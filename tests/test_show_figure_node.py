@@ -120,3 +120,39 @@ def test_running_the_graph_pushes_the_figure_onto_the_canvas_card(qtbot, window)
     assert blocker.args[0], "run finished with a node failure"
     assert item._figure_view.isVisible()
     assert item._figure_placeholder.isHidden()
+
+
+def test_figure_card_save_dialog_is_anchored_to_the_real_window(qtbot, window):
+    """The figure card's matplotlib canvas is embedded via
+    QGraphicsProxyWidget, which strips its normal Qt parent — so
+    self.canvas.parent() (matplotlib's own default for its Save button) is a
+    detached, never-shown top-level, and a native file chooser parented off
+    it crashes. The card must instead resolve a dialog parent through the
+    real QGraphicsView/MainWindow."""
+    win = window
+    show = win.registry.instantiate("flopy.viz.show_figure", pos=(0, 0))
+    win.graph.add_node(show)
+    item = win.scene.node_items[show.id]
+
+    assert item._dialog_parent_widget() is win
+
+    from matplotlib.figure import Figure
+    fig = Figure()
+    fig.add_subplot().plot([1, 2, 3])
+    item.set_figure(fig)
+
+    captured = {}
+
+    def fake_get_save_file_name(parent, *args, **kwargs):
+        captured["parent"] = parent
+        return "", ""
+
+    from PySide6.QtWidgets import QFileDialog
+    original = QFileDialog.getSaveFileName
+    QFileDialog.getSaveFileName = staticmethod(fake_get_save_file_name)
+    try:
+        item._figure_view._toolbar.save_figure()
+    finally:
+        QFileDialog.getSaveFileName = original
+
+    assert captured["parent"] is win
