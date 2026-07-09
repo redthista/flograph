@@ -486,7 +486,7 @@ class NodeItem(QGraphicsObject):
         layout.addWidget(placeholder, 1)
         self._figure_placeholder = placeholder
 
-        self._figure_view = FigureView()
+        self._figure_view = FigureView(dialog_parent=self._dialog_parent_widget)
         self._figure_view.hide()
         layout.addWidget(self._figure_view, 1)
 
@@ -494,6 +494,16 @@ class NodeItem(QGraphicsObject):
         proxy.setWidget(host)
         self._figure_proxy = proxy
         self._layout_figure_proxy()
+
+    def _dialog_parent_widget(self) -> Optional[QWidget]:
+        """The real top-level window for this node's embedded figure to
+        anchor its save-file dialog to — see FigureView/_AnchoredToolbar for
+        why self.canvas.parent() alone isn't safe here."""
+        scene = self.scene()
+        if scene is None:
+            return None
+        views = scene.views()
+        return views[0].window() if views else None
 
     def set_figure(self, figure) -> None:
         """Push a freshly computed figure (or None) onto the embedded canvas —
