@@ -86,7 +86,7 @@ class TestInspector:
         graph = Graph()
         engine = ExecutionEngine(graph)
         reader = graph.add_node(registry.instantiate("flopy.io.read_csv"))
-        plot = graph.add_node(registry.instantiate("flopy.viz.plot"))
+        plot = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
         graph.set_param(reader.id, "path", str(csv))
         graph.connect(reader.id, "table", plot.id, "table")
 
