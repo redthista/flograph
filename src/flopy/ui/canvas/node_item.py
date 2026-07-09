@@ -123,6 +123,7 @@ class NodeItem(QGraphicsObject):
         self.button = node.type_id == BUTTON_TYPE
         self.figure_card = node.type_id in FIGURE_TYPES
         self.table_viewer = node.type_id == TABLE_VIEWER_TYPE
+        self.broken = node.spec.broken
         if self.compact:
             self.width = 28.0
         elif self.note:
@@ -176,6 +177,8 @@ class NodeItem(QGraphicsObject):
             self._build_figure_widget()
         if self.table_viewer:
             self._build_table_viewer_widget()
+        if node.status == NodeStatus.ERROR:
+            self.setToolTip(node.status_message)
 
     # ------------------------------------------------------------- geometry
 
@@ -695,9 +698,12 @@ class NodeItem(QGraphicsObject):
         body.addRoundedRect(rect, 7, 7)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillPath(body, theme.NODE_BODY)
-        outline = QPen(theme.SELECTION_OUTLINE if self.isSelected()
-                       else theme.NODE_BORDER,
-                       2.0 if self.isSelected() else 1.2)
+        if self.isSelected():
+            outline = QPen(theme.SELECTION_OUTLINE, 2.0)
+        elif self.broken:
+            outline = QPen(theme.NODE_BORDER_BROKEN, 1.4)
+        else:
+            outline = QPen(theme.NODE_BORDER, 1.2)
         painter.setPen(outline)
         painter.drawPath(body)
 
@@ -726,7 +732,8 @@ class NodeItem(QGraphicsObject):
         header = QPainterPath()
         header.addRoundedRect(QRectF(0, 0, width, HEADER_H), 7, 7)
         header.addRect(QRectF(0, HEADER_H / 2, width, HEADER_H / 2))
-        painter.fillPath(header.simplified(), theme.NODE_HEADER)
+        painter.fillPath(header.simplified(),
+                         theme.NODE_HEADER_BROKEN if self.broken else theme.NODE_HEADER)
 
         painter.setPen(QPen(theme.NODE_TEXT))
         font = painter.font()
@@ -734,8 +741,9 @@ class NodeItem(QGraphicsObject):
         font.setBold(True)
         painter.setFont(font)
         label_rect = QRectF(10, 0, width - 30, HEADER_H)
+        label_text = f"⚠ {self.node.label}" if self.broken else self.node.label
         label = painter.fontMetrics().elidedText(
-            self.node.label, Qt.ElideRight, int(label_rect.width()))
+            label_text, Qt.ElideRight, int(label_rect.width()))
         painter.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, label)
 
         led_color = QColor(theme.status_color(self.node.status))
