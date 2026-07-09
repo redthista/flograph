@@ -234,6 +234,7 @@ class MainWindow(QMainWindow):
         engine.node_failed.connect(self._on_node_failed)
         engine.node_succeeded.connect(self.editor_panel.on_node_succeeded)
         engine.node_succeeded.connect(self._on_figure_node_succeeded)
+        engine.node_succeeded.connect(self._on_table_viewer_node_succeeded)
 
     def _wire_canvas(self) -> None:
         self.view.add_node_requested.connect(self._show_add_node_menu)
@@ -256,6 +257,16 @@ class MainWindow(QMainWindow):
             return
         entry = self.engine.cache.get(node_id)
         item.set_figure(entry.outputs.get("figure") if entry else None)
+
+    def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.type_id != "flopy.viz.show_table":
+            return
+        item = self.scene.node_items.get(node_id)
+        if item is None:
+            return
+        entry = self.engine.cache.get(node_id)
+        item.set_table_data(entry.outputs.get("table") if entry else None)
 
     def _on_node_failed(self, node_id: str, error) -> None:
         if node_id in self.graph.nodes:
