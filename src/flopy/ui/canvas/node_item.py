@@ -39,7 +39,7 @@ TABLE_MIN_H, TABLE_MAX_H = 140.0, 2000.0
 BUTTON_TYPE = "flopy.util.action_button"
 BUTTON_W, BUTTON_H = 150.0, 50.0
 
-FIGURE_TYPES = {"flopy.viz.show_figure", "flopy.viz.show_plot"}
+FIGURE_TYPES = {"flopy.viz.show_plot"}
 FIGURE_MIN_W, FIGURE_MAX_W = 260.0, 1600.0
 FIGURE_MIN_H, FIGURE_MAX_H = 200.0, 2000.0
 
