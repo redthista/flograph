@@ -154,6 +154,10 @@ class TestVizNodes:
             run_node(registry, "flopy.viz.plot", {},
                      table=pd.DataFrame({"s": ["a", "b"]}))
 
+    def test_show_table_passthrough(self, registry, table):
+        out = run_node(registry, "flopy.viz.show_table", {}, table=table)
+        assert out["table"] is table
+
 
 class TestUtilNodes:
     def test_reroute_passthrough(self, registry):
