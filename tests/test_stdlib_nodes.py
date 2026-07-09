@@ -133,25 +133,25 @@ class TestIONodes:
 
 class TestVizNodes:
     def test_plot_line_defaults(self, registry, table):
-        fig = run_node(registry, "flopy.viz.plot", {}, table=table)
+        out = run_node(registry, "flopy.viz.show_plot", {}, table=table)
         from matplotlib.figure import Figure
-        assert isinstance(fig, Figure)
-        ax = fig.axes[0]
+        assert isinstance(out["figure"], Figure)
+        ax = out["figure"].axes[0]
         assert len(ax.lines) == 2  # units + revenue
 
     def test_plot_explicit_columns(self, registry, table):
-        fig = run_node(registry, "flopy.viz.plot",
+        out = run_node(registry, "flopy.viz.show_plot",
                        {"x": "units", "y": "revenue", "kind": "scatter",
                         "title": "T"}, table=table)
-        assert fig.axes[0].get_title() == "T"
+        assert out["figure"].axes[0].get_title() == "T"
 
     def test_plot_bad_column(self, registry, table):
         with pytest.raises(ValueError, match="not in table"):
-            run_node(registry, "flopy.viz.plot", {"y": "nope"}, table=table)
+            run_node(registry, "flopy.viz.show_plot", {"y": "nope"}, table=table)
 
     def test_plot_no_numeric(self, registry):
         with pytest.raises(ValueError, match="no numeric"):
-            run_node(registry, "flopy.viz.plot", {},
+            run_node(registry, "flopy.viz.show_plot", {},
                      table=pd.DataFrame({"s": ["a", "b"]}))
 
     def test_show_table_passthrough(self, registry, table):
