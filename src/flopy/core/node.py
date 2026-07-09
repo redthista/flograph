@@ -33,6 +33,8 @@ class NodeSpec:
     source: str
     builtin: bool = False
     doc: str = ""
+    # placeholder standing in for a type_id serialization couldn't resolve
+    broken: bool = False
 
     def input(self, name: str) -> Optional[PortSpec]:
         return next((p for p in self.inputs if p.name == name), None)

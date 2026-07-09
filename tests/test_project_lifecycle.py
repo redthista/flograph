@@ -107,6 +107,26 @@ class TestSaveOpen:
         bad.write_text("{broken")
         assert not window.open_path(str(bad), confirm=False)
 
+    def test_open_file_with_unknown_node_type_loads_as_broken_card(
+            self, window, tmp_path):
+        const, script = build_small_project(window)
+        good_node_ids = {const.id, script.id}
+
+        data = graph_to_dict(window.graph)
+        data["graph"]["nodes"].append({
+            "id": "gone", "type": "flopy.missing.plugin_node", "pos": [400, 0],
+            "params": {}, "code": None, "label": None,
+        })
+        path = tmp_path / "has_broken.flopy"
+        path.write_text(json.dumps(data))
+
+        assert window.open_path(str(path), confirm=False)
+        # the rest of the file loaded untouched alongside the broken node
+        assert good_node_ids <= set(window.graph.nodes)
+        assert window.graph.nodes["gone"].spec.broken
+        # scene built a card for it too, without raising
+        assert window.scene.node_items["gone"].broken
+
     def test_recent_files_tracked(self, window, tmp_path):
         path = str(tmp_path / "r.flopy")
         window._project_path = path

@@ -3,6 +3,9 @@
 Versioned via an integer `schema` and a MIGRATIONS chain. Builtin nodes
 serialize by type_id only; a non-null "code" means the instance was forked
 (or is a user script node) and its spec is re-parsed from that code on load.
+A builtin type_id the registry no longer knows (missing plugin, renamed/
+removed stdlib node) becomes a broken placeholder node instead of failing
+the whole load — see `_broken_spec`.
 
 Cached outputs are never embedded in this JSON. A node loads dirty here
 unless flopy.engine.cache_persistence restores its output from a side-car
@@ -13,10 +16,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
+from .datatypes import PortType
 from .graph import Connection, Frame, Graph, GraphError
-from .node import NodeInstance
+from .node import NodeInstance, NodeSpec, NodeStatus
+from .ports import PortDirection, PortSpec
 from .registry import NodeRegistry
 from .script import parse_spec
 
@@ -70,20 +75,30 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     if not isinstance(payload, dict):
         raise GraphError("not a flopy project: missing 'graph' object")
 
+    node_entries = payload.get("nodes", [])
+    conn_entries = payload.get("connections", [])
+    input_ports_needed: dict[str, set[str]] = {}
+    output_ports_needed: dict[str, set[str]] = {}
+    for entry in conn_entries:
+        src_node, src_port = entry["src"]
+        dst_node, dst_port = entry["dst"]
+        output_ports_needed.setdefault(src_node, set()).add(src_port)
+        input_ports_needed.setdefault(dst_node, set()).add(dst_port)
+
     graph = Graph()
-    for entry in payload.get("nodes", []):
+    for entry in node_entries:
         type_id = entry["type"]
         code = entry.get("code")
         if code is not None:
             spec = parse_spec(code, type_id, builtin=False)
         else:
-            builtin = registry.maybe_get(type_id)
-            if builtin is None:
-                raise GraphError(
-                    f"project uses unknown node type {type_id!r} and carries "
-                    f"no code for it"
+            spec = registry.maybe_get(type_id)
+            if spec is None:
+                spec = _broken_spec(
+                    type_id,
+                    inputs=input_ports_needed.get(entry["id"], ()),
+                    outputs=output_ports_needed.get(entry["id"], ()),
                 )
-            spec = builtin
         node = NodeInstance(
             id=entry["id"],
             spec=spec,
@@ -92,9 +107,15 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             pos=tuple(entry.get("pos", (0.0, 0.0))),
             label_override=entry.get("label"),
         )
+        if spec.broken:
+            node.status = NodeStatus.ERROR
+            node.status_message = (
+                f"Unknown node type {type_id!r} — the node script may have "
+                f"been removed, renamed, or belong to a missing plugin."
+            )
         graph.add_node(node)
 
-    for entry in payload.get("connections", []):
+    for entry in conn_entries:
         src_node, src_port = entry["src"]
         dst_node, dst_port = entry["dst"]
         graph.connect(src_node, src_port, dst_node, dst_port,
@@ -108,6 +129,29 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             color=entry.get("color", "#33415c"),
         ))
     return graph
+
+
+def _broken_spec(type_id: str, inputs: Iterable[str],
+                 outputs: Iterable[str]) -> NodeSpec:
+    """A placeholder spec for a builtin type_id the registry can't resolve.
+
+    Ports are synthesized as PortType.ANY from the connections that touched
+    this node in the file, so its wiring survives the round trip even though
+    the real port types are unknown; the node still won't run.
+    """
+    return NodeSpec(
+        type_id=type_id,
+        label=type_id.rsplit(".", 1)[-1],
+        category="Broken",
+        inputs=[PortSpec(name=n, type=PortType.ANY, direction=PortDirection.INPUT,
+                         optional=True) for n in sorted(inputs)],
+        outputs=[PortSpec(name=n, type=PortType.ANY, direction=PortDirection.OUTPUT)
+                for n in sorted(outputs)],
+        params=[],
+        source="",
+        doc=f"Node type {type_id!r} is not available in this build of flopy.",
+        broken=True,
+    )
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:
