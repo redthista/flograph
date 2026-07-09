@@ -11,7 +11,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout,
     QInputDialog, QLabel, QPlainTextEdit, QStyleOptionGraphicsItem,
-    QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
+    QTableView, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from flopy.core import NodeInstance, PortSpec
@@ -41,6 +42,10 @@ BUTTON_W, BUTTON_H = 150.0, 50.0
 FIGURE_TYPE = "flopy.viz.show_figure"
 FIGURE_MIN_W, FIGURE_MAX_W = 260.0, 1600.0
 FIGURE_MIN_H, FIGURE_MAX_H = 200.0, 2000.0
+
+TABLE_VIEWER_TYPE = "flopy.viz.show_table"
+TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W = 260.0, 1600.0
+TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, 2000.0
 
 CARD_HANDLE = 14.0  # bottom-right resize grip, shared by notes and tables
 
@@ -117,6 +122,7 @@ class NodeItem(QGraphicsObject):
         self.table = node.type_id == TABLE_TYPE
         self.button = node.type_id == BUTTON_TYPE
         self.figure_card = node.type_id == FIGURE_TYPE
+        self.table_viewer = node.type_id == TABLE_VIEWER_TYPE
         if self.compact:
             self.width = 28.0
         elif self.note:
@@ -129,6 +135,9 @@ class NodeItem(QGraphicsObject):
         elif self.figure_card:
             self.width = min(FIGURE_MAX_W, max(
                 FIGURE_MIN_W, float(node.params.get("width", 420))))
+        elif self.table_viewer:
+            self.width = min(TABLE_VIEWER_MAX_W, max(
+                TABLE_VIEWER_MIN_W, float(node.params.get("width", 420))))
         else:
             self.width = NODE_WIDTH
         self._note_doc: QTextDocument | None = None
@@ -144,6 +153,9 @@ class NodeItem(QGraphicsObject):
         self._figure_view = None
         self._figure_proxy: QGraphicsProxyWidget | None = None
         self._figure_placeholder: QLabel | None = None
+        self._table_viewer_view: QTableView | None = None
+        self._table_viewer_proxy: QGraphicsProxyWidget | None = None
+        self._table_viewer_placeholder: QLabel | None = None
         self.setFlags(
             QGraphicsItem.ItemIsMovable
             | QGraphicsItem.ItemIsSelectable
@@ -162,6 +174,8 @@ class NodeItem(QGraphicsObject):
             self._build_table_widget()
         if self.figure_card:
             self._build_figure_widget()
+        if self.table_viewer:
+            self._build_table_viewer_widget()
 
     # ------------------------------------------------------------- geometry
 
@@ -188,6 +202,11 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             fixed = float(self.node.params.get("height", 320) or 320)
             return min(FIGURE_MAX_H, max(FIGURE_MIN_H, fixed))
+        if self.table_viewer:
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", 320) or 320)
+            return min(TABLE_VIEWER_MAX_H, max(TABLE_VIEWER_MIN_H, fixed))
         rows = max(len(self.node.spec.inputs), len(self.node.spec.outputs), 1)
         return HEADER_H + rows * ROW_H + PAD_BOTTOM
 
@@ -227,6 +246,13 @@ class NodeItem(QGraphicsObject):
             self.width = min(FIGURE_MAX_W, max(
                 FIGURE_MIN_W, float(self.node.params.get("width", 420))))
             self._layout_figure_proxy()
+            self.update()
+            return
+        if self.table_viewer:
+            self.prepareGeometryChange()
+            self.width = min(TABLE_VIEWER_MAX_W, max(
+                TABLE_VIEWER_MIN_W, float(self.node.params.get("width", 420))))
+            self._layout_table_viewer_proxy()
             self.update()
 
     def _handle_rect(self) -> QRectF:
@@ -519,6 +545,65 @@ class NodeItem(QGraphicsObject):
         self._figure_view.set_figure(figure)
         self._figure_view.show()
 
+    # --------------------------------------------------------- table viewer
+
+    def _table_viewer_proxy_rect(self) -> QRectF:
+        height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
+        return QRectF(0, HEADER_H, self.width, height)
+
+    def _layout_table_viewer_proxy(self) -> None:
+        if self._table_viewer_proxy is not None:
+            self._table_viewer_proxy.setGeometry(self._table_viewer_proxy_rect())
+
+    def _build_table_viewer_widget(self) -> None:
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+
+        placeholder = QLabel("Run the graph to see a table here.")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setStyleSheet("color: #6b7280;")
+        layout.addWidget(placeholder, 1)
+        self._table_viewer_placeholder = placeholder
+
+        view = QTableView()
+        view.setStyleSheet(
+            f"QTableView {{ background: {theme.NODE_BODY.name()};"
+            f" color: {theme.NODE_TEXT.name()}; border: none;"
+            f" gridline-color: {theme.NODE_BORDER.name()}; font-size: 8.5pt; }}"
+            f"QHeaderView::section {{ background: {theme.NODE_HEADER.name()};"
+            f" color: {theme.NODE_SUBTEXT.name()};"
+            f" border: 1px solid {theme.NODE_BORDER.name()}; padding: 2px; }}")
+        view.setSortingEnabled(True)
+        view.hide()
+        layout.addWidget(view, 1)
+        self._table_viewer_view = view
+
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(host)
+        self._table_viewer_proxy = proxy
+        self._layout_table_viewer_proxy()
+
+    def set_table_data(self, table) -> None:
+        """Push a freshly computed DataFrame (or None) onto the embedded
+        table view — called from the GUI thread once the engine reports this
+        node done."""
+        view = self._table_viewer_view
+        if view is None:
+            return
+        import sys
+        pd = sys.modules.get("pandas")
+        if table is None or pd is None or not isinstance(table, pd.DataFrame):
+            view.setModel(None)
+            view.hide()
+            self._table_viewer_placeholder.show()
+            return
+        self._table_viewer_placeholder.hide()
+        from ..inspector.pandas_model import PandasModel
+        view.setModel(PandasModel(table, parent=view))
+        view.show()
+
     @staticmethod
     def _next_column_name(columns: list[str]) -> str:
         import string
@@ -554,7 +639,7 @@ class NodeItem(QGraphicsObject):
                 self.output_ports[spec.name] = port
             self.update()
             return
-        if self.table or self.figure_card:
+        if self.table or self.figure_card or self.table_viewer:
             for spec in self.node.spec.inputs:
                 port = PortItem(self, spec)
                 port.setPos(0, HEADER_H / 2)
@@ -601,8 +686,8 @@ class NodeItem(QGraphicsObject):
         if self.button:
             self._paint_button(painter)
             return
-        if self.figure_card:
-            self._paint_figure_card(painter)
+        if self.figure_card or self.table_viewer:
+            self._paint_widget_card(painter)
             return
         rect = QRectF(0, 0, self.width, self.body_height)
 
@@ -711,7 +796,9 @@ class NodeItem(QGraphicsObject):
                          Qt.AlignCenter | Qt.TextWordWrap,
                          f"▶  {self.node.label}")
 
-    def _paint_figure_card(self, painter: QPainter) -> None:
+    def _paint_widget_card(self, painter: QPainter) -> None:
+        """Shared chrome for cards that embed a proxied widget (figure/table
+        viewers): rounded body, header strip, resize handle when selected."""
         rect = QRectF(0, 0, self.width, self.body_height)
         painter.setRenderHint(QPainter.Antialiasing)
         body = QPainterPath()
@@ -768,6 +855,9 @@ class NodeItem(QGraphicsObject):
             return TABLE_MIN_W, TABLE_MAX_W, TABLE_MIN_H, TABLE_MAX_H
         if self.figure_card:
             return FIGURE_MIN_W, FIGURE_MAX_W, FIGURE_MIN_H, FIGURE_MAX_H
+        if self.table_viewer:
+            return (TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W,
+                    TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H)
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
 
     def itemChange(self, change, value):
@@ -788,7 +878,8 @@ class NodeItem(QGraphicsObject):
                 scene.button_fired.emit(self.node.id)
             event.accept()
             return
-        if (self.note or self.table or self.figure_card) and self.isSelected() \
+        if (self.note or self.table or self.figure_card or self.table_viewer) \
+                and self.isSelected() \
                 and self._handle_rect().contains(event.pos()):
             self._resizing_card = True
             self._resize_start = (event.scenePos().x(), event.scenePos().y(),
@@ -822,6 +913,8 @@ class NodeItem(QGraphicsObject):
                     self._layout_table_proxy()
                 elif self.figure_card:
                     self._layout_figure_proxy()
+                elif self.table_viewer:
+                    self._layout_table_viewer_proxy()
                 self.update()
             event.accept()
             return
@@ -862,6 +955,8 @@ class NodeItem(QGraphicsObject):
                 self._layout_table_proxy()
             elif self.figure_card:
                 self._layout_figure_proxy()
+            elif self.table_viewer:
+                self._layout_table_viewer_proxy()
             event.accept()
             return
         super().mouseReleaseEvent(event)
