@@ -39,7 +39,7 @@ TABLE_MIN_H, TABLE_MAX_H = 140.0, 2000.0
 BUTTON_TYPE = "flopy.util.action_button"
 BUTTON_W, BUTTON_H = 150.0, 50.0
 
-FIGURE_TYPE = "flopy.viz.show_figure"
+FIGURE_TYPES = {"flopy.viz.show_figure", "flopy.viz.show_plot"}
 FIGURE_MIN_W, FIGURE_MAX_W = 260.0, 1600.0
 FIGURE_MIN_H, FIGURE_MAX_H = 200.0, 2000.0
 
@@ -121,7 +121,7 @@ class NodeItem(QGraphicsObject):
         self.note = node.type_id == NOTE_TYPE
         self.table = node.type_id == TABLE_TYPE
         self.button = node.type_id == BUTTON_TYPE
-        self.figure_card = node.type_id == FIGURE_TYPE
+        self.figure_card = node.type_id in FIGURE_TYPES
         self.table_viewer = node.type_id == TABLE_VIEWER_TYPE
         if self.compact:
             self.width = 28.0

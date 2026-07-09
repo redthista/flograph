@@ -20,6 +20,7 @@ from flopy.engine import ExecutionEngine, cache_persistence
 
 from .commands import AddNodeCommand, ConnectCommand, SetLabelCommand
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
+from .canvas.node_item import FIGURE_TYPES
 from .canvas.palette import LibraryTree, NodePalettePopup
 from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
@@ -250,7 +251,7 @@ class MainWindow(QMainWindow):
 
     def _on_figure_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id != "flopy.viz.show_figure":
+        if node is None or node.type_id not in FIGURE_TYPES:
             return
         item = self.scene.node_items.get(node_id)
         if item is None:

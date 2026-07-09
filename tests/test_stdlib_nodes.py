@@ -158,6 +158,17 @@ class TestVizNodes:
         out = run_node(registry, "flopy.viz.show_table", {}, table=table)
         assert out["table"] is table
 
+    def test_show_plot_line_defaults(self, registry, table):
+        out = run_node(registry, "flopy.viz.show_plot", {}, table=table)
+        from matplotlib.figure import Figure
+        assert isinstance(out["figure"], Figure)
+        ax = out["figure"].axes[0]
+        assert len(ax.lines) == 2  # units + revenue
+
+    def test_show_plot_bad_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flopy.viz.show_plot", {"y": "nope"}, table=table)
+
 
 class TestUtilNodes:
     def test_reroute_passthrough(self, registry):
