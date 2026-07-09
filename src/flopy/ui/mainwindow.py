@@ -753,7 +753,12 @@ class MainWindow(QMainWindow):
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.engine.node_succeeded.emit(node_id)
-        if restored:
+        broken = sum(1 for n in loaded.nodes.values() if n.spec.broken)
+        if broken:
+            self.statusBar().showMessage(
+                f"Opened {path} — {broken} node(s) couldn't be resolved and "
+                f"were loaded as broken placeholders", 6000)
+        elif restored:
             self.statusBar().showMessage(
                 f"Opened {path} — {len(restored)} node(s) restored from cache", 4000)
         else:

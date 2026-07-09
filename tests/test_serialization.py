@@ -75,10 +75,41 @@ def test_newer_schema_rejected(registry):
         graph_from_dict({"schema": SCHEMA_VERSION + 1, "graph": {}}, registry)
 
 
-def test_unknown_type_without_code_rejected(registry):
+def test_unknown_type_becomes_broken_placeholder(registry):
     data = {"schema": 1, "graph": {"nodes": [
         {"id": "x", "type": "flopy.gone.mystery", "pos": [0, 0],
-         "params": {}, "code": None, "label": None},
+         "params": {"note": "kept"}, "code": None, "label": None},
     ], "connections": [], "frames": []}}
-    with pytest.raises(GraphError, match="unknown node type"):
-        graph_from_dict(data, registry)
+    graph = graph_from_dict(data, registry)
+    node = graph.nodes["x"]
+    assert node.spec.broken
+    assert node.type_id == "flopy.gone.mystery"
+    assert node.status == NodeStatus.ERROR
+    assert node.params == {"note": "kept"}
+
+
+def test_broken_node_keeps_its_wiring(registry):
+    const = registry.instantiate("flopy.util.constant", pos=(0, 0))
+    data = {"schema": 1, "graph": {"nodes": [
+        {"id": const.id, "type": const.type_id, "pos": [0, 0],
+         "params": dict(const.params), "code": None, "label": None},
+        {"id": "y", "type": "flopy.gone.mystery", "pos": [200, 0],
+         "params": {}, "code": None, "label": None},
+    ], "connections": [
+        {"id": "c1", "src": [const.id, "value"], "dst": ["y", "in1"]},
+    ], "frames": []}}
+    restored = graph_from_dict(data, registry)
+    broken = restored.nodes["y"]
+    assert broken.spec.input("in1") is not None
+    assert len(restored.connections) == 1
+
+
+def test_rest_of_graph_still_loads_alongside_a_broken_node(registry):
+    graph = build_project_graph(registry)
+    data = graph_to_dict(graph)
+    data["graph"]["nodes"].append(
+        {"id": "z", "type": "flopy.gone.mystery", "pos": [400, 0],
+         "params": {}, "code": None, "label": None})
+    restored = graph_from_dict(data, registry)
+    assert len(restored.nodes) == 3
+    assert restored.nodes["z"].spec.broken
