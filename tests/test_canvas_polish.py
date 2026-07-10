@@ -131,6 +131,64 @@ class TestAlignment:
         assert nodes[1].pos == (50.0, 100.0)
 
 
+class TestCardResize:
+    """Ports must ride a card's right edge when it is resized (they used to
+    be positioned once at build time and stay behind as the card grew)."""
+
+    def _card(self, env, registry, type_id="flopy.viz.show_plot"):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate(type_id))
+        return graph, scene, scene.node_items[node.id]
+
+    def test_output_port_follows_width_param(self, env, registry):
+        graph, scene, item = self._card(env, registry)
+        port = item.output_ports["figure"]
+        assert port.pos().x() == item.width
+        graph.set_param(item.node.id, "width", 800)
+        assert item.width == 800.0
+        assert port.pos().x() == 800.0
+
+    def test_output_port_follows_live_drag(self, env, registry):
+        graph, scene, item = self._card(env, registry)
+        item.setSelected(True)
+        item._resizing_card = True
+        item._resize_start = (0.0, 0.0, item.width, item.body_height)
+        item._live_height = item.body_height
+
+        class DragEvent:
+            def scenePos(self):
+                return QPointF(150.0, 40.0)  # +150 px wider
+
+            def accept(self):
+                pass
+
+        start_width = item._resize_start[2]
+        item.mouseMoveEvent(DragEvent())
+        assert item.width == start_width + 150.0
+        assert item.output_ports["figure"].pos().x() == item.width
+        item._resizing_card = False
+        item._live_height = None
+
+    def test_wire_repaths_with_resized_card(self, env, registry):
+        graph, scene, item = self._card(env, registry)
+        sink = graph.add_node(
+            registry.instantiate("flopy.scripting.python_script",
+                                 pos=(900, 0)))
+        graph.connect(item.node.id, "figure", sink.id, "in1")
+        wire = next(iter(scene.connection_items.values()))
+        start_x = wire.path().pointAtPercent(0).x()
+        graph.set_param(item.node.id, "width", 800)
+        assert wire.path().pointAtPercent(0).x() == start_x + (800 - 420)
+
+    def test_show_table_and_table_cards_too(self, env, registry):
+        graph, scene, item = self._card(env, registry, "flopy.viz.show_table")
+        graph.set_param(item.node.id, "width", 700)
+        assert item.output_ports["table"].pos().x() == 700.0
+        graph, scene, item = self._card(env, registry, "flopy.io.table")
+        graph.set_param(item.node.id, "width", 640)
+        assert item.output_ports["table"].pos().x() == 640.0
+
+
 class TestWireDropPalette:
     def test_wire_drop_offers_compatible_and_connects(self, window):
         reg = window.registry
