@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QGraphicsProxyWidget, QGraphicsView
 
@@ -27,7 +27,11 @@ class NodeGraphView(QGraphicsView):
     def __init__(self, scene: NodeGraphScene, parent=None) -> None:
         super().__init__(scene, parent)
         self.setAcceptDrops(True)
-        self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        # SmoothPixmapTransform matters for the embedded figure/webview
+        # cards: without it any zoomed raster is scaled nearest-neighbor
+        # and reads as pixelated instead of merely soft
+        self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
+                            | QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.setResizeAnchor(QGraphicsView.NoAnchor)
         self.setDragMode(QGraphicsView.RubberBandDrag)
@@ -42,6 +46,14 @@ class NodeGraphView(QGraphicsView):
         from .minimap import Minimap
         self.minimap = Minimap(self)
         self.minimap.show()
+
+        # figure cards re-render at the new resolution once zooming pauses —
+        # not per wheel tick, which would redraw every figure continuously
+        self._zoom_settle = QTimer(self)
+        self._zoom_settle.setSingleShot(True)
+        self._zoom_settle.setInterval(150)
+        self._zoom_settle.timeout.connect(
+            lambda: self.scene().refresh_render_ratios())
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -69,6 +81,7 @@ class NodeGraphView(QGraphicsView):
         after = self.mapToScene(pos)
         delta = after - before
         self.translate(delta.x(), delta.y())
+        self._zoom_settle.start()
 
     # ------------------------------------------------------------------ pan
 
@@ -170,6 +183,7 @@ class NodeGraphView(QGraphicsView):
         if self.zoom > 1.5:  # don't over-zoom on a single node
             factor = 1.5 / self.zoom
             self.scale(factor, factor)
+        self._zoom_settle.start()
 
     # --------------------------------------------------------- context menu
 

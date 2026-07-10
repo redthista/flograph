@@ -179,6 +179,12 @@ class NodeGraphScene(QGraphicsScene):
             if node_id in (ci.conn.src_node, ci.conn.dst_node):
                 ci.update_path()
 
+    def refresh_render_ratios(self) -> None:
+        """Re-target figure cards' render resolution — called by the view
+        once its zoom settles, so embedded figures stay crisp at any zoom."""
+        for item in self.node_items.values():
+            item.refresh_render_ratio()
+
     def push_move_command(self, moves: dict) -> None:
         self.undo_stack.push(MoveNodesCommand(self.graph, moves))
 
