@@ -15,7 +15,7 @@ NODE = {
 PARAMS = [
     {"name": "kind", "type": "choice", "label": "Kind",
      "options": ["line", "scatter", "bar", "hist"], "default": "line"},
-    {"name": "x", "type": "columns", "label": "X column",
+    {"name": "x", "type": "columns", "label": "X column", "multi": False,
      "default": "", "placeholder": "(index)"},
     {"name": "y", "type": "columns", "label": "Y columns",
      "default": "", "placeholder": "comma separated; empty = all numeric"},

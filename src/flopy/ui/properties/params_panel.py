@@ -2,7 +2,8 @@
 
 Every ParamSpec type maps to exactly one widget; edits push SetParamCommand
 (mergeable while typing), and graph events flow back into the widgets so
-undo/redo keeps the form in sync.
+undo/redo keeps the form in sync. 'columns' params get a picker fed by the
+cached output of connected upstream nodes (see flopy.engine.introspect).
 """
 from __future__ import annotations
 
@@ -12,8 +13,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPlainTextEdit, QScrollArea, QSpinBox, QToolButton,
-    QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMenu, QPlainTextEdit, QScrollArea, QSpinBox,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from flopy.core import Graph, ParamSpec
@@ -22,10 +23,12 @@ from ..commands import SetLabelCommand, SetParamCommand
 
 
 class ParamsPanel(QScrollArea):
-    def __init__(self, graph: Graph, undo_stack: QUndoStack, parent=None) -> None:
+    def __init__(self, graph: Graph, undo_stack: QUndoStack, parent=None,
+                 cache=None) -> None:
         super().__init__(parent)
         self._graph = graph
         self._undo_stack = undo_stack
+        self._cache = cache  # engine's OutputCache; enables column pickers
         self._node_id: Optional[str] = None
         self._setters: dict[str, Callable[[Any], None]] = {}
         self._updating = False
@@ -159,12 +162,75 @@ class ParamsPanel(QScrollArea):
             row.addWidget(browse)
             return host, self._line_setter(edit)
 
-        # string / columns / anything else -> line edit
+        if spec.type == "columns":
+            return self._make_columns_widget(spec, value)
+
+        # string / anything else -> line edit
         edit = QLineEdit(str(value or ""))
         if spec.placeholder:
             edit.setPlaceholderText(spec.placeholder)
         edit.textEdited.connect(lambda v: self._commit(name, v))
         return edit, self._line_setter(edit)
+
+    def _make_columns_widget(self, spec: ParamSpec, value: Any):
+        """Line edit plus a picker button listing the columns of whatever
+        cached DataFrames feed this node. Free text still works — the picker
+        only fills once upstream has run."""
+        name = spec.name
+        host = QWidget()
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        edit = QLineEdit(str(value or ""))
+        if spec.placeholder:
+            edit.setPlaceholderText(spec.placeholder)
+        edit.textEdited.connect(lambda v: self._commit(name, v))
+
+        pick = QToolButton()
+        pick.setText("▾")
+        pick.setToolTip("Pick from upstream columns (needs an upstream run)")
+        pick.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(pick)
+        pick.setMenu(menu)
+        # built on demand: always reflects the cache at click time, so no
+        # refresh wiring is needed when upstream re-runs
+        menu.aboutToShow.connect(
+            lambda: self._fill_columns_menu(menu, edit, spec))
+        row.addWidget(edit, 1)
+        row.addWidget(pick)
+        return host, self._line_setter(edit)
+
+    def _fill_columns_menu(self, menu: QMenu, edit: QLineEdit,
+                           spec: ParamSpec) -> None:
+        from flopy.engine import upstream_columns
+        menu.clear()
+        columns = (upstream_columns(self._graph, self._cache, self._node_id)
+                   if self._cache is not None and self._node_id else [])
+        if not columns:
+            action = menu.addAction("run upstream nodes to list columns")
+            action.setEnabled(False)
+            return
+        chosen = [c.strip() for c in edit.text().split(",") if c.strip()]
+        for column in columns:
+            action = menu.addAction(column)
+            if spec.multi:
+                action.setCheckable(True)
+                action.setChecked(column in chosen)
+            action.triggered.connect(
+                lambda _checked=False, c=column:
+                self._pick_column(edit, spec, c))
+
+    def _pick_column(self, edit: QLineEdit, spec: ParamSpec, column: str) -> None:
+        if spec.multi:
+            chosen = [c.strip() for c in edit.text().split(",") if c.strip()]
+            if column in chosen:
+                chosen.remove(column)
+            else:
+                chosen.append(column)
+            text = ", ".join(chosen)
+        else:
+            text = column
+        edit.setText(text)
+        self._commit(spec.name, text)
 
     def _line_setter(self, edit: QLineEdit) -> Callable[[Any], None]:
         def set_line(v):

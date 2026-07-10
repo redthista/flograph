@@ -74,7 +74,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, library_dock)
         self.library_tree.add_requested.connect(self._add_node_at_view_center)
 
-        self.params_panel = ParamsPanel(self.graph, self.undo_stack)
+        self.params_panel = ParamsPanel(self.graph, self.undo_stack,
+                                        cache=self.engine.cache)
         self.properties_dock = QDockWidget("Properties", self)
         self.properties_dock.setObjectName("dock_properties")
         self.properties_dock.setWidget(self.params_panel)

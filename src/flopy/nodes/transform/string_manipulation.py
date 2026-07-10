@@ -11,7 +11,8 @@ NODE = {
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
-    {"name": "column", "type": "columns", "label": "Column", "default": ""},
+    {"name": "column", "type": "columns", "label": "Column", "default": "",
+     "multi": False},
     {"name": "operation", "type": "choice", "label": "Operation",
      "options": ["upper", "lower", "title", "capitalize", "strip", "replace"],
      "default": "lower"},

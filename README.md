@@ -96,6 +96,10 @@ def run(ctx, table):
 ```
 
 Port types: `any, dataframe, series, number, string, bool, object, figure`.
+`columns`-typed params render with a ▾ picker listing the columns of the
+DataFrames cached on the node's inputs (run upstream once to populate it);
+add `"multi": False` for single-column params so picking replaces instead
+of toggling a comma list.
 Rules: treat inputs as read-only (outputs are cached by reference); heavy
 imports go inside `run()`; matplotlib figures must use the OO API
 (`matplotlib.figure.Figure()`), never pyplot.
