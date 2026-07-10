@@ -79,6 +79,18 @@ class FigureView(QWidget):
         self._canvas = None
         self._toolbar = None
         self._dialog_parent = dialog_parent
+        self._content_scale = 1.0
+
+    def set_content_scale(self, scale: float) -> None:
+        """Render figures at scale× resolution. The on-canvas figure card
+        magnifies this view through a QGraphicsProxyWidget transform; without
+        a matching resolution boost that just stretches a raster drawn at
+        logical size, so text and lines go soft."""
+        if scale == self._content_scale:
+            return
+        self._content_scale = scale
+        if self._canvas is not None:
+            self.set_figure(self._canvas.figure)  # rebuild at new resolution
 
     def set_figure(self, figure) -> None:
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -89,8 +101,22 @@ class FigureView(QWidget):
         class _Toolbar(_AnchoredToolbar, _Base):
             pass
 
+        content_scale = self._content_scale
+
+        class _ScaledCanvas(FigureCanvasQTAgg):
+            """Reports an inflated device pixel ratio so matplotlib sizes its
+            Agg buffer (and stamps the painted QImage) at scale× resolution.
+            Only matplotlib reads this override — Qt keeps its C++ value."""
+
+            def devicePixelRatioF(self) -> float:
+                return (super().devicePixelRatioF() or 1.0) * content_scale
+
         self.clear()
-        self._canvas = FigureCanvasQTAgg(figure)
+        self._canvas = _ScaledCanvas(figure)
+        # matplotlib only refreshes its pixel ratio on showEvent/screen
+        # changes, and neither fires for a widget embedded in a
+        # QGraphicsProxyWidget — pull the (inflated) ratio in explicitly
+        self._canvas._update_pixel_ratio()
         self._toolbar = _Toolbar(self._canvas, self, self._dialog_parent)
         self._layout.addWidget(self._toolbar)
         self._layout.addWidget(self._canvas, 1)
