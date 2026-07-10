@@ -43,11 +43,24 @@ FIGURE_TYPES = {"flopy.viz.show_plot"}
 FIGURE_MIN_W, FIGURE_MAX_W = 260.0, 1600.0
 FIGURE_MIN_H, FIGURE_MAX_H = 200.0, 2000.0
 
+PLOTLY_TYPE = "flopy.viz.show_plotly"
+
 TABLE_VIEWER_TYPE = "flopy.viz.show_table"
 TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W = 260.0, 1600.0
 TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, 2000.0
 
 CARD_HANDLE = 14.0  # bottom-right resize grip, shared by notes and tables
+
+_plotly_tmp = None  # TemporaryDirectory for card HTML, cleaned at exit
+
+
+def _plotly_html_path(node_id: str):
+    import tempfile
+    from pathlib import Path
+    global _plotly_tmp
+    if _plotly_tmp is None:
+        _plotly_tmp = tempfile.TemporaryDirectory(prefix="flopy-plotly-")
+    return Path(_plotly_tmp.name) / f"{node_id}.html"
 
 
 class PortItem(QGraphicsItem):
@@ -121,7 +134,10 @@ class NodeItem(QGraphicsObject):
         self.note = node.type_id == NOTE_TYPE
         self.table = node.type_id == TABLE_TYPE
         self.button = node.type_id == BUTTON_TYPE
-        self.figure_card = node.type_id in FIGURE_TYPES
+        self.plotly_card = node.type_id == PLOTLY_TYPE
+        # plotly cards share the figure card's chrome (resize, paint, ports);
+        # only the embedded widget differs (webview vs. matplotlib canvas)
+        self.figure_card = node.type_id in FIGURE_TYPES or self.plotly_card
         self.table_viewer = node.type_id == TABLE_VIEWER_TYPE
         self.broken = node.spec.broken
         if self.compact:
@@ -154,6 +170,8 @@ class NodeItem(QGraphicsObject):
         self._figure_view = None
         self._figure_proxy: QGraphicsProxyWidget | None = None
         self._figure_placeholder: QLabel | None = None
+        self._plotly_view = None  # QWebEngineView, created on first figure
+        self._plotly_layout: QVBoxLayout | None = None
         self._table_viewer_view: QTableView | None = None
         self._table_viewer_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_placeholder: QLabel | None = None
@@ -173,7 +191,9 @@ class NodeItem(QGraphicsObject):
         self.rebuild_ports()
         if self.table:
             self._build_table_widget()
-        if self.figure_card:
+        if self.plotly_card:
+            self._build_plotly_widget()
+        elif self.figure_card:
             self._build_figure_widget()
         if self.table_viewer:
             self._build_table_viewer_widget()
@@ -550,6 +570,75 @@ class NodeItem(QGraphicsObject):
         self._figure_placeholder.hide()
         self._figure_view.set_figure(figure)
         self._figure_view.show()
+
+    # -------------------------------------------------------------- plotly
+
+    def _build_plotly_widget(self) -> None:
+        """Card chrome identical to the figure card, but the body hosts a
+        QWebEngineView (created lazily on the first figure — Chromium is
+        heavy and the import can be missing on trimmed PySide6 installs)."""
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+
+        placeholder = QLabel("Run the graph to see an interactive chart here.")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setWordWrap(True)
+        placeholder.setStyleSheet("color: #6b7280;")
+        layout.addWidget(placeholder, 1)
+        self._figure_placeholder = placeholder
+        self._plotly_layout = layout
+
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(host)
+        self._figure_proxy = proxy  # reuses the figure card's resize plumbing
+        self._layout_figure_proxy()
+
+    def _ensure_plotly_view(self):
+        if self._plotly_view is not None:
+            return self._plotly_view
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+        except ImportError:
+            return None
+        view = QWebEngineView()
+        view.hide()
+        self._plotly_layout.addWidget(view, 1)
+        self._plotly_view = view
+        return view
+
+    def set_plotly_figure(self, figure) -> None:
+        """Render a freshly computed plotly figure (or None) into the
+        embedded webview — called from the GUI thread once the engine
+        reports this node done."""
+        if not self.plotly_card:
+            return
+        if figure is None or not hasattr(figure, "to_html"):
+            if self._plotly_view is not None:
+                self._plotly_view.hide()
+            self._figure_placeholder.setText(
+                "Run the graph to see an interactive chart here.")
+            self._figure_placeholder.show()
+            return
+        view = self._ensure_plotly_view()
+        if view is None:
+            self._figure_placeholder.setText(
+                "Qt WebEngine is not available — install the full PySide6 "
+                "package (Tools > Manage Packages) to display Plotly charts.")
+            self._figure_placeholder.show()
+            return
+        from PySide6.QtCore import QUrl
+        # via a temp file, not setHtml: the self-contained page embeds all of
+        # plotly.js (~3 MB) and setHtml caps content at 2 MB
+        path = _plotly_html_path(self.node.id)
+        path.write_text(figure.to_html(
+            full_html=True, include_plotlyjs=True,
+            default_width="100%", default_height="100%",
+            config={"responsive": True}), encoding="utf-8")
+        view.load(QUrl.fromLocalFile(str(path)))
+        self._figure_placeholder.hide()
+        view.show()
 
     # --------------------------------------------------------- table viewer
 

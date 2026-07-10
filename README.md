@@ -57,7 +57,10 @@ The shipped library covers the KNIME basics:
   Expression, Concatenate, Missing Values, Duplicate Row Filter,
   Rename Columns, Pivot, Unpivot, Row Sampling, Convert Types,
   String Manipulation, Statistics.
-- **Viz** — Show Table, Show Plot (live on-canvas cards).
+- **Viz** — Show Table, Show Plot (live on-canvas cards), Show Plotly
+  (fully interactive plotly.js chart embedded on the canvas — hover, zoom
+  and pan in place; needs `pip install plotly`, e.g. via
+  Tools > Manage Packages).
 - **Scripting / Util** — Python Script, Constant, Reroute, Note,
   Action Button.
 
