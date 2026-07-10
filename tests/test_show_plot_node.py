@@ -68,6 +68,28 @@ def window(qtbot, registry):
     return win
 
 
+def test_set_figure_draws_synchronously(qtbot, monkeypatch):
+    """Embedded in a QGraphicsProxyWidget the canvas never gets a real
+    expose event, so set_figure must draw immediately — without it the card
+    shows a blank/garbage buffer until a resize forces a redraw."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+
+    from flopy.ui.inspector.figure_view import FigureView
+
+    draws = []
+    original = FigureCanvasQTAgg.draw
+    monkeypatch.setattr(
+        FigureCanvasQTAgg, "draw",
+        lambda self, *a, **k: (draws.append(1), original(self, *a, **k))[1])
+    view = FigureView()
+    qtbot.addWidget(view)
+    figure = Figure()
+    figure.add_subplot().plot([1, 2, 3], [2, 4, 9])
+    view.set_figure(figure)
+    assert draws, "set_figure must draw the canvas synchronously"
+
+
 def test_running_the_graph_draws_and_pushes_the_plot_onto_the_canvas_card(
         qtbot, window):
     import json

@@ -20,7 +20,7 @@ from flopy.engine import ExecutionEngine, cache_persistence
 
 from .commands import AddNodeCommand, ConnectCommand, SetLabelCommand
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
-from .canvas.node_item import FIGURE_TYPES
+from .canvas.node_item import FIGURE_TYPES, PLOTLY_TYPE
 from .canvas.palette import LibraryTree, NodePalettePopup
 from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
@@ -243,6 +243,7 @@ class MainWindow(QMainWindow):
         engine.node_failed.connect(self._on_node_failed)
         engine.node_succeeded.connect(self.editor_panel.on_node_succeeded)
         engine.node_succeeded.connect(self._on_figure_node_succeeded)
+        engine.node_succeeded.connect(self._on_plotly_node_succeeded)
         engine.node_succeeded.connect(self._on_table_viewer_node_succeeded)
 
     def _wire_canvas(self) -> None:
@@ -266,6 +267,16 @@ class MainWindow(QMainWindow):
             return
         entry = self.engine.cache.get(node_id)
         item.set_figure(entry.outputs.get("figure") if entry else None)
+
+    def _on_plotly_node_succeeded(self, node_id: str) -> None:
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.type_id != PLOTLY_TYPE:
+            return
+        item = self.scene.node_items.get(node_id)
+        if item is None:
+            return
+        entry = self.engine.cache.get(node_id)
+        item.set_plotly_figure(entry.outputs.get("figure") if entry else None)
 
     def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
