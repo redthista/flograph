@@ -96,6 +96,154 @@ class TestTransformNodes:
         assert len(out["rejected"]) == 4
 
 
+class TestEtlNodes:
+    def test_concatenate_union(self, registry, table):
+        other = pd.DataFrame({"region": ["west"], "extra": [1]})
+        out = run_node(registry, "flopy.transform.concatenate", {},
+                       top=table, bottom=other)
+        assert len(out) == 5
+        assert "extra" in out.columns and out["extra"].isna().sum() == 4
+        assert list(out.index) == list(range(5))  # reset by default
+
+    def test_concatenate_intersection(self, registry, table):
+        other = pd.DataFrame({"region": ["west"], "extra": [1]})
+        out = run_node(registry, "flopy.transform.concatenate",
+                       {"columns": "intersection"}, top=table, bottom=other)
+        assert list(out.columns) == ["region"]
+
+    def test_missing_values_drop(self, registry):
+        t = pd.DataFrame({"a": [1.0, None, 3.0], "b": ["x", "y", None]})
+        out = run_node(registry, "flopy.transform.missing_values", {}, table=t)
+        assert len(out) == 1
+
+    def test_missing_values_fill_value_parses_numbers(self, registry):
+        t = pd.DataFrame({"a": [1.0, None]})
+        out = run_node(registry, "flopy.transform.missing_values",
+                       {"strategy": "fill value", "fill_value": "0"}, table=t)
+        assert out["a"].iloc[1] == 0
+
+    def test_missing_values_mean_subset(self, registry):
+        t = pd.DataFrame({"a": [1.0, None, 3.0], "b": [None, "y", "z"]})
+        out = run_node(registry, "flopy.transform.missing_values",
+                       {"strategy": "mean", "columns": "a"}, table=t)
+        assert out["a"].iloc[1] == 2.0
+        assert out["b"].isna().iloc[0]  # untouched
+
+    def test_missing_values_mean_needs_numeric(self, registry):
+        with pytest.raises(ValueError, match="numeric"):
+            run_node(registry, "flopy.transform.missing_values",
+                     {"strategy": "mean", "columns": "s"},
+                     table=pd.DataFrame({"s": ["a", None]}))
+
+    def test_duplicate_filter(self, registry, table):
+        doubled = pd.concat([table, table], ignore_index=True)
+        out = run_node(registry, "flopy.transform.duplicate_filter", {},
+                       table=doubled)
+        assert len(out["unique"]) == 4 and len(out["duplicates"]) == 4
+
+    def test_duplicate_filter_keep_none(self, registry, table):
+        doubled = pd.concat([table, table], ignore_index=True)
+        out = run_node(registry, "flopy.transform.duplicate_filter",
+                       {"keep": "none"}, table=doubled)
+        assert len(out["unique"]) == 0 and len(out["duplicates"]) == 8
+
+    def test_duplicate_filter_subset(self, registry, table):
+        out = run_node(registry, "flopy.transform.duplicate_filter",
+                       {"columns": "region"}, table=table)
+        assert len(out["unique"]) == 2
+
+    def test_rename_columns(self, registry, table):
+        out = run_node(registry, "flopy.transform.rename_columns",
+                       {"mapping": "units = qty\n# note\nrevenue = usd"},
+                       table=table)
+        assert "qty" in out.columns and "usd" in out.columns
+        assert "units" in table.columns  # input untouched
+
+    def test_rename_columns_bad_line(self, registry, table):
+        with pytest.raises(ValueError, match="line 1"):
+            run_node(registry, "flopy.transform.rename_columns",
+                     {"mapping": "just-a-word"}, table=table)
+
+    def test_rename_columns_missing(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flopy.transform.rename_columns",
+                     {"mapping": "nope = x"}, table=table)
+
+    def test_pivot(self, registry, table):
+        out = run_node(registry, "flopy.transform.pivot",
+                       {"index": "region", "columns": "units",
+                        "values": "revenue"}, table=table)
+        assert len(out) == 2 and "region" in out.columns
+
+    def test_pivot_requires_index(self, registry, table):
+        with pytest.raises(ValueError, match="no index columns"):
+            run_node(registry, "flopy.transform.pivot",
+                     {"columns": "units"}, table=table)
+
+    def test_unpivot_roundtrip_shape(self, registry, table):
+        out = run_node(registry, "flopy.transform.unpivot",
+                       {"id_columns": "region"}, table=table)
+        assert list(out.columns) == ["region", "variable", "value"]
+        assert len(out) == 8  # 4 rows x 2 value columns
+
+    def test_row_sampling_first(self, registry, table):
+        out = run_node(registry, "flopy.transform.row_sampling",
+                       {"rows": 2}, table=table)
+        assert list(out["units"]) == [10, 20]
+
+    def test_row_sampling_fraction_random_is_seeded(self, registry, table):
+        a = run_node(registry, "flopy.transform.row_sampling",
+                     {"mode": "random", "fraction": 0.5, "seed": 7},
+                     table=table)
+        b = run_node(registry, "flopy.transform.row_sampling",
+                     {"mode": "random", "fraction": 0.5, "seed": 7},
+                     table=table)
+        assert len(a) == 2 and a.equals(b)
+
+    def test_convert_types(self, registry):
+        t = pd.DataFrame({"n": ["1", "2"], "d": ["2024-01-01", "2024-06-01"]})
+        out = run_node(registry, "flopy.transform.convert_types",
+                       {"columns": "n", "to": "int"}, table=t)
+        assert str(out["n"].dtype) == "Int64"
+        out = run_node(registry, "flopy.transform.convert_types",
+                       {"columns": "d", "to": "datetime"}, table=t)
+        assert out["d"].dt.year.iloc[0] == 2024
+
+    def test_convert_types_coerce(self, registry):
+        t = pd.DataFrame({"n": ["1", "oops"]})
+        with pytest.raises(Exception):
+            run_node(registry, "flopy.transform.convert_types",
+                     {"columns": "n", "to": "float"}, table=t)
+        out = run_node(registry, "flopy.transform.convert_types",
+                       {"columns": "n", "to": "float",
+                        "on_error": "set missing"}, table=t)
+        assert out["n"].isna().iloc[1]
+
+    def test_string_manipulation_case(self, registry, table):
+        out = run_node(registry, "flopy.transform.string_manipulation",
+                       {"column": "region", "operation": "upper"}, table=table)
+        assert out["region"].iloc[0] == "NORTH"
+        assert table["region"].iloc[0] == "north"  # input untouched
+
+    def test_string_manipulation_replace_new_column(self, registry, table):
+        out = run_node(registry, "flopy.transform.string_manipulation",
+                       {"column": "region", "operation": "replace",
+                        "find": "north", "replace_with": "N",
+                        "output_column": "code"}, table=table)
+        assert out["code"].iloc[0] == "N" and out["region"].iloc[0] == "north"
+
+    def test_string_manipulation_replace_needs_find(self, registry, table):
+        with pytest.raises(ValueError, match="Find"):
+            run_node(registry, "flopy.transform.string_manipulation",
+                     {"column": "region", "operation": "replace"}, table=table)
+
+    def test_statistics(self, registry, table):
+        out = run_node(registry, "flopy.transform.statistics", {}, table=table)
+        assert "statistic" in out.columns
+        mean_row = out[out["statistic"] == "mean"]
+        assert mean_row["units"].iloc[0] == 25.0
+
+
 class TestIONodes:
     def test_write_then_read_round_trip(self, registry, table, tmp_path):
         path = tmp_path / "out.csv"
@@ -129,6 +277,56 @@ class TestIONodes:
         pytest.importorskip("openpyxl")
         with pytest.raises(ValueError, match="no file selected"):
             run_node(registry, "flopy.io.read_excel", {})
+
+    def test_write_then_read_parquet_round_trip(self, registry, table, tmp_path):
+        pytest.importorskip("pyarrow")
+        path = tmp_path / "out.parquet"
+        passed = run_node(registry, "flopy.io.write_parquet",
+                          {"path": str(path)}, table=table)
+        assert passed is table
+        back = run_node(registry, "flopy.io.read_parquet", {"path": str(path)})
+        assert back.equals(table)
+        subset = run_node(registry, "flopy.io.read_parquet",
+                          {"path": str(path), "columns": "region"})
+        assert list(subset.columns) == ["region"]
+
+    def test_write_then_read_json_round_trip(self, registry, table, tmp_path):
+        path = tmp_path / "out.json"
+        run_node(registry, "flopy.io.write_json", {"path": str(path)},
+                 table=table)
+        back = run_node(registry, "flopy.io.read_json", {"path": str(path)})
+        assert list(back.columns) == list(table.columns)
+        assert len(back) == len(table)
+
+    def test_write_then_read_jsonl_round_trip(self, registry, table, tmp_path):
+        path = tmp_path / "out.jsonl"
+        run_node(registry, "flopy.io.write_json",
+                 {"path": str(path), "layout": "lines"}, table=table)
+        assert len(path.read_text().strip().splitlines()) == len(table)
+        back = run_node(registry, "flopy.io.read_json",
+                        {"path": str(path), "layout": "lines"})
+        assert len(back) == len(table)
+
+    def test_write_then_read_sqlite_round_trip(self, registry, table, tmp_path):
+        path = tmp_path / "out.db"
+        passed = run_node(registry, "flopy.io.write_sqlite",
+                          {"path": str(path), "table_name": "sales"},
+                          table=table)
+        assert passed is table
+        back = run_node(registry, "flopy.io.read_sqlite",
+                        {"path": str(path), "query": "SELECT * FROM sales"})
+        assert list(back.columns) == list(table.columns)
+        assert len(back) == len(table)
+        top = run_node(registry, "flopy.io.read_sqlite",
+                       {"path": str(path),
+                        "query": "SELECT region, units FROM sales "
+                                 "WHERE units > 15"})
+        assert len(top) == 3
+
+    def test_read_sqlite_requires_query(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="no SQL query"):
+            run_node(registry, "flopy.io.read_sqlite",
+                     {"path": str(tmp_path / "x.db")})
 
 
 class TestVizNodes:
