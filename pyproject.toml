@@ -14,6 +14,7 @@ dependencies = [
 dev = ["pytest>=8", "pytest-qt>=4.4"]
 excel = ["openpyxl"]
 parquet = ["pyarrow"]
+plotly = ["plotly"]
 
 [project.scripts]
 flopy = "flopy.app:main"

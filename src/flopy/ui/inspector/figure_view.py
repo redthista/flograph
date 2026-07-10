@@ -94,8 +94,12 @@ class FigureView(QWidget):
         self._toolbar = _Toolbar(self._canvas, self, self._dialog_parent)
         self._layout.addWidget(self._toolbar)
         self._layout.addWidget(self._canvas, 1)
-        # no explicit draw_idle: the canvas draws on expose, and a scheduled
-        # draw can fire after deletion when views are swapped quickly
+        # Draw synchronously now: embedded in a QGraphicsProxyWidget (the
+        # on-canvas figure card) the canvas gets no real expose event, so
+        # without this it shows a blank/garbage buffer until a resize forces
+        # a redraw. Synchronous draw() — never draw_idle(): a scheduled draw
+        # can fire after deletion when views are swapped quickly.
+        self._canvas.draw()
 
     def clear(self) -> None:
         for widget in (self._toolbar, self._canvas):
