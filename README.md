@@ -47,6 +47,31 @@ an infinite Blueprint-style canvas, where every node is real, editable Python.
 Projects are plain JSON (`.flopy`); caches are never saved, so a reopened
 project is fully reproducible with one `F5`.
 
+## Node library
+
+The shipped library covers the KNIME basics:
+
+- **IO** — read/write CSV, Excel, Parquet, JSON (incl. JSONL), SQLite
+  (query in, table out), inline Table.
+- **Transform** — Select Columns, Filter Rows, Sort, Join, Group By,
+  Expression, Concatenate, Missing Values, Duplicate Row Filter,
+  Rename Columns, Pivot, Unpivot, Row Sampling, Convert Types,
+  String Manipulation, Statistics.
+- **Viz** — Show Table, Show Plot (live on-canvas cards).
+- **Scripting / Util** — Python Script, Constant, Reroute, Note,
+  Action Button.
+
+## Packages
+
+**Tools > Manage Packages** installs, upgrades and uninstalls pip packages
+in flopy's own environment (the venv running the app). Nodes execute
+in-process, so anything installed there is immediately importable from a
+node's `run()` — no restart needed for new installs; upgrades of modules
+the app has already imported take effect on the next launch. The dialog
+uses `pip` when the interpreter has it and falls back to `uv pip` (uv-made
+venvs ship without pip); flopy's own core dependencies are protected from
+uninstall.
+
 ## Writing a node
 
 ```python
