@@ -37,6 +37,7 @@ class ParamSpec:
     placeholder: str = ""
     minimum: Optional[float] = None
     maximum: Optional[float] = None
+    multi: bool = True  # columns only: comma list (True) or single column
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], where: str = "PARAMS") -> "ParamSpec":
@@ -64,4 +65,5 @@ class ParamSpec:
             placeholder=d.get("placeholder", ""),
             minimum=d.get("min"),
             maximum=d.get("max"),
+            multi=bool(d.get("multi", True)),
         )
