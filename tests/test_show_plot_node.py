@@ -31,7 +31,7 @@ def test_show_plot_is_registered_with_a_dataframe_in_figure_out(registry):
     assert spec.inputs[0].type == PortType.DATAFRAME
     assert spec.outputs[0].type == PortType.FIGURE
     assert can_connect(PortType.DATAFRAME, spec.inputs[0].type)
-    for name in ("kind", "x", "y", "title", "width", "height"):
+    for name in ("kind", "x", "y", "title", "width", "height", "scale"):
         assert spec.param(name) is not None
 
 
@@ -58,6 +58,60 @@ def test_show_plot_resize_updates_width_and_height(env, registry):
     assert item.body_height == 400.0
     graph.set_param(node.id, "width", 10)  # clamped to minimum
     assert item.width == 260.0
+
+
+def test_show_plot_scale_param_zooms_the_embedded_figure(env, registry):
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    item = scene.node_items[node.id]
+    proxy = item._figure_proxy
+    assert proxy.scale() == 1.0
+
+    graph.set_param(node.id, "scale", 150)
+    rect = item._figure_proxy_rect()
+    assert proxy.scale() == 1.5
+    assert proxy.size().width() == pytest.approx(rect.width() / 1.5)
+    assert proxy.size().height() == pytest.approx(rect.height() / 1.5)
+
+    graph.set_param(node.id, "scale", 9999)  # clamped to 400%
+    assert proxy.scale() == 4.0
+
+
+def test_figure_view_renders_at_content_scale_resolution(qtbot):
+    """The card's proxy transform magnifies the view; the canvas must render
+    at a matching device pixel ratio or the magnified raster goes soft."""
+    from matplotlib.figure import Figure
+
+    from flopy.ui.inspector.figure_view import FigureView
+
+    view = FigureView()
+    qtbot.addWidget(view)
+    figure = Figure()
+    figure.add_subplot().plot([1, 2, 3], [2, 4, 9])
+
+    view.set_content_scale(2.0)
+    view.set_figure(figure)
+    assert view._canvas.device_pixel_ratio == 2.0
+
+    # changing the scale with a figure already shown rebuilds the canvas
+    # at the new resolution, keeping the same figure
+    view.set_content_scale(3.0)
+    assert view._canvas.device_pixel_ratio == 3.0
+    assert view._canvas.figure is figure
+
+
+def test_scale_param_bumps_the_embedded_canvas_resolution(env, registry):
+    from matplotlib.figure import Figure
+
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    item = scene.node_items[node.id]
+    graph.set_param(node.id, "scale", 200)
+
+    figure = Figure()
+    figure.add_subplot().plot([1, 2], [3, 4])
+    item.set_figure(figure)
+    assert item._figure_view._canvas.device_pixel_ratio == 2.0
 
 
 @pytest.fixture

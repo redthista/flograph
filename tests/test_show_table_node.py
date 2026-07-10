@@ -86,6 +86,25 @@ def test_show_table_resize_updates_width_and_height(env, registry):
     assert item.width == 260.0
 
 
+def test_show_table_scale_param_zooms_the_embedded_view(env, registry):
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flopy.viz.show_table"))
+    item = scene.node_items[node.id]
+    proxy = item._table_viewer_proxy
+    assert proxy.scale() == 1.0
+
+    graph.set_param(node.id, "scale", 200)
+    rect = item._table_viewer_proxy_rect()
+    assert proxy.scale() == 2.0
+    # the widget gets half the logical pixels; the transform doubles them
+    # back, so the card footprint is unchanged but content draws 2x larger
+    assert proxy.size().width() == pytest.approx(rect.width() / 2)
+    assert proxy.size().height() == pytest.approx(rect.height() / 2)
+
+    graph.set_param(node.id, "scale", 5)  # clamped to 25%
+    assert proxy.scale() == 0.25
+
+
 @pytest.fixture
 def window(qtbot, registry):
     win = MainWindow(registry)

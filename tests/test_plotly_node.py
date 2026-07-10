@@ -42,7 +42,8 @@ def test_registered_with_dataframe_in_object_out(registry):
     spec = registry.get("flopy.viz.show_plotly")
     assert spec.inputs[0].type == PortType.DATAFRAME
     assert spec.outputs[0].type == PortType.OBJECT
-    for name in ("kind", "x", "y", "color", "title", "width", "height"):
+    for name in ("kind", "x", "y", "color", "title", "width", "height",
+                 "scale"):
         assert spec.param(name) is not None
     assert not spec.param("x").multi and spec.param("y").multi
 
@@ -97,7 +98,9 @@ class TestCard:
 
     def test_figure_loads_into_webview(self, env, registry, monkeypatch):
         item = self._item(env, registry)
-        loaded, shown = [], []
+        graph = env[0]
+        graph.set_param(item.node.id, "scale", 150)
+        loaded, shown, zoomed = [], [], []
 
         class StubView:
             def load(self, url):
@@ -109,6 +112,9 @@ class TestCard:
             def hide(self):
                 pass
 
+            def setZoomFactor(self, factor):
+                zoomed.append(factor)
+
         monkeypatch.setattr(item, "_ensure_plotly_view", lambda: StubView())
 
         class StubFigure:
@@ -118,6 +124,7 @@ class TestCard:
 
         item.set_plotly_figure(StubFigure())
         assert shown and loaded
+        assert zoomed == [1.5]  # scale param drives the webview zoom factor
         assert item._figure_placeholder.isHidden()
         with open(loaded[0], encoding="utf-8") as fh:
             assert fh.read() == "<html>chart</html>"

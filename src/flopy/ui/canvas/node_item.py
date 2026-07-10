@@ -51,6 +51,8 @@ TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, 2000.0
 
 CARD_HANDLE = 14.0  # bottom-right resize grip, shared by notes and tables
 
+CARD_SCALE_MIN, CARD_SCALE_MAX = 25.0, 400.0  # "scale" param, in percent
+
 _plotly_tmp = None  # TemporaryDirectory for card HTML, cleaned at exit
 
 
@@ -517,13 +519,42 @@ class NodeItem(QGraphicsObject):
 
     # -------------------------------------------------------------- figure
 
+    def _card_scale(self) -> float:
+        """Content zoom for show-cards, from the node's "scale" param (%)."""
+        try:
+            pct = float(self.node.params.get("scale", 100) or 100)
+        except (TypeError, ValueError):
+            pct = 100.0
+        return min(CARD_SCALE_MAX, max(CARD_SCALE_MIN, pct)) / 100.0
+
+    def _scale_proxy_into(self, proxy: QGraphicsProxyWidget,
+                          rect: QRectF) -> None:
+        """Fit a proxied widget into rect at the card's content scale: the
+        widget gets rect/scale logical pixels and a transform maps it back,
+        so a bigger scale shows less content drawn larger (and vice versa)."""
+        scale = self._card_scale()
+        proxy.setScale(scale)
+        proxy.setPos(rect.topLeft())
+        proxy.resize(rect.width() / scale, rect.height() / scale)
+
     def _figure_proxy_rect(self) -> QRectF:
         height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
         return QRectF(0, HEADER_H, self.width, height)
 
     def _layout_figure_proxy(self) -> None:
-        if self._figure_proxy is not None:
+        if self._figure_proxy is None:
+            return
+        if self.plotly_card:
+            # Chromium zooms natively (and stays crisp) — keep the proxy
+            # unscaled and drive the webview's zoom factor instead.
             self._figure_proxy.setGeometry(self._figure_proxy_rect())
+            if self._plotly_view is not None:
+                self._plotly_view.setZoomFactor(self._card_scale())
+            return
+        self._scale_proxy_into(self._figure_proxy, self._figure_proxy_rect())
+        if self._figure_view is not None:
+            # render at matching resolution so the transform stays crisp
+            self._figure_view.set_content_scale(self._card_scale())
 
     def _build_figure_widget(self) -> None:
         from ..inspector.figure_view import FigureView
@@ -637,6 +668,7 @@ class NodeItem(QGraphicsObject):
             default_width="100%", default_height="100%",
             config={"responsive": True}), encoding="utf-8")
         view.load(QUrl.fromLocalFile(str(path)))
+        view.setZoomFactor(self._card_scale())
         self._figure_placeholder.hide()
         view.show()
 
@@ -648,7 +680,8 @@ class NodeItem(QGraphicsObject):
 
     def _layout_table_viewer_proxy(self) -> None:
         if self._table_viewer_proxy is not None:
-            self._table_viewer_proxy.setGeometry(self._table_viewer_proxy_rect())
+            self._scale_proxy_into(self._table_viewer_proxy,
+                                   self._table_viewer_proxy_rect())
 
     def _build_table_viewer_widget(self) -> None:
         host = QWidget()
