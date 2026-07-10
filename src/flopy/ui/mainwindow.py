@@ -74,7 +74,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, library_dock)
         self.library_tree.add_requested.connect(self._add_node_at_view_center)
 
-        self.params_panel = ParamsPanel(self.graph, self.undo_stack)
+        self.params_panel = ParamsPanel(self.graph, self.undo_stack,
+                                        cache=self.engine.cache)
         self.properties_dock = QDockWidget("Properties", self)
         self.properties_dock.setObjectName("dock_properties")
         self.properties_dock.setWidget(self.params_panel)
@@ -163,6 +164,10 @@ class MainWindow(QMainWindow):
         self.action_cancel.setEnabled(False)
         self.action_reset_caches = act("Reset Caches", None, self._reset_caches)
 
+        # --- tools
+        self.action_packages = act("Manage &Packages…", None,
+                                   self._show_packages)
+
         for action in (self.action_run, self.action_run_selected,
                        self.action_cancel):
             toolbar.addAction(action)
@@ -198,6 +203,9 @@ class MainWindow(QMainWindow):
         for action in (self.action_run, self.action_run_selected,
                        self.action_cancel, self.action_reset_caches):
             run_menu.addAction(action)
+
+        tools_menu = self.menuBar().addMenu("&Tools")
+        tools_menu.addAction(self.action_packages)
 
         view_menu = self.menuBar().addMenu("&View")
         for dock in self.findChildren(QDockWidget):
@@ -330,6 +338,16 @@ class MainWindow(QMainWindow):
             self.graph.mark_dirty(node_id)
         self.engine.cache.clear()
         self.statusBar().showMessage("Caches cleared — everything is stale", 4000)
+
+    def _show_packages(self) -> None:
+        from .packages_dialog import PackagesDialog
+        dialog = getattr(self, "_packages_dialog", None)
+        if dialog is None:
+            dialog = PackagesDialog(self)
+            self._packages_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     # ------------------------------------------------------- action button
 
