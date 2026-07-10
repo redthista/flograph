@@ -552,9 +552,26 @@ class NodeItem(QGraphicsObject):
                 self._plotly_view.setZoomFactor(self._card_scale())
             return
         self._scale_proxy_into(self._figure_proxy, self._figure_proxy_rect())
-        if self._figure_view is not None:
-            # render at matching resolution so the transform stays crisp
-            self._figure_view.set_content_scale(self._card_scale())
+        self.refresh_render_ratio()
+
+    def _figure_render_ratio(self) -> float:
+        """Device pixels per logical pixel of the embedded figure: screen
+        DPR × view zoom × card scale. The Agg buffer must match what lands
+        on screen or the compounded transforms stretch a 1× raster."""
+        ratio = self._card_scale()
+        scene = self.scene()
+        views = scene.views() if scene is not None else []
+        if views:
+            view = views[0]
+            ratio *= (view.viewport().devicePixelRatioF() or 1.0)
+            ratio *= view.transform().m11()
+        return min(8.0, max(1.0, ratio))
+
+    def refresh_render_ratio(self) -> None:
+        """Re-target the figure's render resolution — called on card scale
+        changes and (debounced, via the scene) after the view zoom settles."""
+        if self._figure_view is not None and not self.plotly_card:
+            self._figure_view.set_render_ratio(self._figure_render_ratio())
 
     def _build_figure_widget(self) -> None:
         from ..inspector.figure_view import FigureView
@@ -599,6 +616,7 @@ class NodeItem(QGraphicsObject):
             self._figure_placeholder.show()
             return
         self._figure_placeholder.hide()
+        self.refresh_render_ratio()  # card may have been built before the view
         self._figure_view.set_figure(figure)
         self._figure_view.show()
 

@@ -77,9 +77,10 @@ def test_show_plot_scale_param_zooms_the_embedded_figure(env, registry):
     assert proxy.scale() == 4.0
 
 
-def test_figure_view_renders_at_content_scale_resolution(qtbot):
-    """The card's proxy transform magnifies the view; the canvas must render
-    at a matching device pixel ratio or the magnified raster goes soft."""
+def test_figure_view_renders_at_the_requested_ratio(qtbot):
+    """Card scale, view zoom and screen DPR all magnify the figure through
+    transforms the canvas can't see; it must render its buffer at the
+    matching device pixel ratio or the magnified raster goes soft."""
     from matplotlib.figure import Figure
 
     from flopy.ui.inspector.figure_view import FigureView
@@ -89,15 +90,16 @@ def test_figure_view_renders_at_content_scale_resolution(qtbot):
     figure = Figure()
     figure.add_subplot().plot([1, 2, 3], [2, 4, 9])
 
-    view.set_content_scale(2.0)
+    view.set_render_ratio(2.0)
     view.set_figure(figure)
     assert view._canvas.device_pixel_ratio == 2.0
 
-    # changing the scale with a figure already shown rebuilds the canvas
-    # at the new resolution, keeping the same figure
-    view.set_content_scale(3.0)
-    assert view._canvas.device_pixel_ratio == 3.0
-    assert view._canvas.figure is figure
+    # re-targeting with a figure already shown re-renders the same canvas
+    canvas = view._canvas
+    view.set_render_ratio(3.0)
+    assert view._canvas is canvas
+    assert canvas.device_pixel_ratio == 3.0
+    assert canvas.figure is figure
 
 
 def test_scale_param_bumps_the_embedded_canvas_resolution(env, registry):
@@ -112,6 +114,30 @@ def test_scale_param_bumps_the_embedded_canvas_resolution(env, registry):
     figure.add_subplot().plot([1, 2], [3, 4])
     item.set_figure(figure)
     assert item._figure_view._canvas.device_pixel_ratio == 2.0
+
+
+def test_view_zoom_compounds_into_the_render_ratio(qtbot, env, registry):
+    """Zooming the node canvas into a figure card must re-render the figure
+    at the zoomed resolution (debounced via the view's settle timer)."""
+    from flopy.ui.canvas.view import NodeGraphView
+
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    item = scene.node_items[node.id]
+    view = NodeGraphView(scene)
+    qtbot.addWidget(view)
+
+    view.scale(2.0, 2.0)
+    scene.refresh_render_ratios()  # what the settle timer fires
+    # offscreen DPR is 1, so ratio = zoom 2 x card scale 1
+    assert item._figure_view._render_ratio == 2.0
+
+    graph.set_param(node.id, "scale", 200)
+    assert item._figure_view._render_ratio == 4.0
+
+    view.scale(10.0, 10.0)  # zoom clamps: never render beyond 8x
+    scene.refresh_render_ratios()
+    assert item._figure_view._render_ratio == 8.0
 
 
 @pytest.fixture

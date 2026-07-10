@@ -79,18 +79,21 @@ class FigureView(QWidget):
         self._canvas = None
         self._toolbar = None
         self._dialog_parent = dialog_parent
-        self._content_scale = 1.0
+        self._render_ratio: float | None = None
 
-    def set_content_scale(self, scale: float) -> None:
-        """Render figures at scale× resolution. The on-canvas figure card
-        magnifies this view through a QGraphicsProxyWidget transform; without
-        a matching resolution boost that just stretches a raster drawn at
-        logical size, so text and lines go soft."""
-        if scale == self._content_scale:
+    def set_render_ratio(self, ratio: float | None) -> None:
+        """Absolute device pixels per logical pixel to render figures at
+        (screen DPR × canvas zoom × card scale), or None to trust Qt's
+        native ratio. The on-canvas figure card is magnified by transforms
+        the embedded widget can't see; without a matching resolution boost
+        those transforms stretch a raster drawn at logical size and the
+        figure goes soft."""
+        if ratio == self._render_ratio:
             return
-        self._content_scale = scale
+        self._render_ratio = ratio
         if self._canvas is not None:
-            self.set_figure(self._canvas.figure)  # rebuild at new resolution
+            self._canvas._render_ratio = ratio
+            self._sync_pixel_ratio(self._canvas)
 
     def set_figure(self, figure) -> None:
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -101,31 +104,44 @@ class FigureView(QWidget):
         class _Toolbar(_AnchoredToolbar, _Base):
             pass
 
-        content_scale = self._content_scale
-
         class _ScaledCanvas(FigureCanvasQTAgg):
-            """Reports an inflated device pixel ratio so matplotlib sizes its
-            Agg buffer (and stamps the painted QImage) at scale× resolution.
-            Only matplotlib reads this override — Qt keeps its C++ value."""
+            """Reports its _render_ratio as the device pixel ratio so
+            matplotlib sizes its Agg buffer (and stamps the painted QImage)
+            to match the pixels actually landing on screen. Only matplotlib
+            reads this override — Qt keeps its C++ value. Kept free of any
+            closure over the view: a cycle through a live QWidget makes its
+            teardown order depend on the garbage collector."""
+
+            _render_ratio: float | None = None
 
             def devicePixelRatioF(self) -> float:
-                return (super().devicePixelRatioF() or 1.0) * content_scale
+                if self._render_ratio is not None:
+                    return self._render_ratio
+                return super().devicePixelRatioF()
 
         self.clear()
         self._canvas = _ScaledCanvas(figure)
-        # matplotlib only refreshes its pixel ratio on showEvent/screen
-        # changes, and neither fires for a widget embedded in a
-        # QGraphicsProxyWidget — pull the (inflated) ratio in explicitly
-        self._canvas._update_pixel_ratio()
+        self._canvas._render_ratio = self._render_ratio
         self._toolbar = _Toolbar(self._canvas, self, self._dialog_parent)
         self._layout.addWidget(self._toolbar)
         self._layout.addWidget(self._canvas, 1)
-        # Draw synchronously now: embedded in a QGraphicsProxyWidget (the
+        # Ends in a synchronous draw: embedded in a QGraphicsProxyWidget (the
         # on-canvas figure card) the canvas gets no real expose event, so
-        # without this it shows a blank/garbage buffer until a resize forces
-        # a redraw. Synchronous draw() — never draw_idle(): a scheduled draw
-        # can fire after deletion when views are swapped quickly.
-        self._canvas.draw()
+        # without it the card shows a blank/garbage buffer until a resize
+        # forces a redraw.
+        self._sync_pixel_ratio(self._canvas)
+
+    @staticmethod
+    def _sync_pixel_ratio(canvas) -> None:
+        """Pull the (possibly overridden) pixel ratio into matplotlib and
+        redraw synchronously. matplotlib only refreshes its ratio on
+        showEvent/screen changes — neither fires for a widget embedded in a
+        QGraphicsProxyWidget — and its refresh path schedules a draw_idle,
+        which can fire after deletion when views are swapped quickly (same
+        hazard as in set_figure). Cancel it and draw now instead."""
+        canvas._update_pixel_ratio()
+        canvas._draw_pending = False
+        canvas.draw()
 
     def clear(self) -> None:
         for widget in (self._toolbar, self._canvas):
