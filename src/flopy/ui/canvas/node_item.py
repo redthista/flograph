@@ -242,6 +242,7 @@ class NodeItem(QGraphicsObject):
                 TABLE_MIN_W, float(self.node.params.get("width", 320))))
             self._sync_table_widget()
             self._layout_table_proxy()
+            self._ports_follow_width()
             self.update()
             return
         if self.figure_card:
@@ -249,6 +250,7 @@ class NodeItem(QGraphicsObject):
             self.width = min(FIGURE_MAX_W, max(
                 FIGURE_MIN_W, float(self.node.params.get("width", 420))))
             self._layout_figure_proxy()
+            self._ports_follow_width()
             self.update()
             return
         if self.table_viewer:
@@ -256,6 +258,7 @@ class NodeItem(QGraphicsObject):
             self.width = min(TABLE_VIEWER_MAX_W, max(
                 TABLE_VIEWER_MIN_W, float(self.node.params.get("width", 420))))
             self._layout_table_viewer_proxy()
+            self._ports_follow_width()
             self.update()
 
     def _handle_rect(self) -> QRectF:
@@ -631,37 +634,41 @@ class NodeItem(QGraphicsObject):
         self.input_ports.clear()
         self.output_ports.clear()
         self.prepareGeometryChange()
+        for spec in self.node.spec.inputs:
+            self.input_ports[spec.name] = PortItem(self, spec)
+        for spec in self.node.spec.outputs:
+            self.output_ports[spec.name] = PortItem(self, spec)
+        self._layout_ports()
+        self.update()
+
+    def _layout_ports(self) -> None:
+        """Pin port items to the current geometry. Cards resize at runtime,
+        so this runs again on every width change — output ports (and the
+        wires on them) must ride the right edge, not stay where they were."""
         if self.compact:
-            for spec in self.node.spec.inputs:
-                port = PortItem(self, spec)
+            for port in self.input_ports.values():
                 port.setPos(0, self.body_height / 2)
-                self.input_ports[spec.name] = port
-            for spec in self.node.spec.outputs:
-                port = PortItem(self, spec)
+            for port in self.output_ports.values():
                 port.setPos(self.width, self.body_height / 2)
-                self.output_ports[spec.name] = port
-            self.update()
             return
         if self.table or self.figure_card or self.table_viewer:
-            for spec in self.node.spec.inputs:
-                port = PortItem(self, spec)
+            for port in self.input_ports.values():
                 port.setPos(0, HEADER_H / 2)
-                self.input_ports[spec.name] = port
-            for spec in self.node.spec.outputs:
-                port = PortItem(self, spec)
+            for port in self.output_ports.values():
                 port.setPos(self.width, HEADER_H / 2)
-                self.output_ports[spec.name] = port
-            self.update()
             return
         for i, spec in enumerate(self.node.spec.inputs):
-            port = PortItem(self, spec)
-            port.setPos(0, HEADER_H + ROW_H * (i + 0.5))
-            self.input_ports[spec.name] = port
+            self.input_ports[spec.name].setPos(0, HEADER_H + ROW_H * (i + 0.5))
         for i, spec in enumerate(self.node.spec.outputs):
-            port = PortItem(self, spec)
-            port.setPos(self.width, HEADER_H + ROW_H * (i + 0.5))
-            self.output_ports[spec.name] = port
-        self.update()
+            self.output_ports[spec.name].setPos(
+                self.width, HEADER_H + ROW_H * (i + 0.5))
+
+    def _ports_follow_width(self) -> None:
+        """Re-anchor ports after a width change and re-route their wires."""
+        self._layout_ports()
+        scene = self.scene()
+        if scene is not None:
+            scene.node_item_moved(self.node.id)
 
     def port_item(self, name: str, direction: str) -> Optional[PortItem]:
         table = self.input_ports if direction == "input" else self.output_ports
@@ -916,6 +923,7 @@ class NodeItem(QGraphicsObject):
                 if new_width != self.width:
                     self.width = new_width
                     self._note_doc = None
+                    self._ports_follow_width()
                 self._live_height = new_height
                 if self.table:
                     self._layout_table_proxy()
