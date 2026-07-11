@@ -10,9 +10,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout,
-    QInputDialog, QLabel, QPlainTextEdit, QStyleOptionGraphicsItem,
-    QTableView, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout,
-    QWidget,
+    QInputDialog, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit,
+    QStyleOptionGraphicsItem, QTableView, QTableWidget, QTableWidgetItem,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from flopy.core import NodeInstance, PortSpec
@@ -45,9 +45,20 @@ FIGURE_MIN_H, FIGURE_MAX_H = 200.0, 2000.0
 
 PLOTLY_TYPE = "flopy.viz.show_plotly"
 
-TABLE_VIEWER_TYPE = "flopy.viz.show_table"
+# Show Table and Table Spec share the whole table-viewer card path; only the
+# DataFrame pushed into them differs (the data itself vs. its spec).
+TABLE_VIEWER_TYPES = {"flopy.viz.show_table", "flopy.viz.table_spec"}
 TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W = 260.0, 1600.0
 TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, 2000.0
+
+KPI_TYPE = "flopy.viz.card"
+KPI_MIN_W, KPI_MAX_W = 140.0, 800.0
+KPI_MIN_H, KPI_MAX_H = 80.0, 500.0
+
+SLICER_TYPE = "flopy.viz.slicer"
+SLICER_MIN_W, SLICER_MAX_W = 140.0, 600.0
+SLICER_MIN_H, SLICER_MAX_H = 120.0, 2000.0
+SLICER_MAX_OPTIONS = 500  # checkbox rows shown before truncating
 
 CARD_HANDLE = 14.0  # bottom-right resize grip, shared by notes and tables
 
@@ -128,7 +139,9 @@ class NodeItem(QGraphicsObject):
         # plotly cards share the figure card's chrome (resize, paint, ports);
         # only the embedded widget differs (webview vs. matplotlib canvas)
         self.figure_card = node.type_id in FIGURE_TYPES or self.plotly_card
-        self.table_viewer = node.type_id == TABLE_VIEWER_TYPE
+        self.table_viewer = node.type_id in TABLE_VIEWER_TYPES
+        self.kpi_card = node.type_id == KPI_TYPE
+        self.slicer = node.type_id == SLICER_TYPE
         self.broken = node.spec.broken
         if self.compact:
             self.width = 28.0
@@ -145,6 +158,12 @@ class NodeItem(QGraphicsObject):
         elif self.table_viewer:
             self.width = min(TABLE_VIEWER_MAX_W, max(
                 TABLE_VIEWER_MIN_W, float(node.params.get("width", 420))))
+        elif self.kpi_card:
+            self.width = min(KPI_MAX_W, max(
+                KPI_MIN_W, float(node.params.get("width", 220))))
+        elif self.slicer:
+            self.width = min(SLICER_MAX_W, max(
+                SLICER_MIN_W, float(node.params.get("width", 200))))
         else:
             self.width = NODE_WIDTH
         self._note_doc: QTextDocument | None = None
@@ -164,6 +183,12 @@ class NodeItem(QGraphicsObject):
         self._table_viewer_view: QTableView | None = None
         self._table_viewer_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_placeholder: QLabel | None = None
+        self._kpi_value: object = None
+        self._kpi_has_value = False
+        self._slicer_list: QListWidget | None = None
+        self._slicer_proxy: QGraphicsProxyWidget | None = None
+        self._slicer_placeholder: QLabel | None = None
+        self._syncing_slicer = False
         self.setFlags(
             QGraphicsItem.ItemIsMovable
             | QGraphicsItem.ItemIsSelectable
@@ -186,6 +211,8 @@ class NodeItem(QGraphicsObject):
             self._build_figure_widget()
         if self.table_viewer:
             self._build_table_viewer_widget()
+        if self.slicer:
+            self._build_slicer_widget()
         if node.status == NodeStatus.ERROR:
             self.setToolTip(node.status_message)
 
@@ -219,6 +246,16 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             fixed = float(self.node.params.get("height", 320) or 320)
             return min(TABLE_VIEWER_MAX_H, max(TABLE_VIEWER_MIN_H, fixed))
+        if self.kpi_card:
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", 120) or 120)
+            return min(KPI_MAX_H, max(KPI_MIN_H, fixed))
+        if self.slicer:
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", 240) or 240)
+            return min(SLICER_MAX_H, max(SLICER_MIN_H, fixed))
         rows = max(len(self.node.spec.inputs), len(self.node.spec.outputs), 1)
         return HEADER_H + rows * ROW_H + PAD_BOTTOM
 
@@ -267,6 +304,23 @@ class NodeItem(QGraphicsObject):
             self.width = min(TABLE_VIEWER_MAX_W, max(
                 TABLE_VIEWER_MIN_W, float(self.node.params.get("width", 420))))
             self._layout_table_viewer_proxy()
+            self._ports_follow_width()
+            self.update()
+            return
+        if self.kpi_card:
+            # label/format edits repaint the value too, not just geometry
+            self.prepareGeometryChange()
+            self.width = min(KPI_MAX_W, max(
+                KPI_MIN_W, float(self.node.params.get("width", 220))))
+            self._ports_follow_width()
+            self.update()
+            return
+        if self.slicer:
+            self.prepareGeometryChange()
+            self.width = min(SLICER_MAX_W, max(
+                SLICER_MIN_W, float(self.node.params.get("width", 200))))
+            self._sync_slicer_checks()
+            self._layout_slicer_proxy()
             self._ports_follow_width()
             self.update()
 
@@ -692,6 +746,158 @@ class NodeItem(QGraphicsObject):
         view.setModel(PandasModel(table, parent=view))
         view.show()
 
+    # ------------------------------------------------------------- kpi card
+
+    def set_card_value(self, value, has_value: bool = True) -> None:
+        """Push a freshly computed KPI value onto the card — called from the
+        GUI thread once the engine reports this node done. has_value=False
+        reverts to the run-me placeholder (the value itself may be None)."""
+        self._kpi_value = value
+        self._kpi_has_value = has_value
+        self.update()
+
+    def _kpi_text(self) -> str:
+        value = self._kpi_value
+        fmt = str(self.node.params.get("format", "") or "")
+        if fmt:
+            try:
+                return format(value, fmt)
+            except (TypeError, ValueError):
+                pass
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return str(value)
+        return format(value, ",") if isinstance(value, int) \
+            else format(value, ",.6g")
+
+    def _kpi_label(self) -> str:
+        label = str(self.node.params.get("label", "") or "").strip()
+        if label:
+            return label
+        aggregation = self.node.params.get("aggregation", "Sum")
+        column = str(self.node.params.get("column", "") or "").strip()
+        return f"{aggregation} of {column}" if column else str(aggregation)
+
+    # --------------------------------------------------------------- slicer
+
+    def _slicer_proxy_rect(self) -> QRectF:
+        height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
+        return QRectF(0, HEADER_H, self.width, height)
+
+    def _layout_slicer_proxy(self) -> None:
+        if self._slicer_proxy is not None:
+            self._slicer_proxy.setGeometry(self._slicer_proxy_rect())
+
+    def _build_slicer_widget(self) -> None:
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+
+        placeholder = QLabel("Run the graph to load slicer values.")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setWordWrap(True)
+        placeholder.setStyleSheet("color: #6b7280;")
+        layout.addWidget(placeholder, 1)
+        self._slicer_placeholder = placeholder
+
+        values = QListWidget()
+        values.setStyleSheet(
+            f"QListWidget {{ background: {theme.NODE_BODY.name()};"
+            f" color: {theme.NODE_TEXT.name()}; border: none;"
+            f" font-size: 9pt; }}"
+            f"QListWidget::item {{ padding: 1px 2px; }}")
+        values.itemChanged.connect(self._on_slicer_item_changed)
+        values.hide()
+        layout.addWidget(values, 1)
+        self._slicer_list = values
+
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(host)
+        self._slicer_proxy = proxy
+        self._layout_slicer_proxy()
+
+    def set_slicer_options(self, values: Optional[list[str]]) -> None:
+        """Rebuild the checkbox list from the column's unique values (from
+        the upstream cache), ticking those in the "selected" param — called
+        from the GUI thread once the engine reports this node done. None
+        reverts to the run-me placeholder."""
+        widget = self._slicer_list
+        if widget is None:
+            return
+        if values is None:
+            widget.clear()
+            widget.hide()
+            self._slicer_placeholder.show()
+            return
+        self._syncing_slicer = True
+        try:
+            widget.clear()
+            chosen = set(self._slicer_selected_param())
+            for value in values[:SLICER_MAX_OPTIONS]:
+                item = QListWidgetItem(value)
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                item.setCheckState(
+                    Qt.Checked if value in chosen else Qt.Unchecked)
+                widget.addItem(item)
+            if len(values) > SLICER_MAX_OPTIONS:
+                extra = QListWidgetItem(
+                    f"… {len(values) - SLICER_MAX_OPTIONS:,} more values")
+                extra.setFlags(Qt.NoItemFlags)
+                widget.addItem(extra)
+        finally:
+            self._syncing_slicer = False
+        self._slicer_placeholder.hide()
+        widget.show()
+
+    def _sync_slicer_checks(self) -> None:
+        """Re-apply check states from the "selected" param — keeps the card
+        honest when the param changes elsewhere (properties panel, undo)."""
+        widget = self._slicer_list
+        if widget is None or widget.isHidden():
+            return
+        chosen = set(self._slicer_selected_param())
+        self._syncing_slicer = True
+        try:
+            for i in range(widget.count()):
+                item = widget.item(i)
+                if item.flags() & Qt.ItemIsUserCheckable:
+                    item.setCheckState(Qt.Checked if item.text() in chosen
+                                       else Qt.Unchecked)
+        finally:
+            self._syncing_slicer = False
+
+    def _slicer_selected_param(self) -> list[str]:
+        import json
+        raw = str(self.node.params.get("selected", "") or "").strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+            return [str(v) for v in parsed] if isinstance(parsed, list) \
+                else [str(parsed)]
+        except ValueError:
+            return [part.strip() for part in raw.split(",") if part.strip()]
+
+    def _on_slicer_item_changed(self, _item) -> None:
+        """A tick changed: commit the selection (dirties this node and
+        everything downstream) and ask the window to re-run the flow from
+        here, so downstream visuals follow the slicer live."""
+        if self._syncing_slicer or self._slicer_list is None:
+            return
+        import json
+        widget = self._slicer_list
+        selected = [widget.item(i).text() for i in range(widget.count())
+                    if widget.item(i).checkState() == Qt.Checked]
+        scene = self.scene()
+        if scene is None:
+            return
+        new_value = json.dumps(selected) if selected else ""
+        if new_value != self.node.params.get("selected", ""):
+            from ..commands import SetParamCommand
+            scene.undo_stack.push(SetParamCommand(
+                scene.graph, self.node.id, "selected", new_value))
+        scene.slicer_changed.emit(self.node.id)
+
     @staticmethod
     def _next_column_name(columns: list[str]) -> str:
         import string
@@ -733,7 +939,8 @@ class NodeItem(QGraphicsObject):
             for port in self.output_ports.values():
                 port.setPos(self.width, self.body_height / 2)
             return
-        if self.table or self.figure_card or self.table_viewer:
+        if self.table or self.figure_card or self.table_viewer \
+                or self.kpi_card or self.slicer:
             for port in self.input_ports.values():
                 port.setPos(0, HEADER_H / 2)
             for port in self.output_ports.values():
@@ -778,8 +985,11 @@ class NodeItem(QGraphicsObject):
         if self.button:
             self._paint_button(painter)
             return
-        if self.figure_card or self.table_viewer:
+        if self.figure_card or self.table_viewer or self.slicer:
             self._paint_widget_card(painter)
+            return
+        if self.kpi_card:
+            self._paint_kpi(painter)
             return
         rect = QRectF(0, 0, self.width, self.body_height)
 
@@ -893,6 +1103,46 @@ class NodeItem(QGraphicsObject):
                          Qt.AlignCenter | Qt.TextWordWrap,
                          f"▶  {self.node.label}")
 
+    def _paint_kpi(self, painter: QPainter) -> None:
+        """The KPI card: the widget-card chrome with a big painted value —
+        vector text stays crisp at every zoom, no proxy widget needed."""
+        self._paint_widget_card(painter)
+
+        avail = QRectF(8, HEADER_H + 2, self.width - 16,
+                       self.body_height - HEADER_H - 22)
+        if not self._kpi_has_value:
+            painter.setPen(QPen(theme.NODE_SUBTEXT))
+            font = painter.font()
+            font.setBold(False)
+            font.setPointSizeF(8.5)
+            painter.setFont(font)
+            painter.drawText(avail, Qt.AlignCenter | Qt.TextWordWrap,
+                             "Run the graph to compute the value.")
+            return
+
+        text = self._kpi_text()
+        # size to fit: capped by height, shrunk for long values (~0.62 em
+        # average glyph width), never below a readable floor
+        size = min(avail.height() * 0.62,
+                   avail.width() / (0.62 * max(1, len(text))))
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSizeF(max(9.0, size))
+        painter.setFont(font)
+        painter.setPen(QPen(theme.NODE_TEXT))
+        painter.drawText(avail, Qt.AlignCenter, text)
+
+        painter.setPen(QPen(theme.NODE_SUBTEXT))
+        font = painter.font()
+        font.setBold(False)
+        font.setPointSizeF(8.0)
+        painter.setFont(font)
+        caption = painter.fontMetrics().elidedText(
+            self._kpi_label(), Qt.ElideRight, int(self.width - 16))
+        painter.drawText(
+            QRectF(8, self.body_height - 20, self.width - 16, 16),
+            Qt.AlignHCenter | Qt.AlignVCenter, caption)
+
     def _paint_widget_card(self, painter: QPainter) -> None:
         """Shared chrome for cards that embed a proxied widget (figure/table
         viewers): rounded body, header strip, resize handle when selected."""
@@ -955,6 +1205,10 @@ class NodeItem(QGraphicsObject):
         if self.table_viewer:
             return (TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W,
                     TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H)
+        if self.kpi_card:
+            return KPI_MIN_W, KPI_MAX_W, KPI_MIN_H, KPI_MAX_H
+        if self.slicer:
+            return SLICER_MIN_W, SLICER_MAX_W, SLICER_MIN_H, SLICER_MAX_H
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
 
     def itemChange(self, change, value):
@@ -975,7 +1229,8 @@ class NodeItem(QGraphicsObject):
                 scene.button_fired.emit(self.node.id)
             event.accept()
             return
-        if (self.note or self.table or self.figure_card or self.table_viewer) \
+        if (self.note or self.table or self.figure_card or self.table_viewer
+                or self.kpi_card or self.slicer) \
                 and self.isSelected() \
                 and self._handle_rect().contains(event.pos()):
             self._resizing_card = True
@@ -1013,6 +1268,8 @@ class NodeItem(QGraphicsObject):
                     self._layout_figure_proxy()
                 elif self.table_viewer:
                     self._layout_table_viewer_proxy()
+                elif self.slicer:
+                    self._layout_slicer_proxy()
                 self.update()
             event.accept()
             return
@@ -1055,6 +1312,8 @@ class NodeItem(QGraphicsObject):
                 self._layout_figure_proxy()
             elif self.table_viewer:
                 self._layout_table_viewer_proxy()
+            elif self.slicer:
+                self._layout_slicer_proxy()
             event.accept()
             return
         super().mouseReleaseEvent(event)

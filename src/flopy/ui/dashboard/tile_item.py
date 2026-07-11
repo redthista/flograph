@@ -20,11 +20,12 @@ from flopy.core import Tile
 
 from .. import theme
 from ..canvas.node_item import (
-    BUTTON_H, BUTTON_W, FIGURE_TYPES, PLOTLY_TYPE, TABLE_VIEWER_TYPE,
+    BUTTON_H, BUTTON_W, FIGURE_TYPES, PLOTLY_TYPE, TABLE_VIEWER_TYPES,
 )
 
 BUTTON_TYPE = "flopy.util.action_button"
-TILE_ABLE_TYPES = FIGURE_TYPES | {PLOTLY_TYPE, TABLE_VIEWER_TYPE, BUTTON_TYPE}
+TILE_ABLE_TYPES = FIGURE_TYPES | TABLE_VIEWER_TYPES | {PLOTLY_TYPE,
+                                                       BUTTON_TYPE}
 
 TITLE_H = 24.0
 HANDLE = 14.0
@@ -40,7 +41,9 @@ def default_tile_port(type_id: str) -> Optional[str]:
     """The output port a tile of this node type renders."""
     if type_id in FIGURE_TYPES or type_id == PLOTLY_TYPE:
         return "figure"
-    if type_id == TABLE_VIEWER_TYPE:
+    if type_id == "flopy.viz.table_spec":
+        return "spec"
+    if type_id in TABLE_VIEWER_TYPES:
         return "table"
     return None  # action buttons have no ports
 
@@ -128,7 +131,7 @@ class TileItem(QGraphicsObject):
             return "figure"
         if type_id == PLOTLY_TYPE:
             return "plotly"
-        if type_id == TABLE_VIEWER_TYPE:
+        if type_id in TABLE_VIEWER_TYPES:
             return "table"
         if type_id == BUTTON_TYPE:
             return "button"

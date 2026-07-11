@@ -35,6 +35,7 @@ class NodeGraphScene(QGraphicsScene):
     node_rename_requested = Signal(str)  # node_id — header was double-clicked
     wire_dropped = Signal(object, QPointF)  # fixed PortItem, scene pos
     button_fired = Signal(str)          # node_id — an Action Button was clicked
+    slicer_changed = Signal(str)        # node_id — a Slicer's selection changed
     frame_run_requested = Signal(str)   # frame_id — a frame's run glyph was clicked
 
     def __init__(self, graph: Graph, undo_stack: QUndoStack,

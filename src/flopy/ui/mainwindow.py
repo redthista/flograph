@@ -25,7 +25,9 @@ from .commands import (
     RemovePageCommand, RenamePageCommand, SetLabelCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
-from .canvas.node_item import FIGURE_TYPES, PLOTLY_TYPE
+from .canvas.node_item import (
+    FIGURE_TYPES, KPI_TYPE, PLOTLY_TYPE, SLICER_TYPE, TABLE_VIEWER_TYPES,
+)
 from .canvas.palette import LibraryTree, NodePalettePopup
 from .dashboard import (
     DashboardPage, PageTabBar, TILE_ABLE_TYPES, default_tile_port,
@@ -266,6 +268,8 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_figure_node_succeeded)
         engine.node_succeeded.connect(self._on_plotly_node_succeeded)
         engine.node_succeeded.connect(self._on_table_viewer_node_succeeded)
+        engine.node_succeeded.connect(self._on_kpi_node_succeeded)
+        engine.node_succeeded.connect(self._on_slicer_node_succeeded)
 
     def _wire_canvas(self) -> None:
         self.view.add_node_requested.connect(self._show_add_node_menu)
@@ -277,6 +281,7 @@ class MainWindow(QMainWindow):
         self.scene.node_rename_requested.connect(self._rename_node)
         self.scene.wire_dropped.connect(self._on_wire_dropped)
         self.scene.button_fired.connect(self._on_button_fired)
+        self.scene.slicer_changed.connect(self._on_slicer_changed)
         self.scene.frame_run_requested.connect(self._on_frame_run_requested)
 
     def _on_figure_node_succeeded(self, node_id: str) -> None:
@@ -301,13 +306,51 @@ class MainWindow(QMainWindow):
 
     def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id != "flopy.viz.show_table":
+        if node is None or node.type_id not in TABLE_VIEWER_TYPES:
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
             return
         entry = self.engine.cache.get(node_id)
-        item.set_table_data(entry.outputs.get("table") if entry else None)
+        # first output holds the displayed frame: "table" for Show Table,
+        # "spec" for Table Spec
+        port = node.spec.outputs[0].name if node.spec.outputs else "table"
+        item.set_table_data(entry.outputs.get(port) if entry else None)
+
+    def _on_kpi_node_succeeded(self, node_id: str) -> None:
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.type_id != KPI_TYPE:
+            return
+        item = self.scene.node_items.get(node_id)
+        if item is None:
+            return
+        entry = self.engine.cache.get(node_id)
+        if entry is None:
+            item.set_card_value(None, has_value=False)
+        else:
+            item.set_card_value(entry.outputs.get("value"))
+
+    def _on_slicer_node_succeeded(self, node_id: str) -> None:
+        """Populate the slicer's checkbox list with the column's unique
+        values, read from the *upstream* cache — the slicer's own output is
+        already filtered, so it can't be the source of the options."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.type_id != SLICER_TYPE:
+            return
+        item = self.scene.node_items.get(node_id)
+        if item is None:
+            return
+        import sys
+        pd = sys.modules.get("pandas")
+        values = None
+        conn = self.graph.input_connection(node_id, "table")
+        entry = self.engine.cache.get(conn.src_node) if conn else None
+        source = entry.outputs.get(conn.src_port) if entry else None
+        column = str(node.params.get("column", "") or "").strip()
+        if (pd is not None and isinstance(source, pd.DataFrame)
+                and column in source.columns):
+            values = sorted(source[column].astype(str).unique())
+        item.set_slicer_options(values)
 
     # ------------------------------------------------------ dashboard pages
 
@@ -511,6 +554,15 @@ class MainWindow(QMainWindow):
             for target_id in targets:
                 self.graph.mark_dirty(target_id)
         self.engine.run_targets(targets)
+
+    def _on_slicer_changed(self, node_id: str) -> None:
+        """A Slicer's ticks changed: re-run it and the visuals that follow.
+        The SetParamCommand already dirtied the subgraph; if a run is in
+        flight this is a no-op and the affected nodes just stay stale."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.type_id != SLICER_TYPE:
+            return
+        self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
 
     def _named_node_ids(self, text: str) -> list[str]:
         wanted = {line.strip().lower() for line in text.splitlines()
