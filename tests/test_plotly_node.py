@@ -89,7 +89,7 @@ class TestCard:
         item = self._item(env, registry)
         assert item.plotly_card and item.figure_card
         assert item._figure_placeholder.isVisible()
-        assert item._plotly_view is None  # webview only built on first figure
+        assert item._plotly_widget.view is None  # webview only built on first figure
         assert list(item.output_ports) == ["figure"]
         graph = env[0]
         graph.set_param(item.node.id, "width", 700)
@@ -115,7 +115,8 @@ class TestCard:
             def setZoomFactor(self, factor):
                 zoomed.append(factor)
 
-        monkeypatch.setattr(item, "_ensure_plotly_view", lambda: StubView())
+        # a preassigned view short-circuits _ensure_view, no webengine needed
+        monkeypatch.setattr(item._plotly_widget, "view", StubView())
 
         class StubFigure:
             def to_html(self, **kwargs):
@@ -132,7 +133,7 @@ class TestCard:
     def test_placeholder_explains_missing_webengine(self, env, registry,
                                                     monkeypatch):
         item = self._item(env, registry)
-        monkeypatch.setattr(item, "_ensure_plotly_view", lambda: None)
+        monkeypatch.setattr(item._plotly_widget, "_ensure_view", lambda: None)
 
         class StubFigure:
             def to_html(self, **kwargs):

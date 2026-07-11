@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from .datatypes import PortType
-from .graph import Connection, Frame, Graph, GraphError
+from .graph import Connection, Frame, Graph, GraphError, Page, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .ports import PortDirection, PortSpec
 from .registry import NodeRegistry
@@ -64,6 +64,22 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "color": f.color,
                 }
                 for f in graph.frames.values()
+            ],
+            "pages": [
+                {
+                    "id": p.id,
+                    "title": p.title,
+                    "tiles": [
+                        {
+                            "id": t.id,
+                            "node": t.node_id,
+                            "port": t.port,
+                            "rect": list(t.rect),
+                        }
+                        for t in p.tiles.values()
+                    ],
+                }
+                for p in graph.pages.values()
             ],
         },
     }
@@ -128,6 +144,21 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             rect=tuple(entry.get("rect", (0, 0, 300, 200))),
             color=entry.get("color", "#33415c"),
         ))
+
+    for entry in payload.get("pages", []):
+        page = graph.add_page(Page(
+            id=entry["id"],
+            title=entry.get("title", "Page"),
+        ))
+        # tiles referencing missing nodes load as-is: the dashboard shows a
+        # placeholder for them, mirroring the _broken_spec philosophy
+        for tile_entry in entry.get("tiles", []):
+            graph.add_tile(page.id, Tile(
+                id=tile_entry["id"],
+                node_id=tile_entry["node"],
+                port=tile_entry.get("port"),
+                rect=tuple(tile_entry.get("rect", (0, 0, 420, 320))),
+            ))
     return graph
 
 

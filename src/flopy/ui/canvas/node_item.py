@@ -53,18 +53,6 @@ CARD_HANDLE = 14.0  # bottom-right resize grip, shared by notes and tables
 
 CARD_SCALE_MIN, CARD_SCALE_MAX = 25.0, 400.0  # "scale" param, in percent
 
-_plotly_tmp = None  # TemporaryDirectory for card HTML, cleaned at exit
-
-
-def _plotly_html_path(node_id: str):
-    import tempfile
-    from pathlib import Path
-    global _plotly_tmp
-    if _plotly_tmp is None:
-        _plotly_tmp = tempfile.TemporaryDirectory(prefix="flopy-plotly-")
-    return Path(_plotly_tmp.name) / f"{node_id}.html"
-
-
 class PortItem(QGraphicsItem):
     """A circular pin. Wire drags start here and are managed by the scene."""
 
@@ -172,8 +160,7 @@ class NodeItem(QGraphicsObject):
         self._figure_view = None
         self._figure_proxy: QGraphicsProxyWidget | None = None
         self._figure_placeholder: QLabel | None = None
-        self._plotly_view = None  # QWebEngineView, created on first figure
-        self._plotly_layout: QVBoxLayout | None = None
+        self._plotly_widget = None  # shared PlotlyView, see _build_plotly_widget
         self._table_viewer_view: QTableView | None = None
         self._table_viewer_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_placeholder: QLabel | None = None
@@ -548,8 +535,8 @@ class NodeItem(QGraphicsObject):
             # Chromium zooms natively (and stays crisp) — keep the proxy
             # unscaled and drive the webview's zoom factor instead.
             self._figure_proxy.setGeometry(self._figure_proxy_rect())
-            if self._plotly_view is not None:
-                self._plotly_view.setZoomFactor(self._card_scale())
+            if self._plotly_widget is not None:
+                self._plotly_widget.set_zoom(self._card_scale())
             return
         self._scale_proxy_into(self._figure_proxy, self._figure_proxy_rect())
         self.refresh_render_ratio()
@@ -624,38 +611,17 @@ class NodeItem(QGraphicsObject):
 
     def _build_plotly_widget(self) -> None:
         """Card chrome identical to the figure card, but the body hosts a
-        QWebEngineView (created lazily on the first figure — Chromium is
-        heavy and the import can be missing on trimmed PySide6 installs)."""
-        host = QWidget()
-        layout = QVBoxLayout(host)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(0)
-
-        placeholder = QLabel("Run the graph to see an interactive chart here.")
-        placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setWordWrap(True)
-        placeholder.setStyleSheet("color: #6b7280;")
-        layout.addWidget(placeholder, 1)
-        self._figure_placeholder = placeholder
-        self._plotly_layout = layout
+        shared PlotlyView (webview created lazily on the first figure)."""
+        from ..inspector.plotly_view import PlotlyView
+        widget = PlotlyView()
+        widget.setContentsMargins(2, 2, 2, 2)
+        self._plotly_widget = widget
+        self._figure_placeholder = widget.placeholder
 
         proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(host)
+        proxy.setWidget(widget)
         self._figure_proxy = proxy  # reuses the figure card's resize plumbing
         self._layout_figure_proxy()
-
-    def _ensure_plotly_view(self):
-        if self._plotly_view is not None:
-            return self._plotly_view
-        try:
-            from PySide6.QtWebEngineWidgets import QWebEngineView
-        except ImportError:
-            return None
-        view = QWebEngineView()
-        view.hide()
-        self._plotly_layout.addWidget(view, 1)
-        self._plotly_view = view
-        return view
 
     def set_plotly_figure(self, figure) -> None:
         """Render a freshly computed plotly figure (or None) into the
@@ -663,32 +629,8 @@ class NodeItem(QGraphicsObject):
         reports this node done."""
         if not self.plotly_card:
             return
-        if figure is None or not hasattr(figure, "to_html"):
-            if self._plotly_view is not None:
-                self._plotly_view.hide()
-            self._figure_placeholder.setText(
-                "Run the graph to see an interactive chart here.")
-            self._figure_placeholder.show()
-            return
-        view = self._ensure_plotly_view()
-        if view is None:
-            self._figure_placeholder.setText(
-                "Qt WebEngine is not available — install the full PySide6 "
-                "package (Tools > Manage Packages) to display Plotly charts.")
-            self._figure_placeholder.show()
-            return
-        from PySide6.QtCore import QUrl
-        # via a temp file, not setHtml: the self-contained page embeds all of
-        # plotly.js (~3 MB) and setHtml caps content at 2 MB
-        path = _plotly_html_path(self.node.id)
-        path.write_text(figure.to_html(
-            full_html=True, include_plotlyjs=True,
-            default_width="100%", default_height="100%",
-            config={"responsive": True}), encoding="utf-8")
-        view.load(QUrl.fromLocalFile(str(path)))
-        view.setZoomFactor(self._card_scale())
-        self._figure_placeholder.hide()
-        view.show()
+        self._plotly_widget.set_figure(figure)
+        self._plotly_widget.set_zoom(self._card_scale())
 
     # --------------------------------------------------------- table viewer
 

@@ -1,24 +1,16 @@
-"""NodeGraphView: infinite-feeling canvas with zoom-to-cursor, middle/space
-pan, rubber-band selection, and an adaptive grid."""
+"""NodeGraphView: the modeling canvas — ZoomPanGraphicsView plus node
+drag & drop, the Tab palette, node keyboard shortcuts, minimap, and the
+node context menu."""
 from __future__ import annotations
 
-import math
+from PySide6.QtCore import QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import QKeyEvent
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
-from PySide6.QtWidgets import QGraphicsProxyWidget, QGraphicsView
-
-from .. import theme
+from .base_view import ZoomPanGraphicsView
 from .scene import NodeGraphScene
 
-ZOOM_MIN = 0.1
-ZOOM_MAX = 4.0
-GRID_FINE = 20.0
-GRID_COARSE = 100.0
-FINE_GRID_LOD = 0.4
 
-
-class NodeGraphView(QGraphicsView):
+class NodeGraphView(ZoomPanGraphicsView):
     add_node_requested = Signal(QPointF, QPoint)   # scene pos, global pos
     palette_requested = Signal(QPointF, QPoint)    # scene pos, global pos
     node_dropped = Signal(str, QPointF)            # type_id, scene pos
@@ -27,33 +19,10 @@ class NodeGraphView(QGraphicsView):
     def __init__(self, scene: NodeGraphScene, parent=None) -> None:
         super().__init__(scene, parent)
         self.setAcceptDrops(True)
-        # SmoothPixmapTransform matters for the embedded figure/webview
-        # cards: without it any zoomed raster is scaled nearest-neighbor
-        # and reads as pixelated instead of merely soft
-        self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing
-                            | QPainter.SmoothPixmapTransform)
-        self.setTransformationAnchor(QGraphicsView.NoAnchor)
-        self.setResizeAnchor(QGraphicsView.NoAnchor)
-        self.setDragMode(QGraphicsView.RubberBandDrag)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
-        self._panning = False
-        self._pan_last = QPointF()
-        self._space_held = False
-        self.centerOn(0, 0)
 
         from .minimap import Minimap
         self.minimap = Minimap(self)
         self.minimap.show()
-
-        # figure cards re-render at the new resolution once zooming pauses —
-        # not per wheel tick, which would redraw every figure continuously
-        self._zoom_settle = QTimer(self)
-        self._zoom_settle.setSingleShot(True)
-        self._zoom_settle.setInterval(150)
-        self._zoom_settle.timeout.connect(
-            lambda: self.scene().refresh_render_ratios())
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -63,58 +32,10 @@ class NodeGraphView(QGraphicsView):
         super().showEvent(event)
         self.minimap.reposition()
 
-    # ----------------------------------------------------------------- zoom
-
-    @property
-    def zoom(self) -> float:
-        return self.transform().m11()
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        factor = 1.15 ** (event.angleDelta().y() / 120.0)
-        new_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self.zoom * factor))
-        factor = new_zoom / self.zoom
-        if math.isclose(factor, 1.0):
-            return
-        pos = event.position().toPoint()
-        before = self.mapToScene(pos)
-        self.scale(factor, factor)
-        after = self.mapToScene(pos)
-        delta = after - before
-        self.translate(delta.x(), delta.y())
-        self._zoom_settle.start()
-
-    # ------------------------------------------------------------------ pan
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MiddleButton:
-            self._panning = True
-            self._pan_last = event.position()
-            self.setCursor(Qt.ClosedHandCursor)
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._panning:
-            delta = event.position() - self._pan_last
-            self._pan_last = event.position()
-            self.translate(delta.x() / self.zoom, delta.y() / self.zoom)
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MiddleButton and self._panning:
-            self._panning = False
-            self.unsetCursor()
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
     # ------------------------------------------------------------ keyboard
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if isinstance(self.scene().focusItem(), QGraphicsProxyWidget):
+        if self._proxy_widget_has_focus():
             # A note editor or table cell is focused inside an embedded
             # widget — let it handle keys (backspace, arrows, letters)
             # instead of hijacking them as canvas shortcuts.
@@ -129,11 +50,6 @@ class NodeGraphView(QGraphicsView):
                 self.mapToScene(cursor_pos), self.mapToGlobal(cursor_pos))
             event.accept()
             return
-        if key == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_held = True
-            self.setDragMode(QGraphicsView.ScrollHandDrag)
-            event.accept()
-            return
         if key == Qt.Key_Delete or key == Qt.Key_Backspace:
             self.scene().delete_selection()
             event.accept()
@@ -146,15 +62,7 @@ class NodeGraphView(QGraphicsView):
             self._nudge_selection(key, 10.0 if not event.modifiers() & Qt.ShiftModifier else 1.0)
             event.accept()
             return
-        super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_held = False
-            self.setDragMode(QGraphicsView.RubberBandDrag)
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
+        super().keyPressEvent(event)  # space-pan lives in the base view
 
     def _nudge_selection(self, key, step: float) -> None:
         scene: NodeGraphScene = self.scene()
@@ -172,18 +80,8 @@ class NodeGraphView(QGraphicsView):
     def frame_content(self) -> None:
         """F: fit the selection (or everything) in view."""
         scene: NodeGraphScene = self.scene()
-        items = scene.selected_node_items() or list(scene.node_items.values())
-        if not items:
-            return
-        rect = QRectF()
-        for item in items:
-            rect = rect.united(item.sceneBoundingRect())
-        rect.adjust(-60, -60, 60, 60)
-        self.fitInView(rect, Qt.KeepAspectRatio)
-        if self.zoom > 1.5:  # don't over-zoom on a single node
-            factor = 1.5 / self.zoom
-            self.scale(factor, factor)
-        self._zoom_settle.start()
+        self.fit_items(scene.selected_node_items()
+                       or list(scene.node_items.values()))
 
     # --------------------------------------------------------- context menu
 
@@ -228,23 +126,3 @@ class NodeGraphView(QGraphicsView):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
-
-    # ------------------------------------------------------------------ bg
-
-    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
-        painter.fillRect(rect, theme.CANVAS_BG)
-        if self.zoom >= FINE_GRID_LOD:
-            self._draw_grid(painter, rect, GRID_FINE, theme.GRID_FINE)
-        self._draw_grid(painter, rect, GRID_COARSE, theme.GRID_COARSE)
-
-    @staticmethod
-    def _draw_grid(painter: QPainter, rect: QRectF, step: float, color) -> None:
-        painter.setPen(QPen(color, 0))
-        x = math.floor(rect.left() / step) * step
-        while x < rect.right():
-            painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
-            x += step
-        y = math.floor(rect.top() / step) * step
-        while y < rect.bottom():
-            painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
-            y += step

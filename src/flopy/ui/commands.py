@@ -10,10 +10,11 @@ from typing import Any, Optional
 
 from PySide6.QtGui import QUndoCommand
 
-from flopy.core import Connection, Frame, Graph, NodeInstance, NodeSpec
+from flopy.core import Connection, Frame, Graph, NodeInstance, NodeSpec, Page, Tile
 
 _ID_MOVE = 1001
 _ID_PARAM = 1002
+_ID_TILE_RECT = 1003
 
 
 class AddNodeCommand(QUndoCommand):
@@ -294,3 +295,111 @@ class UpdateFrameCommand(QUndoCommand):
     def undo(self) -> None:
         title, rect, color = self._old
         self._graph.update_frame(self._frame_id, title=title, rect=rect, color=color)
+
+
+class AddPageCommand(QUndoCommand):
+    def __init__(self, graph: Graph, page: Page,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("add page", parent)
+        self._graph = graph
+        self._page = page
+
+    def redo(self) -> None:
+        self._graph.add_page(self._page)
+
+    def undo(self) -> None:
+        self._graph.remove_page(self._page.id)
+
+
+class RemovePageCommand(QUndoCommand):
+    def __init__(self, graph: Graph, page_id: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("remove page", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._page: Optional[Page] = None  # tiles ride along with the Page
+
+    def redo(self) -> None:
+        self._page = self._graph.remove_page(self._page_id)
+
+    def undo(self) -> None:
+        self._graph.add_page(self._page)
+
+
+class RenamePageCommand(QUndoCommand):
+    def __init__(self, graph: Graph, page_id: str, title: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("rename page", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).title
+        self._new = title
+
+    def redo(self) -> None:
+        self._graph.update_page(self._page_id, title=self._new)
+
+    def undo(self) -> None:
+        self._graph.update_page(self._page_id, title=self._old)
+
+
+class AddTileCommand(QUndoCommand):
+    def __init__(self, graph: Graph, page_id: str, tile: Tile,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("add tile", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._tile = tile
+
+    def redo(self) -> None:
+        self._graph.add_tile(self._page_id, self._tile)
+
+    def undo(self) -> None:
+        self._graph.remove_tile(self._page_id, self._tile.id)
+
+
+class RemoveTileCommand(QUndoCommand):
+    def __init__(self, graph: Graph, page_id: str, tile_id: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("remove tile", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._tile_id = tile_id
+        self._tile: Optional[Tile] = None
+
+    def redo(self) -> None:
+        self._tile = self._graph.remove_tile(self._page_id, self._tile_id)
+
+    def undo(self) -> None:
+        self._graph.add_tile(self._page_id, self._tile)
+
+
+class MoveResizeTileCommand(QUndoCommand):
+    """One drag of a tile (move or resize — both are just rect changes);
+    consecutive rect changes of the same tile merge into one undo step."""
+
+    def __init__(self, graph: Graph, page_id: str, tile_id: str,
+                 old_rect: tuple, new_rect: tuple,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("move tile", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._tile_id = tile_id
+        self._old = tuple(old_rect)
+        self._new = tuple(new_rect)
+
+    def id(self) -> int:
+        return _ID_TILE_RECT
+
+    def redo(self) -> None:
+        self._graph.update_tile(self._page_id, self._tile_id, rect=self._new)
+
+    def undo(self) -> None:
+        self._graph.update_tile(self._page_id, self._tile_id, rect=self._old)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (not isinstance(other, MoveResizeTileCommand)
+                or other._page_id != self._page_id
+                or other._tile_id != self._tile_id):
+            return False
+        self._new = other._new
+        return True

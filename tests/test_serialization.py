@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from flopy.core import Frame, Graph, GraphError, NodeStatus
+from flopy.core import Frame, Graph, GraphError, NodeStatus, Page, Tile
 from flopy.core.serialization import (
     SCHEMA_VERSION, graph_from_dict, graph_to_dict, load, save,
 )
@@ -113,3 +113,37 @@ def test_rest_of_graph_still_loads_alongside_a_broken_node(registry):
     restored = graph_from_dict(data, registry)
     assert len(restored.nodes) == 3
     assert restored.nodes["z"].spec.broken
+
+
+class TestPageSerialization:
+    def test_pages_round_trip(self, registry):
+        graph = build_project_graph(registry)
+        const_id = next(iter(graph.nodes))
+        graph.add_page(Page(id="p1", title="Sales"))
+        graph.add_tile("p1", Tile(id="t1", node_id=const_id, port="value",
+                                  rect=(10, 20, 400, 300)))
+        graph.add_tile("p1", Tile(id="t2", node_id=const_id))
+        graph.add_page(Page(id="p2", title="Ops"))
+        data = graph_to_dict(graph)
+        restored = graph_from_dict(json.loads(json.dumps(data)), registry)
+        assert graph_to_dict(restored) == data
+        assert list(restored.pages) == ["p1", "p2"]
+        tile = restored.pages["p1"].tiles["t1"]
+        assert (tile.node_id, tile.port) == (const_id, "value")
+        assert tile.rect == (10.0, 20.0, 400.0, 300.0)
+        assert restored.pages["p1"].tiles["t2"].port is None
+
+    def test_file_without_pages_loads(self, registry):
+        data = graph_to_dict(build_project_graph(registry))
+        del data["graph"]["pages"]
+        restored = graph_from_dict(data, registry)
+        assert restored.pages == {}
+
+    def test_tile_referencing_missing_node_survives(self, registry):
+        graph = build_project_graph(registry)
+        graph.add_page(Page(id="p1"))
+        graph.add_tile("p1", Tile(id="t1", node_id="deleted-node", port="table"))
+        data = graph_to_dict(graph)
+        restored = graph_from_dict(data, registry)
+        assert restored.pages["p1"].tiles["t1"].node_id == "deleted-node"
+        assert graph_to_dict(restored) == data
