@@ -368,6 +368,117 @@ class TestVizNodes:
             run_node(registry, "flopy.viz.show_plot", {"y": "nope"}, table=table)
 
 
+class TestCardNode:
+    def test_sum(self, registry, table):
+        out = run_node(registry, "flopy.viz.card",
+                       {"column": "units"}, table=table)
+        assert out["value"] == 100
+        assert isinstance(out["value"], int)  # numpy scalar unwrapped
+
+    def test_average(self, registry, table):
+        out = run_node(registry, "flopy.viz.card",
+                       {"column": "revenue", "aggregation": "Average"},
+                       table=table)
+        assert out["value"] == pytest.approx(217.5)
+
+    def test_count_is_non_null(self, registry):
+        df = pd.DataFrame({"v": [1.0, None, 3.0]})
+        out = run_node(registry, "flopy.viz.card",
+                       {"column": "v", "aggregation": "Count"}, table=df)
+        assert out["value"] == 2
+
+    def test_distinct_count(self, registry, table):
+        out = run_node(registry, "flopy.viz.card",
+                       {"column": "region", "aggregation": "Distinct count"},
+                       table=table)
+        assert out["value"] == 2
+
+    def test_first_and_last(self, registry, table):
+        first = run_node(registry, "flopy.viz.card",
+                         {"column": "region", "aggregation": "First"},
+                         table=table)
+        last = run_node(registry, "flopy.viz.card",
+                        {"column": "region", "aggregation": "Last"},
+                        table=table)
+        assert (first["value"], last["value"]) == ("north", "south")
+
+    def test_requires_column(self, registry, table):
+        with pytest.raises(ValueError, match="no column selected"):
+            run_node(registry, "flopy.viz.card", {}, table=table)
+
+    def test_bad_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flopy.viz.card", {"column": "nope"},
+                     table=table)
+
+    def test_first_on_empty_table(self, registry):
+        with pytest.raises(ValueError, match="no rows"):
+            run_node(registry, "flopy.viz.card",
+                     {"column": "v", "aggregation": "First"},
+                     table=pd.DataFrame({"v": []}))
+
+    def test_average_of_strings_is_actionable(self, registry, table):
+        with pytest.raises(ValueError, match="cannot compute Average"):
+            run_node(registry, "flopy.viz.card",
+                     {"column": "region", "aggregation": "Average"},
+                     table=table)
+
+
+class TestSlicerNode:
+    def test_no_selection_passes_everything(self, registry, table):
+        out = run_node(registry, "flopy.viz.slicer",
+                       {"column": "region"}, table=table)
+        assert out["table"] is table
+
+    def test_json_selection_filters(self, registry, table):
+        out = run_node(registry, "flopy.viz.slicer",
+                       {"column": "region", "selected": '["north"]'},
+                       table=table)
+        assert list(out["table"]["units"]) == [10, 30]
+        assert list(table["units"]) == [10, 20, 30, 40]  # input untouched
+
+    def test_comma_list_selection_filters(self, registry, table):
+        out = run_node(registry, "flopy.viz.slicer",
+                       {"column": "region", "selected": "north, south"},
+                       table=table)
+        assert len(out["table"]) == 4
+
+    def test_matches_values_as_strings(self, registry, table):
+        out = run_node(registry, "flopy.viz.slicer",
+                       {"column": "units", "selected": '["10", "40"]'},
+                       table=table)
+        assert list(out["table"]["units"]) == [10, 40]
+
+    def test_requires_column(self, registry, table):
+        with pytest.raises(ValueError, match="no column selected"):
+            run_node(registry, "flopy.viz.slicer", {}, table=table)
+
+    def test_bad_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flopy.viz.slicer", {"column": "nope"},
+                     table=table)
+
+
+class TestTableSpecNode:
+    def test_spec_shape(self, registry, table):
+        out = run_node(registry, "flopy.viz.table_spec", {}, table=table)
+        spec = out["spec"]
+        assert list(spec.columns) == ["column", "type", "non-null",
+                                      "unique", "min", "max"]
+        assert list(spec["column"]) == ["region", "units", "revenue"]
+
+    def test_spec_values(self, registry, table):
+        out = run_node(registry, "flopy.viz.table_spec", {}, table=table)
+        units = out["spec"].set_index("column").loc["units"]
+        assert units["non-null"] == "4 / 4"
+        assert (units["min"], units["max"]) == ("10", "40")
+
+    def test_spec_survives_awkward_cells(self, registry):
+        df = pd.DataFrame({"o": [{"a": 1}, {"b": 2}]})  # unhashable cells
+        out = run_node(registry, "flopy.viz.table_spec", {}, table=df)
+        assert out["spec"].loc[0, "unique"] == ""
+
+
 class TestUtilNodes:
     def test_reroute_passthrough(self, registry):
         sentinel = object()
