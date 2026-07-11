@@ -212,3 +212,46 @@ class TestWireDropPalette:
         # one undo step for add+connect
         window.undo_stack.undo()
         assert len(window.graph.nodes) == 1 and not window.graph.connections
+
+
+class TestFrameRunButton:
+    def test_click_runs_and_sloppy_drag_does_not_move_the_frame(
+            self, qtbot, env):
+        """The run glyph acts like a button: emit on release inside it, and
+        never let the press double as a frame drag — before this, a slightly
+        sloppy click ran the frame AND dragged it, pushing a bogus undo
+        entry built from stale press coordinates."""
+        from PySide6.QtCore import QEvent, QPoint, Qt
+        from PySide6.QtGui import QMouseEvent
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication
+
+        from flopy.ui.canvas.view import NodeGraphView
+
+        graph, stack, scene = env
+        view = NodeGraphView(scene)
+        qtbot.addWidget(view)
+        view.resize(800, 600)
+        view.show()
+
+        graph.add_frame(Frame(id="fr", title="Stage", rect=(0, 0, 300, 200)))
+        item = scene.frame_items["fr"]
+        fired = []
+        scene.frame_run_requested.connect(fired.append)
+
+        btn = view.mapFromScene(
+            item.mapToScene(item._run_button_rect().center()))
+        QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, btn)
+        assert fired == ["fr"]
+
+        # press the button, drag off it, release: no run, no frame move
+        away = btn + QPoint(80, 80)
+        QTest.mousePress(view.viewport(), Qt.LeftButton, Qt.NoModifier, btn)
+        QApplication.sendEvent(view.viewport(), QMouseEvent(
+            QEvent.MouseMove, QPointF(away),
+            view.viewport().mapToGlobal(QPointF(away)),
+            Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, Qt.NoModifier, away)
+        assert fired == ["fr"]
+        assert item.pos() == QPointF(0, 0)
+        assert stack.count() == 0

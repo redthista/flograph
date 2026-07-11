@@ -32,6 +32,7 @@ class FrameItem(QGraphicsObject):
         self._press_pos = QPointF()
         self._grabbed: list = []  # (node_item, offset)
         self._hover_run = False
+        self._run_pressed = False
 
     # ------------------------------------------------------------- geometry
 
@@ -112,18 +113,24 @@ class FrameItem(QGraphicsObject):
         hovering = self._run_button_rect().contains(event.pos())
         if hovering != self._hover_run:
             self._hover_run = hovering
+            self.setCursor(Qt.PointingHandCursor if hovering
+                           else Qt.ArrowCursor)
+            self.setToolTip("Run the nodes in this frame" if hovering else "")
             self.update()
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
         if self._hover_run:
             self._hover_run = False
+            self.unsetCursor()
             self.update()
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:
         if self._run_button_rect().contains(event.pos()):
-            self.run_requested.emit(self.frame.id)
+            # emit on release, button-style; without swallowing the drag
+            # here a slightly sloppy click would also move the frame
+            self._run_pressed = True
             event.accept()
             return
         self._press_scene_pos = event.scenePos()
@@ -143,6 +150,9 @@ class FrameItem(QGraphicsObject):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._run_pressed:
+            event.accept()
+            return
         if self._resizing:
             delta = event.scenePos() - self._press_scene_pos
             self.prepareGeometryChange()
@@ -157,6 +167,12 @@ class FrameItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
+        if self._run_pressed:
+            self._run_pressed = False
+            if self._run_button_rect().contains(event.pos()):
+                self.run_requested.emit(self.frame.id)
+            event.accept()
+            return
         if self._resizing:
             self._resizing = False
             scene.push_frame_rect(self.frame.id, self.pos(), self._size)
