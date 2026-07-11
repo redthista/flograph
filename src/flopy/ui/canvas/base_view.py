@@ -8,7 +8,8 @@ import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
-from PySide6.QtWidgets import QGraphicsProxyWidget, QGraphicsView
+from PySide6.QtWidgets import (QAbstractScrollArea, QGraphicsProxyWidget,
+                               QGraphicsView, QScrollBar, QWidget)
 
 from .. import theme
 
@@ -57,6 +58,11 @@ class ZoomPanGraphicsView(QGraphicsView):
         return self.transform().m11()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._scrollable_widget_at(event.position().toPoint()) is not None:
+            # a table/list card under the cursor can scroll — let the scene
+            # deliver the wheel to its proxy widget instead of zooming
+            super().wheelEvent(event)
+            return
         factor = 1.15 ** (event.angleDelta().y() / 120.0)
         new_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self.zoom * factor))
         factor = new_zoom / self.zoom
@@ -69,6 +75,38 @@ class ZoomPanGraphicsView(QGraphicsView):
         delta = after - before
         self.translate(delta.x(), delta.y())
         self._zoom_settle.start()
+
+    def _scrollable_widget_at(self, pos) -> QWidget | None:
+        """The embedded widget under the viewport point that could consume a
+        wheel tick — a scroll area with actual scroll range, or a scrollbar
+        itself. Painted cards and widgets whose content fits return None so
+        the canvas keeps zoom-to-cursor."""
+        scene_pos = self.mapToScene(pos)
+        for item in self.items(pos):
+            if not isinstance(item, QGraphicsProxyWidget):
+                continue
+            widget = item.widget()
+            if widget is None:
+                continue
+            # proxy-local coordinates are widget coordinates; mapFromScene
+            # already folds in any proxy.setScale card-fitting transform
+            local = item.mapFromScene(scene_pos).toPoint()
+            child = widget.childAt(local) or widget
+            while child is not None:
+                if isinstance(child, QScrollBar):
+                    return child
+                if (isinstance(child, QAbstractScrollArea)
+                        and self._has_scroll_range(child)):
+                    return child
+                child = child.parentWidget()
+        return None
+
+    @staticmethod
+    def _has_scroll_range(area: QAbstractScrollArea) -> bool:
+        return any(bar.maximum() > bar.minimum()
+                   for bar in (area.verticalScrollBar(),
+                               area.horizontalScrollBar())
+                   if bar is not None)
 
     def fit_items(self, items) -> None:
         """Fit the given graphics items in view with a margin."""
