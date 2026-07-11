@@ -14,6 +14,25 @@ from flopy.core import Graph
 from .cache import OutputCache
 
 
+def slicer_options(graph: Graph, cache: OutputCache,
+                   node_id: str) -> "list[str] | None":
+    """Unique values (sorted, as strings) of the column a Slicer filters on,
+    read from the cached upstream DataFrame — the slicer's own output is
+    already filtered, so it can't be the source. None when nothing usable
+    has run yet, so hosts can show a run-me placeholder."""
+    pd = sys.modules.get("pandas")
+    node = graph.nodes.get(node_id)
+    if pd is None or node is None:
+        return None
+    conn = graph.input_connection(node_id, "table")
+    entry = cache.get(conn.src_node) if conn else None
+    source = entry.outputs.get(conn.src_port) if entry else None
+    column = str(node.params.get("column", "") or "").strip()
+    if not isinstance(source, pd.DataFrame) or column not in source.columns:
+        return None
+    return sorted(source[column].astype(str).unique())
+
+
 def upstream_columns(graph: Graph, cache: OutputCache, node_id: str) -> list[str]:
     """Column names of every cached DataFrame feeding node_id's inputs,
     in port order, deduplicated. Empty when nothing upstream has run yet."""

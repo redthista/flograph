@@ -41,8 +41,12 @@ class ExecutionEngine(QObject):
         super().__init__(parent)
         self.graph = graph
         self.cache = OutputCache()
-        self.pool = QThreadPool(self)
-        self.pool.setMaxThreadCount(1)
+        # the process-wide pool, never a per-engine child: destroying a pool
+        # races with its expiring workers (QThread destroyed while running,
+        # fatal) whenever an engine is dropped with its window. Serial
+        # execution is enforced by _dispatch (one NodeRunnable in flight),
+        # not by the pool's thread count.
+        self.pool = QThreadPool.globalInstance()
 
         self._plan: list[str] = []
         self._current: Optional[str] = None
