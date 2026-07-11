@@ -9,19 +9,28 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QLineEdit,
-    QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QTextEdit, QToolBar,
+    QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QStackedWidget,
+    QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from flopy.core import (
-    Graph, GraphError, NodeInstance, NodeRegistry, NodeStatus, parse_spec,
+    Graph, GraphError, NodeInstance, NodeRegistry, NodeStatus, Page, Tile,
+    parse_spec,
 )
 from flopy.core import serialization
 from flopy.engine import ExecutionEngine, cache_persistence
 
-from .commands import AddNodeCommand, ConnectCommand, SetLabelCommand
+from .commands import (
+    AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
+    RemovePageCommand, RenamePageCommand, SetLabelCommand,
+)
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.node_item import FIGURE_TYPES, PLOTLY_TYPE
 from .canvas.palette import LibraryTree, NodePalettePopup
+from .dashboard import (
+    DashboardPage, PageTabBar, TILE_ABLE_TYPES, default_tile_port,
+    default_tile_size,
+)
 from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
 from .inspector.inspector_dock import InspectorPanel
@@ -42,7 +51,18 @@ class MainWindow(QMainWindow):
         self.scene = NodeGraphScene(self.graph, self.undo_stack,
                                     registry=registry, parent=self)
         self.view = NodeGraphView(self.scene)
-        self.setCentralWidget(self.view)
+        self._canvas_stack = QStackedWidget()
+        self._canvas_stack.addWidget(self.view)
+        self.page_bar = PageTabBar()
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self._canvas_stack, 1)
+        central_layout.addWidget(self.page_bar)
+        self.setCentralWidget(central)
+        self._dashboard_pages: dict[str, DashboardPage] = {}
+        self._restoring_pages = False
         self.engine = ExecutionEngine(self.graph, parent=self)
         self.settings = QSettings("flopy", "flopy")
         self._project_path: Optional[str] = None
@@ -58,6 +78,7 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._wire_engine()
         self._wire_canvas()
+        self._wire_pages()
         # bound method (not a lambda): Qt auto-disconnects it on deletion
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self._update_title()
@@ -287,6 +308,113 @@ class MainWindow(QMainWindow):
             return
         entry = self.engine.cache.get(node_id)
         item.set_table_data(entry.outputs.get("table") if entry else None)
+
+    # ------------------------------------------------------ dashboard pages
+
+    def _wire_pages(self) -> None:
+        events = self.graph.events
+        events.page_added.connect(self._on_page_added)
+        events.page_removed.connect(self._on_page_removed)
+        events.page_changed.connect(self._on_page_changed)
+        self.page_bar.add_page_requested.connect(self._add_page)
+        self.page_bar.rename_page_requested.connect(self._rename_page)
+        self.page_bar.delete_page_requested.connect(self._delete_page)
+        self.page_bar.current_page_changed.connect(
+            self._on_current_page_changed)
+
+    def _on_page_added(self, page: Page) -> None:
+        widget = DashboardPage(self.graph, self.engine, self.undo_stack,
+                               page.id)
+        widget.scene.button_fired.connect(self._on_button_fired)
+        widget.view.tile_dropped.connect(
+            lambda node_id, pos, page_id=page.id:
+            self._on_tile_dropped(page_id, node_id, pos))
+        self._dashboard_pages[page.id] = widget
+        self._canvas_stack.addWidget(widget)
+        self.page_bar.add_page_tab(page)
+
+    def _on_page_removed(self, page_id: str) -> None:
+        widget = self._dashboard_pages.pop(page_id, None)
+        if widget is not None:
+            widget.dispose()  # before deletion: core events hold strong refs
+            self._canvas_stack.removeWidget(widget)
+            widget.deleteLater()
+        self.page_bar.remove_page_tab(page_id)
+
+    def _on_page_changed(self, page: Page) -> None:
+        self.page_bar.set_page_title(page.id, page.title)
+
+    def _on_current_page_changed(self, page_id) -> None:
+        widget = self._dashboard_pages.get(page_id) if page_id else None
+        self._canvas_stack.setCurrentWidget(
+            widget if widget is not None else self.view)
+        if self._project_path and not self._restoring_pages:
+            self.settings.setValue(f"active_page/{self._project_path}",
+                                   page_id or "")
+
+    def _add_page(self) -> None:
+        page = Page(id=uuid.uuid4().hex, title=self._next_page_title())
+        self.undo_stack.push(AddPageCommand(self.graph, page))
+        self.page_bar.select_page(page.id)
+
+    def _next_page_title(self) -> str:
+        titles = {p.title for p in self.graph.pages.values()}
+        n = len(self.graph.pages) + 1
+        while f"Page {n}" in titles:
+            n += 1
+        return f"Page {n}"
+
+    def _rename_page(self, page_id: str, title: str) -> None:
+        page = self.graph.pages.get(page_id)
+        if page is not None and title != page.title:
+            self.undo_stack.push(RenamePageCommand(self.graph, page_id, title))
+
+    def _delete_page(self, page_id: str) -> None:
+        page = self.graph.pages.get(page_id)
+        if page is None:
+            return
+        if page.tiles:
+            answer = QMessageBox.question(
+                self, "Delete page",
+                f"Delete page “{page.title}” and its {len(page.tiles)} "
+                f"tile(s)?")
+            if answer != QMessageBox.Yes:
+                return
+        self.undo_stack.push(RemovePageCommand(self.graph, page_id))
+
+    def _on_tile_dropped(self, page_id: str, node_id: str,
+                         scene_pos: QPointF) -> None:
+        node = self.graph.nodes.get(node_id)
+        if node is None or page_id not in self.graph.pages:
+            return
+        width, height = default_tile_size(node.type_id)
+        tile = Tile(id=uuid.uuid4().hex, node_id=node_id,
+                    port=default_tile_port(node.type_id),
+                    rect=(scene_pos.x(), scene_pos.y(), width, height))
+        self.undo_stack.push(AddTileCommand(self.graph, page_id, tile))
+
+    def _add_tile_to_page(self, page_id: str, node_id: str) -> None:
+        """Context-menu path: place the tile near the page's visible center,
+        cascading a little so stacked adds don't hide each other."""
+        widget = self._dashboard_pages.get(page_id)
+        if widget is not None:
+            center = widget.view.mapToScene(
+                widget.view.viewport().rect().center())
+        else:
+            center = QPointF(0, 0)
+        count = len(self.graph.pages[page_id].tiles)
+        offset = 24.0 * (count % 8)
+        self._on_tile_dropped(page_id, node_id,
+                              QPointF(center.x() - 210 + offset,
+                                      center.y() - 160 + offset))
+        self.page_bar.select_page(page_id)
+
+    def _add_tile_on_new_page(self, node_id: str) -> None:
+        self.undo_stack.beginMacro("add to new page")
+        page = Page(id=uuid.uuid4().hex, title=self._next_page_title())
+        self.undo_stack.push(AddPageCommand(self.graph, page))
+        self._add_tile_to_page(page.id, node_id)
+        self.undo_stack.endMacro()
 
     def _on_node_failed(self, node_id: str, error) -> None:
         if node_id in self.graph.nodes:
@@ -521,6 +649,15 @@ class MainWindow(QMainWindow):
         rename = menu.addAction("Rename")
         rerun = menu.addAction("Mark Dirty")
         view_actions = self._add_view_actions(menu, node_id)
+        page_actions: list = []
+        new_page_action = None
+        if self.graph.nodes[node_id].type_id in TILE_ABLE_TYPES:
+            submenu = menu.addMenu("Add to Page")
+            for page in self.graph.pages.values():
+                page_actions.append((submenu.addAction(page.title), page.id))
+            if page_actions:
+                submenu.addSeparator()
+            new_page_action = submenu.addAction("New Page…")
         menu.addSeparator()
         delete = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
@@ -534,7 +671,13 @@ class MainWindow(QMainWindow):
             self.graph.mark_dirty(node_id)
         elif chosen is delete:
             self.scene.delete_selection()
+        elif new_page_action is not None and chosen is new_page_action:
+            self._add_tile_on_new_page(node_id)
         else:
+            page_id = next((p for a, p in page_actions if a is chosen), None)
+            if page_id is not None:
+                self._add_tile_to_page(page_id, node_id)
+                return
             port_name = next((p for a, p in view_actions if a is chosen), None)
             if port_name is not None:
                 from .inspector.popup_view import PopupView
@@ -782,6 +925,9 @@ class MainWindow(QMainWindow):
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.engine.node_succeeded.emit(node_id)
+        saved_page = self.settings.value(f"active_page/{path}", "")
+        if saved_page and saved_page in self.graph.pages:
+            self.page_bar.select_page(saved_page)
         broken = sum(1 for n in loaded.nodes.values() if n.spec.broken)
         if broken:
             self.statusBar().showMessage(
@@ -795,6 +941,9 @@ class MainWindow(QMainWindow):
         return True
 
     def _replace_graph(self, loaded: Graph) -> None:
+        self._restoring_pages = True
+        for page_id in list(self.graph.pages):
+            self.graph.remove_page(page_id)
         for frame_id in list(self.graph.frames):
             self.graph.remove_frame(frame_id)
         for node_id in list(self.graph.nodes):
@@ -806,6 +955,9 @@ class MainWindow(QMainWindow):
                                conn.dst_node, conn.dst_port, conn_id=conn.id)
         for frame in loaded.frames.values():
             self.graph.add_frame(frame)
+        for page in loaded.pages.values():
+            self.graph.add_page(page)
+        self._restoring_pages = False
         self.undo_stack.clear()
         self.undo_stack.setClean()
         if loaded.nodes:

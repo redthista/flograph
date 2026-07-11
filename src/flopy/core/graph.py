@@ -6,7 +6,7 @@ QUndoCommands that call these methods; the scene and engine react to
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from .datatypes import can_connect
@@ -36,11 +36,34 @@ class Frame:
     color: str = "#33415c"
 
 
+@dataclass
+class Tile:
+    """A dashboard tile: a placed view of one node's output on a Page.
+
+    `node_id` may dangle (the node was deleted, or the file references a
+    node that no longer loads) — the UI shows a placeholder rather than the
+    graph rejecting the tile, which keeps undo orderings and old files safe.
+    """
+    id: str
+    node_id: str
+    port: Optional[str] = None  # output port to render; None for action buttons
+    rect: tuple[float, float, float, float] = (0.0, 0.0, 420.0, 320.0)
+
+
+@dataclass
+class Page:
+    """A dashboard page: a named infinite canvas of tiles."""
+    id: str
+    title: str = "Page"
+    tiles: dict[str, Tile] = field(default_factory=dict)
+
+
 class Graph:
     def __init__(self) -> None:
         self.nodes: dict[str, NodeInstance] = {}
         self.connections: dict[str, Connection] = {}
         self.frames: dict[str, Frame] = {}
+        self.pages: dict[str, Page] = {}
         self.events = GraphEvents()
 
     # ---------------------------------------------------------------- nodes
@@ -331,3 +354,61 @@ class Graph:
             frame.color = color
         self.events.frame_changed.emit(frame)
         return frame
+
+    # ---------------------------------------------------------------- pages
+
+    def page(self, page_id: str) -> Page:
+        try:
+            return self.pages[page_id]
+        except KeyError:
+            raise GraphError(f"no page with id {page_id!r}") from None
+
+    def add_page(self, page: Page) -> Page:
+        if page.id in self.pages:
+            raise GraphError(f"page id {page.id!r} already in graph")
+        self.pages[page.id] = page
+        self.events.page_added.emit(page)
+        return page
+
+    def remove_page(self, page_id: str) -> Page:
+        page = self.pages.pop(page_id, None)
+        if page is None:
+            raise GraphError(f"no page with id {page_id!r}")
+        self.events.page_removed.emit(page_id)
+        return page
+
+    def update_page(self, page_id: str, *, title: Optional[str] = None) -> Page:
+        page = self.page(page_id)
+        if title is not None:
+            page.title = title
+        self.events.page_changed.emit(page)
+        return page
+
+    def add_tile(self, page_id: str, tile: Tile) -> Tile:
+        # no node_id validation: dangling refs are legal (placeholder in UI)
+        page = self.page(page_id)
+        if tile.id in page.tiles:
+            raise GraphError(f"tile id {tile.id!r} already on page {page_id!r}")
+        page.tiles[tile.id] = tile
+        self.events.tile_added.emit(page_id, tile)
+        return tile
+
+    def remove_tile(self, page_id: str, tile_id: str) -> Tile:
+        page = self.page(page_id)
+        tile = page.tiles.pop(tile_id, None)
+        if tile is None:
+            raise GraphError(f"no tile with id {tile_id!r} on page {page_id!r}")
+        self.events.tile_removed.emit(page_id, tile_id)
+        return tile
+
+    def update_tile(self, page_id: str, tile_id: str, *,
+                    rect: Optional[tuple[float, float, float, float]] = None,
+                    ) -> Tile:
+        page = self.page(page_id)
+        tile = page.tiles.get(tile_id)
+        if tile is None:
+            raise GraphError(f"no tile with id {tile_id!r} on page {page_id!r}")
+        if rect is not None:
+            tile.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
+        self.events.tile_changed.emit(page_id, tile)
+        return tile
