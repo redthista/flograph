@@ -340,17 +340,9 @@ class MainWindow(QMainWindow):
         item = self.scene.node_items.get(node_id)
         if item is None:
             return
-        import sys
-        pd = sys.modules.get("pandas")
-        values = None
-        conn = self.graph.input_connection(node_id, "table")
-        entry = self.engine.cache.get(conn.src_node) if conn else None
-        source = entry.outputs.get(conn.src_port) if entry else None
-        column = str(node.params.get("column", "") or "").strip()
-        if (pd is not None and isinstance(source, pd.DataFrame)
-                and column in source.columns):
-            values = sorted(source[column].astype(str).unique())
-        item.set_slicer_options(values)
+        from flopy.engine.introspect import slicer_options
+        item.set_slicer_options(
+            slicer_options(self.graph, self.engine.cache, node_id))
 
     # ------------------------------------------------------ dashboard pages
 
@@ -369,6 +361,7 @@ class MainWindow(QMainWindow):
         widget = DashboardPage(self.graph, self.engine, self.undo_stack,
                                page.id)
         widget.scene.button_fired.connect(self._on_button_fired)
+        widget.scene.slicer_changed.connect(self._on_slicer_changed)
         widget.view.tile_dropped.connect(
             lambda node_id, pos, page_id=page.id:
             self._on_tile_dropped(page_id, node_id, pos))

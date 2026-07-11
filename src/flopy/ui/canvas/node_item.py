@@ -10,15 +10,16 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout,
-    QInputDialog, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit,
-    QStyleOptionGraphicsItem, QTableView, QTableWidget, QTableWidgetItem,
-    QToolButton, QVBoxLayout, QWidget,
+    QInputDialog, QLabel, QPlainTextEdit, QStyleOptionGraphicsItem,
+    QTableView, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from flopy.core import NodeInstance, PortSpec
 from flopy.core.node import NodeStatus
 
 from .. import theme
+from ..slicer_list import SlicerListWidget, selected_param_values
 
 NODE_WIDTH = 170.0
 HEADER_H = 26.0
@@ -58,7 +59,32 @@ KPI_MIN_H, KPI_MAX_H = 80.0, 500.0
 SLICER_TYPE = "flopy.viz.slicer"
 SLICER_MIN_W, SLICER_MAX_W = 140.0, 600.0
 SLICER_MIN_H, SLICER_MAX_H = 120.0, 2000.0
-SLICER_MAX_OPTIONS = 500  # checkbox rows shown before truncating
+
+
+def kpi_text(value, fmt: str) -> str:
+    """A KPI value rendered for display: the node's format spec when it
+    applies, otherwise sensible number formatting. Shared with dashboard
+    tiles."""
+    if fmt:
+        try:
+            return format(value, fmt)
+        except (TypeError, ValueError):
+            pass
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    return format(value, ",") if isinstance(value, int) \
+        else format(value, ",.6g")
+
+
+def kpi_caption(params: dict) -> str:
+    """The caption under a KPI value: the "label" param, falling back to
+    "<Aggregation> of <column>". Shared with dashboard tiles."""
+    label = str(params.get("label", "") or "").strip()
+    if label:
+        return label
+    aggregation = params.get("aggregation", "Sum")
+    column = str(params.get("column", "") or "").strip()
+    return f"{aggregation} of {column}" if column else str(aggregation)
 
 CARD_HANDLE = 14.0  # bottom-right resize grip, shared by notes and tables
 
@@ -185,10 +211,9 @@ class NodeItem(QGraphicsObject):
         self._table_viewer_placeholder: QLabel | None = None
         self._kpi_value: object = None
         self._kpi_has_value = False
-        self._slicer_list: QListWidget | None = None
+        self._slicer_list: SlicerListWidget | None = None
         self._slicer_proxy: QGraphicsProxyWidget | None = None
         self._slicer_placeholder: QLabel | None = None
-        self._syncing_slicer = False
         self.setFlags(
             QGraphicsItem.ItemIsMovable
             | QGraphicsItem.ItemIsSelectable
@@ -757,25 +782,11 @@ class NodeItem(QGraphicsObject):
         self.update()
 
     def _kpi_text(self) -> str:
-        value = self._kpi_value
-        fmt = str(self.node.params.get("format", "") or "")
-        if fmt:
-            try:
-                return format(value, fmt)
-            except (TypeError, ValueError):
-                pass
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return str(value)
-        return format(value, ",") if isinstance(value, int) \
-            else format(value, ",.6g")
+        return kpi_text(self._kpi_value,
+                        str(self.node.params.get("format", "") or ""))
 
     def _kpi_label(self) -> str:
-        label = str(self.node.params.get("label", "") or "").strip()
-        if label:
-            return label
-        aggregation = self.node.params.get("aggregation", "Sum")
-        column = str(self.node.params.get("column", "") or "").strip()
-        return f"{aggregation} of {column}" if column else str(aggregation)
+        return kpi_caption(self.node.params)
 
     # --------------------------------------------------------------- slicer
 
@@ -800,13 +811,8 @@ class NodeItem(QGraphicsObject):
         layout.addWidget(placeholder, 1)
         self._slicer_placeholder = placeholder
 
-        values = QListWidget()
-        values.setStyleSheet(
-            f"QListWidget {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
-            f" font-size: 9pt; }}"
-            f"QListWidget::item {{ padding: 1px 2px; }}")
-        values.itemChanged.connect(self._on_slicer_item_changed)
+        values = SlicerListWidget()
+        values.selection_committed.connect(self._on_slicer_committed)
         values.hide()
         layout.addWidget(values, 1)
         self._slicer_list = values
@@ -829,23 +835,7 @@ class NodeItem(QGraphicsObject):
             widget.hide()
             self._slicer_placeholder.show()
             return
-        self._syncing_slicer = True
-        try:
-            widget.clear()
-            chosen = set(self._slicer_selected_param())
-            for value in values[:SLICER_MAX_OPTIONS]:
-                item = QListWidgetItem(value)
-                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
-                item.setCheckState(
-                    Qt.Checked if value in chosen else Qt.Unchecked)
-                widget.addItem(item)
-            if len(values) > SLICER_MAX_OPTIONS:
-                extra = QListWidgetItem(
-                    f"… {len(values) - SLICER_MAX_OPTIONS:,} more values")
-                extra.setFlags(Qt.NoItemFlags)
-                widget.addItem(extra)
-        finally:
-            self._syncing_slicer = False
+        widget.set_options(values, set(self._slicer_selected_param()))
         self._slicer_placeholder.hide()
         widget.show()
 
@@ -853,45 +843,19 @@ class NodeItem(QGraphicsObject):
         """Re-apply check states from the "selected" param — keeps the card
         honest when the param changes elsewhere (properties panel, undo)."""
         widget = self._slicer_list
-        if widget is None or widget.isHidden():
-            return
-        chosen = set(self._slicer_selected_param())
-        self._syncing_slicer = True
-        try:
-            for i in range(widget.count()):
-                item = widget.item(i)
-                if item.flags() & Qt.ItemIsUserCheckable:
-                    item.setCheckState(Qt.Checked if item.text() in chosen
-                                       else Qt.Unchecked)
-        finally:
-            self._syncing_slicer = False
+        if widget is not None and not widget.isHidden():
+            widget.sync_checks(set(self._slicer_selected_param()))
 
     def _slicer_selected_param(self) -> list[str]:
-        import json
-        raw = str(self.node.params.get("selected", "") or "").strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-            return [str(v) for v in parsed] if isinstance(parsed, list) \
-                else [str(parsed)]
-        except ValueError:
-            return [part.strip() for part in raw.split(",") if part.strip()]
+        return selected_param_values(self.node.params.get("selected", ""))
 
-    def _on_slicer_item_changed(self, _item) -> None:
+    def _on_slicer_committed(self, new_value: str) -> None:
         """A tick changed: commit the selection (dirties this node and
         everything downstream) and ask the window to re-run the flow from
         here, so downstream visuals follow the slicer live."""
-        if self._syncing_slicer or self._slicer_list is None:
-            return
-        import json
-        widget = self._slicer_list
-        selected = [widget.item(i).text() for i in range(widget.count())
-                    if widget.item(i).checkState() == Qt.Checked]
         scene = self.scene()
         if scene is None:
             return
-        new_value = json.dumps(selected) if selected else ""
         if new_value != self.node.params.get("selected", ""):
             from ..commands import SetParamCommand
             scene.undo_stack.push(SetParamCommand(

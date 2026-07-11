@@ -22,6 +22,7 @@ from .tile_item import TileItem
 
 class DashboardScene(QGraphicsScene):
     button_fired = Signal(str)  # node_id — an Action Button tile was clicked
+    slicer_changed = Signal(str)  # node_id — a Slicer tile's selection changed
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -44,6 +45,7 @@ class DashboardScene(QGraphicsScene):
             (events.node_removed, self._on_node_presence_changed),
             (events.dirty_changed, self._on_dirty_changed),
             (events.label_changed, self._on_label_changed),
+            (events.param_changed, self._on_param_changed),
         ]
         for event, callback in self._event_subs:
             event.connect(callback)
@@ -107,6 +109,10 @@ class DashboardScene(QGraphicsScene):
     def _on_label_changed(self, node_id: str) -> None:
         for item in self._tiles_for(node_id):
             item.refresh_content()
+
+    def _on_param_changed(self, node_id: str, name: str, value) -> None:
+        for item in self._tiles_for(node_id):
+            item.on_param_changed()
 
     # ------------------------------------------------------------- helpers
 

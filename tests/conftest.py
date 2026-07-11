@@ -1,8 +1,30 @@
 from __future__ import annotations
 
+import gc
+
 import pytest
 
 from flopy.core import Graph, NodeInstance, NodeRegistry, parse_spec
+
+
+@pytest.fixture(autouse=True)
+def _drain_qt_after_each_test():
+    """Destroy each test's Qt debris deterministically, right here.
+
+    Windows/scenes/animations dropped by a test otherwise linger until
+    Python's GC runs at some arbitrary later point — typically inside a
+    *later* test's event processing, where a running timer (e.g. a node's
+    status-pulse QVariantAnimation) fires into a half-deleted object and
+    segfaults the suite. Collecting now, then draining deferred deletions
+    while the interpreter state is coherent, keeps teardown ordered."""
+    yield
+    import sys
+    app_module = sys.modules.get("PySide6.QtWidgets")
+    app = app_module.QApplication.instance() if app_module else None
+    gc.collect()
+    if app is not None:
+        app.processEvents()
+        app.processEvents()  # deferred deletions posted by the first pass
 
 
 class FakeContext:
