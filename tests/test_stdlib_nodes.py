@@ -375,3 +375,27 @@ class TestUtilNodes:
 
     def test_action_button_runs_as_noop(self, registry):
         assert run_node(registry, "flopy.util.action_button", {}) == {}
+
+
+class TestScriptingNodes:
+    def test_node_template_registers_with_docs(self, registry):
+        spec = registry.get("flopy.scripting.node_template")
+        assert spec.category == "Scripting"
+        assert "Edit Code" in spec.doc  # the doc is the how-to
+
+    def test_node_template_computes_a_column(self, registry, table):
+        out = run_node(registry, "flopy.scripting.node_template",
+                       {"source": "units", "factor": 3.0}, table=table)
+        assert list(out["table"]["result"]) == [30.0, 60.0, 90.0, 120.0]
+        assert "result" not in table.columns  # input left untouched
+
+    def test_node_template_defaults_to_first_numeric(self, registry, table):
+        out = run_node(registry, "flopy.scripting.node_template",
+                       {"operation": "add", "factor": 1.0,
+                        "new_column": "bumped"}, table=table)
+        assert list(out["table"]["bumped"]) == [11.0, 21.0, 31.0, 41.0]
+
+    def test_node_template_bad_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flopy.scripting.node_template",
+                     {"source": "nope"}, table=table)
