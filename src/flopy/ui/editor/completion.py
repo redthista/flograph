@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QObject, QStringListModel, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import (
+    QEvent, QObject, QStringListModel, Qt, QThread, QTimer, Signal, Slot,
+)
 from PySide6.QtWidgets import QCompleter, QToolTip
 
 from .code_editor import CodeEditor
@@ -86,16 +88,30 @@ class CompletionController(QObject):
         self._debounce.timeout.connect(self._fire_request)
         editor.textChanged.connect(self._on_text_changed)
 
-        # warm up jedi off-thread so the first real completion is snappy
-        self._request_completions.emit(-1, "import os\nos.", 2, 3)
+        # warm up jedi lazily, on the editor's first focus: an eager warm-up
+        # keeps the worker busy for ~1s in every fresh window, and a busy
+        # worker can't process quit() — teardown then destroys a running
+        # QThread, which is fatal
+        self._warmed = False
+        editor.installEventFilter(self)
 
         # stop the worker thread before Qt tears down the object tree
         editor.destroyed.connect(self.shutdown)
 
+    def eventFilter(self, obj, event) -> bool:
+        if (not self._warmed and obj is self._editor
+                and event.type() == QEvent.FocusIn):
+            self._warmed = True
+            # so the first real completion is snappy
+            self._request_completions.emit(-1, "import os\nos.", 2, 3)
+        return super().eventFilter(obj, event)
+
     def shutdown(self) -> None:
         if self._thread.isRunning():
             self._thread.quit()
-            self._thread.wait(2000)
+            # no timeout: quit() is queued behind any in-flight jedi call,
+            # and abandoning a running QThread aborts the process
+            self._thread.wait()
 
     # ------------------------------------------------------------- requests
 

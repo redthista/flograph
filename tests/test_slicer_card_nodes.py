@@ -6,9 +6,11 @@ import json
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QUndoStack
+from PySide6.QtWidgets import QApplication
 
-from flopy.core import Graph, NodeRegistry
+from flopy.core import Graph, NodeRegistry, Page, Tile
 from flopy.ui.canvas import NodeGraphScene
+from flopy.ui.dashboard import default_tile_port, default_tile_size
 from flopy.ui.mainwindow import MainWindow
 
 REGIONS = {"columns": ["region", "units"],
@@ -35,7 +37,15 @@ def window(qtbot, registry):
     win = MainWindow(registry)
     win.confirm_close = False
     qtbot.addWidget(win)
-    return win
+    yield win
+    # deterministic teardown: dispose dashboard pages (core events hold
+    # strong refs to their scenes) and drain deferred deletions now, while
+    # the window is intact — leaving them to a later test's event loop is
+    # what flips the suite's pre-existing teardown segfault
+    for page in list(win._dashboard_pages.values()):
+        page.dispose()
+    win.close()
+    QApplication.processEvents()
 
 
 def _add_sliced_flow(win):
@@ -129,6 +139,69 @@ class TestKpiCard:
         assert item._kpi_label() == "Sum of units"
         graph.set_param(node.id, "label", "Total units")
         assert item._kpi_label() == "Total units"
+
+
+def _add_tile(win, page_id: str, node, at=(0.0, 0.0)) -> Tile:
+    width, height = default_tile_size(node.type_id)
+    tile = Tile(id=f"tile-{node.id}", node_id=node.id,
+                port=default_tile_port(node.type_id),
+                rect=(at[0], at[1], width, height))
+    win.graph.add_tile(page_id, tile)
+    return tile
+
+
+class TestDashboardTiles:
+    def _page(self, win) -> str:
+        page = Page(id="p1", title="Page 1")
+        win.graph.add_page(page)  # mainwindow builds the DashboardPage
+        return page.id
+
+    def test_kpi_tile_paints_the_cached_value(self, qtbot, window):
+        win = window
+        source = win.registry.instantiate("flopy.io.table", pos=(0, 0))
+        card = win.registry.instantiate("flopy.viz.card", pos=(400, 0))
+        for node in (source, card):
+            win.graph.add_node(node)
+        win.graph.set_param(source.id, "data", json.dumps(REGIONS))
+        win.graph.set_param(card.id, "column", "units")
+        win.graph.connect(source.id, "table", card.id, "table")
+
+        page_id = self._page(win)
+        tile = _add_tile(win, page_id, card)
+        item = win._dashboard_pages[page_id].scene.tile_items[tile.id]
+        assert not item._kpi_has_value
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        assert item._kpi_has_value
+        assert item._kpi_value == 60
+
+    def test_slicer_tile_ticks_filter_and_rerun_downstream(
+            self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_sliced_flow(win)
+        page_id = self._page(win)
+        tile = _add_tile(win, page_id, slicer)
+        item = win._dashboard_pages[page_id].scene.tile_items[tile.id]
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        widget = item._slicer_widget
+        texts = [widget.item(i).text() for i in range(widget.count())]
+        assert texts == ["north", "south"]
+
+        # ticking on the dashboard commits the param and re-runs downstream
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.item(1).setCheckState(Qt.Checked)
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == ["south"]
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert list(filtered["region"]) == ["south"]
+        # the canvas card's checkboxes follow the same param
+        canvas_list = win.scene.node_items[slicer.id]._slicer_list
+        assert canvas_list.selected_values() == ["south"]
+        # undo unticks the tile without emitting a new commit
+        win.undo_stack.undo()
+        assert widget.selected_values() == []
 
 
 class TestTableSpecCard:

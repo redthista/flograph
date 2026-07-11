@@ -20,12 +20,14 @@ from flopy.core import Tile
 
 from .. import theme
 from ..canvas.node_item import (
-    BUTTON_H, BUTTON_W, FIGURE_TYPES, PLOTLY_TYPE, TABLE_VIEWER_TYPES,
+    BUTTON_H, BUTTON_W, FIGURE_TYPES, KPI_TYPE, PLOTLY_TYPE, SLICER_TYPE,
+    TABLE_VIEWER_TYPES, kpi_caption, kpi_text,
 )
+from ..slicer_list import SlicerListWidget, selected_param_values
 
 BUTTON_TYPE = "flopy.util.action_button"
-TILE_ABLE_TYPES = FIGURE_TYPES | TABLE_VIEWER_TYPES | {PLOTLY_TYPE,
-                                                       BUTTON_TYPE}
+TILE_ABLE_TYPES = FIGURE_TYPES | TABLE_VIEWER_TYPES | {
+    PLOTLY_TYPE, BUTTON_TYPE, KPI_TYPE, SLICER_TYPE}
 
 TITLE_H = 24.0
 HANDLE = 14.0
@@ -45,13 +47,21 @@ def default_tile_port(type_id: str) -> Optional[str]:
         return "spec"
     if type_id in TABLE_VIEWER_TYPES:
         return "table"
-    return None  # action buttons have no ports
+    if type_id == KPI_TYPE:
+        return "value"
+    # action buttons have no ports; slicer tiles show upstream options,
+    # not their own (already filtered) output
+    return None
 
 
 def default_tile_size(type_id: str) -> tuple[float, float]:
     """Buttons land at their canvas size; everything else gets a card."""
     if type_id == BUTTON_TYPE:
         return (BUTTON_W, BUTTON_H)
+    if type_id == KPI_TYPE:
+        return (220.0, 120.0)
+    if type_id == SLICER_TYPE:
+        return (200.0, 260.0)
     return (420.0, 320.0)
 
 
@@ -80,8 +90,11 @@ class TileItem(QGraphicsObject):
         self._figure_view = None
         self._plotly_widget = None
         self._table_view = None
+        self._slicer_widget: Optional[SlicerListWidget] = None
         self._generic_host: Optional[QWidget] = None
         self._generic_child: Optional[QWidget] = None
+        self._kpi_value: object = None  # kpi tiles paint, they hold no widget
+        self._kpi_has_value = False
 
         self._build_host()
         self.refresh_content()
@@ -135,6 +148,10 @@ class TileItem(QGraphicsObject):
             return "table"
         if type_id == BUTTON_TYPE:
             return "button"
+        if type_id == KPI_TYPE:
+            return "kpi"
+        if type_id == SLICER_TYPE:
+            return "slicer"
         return "generic"
 
     def _build_host(self) -> None:
@@ -158,7 +175,8 @@ class TileItem(QGraphicsObject):
 
     def _content_widget(self) -> Optional[QWidget]:
         for widget in (self._figure_view, self._plotly_widget,
-                       self._table_view, self._generic_host):
+                       self._table_view, self._slicer_widget,
+                       self._generic_host):
             if widget is not None:
                 return widget
         return None
@@ -189,6 +207,10 @@ class TileItem(QGraphicsObject):
                 f" padding: 2px; }}")
             widget.setSortingEnabled(True)
             self._table_view = widget
+        elif kind == "slicer":
+            widget = SlicerListWidget()
+            widget.selection_committed.connect(self._commit_slicer_selection)
+            self._slicer_widget = widget
         elif kind == "generic":
             widget = QWidget()
             QVBoxLayout(widget).setContentsMargins(0, 0, 0, 0)
@@ -208,6 +230,20 @@ class TileItem(QGraphicsObject):
         scene = self.scene()
         if scene is not None:
             scene.button_fired.emit(self.tile.node_id)
+
+    def _commit_slicer_selection(self, new_value: str) -> None:
+        """A tick changed on a slicer tile: commit the selection (dirties
+        the subgraph) and ask the window to re-run the visuals downstream —
+        same flow as the slicer's canvas card."""
+        scene = self.scene()
+        node = self._node()
+        if scene is None or node is None:
+            return
+        if new_value != node.params.get("selected", ""):
+            from ..commands import SetParamCommand
+            scene.undo_stack.push(SetParamCommand(
+                self._graph, node.id, "selected", new_value))
+        scene.slicer_changed.emit(node.id)
 
     def refresh_content(self) -> None:
         """Pull the node's cached output into the content widget — called on
@@ -230,6 +266,20 @@ class TileItem(QGraphicsObject):
             self._proxy.hide()
             self.setToolTip("Click to run · right-click to select, then "
                             "drag to move or press Delete to remove")
+            self.update()
+            return
+
+        if kind == "kpi":
+            # painted like the button face: crisp vector text, no widget
+            entry = self._engine.cache.get(self.tile.node_id)
+            self._kpi_has_value = entry is not None
+            self._kpi_value = entry.outputs.get("value") if entry else None
+            if self._kpi_has_value:
+                self._proxy.hide()
+            else:
+                self._proxy.show()
+                self._placeholder.setText(RUN_PROMPT)
+                self._placeholder.show()
             self.update()
             return
 
@@ -256,6 +306,21 @@ class TileItem(QGraphicsObject):
             self._placeholder.hide()
             widget.show()
             self._plotly_widget.set_figure(value)
+        elif kind == "slicer":
+            from flopy.engine.introspect import slicer_options
+            options = slicer_options(self._graph, self._engine.cache,
+                                     self.tile.node_id)
+            if options is None:
+                widget.hide()
+                self._placeholder.setText(RUN_PROMPT)
+                self._placeholder.show()
+            else:
+                self._slicer_widget.set_options(
+                    options,
+                    set(selected_param_values(
+                        node.params.get("selected", ""))))
+                self._placeholder.hide()
+                widget.show()
         elif kind == "table":
             import sys
             pd = sys.modules.get("pandas")
@@ -288,6 +353,20 @@ class TileItem(QGraphicsObject):
                 widget.show()
         self.update()
 
+    def on_param_changed(self) -> None:
+        """Params drive the painted caption/format of kpi tiles and the tick
+        states of slicer tiles (properties panel edits, undo) — keep those
+        live without rebuilding anything. Other tile kinds only re-render on
+        runs."""
+        kind = self._kind()
+        node = self._node()
+        if kind == "kpi":
+            self.update()
+        elif kind == "slicer" and self._slicer_widget is not None \
+                and not self._slicer_widget.isHidden() and node is not None:
+            self._slicer_widget.sync_checks(
+                set(selected_param_values(node.params.get("selected", ""))))
+
     def refresh_render_ratio(self) -> None:
         """Keep embedded matplotlib figures crisp under view zoom and DPR —
         called by the scene when the view's zoom settles."""
@@ -310,6 +389,8 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if node is None or not node.dirty or self._kind() == "button":
             return False
+        if self._kind() == "kpi":  # painted, not widget-backed
+            return self._kpi_has_value
         widget = self._content_widget()
         return widget is not None and not widget.isHidden()
 
@@ -367,6 +448,38 @@ class TileItem(QGraphicsObject):
         for i in (4.0, 8.0, 12.0):
             painter.drawLine(QPointF(hr.right() - i, hr.bottom() - 2),
                              QPointF(hr.right() - 2, hr.bottom() - i))
+
+        if self._kind() == "kpi" and self._kpi_has_value:
+            self._paint_kpi_value(painter)
+
+    def _paint_kpi_value(self, painter: QPainter) -> None:
+        """The KPI number and caption, painted like the canvas Card body —
+        vector text stays crisp at every zoom, no proxy widget needed."""
+        node = self._node()
+        rect = self._content_rect()
+        avail = rect.adjusted(8, 2, -8, -20)
+        text = kpi_text(self._kpi_value,
+                        str(node.params.get("format", "") or ""))
+        size = min(avail.height() * 0.62,
+                   avail.width() / (0.62 * max(1, len(text))))
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSizeF(max(9.0, size))
+        painter.setFont(font)
+        painter.setPen(QPen(theme.NODE_TEXT))
+        painter.drawText(avail, Qt.AlignCenter, text)
+
+        painter.setPen(QPen(theme.NODE_SUBTEXT))
+        font = painter.font()
+        font.setBold(False)
+        font.setPointSizeF(8.0)
+        painter.setFont(font)
+        caption = painter.fontMetrics().elidedText(
+            kpi_caption(node.params), Qt.ElideRight, int(rect.width() - 16))
+        painter.drawText(
+            QRectF(rect.left() + 8, rect.bottom() - 18,
+                   rect.width() - 16, 16),
+            Qt.AlignHCenter | Qt.AlignVCenter, caption)
 
     def _paint_button(self, painter: QPainter) -> None:
         """The Action Button face, identical to NodeItem._paint_button — a
