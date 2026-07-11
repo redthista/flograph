@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QVBoxLayout, QWid
 from flopy.core import Connection, Graph
 from flopy.engine import ExecutionEngine, summarize
 
+from .spec_view import spec_view_for
 from .view_for import view_for as _view_for
 
 
@@ -97,7 +98,16 @@ class InspectorPanel(QWidget):
             meta = QLabel(f"{port.type.value} · {summarize(value)}")
             meta.setStyleSheet("color: #6b7280; font-size: 8pt; padding: 0 4px;")
             host_layout.addWidget(meta)
-            host_layout.addWidget(_view_for(value), 1)
+            spec = spec_view_for(value)
+            if spec is None:
+                host_layout.addWidget(_view_for(value), 1)
+            else:
+                # table values get a KNIME-style spec next to the data
+                sub = QTabWidget()
+                sub.setDocumentMode(True)
+                sub.addTab(_view_for(value), "Data")
+                sub.addTab(spec, "Spec")
+                host_layout.addWidget(sub, 1)
             self._tabs.addTab(host, port.name)
 
     # --------------------------------------------------------------- events

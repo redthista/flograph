@@ -114,3 +114,57 @@ class TestLogConsole:
         assert "received:" in text            # ctx.log from python_script
         assert "run finished" in text
         assert "Python Script" in text        # node label tag
+
+
+class TestSpecView:
+    def test_spec_frame_describes_each_column(self):
+        from flopy.ui.inspector.spec_view import spec_frame
+        df = pd.DataFrame({
+            "n": [1.0, 2.0, np.nan],
+            "s": ["a", "b", "b"],
+        })
+        spec = spec_frame(df)
+        assert list(spec["column"]) == ["n", "s"]
+        assert spec["type"][0] == "float64"
+        assert spec["non-null"][0] == "2 / 3"
+        assert spec["unique"][1] == "2"
+        assert spec["min"][0] == "1.0" and spec["max"][0] == "2.0"
+
+    def test_spec_frame_survives_awkward_cells(self):
+        from flopy.ui.inspector.spec_view import spec_frame
+        # dicts are unhashable (no nunique) and unorderable (no min/max)
+        spec = spec_frame(pd.DataFrame({"o": [{"a": 1}, {"b": 2}]}))
+        assert spec["non-null"][0] == "2 / 2"
+        assert spec["unique"][0] == ""
+        assert spec["min"][0] == ""
+
+    def test_spec_view_only_for_tables(self, qtbot):
+        from flopy.ui.inspector.spec_view import spec_view_for
+        assert spec_view_for(42) is None
+        view = spec_view_for(pd.Series([1, 2], name="v"))
+        assert view is not None
+        assert view.model()._df["column"][0] == "v"
+
+    def test_inspector_table_port_gets_a_spec_tab(self, qtbot, registry,
+                                                  tmp_path):
+        from PySide6.QtWidgets import QTabWidget
+        csv = tmp_path / "d.csv"
+        csv.write_text("a,b\n1,x\n3,y\n")
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        reader = graph.add_node(registry.instantiate("flopy.io.read_csv"))
+        graph.set_param(reader.id, "path", str(csv))
+
+        panel = InspectorPanel(graph, engine)
+        qtbot.addWidget(panel)
+        panel.show_node(reader.id)
+        with qtbot.waitSignal(engine.run_finished, timeout=5000):
+            engine.run_all()
+
+        host = panel._tabs.widget(0)
+        sub = host.findChild(QTabWidget)
+        assert sub is not None
+        assert [sub.tabText(i) for i in range(sub.count())] == ["Data", "Spec"]
+        spec_model = sub.widget(1).model()
+        assert list(spec_model._df["column"]) == ["a", "b"]
+        assert "int" in spec_model._df["type"][0]
