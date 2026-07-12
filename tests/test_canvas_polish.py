@@ -3,11 +3,11 @@ import pytest
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Frame, Graph, NodeRegistry
-from flopy.core.serialization import graph_to_dict
-from flopy.ui.canvas import FrameItem, NodeGraphScene
-from flopy.ui.commands import AddFrameCommand, RemoveFrameCommand, UpdateFrameCommand
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import Frame, Graph, NodeRegistry
+from flograph.core.serialization import graph_to_dict
+from flograph.ui.canvas import FrameItem, NodeGraphScene
+from flograph.ui.commands import AddFrameCommand, RemoveFrameCommand, UpdateFrameCommand
+from flograph.ui.mainwindow import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -36,14 +36,14 @@ def window(qtbot, registry):
 class TestReroute:
     def test_insert_reroute_splits_wire(self, env, registry):
         graph, stack, scene = env
-        a = graph.add_node(registry.instantiate("flopy.util.constant"))
-        b = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        a = graph.add_node(registry.instantiate("flograph.util.constant"))
+        b = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         conn, _ = graph.connect(a.id, "value", b.id, "in1")
         before = graph_to_dict(graph)
 
         scene.insert_reroute(conn, QPointF(100, 50))
         reroutes = [n for n in graph.nodes.values()
-                    if n.type_id == "flopy.util.reroute"]
+                    if n.type_id == "flograph.util.reroute"]
         assert len(reroutes) == 1
         assert len(graph.connections) == 2
         assert conn.id not in graph.connections
@@ -56,12 +56,12 @@ class TestReroute:
         assert graph_to_dict(graph) == before
 
     def test_reroute_passes_value_through_engine(self, qtbot, env, registry):
-        from flopy.engine import ExecutionEngine
+        from flograph.engine import ExecutionEngine
         graph, stack, scene = env
-        a = graph.add_node(registry.instantiate("flopy.util.constant"))
+        a = graph.add_node(registry.instantiate("flograph.util.constant"))
         graph.set_param(a.id, "kind", "int")
         graph.set_param(a.id, "value", "7")
-        b = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        b = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         conn, _ = graph.connect(a.id, "value", b.id, "in1")
         scene.insert_reroute(conn, QPointF(0, 0))
 
@@ -91,7 +91,7 @@ class TestFrames:
         assert "f1" in graph.frames and "f1" in scene.frame_items
 
     def test_frame_serialization_round_trip(self, env, registry):
-        from flopy.core.serialization import graph_from_dict
+        from flograph.core.serialization import graph_from_dict
         graph, stack, scene = env
         graph.add_frame(Frame(id="f2", title="T", rect=(5, 5, 100, 80),
                               color="#112233"))
@@ -112,7 +112,7 @@ class TestFrames:
 class TestAlignment:
     def test_align_left_and_distribute(self, window):
         reg = window.registry
-        nodes = [reg.instantiate("flopy.util.constant", pos=(x, y))
+        nodes = [reg.instantiate("flograph.util.constant", pos=(x, y))
                  for x, y in ((0, 0), (50, 100), (120, 260))]
         for n in nodes:
             window.graph.add_node(n)
@@ -135,7 +135,7 @@ class TestCardResize:
     """Ports must ride a card's right edge when it is resized (they used to
     be positioned once at build time and stay behind as the card grew)."""
 
-    def _card(self, env, registry, type_id="flopy.viz.show_plot"):
+    def _card(self, env, registry, type_id="flograph.viz.show_plot"):
         graph, stack, scene = env
         node = graph.add_node(registry.instantiate(type_id))
         return graph, scene, scene.node_items[node.id]
@@ -172,7 +172,7 @@ class TestCardResize:
     def test_wire_repaths_with_resized_card(self, env, registry):
         graph, scene, item = self._card(env, registry)
         sink = graph.add_node(
-            registry.instantiate("flopy.scripting.python_script",
+            registry.instantiate("flograph.scripting.python_script",
                                  pos=(900, 0)))
         graph.connect(item.node.id, "figure", sink.id, "in1")
         wire = next(iter(scene.connection_items.values()))
@@ -181,10 +181,10 @@ class TestCardResize:
         assert wire.path().pointAtPercent(0).x() == start_x + (800 - 420)
 
     def test_show_table_and_table_cards_too(self, env, registry):
-        graph, scene, item = self._card(env, registry, "flopy.viz.show_table")
+        graph, scene, item = self._card(env, registry, "flograph.viz.show_table")
         graph.set_param(item.node.id, "width", 700)
         assert item.output_ports["table"].pos().x() == 700.0
-        graph, scene, item = self._card(env, registry, "flopy.io.table")
+        graph, scene, item = self._card(env, registry, "flograph.io.table")
         graph.set_param(item.node.id, "width", 640)
         assert item.output_ports["table"].pos().x() == 640.0
 
@@ -192,7 +192,7 @@ class TestCardResize:
 class TestWireDropPalette:
     def test_wire_drop_offers_compatible_and_connects(self, window):
         reg = window.registry
-        src = reg.instantiate("flopy.io.read_csv", pos=(0, 0))
+        src = reg.instantiate("flograph.io.read_csv", pos=(0, 0))
         window.graph.add_node(src)
         port_item = window.scene.node_items[src.id].output_ports["table"]
 
@@ -204,7 +204,7 @@ class TestWireDropPalette:
         assert not any("Read CSV" in l for l in labels)  # no inputs
         window._palette_popup.hide()
 
-        window._add_node_from_palette("flopy.transform.filter_rows")
+        window._add_node_from_palette("flograph.transform.filter_rows")
         assert len(window.graph.nodes) == 2
         assert len(window.graph.connections) == 1
         conn = next(iter(window.graph.connections.values()))
@@ -226,7 +226,7 @@ class TestFrameRunButton:
         from PySide6.QtTest import QTest
         from PySide6.QtWidgets import QApplication
 
-        from flopy.ui.canvas.view import NodeGraphView
+        from flograph.ui.canvas.view import NodeGraphView
 
         graph, stack, scene = env
         view = NodeGraphView(scene)

@@ -3,8 +3,8 @@ run on the real thread pool, results arrive via queued signals."""
 import pytest
 from PySide6.QtCore import QTimer
 
-from flopy.core import Graph, NodeStatus, parse_spec, NodeInstance
-from flopy.engine import ExecutionEngine, build_plan
+from flograph.core import Graph, NodeStatus, parse_spec, NodeInstance
+from flograph.engine import ExecutionEngine, build_plan
 
 TAGGED = """
 NODE = {{

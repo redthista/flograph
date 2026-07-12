@@ -4,9 +4,9 @@ equivalent point."""
 import pytest
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, Page, Tile
-from flopy.core.serialization import graph_to_dict
-from flopy.ui.commands import (
+from flograph.core import Graph, Page, Tile
+from flograph.core.serialization import graph_to_dict
+from flograph.ui.commands import (
     AddPageCommand, AddTileCommand, MoveResizeTileCommand,
     RemovePageCommand, RemoveTileCommand, RenamePageCommand,
 )

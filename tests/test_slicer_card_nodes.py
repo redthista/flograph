@@ -8,10 +8,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QApplication
 
-from flopy.core import Graph, NodeRegistry, Page, Tile
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.dashboard import default_tile_port, default_tile_size
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import Graph, NodeRegistry, Page, Tile
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.dashboard import default_tile_port, default_tile_size
+from flograph.ui.mainwindow import MainWindow
 
 REGIONS = {"columns": ["region", "units"],
            "rows": [["north", "10"], ["south", "20"], ["north", "30"]]}
@@ -50,9 +50,9 @@ def window(qtbot, registry):
 
 def _add_sliced_flow(win):
     """Table -> Slicer(region) -> Show Table, returning the three nodes."""
-    source = win.registry.instantiate("flopy.io.table", pos=(0, 0))
-    slicer = win.registry.instantiate("flopy.viz.slicer", pos=(400, 0))
-    shown = win.registry.instantiate("flopy.viz.show_table", pos=(800, 0))
+    source = win.registry.instantiate("flograph.io.table", pos=(0, 0))
+    slicer = win.registry.instantiate("flograph.viz.slicer", pos=(400, 0))
+    shown = win.registry.instantiate("flograph.viz.show_table", pos=(800, 0))
     for node in (source, slicer, shown):
         win.graph.add_node(node)
     win.graph.set_param(source.id, "data", json.dumps(REGIONS))
@@ -65,7 +65,7 @@ def _add_sliced_flow(win):
 class TestSlicerCard:
     def test_item_is_a_resizable_widget_card(self, env, registry):
         graph, stack, scene = env
-        node = graph.add_node(registry.instantiate("flopy.viz.slicer"))
+        node = graph.add_node(registry.instantiate("flograph.viz.slicer"))
         item = scene.node_items[node.id]
         assert item.slicer
         assert item._slicer_list is not None
@@ -104,8 +104,8 @@ class TestSlicerCard:
 class TestKpiCard:
     def test_value_lands_on_the_item_after_a_run(self, qtbot, window):
         win = window
-        source = win.registry.instantiate("flopy.io.table", pos=(0, 0))
-        card = win.registry.instantiate("flopy.viz.card", pos=(400, 0))
+        source = win.registry.instantiate("flograph.io.table", pos=(0, 0))
+        card = win.registry.instantiate("flograph.viz.card", pos=(400, 0))
         for node in (source, card):
             win.graph.add_node(node)
         win.graph.set_param(source.id, "data", json.dumps(REGIONS))
@@ -122,7 +122,7 @@ class TestKpiCard:
 
     def test_text_honours_format_and_defaults(self, env, registry):
         graph, stack, scene = env
-        node = graph.add_node(registry.instantiate("flopy.viz.card"))
+        node = graph.add_node(registry.instantiate("flograph.viz.card"))
         item = scene.node_items[node.id]
         item.set_card_value(1234567)
         assert item._kpi_text() == "1,234,567"
@@ -133,7 +133,7 @@ class TestKpiCard:
 
     def test_caption_falls_back_to_aggregation_of_column(self, env, registry):
         graph, stack, scene = env
-        node = graph.add_node(registry.instantiate("flopy.viz.card"))
+        node = graph.add_node(registry.instantiate("flograph.viz.card"))
         graph.set_param(node.id, "column", "units")
         item = scene.node_items[node.id]
         assert item._kpi_label() == "Sum of units"
@@ -158,8 +158,8 @@ class TestDashboardTiles:
 
     def test_kpi_tile_paints_the_cached_value(self, qtbot, window):
         win = window
-        source = win.registry.instantiate("flopy.io.table", pos=(0, 0))
-        card = win.registry.instantiate("flopy.viz.card", pos=(400, 0))
+        source = win.registry.instantiate("flograph.io.table", pos=(0, 0))
+        card = win.registry.instantiate("flograph.viz.card", pos=(400, 0))
         for node in (source, card):
             win.graph.add_node(node)
         win.graph.set_param(source.id, "data", json.dumps(REGIONS))
@@ -207,8 +207,8 @@ class TestDashboardTiles:
 class TestTableSpecCard:
     def test_spec_lands_on_the_table_viewer_card(self, qtbot, window):
         win = window
-        source = win.registry.instantiate("flopy.io.table", pos=(0, 0))
-        spec = win.registry.instantiate("flopy.viz.table_spec", pos=(400, 0))
+        source = win.registry.instantiate("flograph.io.table", pos=(0, 0))
+        spec = win.registry.instantiate("flograph.viz.table_spec", pos=(400, 0))
         for node in (source, spec):
             win.graph.add_node(node)
         win.graph.set_param(source.id, "data", json.dumps(REGIONS))

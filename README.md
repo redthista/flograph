@@ -1,16 +1,35 @@
-# flopy
+# flograph
 
 A visual node-based Python programming environment: KNIME-style dataflow on
 an infinite Blueprint-style canvas, where every node is real, editable Python.
 
 ![status](https://img.shields.io/badge/status-v0.1-blue)
 
+## Install
+
+```bash
+pip install flograph          # from PyPI or an internal index (e.g. Artifactory)
+flograph                      # launch the app
+```
+
+To publish to an internal PyPI repository, build and upload the artifacts
+in `dist/`:
+
+```bash
+uv build
+uv publish --publish-url https://<host>/artifactory/api/pypi/<repo>/ \
+    --username <user> --password <token>   # or: twine upload --repository-url ...
+```
+
+Projects saved before the rename to flograph (`.flopy` files with `flopy.*`
+node type ids) still open.
+
 ## Run it
 
 ```bash
-.venv/bin/python main.py                 # or: .venv/bin/flopy
-.venv/bin/python main.py project.flopy   # open a project
-.venv/bin/python -m flopy.engine.headless project.flopy   # run without GUI
+.venv/bin/python main.py                 # or: .venv/bin/flograph
+.venv/bin/python main.py project.flograph   # open a project
+.venv/bin/python -m flograph.engine.headless project.flograph   # run without GUI
 ```
 
 ## The idea
@@ -44,7 +63,7 @@ an infinite Blueprint-style canvas, where every node is real, editable Python.
 | Duplicate / delete | `Ctrl+D` / `Del` |
 | Undo anything | `Ctrl+Z` — every graph mutation is on the undo stack |
 
-Projects are plain JSON (`.flopy`); caches are never saved, so a reopened
+Projects are plain JSON (`.flograph`); caches are never saved, so a reopened
 project is fully reproducible with one `F5`.
 
 ## Node library
@@ -67,12 +86,12 @@ The shipped library covers the KNIME basics:
 ## Packages
 
 **Tools > Manage Packages** installs, upgrades and uninstalls pip packages
-in flopy's own environment (the venv running the app). Nodes execute
+in flograph's own environment (the venv running the app). Nodes execute
 in-process, so anything installed there is immediately importable from a
 node's `run()` — no restart needed for new installs; upgrades of modules
 the app has already imported take effect on the next launch. The dialog
 uses `pip` when the interpreter has it and falls back to `uv pip` (uv-made
-venvs ship without pip); flopy's own core dependencies are protected from
+venvs ship without pip); flograph's own core dependencies are protected from
 uninstall.
 
 ## Writing a node
@@ -107,7 +126,7 @@ Rules: treat inputs as read-only (outputs are cached by reference); heavy
 imports go inside `run()`; matplotlib figures must use the OO API
 (`matplotlib.figure.Figure()`), never pyplot.
 
-Drop new `.py` files under `src/flopy/nodes/<category>/` and they appear in
+Drop new `.py` files under `src/flograph/nodes/<category>/` and they appear in
 the library on next launch.
 
 ## Development
@@ -119,14 +138,14 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/
 
 Architecture (src layout):
 
-- `flopy/core` — Qt-free model: graph, typed ports, script contract,
+- `flograph/core` — Qt-free model: graph, typed ports, script contract,
   registry, JSON serialization. Fully unit-testable; a poison test keeps Qt
   and pandas out of its import graph.
-- `flopy/engine` — background execution: plan builder, single-thread pool
+- `flograph/engine` — background execution: plan builder, single-thread pool
   worker, output cache, cancellation, per-node stdout capture, tracebacks
   mapped to node script lines.
-- `flopy/nodes` — the standard library; each node is a script file loaded as
+- `flograph/nodes` — the standard library; each node is a script file loaded as
   text through the same contract as user code.
-- `flopy/ui` — canvas (QGraphicsView from scratch), code editor, inspector,
+- `flograph/ui` — canvas (QGraphicsView from scratch), code editor, inspector,
   properties, console. One rule everywhere: **QUndoCommands are the only
   writers to the graph**; items react to graph events.

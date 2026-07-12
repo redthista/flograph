@@ -4,10 +4,10 @@ the graph through it all."""
 import pytest
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, NodeRegistry
-from flopy.core.serialization import graph_to_dict
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.commands import (
+from flograph.core import Graph, NodeRegistry
+from flograph.core.serialization import graph_to_dict
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.commands import (
     AddNodeCommand, ConnectCommand, DisconnectCommand, MoveNodesCommand,
     RemoveSelectionCommand, SetCodeCommand, SetParamCommand,
 )
@@ -42,8 +42,8 @@ def assert_undo_redo_stable(stack, graph, before, after):
 
 
 def build_pipeline(graph, stack, registry):
-    const = registry.instantiate("flopy.util.constant", pos=(0, 0))
-    script = registry.instantiate("flopy.scripting.python_script", pos=(250, 0))
+    const = registry.instantiate("flograph.util.constant", pos=(0, 0))
+    script = registry.instantiate("flograph.scripting.python_script", pos=(250, 0))
     stack.push(AddNodeCommand(graph, const))
     stack.push(AddNodeCommand(graph, script))
     stack.push(ConnectCommand(graph, const.id, "value", script.id, "in1"))
@@ -84,9 +84,9 @@ def test_remove_connected_node_restores_wires(env, registry):
 
 def test_connect_displacement_restores_old_wire(env, registry):
     graph, stack, scene = env
-    a = registry.instantiate("flopy.util.constant")
-    b = registry.instantiate("flopy.util.constant")
-    target = registry.instantiate("flopy.scripting.python_script")
+    a = registry.instantiate("flograph.util.constant")
+    b = registry.instantiate("flograph.util.constant")
+    target = registry.instantiate("flograph.scripting.python_script")
     for node in (a, b, target):
         stack.push(AddNodeCommand(graph, node))
     stack.push(ConnectCommand(graph, a.id, "value", target.id, "in1"))
@@ -112,7 +112,7 @@ def test_disconnect_undo(env, registry):
 
 def test_move_merge(env, registry):
     graph, stack, scene = env
-    node = registry.instantiate("flopy.util.constant", pos=(0, 0))
+    node = registry.instantiate("flograph.util.constant", pos=(0, 0))
     stack.push(AddNodeCommand(graph, node))
     index_before = stack.index()
     stack.push(MoveNodesCommand(graph, {node.id: ((0, 0), (10, 0))}))
@@ -127,7 +127,7 @@ def test_move_merge(env, registry):
 
 def test_set_param_merge_and_undo(env, registry):
     graph, stack, scene = env
-    node = registry.instantiate("flopy.util.constant")
+    node = registry.instantiate("flograph.util.constant")
     stack.push(AddNodeCommand(graph, node))
     before = snapshot(graph)
     stack.push(SetParamCommand(graph, node.id, "value", "a"))

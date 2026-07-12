@@ -5,11 +5,11 @@ import pytest
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, NodeRegistry
-from flopy.engine import ExecutionEngine
-from flopy.ui.inspector.pandas_model import PAGE_SIZE, PandasModel
-from flopy.ui.inspector.inspector_dock import InspectorPanel
-from flopy.ui.console.log_dock import LogConsole
+from flograph.core import Graph, NodeRegistry
+from flograph.engine import ExecutionEngine
+from flograph.ui.inspector.pandas_model import PAGE_SIZE, PandasModel
+from flograph.ui.inspector.inspector_dock import InspectorPanel
+from flograph.ui.console.log_dock import LogConsole
 
 
 @pytest.fixture(scope="module")
@@ -56,8 +56,8 @@ class TestInspector:
         csv.write_text("a,b\n1,2\n3,4\n-1,6\n")
         graph = Graph()
         engine = ExecutionEngine(graph)
-        reader = graph.add_node(registry.instantiate("flopy.io.read_csv"))
-        filt = graph.add_node(registry.instantiate("flopy.transform.filter_rows"))
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        filt = graph.add_node(registry.instantiate("flograph.transform.filter_rows"))
         graph.set_param(reader.id, "path", str(csv))
         graph.set_param(filt.id, "query", "a > 0")
         graph.connect(reader.id, "table", filt.id, "table")
@@ -85,8 +85,8 @@ class TestInspector:
         csv.write_text("x,y\n1,2\n2,4\n3,9\n")
         graph = Graph()
         engine = ExecutionEngine(graph)
-        reader = graph.add_node(registry.instantiate("flopy.io.read_csv"))
-        plot = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        plot = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
         graph.set_param(reader.id, "path", str(csv))
         graph.connect(reader.id, "table", plot.id, "table")
 
@@ -95,7 +95,7 @@ class TestInspector:
         panel.show_node(plot.id)
         self._run(qtbot, engine)
         assert plot.status.value == "done"
-        from flopy.ui.inspector.figure_view import FigureView
+        from flograph.ui.inspector.figure_view import FigureView
         assert panel._tabs.count() == 1
         host = panel._tabs.widget(0)
         assert host.findChildren(FigureView), "figure view not created"
@@ -105,7 +105,7 @@ class TestLogConsole:
     def test_log_lines_appear(self, qtbot, registry):
         graph = Graph()
         engine = ExecutionEngine(graph)
-        node = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         console = LogConsole(graph, engine)
         qtbot.addWidget(console)
         with qtbot.waitSignal(engine.run_finished, timeout=5000):
@@ -118,7 +118,7 @@ class TestLogConsole:
 
 class TestSpecView:
     def test_spec_frame_describes_each_column(self):
-        from flopy.ui.inspector.spec_view import spec_frame
+        from flograph.ui.inspector.spec_view import spec_frame
         df = pd.DataFrame({
             "n": [1.0, 2.0, np.nan],
             "s": ["a", "b", "b"],
@@ -131,7 +131,7 @@ class TestSpecView:
         assert spec["min"][0] == "1.0" and spec["max"][0] == "2.0"
 
     def test_spec_frame_survives_awkward_cells(self):
-        from flopy.ui.inspector.spec_view import spec_frame
+        from flograph.ui.inspector.spec_view import spec_frame
         # dicts are unhashable (no nunique) and unorderable (no min/max)
         spec = spec_frame(pd.DataFrame({"o": [{"a": 1}, {"b": 2}]}))
         assert spec["non-null"][0] == "2 / 2"
@@ -139,7 +139,7 @@ class TestSpecView:
         assert spec["min"][0] == ""
 
     def test_spec_view_only_for_tables(self, qtbot):
-        from flopy.ui.inspector.spec_view import spec_view_for
+        from flograph.ui.inspector.spec_view import spec_view_for
         assert spec_view_for(42) is None
         view = spec_view_for(pd.Series([1, 2], name="v"))
         assert view is not None
@@ -152,7 +152,7 @@ class TestSpecView:
         csv.write_text("a,b\n1,x\n3,y\n")
         graph = Graph()
         engine = ExecutionEngine(graph)
-        reader = graph.add_node(registry.instantiate("flopy.io.read_csv"))
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
         graph.set_param(reader.id, "path", str(csv))
 
         panel = InspectorPanel(graph, engine)
