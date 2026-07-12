@@ -25,6 +25,10 @@ PARAMS = [
      "default": True},
     {"name": "message", "type": "text", "label": "Message (Markdown)",
      "default": "", "placeholder": "Shown in a popup when clicked"},
+    {"name": "width", "type": "int", "label": "Width",
+     "default": 150, "min": 90, "max": 400},
+    {"name": "height", "type": "int", "label": "Height",
+     "default": 50, "min": 36, "max": 160},
 ]
 
 

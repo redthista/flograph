@@ -98,6 +98,12 @@ class NodeGraphView(ZoomPanGraphicsView):
         if isinstance(item, PortItem):
             item = item.node_item
         if isinstance(item, NodeItem):
+            if item.button:
+                # Right-click on an Action Button enters edit mode (move/resize)
+                # rather than opening the node context menu.
+                item.enter_button_edit()
+                event.accept()
+                return
             self.node_context_requested.emit(item.node.id, event.globalPos())
             event.accept()
             return
