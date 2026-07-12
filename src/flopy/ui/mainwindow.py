@@ -6,13 +6,11 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt
-from PySide6.QtGui import (
-    QAction, QActionGroup, QColor, QKeySequence, QUndoStack,
-)
+from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QDockWidget, QFileDialog, QInputDialog,
-    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QStackedWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QApplication, QColorDialog, QComboBox, QDockWidget, QFileDialog,
+    QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
+    QPlainTextEdit, QStackedWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from flopy.core import (
@@ -211,6 +209,8 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.action_undo)
         toolbar.addAction(self.action_redo)
+        toolbar.addSeparator()
+        self._build_snap_toolbar(toolbar)
 
         file_menu = self.menuBar().addMenu("&File")
         for action in (self.action_new, self.action_open, self.action_save,
@@ -247,48 +247,43 @@ class MainWindow(QMainWindow):
         view_menu = self.menuBar().addMenu("&View")
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
-        view_menu.addSeparator()
-        self._build_snap_actions(view_menu)
 
-    def _build_snap_actions(self, view_menu: QMenu) -> None:
-        """Snap-to-grid toggle + resolution presets, restored from QSettings.
-        Applies to node moves/resizes on the canvas and dashboard tiles."""
+    def _build_snap_toolbar(self, toolbar: QToolBar) -> None:
+        """Snap-to-grid toggle + resolution selector on the main toolbar — a
+        visual/view control, restored from QSettings. Applies to node/frame
+        moves and resizes on the canvas and dashboard tiles."""
         self.action_snap_grid = QAction("Snap to Grid", self)
         self.action_snap_grid.setCheckable(True)
+        self.action_snap_grid.setToolTip(
+            "Snap moves and resizes to the grid (hold Ctrl to bypass)")
         self.action_snap_grid.setChecked(
             self.settings.value("snap/enabled", False, type=bool))
         self.action_snap_grid.toggled.connect(self._on_snap_toggled)
-        view_menu.addAction(self.action_snap_grid)
+        toolbar.addAction(self.action_snap_grid)
 
-        resolution_menu = view_menu.addMenu("Grid Resolution")
-        self._grid_group = QActionGroup(self)
-        self._grid_group.setExclusive(True)
+        self._grid_combo = QComboBox()
+        self._grid_combo.setToolTip("Grid resolution")
         current = float(self.settings.value("snap/step", grid.DEFAULT_STEP))
-        for name, step in grid.GRID_PRESETS.items():
-            action = QAction(f"{name} ({int(step)} px)", self)
-            action.setCheckable(True)
-            action.setData(step)
-            action.setChecked(abs(step - current) < 0.01)
-            self._grid_group.addAction(action)
-            resolution_menu.addAction(action)
-        if self._grid_group.checkedAction() is None:
-            # persisted step isn't one of the presets — fall back to Normal
-            for action in self._grid_group.actions():
-                if abs(action.data() - grid.DEFAULT_STEP) < 0.01:
-                    action.setChecked(True)
-        self._grid_group.triggered.connect(self._on_grid_resolution)
+        selected = 0
+        for index, (name, step) in enumerate(grid.GRID_PRESETS.items()):
+            self._grid_combo.addItem(f"{name} ({int(step)} px)", step)
+            if abs(step - current) < 0.01:
+                selected = index
+        self._grid_combo.setCurrentIndex(selected)
+        self._grid_combo.currentIndexChanged.connect(self._on_grid_resolution)
+        toolbar.addWidget(QLabel(" Grid: "))
+        toolbar.addWidget(self._grid_combo)
         self._apply_snap_settings()
 
     def _current_grid_step(self) -> float:
-        action = self._grid_group.checkedAction()
-        return float(action.data()) if action is not None else grid.DEFAULT_STEP
+        return float(self._grid_combo.currentData())
 
     def _on_snap_toggled(self, checked: bool) -> None:
         self.settings.setValue("snap/enabled", checked)
         self._apply_snap_settings()
 
-    def _on_grid_resolution(self, action: QAction) -> None:
-        self.settings.setValue("snap/step", float(action.data()))
+    def _on_grid_resolution(self, _index: int) -> None:
+        self.settings.setValue("snap/step", self._current_grid_step())
         self._apply_snap_settings()
 
     def _apply_snap_settings(self) -> None:
