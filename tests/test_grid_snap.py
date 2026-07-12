@@ -4,9 +4,9 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QGraphicsItem
 
-from flopy.core import NodeRegistry, Page, Tile
+from flopy.core import Frame, NodeRegistry, Page, Tile
 from flopy.ui.canvas import grid
-from flopy.ui.commands import AddPageCommand, AddTileCommand
+from flopy.ui.commands import AddFrameCommand, AddPageCommand, AddTileCommand
 from flopy.ui.mainwindow import MainWindow
 
 
@@ -185,3 +185,62 @@ class TestSnapSettings:
 
     def test_default_grid_step_is_normal(self, window):
         assert window._current_grid_step() == grid.DEFAULT_STEP
+
+
+# ------------------------------------------------------------------- frames
+
+class _FrameDrag:
+    def __init__(self, scene_pos, modifiers=Qt.NoModifier):
+        self._pos = scene_pos
+        self._mods = modifiers
+
+    def scenePos(self):
+        return self._pos
+
+    def modifiers(self):
+        return self._mods
+
+    def accept(self):
+        pass
+
+
+class TestFrameSnap:
+    def _frame(self, window):
+        window.undo_stack.push(AddFrameCommand(
+            window.graph, Frame(id="f1", rect=(0, 0, 400, 260))))
+        return window.scene.frame_items["f1"]
+
+    def test_resize_snaps_size(self, window):
+        frame = self._frame(window)
+        window.scene.snap_enabled = True
+        window.scene.grid_step = 20
+        frame._resizing = True
+        frame._press_scene_pos = QPointF(0, 0)
+        frame._press_size = (400, 260)
+        frame.mouseMoveEvent(_FrameDrag(QPointF(37, 23)))  # 437, 283
+        assert frame._size == (440, 280)
+        frame._resizing = False
+
+    def test_resize_bypass_with_ctrl(self, window):
+        frame = self._frame(window)
+        window.scene.snap_enabled = True
+        window.scene.grid_step = 20
+        frame._resizing = True
+        frame._press_scene_pos = QPointF(0, 0)
+        frame._press_size = (400, 260)
+        frame.mouseMoveEvent(_FrameDrag(QPointF(37, 23), Qt.ControlModifier))
+        assert frame._size == (437, 283)
+        frame._resizing = False
+
+    def test_move_snaps_only_while_dragging(self, window):
+        frame = self._frame(window)
+        window.scene.snap_enabled = True
+        window.scene.grid_step = 20
+        frame._dragging = True
+        out = frame.itemChange(
+            QGraphicsItem.ItemPositionChange, QPointF(23, 38))
+        assert (out.x(), out.y()) == (20, 40)
+        frame._dragging = False
+        out = frame.itemChange(
+            QGraphicsItem.ItemPositionChange, QPointF(23, 38))
+        assert (out.x(), out.y()) == (23, 38)
