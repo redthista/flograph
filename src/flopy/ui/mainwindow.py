@@ -31,7 +31,7 @@ from .canvas import grid
 from .canvas.node_item import (
     FIGURE_TYPES, KPI_TYPE, PLOTLY_TYPE, SLICER_TYPE, TABLE_VIEWER_TYPES,
 )
-from .canvas.palette import LibraryTree, NodePalettePopup
+from .canvas.palette import LibraryPanel, NodePalettePopup
 from .dashboard import (
     DashboardPage, PageTabBar, TILE_ABLE_TYPES, default_tile_port,
     default_tile_size,
@@ -94,10 +94,11 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- docks
 
     def _build_docks(self) -> None:
-        self.library_tree = LibraryTree(self.registry)
+        self.library_panel = LibraryPanel(self.registry)
+        self.library_tree = self.library_panel.tree
         library_dock = QDockWidget("Node Library", self)
         library_dock.setObjectName("dock_library")
-        library_dock.setWidget(self.library_tree)
+        library_dock.setWidget(self.library_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, library_dock)
         self.library_tree.add_requested.connect(self._add_node_at_view_center)
         self.library_tree.new_group_requested.connect(self._new_user_group)
