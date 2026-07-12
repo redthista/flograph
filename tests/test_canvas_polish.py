@@ -1,6 +1,6 @@
 """M7: reroute insertion, frames, alignment, wire-drop palette plumbing."""
 import pytest
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QUndoStack
 
 from flopy.core import Frame, Graph, NodeRegistry
@@ -168,6 +168,9 @@ class TestCardResize:
         class DragEvent:
             def scenePos(self):
                 return QPointF(150.0, 40.0)  # +150 px wider
+
+            def modifiers(self):
+                return Qt.NoModifier
 
             def accept(self):
                 pass
