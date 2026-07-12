@@ -11,7 +11,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-# Snap resolutions offered in the View ▸ Grid Resolution menu. "Normal" matches
+# Snap resolutions offered in the toolbar's grid selector. "Normal" matches
 # the fine background grid the canvas has always drawn.
 GRID_PRESETS = {"Compact": 10.0, "Normal": 20.0, "Relaxed": 40.0}
 DEFAULT_STEP = 20.0
