@@ -194,6 +194,60 @@ class NodeGraphScene(QGraphicsScene):
     def push_move_command(self, moves: dict) -> None:
         self.undo_stack.push(MoveNodesCommand(self.graph, moves))
 
+    # ------------------------------------------------------- group drag/move
+
+    def _selected_movables(self) -> list:
+        """Selected items that participate in a drag: nodes and frames."""
+        return [i for i in self.selectedItems()
+                if isinstance(i, (NodeItem, FrameItem))]
+
+    def begin_group_drag(self) -> dict:
+        """Arm every selected node/frame for a group drag: flag each as
+        dragging so its own itemChange snaps (Qt moves the whole selection by
+        one delta, but only the pressed item was flagged before), and snapshot
+        their start positions for the release commit."""
+        starts: dict = {"nodes": {}, "frames": {}}
+        for item in self._selected_movables():
+            item._dragging = True
+            if isinstance(item, FrameItem):
+                starts["frames"][item.frame.id] = (
+                    item.pos().x(), item.pos().y(), *item._size)
+            else:
+                starts["nodes"][item.node.id] = (item.pos().x(), item.pos().y())
+        return starts
+
+    def commit_group_move(self, starts: dict) -> None:
+        """Clear the drag flags and push one undo macro for whatever actually
+        moved — node positions and frame rects together, so a mixed-selection
+        drag sticks (and undoes) as a single step."""
+        node_moves: dict = {}
+        for node_id, old in starts.get("nodes", {}).items():
+            item = self.node_items.get(node_id)
+            if item is None:
+                continue
+            item._dragging = False
+            new = (item.pos().x(), item.pos().y())
+            if new != old:
+                node_moves[node_id] = (old, new)
+        frame_moves: dict = {}
+        for frame_id, old in starts.get("frames", {}).items():
+            item = self.frame_items.get(frame_id)
+            if item is None:
+                continue
+            item._dragging = False
+            new = (item.pos().x(), item.pos().y(), *item._size)
+            if new[:2] != old[:2]:
+                frame_moves[frame_id] = new
+        if not (node_moves or frame_moves):
+            return
+        self.undo_stack.beginMacro("move selection")
+        if node_moves:
+            self.push_move_command(node_moves)
+        for frame_id, rect in frame_moves.items():
+            self.undo_stack.push(UpdateFrameCommand(
+                self.graph, frame_id, rect=rect))
+        self.undo_stack.endMacro()
+
     def delete_selection(self) -> None:
         from ..commands import RemoveFrameCommand
         node_ids = [i.node.id for i in self.selected_node_items()]
