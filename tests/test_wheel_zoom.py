@@ -81,6 +81,31 @@ def test_wheel_over_scrollable_table_scrolls_not_zooms(env, registry):
     assert bar.value() > before_scroll
 
 
+def test_wheel_past_scroll_end_neither_zooms_nor_pans(env, registry):
+    graph, _, scene, view = env
+    node = add_table_node(graph, registry, rows=60)
+    item = scene.node_items[node.id]
+    view.centerOn(item)
+    bar = item._table_widget.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    pos = point_over_grid(view, item)
+
+    before_zoom = view.zoom
+    before_transform = view.transform()
+    before_scroll = (view.horizontalScrollBar().value(),
+                     view.verticalScrollBar().value())
+    send_wheel(view, pos)  # wheel down with the table already at the bottom
+
+    assert view.zoom == before_zoom
+    assert view.transform() == before_transform
+    assert (view.horizontalScrollBar().value(),
+            view.verticalScrollBar().value()) == before_scroll
+
+    send_wheel(view, pos, delta=120)  # reversing still scrolls the table
+    assert bar.value() < bar.maximum()
+    assert view.zoom == before_zoom
+
+
 def test_wheel_over_table_without_overflow_still_zooms(env, registry):
     graph, _, scene, view = env
     node = add_table_node(graph, registry, rows=1)

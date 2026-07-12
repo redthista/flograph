@@ -60,8 +60,17 @@ class ZoomPanGraphicsView(QGraphicsView):
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._scrollable_widget_at(event.position().toPoint()) is not None:
             # a table/list card under the cursor can scroll — let the scene
-            # deliver the wheel to its proxy widget instead of zooming
+            # deliver the wheel to its proxy widget instead of zooming. When
+            # the widget is already at the end of its range it ignores the
+            # tick and QGraphicsView falls back to scrolling the view's own
+            # (hidden) scrollbars, panning the canvas out from under the
+            # cursor; pin them so the card swallows the tick instead.
+            hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
+            h, v = hbar.value(), vbar.value()
             super().wheelEvent(event)
+            hbar.setValue(h)
+            vbar.setValue(v)
+            event.accept()
             return
         factor = 1.15 ** (event.angleDelta().y() / 120.0)
         new_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self.zoom * factor))
