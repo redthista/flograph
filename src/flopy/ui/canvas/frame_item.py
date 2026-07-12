@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QInputDialog
 from flopy.core import Frame
 
 from .. import theme
+from .grid import grid_step, snap, snap_point, snapping_active
 
 TITLE_H = 24.0
 HANDLE = 14.0
@@ -22,8 +23,13 @@ class FrameItem(QGraphicsObject):
         super().__init__()
         self.frame = frame
         self.setZValue(-10)
-        self.setFlags(QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemIsSelectable)
+        self.setFlags(QGraphicsItem.ItemIsMovable
+                      | QGraphicsItem.ItemIsSelectable
+                      | QGraphicsItem.ItemSendsGeometryChanges)
         self.setAcceptHoverEvents(True)
+        # set before setPos — ItemSendsGeometryChanges makes setPos fire
+        # itemChange, which reads _dragging
+        self._dragging = False  # a move is in progress (snap gate)
         self.setPos(frame.rect[0], frame.rect[1])
         self._size = (frame.rect[2], frame.rect[3])
         self._resizing = False
@@ -113,18 +119,30 @@ class FrameItem(QGraphicsObject):
         hovering = self._run_button_rect().contains(event.pos())
         if hovering != self._hover_run:
             self._hover_run = hovering
-            self.setCursor(Qt.PointingHandCursor if hovering
-                           else Qt.ArrowCursor)
             self.setToolTip("Run the nodes in this frame" if hovering else "")
             self.update()
+        if hovering:
+            self.setCursor(Qt.PointingHandCursor)
+        elif self._handle_rect().contains(event.pos()):
+            self.setCursor(Qt.SizeFDiagCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
         if self._hover_run:
             self._hover_run = False
-            self.unsetCursor()
             self.update()
+        self.unsetCursor()
         super().hoverLeaveEvent(event)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self._dragging \
+                and snapping_active(self.scene()):
+            step = grid_step(self.scene())
+            x, y = snap_point(value.x(), value.y(), step)
+            return QPointF(x, y)
+        return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
         if self._run_button_rect().contains(event.pos()):
@@ -147,6 +165,8 @@ class FrameItem(QGraphicsObject):
         for item in scene.node_items.values():
             if rect.contains(item.sceneBoundingRect().center()):
                 self._grabbed.append((item, item.pos() - self.pos()))
+        if event.button() == Qt.LeftButton:
+            self._dragging = True  # snap the frame's position while moving
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -155,9 +175,14 @@ class FrameItem(QGraphicsObject):
             return
         if self._resizing:
             delta = event.scenePos() - self._press_scene_pos
+            width = self._press_size[0] + delta.x()
+            height = self._press_size[1] + delta.y()
+            if snapping_active(self.scene(), event.modifiers()):
+                step = grid_step(self.scene())
+                width = snap(width, step)
+                height = snap(height, step)
             self.prepareGeometryChange()
-            self._size = (max(120.0, self._press_size[0] + delta.x()),
-                          max(60.0, self._press_size[1] + delta.y()))
+            self._size = (max(120.0, width), max(60.0, height))
             self.update()
             event.accept()
             return
@@ -167,6 +192,7 @@ class FrameItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
+        self._dragging = False
         if self._run_pressed:
             self._run_pressed = False
             if self._run_button_rect().contains(event.pos()):
