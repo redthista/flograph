@@ -237,7 +237,7 @@ class NodeItem(QGraphicsObject):
 
         self.input_ports: dict[str, PortItem] = {}
         self.output_ports: dict[str, PortItem] = {}
-        self._drag_start_positions: dict[str, tuple[float, float]] = {}
+        self._group_starts: dict | None = None  # group-drag snapshot
         self._pulse = 0.0
         self._pulse_anim: Optional[QVariantAnimation] = None
         self.rebuild_ports()
@@ -1344,11 +1344,10 @@ class NodeItem(QGraphicsObject):
                 self.setFlag(QGraphicsItem.ItemIsMovable, False)
         super().mousePressEvent(event)
         scene = self.scene()
-        if scene is not None:
-            self._drag_start_positions = {
-                item.node.id: (item.pos().x(), item.pos().y())
-                for item in scene.selected_node_items() + [self]
-            }
+        if scene is not None and self._dragging:
+            # A real header drag: arm the whole selection so every selected
+            # node/frame snaps, not just this one, and snapshot for the commit.
+            self._group_starts = scene.begin_group_drag()
 
     def mouseMoveEvent(self, event) -> None:
         if self._resizing_card:
@@ -1433,22 +1432,13 @@ class NodeItem(QGraphicsObject):
         if self._move_suppressed:
             self._move_suppressed = False
             self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        was_dragging = self._dragging
         self._dragging = False
         super().mouseReleaseEvent(event)
         scene = self.scene()
-        if scene is None or not self._drag_start_positions:
-            return
-        moves = {}
-        for node_id, old in self._drag_start_positions.items():
-            item = scene.node_items.get(node_id)
-            if item is None:
-                continue
-            new = (item.pos().x(), item.pos().y())
-            if new != old:
-                moves[node_id] = (old, new)
-        self._drag_start_positions = {}
-        if moves:
-            scene.push_move_command(moves)
+        if scene is not None and was_dragging and self._group_starts:
+            scene.commit_group_move(self._group_starts)
+        self._group_starts = None
 
     # -------------------------------------------------------------- updates
 

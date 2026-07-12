@@ -244,3 +244,68 @@ class TestFrameSnap:
         out = frame.itemChange(
             QGraphicsItem.ItemPositionChange, QPointF(23, 38))
         assert (out.x(), out.y()) == (23, 38)
+
+
+# --------------------------------------------------- multi-select group drag
+
+class TestGroupDragSnap:
+    """Dragging a multi-selection must snap *every* selected node and frame,
+    not just the item under the cursor, and commit them as one move
+    (issues.md #5)."""
+
+    def _selection(self, window):
+        scene = window.scene
+        scene.snap_enabled = True
+        scene.grid_step = 20
+        n1 = window.registry.instantiate("flopy.util.note")
+        n2 = window.registry.instantiate("flopy.util.note")
+        window.graph.add_node(n1)
+        window.graph.add_node(n2)
+        i1 = scene.node_items[n1.id]
+        i2 = scene.node_items[n2.id]
+        i1.setPos(23, 38)   # off-grid; _dragging is False so it stays put
+        i2.setPos(111, 47)
+        window.undo_stack.push(AddFrameCommand(
+            window.graph, Frame(id="gf", rect=(63, 57, 400, 260))))
+        frame = scene.frame_items["gf"]
+        for item in (i1, i2, frame):
+            item.setSelected(True)
+        return scene, i1, i2, frame
+
+    def test_all_selected_items_snap(self, window):
+        scene, i1, i2, frame = self._selection(window)
+        starts = scene.begin_group_drag()
+        # the regression: the non-anchor items must snap too, not just one
+        for item in (i1, i2, frame):
+            assert item._dragging is True
+            out = item.itemChange(
+                QGraphicsItem.ItemPositionChange, QPointF(23, 38))
+            assert (out.x(), out.y()) == (20, 40)
+        assert set(starts["nodes"]) == {i1.node.id, i2.node.id}
+        assert set(starts["frames"]) == {"gf"}
+
+    def test_group_move_commits_nodes_and_frame(self, window):
+        scene, i1, i2, frame = self._selection(window)
+        starts = scene.begin_group_drag()
+        i1.setPos(60, 60)   # simulate the drag (snapped while _dragging)
+        i2.setPos(140, 80)
+        frame.setPos(80, 80)
+        scene.commit_group_move(starts)
+
+        assert i1._dragging is False and frame._dragging is False
+        assert window.graph.nodes[i1.node.id].pos == (60, 60)
+        assert window.graph.nodes[i2.node.id].pos == (140, 80)
+        assert window.graph.frames["gf"].rect == (80, 80, 400, 260)
+
+        # the whole selection reverts in a single undo step
+        window.undo_stack.undo()
+        assert window.graph.nodes[i1.node.id].pos == (23, 38)
+        assert window.graph.frames["gf"].rect == (63, 57, 400, 260)
+
+    def test_nothing_moved_pushes_no_command(self, window):
+        scene, i1, i2, frame = self._selection(window)
+        before = scene.undo_stack.index()
+        starts = scene.begin_group_drag()
+        scene.commit_group_move(starts)   # released without moving
+        assert scene.undo_stack.index() == before
+        assert i1._dragging is False and frame._dragging is False
