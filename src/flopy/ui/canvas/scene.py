@@ -223,6 +223,9 @@ class NodeGraphScene(QGraphicsScene):
     def push_frame_title(self, frame_id: str, title: str) -> None:
         self.undo_stack.push(UpdateFrameCommand(self.graph, frame_id, title=title))
 
+    def push_frame_color(self, frame_id: str, color: str) -> None:
+        self.undo_stack.push(UpdateFrameCommand(self.graph, frame_id, color=color))
+
     # -------------------------------------------------------------- reroute
 
     def insert_reroute(self, conn: Connection, scene_pos: QPointF) -> None:

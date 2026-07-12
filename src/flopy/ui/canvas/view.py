@@ -15,6 +15,7 @@ class NodeGraphView(ZoomPanGraphicsView):
     palette_requested = Signal(QPointF, QPoint)    # scene pos, global pos
     node_dropped = Signal(str, QPointF)            # type_id, scene pos
     node_context_requested = Signal(str, QPoint)   # node_id, global pos
+    frame_context_requested = Signal(str, QPoint)  # frame_id, global pos
 
     def __init__(self, scene: NodeGraphScene, parent=None) -> None:
         super().__init__(scene, parent)
@@ -87,6 +88,7 @@ class NodeGraphView(ZoomPanGraphicsView):
 
     def contextMenuEvent(self, event) -> None:
         from .node_item import NodeItem, PortItem
+        from .frame_item import FrameItem
         item = self.itemAt(event.pos())
         if item is None:
             self.add_node_requested.emit(
@@ -97,6 +99,10 @@ class NodeGraphView(ZoomPanGraphicsView):
             item = item.node_item
         if isinstance(item, NodeItem):
             self.node_context_requested.emit(item.node.id, event.globalPos())
+            event.accept()
+            return
+        if isinstance(item, FrameItem):
+            self.frame_context_requested.emit(item.frame.id, event.globalPos())
             event.accept()
             return
         super().contextMenuEvent(event)
