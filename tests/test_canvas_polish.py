@@ -90,6 +90,16 @@ class TestFrames:
         stack.undo()
         assert "f1" in graph.frames and "f1" in scene.frame_items
 
+    def test_push_frame_color_is_undoable(self, env):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", title="Stage", color="#33415c"))
+        scene.push_frame_color("f1", "#ff0000")
+        assert graph.frames["f1"].color == "#ff0000"
+        stack.undo()
+        assert graph.frames["f1"].color == "#33415c"
+        stack.redo()
+        assert graph.frames["f1"].color == "#ff0000"
+
     def test_frame_serialization_round_trip(self, env, registry):
         from flopy.core.serialization import graph_from_dict
         graph, stack, scene = env

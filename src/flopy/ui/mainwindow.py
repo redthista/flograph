@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt
-from PySide6.QtGui import QAction, QKeySequence, QUndoStack
+from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QInputDialog, QLineEdit,
-    QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QStackedWidget,
-    QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QApplication, QColorDialog, QDockWidget, QFileDialog, QInputDialog,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
+    QStackedWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from flopy.core import (
@@ -287,6 +287,7 @@ class MainWindow(QMainWindow):
         self.view.palette_requested.connect(self._show_palette)
         self.view.node_dropped.connect(self._add_node_at)
         self.view.node_context_requested.connect(self._show_node_menu)
+        self.view.frame_context_requested.connect(self._show_frame_menu)
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self.scene.node_double_clicked.connect(self._on_node_double_clicked)
         self.scene.node_rename_requested.connect(self._rename_node)
@@ -784,6 +785,23 @@ class MainWindow(QMainWindow):
             self._add_frame_at(scene_pos)
         elif chosen is not None and chosen.data():
             self._add_node_at(chosen.data(), scene_pos)
+
+    def _show_frame_menu(self, frame_id: str, global_pos: QPoint) -> None:
+        if frame_id not in self.graph.frames:
+            return
+        menu = QMenu(self)
+        change_color = menu.addAction("Change colour…")
+        chosen = menu.exec(global_pos)
+        if chosen is change_color:
+            self._pick_frame_color(frame_id)
+
+    def _pick_frame_color(self, frame_id: str) -> None:
+        if frame_id not in self.graph.frames:
+            return
+        current = QColor(self.graph.frames[frame_id].color)
+        color = QColorDialog.getColor(current, self, "Frame colour")
+        if color.isValid():
+            self.scene.push_frame_color(frame_id, color.name())
 
     def _show_node_menu(self, node_id: str, global_pos: QPoint) -> None:
         if node_id not in self.graph.nodes:
