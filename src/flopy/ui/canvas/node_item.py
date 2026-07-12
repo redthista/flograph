@@ -40,6 +40,8 @@ TABLE_MIN_H, TABLE_MAX_H = 140.0, 2000.0
 
 BUTTON_TYPE = "flopy.util.action_button"
 BUTTON_W, BUTTON_H = 150.0, 50.0
+BUTTON_MIN_W, BUTTON_MAX_W = 90.0, 400.0
+BUTTON_MIN_H, BUTTON_MAX_H = 36.0, 160.0
 
 FIGURE_TYPES = {"flopy.viz.show_plot"}
 FIGURE_MIN_W, FIGURE_MAX_W = 260.0, 1600.0
@@ -178,7 +180,8 @@ class NodeItem(QGraphicsObject):
             self.width = min(TABLE_MAX_W, max(
                 TABLE_MIN_W, float(node.params.get("width", 320))))
         elif self.button:
-            self.width = BUTTON_W
+            self.width = min(BUTTON_MAX_W, max(
+                BUTTON_MIN_W, float(node.params.get("width", BUTTON_W))))
         elif self.figure_card:
             self.width = min(FIGURE_MAX_W, max(
                 FIGURE_MIN_W, float(node.params.get("width", 420))))
@@ -200,6 +203,7 @@ class NodeItem(QGraphicsObject):
         self._live_height: float | None = None  # transient, while drag-resizing
         self._dragging = False  # a header-bar move is in progress (snap gate)
         self._move_suppressed = False  # body press cleared ItemIsMovable
+        self._button_edit = False  # button in edit mode (right-click to enter)
         self._note_editor: QGraphicsProxyWidget | None = None
         self._note_editor_widget: QPlainTextEdit | None = None
         self._closing_note_edit = False
@@ -219,10 +223,14 @@ class NodeItem(QGraphicsObject):
         self._slicer_proxy: QGraphicsProxyWidget | None = None
         self._slicer_placeholder: QLabel | None = None
         self.setFlags(
-            QGraphicsItem.ItemIsMovable
-            | QGraphicsItem.ItemIsSelectable
+            QGraphicsItem.ItemIsSelectable
             | QGraphicsItem.ItemSendsGeometryChanges
         )
+        # Buttons stay put until right-click puts them in edit mode; every
+        # other node drags freely. Keeping buttons non-movable is what stops a
+        # button caught in a multi-selection from being dragged with the group.
+        if not self.button:
+            self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
         self.setAcceptHoverEvents(True)  # drives the move/resize cursors
         self.setPos(*node.pos)
@@ -253,7 +261,10 @@ class NodeItem(QGraphicsObject):
         if self.compact:
             return 24.0
         if self.button:
-            return BUTTON_H
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", BUTTON_H) or BUTTON_H)
+            return min(BUTTON_MAX_H, max(BUTTON_MIN_H, fixed))
         if self.note:
             if self._live_height is not None:
                 return self._live_height
@@ -1072,6 +1083,18 @@ class NodeItem(QGraphicsObject):
                          Qt.AlignCenter | Qt.TextWordWrap,
                          f"▶  {self.node.label}")
 
+        if self._button_edit:
+            # A dashed overlay plus a corner grip signals "editable" — this is
+            # the only cue that the button now moves/resizes instead of firing.
+            painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.2, Qt.DashLine))
+            painter.drawPath(body)
+            painter.setPen(QPen(QColor("#ffffff"), 1.4))
+            handle = self._handle_rect()
+            for i in (4.0, 8.0):
+                painter.drawLine(
+                    QPointF(handle.right() - i, handle.bottom() - 2),
+                    QPointF(handle.right() - 2, handle.bottom() - i))
+
     def _paint_kpi(self, painter: QPainter) -> None:
         """The KPI card: the widget-card chrome with a big painted value —
         vector text stays crisp at every zoom, no proxy widget needed."""
@@ -1178,11 +1201,14 @@ class NodeItem(QGraphicsObject):
             return KPI_MIN_W, KPI_MAX_W, KPI_MIN_H, KPI_MAX_H
         if self.slicer:
             return SLICER_MIN_W, SLICER_MAX_W, SLICER_MIN_H, SLICER_MAX_H
+        if self.button:
+            return BUTTON_MIN_W, BUTTON_MAX_W, BUTTON_MIN_H, BUTTON_MAX_H
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
 
     def _resizable(self) -> bool:
         return bool(self.note or self.table or self.figure_card
-                    or self.table_viewer or self.kpi_card or self.slicer)
+                    or self.table_viewer or self.kpi_card or self.slicer
+                    or (self.button and self._button_edit))
 
     def _header_h(self) -> float:
         """Height of the drag bar — the only region a move can start from.
@@ -1218,6 +1244,8 @@ class NodeItem(QGraphicsObject):
             self.setCursor(Qt.SizeHorCursor)
         elif edge == "bottom":
             self.setCursor(Qt.SizeVerCursor)
+        elif self.button and self._button_edit:
+            self.setCursor(Qt.SizeAllCursor)  # whole face drags in edit mode
         elif (not self.compact and not self.button
                 and event.pos().y() < self._header_h()):
             self.setCursor(Qt.SizeAllCursor)  # the header drag bar
@@ -1229,6 +1257,26 @@ class NodeItem(QGraphicsObject):
         self.unsetCursor()
         super().hoverLeaveEvent(event)
 
+    def enter_button_edit(self) -> None:
+        """Put this Action Button into edit mode: right-click entry point. The
+        button becomes selectable/movable/resizable and stops firing on click.
+        Selecting it alone (clearing other selections) is what keeps a later
+        drag from carrying any previously-selected nodes along."""
+        if not self.button:
+            return
+        scene = self.scene()
+        if scene is not None:
+            scene.clearSelection()
+        self._button_edit = True
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setSelected(True)
+        self.update()
+
+    def _exit_button_edit(self) -> None:
+        self._button_edit = False
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self.update()
+
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self._dragging \
                 and snapping_active(self.scene()):
@@ -1239,18 +1287,42 @@ class NodeItem(QGraphicsObject):
             scene = self.scene()
             if scene is not None:
                 scene.node_item_moved(self.node.id)
+        if change == QGraphicsItem.ItemSelectedHasChanged \
+                and self._button_edit and not value:
+            # Clicking the canvas or another node drops the selection, which
+            # leaves button edit mode and restores fire-on-click.
+            self._exit_button_edit()
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
         if self.button and event.button() == Qt.LeftButton \
-                and not self.isSelected():
-            # unselected: a plain left-click fires the action instead of
-            # selecting/dragging. Right-click (context menu) still selects it
-            # per the usual flow; once selected, left-click/drag moves it.
+                and not self._button_edit:
+            # Default state: a left-click fires the action. Editing (move and
+            # resize) is only reachable via right-click, which enters edit mode.
             scene = self.scene()
             if scene is not None:
                 scene.button_fired.emit(self.node.id)
             event.accept()
+            return
+        if self.button and self._button_edit \
+                and event.button() == Qt.LeftButton:
+            # In edit mode the whole face drags; an edge/corner grip resizes.
+            edge = self._edge_at(event.pos())
+            if edge is not None:
+                self._resizing_card = True
+                self._resize_edge = edge
+                self._resize_start = (event.scenePos().x(),
+                                      event.scenePos().y(),
+                                      self.width, self.body_height)
+                self._live_height = self.body_height
+                event.accept()
+                return
+            self._dragging = True
+            super().mousePressEvent(event)
+            scene = self.scene()
+            if scene is not None:
+                self._drag_start_positions = {
+                    self.node.id: (self.pos().x(), self.pos().y())}
             return
         edge = (self._edge_at(event.pos())
                 if event.button() == Qt.LeftButton else None)

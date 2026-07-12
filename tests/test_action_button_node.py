@@ -1,8 +1,8 @@
 """The Action Button: port-less canvas control that fires a run/message
 action instead of taking part in the data flow."""
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import Qt, QPointF
+from PySide6.QtWidgets import QGraphicsItem, QMessageBox
 from PySide6.QtGui import QUndoStack
 
 from flopy.core import Frame, Graph, NodeRegistry
@@ -26,15 +26,28 @@ def env(qtbot, registry):
 
 
 class _FakeMouseEvent:
-    """Duck-typed stand-in for a QGraphicsSceneMouseEvent, covering only the
-    members NodeItem.mousePressEvent reads on the unselected-fire path."""
+    """Duck-typed stand-in for a QGraphicsSceneMouseEvent. Covers the members
+    the fire path reads plus pos/scenePos/modifiers for the edit-mode resize
+    gesture (whose press/move/release branches all return before super())."""
 
-    def __init__(self, button):
+    def __init__(self, button, pos=None, scene_pos=None, modifiers=Qt.NoModifier):
         self._button = button
+        self._pos = pos if pos is not None else QPointF(0, 0)
+        self._scene_pos = scene_pos if scene_pos is not None else self._pos
+        self._modifiers = modifiers
         self.accepted = False
 
     def button(self):
         return self._button
+
+    def pos(self):
+        return self._pos
+
+    def scenePos(self):
+        return self._scene_pos
+
+    def modifiers(self):
+        return self._modifiers
 
     def accept(self):
         self.accepted = True
@@ -69,6 +82,74 @@ def test_button_fires_on_click_when_unselected(env, registry):
 
     assert fired == [node.id]
     assert event.accepted
+
+
+def test_enter_edit_mode_makes_button_movable_and_clears_other_selection(env, registry):
+    graph, stack, scene = env
+    other = graph.add_node(registry.instantiate("flopy.util.constant"))
+    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    item = scene.node_items[node.id]
+    scene.node_items[other.id].setSelected(True)
+
+    item.enter_button_edit()
+
+    assert item._button_edit and item.isSelected()
+    assert item.flags() & QGraphicsItem.ItemIsMovable
+    # entering edit mode selects the button alone, so a drag can't carry the
+    # previously-selected node along (the "moves both" bug)
+    assert not scene.node_items[other.id].isSelected()
+
+
+def test_left_click_in_edit_mode_resizes_instead_of_firing(env, registry):
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    item = scene.node_items[node.id]
+    item.enter_button_edit()
+
+    fired = []
+    scene.button_fired.connect(fired.append)
+    # press on the bottom-right grip → grabs the resize corner, never fires
+    corner = QPointF(item.width, item.body_height)
+    item.mousePressEvent(_FakeMouseEvent(Qt.LeftButton, pos=corner,
+                                         scene_pos=corner))
+
+    assert fired == []
+    assert item._resizing_card
+    item.mouseReleaseEvent(_FakeMouseEvent(Qt.LeftButton))
+
+
+def test_resize_in_edit_mode_persists_size(env, registry):
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    item = scene.node_items[node.id]
+    item.enter_button_edit()
+
+    start = QPointF(item.width, item.body_height)          # 150, 50
+    end = QPointF(item.width + 40, item.body_height + 20)   # 190, 70
+    ctrl = Qt.ControlModifier  # bypass grid snapping for a deterministic delta
+    item.mousePressEvent(_FakeMouseEvent(Qt.LeftButton, pos=start,
+                                         scene_pos=start, modifiers=ctrl))
+    item.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, scene_pos=end,
+                                        modifiers=ctrl))
+    item.mouseReleaseEvent(_FakeMouseEvent(Qt.LeftButton, modifiers=ctrl))
+
+    assert (item.width, item.body_height) == (190.0, 70.0)
+    assert node.params["width"] == 190
+    assert node.params["height"] == 70
+
+
+def test_click_away_exits_edit_mode(env, registry):
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    item = scene.node_items[node.id]
+    item.enter_button_edit()
+    assert item._button_edit
+
+    # clicking the canvas / another node drops the selection
+    item.setSelected(False)
+
+    assert not item._button_edit
+    assert not (item.flags() & QGraphicsItem.ItemIsMovable)
 
 
 @pytest.fixture
