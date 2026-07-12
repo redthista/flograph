@@ -37,6 +37,7 @@ class FrameItem(QGraphicsObject):
         self._press_size = self._size
         self._press_pos = QPointF()
         self._grabbed: list = []  # (node_item, offset)
+        self._group_starts: dict | None = None  # multi-selection drag snapshot
         self._hover_run = False
         self._run_pressed = False
 
@@ -158,9 +159,18 @@ class FrameItem(QGraphicsObject):
             self._resizing = True
             event.accept()
             return
-        # grab nodes whose centers sit inside the frame
         scene = self.scene()
         self._grabbed = []
+        if (event.button() == Qt.LeftButton and self.isSelected()
+                and scene is not None and len(scene._selected_movables()) > 1):
+            # Part of a multi-selection: move as a uniform group so every
+            # selected node/frame snaps and commits together. Skip the
+            # content-grab — a node that's both inside and independently
+            # selected would otherwise be moved twice.
+            super().mousePressEvent(event)
+            self._group_starts = scene.begin_group_drag()
+            return
+        # Single-frame drag: carry the nodes whose centers sit inside.
         rect = self.scene_rect()
         for item in scene.node_items.values():
             if rect.contains(item.sceneBoundingRect().center()):
@@ -205,6 +215,11 @@ class FrameItem(QGraphicsObject):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+        if self._group_starts is not None:
+            # Multi-selection drag: the scene commits the whole selection.
+            scene.commit_group_move(self._group_starts)
+            self._group_starts = None
+            return
         if self.pos() != self._press_pos:
             moves = {}
             for item, offset in self._grabbed:
