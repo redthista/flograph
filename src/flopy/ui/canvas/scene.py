@@ -48,6 +48,11 @@ class NodeGraphScene(QGraphicsScene):
         self.connection_items: dict[str, ConnectionItem] = {}
         self.frame_items: dict[str, FrameItem] = {}
 
+        # Snap-to-grid view preference; the main window is the sole writer.
+        from .grid import DEFAULT_STEP
+        self.snap_enabled = False
+        self.grid_step = DEFAULT_STEP
+
         self.setSceneRect(QRectF(-SCENE_EXTENT, -SCENE_EXTENT,
                                  2 * SCENE_EXTENT, 2 * SCENE_EXTENT))
 

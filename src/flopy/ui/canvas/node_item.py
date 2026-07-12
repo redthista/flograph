@@ -20,6 +20,7 @@ from flopy.core.node import NodeStatus
 
 from .. import theme
 from ..slicer_list import SlicerListWidget, selected_param_values
+from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 
 NODE_WIDTH = 170.0
 HEADER_H = 26.0
@@ -194,8 +195,11 @@ class NodeItem(QGraphicsObject):
             self.width = NODE_WIDTH
         self._note_doc: QTextDocument | None = None
         self._resizing_card = False
+        self._resize_edge = "corner"  # which edge/corner the drag grabbed
         self._resize_start = (0.0, 0.0, 0.0, 0.0)  # scene x/y, width/height
         self._live_height: float | None = None  # transient, while drag-resizing
+        self._dragging = False  # a header-bar move is in progress (snap gate)
+        self._move_suppressed = False  # body press cleared ItemIsMovable
         self._note_editor: QGraphicsProxyWidget | None = None
         self._note_editor_widget: QPlainTextEdit | None = None
         self._closing_note_edit = False
@@ -220,6 +224,7 @@ class NodeItem(QGraphicsObject):
             | QGraphicsItem.ItemSendsGeometryChanges
         )
         self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
+        self.setAcceptHoverEvents(True)  # drives the move/resize cursors
         self.setPos(*node.pos)
 
         self.input_ports: dict[str, PortItem] = {}
@@ -1175,7 +1180,61 @@ class NodeItem(QGraphicsObject):
             return SLICER_MIN_W, SLICER_MAX_W, SLICER_MIN_H, SLICER_MAX_H
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
 
+    def _resizable(self) -> bool:
+        return bool(self.note or self.table or self.figure_card
+                    or self.table_viewer or self.kpi_card or self.slicer)
+
+    def _header_h(self) -> float:
+        """Height of the drag bar — the only region a move can start from.
+        Headerless kinds (reroute, button) drag by their whole body, having
+        nothing else to grab; notes get a thin top strip."""
+        if self.compact or self.button:
+            return self.body_height
+        return HEADER_H
+
+    def _edge_at(self, pos: QPointF) -> Optional[str]:
+        """Which resize edge/corner (if any) a point grabs: "right", "bottom",
+        "corner", or None. Only resizable cards, and only when selected."""
+        if not (self._resizable() and self.isSelected()):
+            return None
+        w, h = self.width, self.body_height
+        near_right = w - EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
+        near_bottom = h - EDGE_MARGIN <= pos.y() <= h + EDGE_MARGIN
+        within_h = -EDGE_MARGIN <= pos.y() <= h + EDGE_MARGIN
+        within_w = -EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
+        if self._handle_rect().contains(pos) or (near_right and near_bottom):
+            return "corner"
+        if near_right and within_h:
+            return "right"
+        if near_bottom and within_w:
+            return "bottom"
+        return None
+
+    def hoverMoveEvent(self, event) -> None:
+        edge = self._edge_at(event.pos())
+        if edge == "corner":
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif edge == "right":
+            self.setCursor(Qt.SizeHorCursor)
+        elif edge == "bottom":
+            self.setCursor(Qt.SizeVerCursor)
+        elif (not self.compact and not self.button
+                and event.pos().y() < self._header_h()):
+            self.setCursor(Qt.SizeAllCursor)  # the header drag bar
+        else:
+            self.unsetCursor()
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event) -> None:
+        self.unsetCursor()
+        super().hoverLeaveEvent(event)
+
     def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self._dragging \
+                and snapping_active(self.scene()):
+            step = grid_step(self.scene())
+            x, y = snap_point(value.x(), value.y(), step)
+            return QPointF(x, y)
         if change == QGraphicsItem.ItemPositionHasChanged:
             scene = self.scene()
             if scene is not None:
@@ -1193,16 +1252,24 @@ class NodeItem(QGraphicsObject):
                 scene.button_fired.emit(self.node.id)
             event.accept()
             return
-        if (self.note or self.table or self.figure_card or self.table_viewer
-                or self.kpi_card or self.slicer) \
-                and self.isSelected() \
-                and self._handle_rect().contains(event.pos()):
+        edge = (self._edge_at(event.pos())
+                if event.button() == Qt.LeftButton else None)
+        if edge is not None:
             self._resizing_card = True
+            self._resize_edge = edge
             self._resize_start = (event.scenePos().x(), event.scenePos().y(),
                                   self.width, self.body_height)
             self._live_height = self.body_height
             event.accept()
             return
+        if event.button() == Qt.LeftButton:
+            # Only the header drag bar starts a move; a press on the body just
+            # selects (clear ItemIsMovable for this gesture so it can't drag).
+            if event.pos().y() < self._header_h():
+                self._dragging = True
+            else:
+                self._move_suppressed = True
+                self.setFlag(QGraphicsItem.ItemIsMovable, False)
         super().mousePressEvent(event)
         scene = self.scene()
         if scene is not None:
@@ -1215,10 +1282,21 @@ class NodeItem(QGraphicsObject):
         if self._resizing_card:
             min_w, max_w, min_h, max_h = self._resize_bounds()
             start_x, start_y, start_w, start_h = self._resize_start
-            new_width = min(max_w, max(
-                min_w, start_w + event.scenePos().x() - start_x))
-            new_height = min(max_h, max(
-                min_h, start_h + event.scenePos().y() - start_y))
+            edge = self._resize_edge
+            new_width = self.width
+            new_height = self._live_height
+            snapping = snapping_active(self.scene(), event.modifiers())
+            step = grid_step(self.scene())
+            if edge in ("right", "corner"):
+                new_width = start_w + event.scenePos().x() - start_x
+                if snapping:
+                    new_width = snap(new_width, step)
+                new_width = min(max_w, max(min_w, new_width))
+            if edge in ("bottom", "corner"):
+                new_height = start_h + event.scenePos().y() - start_y
+                if snapping:
+                    new_height = snap(new_height, step)
+                new_height = min(max_h, max(min_h, new_height))
             if new_width != self.width or new_height != self._live_height:
                 self.prepareGeometryChange()
                 if new_width != self.width:
@@ -1280,6 +1358,10 @@ class NodeItem(QGraphicsObject):
                 self._layout_slicer_proxy()
             event.accept()
             return
+        if self._move_suppressed:
+            self._move_suppressed = False
+            self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self._dragging = False
         super().mouseReleaseEvent(event)
         scene = self.scene()
         if scene is None or not self._drag_start_positions:

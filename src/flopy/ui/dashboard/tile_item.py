@@ -19,6 +19,9 @@ from PySide6.QtWidgets import (
 from flopy.core import Tile
 
 from .. import theme
+from ..canvas.grid import (
+    EDGE_MARGIN, grid_step, snap, snap_point, snapping_active,
+)
 from ..canvas.node_item import (
     BUTTON_H, BUTTON_W, FIGURE_TYPES, KPI_TYPE, PLOTLY_TYPE, SLICER_TYPE,
     TABLE_VIEWER_TYPES, kpi_caption, kpi_text,
@@ -72,12 +75,18 @@ class TileItem(QGraphicsObject):
         self._graph = graph
         self._engine = engine
         self.setFlags(QGraphicsItem.ItemIsMovable
-                      | QGraphicsItem.ItemIsSelectable)
+                      | QGraphicsItem.ItemIsSelectable
+                      | QGraphicsItem.ItemSendsGeometryChanges)
         self.setAcceptHoverEvents(True)
+        # set before setPos — ItemSendsGeometryChanges makes setPos fire
+        # itemChange, which reads _dragging
+        self._resizing = False
+        self._resize_edge = "corner"  # which edge/corner the drag grabbed
+        self._dragging = False  # a title-bar move is in progress (snap gate)
+        self._move_suppressed = False  # body press cleared ItemIsMovable
         x, y, w, h = tile.rect
         self.setPos(x, y)
         self._size = (w, h)
-        self._resizing = False
         self._press_scene_pos = QPointF()
         self._press_pos = QPointF()
         self._press_size = self._size
@@ -507,6 +516,37 @@ class TileItem(QGraphicsObject):
 
     # ------------------------------------------------------------ behaviour
 
+    def _edge_at(self, pos: QPointF) -> Optional[str]:
+        """Which resize edge/corner (if any) a point grabs: "right", "bottom",
+        "corner", or None. Buttons are fixed-size and never resize."""
+        if self._kind() == "button":
+            return None
+        w, h = self._size
+        near_right = w - EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
+        near_bottom = h - EDGE_MARGIN <= pos.y() <= h + EDGE_MARGIN
+        within_h = -EDGE_MARGIN <= pos.y() <= h + EDGE_MARGIN
+        within_w = -EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
+        if self._handle_rect().contains(pos) or (near_right and near_bottom):
+            return "corner"
+        if near_right and within_h:
+            return "right"
+        if near_bottom and within_w:
+            return "bottom"
+        return None
+
+    def _apply_edge_cursor(self, pos: QPointF) -> None:
+        edge = self._edge_at(pos)
+        if edge == "corner":
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif edge == "right":
+            self.setCursor(Qt.SizeHorCursor)
+        elif edge == "bottom":
+            self.setCursor(Qt.SizeVerCursor)
+        elif pos.y() < TITLE_H:
+            self.setCursor(Qt.SizeAllCursor)  # the title drag bar
+        else:
+            self.setCursor(Qt.ArrowCursor)
+
     def hoverMoveEvent(self, event) -> None:
         if self._kind() == "button":
             super().hoverMoveEvent(event)
@@ -514,18 +554,28 @@ class TileItem(QGraphicsObject):
         hovering = self._close_rect().contains(event.pos())
         if hovering != self._hover_close:
             self._hover_close = hovering
-            self.setCursor(Qt.PointingHandCursor if hovering
-                           else Qt.ArrowCursor)
             self.setToolTip("Remove this tile" if hovering else "")
             self.update()
+        if hovering:
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self._apply_edge_cursor(event.pos())
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
         if self._hover_close:
             self._hover_close = False
-            self.unsetCursor()
             self.update()
+        self.unsetCursor()
         super().hoverLeaveEvent(event)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self._dragging \
+                and snapping_active(self.scene()):
+            step = grid_step(self.scene())
+            x, y = snap_point(value.x(), value.y(), step)
+            return QPointF(x, y)
+        return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
         if self._kind() == "button":
@@ -549,11 +599,21 @@ class TileItem(QGraphicsObject):
         self._press_scene_pos = event.scenePos()
         self._press_pos = self.pos()
         self._press_size = self._size
-        if (self._kind() != "button"  # buttons are fixed-size, like on canvas
-                and self._handle_rect().contains(event.pos())):
+        edge = (self._edge_at(event.pos())
+                if event.button() == Qt.LeftButton else None)
+        if edge is not None:  # buttons return None (fixed-size, like on canvas)
             self._resizing = True
+            self._resize_edge = edge
             event.accept()
             return
+        if event.button() == Qt.LeftButton:
+            # Only the title bar starts a move; a press on the body just
+            # selects. Buttons have no title bar, so they drag whole-body.
+            if self._kind() != "button" and event.pos().y() >= TITLE_H:
+                self._move_suppressed = True
+                self.setFlag(QGraphicsItem.ItemIsMovable, False)
+            else:
+                self._dragging = True
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -561,10 +621,23 @@ class TileItem(QGraphicsObject):
             event.accept()
             return
         if self._resizing:
+            edge = self._resize_edge
+            width, height = self._size
             delta = event.scenePos() - self._press_scene_pos
+            snapping = snapping_active(self.scene(), event.modifiers())
+            step = grid_step(self.scene())
+            if edge in ("right", "corner"):
+                width = self._press_size[0] + delta.x()
+                if snapping:
+                    width = snap(width, step)
+                width = max(MIN_W, width)
+            if edge in ("bottom", "corner"):
+                height = self._press_size[1] + delta.y()
+                if snapping:
+                    height = snap(height, step)
+                height = max(MIN_H, height)
             self.prepareGeometryChange()
-            self._size = (max(MIN_W, self._press_size[0] + delta.x()),
-                          max(MIN_H, self._press_size[1] + delta.y()))
+            self._size = (width, height)
             self._layout_proxy()
             self.update()
             event.accept()
@@ -589,6 +662,10 @@ class TileItem(QGraphicsObject):
                     (self.pos().x(), self.pos().y(), *self._size))
             event.accept()
             return
+        if self._move_suppressed:
+            self._move_suppressed = False
+            self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self._dragging = False
         super().mouseReleaseEvent(event)
         if self.pos() != self._press_pos and scene is not None:
             scene.push_tile_rect(

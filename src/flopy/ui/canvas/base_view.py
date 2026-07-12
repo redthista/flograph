@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import (QAbstractScrollArea, QGraphicsProxyWidget,
                                QGraphicsView, QScrollBar, QWidget)
@@ -177,18 +177,42 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            self._space_held = False
-            self.setDragMode(QGraphicsView.RubberBandDrag)
+            self._end_space_pan()
             event.accept()
             return
         super().keyReleaseEvent(event)
+
+    def _end_space_pan(self) -> None:
+        """Leave space-pan and restore the normal cursor. Space's key-release
+        can be swallowed when a popup steals focus or the window deactivates
+        mid-pan; without this the open-hand ScrollHandDrag cursor sticks."""
+        if not self._space_held:
+            return
+        self._space_held = False
+        self.setDragMode(QGraphicsView.RubberBandDrag)
+        self.unsetCursor()
+
+    def focusOutEvent(self, event) -> None:
+        self._end_space_pan()
+        super().focusOutEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._end_space_pan()
+        super().leaveEvent(event)
+
+    def changeEvent(self, event) -> None:
+        if event.type() == QEvent.ActivationChange and not self.isActiveWindow():
+            self._end_space_pan()
+        super().changeEvent(event)
 
     # ------------------------------------------------------------------ bg
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         painter.fillRect(rect, theme.CANVAS_BG)
+        from .grid import grid_step
+        fine = grid_step(self.scene())  # follows the chosen snap resolution
         if self.zoom >= FINE_GRID_LOD:
-            self._draw_grid(painter, rect, GRID_FINE, theme.GRID_FINE)
+            self._draw_grid(painter, rect, fine, theme.GRID_FINE)
         self._draw_grid(painter, rect, GRID_COARSE, theme.GRID_COARSE)
 
     @staticmethod

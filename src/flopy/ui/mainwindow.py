@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt
-from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
+from PySide6.QtGui import (
+    QAction, QActionGroup, QColor, QKeySequence, QUndoStack,
+)
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDockWidget, QFileDialog, QInputDialog,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
@@ -27,6 +29,7 @@ from .commands import (
     RemovePageCommand, RenamePageCommand, SetLabelCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
+from .canvas import grid
 from .canvas.node_item import (
     FIGURE_TYPES, KPI_TYPE, PLOTLY_TYPE, SLICER_TYPE, TABLE_VIEWER_TYPES,
 )
@@ -244,6 +247,65 @@ class MainWindow(QMainWindow):
         view_menu = self.menuBar().addMenu("&View")
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
+        view_menu.addSeparator()
+        self._build_snap_actions(view_menu)
+
+    def _build_snap_actions(self, view_menu: QMenu) -> None:
+        """Snap-to-grid toggle + resolution presets, restored from QSettings.
+        Applies to node moves/resizes on the canvas and dashboard tiles."""
+        self.action_snap_grid = QAction("Snap to Grid", self)
+        self.action_snap_grid.setCheckable(True)
+        self.action_snap_grid.setChecked(
+            self.settings.value("snap/enabled", False, type=bool))
+        self.action_snap_grid.toggled.connect(self._on_snap_toggled)
+        view_menu.addAction(self.action_snap_grid)
+
+        resolution_menu = view_menu.addMenu("Grid Resolution")
+        self._grid_group = QActionGroup(self)
+        self._grid_group.setExclusive(True)
+        current = float(self.settings.value("snap/step", grid.DEFAULT_STEP))
+        for name, step in grid.GRID_PRESETS.items():
+            action = QAction(f"{name} ({int(step)} px)", self)
+            action.setCheckable(True)
+            action.setData(step)
+            action.setChecked(abs(step - current) < 0.01)
+            self._grid_group.addAction(action)
+            resolution_menu.addAction(action)
+        if self._grid_group.checkedAction() is None:
+            # persisted step isn't one of the presets — fall back to Normal
+            for action in self._grid_group.actions():
+                if abs(action.data() - grid.DEFAULT_STEP) < 0.01:
+                    action.setChecked(True)
+        self._grid_group.triggered.connect(self._on_grid_resolution)
+        self._apply_snap_settings()
+
+    def _current_grid_step(self) -> float:
+        action = self._grid_group.checkedAction()
+        return float(action.data()) if action is not None else grid.DEFAULT_STEP
+
+    def _on_snap_toggled(self, checked: bool) -> None:
+        self.settings.setValue("snap/enabled", checked)
+        self._apply_snap_settings()
+
+    def _on_grid_resolution(self, action: QAction) -> None:
+        self.settings.setValue("snap/step", float(action.data()))
+        self._apply_snap_settings()
+
+    def _apply_snap_settings(self) -> None:
+        """Push the current snap toggle/step onto every scene and repaint so
+        the grid redraws at the new resolution."""
+        enabled = self.action_snap_grid.isChecked()
+        step = self._current_grid_step()
+        views = [self.view]
+        scenes = [self.scene]
+        for page in self._dashboard_pages.values():
+            scenes.append(page.scene)
+            views.append(page.view)
+        for scene in scenes:
+            scene.snap_enabled = enabled
+            scene.grid_step = step
+        for view in views:
+            view.viewport().update()
 
     def _smart_edit(self, text_method: str, canvas_fn) -> None:
         """Route Ctrl+Z/X/C/V to the focused text widget when there is one,
@@ -378,6 +440,8 @@ class MainWindow(QMainWindow):
             lambda node_id, pos, page_id=page.id:
             self._on_tile_dropped(page_id, node_id, pos))
         self._dashboard_pages[page.id] = widget
+        widget.scene.snap_enabled = self.action_snap_grid.isChecked()
+        widget.scene.grid_step = self._current_grid_step()
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)
 
