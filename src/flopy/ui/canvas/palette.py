@@ -7,7 +7,7 @@ from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QFrame, QLineEdit, QListWidget, QListWidgetItem, QMenu, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from flopy.core import NodeRegistry, NodeSpec
@@ -177,3 +177,52 @@ class LibraryTree(QTreeWidget):
 
     def mimeTypes(self) -> list[str]:
         return [NODE_TYPE_MIME]
+
+    def filter(self, query: str) -> None:
+        """Hide items that don't match query, in place (structure untouched)."""
+        query = query.strip()
+        if not query:
+            self._set_all_visible()
+            return
+        matched = {spec.type_id for spec in self._registry.search(query)}
+        for i in range(self.topLevelItemCount()):
+            self._filter_item(self.topLevelItem(i), matched)
+
+    def _filter_item(self, item: QTreeWidgetItem, matched: set[str]) -> bool:
+        type_id = item.data(0, Qt.UserRole)
+        if type_id:
+            visible = type_id in matched
+            item.setHidden(not visible)
+            return visible
+        any_visible = False
+        for i in range(item.childCount()):
+            if self._filter_item(item.child(i), matched):
+                any_visible = True
+        item.setHidden(not any_visible)
+        if any_visible:
+            item.setExpanded(True)
+        return any_visible
+
+    def _set_all_visible(self) -> None:
+        def _show(item: QTreeWidgetItem) -> None:
+            item.setHidden(False)
+            for i in range(item.childCount()):
+                _show(item.child(i))
+        for i in range(self.topLevelItemCount()):
+            _show(self.topLevelItem(i))
+
+
+class LibraryPanel(QWidget):
+    """Node Library dock content: a search box above the persistent tree."""
+
+    def __init__(self, registry: NodeRegistry, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search nodes…")
+        self.tree = LibraryTree(registry)
+        layout.addWidget(self.search)
+        layout.addWidget(self.tree, 1)
+        self.search.textChanged.connect(self.tree.filter)
