@@ -13,13 +13,19 @@ flograph                      # launch the app
 ```
 
 To publish to an internal PyPI repository, build and upload the artifacts
-in `dist/`:
+in `dist/` — with uv, or with pip-only tooling:
 
 ```bash
-uv build
+uv build                                  # or: pip install build && python -m build
 uv publish --publish-url https://<host>/artifactory/api/pypi/<repo>/ \
-    --username <user> --password <token>   # or: twine upload --repository-url ...
+    --username <user> --password <token>
+# pip-only equivalent:
+# pip install twine
+# twine upload --repository-url https://<host>/artifactory/api/pypi/<repo>/ dist/*
 ```
+
+uv is a development convenience only; the built wheel installs with plain
+pip and has no runtime relationship to uv.
 
 Projects saved before the rename to flograph (`.flopy` files with `flopy.*`
 node type ids) still open.
