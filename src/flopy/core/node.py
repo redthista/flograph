@@ -35,6 +35,8 @@ class NodeSpec:
     doc: str = ""
     # placeholder standing in for a type_id serialization couldn't resolve
     broken: bool = False
+    # library sub-section for user-saved nodes; None/"" = ungrouped, top-level
+    group: Optional[str] = None
 
     def input(self, name: str) -> Optional[PortSpec]:
         return next((p for p in self.inputs if p.name == name), None)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
@@ -22,6 +22,10 @@ _SYNTAX_LINE = re.compile(r"syntax error on line (\d+)")
 
 
 class EditorPanel(QWidget):
+    # emitted when the user asks to save the bound node as a library user node;
+    # MainWindow owns the dialog + filesystem + registry reload
+    save_as_user_node_requested = Signal(str)  # node_id
+
     def __init__(self, graph: Graph, undo_stack: QUndoStack,
                  registry: NodeRegistry, parent=None) -> None:
         super().__init__(parent)
@@ -39,11 +43,17 @@ class EditorPanel(QWidget):
         self._reset_btn = QPushButton("Reset to library")
         self._reset_btn.hide()
         self._reset_btn.clicked.connect(self._reset_to_library)
+        self._save_user_btn = QPushButton("Save as user node…")
+        self._save_user_btn.setToolTip(
+            "Save this node's current code to your library as a reusable node")
+        self._save_user_btn.hide()
+        self._save_user_btn.clicked.connect(self._save_as_user_node)
 
         header = QHBoxLayout()
         header.addWidget(self._title)
         header.addWidget(self._badge)
         header.addStretch(1)
+        header.addWidget(self._save_user_btn)
         header.addWidget(self._reset_btn)
 
         self.editor = CodeEditor(self)
@@ -84,6 +94,7 @@ class EditorPanel(QWidget):
             self._title.setText("No node selected")
             self._badge.hide()
             self._reset_btn.hide()
+            self._save_user_btn.hide()
             return
         node = self._graph.node(node_id)
         self._loading = True
@@ -102,6 +113,8 @@ class EditorPanel(QWidget):
         self._badge.setVisible(node.forked)
         self._reset_btn.setVisible(node.forked and library is not None
                                    and library.builtin)
+        # any bound node's current code can be promoted to a user library node
+        self._save_user_btn.setVisible(not node.spec.broken)
 
     # --------------------------------------------------------------- apply
 
@@ -123,6 +136,10 @@ class EditorPanel(QWidget):
         self.editor.set_error_line(None)
         self._undo_stack.push(SetCodeCommand(self._graph, self._node_id, source))
         self._show_message("Applied.")
+
+    def _save_as_user_node(self) -> None:
+        if self._node_id is not None:
+            self.save_as_user_node_requested.emit(self._node_id)
 
     def _reset_to_library(self) -> None:
         if self._node_id is None:

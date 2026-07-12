@@ -6,7 +6,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
-    QFrame, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget,
+    QFrame, QLineEdit, QListWidget, QListWidgetItem, QMenu, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout,
 )
 
@@ -81,10 +81,17 @@ class NodePalettePopup(QFrame):
 
 
 class LibraryTree(QTreeWidget):
-    """Persistent dock: node types by category; drag onto the canvas or
-    double-click to add."""
+    """Persistent dock: built-in node types by category, plus a User Nodes
+    section (grouped by folder). Drag onto the canvas or double-click to add;
+    right-click user entries to manage them."""
 
-    add_requested = Signal(str)  # type_id
+    USER_SECTION = "User Nodes"
+
+    add_requested = Signal(str)            # type_id
+    new_group_requested = Signal()
+    rename_user_node_requested = Signal(str)   # type_id
+    delete_user_node_requested = Signal(str)   # type_id
+    move_user_node_requested = Signal(str)     # type_id
 
     def __init__(self, registry: NodeRegistry, parent=None) -> None:
         super().__init__(parent)
@@ -92,25 +99,72 @@ class LibraryTree(QTreeWidget):
         self.setHeaderHidden(True)
         self.setDragEnabled(True)
         self.itemActivated.connect(self._on_activated)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.reload()
 
     def reload(self) -> None:
         self.clear()
-        for category, specs in self._registry.categories().items():
-            top = QTreeWidgetItem([category])
-            top.setFlags(top.flags() & ~Qt.ItemIsDragEnabled)
-            self.addTopLevelItem(top)
-            for spec in specs:
-                child = QTreeWidgetItem([spec.label])
-                child.setData(0, Qt.UserRole, spec.type_id)
-                child.setToolTip(0, spec.doc or spec.type_id)
-                top.addChild(child)
+        builtin: dict[str, list[NodeSpec]] = {}
+        user: dict[Optional[str], list[NodeSpec]] = {}
+        for spec in self._registry.all():
+            if spec.builtin:
+                builtin.setdefault(spec.category, []).append(spec)
+            else:
+                user.setdefault(spec.group or None, []).append(spec)
+
+        for category in sorted(builtin):
+            top = self._section(category)
+            for spec in builtin[category]:
+                top.addChild(self._node_item(spec))
             top.setExpanded(True)
+
+        user_top = self._section(self.USER_SECTION)
+        user_top.setData(0, Qt.UserRole + 1, self.USER_SECTION)  # section marker
+        for group in sorted(user, key=lambda g: (g is not None, g or "")):
+            specs = user[group]
+            parent = user_top
+            if group is not None:
+                parent = QTreeWidgetItem([group])
+                parent.setFlags(parent.flags() & ~Qt.ItemIsDragEnabled)
+                user_top.addChild(parent)
+                parent.setExpanded(True)
+            for spec in specs:
+                parent.addChild(self._node_item(spec))
+        user_top.setExpanded(True)
+
+    def _section(self, title: str) -> QTreeWidgetItem:
+        top = QTreeWidgetItem([title])
+        top.setFlags(top.flags() & ~Qt.ItemIsDragEnabled)
+        self.addTopLevelItem(top)
+        return top
+
+    def _node_item(self, spec: NodeSpec) -> QTreeWidgetItem:
+        child = QTreeWidgetItem([spec.label])
+        child.setData(0, Qt.UserRole, spec.type_id)
+        child.setToolTip(0, spec.doc or spec.type_id)
+        return child
 
     def _on_activated(self, item: QTreeWidgetItem, column: int) -> None:
         type_id = item.data(0, Qt.UserRole)
         if type_id:
             self.add_requested.emit(type_id)
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        item = self.itemAt(pos)
+        menu = QMenu(self)
+        type_id = item.data(0, Qt.UserRole) if item else None
+        is_user_node = bool(type_id) and type_id.startswith("user.")
+        if is_user_node:
+            menu.addAction("Rename…",
+                           lambda: self.rename_user_node_requested.emit(type_id))
+            menu.addAction("Move to group…",
+                           lambda: self.move_user_node_requested.emit(type_id))
+            menu.addAction("Delete",
+                           lambda: self.delete_user_node_requested.emit(type_id))
+            menu.addSeparator()
+        menu.addAction("New group…", self.new_group_requested.emit)
+        menu.exec(self.viewport().mapToGlobal(pos))
 
     def mimeData(self, items) -> QMimeData:
         mime = QMimeData()
