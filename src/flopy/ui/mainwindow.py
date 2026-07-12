@@ -18,7 +18,9 @@ from flopy.core import (
     parse_spec,
 )
 from flopy.core import serialization
+from flopy.core import user_nodes
 from flopy.engine import ExecutionEngine, cache_persistence
+from flopy.paths import user_nodes_dir
 
 from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
@@ -35,6 +37,7 @@ from .dashboard import (
 )
 from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
+from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
 from .properties.params_panel import ParamsPanel
 
@@ -96,6 +99,12 @@ class MainWindow(QMainWindow):
         library_dock.setWidget(self.library_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, library_dock)
         self.library_tree.add_requested.connect(self._add_node_at_view_center)
+        self.library_tree.new_group_requested.connect(self._new_user_group)
+        self.library_tree.rename_user_node_requested.connect(
+            self._rename_user_node)
+        self.library_tree.move_user_node_requested.connect(self._move_user_node)
+        self.library_tree.delete_user_node_requested.connect(
+            self._delete_user_node)
 
         self.params_panel = ParamsPanel(self.graph, self.undo_stack,
                                         cache=self.engine.cache)
@@ -105,6 +114,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
         self.editor_panel = EditorPanel(self.graph, self.undo_stack, self.registry)
+        self.editor_panel.save_as_user_node_requested.connect(
+            self._save_as_user_node)
         self.editor_dock = QDockWidget("Code", self)
         self.editor_dock.setObjectName("dock_editor")
         self.editor_dock.setWidget(self.editor_panel)
@@ -609,6 +620,100 @@ class MainWindow(QMainWindow):
     def _add_node_at_view_center(self, type_id: str) -> None:
         center = self.view.mapToScene(self.view.viewport().rect().center())
         self._add_node_at(type_id, center)
+
+    # ---------------------------------------------------------- user nodes
+
+    def _reload_user_nodes(self) -> None:
+        errors = self.registry.reload_user_nodes(user_nodes_dir())
+        self.library_tree.reload()
+        if errors:
+            skipped = ", ".join(p.name for p, _ in errors)
+            self.statusBar().showMessage(
+                f"Some user nodes were skipped: {skipped}", 6000)
+
+    def _save_as_user_node(self, node_id: str) -> None:
+        if node_id not in self.graph.nodes:
+            return
+        node = self.graph.node(node_id)
+        nodes_dir = user_nodes_dir()
+        dialog = SaveUserNodeDialog(
+            node.label, user_nodes.list_groups(nodes_dir), self)
+        if dialog.exec() != SaveUserNodeDialog.Accepted:
+            return
+        name, group = dialog.values()
+        try:
+            type_id = user_nodes.write_user_node(
+                nodes_dir, group, name, node.source)
+        except user_nodes.UserNodeError:
+            if QMessageBox.question(
+                    self, "Overwrite user node?",
+                    f"A user node named {name!r} already exists in this "
+                    f"group. Overwrite it?") != QMessageBox.Yes:
+                return
+            type_id = user_nodes.write_user_node(
+                nodes_dir, group, name, node.source, overwrite=True)
+        self._reload_user_nodes()
+        self.statusBar().showMessage(f"Saved user node {type_id}", 4000)
+
+    def _new_user_group(self) -> None:
+        name, ok = QInputDialog.getText(self, "New group", "Group name:")
+        if ok and name.strip():
+            user_nodes.create_group(user_nodes_dir(), name.strip())
+            self._reload_user_nodes()
+
+    def _rename_user_node(self, type_id: str) -> None:
+        spec = self.registry.maybe_get(type_id)
+        current = spec.label if spec else ""
+        name, ok = QInputDialog.getText(
+            self, "Rename user node", "Name:", QLineEdit.Normal, current)
+        if not (ok and name.strip()):
+            return
+        try:
+            user_nodes.rename_user_node(user_nodes_dir(), type_id, name.strip())
+        except user_nodes.UserNodeError as exc:
+            QMessageBox.warning(self, "Rename failed", str(exc))
+            return
+        self._reload_user_nodes()
+
+    def _move_user_node(self, type_id: str) -> None:
+        nodes_dir = user_nodes_dir()
+        groups = user_nodes.list_groups(nodes_dir)
+        choices = ["(no group)", *groups, "New group…"]
+        choice, ok = QInputDialog.getItem(
+            self, "Move to group", "Group:", choices, 0, False)
+        if not ok:
+            return
+        if choice == "New group…":
+            new_name, ok = QInputDialog.getText(self, "New group", "Group name:")
+            if not (ok and new_name.strip()):
+                return
+            target: Optional[str] = user_nodes.slugify(new_name.strip())
+        elif choice == "(no group)":
+            target = None
+        else:
+            target = choice
+        try:
+            user_nodes.move_user_node(nodes_dir, type_id, target)
+        except user_nodes.UserNodeError as exc:
+            QMessageBox.warning(self, "Move failed", str(exc))
+            return
+        self._reload_user_nodes()
+
+    def _delete_user_node(self, type_id: str) -> None:
+        spec = self.registry.maybe_get(type_id)
+        label = spec.label if spec else type_id
+        if QMessageBox.question(
+                self, "Delete user node?",
+                f"Delete user node {label!r}? Nodes already placed on the "
+                f"canvas keep working; new placements won't be available."
+                ) != QMessageBox.Yes:
+            return
+        try:
+            user_nodes.delete_user_node(user_nodes_dir(), type_id)
+        except user_nodes.UserNodeError as exc:
+            QMessageBox.warning(self, "Delete failed", str(exc))
+            return
+        self._reload_user_nodes()
 
     def _show_palette(self, scene_pos: QPointF, global_pos: QPoint) -> None:
         self._palette_scene_pos = scene_pos

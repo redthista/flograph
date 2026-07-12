@@ -7,10 +7,11 @@ script contract as user code. type_id = "flopy.<subpackage>.<stem>".
 from __future__ import annotations
 
 import importlib.resources
+from pathlib import Path
 from typing import Optional
 
 from .node import NodeInstance, NodeSpec
-from .script import parse_spec
+from .script import NodeScriptError, parse_spec
 
 
 class NodeRegistry:
@@ -59,6 +60,49 @@ class NodeRegistry:
                 self.register(parse_spec(entry.read_text(), type_id, builtin=True))
                 loaded.append(type_id)
         return loaded
+
+    def load_user_nodes(self, directory: Path) -> list[tuple[Path, str]]:
+        """Scan a user-writable directory for node scripts and register them.
+
+        Layout: top-level `<stem>.py` is ungrouped; a file one level deep in
+        `<group>/<stem>.py` belongs to that group. type_id =
+        "user.<group>.<stem>" (or "user.<stem>"). Unlike builtins, a malformed
+        user file is skipped (its (path, error) is collected and returned)
+        rather than aborting startup.
+        """
+        directory = Path(directory)
+        errors: list[tuple[Path, str]] = []
+        if not directory.is_dir():
+            return errors
+
+        def _load(path: Path, group: Optional[str]) -> None:
+            stem = path.name[:-3]
+            type_id = f"user.{group}.{stem}" if group else f"user.{stem}"
+            try:
+                spec = parse_spec(path.read_text(), type_id, builtin=False)
+            except (NodeScriptError, OSError) as exc:
+                errors.append((path, str(exc)))
+                return
+            spec.group = group
+            self.register(spec)
+
+        for entry in sorted(directory.iterdir(), key=lambda e: e.name):
+            if entry.name.startswith((".", "_")):
+                continue
+            if entry.is_file() and entry.name.endswith(".py"):
+                _load(entry, None)
+            elif entry.is_dir():
+                for sub in sorted(entry.iterdir(), key=lambda e: e.name):
+                    if (sub.is_file() and sub.name.endswith(".py")
+                            and not sub.name.startswith("_")):
+                        _load(sub, entry.name)
+        return errors
+
+    def reload_user_nodes(self, directory: Path) -> list[tuple[Path, str]]:
+        """Drop all currently-registered user (non-builtin) specs and rescan."""
+        self._specs = {tid: spec for tid, spec in self._specs.items()
+                       if spec.builtin}
+        return self.load_user_nodes(directory)
 
     def search(self, query: str) -> list[NodeSpec]:
         """Fuzzy search over labels (and, weaker, categories) for the palette."""

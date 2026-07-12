@@ -12,6 +12,7 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     from flopy.core import NodeRegistry
+    from flopy.paths import user_nodes_dir
     from flopy.ui.mainwindow import MainWindow
     from flopy.ui.theme import apply_theme
 
@@ -25,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
 
     registry = NodeRegistry()
     registry.load_builtins()
+    registry.load_user_nodes(user_nodes_dir())
 
     window = MainWindow(registry)
     window.resize(1400, 900)

@@ -12,6 +12,7 @@ import sys
 from PySide6.QtCore import QCoreApplication
 
 from flopy.core import NodeRegistry, NodeStatus, serialization
+from flopy.paths import user_nodes_dir
 
 from .scheduler import ExecutionEngine
 
@@ -25,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])
     registry = NodeRegistry()
     registry.load_builtins()
+    registry.load_user_nodes(user_nodes_dir())
     graph = serialization.load(argv[0], registry)
     engine = ExecutionEngine(graph)
 
