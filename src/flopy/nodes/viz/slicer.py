@@ -18,7 +18,7 @@ NODE = {
 PARAMS = [
     {"name": "column", "type": "columns", "label": "Column",
      "default": "", "multi": False},
-    {"name": "selected", "type": "text", "label": "Selected values",
+    {"name": "selected", "type": "string", "label": "Selected values",
      "default": "", "placeholder": 'Ticked values, e.g. ["north", "south"] '
                                    "— blank keeps every row"},
     {"name": "width", "type": "int", "label": "Width",
