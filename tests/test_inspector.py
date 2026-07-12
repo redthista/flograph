@@ -101,6 +101,56 @@ class TestInspector:
         assert host.findChildren(FigureView), "figure view not created"
 
 
+class TestFigureViewTeardown:
+    """Regression for the locLabel segfault: matplotlib keeps event
+    callbacks on the Figure (they survive canvas swaps), so a torn-down
+    toolbar left connected keeps receiving mouse_move through any later
+    canvas showing the same figure — set_message then hits its deleted
+    QLabel ("Internal C++ object already deleted", eventually SIGSEGV)."""
+
+    @staticmethod
+    def _motion_cids(figure) -> set:
+        return set(figure._canvas_callbacks.callbacks.get(
+            "motion_notify_event", {}))
+
+    @staticmethod
+    def _make_view(qtbot):
+        from matplotlib.figure import Figure
+        from flopy.ui.inspector.figure_view import FigureView
+        view = FigureView()
+        qtbot.addWidget(view)
+        view.set_figure(Figure())
+        return view
+
+    def test_set_figure_swap_unhooks_old_toolbar(self, qtbot):
+        view = self._make_view(qtbot)
+        fig = view._canvas.figure
+        old_cid = view._toolbar._id_drag
+        assert old_cid in self._motion_cids(fig)
+
+        view.set_figure(fig)  # node re-ran: same figure, fresh canvas/toolbar
+        assert old_cid not in self._motion_cids(fig)
+        assert view._toolbar._id_drag in self._motion_cids(fig)
+
+    def test_clear_unhooks_toolbar(self, qtbot):
+        view = self._make_view(qtbot)
+        fig = view._canvas.figure
+        cid = view._toolbar._id_drag
+        view.clear()
+        assert cid not in self._motion_cids(fig)
+
+    def test_widget_destruction_without_clear_unhooks_toolbar(self, qtbot):
+        # scene removeItem / popup close delete the widget tree without ever
+        # calling clear(); the toolbar's destroyed signal must unhook it
+        from PySide6.QtCore import QCoreApplication, QEvent
+        view = self._make_view(qtbot)
+        fig = view._canvas.figure
+        cid = view._toolbar._id_drag
+        view.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        assert cid not in self._motion_cids(fig)
+
+
 class TestLogConsole:
     def test_log_lines_appear(self, qtbot, registry):
         graph = Graph()

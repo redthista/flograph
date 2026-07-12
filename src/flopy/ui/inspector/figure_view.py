@@ -10,6 +10,24 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 DialogParent = Union[QWidget, Callable[[], Optional[QWidget]], None]
 
+# NavigationToolbar2's matplotlib event hooks, by the attribute the base
+# class stores each connection id under.
+_TOOLBAR_CID_ATTRS = ("_id_press", "_id_release", "_id_drag")
+
+
+def _disconnect_toolbar_cids(canvas, cids) -> None:
+    """Unhook a toolbar's matplotlib event callbacks.
+
+    matplotlib keeps the callback registry on the *Figure* (so it survives
+    canvas swaps), which means a toolbar left connected outlives its Qt
+    widgets: any later canvas showing the same figure keeps dispatching
+    mouse events into the dead toolbar's deleted QLabel ("Internal C++
+    object already deleted" spam, then a segfault). Registry disconnects
+    are idempotent, so calling this twice for the same toolbar is fine."""
+    for cid in cids:
+        if cid is not None:
+            canvas.mpl_disconnect(cid)
+
 
 class _AnchoredToolbar:
     """Mixin overriding NavigationToolbar2QT.save_figure to anchor its file
@@ -102,7 +120,13 @@ class FigureView(QWidget):
         )
 
         class _Toolbar(_AnchoredToolbar, _Base):
-            pass
+            def set_message(self, s):
+                # Last-ditch guard: an event already in flight when the
+                # toolbar is torn down must not touch the deleted locLabel.
+                import shiboken6
+                if not shiboken6.isValid(self):
+                    return
+                super().set_message(s)
 
         class _ScaledCanvas(FigureCanvasQTAgg):
             """Reports its _render_ratio as the device pixel ratio so
@@ -123,6 +147,16 @@ class FigureView(QWidget):
         self._canvas = _ScaledCanvas(figure)
         self._canvas._render_ratio = self._render_ratio
         self._toolbar = _Toolbar(self._canvas, self, self._dialog_parent)
+        # Safety net for teardown paths that never call clear() (scene
+        # removeItem + GC, popup close, page dispose): the moment the
+        # toolbar's C++ side dies, unhook its matplotlib callbacks. The
+        # lambda captures only the canvas and the cids — never the view
+        # (see _ScaledCanvas on why such a closure would be a hazard).
+        canvas = self._canvas
+        cids = tuple(getattr(self._toolbar, attr, None)
+                     for attr in _TOOLBAR_CID_ATTRS)
+        self._toolbar.destroyed.connect(
+            lambda *_: _disconnect_toolbar_cids(canvas, cids))
         self._layout.addWidget(self._toolbar)
         self._layout.addWidget(self._canvas, 1)
         # Ends in a synchronous draw: embedded in a QGraphicsProxyWidget (the
@@ -144,6 +178,14 @@ class FigureView(QWidget):
         canvas.draw()
 
     def clear(self) -> None:
+        if self._toolbar is not None and self._canvas is not None:
+            # Unhook now rather than waiting for the deferred delete: the
+            # caller may immediately attach a new canvas to the same figure
+            # (set_figure on re-run) and start dispatching events.
+            _disconnect_toolbar_cids(
+                self._canvas,
+                tuple(getattr(self._toolbar, attr, None)
+                      for attr in _TOOLBAR_CID_ATTRS))
         for widget in (self._toolbar, self._canvas):
             if widget is not None:
                 self._layout.removeWidget(widget)
