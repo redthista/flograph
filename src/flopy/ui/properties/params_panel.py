@@ -57,6 +57,12 @@ class ParamsPanel(QScrollArea):
             item = self._layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # hide immediately -- taking it out of the layout alone
+                # doesn't stop it painting, and two rebuilds can happen back
+                # to back (e.g. clearSelection() + setSelected(True)) before
+                # deleteLater() actually runs, leaving stale widgets visible
+                # on top of the new form
+                widget.hide()
                 widget.deleteLater()
         self._setters = {}
 
