@@ -106,6 +106,85 @@ def run(ctx):
         assert panel.editor.toPlainText() == original
 
 
+class TestEditorPanelTempEdits:
+    """Test that unsaved edits persist when switching between nodes."""
+
+    def _panel(self, qtbot, graph, stack, registry):
+        panel = EditorPanel(graph, stack, registry)
+        qtbot.addWidget(panel)
+        return panel
+
+    def test_unsaved_changes_persist_when_switching_nodes(self, qtbot, env, registry):
+        """Switch away from a node with unsaved edits and back — edits should survive."""
+        graph, stack, _ = env
+        node_a = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
+        node_b = graph.add_node(registry.instantiate("flograph.util.constant"))
+        panel = self._panel(qtbot, graph, stack, registry)
+
+        # Select node A and type some unsaved edits.
+        panel.set_node(node_a.id)
+        original_source = panel.editor.toPlainText()
+        panel.editor.setPlainText(original_source + "\n# my temp edit\n")
+        assert "# my temp edit" in panel.editor.toPlainText()
+
+        # Switch to node B — editor should load B's source.
+        panel.set_node(node_b.id)
+        b_source = graph.node(node_b.id).spec.source
+        assert panel.editor.toPlainText() == b_source
+
+        # Switch back to node A — temp edits should be restored.
+        panel.set_node(node_a.id)
+        assert "# my temp edit" in panel.editor.toPlainText()
+
+    def test_applied_edits_clear_cache(self, qtbot, env, registry):
+        """After applying changes, the cache is cleared and next switch loads from graph."""
+        graph, stack, _ = env
+        node_a = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
+        node_b = graph.add_node(registry.instantiate("flograph.util.constant"))
+        panel = self._panel(qtbot, graph, stack, registry)
+
+        # Select A and make unsaved edits.
+        panel.set_node(node_a.id)
+        original_source = panel.editor.toPlainText()
+        edited = original_source + "\n# my temp edit\n"
+        panel.editor.setPlainText(edited)
+
+        # Switch to B then back to A — cache restores the edit.
+        panel.set_node(node_b.id)
+        panel.set_node(node_a.id)
+        assert "# my temp edit" in panel.editor.toPlainText()
+
+        # Apply the code so graph now owns it.
+        panel.apply_code()
+        assert node_a.forked
+
+        # Switch to B then back — should load from graph (which has the applied version).
+        panel.set_node(node_b.id)
+        panel.set_node(node_a.id)
+        # The editor shows what was just applied, not stale cache.
+        assert "# my temp edit" in panel.editor.toPlainText()
+
+    def test_multiple_nodes_all_caret(self, qtbot, env, registry):
+        """Each node retains its own cached edits independently."""
+        graph, stack, _ = env
+        node_a = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
+        node_b = graph.add_node(registry.instantiate("flograph.util.constant"))
+        panel = self._panel(qtbot, graph, stack, registry)
+
+        # Edit A.
+        panel.set_node(node_a.id)
+        panel.editor.setPlainText(panel.editor.toPlainText() + "\n# edit on a\n")
+
+        # Edit B.
+        panel.set_node(node_b.id)
+        panel.editor.setPlainText(panel.editor.toPlainText() + "\n# edit on b\n")
+
+        # Switch back to A — its edits should be intact, not B's.
+        panel.set_node(node_a.id)
+        assert "# edit on a" in panel.editor.toPlainText()
+        assert "# edit on b" not in panel.editor.toPlainText()
+
+
 class TestParamsPanel:
     def test_widgets_commit_and_track_undo(self, qtbot, env, registry):
         graph, stack, _ = env
