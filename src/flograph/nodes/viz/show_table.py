@@ -8,6 +8,7 @@ further consumers (e.g. a second Show Table, or an export node).
 NODE = {
     "label": "Show Table",
     "category": "Viz",
+    "card": "table_viewer",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

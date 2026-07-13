@@ -9,6 +9,7 @@ logic. Use "Format" for a Python format spec (e.g. ",.2f" or ".1%"); leave
 NODE = {
     "label": "Card",
     "category": "Viz",
+    "card": "kpi",
     "inputs": [("table", "dataframe")],
     "outputs": [("value", "any")],
 }

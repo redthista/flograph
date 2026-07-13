@@ -7,6 +7,7 @@ takes no part in execution; double-click it to edit the text.
 NODE = {
     "label": "Note",
     "category": "Util",
+    "card": "note",
     "inputs": [],
     "outputs": [],
 }

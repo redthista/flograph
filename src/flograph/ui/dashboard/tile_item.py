@@ -23,14 +23,18 @@ from ..canvas.grid import (
     EDGE_MARGIN, grid_step, snap, snap_point, snapping_active,
 )
 from ..canvas.node_item import (
-    BUTTON_H, BUTTON_W, FIGURE_TYPES, KPI_TYPE, PLOTLY_TYPE, SLICER_TYPE,
-    TABLE_VIEWER_TYPES, kpi_caption, kpi_text,
+    BUTTON_H, BUTTON_W, card_kind, kpi_caption, kpi_text,
 )
 from ..slicer_list import SlicerListWidget, selected_param_values
 
-BUTTON_TYPE = "flograph.util.action_button"
-TILE_ABLE_TYPES = FIGURE_TYPES | TABLE_VIEWER_TYPES | {
-    PLOTLY_TYPE, BUTTON_TYPE, KPI_TYPE, SLICER_TYPE}
+# card kinds that can be placed on a dashboard page
+TILE_ABLE_KINDS = frozenset({
+    "webview", "figure", "table_viewer", "kpi", "slicer", "button"})
+
+
+def is_tile_able(node) -> bool:
+    """Whether a node can be placed on a dashboard page as a tile."""
+    return card_kind(node) in TILE_ABLE_KINDS
 
 TITLE_H = 24.0
 HANDLE = 14.0
@@ -42,28 +46,24 @@ MISSING_NODE = ("The node behind this tile was deleted.\n"
                 "Select the tile and press Delete to remove it.")
 
 
-def default_tile_port(type_id: str) -> Optional[str]:
-    """The output port a tile of this node type renders."""
-    if type_id in FIGURE_TYPES or type_id == PLOTLY_TYPE:
-        return "figure"
-    if type_id == "flograph.viz.table_spec":
-        return "spec"
-    if type_id in TABLE_VIEWER_TYPES:
-        return "table"
-    if type_id == KPI_TYPE:
-        return "value"
+def default_tile_port(node) -> Optional[str]:
+    """The output port a tile of this node renders — its first declared output
+    ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
+    if card_kind(node) in ("webview", "figure", "table_viewer", "kpi"):
+        return node.spec.outputs[0].name if node.spec.outputs else None
     # action buttons have no ports; slicer tiles show upstream options,
     # not their own (already filtered) output
     return None
 
 
-def default_tile_size(type_id: str) -> tuple[float, float]:
+def default_tile_size(node) -> tuple[float, float]:
     """Buttons land at their canvas size; everything else gets a card."""
-    if type_id == BUTTON_TYPE:
+    kind = card_kind(node)
+    if kind == "button":
         return (BUTTON_W, BUTTON_H)
-    if type_id == KPI_TYPE:
+    if kind == "kpi":
         return (220.0, 120.0)
-    if type_id == SLICER_TYPE:
+    if kind == "slicer":
         return (200.0, 260.0)
     return (420.0, 320.0)
 
@@ -148,20 +148,15 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if node is None:
             return "missing"
-        type_id = node.type_id
-        if type_id in FIGURE_TYPES:
-            return "figure"
-        if type_id == PLOTLY_TYPE:
-            return "plotly"
-        if type_id in TABLE_VIEWER_TYPES:
-            return "table"
-        if type_id == BUTTON_TYPE:
-            return "button"
-        if type_id == KPI_TYPE:
-            return "kpi"
-        if type_id == SLICER_TYPE:
-            return "slicer"
-        return "generic"
+        # map the node's card kind to this tile's internal widget names
+        return {
+            "webview": "plotly",
+            "figure": "figure",
+            "table_viewer": "table",
+            "button": "button",
+            "kpi": "kpi",
+            "slicer": "slicer",
+        }.get(card_kind(node), "generic")
 
     def _build_host(self) -> None:
         host = QWidget()

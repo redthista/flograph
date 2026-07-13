@@ -9,6 +9,7 @@ further consumers (e.g. an export node).
 NODE = {
     "label": "Show Plot",
     "category": "Viz",
+    "card": "figure",
     "inputs": [("table", "dataframe")],
     "outputs": [("figure", "figure")],
 }

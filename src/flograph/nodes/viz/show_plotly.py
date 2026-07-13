@@ -8,6 +8,7 @@ further consumers.
 NODE = {
     "label": "Show Plotly",
     "category": "Viz",
+    "card": "webview",
     "inputs": [("table", "dataframe")],
     "outputs": [("figure", "object")],
 }

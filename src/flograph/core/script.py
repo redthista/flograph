@@ -44,6 +44,14 @@ class NodeScriptError(Exception):
     """The script text does not satisfy the node contract."""
 
 
+# Rich-card kinds a node may declare via NODE["card"]. The value drives which
+# canvas card / dashboard tile renders the node's output; None = ordinary node.
+CARD_KINDS = frozenset({
+    "webview", "figure", "table_viewer", "kpi", "slicer",
+    "button", "note", "grid", "reroute",
+})
+
+
 def spec_filename(type_id: str) -> str:
     return f"<spec:{type_id}>"
 
@@ -122,6 +130,13 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
     if not category or not isinstance(category, str):
         raise NodeScriptError("NODE['category'] must be a non-empty string")
 
+    card = node_decl.get("card")
+    if card is not None and card not in CARD_KINDS:
+        valid = ", ".join(sorted(CARD_KINDS))
+        raise NodeScriptError(
+            f"NODE['card'] {card!r} is not a valid card kind (valid: {valid})"
+        )
+
     inputs = _parse_ports(node_decl.get("inputs", []), PortDirection.INPUT,
                           "NODE['inputs']")
     outputs = _parse_ports(node_decl.get("outputs", []), PortDirection.OUTPUT,
@@ -158,6 +173,7 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         source=source,
         builtin=builtin,
         doc=(namespace.get("__doc__") or "").strip(),
+        card=card,
     )
 
 
