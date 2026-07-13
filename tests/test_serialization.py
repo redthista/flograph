@@ -2,16 +2,16 @@ import json
 
 import pytest
 
-from flopy.core import Frame, Graph, GraphError, NodeStatus, Page, Tile
-from flopy.core.serialization import (
+from flograph.core import Frame, Graph, GraphError, NodeStatus, Page, Tile
+from flograph.core.serialization import (
     SCHEMA_VERSION, graph_from_dict, graph_to_dict, load, save,
 )
 
 
 def build_project_graph(registry) -> Graph:
     graph = Graph()
-    const = registry.instantiate("flopy.util.constant", pos=(0, 0))
-    script = registry.instantiate("flopy.scripting.python_script", pos=(200, 50))
+    const = registry.instantiate("flograph.util.constant", pos=(0, 0))
+    script = registry.instantiate("flograph.scripting.python_script", pos=(200, 50))
     graph.add_node(const)
     graph.add_node(script)
     graph.set_param(const.id, "value", "hello")
@@ -40,7 +40,7 @@ def test_loaded_nodes_are_dirty_and_idle(registry):
 def test_forked_code_survives_round_trip(registry):
     graph = build_project_graph(registry)
     script = next(n for n in graph.nodes.values()
-                  if n.type_id == "flopy.scripting.python_script")
+                  if n.type_id == "flograph.scripting.python_script")
     graph.set_code(script.id, """
 NODE = {"label": "Custom", "category": "Scripting",
         "inputs": [("in1", "any", {"optional": True})],
@@ -57,43 +57,43 @@ def run(ctx, in1):
 
 def test_file_save_load(registry, tmp_path):
     graph = build_project_graph(registry)
-    path = tmp_path / "project.flopy"
+    path = tmp_path / "project.flograph"
     save(graph, path)
     restored = load(path, registry)
     assert graph_to_dict(restored) == graph_to_dict(graph)
 
 
 def test_bad_json_rejected(registry, tmp_path):
-    path = tmp_path / "broken.flopy"
+    path = tmp_path / "broken.flograph"
     path.write_text("{not json")
     with pytest.raises(GraphError, match="invalid JSON"):
         load(path, registry)
 
 
 def test_newer_schema_rejected(registry):
-    with pytest.raises(GraphError, match="newer than this flopy"):
+    with pytest.raises(GraphError, match="newer than this flograph"):
         graph_from_dict({"schema": SCHEMA_VERSION + 1, "graph": {}}, registry)
 
 
 def test_unknown_type_becomes_broken_placeholder(registry):
     data = {"schema": 1, "graph": {"nodes": [
-        {"id": "x", "type": "flopy.gone.mystery", "pos": [0, 0],
+        {"id": "x", "type": "flograph.gone.mystery", "pos": [0, 0],
          "params": {"note": "kept"}, "code": None, "label": None},
     ], "connections": [], "frames": []}}
     graph = graph_from_dict(data, registry)
     node = graph.nodes["x"]
     assert node.spec.broken
-    assert node.type_id == "flopy.gone.mystery"
+    assert node.type_id == "flograph.gone.mystery"
     assert node.status == NodeStatus.ERROR
     assert node.params == {"note": "kept"}
 
 
 def test_broken_node_keeps_its_wiring(registry):
-    const = registry.instantiate("flopy.util.constant", pos=(0, 0))
+    const = registry.instantiate("flograph.util.constant", pos=(0, 0))
     data = {"schema": 1, "graph": {"nodes": [
         {"id": const.id, "type": const.type_id, "pos": [0, 0],
          "params": dict(const.params), "code": None, "label": None},
-        {"id": "y", "type": "flopy.gone.mystery", "pos": [200, 0],
+        {"id": "y", "type": "flograph.gone.mystery", "pos": [200, 0],
          "params": {}, "code": None, "label": None},
     ], "connections": [
         {"id": "c1", "src": [const.id, "value"], "dst": ["y", "in1"]},
@@ -108,7 +108,7 @@ def test_rest_of_graph_still_loads_alongside_a_broken_node(registry):
     graph = build_project_graph(registry)
     data = graph_to_dict(graph)
     data["graph"]["nodes"].append(
-        {"id": "z", "type": "flopy.gone.mystery", "pos": [400, 0],
+        {"id": "z", "type": "flograph.gone.mystery", "pos": [400, 0],
          "params": {}, "code": None, "label": None})
     restored = graph_from_dict(data, registry)
     assert len(restored.nodes) == 3

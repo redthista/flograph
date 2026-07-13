@@ -4,8 +4,8 @@ import pytest
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QLineEdit, QMenu
 
-from flopy.core import Graph
-from flopy.engine import OutputCache, upstream_columns
+from flograph.core import Graph
+from flograph.engine import OutputCache, upstream_columns
 from tests.conftest import make_node
 
 SOURCE = """
@@ -99,7 +99,7 @@ class TestUpstreamColumns:
 class TestColumnPicker:
     @pytest.fixture
     def panel(self, qtbot, wired, table):
-        from flopy.ui.properties.params_panel import ParamsPanel
+        from flograph.ui.properties.params_panel import ParamsPanel
         graph, cache, src, consumer = wired
         cache.set(src.id, {"table": table}, 0.0)
         panel = ParamsPanel(graph, QUndoStack(), cache=cache)

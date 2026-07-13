@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from flopy import packages
+from flograph import packages
 
 
 class TestHelpers:
@@ -51,7 +51,7 @@ class TestHelpers:
 
 class TestDialog:
     def test_lists_and_filters(self, qtbot):
-        from flopy.ui.packages_dialog import PackagesDialog
+        from flograph.ui.packages_dialog import PackagesDialog
         dialog = PackagesDialog()
         qtbot.addWidget(dialog)
         table = dialog._table
@@ -66,7 +66,7 @@ class TestDialog:
     def test_uninstall_refuses_core_packages(self, qtbot, monkeypatch):
         from PySide6.QtWidgets import QMessageBox
 
-        from flopy.ui.packages_dialog import PackagesDialog
+        from flograph.ui.packages_dialog import PackagesDialog
         dialog = PackagesDialog()
         qtbot.addWidget(dialog)
         warned = []
@@ -80,7 +80,7 @@ class TestDialog:
         assert warned and not started
 
     def test_not_busy_initially(self, qtbot):
-        from flopy.ui.packages_dialog import PackagesDialog
+        from flograph.ui.packages_dialog import PackagesDialog
         dialog = PackagesDialog()
         qtbot.addWidget(dialog)
         assert not dialog.busy
