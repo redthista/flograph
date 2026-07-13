@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, NodeRegistry
-from flopy.ui.canvas import NodeGraphScene
+from flograph.core import Graph, NodeRegistry
+from flograph.ui.canvas import NodeGraphScene
 
 
 @pytest.fixture(scope="module")
@@ -25,7 +25,7 @@ def env(qtbot, registry):
 
 
 def test_table_is_registered_with_one_output(registry):
-    spec = registry.get("flopy.io.table")
+    spec = registry.get("flograph.io.table")
     assert spec.inputs == []
     assert [p.name for p in spec.outputs] == ["table"]
     assert spec.param("data") is not None
@@ -35,7 +35,7 @@ def test_table_is_registered_with_one_output(registry):
 
 def test_table_item_embeds_a_grid_widget(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.io.table"))
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[node.id]
     assert item.table
     assert item._table_widget is not None
@@ -47,12 +47,12 @@ def test_table_item_embeds_a_grid_widget(env, registry):
 
 def test_table_runs_and_emits_dataframe(qtbot, env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.io.table"))
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
     graph.set_param(node.id, "data", json.dumps({
         "columns": ["a", "b"],
         "rows": [["1", "2"], ["3", "4"]],
     }))
-    from flopy.engine import ExecutionEngine
+    from flograph.engine import ExecutionEngine
     engine = ExecutionEngine(graph)
     with qtbot.waitSignal(engine.run_finished, timeout=5000) as blocker:
         engine.run_all()
@@ -64,10 +64,10 @@ def test_table_runs_and_emits_dataframe(qtbot, env, registry):
 
 
 def test_table_keeps_non_numeric_column_as_strings(registry):
-    from flopy.core import compile_run
+    from flograph.core import compile_run
     from tests.conftest import FakeContext
 
-    spec = registry.get("flopy.io.table")
+    spec = registry.get("flograph.io.table")
     run = compile_run(spec.source, "test-table")
     params = spec.default_params()
     params["data"] = json.dumps({
@@ -81,7 +81,7 @@ def test_table_keeps_non_numeric_column_as_strings(registry):
 
 def test_table_edit_commits_and_is_undoable(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.io.table"))
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[node.id]
     grid = item._table_widget
     grid.item(0, 0).setText("hello")
@@ -92,7 +92,7 @@ def test_table_edit_commits_and_is_undoable(env, registry):
 
 def test_table_add_and_remove_row_and_column(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.io.table"))
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[node.id]
 
     item._table_add_row()
@@ -113,7 +113,7 @@ def test_table_add_and_remove_row_and_column(env, registry):
 
 def test_table_wont_remove_last_row_or_column(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.io.table"))
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[node.id]
     for _ in range(5):
         item._table_remove_row()
@@ -125,7 +125,7 @@ def test_table_wont_remove_last_row_or_column(env, registry):
 
 def test_table_resize_updates_width_and_height(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.io.table"))
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[node.id]
     graph.set_param(node.id, "width", 500)
     graph.set_param(node.id, "height", 300)
@@ -136,9 +136,9 @@ def test_table_resize_updates_width_and_height(env, registry):
 
 
 def test_table_serialization_round_trip(env, registry):
-    from flopy.core.serialization import graph_from_dict, graph_to_dict
+    from flograph.core.serialization import graph_from_dict, graph_to_dict
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.io.table"))
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
     graph.set_param(node.id, "data", json.dumps({
         "columns": ["x"], "rows": [["9"]],
     }))
@@ -151,7 +151,7 @@ def test_table_serialization_round_trip(env, registry):
 def test_table_excluded_from_wire_drop_palette(registry):
     """Zero inputs -> a wire can never be dropped onto this node's input side,
     but its dataframe output should offer as a target for dataframe inputs."""
-    from flopy.core import PortType, can_connect
-    spec = registry.get("flopy.io.table")
+    from flograph.core import PortType, can_connect
+    spec = registry.get("flograph.io.table")
     assert not spec.inputs
     assert can_connect(PortType.DATAFRAME, spec.outputs[0].type)

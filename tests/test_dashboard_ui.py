@@ -3,11 +3,11 @@ add-tile paths (drop + context-menu helpers)."""
 import pandas as pd
 import pytest
 
-from flopy.core import NodeRegistry, Page, Tile
-from flopy.ui.commands import AddPageCommand, AddTileCommand
-from flopy.ui.dashboard.tile_item import MISSING_NODE, RUN_PROMPT
-from flopy.ui.dashboard.visuals_list import TILE_NODE_MIME
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import NodeRegistry, Page, Tile
+from flograph.ui.commands import AddPageCommand, AddTileCommand
+from flograph.ui.dashboard.tile_item import MISSING_NODE, RUN_PROMPT
+from flograph.ui.dashboard.visuals_list import TILE_NODE_MIME
+from flograph.ui.mainwindow import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -32,7 +32,7 @@ def add_page(window, page_id="p1", title="Board"):
 
 
 def add_show_table(window, pos=(0, 0)):
-    node = window.registry.instantiate("flopy.viz.show_table", pos=pos)
+    node = window.registry.instantiate("flograph.viz.show_table", pos=pos)
     window.graph.add_node(node)
     return node
 
@@ -110,7 +110,7 @@ class TestTiles:
         assert item._is_stale()
 
     def test_deleted_node_leaves_revivable_placeholder(self, window):
-        from flopy.ui.commands import RemoveSelectionCommand
+        from flograph.ui.commands import RemoveSelectionCommand
         add_page(window)
         node = add_show_table(window)
         item = add_tile(window, node)
@@ -130,7 +130,7 @@ class TestTiles:
     def test_figure_tile_shows_figure(self, window):
         from matplotlib.figure import Figure
         add_page(window)
-        node = window.registry.instantiate("flopy.viz.show_plot", pos=(0, 0))
+        node = window.registry.instantiate("flograph.viz.show_plot", pos=(0, 0))
         window.graph.add_node(node)
         item = add_tile(window, node, port="figure")
 
@@ -148,10 +148,10 @@ class TestTiles:
         from PySide6.QtCore import QPointF, Qt
         from PySide6.QtTest import QTest
 
-        from flopy.ui.dashboard.dashboard_view import DashboardView
+        from flograph.ui.dashboard.dashboard_view import DashboardView
 
         add_page(window)
-        node = window.registry.instantiate("flopy.util.action_button",
+        node = window.registry.instantiate("flograph.util.action_button",
                                            pos=(0, 0))
         window.graph.add_node(node)
         window.graph.set_param(node.id, "action", "Run whole flow")
@@ -211,7 +211,7 @@ class TestVisualsList:
     def test_lists_only_tile_able_nodes_and_packs_node_id(self, window):
         add_page(window)
         shown = add_show_table(window)
-        plain = window.registry.instantiate("flopy.util.constant", pos=(0, 0))
+        plain = window.registry.instantiate("flograph.util.constant", pos=(0, 0))
         window.graph.add_node(plain)
 
         visuals = window._dashboard_pages["p1"].visuals
@@ -228,11 +228,11 @@ class TestPersistence:
         add_page(window)
         node = add_show_table(window)
         add_tile(window, node)
-        path = str(tmp_path / "board.flopy")
+        path = str(tmp_path / "board.flograph")
         window._project_path = path
         assert window._save()
 
-        from flopy.core import Graph
+        from flograph.core import Graph
         window._replace_graph(Graph())
         assert not window.graph.pages
         assert not window._dashboard_pages

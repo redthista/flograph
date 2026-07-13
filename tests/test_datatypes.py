@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from flopy.core import PortType, can_connect, validate_value
+from flograph.core import PortType, can_connect, validate_value
 
 
 class TestCanConnect:

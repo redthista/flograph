@@ -1,7 +1,7 @@
 """Dashboard pages in the core model: Page/Tile CRUD and events (Qt-free)."""
 import pytest
 
-from flopy.core import Graph, GraphError, Page, Tile
+from flograph.core import Graph, GraphError, Page, Tile
 
 
 @pytest.fixture

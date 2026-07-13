@@ -8,9 +8,9 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QUndoStack, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
-from flopy.core import Graph, NodeRegistry
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.canvas.view import NodeGraphView
+from flograph.core import Graph, NodeRegistry
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.canvas.view import NodeGraphView
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +41,7 @@ def send_wheel(view, pos: QPoint, delta: int = -120) -> None:
 
 
 def add_table_node(graph, registry, rows: int):
-    node = registry.instantiate("flopy.io.table")
+    node = registry.instantiate("flograph.io.table")
     node.params["data"] = json.dumps(
         {"columns": ["A"], "rows": [[str(i)] for i in range(rows)]})
     graph.add_node(node)

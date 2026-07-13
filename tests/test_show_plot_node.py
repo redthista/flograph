@@ -4,9 +4,9 @@ import pandas as pd
 import pytest
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, NodeRegistry, PortType, can_connect
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import Graph, NodeRegistry, PortType, can_connect
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.mainwindow import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -25,7 +25,7 @@ def env(qtbot, registry):
 
 
 def test_show_plot_is_registered_with_a_dataframe_in_figure_out(registry):
-    spec = registry.get("flopy.viz.show_plot")
+    spec = registry.get("flograph.viz.show_plot")
     assert [p.name for p in spec.inputs] == ["table"]
     assert [p.name for p in spec.outputs] == ["figure"]
     assert spec.inputs[0].type == PortType.DATAFRAME
@@ -37,7 +37,7 @@ def test_show_plot_is_registered_with_a_dataframe_in_figure_out(registry):
 
 def test_show_plot_item_is_a_figure_card_with_placeholder(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
     item = scene.node_items[node.id]
     assert item.figure_card
     assert item._figure_view is not None
@@ -50,7 +50,7 @@ def test_show_plot_item_is_a_figure_card_with_placeholder(env, registry):
 
 def test_show_plot_resize_updates_width_and_height(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
     item = scene.node_items[node.id]
     graph.set_param(node.id, "width", 600)
     graph.set_param(node.id, "height", 400)
@@ -62,7 +62,7 @@ def test_show_plot_resize_updates_width_and_height(env, registry):
 
 def test_show_plot_scale_param_zooms_the_embedded_figure(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
     item = scene.node_items[node.id]
     proxy = item._figure_proxy
     assert proxy.scale() == 1.0
@@ -83,7 +83,7 @@ def test_figure_view_renders_at_the_requested_ratio(qtbot):
     matching device pixel ratio or the magnified raster goes soft."""
     from matplotlib.figure import Figure
 
-    from flopy.ui.inspector.figure_view import FigureView
+    from flograph.ui.inspector.figure_view import FigureView
 
     view = FigureView()
     qtbot.addWidget(view)
@@ -106,7 +106,7 @@ def test_scale_param_bumps_the_embedded_canvas_resolution(env, registry):
     from matplotlib.figure import Figure
 
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
     item = scene.node_items[node.id]
     graph.set_param(node.id, "scale", 200)
 
@@ -119,10 +119,10 @@ def test_scale_param_bumps_the_embedded_canvas_resolution(env, registry):
 def test_view_zoom_compounds_into_the_render_ratio(qtbot, env, registry):
     """Zooming the node canvas into a figure card must re-render the figure
     at the zoomed resolution (debounced via the view's settle timer)."""
-    from flopy.ui.canvas.view import NodeGraphView
+    from flograph.ui.canvas.view import NodeGraphView
 
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_plot"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
     item = scene.node_items[node.id]
     view = NodeGraphView(scene)
     qtbot.addWidget(view)
@@ -155,7 +155,7 @@ def test_set_figure_draws_synchronously(qtbot, monkeypatch):
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
     from matplotlib.figure import Figure
 
-    from flopy.ui.inspector.figure_view import FigureView
+    from flograph.ui.inspector.figure_view import FigureView
 
     draws = []
     original = FigureCanvasQTAgg.draw
@@ -175,8 +175,8 @@ def test_running_the_graph_draws_and_pushes_the_plot_onto_the_canvas_card(
     import json
 
     win = window
-    show = win.registry.instantiate("flopy.viz.show_plot", pos=(300, 0))
-    table = win.registry.instantiate("flopy.io.table", pos=(-300, 0))
+    show = win.registry.instantiate("flograph.viz.show_plot", pos=(300, 0))
+    table = win.registry.instantiate("flograph.io.table", pos=(-300, 0))
     win.graph.add_node(table)
     win.graph.add_node(show)
     win.graph.set_param(table.id, "data", json.dumps({

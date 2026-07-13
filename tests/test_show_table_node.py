@@ -3,9 +3,9 @@ import pandas as pd
 import pytest
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, NodeRegistry, PortType, can_connect
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import Graph, NodeRegistry, PortType, can_connect
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.mainwindow import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -24,7 +24,7 @@ def env(qtbot, registry):
 
 
 def test_show_table_is_registered_with_passthrough_ports(registry):
-    spec = registry.get("flopy.viz.show_table")
+    spec = registry.get("flograph.viz.show_table")
     assert [p.name for p in spec.inputs] == ["table"]
     assert [p.name for p in spec.outputs] == ["table"]
     assert spec.inputs[0].type == PortType.DATAFRAME
@@ -35,10 +35,10 @@ def test_show_table_is_registered_with_passthrough_ports(registry):
 
 
 def test_show_table_runs_as_passthrough(registry):
-    from flopy.core import compile_run
+    from flograph.core import compile_run
     from tests.conftest import FakeContext
 
-    spec = registry.get("flopy.viz.show_table")
+    spec = registry.get("flograph.viz.show_table")
     run = compile_run(spec.source, "test-show-table")
     sentinel = object()
     out = run(FakeContext(params=spec.default_params()), table=sentinel)
@@ -47,7 +47,7 @@ def test_show_table_runs_as_passthrough(registry):
 
 def test_show_table_item_embeds_a_table_view_with_placeholder(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_table"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
     item = scene.node_items[node.id]
     assert item.table_viewer
     assert item._table_viewer_view is not None
@@ -60,7 +60,7 @@ def test_show_table_item_embeds_a_table_view_with_placeholder(env, registry):
 
 def test_show_table_set_table_data_swaps_placeholder_for_grid(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_table"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
     item = scene.node_items[node.id]
 
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
@@ -76,7 +76,7 @@ def test_show_table_set_table_data_swaps_placeholder_for_grid(env, registry):
 
 def test_show_table_resize_updates_width_and_height(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_table"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
     item = scene.node_items[node.id]
     graph.set_param(node.id, "width", 600)
     graph.set_param(node.id, "height", 400)
@@ -88,7 +88,7 @@ def test_show_table_resize_updates_width_and_height(env, registry):
 
 def test_show_table_scale_param_zooms_the_embedded_view(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.viz.show_table"))
+    node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
     item = scene.node_items[node.id]
     proxy = item._table_viewer_proxy
     assert proxy.scale() == 1.0
@@ -117,8 +117,8 @@ def test_running_the_graph_pushes_the_table_onto_the_canvas_card(qtbot, window):
     import json
 
     win = window
-    show = win.registry.instantiate("flopy.viz.show_table", pos=(300, 0))
-    table = win.registry.instantiate("flopy.io.table", pos=(-300, 0))
+    show = win.registry.instantiate("flograph.viz.show_table", pos=(300, 0))
+    table = win.registry.instantiate("flograph.io.table", pos=(-300, 0))
     win.graph.add_node(table)
     win.graph.add_node(show)
     win.graph.set_param(table.id, "data", json.dumps({

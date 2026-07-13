@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from flopy.core import NodeRegistry, parse_spec, serialization
-from flopy.core.graph import Graph
-from flopy.core import user_nodes
+from flograph.core import NodeRegistry, parse_spec, serialization
+from flograph.core.graph import Graph
+from flograph.core import user_nodes
 
 SAMPLE = '''"""My Node
 
@@ -57,7 +57,7 @@ class TestSlugAndTypeId:
         assert user_nodes.split_type_id("user.stem") == (None, "stem")
         assert user_nodes.split_type_id("user.grp.stem") == ("grp", "stem")
         with pytest.raises(user_nodes.UserNodeError):
-            user_nodes.split_type_id("flopy.io.read_csv")
+            user_nodes.split_type_id("flograph.io.read_csv")
 
 
 class TestWriteAndLoad:
@@ -99,7 +99,7 @@ class TestWriteAndLoad:
         reg.reload_user_nodes(tmp_path)
         assert reg.maybe_get("user.temp") is None
         # builtins survive the reload
-        assert reg.maybe_get("flopy.io.read_csv") is not None
+        assert reg.maybe_get("flograph.io.read_csv") is not None
 
 
 class TestFileOps:
@@ -146,7 +146,7 @@ class TestRoundTrip:
         graph.add_node(node)
         assert not node.forked  # referenced by type_id, not embedded
 
-        project = tmp_path / "p.flopy"
+        project = tmp_path / "p.flograph"
         serialization.save(graph, project)
         assert '"code": null' in project.read_text()
 
@@ -157,8 +157,8 @@ class TestRoundTrip:
 
 class TestSaveFlowIntegration:
     def test_save_as_user_node_from_window(self, qtbot, tmp_path, monkeypatch):
-        monkeypatch.setenv("FLOPY_USER_DIR", str(tmp_path))
-        from flopy.ui import mainwindow as mw
+        monkeypatch.setenv("FLOGRAPH_USER_DIR", str(tmp_path))
+        from flograph.ui import mainwindow as mw
 
         reg = NodeRegistry()
         reg.load_builtins()
@@ -166,7 +166,7 @@ class TestSaveFlowIntegration:
         win.confirm_close = False
         qtbot.addWidget(win)
 
-        node = reg.instantiate("flopy.util.constant")
+        node = reg.instantiate("flograph.util.constant")
         win.graph.add_node(node)
 
         class FakeDialog:
@@ -199,7 +199,7 @@ class TestSaveFlowIntegration:
         reg.load_user_nodes(nodes_dir)
         graph = Graph()
         graph.add_node(reg.instantiate(type_id))
-        project = tmp_path / "p.flopy"
+        project = tmp_path / "p.flograph"
         serialization.save(graph, project)
 
         # a registry without the user node -> broken placeholder, not a crash

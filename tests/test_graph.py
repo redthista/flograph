@@ -1,6 +1,6 @@
 import pytest
 
-from flopy.core import Graph, GraphError, NodeStatus, parse_spec
+from flograph.core import Graph, GraphError, NodeStatus, parse_spec
 from tests.conftest import PASSTHROUGH, make_node
 
 TYPED = """

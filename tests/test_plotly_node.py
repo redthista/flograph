@@ -3,8 +3,8 @@ import pandas as pd
 import pytest
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, NodeRegistry, PortType, compile_run
-from flopy.ui.canvas import NodeGraphScene
+from flograph.core import Graph, NodeRegistry, PortType, compile_run
+from flograph.ui.canvas import NodeGraphScene
 from tests.conftest import FakeContext
 
 
@@ -31,7 +31,7 @@ def table():
 
 
 def run_node(registry, params=None, **inputs):
-    spec = registry.get("flopy.viz.show_plotly")
+    spec = registry.get("flograph.viz.show_plotly")
     defaults = spec.default_params()
     defaults.update(params or {})
     run = compile_run(spec.source, "test-plotly")
@@ -39,7 +39,7 @@ def run_node(registry, params=None, **inputs):
 
 
 def test_registered_with_dataframe_in_object_out(registry):
-    spec = registry.get("flopy.viz.show_plotly")
+    spec = registry.get("flograph.viz.show_plotly")
     assert spec.inputs[0].type == PortType.DATAFRAME
     assert spec.outputs[0].type == PortType.OBJECT
     for name in ("kind", "x", "y", "color", "title", "width", "height",
@@ -82,7 +82,7 @@ class TestRun:
 class TestCard:
     def _item(self, env, registry):
         graph, stack, scene = env
-        node = graph.add_node(registry.instantiate("flopy.viz.show_plotly"))
+        node = graph.add_node(registry.instantiate("flograph.viz.show_plotly"))
         return scene.node_items[node.id]
 
     def test_is_a_resizable_card_with_placeholder(self, env, registry):

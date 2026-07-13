@@ -5,9 +5,9 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtWidgets import QGraphicsItem, QMessageBox
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Frame, Graph, NodeRegistry
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import Frame, Graph, NodeRegistry
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.mainwindow import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -54,7 +54,7 @@ class _FakeMouseEvent:
 
 
 def test_button_is_registered_and_portless(registry):
-    spec = registry.get("flopy.util.action_button")
+    spec = registry.get("flograph.util.action_button")
     assert spec.inputs == [] and spec.outputs == []
     assert spec.param("action") is not None
     assert spec.param("targets") is not None
@@ -62,7 +62,7 @@ def test_button_is_registered_and_portless(registry):
 
 def test_button_item_is_fixed_size_and_portless(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    node = graph.add_node(registry.instantiate("flograph.util.action_button"))
     item = scene.node_items[node.id]
     assert item.button
     assert not item.input_ports and not item.output_ports
@@ -71,7 +71,7 @@ def test_button_item_is_fixed_size_and_portless(env, registry):
 
 def test_button_fires_on_click_when_unselected(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    node = graph.add_node(registry.instantiate("flograph.util.action_button"))
     item = scene.node_items[node.id]
     assert not item.isSelected()
 
@@ -86,8 +86,8 @@ def test_button_fires_on_click_when_unselected(env, registry):
 
 def test_enter_edit_mode_makes_button_movable_and_clears_other_selection(env, registry):
     graph, stack, scene = env
-    other = graph.add_node(registry.instantiate("flopy.util.constant"))
-    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    other = graph.add_node(registry.instantiate("flograph.util.constant"))
+    node = graph.add_node(registry.instantiate("flograph.util.action_button"))
     item = scene.node_items[node.id]
     scene.node_items[other.id].setSelected(True)
 
@@ -102,7 +102,7 @@ def test_enter_edit_mode_makes_button_movable_and_clears_other_selection(env, re
 
 def test_left_click_in_edit_mode_resizes_instead_of_firing(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    node = graph.add_node(registry.instantiate("flograph.util.action_button"))
     item = scene.node_items[node.id]
     item.enter_button_edit()
 
@@ -120,7 +120,7 @@ def test_left_click_in_edit_mode_resizes_instead_of_firing(env, registry):
 
 def test_resize_in_edit_mode_persists_size(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    node = graph.add_node(registry.instantiate("flograph.util.action_button"))
     item = scene.node_items[node.id]
     item.enter_button_edit()
 
@@ -140,7 +140,7 @@ def test_resize_in_edit_mode_persists_size(env, registry):
 
 def test_click_away_exits_edit_mode(env, registry):
     graph, stack, scene = env
-    node = graph.add_node(registry.instantiate("flopy.util.action_button"))
+    node = graph.add_node(registry.instantiate("flograph.util.action_button"))
     item = scene.node_items[node.id]
     item.enter_button_edit()
     assert item._button_edit
@@ -163,8 +163,8 @@ def window(qtbot, registry):
 class TestButtonFiredHandler:
     def test_run_nodes_by_label_clears_cache_and_runs(self, qtbot, window):
         win = window
-        target = win.registry.instantiate("flopy.util.constant", pos=(0, 0))
-        button = win.registry.instantiate("flopy.util.action_button", pos=(200, 0))
+        target = win.registry.instantiate("flograph.util.constant", pos=(0, 0))
+        button = win.registry.instantiate("flograph.util.action_button", pos=(200, 0))
         win.graph.add_node(target)
         win.graph.add_node(button)
         win.graph.set_param(button.id, "targets", target.label)
@@ -176,9 +176,9 @@ class TestButtonFiredHandler:
 
     def test_run_whole_flow_runs_every_node(self, qtbot, window):
         win = window
-        a = win.registry.instantiate("flopy.util.constant", pos=(0, 0))
-        b = win.registry.instantiate("flopy.util.constant", pos=(0, 100))
-        button = win.registry.instantiate("flopy.util.action_button", pos=(200, 0))
+        a = win.registry.instantiate("flograph.util.constant", pos=(0, 0))
+        b = win.registry.instantiate("flograph.util.constant", pos=(0, 100))
+        button = win.registry.instantiate("flograph.util.action_button", pos=(200, 0))
         for n in (a, b, button):
             win.graph.add_node(n)
         win.graph.set_param(button.id, "action", "Run whole flow")
@@ -190,9 +190,9 @@ class TestButtonFiredHandler:
 
     def test_run_frame_targets_geometrically_contained_nodes(self, qtbot, window):
         win = window
-        inside = win.registry.instantiate("flopy.util.constant", pos=(10, 10))
-        outside = win.registry.instantiate("flopy.util.constant", pos=(900, 900))
-        button = win.registry.instantiate("flopy.util.action_button", pos=(500, 0))
+        inside = win.registry.instantiate("flograph.util.constant", pos=(10, 10))
+        outside = win.registry.instantiate("flograph.util.constant", pos=(900, 900))
+        button = win.registry.instantiate("flograph.util.action_button", pos=(500, 0))
         for n in (inside, outside, button):
             win.graph.add_node(n)
         win.graph.add_frame(Frame(id="f1", title="Zone A", rect=(0, 0, 200, 200)))
@@ -207,7 +207,7 @@ class TestButtonFiredHandler:
 
     def test_unknown_frame_title_does_nothing(self, window):
         win = window
-        button = win.registry.instantiate("flopy.util.action_button", pos=(0, 0))
+        button = win.registry.instantiate("flograph.util.action_button", pos=(0, 0))
         win.graph.add_node(button)
         win.graph.set_param(button.id, "action", "Run frame")
         win.graph.set_param(button.id, "frame_title", "no such frame")
@@ -216,7 +216,7 @@ class TestButtonFiredHandler:
 
     def test_show_message_opens_a_markdown_dialog(self, window, monkeypatch):
         win = window
-        button = win.registry.instantiate("flopy.util.action_button", pos=(0, 0))
+        button = win.registry.instantiate("flograph.util.action_button", pos=(0, 0))
         win.graph.add_node(button)
         win.graph.set_param(button.id, "action", "Show message")
         win.graph.set_param(button.id, "message", "**hello**")

@@ -1,4 +1,4 @@
-"""flopy.core must stay Qt-free and import-light.
+"""flograph.core must stay Qt-free and import-light.
 
 Run the import in a subprocess so this test is immune to whatever the rest of
 the suite already imported.
@@ -8,12 +8,12 @@ import sys
 
 CHECK = """
 import sys
-import flopy.core
-import flopy.core.serialization
+import flograph.core
+import flograph.core.serialization
 
 heavy = [name for name in sys.modules
          if name.split(".")[0] in ("PySide6", "pandas", "matplotlib", "shiboken6")]
-assert not heavy, f"flopy.core import pulled in: {heavy}"
+assert not heavy, f"flograph.core import pulled in: {heavy}"
 """
 
 
