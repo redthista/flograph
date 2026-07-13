@@ -2,13 +2,40 @@
 name = "flograph"
 version = "0.1.0"
 description = "Visual node-based Python programming environment (KNIME-style dataflow, Blueprint-style canvas)"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "redthista", email = "dconrancpw@gmail.com" }]
+keywords = [
+    "dataflow", "visual-programming", "node-editor", "etl", "pandas",
+    "gui", "pyside6", "qt", "knime", "low-code",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Software Development :: User Interfaces",
+    "Topic :: Software Development :: Code Generators",
+]
 dependencies = [
     "PySide6>=6.7",
     "pandas>=2.0",
     "matplotlib>=3.8",
     "jedi>=0.19",
 ]
+
+[project.urls]
+Homepage = "https://github.com/redthista/flopy"
+Repository = "https://github.com/redthista/flopy"
+Issues = "https://github.com/redthista/flopy/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-qt>=4.4"]

@@ -165,3 +165,8 @@ Architecture (src layout):
 - `flograph/ui` — canvas (QGraphicsView from scratch), code editor, inspector,
   properties, console. One rule everywhere: **QUndoCommands are the only
   writers to the graph**; items react to graph events.
+
+## License
+
+[MIT](LICENSE) — free for commercial and private use, modification, and
+redistribution; just keep the copyright and license notice.
