@@ -1,0 +1,79 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "ca1a068bbfda4bcb9007ff01ef7c2607",
+        "type": "flograph.io.table",
+        "pos": [
+          -460.0,
+          0.0
+        ],
+        "params": {
+          "data": "{\"columns\": [\"Product\", \"Region\", \"Units\", \"Revenue\"], \"rows\": [[\"Aurora Lamp\", \"North\", \"120\", \"4380\"], [\"Basalt Mug\", \"South\", \"310\", \"2790\"], [\"Cirrus Chair\", \"East\", \"85\", \"9265\"], [\"Delta Desk\", \"West\", \"42\", \"12600\"], [\"Ember Kettle\", \"North\", \"198\", \"5940\"]]}",
+          "width": 340,
+          "height": 240
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "4a59826d4bd94a2e86455c6ea4bdb214",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          0.0,
+          0.0
+        ],
+        "params": {
+          "title": "Sales Report",
+          "template": "<!doctype html>\n<div style=\"font-family: system-ui, -apple-system, sans-serif; padding: 20px;\n            color: #111827;\">\n  <h2 style=\"margin: 0 0 4px;\">{{ title | default('Sales Report') }}</h2>\n  <p style=\"color: #6b7280; margin: 0 0 16px; font-size: 13px;\">\n    {{ rows | length }} rows &middot; {{ columns | length }} columns\n  </p>\n  <table style=\"border-collapse: collapse; width: 100%; font-size: 14px;\">\n    <thead>\n      <tr>\n        {% for c in columns %}\n        <th style=\"text-align: left; padding: 8px 12px; background: #f3f4f6;\n                   border-bottom: 2px solid #d1d5db;\">{{ c }}</th>\n        {% endfor %}\n      </tr>\n    </thead>\n    <tbody>\n      {% for row in rows %}\n      <tr style=\"background: {{ '#ffffff' if loop.index0 % 2 == 0 else '#f9fafb' }};\">\n        {% for c in columns %}\n        <td style=\"padding: 8px 12px; border-bottom: 1px solid #e5e7eb;\">{{ row[c] }}</td>\n        {% endfor %}\n      </tr>\n      {% endfor %}\n    </tbody>\n  </table>\n</div>\n"
+        },
+        "code": "\"\"\"Jinja2 Template\n\nRenders a Jinja2 template over the input DataFrame and emits the resulting\nHTML string. Wire a table in and a Show Web View out to preview the page.\njinja2 is imported inside run(); if it's missing, install it from\nTools > Manage Packages.\n\"\"\"\nNODE = {\n    \"label\": \"Jinja2 Template\",\n    \"category\": \"Scripting\",\n    \"inputs\": [(\"table\", \"dataframe\")],\n    \"outputs\": [(\"html\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"title\", \"type\": \"string\", \"label\": \"Title\", \"default\": \"Sales Report\"},\n    {\"name\": \"template\", \"type\": \"text\", \"label\": \"Template (Jinja2)\",\n     \"default\": '<!doctype html>\\n<div style=\"font-family: system-ui, -apple-system, sans-serif; padding: 20px;\\n            color: #111827;\">\\n  <h2 style=\"margin: 0 0 4px;\">{{ title | default(\\'Sales Report\\') }}</h2>\\n  <p style=\"color: #6b7280; margin: 0 0 16px; font-size: 13px;\">\\n    {{ rows | length }} rows &middot; {{ columns | length }} columns\\n  </p>\\n  <table style=\"border-collapse: collapse; width: 100%; font-size: 14px;\">\\n    <thead>\\n      <tr>\\n        {% for c in columns %}\\n        <th style=\"text-align: left; padding: 8px 12px; background: #f3f4f6;\\n                   border-bottom: 2px solid #d1d5db;\">{{ c }}</th>\\n        {% endfor %}\\n      </tr>\\n    </thead>\\n    <tbody>\\n      {% for row in rows %}\\n      <tr style=\"background: {{ \\'#ffffff\\' if loop.index0 % 2 == 0 else \\'#f9fafb\\' }};\">\\n        {% for c in columns %}\\n        <td style=\"padding: 8px 12px; border-bottom: 1px solid #e5e7eb;\">{{ row[c] }}</td>\\n        {% endfor %}\\n      </tr>\\n      {% endfor %}\\n    </tbody>\\n  </table>\\n</div>\\n'},\n]\n\n\ndef run(ctx, table):\n    import jinja2\n\n    columns = list(table.columns)\n    rows = table.to_dict(orient=\"records\")\n    env = jinja2.Environment(\n        autoescape=jinja2.select_autoescape([\"html\", \"xml\"]))\n    html = env.from_string(ctx.params[\"template\"]).render(\n        title=ctx.params[\"title\"], columns=columns, rows=rows, table=table)\n    ctx.log(f\"rendered {len(rows)} rows into HTML\")\n    return {\"html\": html}\n",
+        "label": null
+      },
+      {
+        "id": "efaf97e3556d4e2fa14ec376ecb80b67",
+        "type": "flograph.viz.show_web",
+        "pos": [
+          460.0,
+          0.0
+        ],
+        "params": {
+          "title": "Sales Report",
+          "width": 720,
+          "height": 460,
+          "scale": 100
+        },
+        "code": "\"\"\"Show Web View\n\nA template for building a visual node from *any* Python library. It renders\nwhatever run() returns into an embedded web view (a real Chromium browser), so\nyou can drive it from any library that can produce HTML.\n\nDrop it on the canvas, right-click and choose Edit Code, then swap the run()\nbody for your library. The rule is simple: **return HTML** \u2014 either\n\n  \u2022 a raw HTML string, or\n  \u2022 any object with a `to_html()` method (e.g. a Plotly figure), or\n  \u2022 any object with a `_repr_html_()` method (folium maps, Altair charts,\n    pandas Stylers, IPython HTML, and most notebook-friendly libraries).\n\nInstall third-party libraries from Tools > Manage Packages; import them inside\nrun() (never at the top of the file) so the node still loads when they're\nabsent.\n\"\"\"\n\n# The \"card\": \"webview\" marker is what gives this node the embedded web view \u2014\n# it travels with the code, so a copy you Save as a user node keeps the view.\n# Ports are (name, type) tuples; the input is optional so the node also works\n# standalone. Valid port types: any, dataframe, series, number, string, bool,\n# object, figure.\nNODE = {\n    \"label\": \"Show Web View\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [(\"data\", \"any\", {\"optional\": True})],\n    \"outputs\": [(\"view\", \"object\")],\n}\n\n# Widgets shown in the properties panel; values arrive via ctx.params. Width,\n# height and scale drive the card's size on the canvas.\nPARAMS = [\n    {\"name\": \"title\", \"type\": \"string\", \"label\": \"Title\", \"default\": \"\"},\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 420, \"min\": 260, \"max\": 1600},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 320, \"min\": 200, \"max\": 2000},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400},\n]\n\n\ndef run(ctx, data=None):\n    # Display the HTML produced upstream (e.g. by a Jinja2 Template node). The\n    # card coerces the return value to HTML: a raw string is shown verbatim.\n    if data is None:\n        return (\n            \"<div style=\\\"font-family: system-ui, sans-serif; padding: 24px;\"\n            \" color: #6b7280;\\\">Connect the Jinja2 Template node's HTML\"\n            \" output to render it here.</div>\"\n        )\n    ctx.log(\"displaying upstream HTML\")\n    return data\n",
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "e9b5df492449455abdce11a3c05b0188",
+        "src": [
+          "ca1a068bbfda4bcb9007ff01ef7c2607",
+          "table"
+        ],
+        "dst": [
+          "4a59826d4bd94a2e86455c6ea4bdb214",
+          "table"
+        ]
+      },
+      {
+        "id": "2f69dbfa3c96447fbfa70226113a858f",
+        "src": [
+          "4a59826d4bd94a2e86455c6ea4bdb214",
+          "html"
+        ],
+        "dst": [
+          "efaf97e3556d4e2fa14ec376ecb80b67",
+          "data"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": []
+  }
+}
