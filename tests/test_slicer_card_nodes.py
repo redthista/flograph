@@ -142,9 +142,9 @@ class TestKpiCard:
 
 
 def _add_tile(win, page_id: str, node, at=(0.0, 0.0)) -> Tile:
-    width, height = default_tile_size(node.type_id)
+    width, height = default_tile_size(node)
     tile = Tile(id=f"tile-{node.id}", node_id=node.id,
-                port=default_tile_port(node.type_id),
+                port=default_tile_port(node),
                 rect=(at[0], at[1], width, height))
     win.graph.add_tile(page_id, tile)
     return tile

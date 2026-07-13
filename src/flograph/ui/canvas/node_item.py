@@ -63,6 +63,29 @@ SLICER_TYPE = "flograph.viz.slicer"
 SLICER_MIN_W, SLICER_MAX_W = 140.0, 600.0
 SLICER_MIN_H, SLICER_MAX_H = 120.0, 2000.0
 
+# Rich cards are chosen by a node's declared NODE["card"] kind (carried in its
+# source, so it survives fork/save). This legacy map covers nodes whose source
+# predates the marker — already-forked instances and old project files still
+# carrying a built-in type_id but no `card` field.
+_LEGACY_CARD_BY_TYPE_ID = {
+    "flograph.util.reroute": "reroute",
+    NOTE_TYPE: "note",
+    TABLE_TYPE: "grid",
+    BUTTON_TYPE: "button",
+    PLOTLY_TYPE: "webview",
+    "flograph.viz.show_plot": "figure",
+    "flograph.viz.show_table": "table_viewer",
+    "flograph.viz.table_spec": "table_viewer",
+    KPI_TYPE: "kpi",
+    SLICER_TYPE: "slicer",
+}
+
+
+def card_kind(node) -> Optional[str]:
+    """The rich-card kind for a node: its explicit NODE['card'] marker, else a
+    legacy fallback keyed on the built-in type_id. None = an ordinary node."""
+    return node.spec.card or _LEGACY_CARD_BY_TYPE_ID.get(node.type_id)
+
 
 def kpi_text(value, fmt: str) -> str:
     """A KPI value rendered for display: the node's format spec when it
@@ -160,17 +183,20 @@ class NodeItem(QGraphicsObject):
     def __init__(self, node: NodeInstance) -> None:
         super().__init__()
         self.node = node
-        self.compact = node.type_id == "flograph.util.reroute"
-        self.note = node.type_id == NOTE_TYPE
-        self.table = node.type_id == TABLE_TYPE
-        self.button = node.type_id == BUTTON_TYPE
-        self.plotly_card = node.type_id == PLOTLY_TYPE
-        # plotly cards share the figure card's chrome (resize, paint, ports);
+        kind = card_kind(node)
+        self.compact = kind == "reroute"
+        self.note = kind == "note"
+        self.table = kind == "grid"
+        self.button = kind == "button"
+        # a "webview" card embeds the HTML webview; the attribute keeps its
+        # historical name since all the downstream chrome/render code reads it
+        self.plotly_card = kind == "webview"
+        # webview cards share the figure card's chrome (resize, paint, ports);
         # only the embedded widget differs (webview vs. matplotlib canvas)
-        self.figure_card = node.type_id in FIGURE_TYPES or self.plotly_card
-        self.table_viewer = node.type_id in TABLE_VIEWER_TYPES
-        self.kpi_card = node.type_id == KPI_TYPE
-        self.slicer = node.type_id == SLICER_TYPE
+        self.figure_card = kind == "figure" or self.plotly_card
+        self.table_viewer = kind == "table_viewer"
+        self.kpi_card = kind == "kpi"
+        self.slicer = kind == "slicer"
         self.broken = node.spec.broken
         if self.compact:
             self.width = 28.0

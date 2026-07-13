@@ -8,6 +8,7 @@ spec itself is emitted as a DataFrame on the "spec" port for further use.
 NODE = {
     "label": "Table Spec",
     "category": "Viz",
+    "card": "table_viewer",
     "inputs": [("table", "dataframe")],
     "outputs": [("spec", "dataframe")],
 }

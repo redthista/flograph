@@ -10,10 +10,12 @@ from flograph.core import Graph
 TILE_NODE_MIME = "application/x-flograph-tile-node"
 
 _KIND_GLYPHS = {
-    "flograph.viz.show_plot": "📈",
-    "flograph.viz.show_plotly": "📊",
-    "flograph.viz.show_table": "▦",
-    "flograph.util.action_button": "▶",
+    "figure": "📈",
+    "webview": "📊",
+    "table_viewer": "▦",
+    "kpi": "🔢",
+    "slicer": "⑂",
+    "button": "▶",
 }
 
 
@@ -45,12 +47,13 @@ class VisualsList(QListWidget):
         self._rebuild()
 
     def _rebuild(self) -> None:
-        from .tile_item import TILE_ABLE_TYPES
+        from ..canvas.node_item import card_kind
+        from .tile_item import is_tile_able
         self.clear()
         for node in self._graph.nodes.values():
-            if node.type_id not in TILE_ABLE_TYPES:
+            if not is_tile_able(node):
                 continue
-            glyph = _KIND_GLYPHS.get(node.type_id, "")
+            glyph = _KIND_GLYPHS.get(card_kind(node), "")
             item = QListWidgetItem(f"{glyph} {node.label}".strip())
             item.setData(Qt.UserRole, node.id)
             item.setToolTip("Drag onto the page to place this visual")

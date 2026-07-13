@@ -10,6 +10,7 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
+    "card": "grid",
     "inputs": [],
     "outputs": [("table", "dataframe")],
 }

@@ -33,6 +33,10 @@ class NodeSpec:
     source: str
     builtin: bool = False
     doc: str = ""
+    # rich-card kind declared by NODE["card"] (e.g. "webview", "figure"); drives
+    # canvas/dashboard rendering. Lives in `source`, so it survives fork/save —
+    # unlike the old type_id-based dispatch. None = an ordinary node.
+    card: Optional[str] = None
     # placeholder standing in for a type_id serialization couldn't resolve
     broken: bool = False
     # library sub-section for user-saved nodes; None/"" = ungrouped, top-level
