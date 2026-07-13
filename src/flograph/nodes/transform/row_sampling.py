@@ -1,6 +1,6 @@
 """Row Sampling
 
-Take a subset of rows (KNIME Row Sampling): the first or last rows, or a
+Take a subset of rows: the first or last rows, or a
 random sample — an absolute count, or a fraction of the table when the
 fraction is set above zero.
 """

@@ -1,6 +1,6 @@
 """String Manipulation
 
-Apply a string operation to one column (KNIME String Manipulation): case
+Apply a string operation to one column: case
 changes, whitespace strip, or find & replace (plain text or regex). Write
 the result in place or into a new column.
 """

@@ -1,6 +1,6 @@
 """Rename Columns
 
-Rename columns (KNIME Column Renamer): one `old = new` mapping per line.
+Rename columns: one `old = new` mapping per line.
 Lines starting with # are ignored.
 """
 NODE = {

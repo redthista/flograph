@@ -1,6 +1,6 @@
 """Table Spec
 
-A KNIME-style spec card: shows the incoming table's structure — one row per
+A spec card: shows the incoming table's structure — one row per
 column with its dtype, non-null count, unique count and min/max domain —
 directly on the canvas, so a flow's data shape is readable at a glance. The
 spec itself is emitted as a DataFrame on the "spec" port for further use.

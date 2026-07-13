@@ -1,4 +1,4 @@
-"""KNIME-style table spec: one row per column of a DataFrame — its dtype,
+"""Table spec: one row per column of a DataFrame — its dtype,
 null count and value domain — so a table's shape can be read at a glance
 without scanning the data itself. Qt-free on purpose: both the inspector's
 Spec tab and the Table Spec node build on this."""

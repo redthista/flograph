@@ -102,7 +102,7 @@ class InspectorPanel(QWidget):
             if spec is None:
                 host_layout.addWidget(_view_for(value), 1)
             else:
-                # table values get a KNIME-style spec next to the data
+                # table values get a column spec next to the data
                 sub = QTabWidget()
                 sub.setDocumentMode(True)
                 sub.addTab(_view_for(value), "Data")
