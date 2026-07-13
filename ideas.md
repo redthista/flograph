@@ -1,4 +1,4 @@
-1. flow variables like in knime
+1. flow variables (as in other node-based ETL tools)
 2. Export py script option, that creates a output script mirroring the flow. nice to use when a flograph workflow has matured enough to move the script to its own python script thats stands alone outside of the tool.
 3. moving nodes should happen from their top bar only, make resizing better and esp important on "show *" nodes, as they often need to be resized.
 4. add node: that similar to powerbis "Cards"

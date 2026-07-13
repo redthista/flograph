@@ -1,6 +1,6 @@
 """Missing Values
 
-Handle missing values (KNIME Missing Value): drop the rows that contain
+Handle missing values: drop the rows that contain
 them, or fill them — with a fixed value, the previous/next row's value, or
 a per-column mean/median.
 """

@@ -1,7 +1,7 @@
 """Read SQLite
 
 Run a SQL query against a SQLite database file and load the result as a
-DataFrame (KNIME DB Query Reader, stdlib sqlite3 — no server needed).
+DataFrame (SQL query reader; stdlib sqlite3 — no server needed).
 """
 NODE = {
     "label": "Read SQLite",

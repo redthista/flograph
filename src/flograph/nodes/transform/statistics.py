@@ -1,6 +1,6 @@
 """Statistics
 
-Summary statistics per column (KNIME Statistics): count, mean, std,
+Summary statistics per column: count, mean, std,
 min/max, quartiles — pandas describe() as a table, one row per statistic.
 """
 NODE = {

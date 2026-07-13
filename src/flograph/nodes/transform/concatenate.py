@@ -1,6 +1,6 @@
 """Concatenate
 
-Stack the rows of two DataFrames on top of each other (KNIME Concatenate).
+Stack the rows of two DataFrames on top of each other.
 Union keeps every column and fills gaps with missing values; intersection
 keeps only the columns both tables share.
 """
