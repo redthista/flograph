@@ -138,6 +138,41 @@ def test_resize_in_edit_mode_persists_size(env, registry):
     assert node.params["height"] == 70
 
 
+def test_move_in_edit_mode_persists_position(env, registry):
+    """Dragging the button in edit mode must write the new pos to the model,
+    not just slide the on-screen item — otherwise it reloads at its old spot.
+    Uses real QGraphicsSceneMouseEvents because the move path crosses super()."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+
+    graph, stack, scene = env
+    node = graph.add_node(registry.instantiate("flograph.util.action_button"))
+    item = scene.node_items[node.id]
+    item.enter_button_edit()
+
+    mid = QPointF(item.width / 2, item.body_height / 2)
+
+    def event(kind, scene_pos):
+        ev = QGraphicsSceneMouseEvent(kind)
+        ev.setButton(Qt.LeftButton)
+        ev.setButtons(Qt.LeftButton)
+        ev.setPos(mid)
+        ev.setScenePos(scene_pos)
+        return ev
+
+    assert node.pos == (0.0, 0.0)
+    item.mousePressEvent(event(QEvent.GraphicsSceneMousePress,
+                               item.scenePos() + mid))
+    # the press must arm the group-drag snapshot; the dead _drag_start_positions
+    # attribute never committed, so the move was silently lost
+    assert item._group_starts is not None
+    item.setPos(item.pos().x() + 60, item.pos().y() + 40)  # Qt slides the item
+    item.mouseReleaseEvent(event(QEvent.GraphicsSceneMouseRelease,
+                                 item.scenePos() + mid))
+
+    assert node.pos == (60.0, 40.0)
+
+
 def test_click_away_exits_edit_mode(env, registry):
     graph, stack, scene = env
     node = graph.add_node(registry.instantiate("flograph.util.action_button"))

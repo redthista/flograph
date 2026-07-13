@@ -1321,8 +1321,11 @@ class NodeItem(QGraphicsObject):
             super().mousePressEvent(event)
             scene = self.scene()
             if scene is not None:
-                self._drag_start_positions = {
-                    self.node.id: (self.pos().x(), self.pos().y())}
+                # Arm the group-drag snapshot so the release handler commits
+                # the move to the model — without this the button slides on
+                # screen but node.pos is never updated, so it reloads at its
+                # old spot.
+                self._group_starts = scene.begin_group_drag()
             return
         edge = (self._edge_at(event.pos())
                 if event.button() == Qt.LeftButton else None)
