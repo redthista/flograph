@@ -34,6 +34,8 @@ class EditorPanel(QWidget):
         self._registry = registry
         self._node_id: Optional[str] = None
         self._loading = False
+        # Cache unsaved edits keyed by node_id so switching away and back restores them.
+        self._temp_edits: dict[str, str] = {}
 
         self._title = QLabel("No node selected")
         self._title.setStyleSheet("font-weight: bold;")
@@ -84,6 +86,10 @@ class EditorPanel(QWidget):
     # -------------------------------------------------------------- binding
 
     def set_node(self, node_id: Optional[str]) -> None:
+        # Before switching away from the current node, save any unsaved edits.
+        if self._node_id is not None and self.editor.toPlainText():
+            self._temp_edits[self._node_id] = self.editor.toPlainText()
+
         self._node_id = node_id
         self.editor.set_error_line(None)
         self._show_message("")
@@ -96,9 +102,18 @@ class EditorPanel(QWidget):
             self._reset_btn.hide()
             self._save_user_btn.hide()
             return
-        node = self._graph.node(node_id)
+
+        # Check if we have cached temp edits for this node.
+        cached = self._temp_edits.get(node_id)
+        if cached is not None:
+            source_to_load = cached
+        else:
+            # No cached edits - load from the actual node source.
+            node = self._graph.node(node_id)
+            source_to_load = node.source
+
         self._loading = True
-        self.editor.setPlainText(node.source)
+        self.editor.setPlainText(source_to_load or "")
         self._loading = False
         self.editor.setEnabled(True)
         self._apply_btn.setEnabled(True)
@@ -156,6 +171,8 @@ class EditorPanel(QWidget):
         """Graph-side code change (apply, undo/redo, reset) — reload text."""
         if node_id != self._node_id or self._loading:
             return
+        # Clear cached temp edit since the graph now owns this version.
+        self._temp_edits.pop(node_id, None)
         node = self._graph.node(node_id)
         if self.editor.toPlainText() != node.source:
             self._loading = True
