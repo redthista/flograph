@@ -71,6 +71,7 @@ class NodeGraphScene(QGraphicsScene):
         events.status_changed.connect(self._on_status_changed)
         events.dirty_changed.connect(self._on_dirty_changed)
         events.label_changed.connect(self._on_label_changed)
+        events.temp_edit_changed.connect(self._on_temp_edit_changed)
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
         events.frame_changed.connect(self._on_frame_changed)
@@ -149,6 +150,11 @@ class NodeGraphScene(QGraphicsScene):
             item.update()
 
     def _on_label_changed(self, node_id: str) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.update()
+
+    def _on_temp_edit_changed(self, node_id: str, has_temp_edit: bool) -> None:
         item = self.node_items.get(node_id)
         if item is not None:
             item.update()

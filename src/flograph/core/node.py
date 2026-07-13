@@ -69,6 +69,7 @@ class NodeInstance:
     status: NodeStatus = NodeStatus.IDLE
     status_message: str = ""
     dirty: bool = True
+    _temp_edit: bool = False  # transient — unsaved edits in editor panel
 
     @classmethod
     def create(cls, spec: NodeSpec, pos: tuple[float, float] = (0.0, 0.0)) -> "NodeInstance":

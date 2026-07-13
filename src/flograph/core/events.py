@@ -43,6 +43,7 @@ class GraphEvents:
         self.label_changed = Event()   # (node_id: str)
         self.dirty_changed = Event()   # (node_id: str, dirty: bool)
         self.status_changed = Event()  # (node_id: str, status: NodeStatus, message: str)
+        self.temp_edit_changed = Event()  # (node_id: str, has_temp_edit: bool)
         self.frame_added = Event()     # (frame: Frame)
         self.frame_removed = Event()   # (frame_id: str)
         self.frame_changed = Event()   # (frame: Frame)
