@@ -1,6 +1,6 @@
 # flograph
 
-A visual node-based Python programming environment: KNIME-style dataflow on
+A visual node-based Python programming environment: flow-based dataflow on
 an infinite Blueprint-style canvas, where every node is real, editable Python.
 
 ![status](https://img.shields.io/badge/status-v0.1-blue)
@@ -21,8 +21,7 @@ python -m build          # or: uv build   ->   dist/flograph-*.whl
 ```
 
 > The project was renamed from **flopy** to **flograph** because `flopy` is
-> already taken on PyPI (USGS MODFLOW). To migrate projects saved by the old
-> build, see [Migrating old `.flopy` projects](#migrating-old-flopy-projects).
+> already taken on PyPI (USGS MODFLOW).
 
 ## Run it
 
@@ -41,7 +40,7 @@ python -m flograph.engine.headless project.flograph   # run without GUI
   `run(ctx, **inputs)` function. Double-click any node to read or fork its
   code in the built-in editor (syntax highlighting, jedi completion,
   error markers on the failing line).
-- **KNIME semantics.** Data flows through typed ports; execution is a
+- **Dataflow semantics.** Data flows through typed ports; execution is a
   topological walk of the dirty subgraph; every node's outputs are cached, so
   re-runs only recompute what changed. Status LEDs: gray idle, yellow queued,
   pulsing blue running, green done, red error.
@@ -67,24 +66,9 @@ python -m flograph.engine.headless project.flograph   # run without GUI
 Projects are plain JSON (`.flograph`); caches are never saved, so a reopened
 project is fully reproducible with one `F5`.
 
-### Migrating old `.flopy` projects
-
-Projects saved by the old **flopy** build use a `.flopy` extension and embed
-`flopy.*` node type-ids, which this build no longer recognises. Convert them
-in place with the bundled one-shot migrator (stdlib-only, no install needed):
-
-```bash
-python scripts/flopy_to_flograph.py project.flopy          # -> project.flograph
-python scripts/flopy_to_flograph.py my/projects --recursive
-```
-
-It rewrites builtin `flopy.*` type-ids to `flograph.*` (leaving `user.*`
-nodes alone), renames the file and any `.flopy.cache/` side-car, and by
-default keeps the original (`--delete-original` to remove it).
-
 ## Node library
 
-The shipped library covers the KNIME basics:
+The shipped library covers the essentials:
 
 - **IO** — read/write CSV, Excel, Parquet, JSON (incl. JSONL), SQLite
   (query in, table out), inline Table.

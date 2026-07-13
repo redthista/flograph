@@ -1,6 +1,6 @@
 """Pivot
 
-Pivot a long table into a wide one (KNIME Pivot): rows grouped by the index
+Pivot a long table into a wide one: rows grouped by the index
 columns, one output column per distinct value of the pivot column, cells
 aggregated.
 """

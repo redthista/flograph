@@ -1,6 +1,6 @@
 """Convert Types
 
-Convert columns to another type (KNIME column converter nodes). On errors
+Convert columns to another type. On errors
 either fail the node or coerce the offending cells to missing values.
 """
 NODE = {

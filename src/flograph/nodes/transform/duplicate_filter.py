@@ -1,6 +1,6 @@
 """Duplicate Row Filter
 
-Remove duplicate rows (KNIME Duplicate Row Filter), judged over all columns
+Remove duplicate rows, judged over all columns
 or a subset. Keep the first or last occurrence, or drop every row that has
 a duplicate.
 """

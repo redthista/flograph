@@ -1,15 +1,15 @@
 [project]
 name = "flograph"
 version = "0.1.0"
-description = "Visual node-based Python programming environment (KNIME-style dataflow, Blueprint-style canvas)"
+description = "Visual node-based Python programming environment (flow-based dataflow, Blueprint-style canvas)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "redthista", email = "dconrancpw@gmail.com" }]
+authors = [{ name = "redthista" }]
 keywords = [
     "dataflow", "visual-programming", "node-editor", "etl", "pandas",
-    "gui", "pyside6", "qt", "knime", "low-code",
+    "gui", "pyside6", "qt", "low-code",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

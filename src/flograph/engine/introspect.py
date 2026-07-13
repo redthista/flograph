@@ -1,6 +1,6 @@
 """Introspection of cached upstream data.
 
-flograph's take on KNIME table-spec propagation: nodes are arbitrary Python,
+flograph's take on table-spec propagation: nodes are arbitrary Python,
 so output schemas can't be declared statically — but after a run the real
 outputs sit in the cache. The properties panel uses this to offer column
 pickers populated from whatever DataFrames actually feed a node.

@@ -1,6 +1,6 @@
 """Unpivot
 
-Melt a wide table into a long one (KNIME Unpivot): the retained columns
+Melt a wide table into a long one: the retained columns
 repeat on every row, each value column becomes (variable, value) pairs.
 """
 NODE = {
