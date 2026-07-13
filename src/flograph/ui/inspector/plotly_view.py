@@ -1,9 +1,12 @@
-"""PlotlyView: a plotly figure in an embedded QWebEngineView, shared by the
-Show Plotly canvas card and dashboard tiles. The webview is created lazily on
-the first figure — Chromium is heavy and the import can be missing on trimmed
-PySide6 installs — and the page loads from a temp file, not setHtml: the
-self-contained page embeds all of plotly.js (~3 MB) and setHtml caps content
-at 2 MB."""
+"""HtmlView (aka PlotlyView): renders any HTML in an embedded QWebEngineView,
+shared by the webview canvas card and dashboard tiles. It accepts whatever a
+node's run() returns — a raw HTML string, or any object with `to_html()`
+(Plotly) or `_repr_html_()` (folium, Altair, pandas Styler, …) — so a visual
+node can be built from *any* Python library. The webview is created lazily on
+first content — Chromium is heavy and the import can be missing on trimmed
+PySide6 installs — and the page loads from a temp file, not setHtml: a
+self-contained Plotly page embeds all of plotly.js (~3 MB) and setHtml caps
+content at 2 MB."""
 from __future__ import annotations
 
 import uuid
@@ -11,9 +14,9 @@ import uuid
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-RUN_PROMPT = "Run the graph to see an interactive chart here."
+RUN_PROMPT = "Run the graph to see the view here."
 NO_WEBENGINE = ("Qt WebEngine is not available — install the full PySide6 "
-                "package (Tools > Manage Packages) to display Plotly charts.")
+                "package (Tools > Manage Packages) to display web views.")
 
 _plotly_tmp = None  # TemporaryDirectory for the HTML, cleaned at exit
 
@@ -25,6 +28,41 @@ def _plotly_html_path(token: str):
     if _plotly_tmp is None:
         _plotly_tmp = tempfile.TemporaryDirectory(prefix="flograph-plotly-")
     return Path(_plotly_tmp.name) / f"{token}.html"
+
+
+def to_html(obj) -> str | None:
+    """Coerce a node output to a full HTML page, or None if it can't render.
+
+    Order: a raw HTML string is used verbatim; then `to_html()` (Plotly and
+    friends — the rich signature first, plain call as fallback); then the
+    universal `_repr_html_()` protocol. Fragments are wrapped into a minimal
+    full-bleed document so they fill the card."""
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        return _wrap(obj)
+    render = getattr(obj, "to_html", None)
+    if callable(render):
+        try:
+            return render(full_html=True, include_plotlyjs=True,
+                          default_width="100%", default_height="100%",
+                          config={"responsive": True})
+        except TypeError:
+            return _wrap(render())
+    render = getattr(obj, "_repr_html_", None)
+    if callable(render):
+        return _wrap(render())
+    return None
+
+
+def _wrap(html: str) -> str:
+    """Ensure an HTML fragment is a full, full-bleed document."""
+    if "<html" in html.lower():
+        return html
+    return ("<!doctype html><html><head><meta charset='utf-8'>"
+            "<style>html,body{margin:0;padding:0;height:100%;width:100%}"
+            "body>*{max-width:100%}</style></head>"
+            f"<body>{html}</body></html>")
 
 
 class PlotlyView(QWidget):
@@ -60,10 +98,12 @@ class PlotlyView(QWidget):
         self.view = view
         return view
 
-    def set_figure(self, figure) -> None:
-        """Render a freshly computed plotly figure (or None) into the
-        embedded webview — call from the GUI thread only."""
-        if figure is None or not hasattr(figure, "to_html"):
+    def set_content(self, content) -> None:
+        """Render freshly computed content (or None) into the embedded webview
+        — a raw HTML string, or any object with to_html()/_repr_html_(). Call
+        from the GUI thread only."""
+        html = to_html(content)
+        if html is None:
             if self.view is not None:
                 self.view.hide()
             self.placeholder.setText(RUN_PROMPT)
@@ -76,16 +116,21 @@ class PlotlyView(QWidget):
             return
         from PySide6.QtCore import QUrl
         path = _plotly_html_path(self._token)
-        path.write_text(figure.to_html(
-            full_html=True, include_plotlyjs=True,
-            default_width="100%", default_height="100%",
-            config={"responsive": True}), encoding="utf-8")
+        path.write_text(html, encoding="utf-8")
         view.load(QUrl.fromLocalFile(str(path)))
         self.placeholder.hide()
         view.show()
+
+    # historical name — callers still push output via set_figure()
+    set_figure = set_content
 
     def set_zoom(self, factor: float) -> None:
         """Chromium zooms natively (and stays crisp) — callers drive this
         instead of scaling the widget through a graphics transform."""
         if self.view is not None:
             self.view.setZoomFactor(factor)
+
+
+# neutral name for the generalized any-HTML view; PlotlyView stays as the
+# historical alias used across the canvas and dashboard imports
+HtmlView = PlotlyView

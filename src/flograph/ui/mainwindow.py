@@ -28,13 +28,11 @@ from .commands import (
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas import grid
-from .canvas.node_item import (
-    FIGURE_TYPES, KPI_TYPE, PLOTLY_TYPE, SLICER_TYPE, TABLE_VIEWER_TYPES,
-)
+from .canvas.node_item import card_kind
 from .canvas.palette import LibraryPanel, NodePalettePopup
 from .dashboard import (
-    DashboardPage, PageTabBar, TILE_ABLE_TYPES, default_tile_port,
-    default_tile_size,
+    DashboardPage, PageTabBar, default_tile_port, default_tile_size,
+    is_tile_able,
 )
 from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
@@ -356,7 +354,7 @@ class MainWindow(QMainWindow):
 
     def _on_figure_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id not in FIGURE_TYPES:
+        if node is None or card_kind(node) != "figure":
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
@@ -366,17 +364,19 @@ class MainWindow(QMainWindow):
 
     def _on_plotly_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id != PLOTLY_TYPE:
+        if node is None or card_kind(node) != "webview":
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
             return
         entry = self.engine.cache.get(node_id)
-        item.set_plotly_figure(entry.outputs.get("figure") if entry else None)
+        # a webview node's rendered output is its first declared output port
+        port = node.spec.outputs[0].name if node.spec.outputs else "figure"
+        item.set_plotly_figure(entry.outputs.get(port) if entry else None)
 
     def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id not in TABLE_VIEWER_TYPES:
+        if node is None or card_kind(node) != "table_viewer":
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
@@ -389,7 +389,7 @@ class MainWindow(QMainWindow):
 
     def _on_kpi_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id != KPI_TYPE:
+        if node is None or card_kind(node) != "kpi":
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
         values, read from the *upstream* cache — the slicer's own output is
         already filtered, so it can't be the source of the options."""
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id != SLICER_TYPE:
+        if node is None or card_kind(node) != "slicer":
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
@@ -495,9 +495,9 @@ class MainWindow(QMainWindow):
         node = self.graph.nodes.get(node_id)
         if node is None or page_id not in self.graph.pages:
             return
-        width, height = default_tile_size(node.type_id)
+        width, height = default_tile_size(node)
         tile = Tile(id=uuid.uuid4().hex, node_id=node_id,
-                    port=default_tile_port(node.type_id),
+                    port=default_tile_port(node),
                     rect=(scene_pos.x(), scene_pos.y(), width, height))
         self.undo_stack.push(AddTileCommand(self.graph, page_id, tile))
 
@@ -547,8 +547,7 @@ class MainWindow(QMainWindow):
 
     def _on_node_double_clicked(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is not None and node.type_id in (
-                "flograph.util.note", "flograph.util.action_button"):
+        if node is not None and card_kind(node) in ("note", "button"):
             # notes and buttons are edited through their params, not their code
             self.params_panel.set_node(node_id)
             self.properties_dock.show()
@@ -600,7 +599,7 @@ class MainWindow(QMainWindow):
 
     def _on_button_fired(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id != "flograph.util.action_button":
+        if node is None or card_kind(node) != "button":
             return
         action = node.params.get("action", "Run nodes")
         if action == "Show message":
@@ -625,7 +624,7 @@ class MainWindow(QMainWindow):
         The SetParamCommand already dirtied the subgraph; if a run is in
         flight this is a no-op and the affected nodes just stay stale."""
         node = self.graph.nodes.get(node_id)
-        if node is None or node.type_id != SLICER_TYPE:
+        if node is None or card_kind(node) != "slicer":
             return
         self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
 
@@ -879,7 +878,7 @@ class MainWindow(QMainWindow):
         view_actions = self._add_view_actions(menu, node_id)
         page_actions: list = []
         new_page_action = None
-        if self.graph.nodes[node_id].type_id in TILE_ABLE_TYPES:
+        if is_tile_able(self.graph.nodes[node_id]):
             submenu = menu.addMenu("Add to Page")
             for page in self.graph.pages.values():
                 page_actions.append((submenu.addAction(page.title), page.id))
