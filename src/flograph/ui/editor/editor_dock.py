@@ -95,12 +95,14 @@ class EditorPanel(QWidget):
 
     def set_node(self, node_id: Optional[str]) -> None:
         # Before switching away from the current node, save any unsaved edits.
-        if self._node_id is not None and self.editor.toPlainText():
+        # The node may already be gone (e.g. deletion triggered this switch).
+        prev_node = self._graph.nodes.get(self._node_id)
+        if prev_node is not None and self.editor.toPlainText():
             current = self.editor.toPlainText()
-            graph_source = self._graph.node(self._node_id).source
+            graph_source = prev_node.source
             if current != graph_source:
                 # Node has temp edits — mark it for canvas indicator.
-                self._graph.node(self._node_id)._temp_edit = True
+                prev_node._temp_edit = True
                 self._graph.events.temp_edit_changed.emit(
                     self._node_id, True)
             self._temp_edits[self._node_id] = current
