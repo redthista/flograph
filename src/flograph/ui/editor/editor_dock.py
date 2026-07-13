@@ -67,8 +67,16 @@ class EditorPanel(QWidget):
         self._apply_btn = QPushButton("Apply  (Ctrl+Enter)")
         self._apply_btn.setEnabled(False)
         self._apply_btn.clicked.connect(self.apply_code)
+
+        # Unsaved indicator — amber dot shown when temp edits differ from graph.
+        self._unsaved_indicator = QLabel("●")
+        self._unsaved_indicator.setStyleSheet(
+            "color: #eab308; font-size: 14px; font-weight: bold;")
+        self._unsaved_indicator.hide()
+
         footer = QHBoxLayout()
         footer.addWidget(self._message, 1)
+        footer.addWidget(self._unsaved_indicator)
         footer.addWidget(self._apply_btn)
 
         layout = QVBoxLayout(self)
@@ -88,7 +96,14 @@ class EditorPanel(QWidget):
     def set_node(self, node_id: Optional[str]) -> None:
         # Before switching away from the current node, save any unsaved edits.
         if self._node_id is not None and self.editor.toPlainText():
-            self._temp_edits[self._node_id] = self.editor.toPlainText()
+            current = self.editor.toPlainText()
+            graph_source = self._graph.node(self._node_id).source
+            if current != graph_source:
+                # Node has temp edits — mark it for canvas indicator.
+                self._graph.node(self._node_id)._temp_edit = True
+                self._graph.events.temp_edit_changed.emit(
+                    self._node_id, True)
+            self._temp_edits[self._node_id] = current
 
         self._node_id = node_id
         self.editor.set_error_line(None)
@@ -97,6 +112,7 @@ class EditorPanel(QWidget):
             self.editor.setPlainText("")
             self.editor.setEnabled(False)
             self._apply_btn.setEnabled(False)
+            self._unsaved_indicator.hide()
             self._title.setText("No node selected")
             self._badge.hide()
             self._reset_btn.hide()
@@ -117,6 +133,16 @@ class EditorPanel(QWidget):
         self._loading = False
         self.editor.setEnabled(True)
         self._apply_btn.setEnabled(True)
+        # Show unsaved indicator if the cached edit differs from graph.
+        if source_to_load != self._graph.node(node_id).source:
+            self._unsaved_indicator.show()
+            self._graph.node(node_id)._temp_edit = True
+            self._graph.events.temp_edit_changed.emit(node_id, True)
+        else:
+            self._unsaved_indicator.hide()
+            if self._graph.node(node_id)._temp_edit:
+                self._graph.node(node_id)._temp_edit = False
+                self._graph.events.temp_edit_changed.emit(node_id, False)
         self._refresh_header(node_id)
 
     def _refresh_header(self, node_id: str) -> None:
@@ -173,6 +199,8 @@ class EditorPanel(QWidget):
             return
         # Clear cached temp edit since the graph now owns this version.
         self._temp_edits.pop(node_id, None)
+        self._graph.node(node_id)._temp_edit = False
+        self._unsaved_indicator.hide()
         node = self._graph.node(node_id)
         if self.editor.toPlainText() != node.source:
             self._loading = True

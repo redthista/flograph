@@ -1040,6 +1040,16 @@ class NodeItem(QGraphicsObject):
             painter.drawEllipse(
                 QRectF(led_center_x - 2, HEADER_H / 2 - 2, 4, 4))
 
+        # Unsaved temp-edit indicator — small amber dot beside status LED.
+        if self.node._temp_edit:
+            INDICATOR_R = 3.0
+            indicator_x = led_center_x - LED_RADIUS - 10
+            painter.setPen(QPen(theme.NODE_BORDER, 0.5))
+            painter.setBrush(QBrush("#eab308"))
+            painter.drawEllipse(
+                QRectF(indicator_x - INDICATOR_R, HEADER_H / 2 - INDICATOR_R,
+                       2 * INDICATOR_R, 2 * INDICATOR_R))
+
     def _paint_table(self, painter: QPainter) -> None:
         rect = QRectF(0, 0, self.width, self.body_height)
         painter.setRenderHint(QPainter.Antialiasing)
