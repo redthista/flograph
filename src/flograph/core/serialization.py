@@ -15,6 +15,7 @@ save/load flow and its independent versioning.
 from __future__ import annotations
 
 import json
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -25,6 +26,11 @@ from .ports import PortDirection, PortSpec
 from .registry import NodeRegistry
 from .script import parse_spec
 
+try:  # stamp saved files with the installed distribution version (single source)
+    FLOGRAPH_VERSION = _pkg_version("flograph")
+except PackageNotFoundError:  # running from a source tree without an install
+    FLOGRAPH_VERSION = "0.0.0+unknown"
+
 SCHEMA_VERSION = 1
 
 MIGRATIONS: dict[int, Callable[[dict], dict]] = {
@@ -34,7 +40,7 @@ MIGRATIONS: dict[int, Callable[[dict], dict]] = {
 
 def graph_to_dict(graph: Graph) -> dict[str, Any]:
     return {
-        "flograph_version": "0.1.0",
+        "flograph_version": FLOGRAPH_VERSION,
         "schema": SCHEMA_VERSION,
         "graph": {
             "nodes": [
