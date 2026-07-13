@@ -5,9 +5,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtTest import QTest
 
-from flopy.core import Graph, NodeRegistry
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.canvas.view import NodeGraphView
+from flograph.core import Graph, NodeRegistry
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.canvas.view import NodeGraphView
 
 
 @pytest.fixture(scope="module")
@@ -30,7 +30,7 @@ def env(qtbot, registry):
 
 def test_backspace_in_note_editor_edits_text_not_delete_node(env, registry):
     graph, stack, scene, view = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     item = scene.node_items[note.id]
     item.start_note_edit()
     editor = item._note_editor_widget
@@ -45,7 +45,7 @@ def test_backspace_in_note_editor_edits_text_not_delete_node(env, registry):
 
 def test_letter_f_in_note_editor_types_not_frame(env, registry):
     graph, stack, scene, view = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     item = scene.node_items[note.id]
     item.start_note_edit()
     editor = item._note_editor_widget
@@ -59,7 +59,7 @@ def test_letter_f_in_note_editor_types_not_frame(env, registry):
 
 def test_arrow_keys_in_table_move_cell_cursor_not_node(env, registry):
     graph, stack, scene, view = env
-    table = graph.add_node(registry.instantiate("flopy.io.table"))
+    table = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[table.id]
     grid = item._table_widget
     grid.setCurrentCell(0, 0)
@@ -74,7 +74,7 @@ def test_arrow_keys_in_table_move_cell_cursor_not_node(env, registry):
 
 def test_delete_key_still_removes_selected_node_when_nothing_focused(env, registry):
     graph, stack, scene, view = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     item = scene.node_items[note.id]
     item.setSelected(True)
     view.setFocus()

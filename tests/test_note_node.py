@@ -2,8 +2,8 @@
 import pytest
 from PySide6.QtGui import QUndoStack
 
-from flopy.core import Graph, NodeRegistry
-from flopy.ui.canvas import NodeGraphScene
+from flograph.core import Graph, NodeRegistry
+from flograph.ui.canvas import NodeGraphScene
 
 
 @pytest.fixture(scope="module")
@@ -22,7 +22,7 @@ def env(qtbot, registry):
 
 
 def test_note_is_registered_and_portless(registry):
-    spec = registry.get("flopy.util.note")
+    spec = registry.get("flograph.util.note")
     assert spec.inputs == [] and spec.outputs == []
     assert spec.param("text") is not None
     assert spec.param("width") is not None
@@ -30,7 +30,7 @@ def test_note_is_registered_and_portless(registry):
 
 def test_note_item_renders_markdown_geometry(env, registry):
     graph, stack, scene = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     item = scene.node_items[note.id]
     assert item.note
     assert not item.input_ports and not item.output_ports
@@ -48,11 +48,11 @@ def test_note_item_renders_markdown_geometry(env, registry):
 
 
 def test_note_runs_as_noop_in_engine(qtbot, env, registry):
-    from flopy.core.node import NodeStatus
-    from flopy.engine import ExecutionEngine
+    from flograph.core.node import NodeStatus
+    from flograph.engine import ExecutionEngine
     graph, stack, scene = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
-    const = graph.add_node(registry.instantiate("flopy.util.constant"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
+    const = graph.add_node(registry.instantiate("flograph.util.constant"))
     engine = ExecutionEngine(graph)
     with qtbot.waitSignal(engine.run_finished, timeout=5000) as blocker:
         engine.run_all()
@@ -63,16 +63,16 @@ def test_note_runs_as_noop_in_engine(qtbot, env, registry):
 
 def test_note_excluded_from_wire_drop_palette(registry):
     """Zero ports -> never offered when dropping a wire on the canvas."""
-    from flopy.core import PortType, can_connect
-    note = registry.get("flopy.util.note")
+    from flograph.core import PortType, can_connect
+    note = registry.get("flograph.util.note")
     assert not any(can_connect(PortType.DATAFRAME, p.type)
                    for p in note.inputs)
 
 
 def test_note_serialization_round_trip(env, registry):
-    from flopy.core.serialization import graph_from_dict, graph_to_dict
+    from flograph.core.serialization import graph_from_dict, graph_to_dict
     graph, stack, scene = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     graph.set_param(note.id, "text", "# Saved title")
     graph.set_param(note.id, "width", 420)
     graph.set_param(note.id, "height", 300)
@@ -85,7 +85,7 @@ def test_note_serialization_round_trip(env, registry):
 def test_note_fixed_height(env, registry):
     """height=0 fits the text; a positive height pins the card size."""
     graph, stack, scene = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     item = scene.node_items[note.id]
     auto = item.body_height
     graph.set_param(note.id, "height", 400)
@@ -98,7 +98,7 @@ def test_note_fixed_height(env, registry):
 
 def test_note_inline_edit_commits_and_is_undoable(env, registry):
     graph, stack, scene = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     item = scene.node_items[note.id]
     item.start_note_edit()
     assert item._note_editor_widget is not None
@@ -112,7 +112,7 @@ def test_note_inline_edit_commits_and_is_undoable(env, registry):
 
 def test_note_inline_edit_escape_cancels(env, registry):
     graph, stack, scene = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     item = scene.node_items[note.id]
     before = graph.node(note.id).params["text"]
     item.start_note_edit()
@@ -126,9 +126,9 @@ def test_params_panel_text_keeps_cursor_while_typing(qtbot, env, registry):
     """Regression: the param-changed echo must not reset the cursor, or
     typed characters land at the start in reverse order."""
     from PySide6.QtWidgets import QPlainTextEdit
-    from flopy.ui.properties.params_panel import ParamsPanel
+    from flograph.ui.properties.params_panel import ParamsPanel
     graph, stack, scene = env
-    note = graph.add_node(registry.instantiate("flopy.util.note"))
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
     graph.set_param(note.id, "text", "start:")
     panel = ParamsPanel(graph, stack)
     qtbot.addWidget(panel)

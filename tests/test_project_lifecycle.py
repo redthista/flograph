@@ -4,9 +4,9 @@ import json
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from flopy.core import NodeRegistry
-from flopy.core.serialization import graph_to_dict
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import NodeRegistry
+from flograph.core.serialization import graph_to_dict
+from flograph.ui.mainwindow import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -26,8 +26,8 @@ def window(qtbot, registry):
 
 def build_small_project(win):
     reg = win.registry
-    const = reg.instantiate("flopy.util.constant", pos=(0, 0))
-    script = reg.instantiate("flopy.scripting.python_script", pos=(200, 0))
+    const = reg.instantiate("flograph.util.constant", pos=(0, 0))
+    script = reg.instantiate("flograph.scripting.python_script", pos=(200, 0))
     win.graph.add_node(const)
     win.graph.add_node(script)
     win.graph.connect(const.id, "value", script.id, "in1")
@@ -38,12 +38,12 @@ class TestSaveOpen:
     def test_save_and_reopen_reproduces_graph(self, window, tmp_path):
         build_small_project(window)
         before = graph_to_dict(window.graph)
-        path = str(tmp_path / "proj.flopy")
+        path = str(tmp_path / "proj.flograph")
         window._project_path = path
         assert window._save()
         assert window.undo_stack.isClean()
 
-        window._replace_graph(__import__("flopy.core", fromlist=["Graph"]).Graph())
+        window._replace_graph(__import__("flograph.core", fromlist=["Graph"]).Graph())
         assert not window.graph.nodes
 
         assert window.open_path(path, confirm=False)
@@ -59,12 +59,12 @@ class TestSaveOpen:
             window.engine.run_targets([const.id, script.id])
         assert not const.dirty and not script.dirty
 
-        path = str(tmp_path / "cached.flopy")
+        path = str(tmp_path / "cached.flograph")
         window._project_path = path
         assert window._save()
-        assert (tmp_path / "cached.flopy.cache" / "manifest.json").exists()
+        assert (tmp_path / "cached.flograph.cache" / "manifest.json").exists()
 
-        from flopy.core import Graph
+        from flograph.core import Graph
         window._replace_graph(Graph())
         assert window.open_path(path, confirm=False)
 
@@ -81,7 +81,7 @@ class TestSaveOpen:
         with qtbot.waitSignal(window.engine.run_finished, timeout=20000):
             window.engine.run_targets([const.id, script.id])
 
-        path = str(tmp_path / "stale.flopy")
+        path = str(tmp_path / "stale.flograph")
         window._project_path = path
         assert window._save()
 
@@ -90,7 +90,7 @@ class TestSaveOpen:
         window.graph.set_param(const.id, "value", "edited")
         assert window._save()
 
-        from flopy.core import Graph
+        from flograph.core import Graph
         window._replace_graph(Graph())
         assert window.open_path(path, confirm=False)
 
@@ -103,7 +103,7 @@ class TestSaveOpen:
         from PySide6.QtWidgets import QMessageBox
         monkeypatch.setattr(QMessageBox, "critical",
                             staticmethod(lambda *a, **k: None))
-        bad = tmp_path / "bad.flopy"
+        bad = tmp_path / "bad.flograph"
         bad.write_text("{broken")
         assert not window.open_path(str(bad), confirm=False)
 
@@ -114,10 +114,10 @@ class TestSaveOpen:
 
         data = graph_to_dict(window.graph)
         data["graph"]["nodes"].append({
-            "id": "gone", "type": "flopy.missing.plugin_node", "pos": [400, 0],
+            "id": "gone", "type": "flograph.missing.plugin_node", "pos": [400, 0],
             "params": {}, "code": None, "label": None,
         })
-        path = tmp_path / "has_broken.flopy"
+        path = tmp_path / "has_broken.flograph"
         path.write_text(json.dumps(data))
 
         assert window.open_path(str(path), confirm=False)
@@ -128,15 +128,15 @@ class TestSaveOpen:
         assert window.scene.node_items["gone"].broken
 
     def test_recent_files_tracked(self, window, tmp_path):
-        path = str(tmp_path / "r.flopy")
+        path = str(tmp_path / "r.flograph")
         window._project_path = path
         window._save()
         assert path in window._recent_files()
 
     def test_title_reflects_dirty_state(self, window, registry):
-        from flopy.ui.commands import AddNodeCommand
+        from flograph.ui.commands import AddNodeCommand
         assert not window.isWindowModified()
-        node = registry.instantiate("flopy.util.constant")
+        node = registry.instantiate("flograph.util.constant")
         window.undo_stack.push(AddNodeCommand(window.graph, node))
         assert window.isWindowModified()
 

@@ -4,7 +4,7 @@ import gc
 
 import pytest
 
-from flopy.core import Graph, NodeInstance, NodeRegistry, parse_spec
+from flograph.core import Graph, NodeInstance, NodeRegistry, parse_spec
 
 
 @pytest.fixture(autouse=True)

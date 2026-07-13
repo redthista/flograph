@@ -1,6 +1,6 @@
 import pytest
 
-from flopy.core import NodeScriptError, PortType, compile_run, parse_spec
+from flograph.core import NodeScriptError, PortType, compile_run, parse_spec
 from tests.conftest import FakeContext
 
 GOOD = """

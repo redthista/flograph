@@ -4,12 +4,12 @@ import pytest
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
 
-from flopy.core import Graph, NodeRegistry
-from flopy.engine import NodeError
-from flopy.ui.canvas import NodeGraphScene
-from flopy.ui.editor.code_editor import CodeEditor
-from flopy.ui.editor.editor_dock import EditorPanel
-from flopy.ui.properties.params_panel import ParamsPanel
+from flograph.core import Graph, NodeRegistry
+from flograph.engine import NodeError
+from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.editor.code_editor import CodeEditor
+from flograph.ui.editor.editor_dock import EditorPanel
+from flograph.ui.properties.params_panel import ParamsPanel
 
 
 @pytest.fixture(scope="module")
@@ -35,7 +35,7 @@ class TestEditorPanel:
 
     def test_apply_valid_code_forks_node(self, qtbot, env, registry):
         graph, stack, _ = env
-        node = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         panel = self._panel(qtbot, graph, stack, registry)
         panel.set_node(node.id)
         assert panel.editor.toPlainText() == node.spec.source
@@ -54,7 +54,7 @@ def run(ctx):
 
     def test_apply_bad_code_shows_error_no_command(self, qtbot, env, registry):
         graph, stack, _ = env
-        node = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         panel = self._panel(qtbot, graph, stack, registry)
         panel.set_node(node.id)
         index = stack.index()
@@ -67,7 +67,7 @@ def run(ctx):
 
     def test_reset_to_library(self, qtbot, env, registry):
         graph, stack, _ = env
-        node = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         graph.set_code(node.id, """
 NODE = {"label": "Fork", "category": "Scripting",
         "inputs": [], "outputs": [("out1", "any")]}
@@ -84,7 +84,7 @@ def run(ctx):
 
     def test_engine_error_marks_line(self, qtbot, env, registry):
         graph, stack, _ = env
-        node = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         panel = self._panel(qtbot, graph, stack, registry)
         panel.set_node(node.id)
         panel.on_node_failed(node.id, NodeError(
@@ -96,7 +96,7 @@ def run(ctx):
 
     def test_undo_of_code_change_reloads_editor(self, qtbot, env, registry):
         graph, stack, _ = env
-        node = graph.add_node(registry.instantiate("flopy.scripting.python_script"))
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
         panel = self._panel(qtbot, graph, stack, registry)
         panel.set_node(node.id)
         original = panel.editor.toPlainText()
@@ -109,7 +109,7 @@ def run(ctx):
 class TestParamsPanel:
     def test_widgets_commit_and_track_undo(self, qtbot, env, registry):
         graph, stack, _ = env
-        node = graph.add_node(registry.instantiate("flopy.util.constant"))
+        node = graph.add_node(registry.instantiate("flograph.util.constant"))
         panel = ParamsPanel(graph, stack)
         qtbot.addWidget(panel)
         panel.set_node(node.id)
@@ -125,7 +125,7 @@ class TestParamsPanel:
 
     def test_bool_and_string_widgets(self, qtbot, env, registry):
         graph, stack, _ = env
-        node = graph.add_node(registry.instantiate("flopy.io.read_csv"))
+        node = graph.add_node(registry.instantiate("flograph.io.read_csv"))
         panel = ParamsPanel(graph, stack)
         qtbot.addWidget(panel)
         panel.set_node(node.id)

@@ -4,10 +4,10 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QGraphicsItem
 
-from flopy.core import Frame, NodeRegistry, Page, Tile
-from flopy.ui.canvas import grid
-from flopy.ui.commands import AddFrameCommand, AddPageCommand, AddTileCommand
-from flopy.ui.mainwindow import MainWindow
+from flograph.core import Frame, NodeRegistry, Page, Tile
+from flograph.ui.canvas import grid
+from flograph.ui.commands import AddFrameCommand, AddPageCommand, AddTileCommand
+from flograph.ui.mainwindow import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -71,7 +71,7 @@ class TestSnappingActive:
 
 class TestNodeEdge:
     def _note(self, window):
-        node = window.registry.instantiate("flopy.util.note")
+        node = window.registry.instantiate("flograph.util.note")
         window.graph.add_node(node)
         item = window.scene.node_items[node.id]
         item.setSelected(True)
@@ -92,7 +92,7 @@ class TestNodeEdge:
         assert item._edge_at(QPointF(w, h)) is None
 
     def test_plain_node_never_resizes(self, window):
-        node = window.registry.instantiate("flopy.util.constant")
+        node = window.registry.instantiate("flograph.util.constant")
         window.graph.add_node(node)
         item = window.scene.node_items[node.id]
         item.setSelected(True)
@@ -102,7 +102,7 @@ class TestNodeEdge:
 
 class TestNodeMoveSnap:
     def _note(self, window):
-        node = window.registry.instantiate("flopy.util.note")
+        node = window.registry.instantiate("flograph.util.note")
         window.graph.add_node(node)
         return window.scene.node_items[node.id]
 
@@ -136,7 +136,7 @@ class TestNodeMoveSnap:
 def _make_tile(window):
     window.undo_stack.push(
         AddPageCommand(window.graph, Page(id="p1", title="Board")))
-    node = window.registry.instantiate("flopy.viz.show_table")
+    node = window.registry.instantiate("flograph.viz.show_table")
     window.graph.add_node(node)
     window.undo_stack.push(AddTileCommand(
         window.graph, "p1", Tile(id="t1", node_id=node.id, port="table")))
@@ -257,8 +257,8 @@ class TestGroupDragSnap:
         scene = window.scene
         scene.snap_enabled = True
         scene.grid_step = 20
-        n1 = window.registry.instantiate("flopy.util.note")
-        n2 = window.registry.instantiate("flopy.util.note")
+        n1 = window.registry.instantiate("flograph.util.note")
+        n2 = window.registry.instantiate("flograph.util.note")
         window.graph.add_node(n1)
         window.graph.add_node(n2)
         i1 = scene.node_items[n1.id]
