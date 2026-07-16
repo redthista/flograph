@@ -1,6 +1,6 @@
 [project]
 name = "flograph"
-version = "0.1.4"
+version = "0.1.5"
 description = "Visual node-based Python programming environment (flow-based dataflow, Blueprint-style canvas)"
 readme = "README.md"
 requires-python = ">=3.11"
