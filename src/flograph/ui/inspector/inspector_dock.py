@@ -100,12 +100,12 @@ class InspectorPanel(QWidget):
             host_layout.addWidget(meta)
             spec = spec_view_for(value)
             if spec is None:
-                host_layout.addWidget(_view_for(value), 1)
+                host_layout.addWidget(_view_for(value, embed_figures=False), 1)
             else:
                 # table values get a column spec next to the data
                 sub = QTabWidget()
                 sub.setDocumentMode(True)
-                sub.addTab(_view_for(value), "Data")
+                sub.addTab(_view_for(value, embed_figures=False), "Data")
                 sub.addTab(spec, "Spec")
                 host_layout.addWidget(sub, 1)
             self._tabs.addTab(host, port.name)

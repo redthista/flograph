@@ -129,6 +129,9 @@ class PortItem(QGraphicsItem):
         self._drag_tint: Optional[bool] = None  # None / valid / invalid
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.LeftButton)
+        # card-type nodes (figure/table/kpi/slicer) draw no port name text —
+        # this is the only way to tell ports apart on those, so always set it
+        self.setToolTip(spec.name)
 
     @property
     def node_id(self) -> str:
@@ -947,16 +950,31 @@ class NodeItem(QGraphicsObject):
             return
         if self.table or self.figure_card or self.table_viewer \
                 or self.kpi_card or self.slicer:
-            for port in self.input_ports.values():
-                port.setPos(0, HEADER_H / 2)
-            for port in self.output_ports.values():
-                port.setPos(self.width, HEADER_H / 2)
+            self._space_header_ports(self.input_ports.values(), 0)
+            self._space_header_ports(self.output_ports.values(), self.width)
             return
         for i, spec in enumerate(self.node.spec.inputs):
             self.input_ports[spec.name].setPos(0, HEADER_H + ROW_H * (i + 0.5))
         for i, spec in enumerate(self.node.spec.outputs):
             self.output_ports[spec.name].setPos(
                 self.width, HEADER_H + ROW_H * (i + 0.5))
+
+    @staticmethod
+    def _space_header_ports(ports, x: float) -> None:
+        """Card-type nodes usually have one port per side, centered in the
+        header; when a forked/custom card declares more, spread them evenly
+        so their pins (and wires) don't collapse into one indistinguishable
+        dot. A single port still lands dead center — unchanged from before."""
+        items = list(ports)
+        n = len(items)
+        if n <= 1:
+            for port in items:
+                port.setPos(x, HEADER_H / 2)
+            return
+        spacing = min(14.0, (HEADER_H - 8.0) / (n - 1))
+        start = HEADER_H / 2 - spacing * (n - 1) / 2
+        for i, port in enumerate(items):
+            port.setPos(x, start + spacing * i)
 
     def _ports_follow_width(self) -> None:
         """Re-anchor ports after a width change and re-route their wires."""
