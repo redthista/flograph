@@ -1,0 +1,79 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t3n01tabledata0000000000000001",
+        "type": "flograph.io.table",
+        "pos": [
+          -460,
+          -100
+        ],
+        "params": {
+          "data": "{\"columns\": [\"day\", \"visits\"], \"rows\": [[\"Mon\", 120], [\"Tue\", 98], [\"Wed\", 140], [\"Thu\", 110], [\"Fri\", 165], [\"Sat\", 210], [\"Sun\", 175]]}",
+          "width": 300,
+          "height": 240
+        },
+        "code": null,
+        "label": "Visits Sample Data"
+      },
+      {
+        "id": "t3n02pythonscript0000000000002",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -60,
+          -100
+        ],
+        "params": {},
+        "code": "\"\"\"Cumulative Visits\n\nAdds a running-total column to the incoming table so a chart can show both\nthe daily figure and the cumulative trend on the same axes.\n\"\"\"\nNODE = {\n    \"label\": \"Cumulative Visits\",\n    \"category\": \"Scripting\",\n    \"inputs\": [(\"in1\", \"dataframe\")],\n    \"outputs\": [(\"out1\", \"dataframe\")],\n}\nPARAMS = []\n\n\ndef run(ctx, in1):\n    table = in1.copy()\n    table[\"cumulative\"] = table[\"visits\"].cumsum()\n    ctx.log(f\"added cumulative column over {len(table)} rows\")\n    return {\"out1\": table}\n",
+        "label": "Cumulative Visits"
+      },
+      {
+        "id": "t3n03showplotly000000000000003",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          340,
+          -160
+        ],
+        "params": {
+          "kind": "line",
+          "x": "day",
+          "y": "visits,cumulative",
+          "title": "Daily & Cumulative Visits",
+          "width": 460,
+          "height": 340,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t3c01000000000000000000000001",
+        "src": [
+          "t3n01tabledata0000000000000001",
+          "table"
+        ],
+        "dst": [
+          "t3n02pythonscript0000000000002",
+          "in1"
+        ]
+      },
+      {
+        "id": "t3c02000000000000000000000002",
+        "src": [
+          "t3n02pythonscript0000000000002",
+          "out1"
+        ],
+        "dst": [
+          "t3n03showplotly000000000000003",
+          "table"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": []
+  }
+}

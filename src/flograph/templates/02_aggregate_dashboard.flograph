@@ -1,0 +1,137 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t2n01tabledata0000000000000001",
+        "type": "flograph.io.table",
+        "pos": [
+          -520,
+          -140
+        ],
+        "params": {
+          "data": "{\"columns\": [\"region\", \"product\", \"revenue\", \"units\"], \"rows\": [[\"North\", \"Widget\", 320, 40], [\"North\", \"Gadget\", 210, 18], [\"North\", \"Widget\", 150, 20], [\"South\", \"Widget\", 190, 22], [\"South\", \"Gadget\", 260, 30], [\"South\", \"Gadget\", 140, 16], [\"East\", \"Widget\", 150, 18], [\"East\", \"Gadget\", 210, 25], [\"East\", \"Widget\", 275, 33]]}",
+          "width": 360,
+          "height": 260
+        },
+        "code": null,
+        "label": "Sales Sample Data"
+      },
+      {
+        "id": "t2n02groupby000000000000000002",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          -100,
+          -220
+        ],
+        "params": {
+          "by": "region",
+          "agg": "sum",
+          "values": "revenue,units"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t2n03showtable00000000000000003",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          280,
+          -220
+        ],
+        "params": {
+          "width": 420,
+          "height": 280,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t2n04kpicard000000000000000004",
+        "type": "flograph.viz.card",
+        "pos": [
+          -100,
+          60
+        ],
+        "params": {
+          "column": "revenue",
+          "aggregation": "Sum",
+          "label": "Total Revenue",
+          "format": ",.0f",
+          "width": 240,
+          "height": 140
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t2c01000000000000000000000001",
+        "src": [
+          "t2n01tabledata0000000000000001",
+          "table"
+        ],
+        "dst": [
+          "t2n02groupby000000000000000002",
+          "table"
+        ]
+      },
+      {
+        "id": "t2c02000000000000000000000002",
+        "src": [
+          "t2n02groupby000000000000000002",
+          "aggregated"
+        ],
+        "dst": [
+          "t2n03showtable00000000000000003",
+          "table"
+        ]
+      },
+      {
+        "id": "t2c03000000000000000000000003",
+        "src": [
+          "t2n01tabledata0000000000000001",
+          "table"
+        ],
+        "dst": [
+          "t2n04kpicard000000000000000004",
+          "table"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": [
+      {
+        "id": "t2p01dashboardpage00000001",
+        "title": "Dashboard",
+        "tiles": [
+          {
+            "id": "t2t01tile0000000000000001",
+            "node": "t2n04kpicard000000000000000004",
+            "port": "value",
+            "rect": [
+              40,
+              40,
+              260,
+              160
+            ]
+          },
+          {
+            "id": "t2t02tile0000000000000002",
+            "node": "t2n03showtable00000000000000003",
+            "port": "table",
+            "rect": [
+              40,
+              220,
+              440,
+              300
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t4n01note0000000000000000001",
+        "type": "flograph.util.note",
+        "pos": [
+          -800,
+          -420
+        ],
+        "params": {
+          "text": "## Customer Revenue Rollup\n\nJoins Orders to Customers on `customer_id`, rolls revenue up by region, and sorts highest-first.",
+          "width": 340,
+          "height": 0
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t4n02custtable00000000000002",
+        "type": "flograph.io.table",
+        "pos": [
+          -800,
+          -180
+        ],
+        "params": {
+          "data": "{\"columns\": [\"customer_id\", \"name\", \"region\"], \"rows\": [[1, \"Acme Co\", \"North\"], [2, \"Globex\", \"South\"], [3, \"Initech\", \"East\"], [4, \"Umbrella\", \"North\"], [5, \"Soylent\", \"South\"], [6, \"Hooli\", \"East\"]]}",
+          "width": 320,
+          "height": 220
+        },
+        "code": null,
+        "label": "Customers"
+      },
+      {
+        "id": "t4n03orderstable0000000000003",
+        "type": "flograph.io.table",
+        "pos": [
+          -800,
+          100
+        ],
+        "params": {
+          "data": "{\"columns\": [\"customer_id\", \"product\", \"revenue\", \"units\"], \"rows\": [[1, \"Widget\", 320, 40], [1, \"Gadget\", 150, 18], [2, \"Widget\", 210, 25], [3, \"Gadget\", 275, 33], [4, \"Widget\", 190, 22], [4, \"Gadget\", 260, 30], [5, \"Widget\", 140, 16], [5, \"Gadget\", 305, 38], [6, \"Widget\", 180, 21], [6, \"Gadget\", 230, 27]]}",
+          "width": 320,
+          "height": 260
+        },
+        "code": null,
+        "label": "Orders"
+      },
+      {
+        "id": "t4n04join00000000000000000004",
+        "type": "flograph.transform.join",
+        "pos": [
+          -420,
+          -40
+        ],
+        "params": {
+          "on": "customer_id",
+          "how": "inner"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t4n05groupby00000000000000005",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          -100,
+          -40
+        ],
+        "params": {
+          "by": "region",
+          "agg": "sum",
+          "values": "revenue,units"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t4n06sort000000000000000000006",
+        "type": "flograph.transform.sort",
+        "pos": [
+          220,
+          -40
+        ],
+        "params": {
+          "by": "revenue",
+          "descending": true
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t4n07showtable00000000000007",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          560,
+          -200
+        ],
+        "params": {
+          "width": 420,
+          "height": 260,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t4n08showplotly000000000008",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          560,
+          100
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "region",
+          "y": "revenue",
+          "title": "Revenue by Region",
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t4c01",
+        "src": [
+          "t4n03orderstable0000000000003",
+          "table"
+        ],
+        "dst": [
+          "t4n04join00000000000000000004",
+          "left"
+        ]
+      },
+      {
+        "id": "t4c02",
+        "src": [
+          "t4n02custtable00000000000002",
+          "table"
+        ],
+        "dst": [
+          "t4n04join00000000000000000004",
+          "right"
+        ]
+      },
+      {
+        "id": "t4c03",
+        "src": [
+          "t4n04join00000000000000000004",
+          "joined"
+        ],
+        "dst": [
+          "t4n05groupby00000000000000005",
+          "table"
+        ]
+      },
+      {
+        "id": "t4c04",
+        "src": [
+          "t4n05groupby00000000000000005",
+          "aggregated"
+        ],
+        "dst": [
+          "t4n06sort000000000000000000006",
+          "table"
+        ]
+      },
+      {
+        "id": "t4c05",
+        "src": [
+          "t4n06sort000000000000000000006",
+          "table"
+        ],
+        "dst": [
+          "t4n07showtable00000000000007",
+          "table"
+        ]
+      },
+      {
+        "id": "t4c06",
+        "src": [
+          "t4n06sort000000000000000000006",
+          "table"
+        ],
+        "dst": [
+          "t4n08showplotly000000000008",
+          "table"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": []
+  }
+}

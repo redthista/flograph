@@ -1,0 +1,82 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t1n01tabledata0000000000000001",
+        "type": "flograph.io.table",
+        "pos": [
+          -460,
+          -120
+        ],
+        "params": {
+          "data": "{\"columns\": [\"region\", \"month\", \"revenue\", \"units\"], \"rows\": [[\"North\", \"Jan\", 320, 40], [\"North\", \"Feb\", 280, 35], [\"North\", \"Mar\", 410, 52], [\"South\", \"Jan\", 190, 22], [\"South\", \"Feb\", 260, 30], [\"South\", \"Mar\", 305, 38], [\"East\", \"Jan\", 150, 18], [\"East\", \"Feb\", 210, 25], [\"East\", \"Mar\", 275, 33]]}",
+          "width": 360,
+          "height": 260
+        },
+        "code": null,
+        "label": "Sales Sample Data"
+      },
+      {
+        "id": "t1n02filterrows00000000000002",
+        "type": "flograph.transform.filter_rows",
+        "pos": [
+          -40,
+          -60
+        ],
+        "params": {
+          "query": "revenue > 250"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t1n03showplotly000000000000003",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          360,
+          -140
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "month",
+          "y": "revenue",
+          "color": "region",
+          "title": "Revenue by Month",
+          "width": 460,
+          "height": 340,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t1c01000000000000000000000001",
+        "src": [
+          "t1n01tabledata0000000000000001",
+          "table"
+        ],
+        "dst": [
+          "t1n02filterrows00000000000002",
+          "table"
+        ]
+      },
+      {
+        "id": "t1c02000000000000000000000002",
+        "src": [
+          "t1n02filterrows00000000000002",
+          "filtered"
+        ],
+        "dst": [
+          "t1n03showplotly000000000000003",
+          "table"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": []
+  }
+}
