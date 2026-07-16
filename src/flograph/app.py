@@ -4,9 +4,15 @@ from __future__ import annotations
 import sys
 
 
+def _matplotlib_available() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("matplotlib") is not None
+
+
 def main(argv: list[str] | None = None) -> int:
-    import matplotlib
-    matplotlib.use("QtAgg")  # before any pyplot import, GUI-safe backend
+    if _matplotlib_available():
+        import matplotlib
+        matplotlib.use("QtAgg")  # before any pyplot import, GUI-safe backend
 
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication

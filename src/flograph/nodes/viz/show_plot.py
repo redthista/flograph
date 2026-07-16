@@ -31,6 +31,15 @@ PARAMS = [
 
 
 def run(ctx, table):
+    import importlib.util
+
+    if importlib.util.find_spec("matplotlib") is None:
+        raise RuntimeError(
+            "Show Plot requires the optional matplotlib extra. "
+            "Install it with `pip install flograph[matplotlib]` or "
+            "Tools > Manage Packages > matplotlib."
+        )
+
     from matplotlib.figure import Figure  # OO API only — never pyplot in nodes
 
     fig = Figure(figsize=(7, 4.5), layout="tight")
