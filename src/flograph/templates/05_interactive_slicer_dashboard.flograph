@@ -1,0 +1,176 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t5n01tabledata000000000001",
+        "type": "flograph.io.table",
+        "pos": [
+          -680,
+          -260
+        ],
+        "params": {
+          "data": "{\"columns\": [\"region\", \"month\", \"revenue\"], \"rows\": [[\"North\", \"Jan\", 320], [\"North\", \"Feb\", 280], [\"North\", \"Mar\", 410], [\"North\", \"Apr\", 350], [\"South\", \"Jan\", 190], [\"South\", \"Feb\", 260], [\"South\", \"Mar\", 305], [\"South\", \"Apr\", 275], [\"East\", \"Jan\", 150], [\"East\", \"Feb\", 210], [\"East\", \"Mar\", 275], [\"East\", \"Apr\", 240], [\"West\", \"Jan\", 205], [\"West\", \"Feb\", 230], [\"West\", \"Mar\", 260], [\"West\", \"Apr\", 300]]}",
+          "width": 340,
+          "height": 300
+        },
+        "code": null,
+        "label": "Regional Revenue"
+      },
+      {
+        "id": "t5n02slicer000000000000002",
+        "type": "flograph.viz.slicer",
+        "pos": [
+          -260,
+          -180
+        ],
+        "params": {
+          "column": "region",
+          "selected": "[\"North\", \"South\"]",
+          "width": 200,
+          "height": 260
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t5n03showtable0000000000003",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          60,
+          -320
+        ],
+        "params": {
+          "width": 420,
+          "height": 280,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t5n04groupby0000000000000004",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          60,
+          -20
+        ],
+        "params": {
+          "by": "month",
+          "agg": "sum",
+          "values": "revenue"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t5n05showplotly00000000005",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          420,
+          -20
+        ],
+        "params": {
+          "kind": "line",
+          "x": "month",
+          "y": "revenue",
+          "title": "Monthly Revenue Trend",
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t5c01",
+        "src": [
+          "t5n01tabledata000000000001",
+          "table"
+        ],
+        "dst": [
+          "t5n02slicer000000000000002",
+          "table"
+        ]
+      },
+      {
+        "id": "t5c02",
+        "src": [
+          "t5n02slicer000000000000002",
+          "table"
+        ],
+        "dst": [
+          "t5n03showtable0000000000003",
+          "table"
+        ]
+      },
+      {
+        "id": "t5c03",
+        "src": [
+          "t5n02slicer000000000000002",
+          "table"
+        ],
+        "dst": [
+          "t5n04groupby0000000000000004",
+          "table"
+        ]
+      },
+      {
+        "id": "t5c04",
+        "src": [
+          "t5n04groupby0000000000000004",
+          "aggregated"
+        ],
+        "dst": [
+          "t5n05showplotly00000000005",
+          "table"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": [
+      {
+        "id": "t5p01dashboard00000001",
+        "title": "Dashboard",
+        "tiles": [
+          {
+            "id": "t5t01",
+            "node": "t5n02slicer000000000000002",
+            "port": null,
+            "rect": [
+              -160,
+              -150,
+              200,
+              260
+            ]
+          },
+          {
+            "id": "t5t02",
+            "node": "t5n03showtable0000000000003",
+            "port": "table",
+            "rect": [
+              60,
+              -150,
+              380,
+              260
+            ]
+          },
+          {
+            "id": "t5t03",
+            "node": "t5n05showplotly00000000005",
+            "port": "figure",
+            "rect": [
+              -160,
+              130,
+              380,
+              280
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

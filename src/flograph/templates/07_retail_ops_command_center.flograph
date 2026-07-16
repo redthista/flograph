@@ -1,0 +1,1157 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t7note_title",
+        "type": "flograph.util.note",
+        "pos": [
+          -1600,
+          -1060
+        ],
+        "params": {
+          "text": "# \ud83d\uded2 Retail Ops Command Center\n\nThe full tour of flograph in one canvas:\n\n1. **Sources** \u2014 five editable on-canvas tables\n2. **Enrich** \u2014 concatenate quarters, join twice, derive revenue / cost / margin\n3. **Regional** \u2014 rollup vs targets, KPI cards, HTML executive briefing\n4. **Product mix** \u2014 segment slicer, category rollup, region \u00d7 category pivot\n5. **Trend & Pareto** \u2014 monthly trend, ABC classification script\n6. **Data quality** \u2014 describe() statistics + margin distribution\n\n\u25b6 Press **F5** (Run All), then explore the **Overview / Detail / Executive** pages below.",
+          "width": 640,
+          "height": 0
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7src_q1",
+        "type": "flograph.io.table",
+        "pos": [
+          -1560,
+          -720
+        ],
+        "params": {
+          "data": "{\"columns\": [\"order_id\", \"month\", \"customer_id\", \"product_id\", \"units\"], \"rows\": [[5001, \"01 Jan\", 6, 103, 4], [5002, \"01 Jan\", 1, 102, 5], [5003, \"01 Jan\", 2, 106, 5], [5004, \"01 Jan\", 1, 104, 1], [5005, \"01 Jan\", 2, 107, 4], [5006, \"01 Jan\", 2, 104, 1], [5007, \"01 Jan\", 7, 101, 5], [5008, \"01 Jan\", 2, 104, 6], [5009, \"02 Feb\", 1, 107, 1], [5010, \"02 Feb\", 4, 101, 5], [5011, \"02 Feb\", 3, 105, 4], [5012, \"02 Feb\", 3, 102, 5], [5013, \"02 Feb\", 5, 103, 1], [5014, \"02 Feb\", 4, 106, 1], [5015, \"02 Feb\", 2, 101, 5], [5016, \"02 Feb\", 4, 108, 6], [5017, \"03 Mar\", 7, 106, 4], [5018, \"03 Mar\", 8, 106, 3], [5019, \"03 Mar\", 4, 103, 6], [5020, \"03 Mar\", 4, 102, 5], [5021, \"03 Mar\", 5, 108, 3], [5022, \"03 Mar\", 8, 105, 5], [5023, \"03 Mar\", 2, 102, 5], [5024, \"03 Mar\", 7, 103, 3]]}",
+          "width": 360,
+          "height": 220
+        },
+        "code": null,
+        "label": "Orders Q1"
+      },
+      {
+        "id": "t7src_q2",
+        "type": "flograph.io.table",
+        "pos": [
+          -1560,
+          -440
+        ],
+        "params": {
+          "data": "{\"columns\": [\"order_id\", \"month\", \"customer_id\", \"product_id\", \"units\"], \"rows\": [[6001, \"04 Apr\", 3, 108, 4], [6002, \"04 Apr\", 1, 102, 5], [6003, \"04 Apr\", 6, 106, 6], [6004, \"04 Apr\", 6, 108, 5], [6005, \"04 Apr\", 8, 102, 1], [6006, \"04 Apr\", 5, 108, 6], [6007, \"04 Apr\", 2, 101, 6], [6008, \"04 Apr\", 5, 108, 3], [6009, \"05 May\", 7, 106, 1], [6010, \"05 May\", 8, 106, 2], [6011, \"05 May\", 2, 108, 1], [6012, \"05 May\", 4, 105, 2], [6013, \"05 May\", 4, 107, 4], [6014, \"05 May\", 8, 102, 2], [6015, \"05 May\", 8, 107, 5], [6016, \"05 May\", 5, 103, 4], [6017, \"06 Jun\", 5, 107, 3], [6018, \"06 Jun\", 7, 104, 2], [6019, \"06 Jun\", 2, 103, 2], [6020, \"06 Jun\", 4, 104, 1], [6021, \"06 Jun\", 8, 103, 3], [6022, \"06 Jun\", 5, 101, 2], [6023, \"06 Jun\", 7, 106, 5], [6024, \"06 Jun\", 6, 103, 6]]}",
+          "width": 360,
+          "height": 220
+        },
+        "code": null,
+        "label": "Orders Q2"
+      },
+      {
+        "id": "t7src_customers",
+        "type": "flograph.io.table",
+        "pos": [
+          -1560,
+          -160
+        ],
+        "params": {
+          "data": "{\"columns\": [\"customer_id\", \"name\", \"region\", \"segment\"], \"rows\": [[1, \"Acme Co\", \"North\", \"Enterprise\"], [2, \"Globex\", \"South\", \"Enterprise\"], [3, \"Initech\", \"East\", \"SMB\"], [4, \"Umbrella\", \"North\", \"SMB\"], [5, \"Soylent\", \"South\", \"Consumer\"], [6, \"Hooli\", \"East\", \"Enterprise\"], [7, \"Stark Industries\", \"West\", \"Consumer\"], [8, \"Wayne Corp\", \"West\", \"SMB\"]]}",
+          "width": 360,
+          "height": 220
+        },
+        "code": null,
+        "label": "Customers"
+      },
+      {
+        "id": "t7src_products",
+        "type": "flograph.io.table",
+        "pos": [
+          -1560,
+          120
+        ],
+        "params": {
+          "data": "{\"columns\": [\"product_id\", \"product\", \"category\", \"unit_price\", \"unit_cost\"], \"rows\": [[101, \"Laptop\", \"Electronics\", 1200, 900], [102, \"Phone\", \"Electronics\", 800, 550], [103, \"Monitor\", \"Electronics\", 350, 210], [104, \"Desk\", \"Furniture\", 450, 280], [105, \"Chair\", \"Furniture\", 220, 120], [106, \"Lamp\", \"Furniture\", 90, 40], [107, \"Headset\", \"Accessories\", 150, 70], [108, \"Cable Kit\", \"Accessories\", 40, 12]]}",
+          "width": 360,
+          "height": 220
+        },
+        "code": null,
+        "label": "Products"
+      },
+      {
+        "id": "t7src_targets",
+        "type": "flograph.io.table",
+        "pos": [
+          -1560,
+          400
+        ],
+        "params": {
+          "data": "{\"columns\": [\"region\", \"target\"], \"rows\": [[\"North\", 24000], [\"South\", 25000], [\"East\", 15000], [\"West\", 13000]]}",
+          "width": 300,
+          "height": 160
+        },
+        "code": null,
+        "label": "Regional Targets"
+      },
+      {
+        "id": "t7concat",
+        "type": "flograph.transform.concatenate",
+        "pos": [
+          -1080,
+          -700
+        ],
+        "params": {
+          "columns": "union",
+          "reset_index": true
+        },
+        "code": null,
+        "label": "Q1 + Q2"
+      },
+      {
+        "id": "t7join_cust",
+        "type": "flograph.transform.join",
+        "pos": [
+          -880,
+          -700
+        ],
+        "params": {
+          "on": "customer_id",
+          "how": "inner"
+        },
+        "code": null,
+        "label": "+ Customers"
+      },
+      {
+        "id": "t7join_prod",
+        "type": "flograph.transform.join",
+        "pos": [
+          -680,
+          -700
+        ],
+        "params": {
+          "on": "product_id",
+          "how": "inner"
+        },
+        "code": null,
+        "label": "+ Products"
+      },
+      {
+        "id": "t7expr_finance",
+        "type": "flograph.transform.expression",
+        "pos": [
+          -480,
+          -700
+        ],
+        "params": {
+          "expressions": "revenue = units * unit_price\ncost = units * unit_cost\nmargin = revenue - cost"
+        },
+        "code": null,
+        "label": "Derive Finance"
+      },
+      {
+        "id": "t7reroute",
+        "type": "flograph.util.reroute",
+        "pos": [
+          -280,
+          -640
+        ],
+        "params": {},
+        "code": null,
+        "label": "enriched"
+      },
+      {
+        "id": "t7table_spec",
+        "type": "flograph.viz.table_spec",
+        "pos": [
+          -1080,
+          -560
+        ],
+        "params": {
+          "width": 480,
+          "height": 260,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7gb_region",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          -1080,
+          -120
+        ],
+        "params": {
+          "by": "region",
+          "agg": "sum",
+          "values": "revenue,margin"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7join_targets",
+        "type": "flograph.transform.join",
+        "pos": [
+          -880,
+          -120
+        ],
+        "params": {
+          "on": "region",
+          "how": "inner"
+        },
+        "code": null,
+        "label": "+ Targets"
+      },
+      {
+        "id": "t7expr_attain",
+        "type": "flograph.transform.expression",
+        "pos": [
+          -680,
+          -120
+        ],
+        "params": {
+          "expressions": "attainment = revenue / target * 100"
+        },
+        "code": null,
+        "label": "Attainment %"
+      },
+      {
+        "id": "t7sort_attain",
+        "type": "flograph.transform.sort",
+        "pos": [
+          -480,
+          -120
+        ],
+        "params": {
+          "by": "attainment",
+          "descending": true
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7kpi_revenue",
+        "type": "flograph.viz.card",
+        "pos": [
+          -1080,
+          40
+        ],
+        "params": {
+          "column": "revenue",
+          "aggregation": "Sum",
+          "label": "Total Revenue",
+          "format": ",.0f",
+          "width": 220,
+          "height": 120
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7kpi_margin",
+        "type": "flograph.viz.card",
+        "pos": [
+          -840,
+          40
+        ],
+        "params": {
+          "column": "margin",
+          "aggregation": "Sum",
+          "label": "Total Margin",
+          "format": ",.0f",
+          "width": 220,
+          "height": 120
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7kpi_attain",
+        "type": "flograph.viz.card",
+        "pos": [
+          -600,
+          40
+        ],
+        "params": {
+          "column": "attainment",
+          "aggregation": "Average",
+          "label": "Avg Target Attainment %",
+          "format": ".1f",
+          "width": 220,
+          "height": 120
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7table_region",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          -1080,
+          220
+        ],
+        "params": {
+          "width": 420,
+          "height": 240,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7plotly_region",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          -620,
+          220
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "region",
+          "y": "revenue,target",
+          "title": "Revenue vs Target",
+          "width": 440,
+          "height": 300,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7exec_web",
+        "type": "flograph.viz.show_web",
+        "pos": [
+          -1080,
+          520
+        ],
+        "params": {
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": "\"\"\"Executive Summary\n\nRenders the regional rollup as a styled HTML briefing \u2014 a Show Web View\nforked to prove any Python HTML output can become a canvas visual.\n\"\"\"\nNODE = {\n    \"label\": \"Executive Summary\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [(\"data\", \"dataframe\")],\n    \"outputs\": [(\"view\", \"object\")],\n}\nPARAMS = [\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 460, \"min\": 260, \"max\": 1600},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 320, \"min\": 200, \"max\": 2000},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400},\n]\n\n\ndef run(ctx, data):\n    best = data.iloc[0]\n    rows = \"\".join(\n        f\"<tr><td style='padding:4px 12px 4px 0'>{r.region}</td>\"\n        f\"<td style='text-align:right;padding:4px 12px'>{r.revenue:,.0f}</td>\"\n        f\"<td style='text-align:right;padding:4px 12px'>{r.target:,.0f}</td>\"\n        f\"<td style='text-align:right;padding:4px 0;font-weight:600;\"\n        f\"color:{'#059669' if r.attainment >= 100 else '#dc2626'}'>\"\n        f\"{r.attainment:.0f}%</td></tr>\"\n        for r in data.itertuples())\n    ctx.log(f\"summarised {len(data)} regions\")\n    return f\"\"\"\n    <div style=\"font-family: system-ui, sans-serif; padding: 20px; line-height: 1.5;\">\n      <h2 style=\"margin: 0 0 4px;\">Quarterly Briefing</h2>\n      <p style=\"margin: 0 0 14px; color: #6b7280;\">\n        <b style=\"color:#059669\">{best.region}</b> leads at\n        <b>{best.attainment:.0f}%</b> of target.</p>\n      <table style=\"border-collapse: collapse; font-size: 14px;\">\n        <tr style=\"color:#6b7280; text-align:right;\">\n          <th style=\"text-align:left; padding-right:12px;\">Region</th>\n          <th style=\"padding:0 12px;\">Revenue</th>\n          <th style=\"padding:0 12px;\">Target</th><th>Attainment</th></tr>\n        {rows}\n      </table>\n    </div>\n    \"\"\"\n",
+        "label": "Executive Summary"
+      },
+      {
+        "id": "t7note_slicer",
+        "type": "flograph.util.note",
+        "pos": [
+          620,
+          -780
+        ],
+        "params": {
+          "text": "### \ud83c\udf9b Try the slicer\n\nTick / untick segments \u2014 every visual downstream re-runs live.",
+          "width": 280,
+          "height": 0
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7slicer",
+        "type": "flograph.viz.slicer",
+        "pos": [
+          620,
+          -620
+        ],
+        "params": {
+          "column": "segment",
+          "selected": "[\"Enterprise\", \"SMB\"]",
+          "width": 200,
+          "height": 240
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7gb_category",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          940,
+          -620
+        ],
+        "params": {
+          "by": "category",
+          "agg": "sum",
+          "values": "revenue,margin"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7plotly_category",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          1160,
+          -660
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "category",
+          "y": "revenue,margin",
+          "title": "Category Economics (sliced)",
+          "width": 420,
+          "height": 300,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7pivot",
+        "type": "flograph.transform.pivot",
+        "pos": [
+          940,
+          -480
+        ],
+        "params": {
+          "index": "category",
+          "columns": "region",
+          "values": "revenue",
+          "agg": "sum"
+        },
+        "code": null,
+        "label": "Region \u00d7 Category"
+      },
+      {
+        "id": "t7table_pivot",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          940,
+          -340
+        ],
+        "params": {
+          "width": 460,
+          "height": 240,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7gb_month",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          620,
+          160
+        ],
+        "params": {
+          "by": "month,region",
+          "agg": "sum",
+          "values": "revenue"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7plotly_trend",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          860,
+          120
+        ],
+        "params": {
+          "kind": "line",
+          "x": "month",
+          "y": "revenue",
+          "color": "region",
+          "title": "Monthly Revenue by Region (sliced)",
+          "width": 520,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7script_abc",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          620,
+          340
+        ],
+        "params": {},
+        "code": "\"\"\"ABC Classification\n\nPareto analysis: products ranked by revenue with cumulative share, classed\nA (top ~70% of revenue), B (next ~20%) or C (the tail).\n\"\"\"\nNODE = {\n    \"label\": \"ABC Classification\",\n    \"category\": \"Scripting\",\n    \"inputs\": [(\"in1\", \"dataframe\")],\n    \"outputs\": [(\"out1\", \"dataframe\")],\n}\nPARAMS = []\n\n\ndef run(ctx, in1):\n    by_prod = (in1.groupby(\"product\", as_index=False)[\"revenue\"].sum()\n               .sort_values(\"revenue\", ascending=False).reset_index(drop=True))\n    total = by_prod[\"revenue\"].sum()\n    by_prod[\"cum_share_pct\"] = (by_prod[\"revenue\"].cumsum() / total * 100).round(1)\n    by_prod[\"abc_class\"] = by_prod[\"cum_share_pct\"].apply(\n        lambda c: \"A\" if c <= 70 else (\"B\" if c <= 90 else \"C\"))\n    ctx.log(f\"classified {len(by_prod)} products \"\n            f\"(A: {(by_prod.abc_class == 'A').sum()})\")\n    return {\"out1\": by_prod}\n",
+        "label": "ABC Classification"
+      },
+      {
+        "id": "t7table_abc",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          620,
+          480
+        ],
+        "params": {
+          "width": 420,
+          "height": 260,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7plotly_abc",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          1080,
+          500
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "product",
+          "y": "revenue",
+          "title": "Product Pareto",
+          "width": 440,
+          "height": 280,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7stats",
+        "type": "flograph.transform.statistics",
+        "pos": [
+          -1560,
+          720
+        ],
+        "params": {
+          "include": "numeric only"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7table_stats",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          -1340,
+          680
+        ],
+        "params": {
+          "width": 520,
+          "height": 280,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t7plot_hist",
+        "type": "flograph.viz.show_plot",
+        "pos": [
+          -760,
+          680
+        ],
+        "params": {
+          "kind": "hist",
+          "x": "",
+          "y": "margin",
+          "title": "Order Margin Distribution",
+          "width": 440,
+          "height": 300,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t7c001",
+        "src": [
+          "t7src_q1",
+          "table"
+        ],
+        "dst": [
+          "t7concat",
+          "top"
+        ]
+      },
+      {
+        "id": "t7c002",
+        "src": [
+          "t7src_q2",
+          "table"
+        ],
+        "dst": [
+          "t7concat",
+          "bottom"
+        ]
+      },
+      {
+        "id": "t7c003",
+        "src": [
+          "t7concat",
+          "combined"
+        ],
+        "dst": [
+          "t7join_cust",
+          "left"
+        ]
+      },
+      {
+        "id": "t7c004",
+        "src": [
+          "t7src_customers",
+          "table"
+        ],
+        "dst": [
+          "t7join_cust",
+          "right"
+        ]
+      },
+      {
+        "id": "t7c005",
+        "src": [
+          "t7join_cust",
+          "joined"
+        ],
+        "dst": [
+          "t7join_prod",
+          "left"
+        ]
+      },
+      {
+        "id": "t7c006",
+        "src": [
+          "t7src_products",
+          "table"
+        ],
+        "dst": [
+          "t7join_prod",
+          "right"
+        ]
+      },
+      {
+        "id": "t7c007",
+        "src": [
+          "t7join_prod",
+          "joined"
+        ],
+        "dst": [
+          "t7expr_finance",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c008",
+        "src": [
+          "t7expr_finance",
+          "table"
+        ],
+        "dst": [
+          "t7reroute",
+          "value"
+        ]
+      },
+      {
+        "id": "t7c009",
+        "src": [
+          "t7expr_finance",
+          "table"
+        ],
+        "dst": [
+          "t7table_spec",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c010",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7gb_region",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c011",
+        "src": [
+          "t7gb_region",
+          "aggregated"
+        ],
+        "dst": [
+          "t7join_targets",
+          "left"
+        ]
+      },
+      {
+        "id": "t7c012",
+        "src": [
+          "t7src_targets",
+          "table"
+        ],
+        "dst": [
+          "t7join_targets",
+          "right"
+        ]
+      },
+      {
+        "id": "t7c013",
+        "src": [
+          "t7join_targets",
+          "joined"
+        ],
+        "dst": [
+          "t7expr_attain",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c014",
+        "src": [
+          "t7expr_attain",
+          "table"
+        ],
+        "dst": [
+          "t7sort_attain",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c015",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7kpi_revenue",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c016",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7kpi_margin",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c017",
+        "src": [
+          "t7sort_attain",
+          "table"
+        ],
+        "dst": [
+          "t7kpi_attain",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c018",
+        "src": [
+          "t7sort_attain",
+          "table"
+        ],
+        "dst": [
+          "t7table_region",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c019",
+        "src": [
+          "t7sort_attain",
+          "table"
+        ],
+        "dst": [
+          "t7plotly_region",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c020",
+        "src": [
+          "t7sort_attain",
+          "table"
+        ],
+        "dst": [
+          "t7exec_web",
+          "data"
+        ]
+      },
+      {
+        "id": "t7c021",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7slicer",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c022",
+        "src": [
+          "t7slicer",
+          "table"
+        ],
+        "dst": [
+          "t7gb_category",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c023",
+        "src": [
+          "t7gb_category",
+          "aggregated"
+        ],
+        "dst": [
+          "t7plotly_category",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c024",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7pivot",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c025",
+        "src": [
+          "t7pivot",
+          "pivoted"
+        ],
+        "dst": [
+          "t7table_pivot",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c026",
+        "src": [
+          "t7slicer",
+          "table"
+        ],
+        "dst": [
+          "t7gb_month",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c027",
+        "src": [
+          "t7gb_month",
+          "aggregated"
+        ],
+        "dst": [
+          "t7plotly_trend",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c028",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7script_abc",
+          "in1"
+        ]
+      },
+      {
+        "id": "t7c029",
+        "src": [
+          "t7script_abc",
+          "out1"
+        ],
+        "dst": [
+          "t7table_abc",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c030",
+        "src": [
+          "t7script_abc",
+          "out1"
+        ],
+        "dst": [
+          "t7plotly_abc",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c031",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7stats",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c032",
+        "src": [
+          "t7stats",
+          "stats"
+        ],
+        "dst": [
+          "t7table_stats",
+          "table"
+        ]
+      },
+      {
+        "id": "t7c033",
+        "src": [
+          "t7reroute",
+          "value"
+        ],
+        "dst": [
+          "t7plot_hist",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "t7f_sources",
+        "title": "1 \u00b7 Sources",
+        "rect": [
+          -1600,
+          -760,
+          460,
+          1360
+        ],
+        "color": "#2f4858"
+      },
+      {
+        "id": "t7f_enrich",
+        "title": "2 \u00b7 Enrich & Combine",
+        "rect": [
+          -1120,
+          -760,
+          880,
+          500
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "t7f_regional",
+        "title": "3 \u00b7 Regional Performance",
+        "rect": [
+          -1120,
+          -180,
+          1000,
+          1060
+        ],
+        "color": "#463a5c"
+      },
+      {
+        "id": "t7f_product",
+        "title": "4 \u00b7 Product & Segment Mix",
+        "rect": [
+          580,
+          -820,
+          1040,
+          760
+        ],
+        "color": "#5c4a33"
+      },
+      {
+        "id": "t7f_trend",
+        "title": "5 \u00b7 Trend & Pareto",
+        "rect": [
+          580,
+          60,
+          1040,
+          760
+        ],
+        "color": "#3a5c58"
+      },
+      {
+        "id": "t7f_quality",
+        "title": "6 \u00b7 Data Quality",
+        "rect": [
+          -1600,
+          640,
+          1400,
+          420
+        ],
+        "color": "#5c3340"
+      }
+    ],
+    "pages": [
+      {
+        "id": "t7page_overview",
+        "title": "Overview",
+        "tiles": [
+          {
+            "id": "t7t_kpi_rev",
+            "node": "t7kpi_revenue",
+            "port": "value",
+            "rect": [
+              -200,
+              -240,
+              220,
+              120
+            ]
+          },
+          {
+            "id": "t7t_kpi_mar",
+            "node": "t7kpi_margin",
+            "port": "value",
+            "rect": [
+              40,
+              -240,
+              220,
+              120
+            ]
+          },
+          {
+            "id": "t7t_kpi_att",
+            "node": "t7kpi_attain",
+            "port": "value",
+            "rect": [
+              280,
+              -240,
+              220,
+              120
+            ]
+          },
+          {
+            "id": "t7t_slicer",
+            "node": "t7slicer",
+            "port": null,
+            "rect": [
+              -200,
+              -140,
+              180,
+              240
+            ]
+          },
+          {
+            "id": "t7t_region",
+            "node": "t7plotly_region",
+            "port": "figure",
+            "rect": [
+              0,
+              -140,
+              500,
+              240
+            ]
+          },
+          {
+            "id": "t7t_trend",
+            "node": "t7plotly_trend",
+            "port": "figure",
+            "rect": [
+              -200,
+              120,
+              700,
+              190
+            ]
+          }
+        ]
+      },
+      {
+        "id": "t7page_detail",
+        "title": "Detail",
+        "tiles": [
+          {
+            "id": "t7t_pivot",
+            "node": "t7table_pivot",
+            "port": "table",
+            "rect": [
+              -200,
+              -240,
+              420,
+              250
+            ]
+          },
+          {
+            "id": "t7t_abc",
+            "node": "t7table_abc",
+            "port": "table",
+            "rect": [
+              240,
+              -240,
+              420,
+              250
+            ]
+          },
+          {
+            "id": "t7t_stats",
+            "node": "t7table_stats",
+            "port": "table",
+            "rect": [
+              -200,
+              -10,
+              420,
+              250
+            ]
+          },
+          {
+            "id": "t7t_cat",
+            "node": "t7plotly_category",
+            "port": "figure",
+            "rect": [
+              240,
+              -10,
+              420,
+              250
+            ]
+          }
+        ]
+      },
+      {
+        "id": "t7page_exec",
+        "title": "Executive",
+        "tiles": [
+          {
+            "id": "t7t_exec",
+            "node": "t7exec_web",
+            "port": "view",
+            "rect": [
+              -200,
+              -240,
+              480,
+              350
+            ]
+          },
+          {
+            "id": "t7t_regtable",
+            "node": "t7table_region",
+            "port": "table",
+            "rect": [
+              300,
+              -240,
+              430,
+              280
+            ]
+          },
+          {
+            "id": "t7t_att2",
+            "node": "t7kpi_attain",
+            "port": "value",
+            "rect": [
+              300,
+              20,
+              220,
+              120
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

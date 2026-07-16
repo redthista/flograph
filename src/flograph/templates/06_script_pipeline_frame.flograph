@@ -1,0 +1,181 @@
+{
+  "flograph_version": "0.1.2",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t6n01note0000000000000001",
+        "type": "flograph.util.note",
+        "pos": [
+          -820,
+          -440
+        ],
+        "params": {
+          "text": "## Traffic Analysis Pipeline\n\nScores each day against a 3-day rolling average, keeps the standout days, and ranks them.",
+          "width": 340,
+          "height": 0
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t6n02tabledata00000000002",
+        "type": "flograph.io.table",
+        "pos": [
+          -820,
+          -240
+        ],
+        "params": {
+          "data": "{\"columns\": [\"day\", \"visits\", \"signups\"], \"rows\": [[\"Day 1\", 120, 14], [\"Day 2\", 98, 9], [\"Day 3\", 140, 17], [\"Day 4\", 110, 12], [\"Day 5\", 165, 21], [\"Day 6\", 210, 28], [\"Day 7\", 175, 19], [\"Day 8\", 130, 15], [\"Day 9\", 105, 11], [\"Day 10\", 150, 18], [\"Day 11\", 120, 13], [\"Day 12\", 180, 22], [\"Day 13\", 225, 31], [\"Day 14\", 190, 24]]}",
+          "width": 320,
+          "height": 300
+        },
+        "code": null,
+        "label": "Site Traffic"
+      },
+      {
+        "id": "t6n03script0000000000000003",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -460,
+          -240
+        ],
+        "params": {},
+        "code": "\"\"\"Traffic Quality Score\n\nAdds a 3-day rolling average of visits and tags each day \"above\" or \"below\"\nthat average, so a later Filter Rows can isolate standout days.\n\"\"\"\nNODE = {\n    \"label\": \"Traffic Quality Score\",\n    \"category\": \"Scripting\",\n    \"inputs\": [(\"in1\", \"dataframe\")],\n    \"outputs\": [(\"out1\", \"dataframe\")],\n}\nPARAMS = []\n\n\ndef run(ctx, in1):\n    table = in1.copy()\n    table[\"rolling_avg\"] = table[\"visits\"].rolling(3, min_periods=1).mean().round(1)\n    table[\"performance\"] = table.apply(\n        lambda r: \"above\" if r[\"visits\"] >= r[\"rolling_avg\"] else \"below\", axis=1)\n    ctx.log(f\"scored {len(table)} days\")\n    return {\"out1\": table}\n",
+        "label": "Traffic Quality Score"
+      },
+      {
+        "id": "t6n04filterrows00000000004",
+        "type": "flograph.transform.filter_rows",
+        "pos": [
+          -100,
+          -240
+        ],
+        "params": {
+          "query": "performance == 'above'"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t6n05sort00000000000000005",
+        "type": "flograph.transform.sort",
+        "pos": [
+          220,
+          -240
+        ],
+        "params": {
+          "by": "visits",
+          "descending": true
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t6n06showtable0000000006",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          560,
+          -340
+        ],
+        "params": {
+          "width": 420,
+          "height": 280,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t6n07showplot0000000000007",
+        "type": "flograph.viz.show_plot",
+        "pos": [
+          560,
+          -20
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "day",
+          "y": "visits",
+          "title": "Above-Average Traffic Days",
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t6c01",
+        "src": [
+          "t6n02tabledata00000000002",
+          "table"
+        ],
+        "dst": [
+          "t6n03script0000000000000003",
+          "in1"
+        ]
+      },
+      {
+        "id": "t6c02",
+        "src": [
+          "t6n03script0000000000000003",
+          "out1"
+        ],
+        "dst": [
+          "t6n04filterrows00000000004",
+          "table"
+        ]
+      },
+      {
+        "id": "t6c03",
+        "src": [
+          "t6n04filterrows00000000004",
+          "filtered"
+        ],
+        "dst": [
+          "t6n05sort00000000000000005",
+          "table"
+        ]
+      },
+      {
+        "id": "t6c04",
+        "src": [
+          "t6n05sort00000000000000005",
+          "table"
+        ],
+        "dst": [
+          "t6n06showtable0000000006",
+          "table"
+        ]
+      },
+      {
+        "id": "t6c05",
+        "src": [
+          "t6n05sort00000000000000005",
+          "table"
+        ],
+        "dst": [
+          "t6n07showplot0000000000007",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "t6f01pipelineframe0001",
+        "title": "Traffic Analysis Pipeline",
+        "rect": [
+          -860,
+          -300,
+          1180,
+          220
+        ],
+        "color": "#3b4a63"
+      }
+    ],
+    "pages": []
+  }
+}
