@@ -80,7 +80,12 @@ class TestInspector:
         assert panel._tabs.count() == 1
         assert panel._tabs.tabText(0) == "table"
 
-    def test_figure_output_view(self, qtbot, registry, tmp_path):
+    def test_figure_output_shows_pointer_not_a_squeezed_copy(
+            self, qtbot, registry, tmp_path):
+        """The node's canvas card (or dashboard tile) already renders its
+        figure at a sensible size; the docked Inspector is narrow and used
+        to cram in its own squashed FigureCanvas copy — just point at the
+        card instead of duplicating it badly."""
         csv = tmp_path / "d.csv"
         csv.write_text("x,y\n1,2\n2,4\n3,9\n")
         graph = Graph()
@@ -98,7 +103,27 @@ class TestInspector:
         from flograph.ui.inspector.figure_view import FigureView
         assert panel._tabs.count() == 1
         host = panel._tabs.widget(0)
-        assert host.findChildren(FigureView), "figure view not created"
+        assert not host.findChildren(FigureView), \
+            "inspector should not embed a live figure canvas"
+
+    def test_popup_view_still_embeds_the_figure(self, qtbot, registry, tmp_path):
+        """Unlike the docked Inspector, a popup view is a deliberate,
+        generously-sized window — it should still show the real figure."""
+        csv = tmp_path / "d.csv"
+        csv.write_text("x,y\n1,2\n2,4\n3,9\n")
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        plot = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
+        graph.set_param(reader.id, "path", str(csv))
+        graph.connect(reader.id, "table", plot.id, "table")
+        self._run(qtbot, engine)
+
+        from flograph.ui.inspector.figure_view import FigureView
+        from flograph.ui.inspector.popup_view import PopupView
+        popup = PopupView(graph, engine, plot.id, "figure")
+        qtbot.addWidget(popup)
+        assert isinstance(popup._current_widget, FigureView)
 
 
 class TestFigureViewTeardown:

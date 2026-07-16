@@ -217,6 +217,7 @@ class MainWindow(QMainWindow):
             file_menu.addAction(action)
         self._recent_menu = file_menu.addMenu("Open &Recent")
         self._rebuild_recent_menu()
+        self._build_examples_menu(file_menu)
         file_menu.addSeparator()
         file_menu.addAction(self.action_quit)
 
@@ -1134,6 +1135,43 @@ class MainWindow(QMainWindow):
             self, "Open project", "", "flograph projects (*.flograph)")
         if path:
             self.open_path(path, confirm=False)
+
+    def _build_examples_menu(self, file_menu: QMenu) -> None:
+        import importlib.resources
+
+        self._examples_menu = file_menu.addMenu("Open &Example")
+        try:
+            root = importlib.resources.files("flograph.templates")
+            paths = sorted(
+                (entry for entry in root.iterdir()
+                 if entry.name.endswith(".flograph")),
+                key=lambda entry: entry.name,
+            )
+        except (ModuleNotFoundError, FileNotFoundError):
+            paths = []
+        self._examples_menu.setEnabled(bool(paths))
+        for entry in paths:
+            title = entry.name[:-len(".flograph")]
+            if title[:2].isdigit() and "_" in title:
+                title = title.split("_", 1)[1]
+            title = title.replace("_", " ").title()
+            action = self._examples_menu.addAction(title)
+            action.triggered.connect(
+                lambda checked=False, p=Path(str(entry)): self._open_example(p))
+
+    def _open_example(self, path: Path) -> None:
+        if not self._confirm_discard():
+            return
+        try:
+            loaded = serialization.load(path, self.registry)
+        except (GraphError, OSError, KeyError) as exc:
+            QMessageBox.critical(self, "Open failed", str(exc))
+            return
+        self._replace_graph(loaded)
+        self._project_path = None
+        self._update_title()
+        self.statusBar().showMessage(
+            f"Loaded example '{path.stem}' — use Save As to keep it", 4000)
 
     def open_path(self, path: str, confirm: bool = True) -> bool:
         if confirm and not self._confirm_discard():

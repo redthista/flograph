@@ -268,3 +268,49 @@ class TestFrameRunButton:
         assert fired == ["fr"]
         assert item.pos() == QPointF(0, 0)
         assert stack.count() == 0
+
+
+class TestCardMultiPortLayout:
+    """A card-type node (figure/table/kpi/slicer) with more than one port on
+    a side used to pin every one of them to the exact same header point —
+    the wires still connected correctly, but the pins visually merged into
+    what looked like a single port, with no way to tell which wire fed
+    which parameter. See node_item.py's _space_header_ports."""
+
+    TWO_INPUT_FIGURE_CARD = '''
+NODE = {
+    "label": "Two Input Figure",
+    "category": "Viz",
+    "card": "figure",
+    "inputs": [("a", "dataframe"), ("b", "dataframe")],
+    "outputs": [("figure", "figure")],
+}
+PARAMS = []
+def run(ctx, a, b):
+    return None
+'''
+
+    def test_two_input_figure_card_spaces_ports_apart(self, env):
+        from flograph.core import NodeInstance, parse_spec
+
+        graph, stack, scene = env
+        spec = parse_spec(self.TWO_INPUT_FIGURE_CARD, "test.two_input_figure")
+        node = graph.add_node(NodeInstance.create(spec))
+        item = scene.node_items[node.id]
+        assert item.figure_card
+        assert len(item.input_ports) == 2
+
+        positions = {name: port.pos().y()
+                     for name, port in item.input_ports.items()}
+        assert positions["a"] != positions["b"]
+        assert abs(positions["a"] - positions["b"]) >= 11.0  # port diameter
+
+    def test_single_input_card_port_position_is_unchanged(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        item = scene.node_items[node.id]
+        assert item.table_viewer
+        assert len(item.input_ports) == 1
+        port = next(iter(item.input_ports.values()))
+        from flograph.ui.canvas.node_item import HEADER_H
+        assert port.pos().y() == HEADER_H / 2
