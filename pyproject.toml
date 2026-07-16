@@ -1,6 +1,6 @@
 [project]
 name = "flograph"
-version = "0.1.2"
+version = "0.1.4"
 description = "Visual node-based Python programming environment (flow-based dataflow, Blueprint-style canvas)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,7 +28,6 @@ classifiers = [
 dependencies = [
     "PySide6>=6.7",
     "pandas>=2.0",
-    "matplotlib>=3.8",
     "jedi>=0.19",
 ]
 
@@ -40,6 +39,7 @@ Issues = "https://github.com/redthista/flograph/issues"
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-qt>=4.4"]
 excel = ["openpyxl"]
+matplotlib = ["matplotlib>=3.8"]
 parquet = ["pyarrow"]
 plotly = ["plotly"]
 geo = ["geopandas", "folium"]
