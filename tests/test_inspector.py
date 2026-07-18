@@ -222,7 +222,7 @@ class TestSpecView:
 
     def test_inspector_table_port_gets_a_spec_tab(self, qtbot, registry,
                                                   tmp_path):
-        from PySide6.QtWidgets import QTabWidget
+        from PySide6.QtWidgets import QTabWidget, QTableView
         csv = tmp_path / "d.csv"
         csv.write_text("a,b\n1,x\n3,y\n")
         graph = Graph()
@@ -240,6 +240,14 @@ class TestSpecView:
         sub = host.findChild(QTabWidget)
         assert sub is not None
         assert [sub.tabText(i) for i in range(sub.count())] == ["Data", "Spec"]
-        spec_model = sub.widget(1).model()
+
+        # the Spec tab defers its column-stats scan until it's actually
+        # opened, so before that its content isn't a table view yet
+        assert sub.widget(1).findChild(QTableView) is None
+
+        sub.setCurrentIndex(1)  # "opening" the tab builds it on demand
+        spec_view = sub.widget(1).findChild(QTableView)
+        assert spec_view is not None
+        spec_model = spec_view.model()
         assert list(spec_model._df["column"]) == ["a", "b"]
         assert "int" in spec_model._df["type"][0]
