@@ -100,6 +100,147 @@ class TestSlicerCard:
         assert win.graph.nodes[slicer.id].params["selected"] == ""
         assert widget.item(0).checkState() == Qt.Unchecked
 
+    def test_single_mode_radio_behaviour(self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_sliced_flow(win)
+        win.graph.set_param(slicer.id, "mode", "single")
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+
+        widget = win.scene.node_items[slicer.id]._slicer_list
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.item(0).setCheckState(Qt.Checked)  # "north"
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == ["north"]
+
+        # ticking a second value clears the first — only one at a time
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.item(1).setCheckState(Qt.Checked)  # "south"
+        assert widget.item(0).checkState() == Qt.Unchecked
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == ["south"]
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert list(filtered["region"]) == ["south"]
+
+        # clicking the ticked value again clears the selection entirely
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.item(1).setCheckState(Qt.Unchecked)
+        assert win.graph.nodes[slicer.id].params["selected"] == ""
+
+    def test_switching_to_single_mode_trims_a_multi_selection(
+            self, qtbot, window):
+        """Flipping the "Selection" param from multi to single with two
+        values already ticked must trim to one — otherwise the card would
+        keep showing both ticked while run() (which only honours the first
+        in single mode) filters on just one, a silent card/data mismatch."""
+        win = window
+        _source, slicer, shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        widget = win.scene.node_items[slicer.id]._slicer_list
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.select_all()  # both "north" and "south" ticked
+        assert widget.selected_values() == ["north", "south"]
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.graph.set_param(slicer.id, "mode", "single")
+
+        assert widget.selected_values() == ["north"]
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == ["north"]
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert list(filtered["region"]) == ["north", "north"]
+
+    def test_search_filter_hides_without_dropping_ticks(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+
+        item = win.scene.node_items[slicer.id]
+        widget = item._slicer_list
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.item(0).setCheckState(Qt.Checked)  # tick "north"
+
+        widget.set_filter("south")
+        assert widget.item(0).isHidden()  # "north" is filtered out…
+        assert widget.item(0).checkState() == Qt.Checked  # …but still ticked
+        assert widget.selected_values() == ["north"]  # hidden rows still count
+
+        widget.set_filter("")
+        assert not widget.item(0).isHidden()
+
+    def test_filter_survives_the_rerun_a_tick_triggers(self, qtbot, window):
+        """Ticking a value re-runs the slicer, which repopulates the list
+        from the freshly-cached upstream table (set_slicer_options ->
+        set_options -> clear() + rebuild) — an active search must not be
+        silently dropped by that rebuild."""
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+
+        widget = win.scene.node_items[slicer.id]._slicer_list
+        widget.set_filter("north")
+        assert widget.item(1).isHidden()  # "south" filtered out
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.item(0).setCheckState(Qt.Checked)  # tick "north" (visible)
+
+        # the rebuild the tick triggered must not have cleared the filter
+        assert widget.item(1).isHidden()
+        assert widget.item(0).checkState() == Qt.Checked
+
+    def test_select_all_and_clear_all_respect_the_filter(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+
+        widget = win.scene.node_items[slicer.id]._slicer_list
+        widget.set_filter("north")
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.select_all()
+        assert widget.selected_values() == ["north"]  # "south" stayed hidden
+
+        widget.set_filter("")
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            widget.clear_all()
+        assert widget.selected_values() == []
+
+    def test_toolbar_hides_select_all_in_single_mode(self, qtbot):
+        from flograph.ui.slicer_list import SlicerListWidget, SlicerToolbar
+        target = SlicerListWidget()
+        toolbar = SlicerToolbar(target)
+        qtbot.addWidget(toolbar)
+        assert not toolbar._select_all.isHidden()
+        toolbar.set_mode("single")
+        assert toolbar._select_all.isHidden()
+        toolbar.set_mode("multi")
+        assert not toolbar._select_all.isHidden()
+
+    def test_mode_syncs_to_card_after_a_run(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        win.graph.set_param(slicer.id, "mode", "single")
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        item = win.scene.node_items[slicer.id]
+        assert item._slicer_list._mode == "single"
+        assert item._slicer_toolbar._select_all.isHidden()
+
+    def test_toolbar_count_label_tracks_ticks(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        item = win.scene.node_items[slicer.id]
+        assert item._slicer_toolbar._count.text() == "0/2"
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            item._slicer_list.item(0).setCheckState(Qt.Checked)
+        assert item._slicer_toolbar._count.text() == "1/2"
+
 
 class TestKpiCard:
     def test_value_lands_on_the_item_after_a_run(self, qtbot, window):
