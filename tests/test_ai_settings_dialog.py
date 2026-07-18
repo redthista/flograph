@@ -83,6 +83,30 @@ class TestAiSettingsDialog:
         assert dialog._model.currentText() == "qwen2.5-coder"
 
 
+class TestInfoButton:
+    def test_click_shows_info_message_box(self, qtbot, monkeypatch):
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+
+        calls = []
+        monkeypatch.setattr(
+            mod.QMessageBox, "information",
+            staticmethod(lambda *a, **k: calls.append(a)))
+
+        dialog._info_btn.click()
+
+        assert len(calls) == 1
+        _parent, title, text = calls[0]
+        assert title == "How the AI Assistant Works"
+        assert "node's source code" in text
+        assert "NOT sent" in text
+
+    def test_info_button_labelled_for_what_it_does(self, qtbot):
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+        assert dialog._info_btn.text() == "What data is sent?"
+
+
 class TestFetchModelsButton:
     def _dialog(self, qtbot):
         dialog = mod.AiSettingsDialog()

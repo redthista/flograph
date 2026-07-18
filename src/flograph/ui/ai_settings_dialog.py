@@ -18,6 +18,28 @@ from flograph import ai
 _ORG = "flograph"
 _APP = "flograph"
 
+_INFO_TEXT = """\
+When you click "Ask AI" on a node, three things are sent to the Base URL \
+configured here — nothing passes through any flograph-run server first:
+
+1. A fixed instruction describing flograph's node contract (no data — the \
+same every time).
+2. The current node's source code — the NODE / PARAMS / run() text shown \
+in the code editor.
+3. The instruction you type (e.g. "format the date column as YYYY-MM-DD").
+
+What is NOT sent:
+
+• The actual data flowing through the node (dataframe or column values) — \
+run() is never executed as part of this, so there's no data to send.
+• Parameter values set via the Properties panel (file paths, connection \
+strings, etc.) — those aren't part of the script text.
+• Any other node's code, or the rest of the graph.
+
+One caveat: if a literal value (e.g. a file path or key) is hardcoded \
+directly in the node's script instead of set via the Properties panel, it \
+will be included — it's part of the source code sent to the server."""
+
 
 def load_llm_config() -> ai.LLMConfig:
     settings = QSettings(_ORG, _APP)
@@ -32,7 +54,7 @@ class AiSettingsDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("AI Assistant Settings")
-        self.resize(440, 160)
+        self.resize(480, 160)
 
         config = load_llm_config()
 
@@ -66,7 +88,13 @@ class AiSettingsDialog(QDialog):
             QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
+        self._info_btn = buttons.addButton(
+            "What data is sent?", QDialogButtonBox.HelpRole)
+        self._info_btn.clicked.connect(self._show_info)
         form.addRow(buttons)
+
+    def _show_info(self) -> None:
+        QMessageBox.information(self, "How the AI Assistant Works", _INFO_TEXT)
 
     def _fetch_models(self) -> None:
         config = ai.LLMConfig(
