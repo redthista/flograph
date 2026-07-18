@@ -39,6 +39,7 @@ from .editor.editor_dock import EditorPanel
 from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
 from .properties.params_panel import ParamsPanel
+from .resource_monitor import ResourceMonitorWidget
 
 MAX_RECENT = 8
 PASTE_OFFSET = 30.0
@@ -87,6 +88,8 @@ class MainWindow(QMainWindow):
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self._update_title()
         self._restore_window_state()
+        self.resource_monitor = ResourceMonitorWidget(self.engine, self)
+        self.statusBar().addPermanentWidget(self.resource_monitor)
         self.statusBar().showMessage("Ready")
 
     # ---------------------------------------------------------------- docks
@@ -536,6 +539,7 @@ class MainWindow(QMainWindow):
         node_id = items[0].node.id if len(items) == 1 else None
         self.params_panel.set_node(node_id)
         self.editor_panel.set_node(node_id)
+        self.resource_monitor.set_node(node_id)
         if node_id is not None:
             self.inspector_panel.show_node(node_id)
             return
