@@ -9,8 +9,19 @@ from PySide6.QtWidgets import QTableView, QWidget
 from flograph.core.spec import SPEC_COLUMNS, spec_frame  # noqa: F401 — re-export
 
 
+def is_tabular(value: Any) -> bool:
+    """True for DataFrame/Series values — the ones spec_view_for can build a
+    spec for. Just a type check, no column stats; safe to call eagerly."""
+    import sys
+    pd = sys.modules.get("pandas")
+    return pd is not None and isinstance(value, (pd.DataFrame, pd.Series))
+
+
 def spec_view_for(value: Any) -> Optional[QWidget]:
-    """A spec table for DataFrame/Series values, None for anything else."""
+    """A spec table for DataFrame/Series values, None for anything else.
+    Building it walks every column (nunique/min/max) — for large tables that
+    can be slow, so callers should defer this until the tab is actually
+    shown rather than calling it on every selection change."""
     import sys
     pd = sys.modules.get("pandas")
     if pd is None:
