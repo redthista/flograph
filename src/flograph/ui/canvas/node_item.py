@@ -19,7 +19,7 @@ from flograph.core import NodeInstance, PortSpec
 from flograph.core.node import NodeStatus
 
 from .. import theme
-from ..slicer_list import SlicerListWidget, selected_param_values
+from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 
 NODE_WIDTH = 170.0
@@ -249,6 +249,7 @@ class NodeItem(QGraphicsObject):
         self._kpi_value: object = None
         self._kpi_has_value = False
         self._slicer_list: SlicerListWidget | None = None
+        self._slicer_toolbar: SlicerToolbar | None = None
         self._slicer_proxy: QGraphicsProxyWidget | None = None
         self._slicer_placeholder: QLabel | None = None
         self.setFlags(
@@ -859,7 +860,12 @@ class NodeItem(QGraphicsObject):
         values = SlicerListWidget()
         values.selection_committed.connect(self._on_slicer_committed)
         values.hide()
+
+        toolbar = SlicerToolbar(values)
+        toolbar.hide()
+        layout.addWidget(toolbar)
         layout.addWidget(values, 1)
+        self._slicer_toolbar = toolbar
         self._slicer_list = values
 
         proxy = QGraphicsProxyWidget(self)
@@ -878,21 +884,37 @@ class NodeItem(QGraphicsObject):
         if values is None:
             widget.clear()
             widget.hide()
+            if self._slicer_toolbar is not None:
+                self._slicer_toolbar.hide()
             self._slicer_placeholder.show()
             return
+        widget.set_mode(self._slicer_mode())
         widget.set_options(values, set(self._slicer_selected_param()))
         self._slicer_placeholder.hide()
         widget.show()
+        if self._slicer_toolbar is not None:
+            self._slicer_toolbar.set_mode(self._slicer_mode())
+            self._slicer_toolbar.refresh_summary()
+            self._slicer_toolbar.show()
 
     def _sync_slicer_checks(self) -> None:
-        """Re-apply check states from the "selected" param — keeps the card
-        honest when the param changes elsewhere (properties panel, undo)."""
+        """Re-apply check states and selection mode from this node's params
+        — keeps the card honest when they change elsewhere (properties
+        panel, undo)."""
         widget = self._slicer_list
         if widget is not None and not widget.isHidden():
+            widget.set_mode(self._slicer_mode())
+            if self._slicer_toolbar is not None:
+                self._slicer_toolbar.set_mode(self._slicer_mode())
             widget.sync_checks(set(self._slicer_selected_param()))
+            if self._slicer_toolbar is not None:
+                self._slicer_toolbar.refresh_summary()
 
     def _slicer_selected_param(self) -> list[str]:
         return selected_param_values(self.node.params.get("selected", ""))
+
+    def _slicer_mode(self) -> str:
+        return str(self.node.params.get("mode", "multi") or "multi")
 
     def _on_slicer_committed(self, new_value: str) -> None:
         """A tick changed: commit the selection (dirties this node and

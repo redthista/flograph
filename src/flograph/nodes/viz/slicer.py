@@ -1,10 +1,16 @@
 """Slicer
 
-A Power BI-style interactive filter: pick a column and the card shows that
-column's values as a checkbox list, right on the canvas. Ticking values
-filters the table flowing through and automatically re-runs everything
-downstream, so the visuals that follow stay live. With nothing ticked the
-table passes through unfiltered.
+A Power BI/Excel-style interactive filter: pick a column and the card shows
+that column's values right on the canvas, with a search box to find values
+and Select All / None shortcuts. Ticking values filters the table flowing
+through and automatically re-runs everything downstream, so the visuals
+that follow stay live. With nothing ticked the table passes through
+unfiltered.
+
+"Selection" switches between the two slicer styles those tools offer:
+"multi" is a checkbox list (any number of ticks); "single" is a radio-style
+list where picking one value clears any other and clicking it again clears
+the selection entirely.
 
 Values are matched as strings; "Selected values" holds the ticked ones as a
 JSON array (a comma-separated list also works when editing by hand).
@@ -19,6 +25,8 @@ NODE = {
 PARAMS = [
     {"name": "column", "type": "columns", "label": "Column",
      "default": "", "multi": False},
+    {"name": "mode", "type": "choice", "label": "Selection",
+     "options": ["multi", "single"], "default": "multi"},
     {"name": "selected", "type": "string", "label": "Selected values",
      "default": "", "placeholder": 'Ticked values, e.g. ["north", "south"] '
                                    "— blank keeps every row"},
@@ -55,6 +63,10 @@ def run(ctx, table):
         raise ValueError(f"column {column!r} not in table (has: {available})")
 
     selected = _selected_values(ctx.params.get("selected", ""))
+    if str(ctx.params.get("mode", "multi")).strip() == "single":
+        # a hand-edited param could still hold more than one value; single
+        # mode only ever honours the first
+        selected = selected[:1]
     if not selected:
         return {"table": table}
     filtered = table[table[column].astype(str).isin(selected)]
