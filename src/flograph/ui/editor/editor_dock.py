@@ -8,13 +8,14 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QInputDialog, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph, NodeRegistry, NodeScriptError, parse_spec
 from flograph.engine import NodeError
 
 from ..commands import ResetCodeCommand, SetCodeCommand
+from .ai_worker import AiAssistantController
 from .code_editor import CodeEditor
 from .completion import CompletionController
 
@@ -50,17 +51,31 @@ class EditorPanel(QWidget):
             "Save this node's current code to your library as a reusable node")
         self._save_user_btn.hide()
         self._save_user_btn.clicked.connect(self._save_as_user_node)
+        self._ask_ai_btn = QPushButton("Ask AI…")
+        self._ask_ai_btn.setToolTip(
+            "Describe a change in plain English (e.g. \"format the date "
+            "column as YYYY-MM-DD\") and a local LLM will rewrite this "
+            "node's code for you to review — nothing is applied "
+            "automatically.")
+        self._ask_ai_btn.hide()
+        self._ask_ai_btn.clicked.connect(self._ask_ai)
 
         header = QHBoxLayout()
         header.addWidget(self._title)
         header.addWidget(self._badge)
         header.addStretch(1)
+        header.addWidget(self._ask_ai_btn)
         header.addWidget(self._save_user_btn)
         header.addWidget(self._reset_btn)
 
         self.editor = CodeEditor(self)
         self.editor.setEnabled(False)
         self.completion = CompletionController(self.editor)
+
+        self._ai_request_id = 0
+        self.ai = AiAssistantController(self.editor)
+        self.ai.succeeded.connect(self._on_ai_succeeded)
+        self.ai.failed.connect(self._on_ai_failed)
 
         self._message = QLabel("")
         self._message.setWordWrap(True)
@@ -119,6 +134,7 @@ class EditorPanel(QWidget):
             self._badge.hide()
             self._reset_btn.hide()
             self._save_user_btn.hide()
+            self._ask_ai_btn.hide()
             return
 
         # Check if we have cached temp edits for this node.
@@ -158,6 +174,7 @@ class EditorPanel(QWidget):
                                    and library.builtin)
         # any bound node's current code can be promoted to a user library node
         self._save_user_btn.setVisible(not node.spec.broken)
+        self._ask_ai_btn.setVisible(True)
 
     # --------------------------------------------------------------- apply
 
@@ -192,6 +209,44 @@ class EditorPanel(QWidget):
         if library is not None:
             self._undo_stack.push(
                 ResetCodeCommand(self._graph, self._node_id, library))
+
+    # ------------------------------------------------------------------ ai
+
+    def _ask_ai(self) -> None:
+        if self._node_id is None:
+            return
+        instruction, ok = QInputDialog.getMultiLineText(
+            self, "Ask AI",
+            "Describe the change, e.g. \"format the date column as "
+            "YYYY-MM-DD\" or \"filter out rows where price is negative\":")
+        if not ok or not instruction.strip():
+            return
+        node = self._graph.node(self._node_id)
+        self._ai_request_id += 1
+        self._ask_ai_btn.setEnabled(False)
+        self._show_message("Asking the local LLM…")
+        self.ai.request_suggestion(
+            self._ai_request_id, self.editor.toPlainText(),
+            instruction, node.type_id)
+
+    def _on_ai_succeeded(self, request_id: int, code: str) -> None:
+        self._ask_ai_btn.setEnabled(True)
+        if request_id != self._ai_request_id or self._node_id is None:
+            return  # stale reply, or the user switched nodes meanwhile
+        # Populate the editor as if the user had typed it themselves — this
+        # is a suggestion for review, never applied automatically. The user
+        # still has to read it and press Apply.
+        self.editor.setPlainText(code)
+        if code != self._graph.node(self._node_id).source:
+            self._unsaved_indicator.show()
+        self._show_message(
+            "AI suggestion loaded — review the code, then Apply.")
+
+    def _on_ai_failed(self, request_id: int, message: str) -> None:
+        self._ask_ai_btn.setEnabled(True)
+        if request_id != self._ai_request_id:
+            return
+        self._show_message(message, error=True)
 
     # -------------------------------------------------------------- events
 
