@@ -230,6 +230,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+ai = [
+    { name = "requests" },
+]
 dev = [
     { name = "pytest" },
     { name = "pytest-qt" },
@@ -265,8 +268,9 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-qt", marker = "extra == 'dev'", specifier = ">=4.4" },
+    { name = "requests", marker = "extra == 'ai'" },
 ]
-provides-extras = ["dev", "excel", "matplotlib", "parquet", "plotly", "geo"]
+provides-extras = ["dev", "excel", "matplotlib", "parquet", "plotly", "geo", "ai"]
 
 [[package]]
 name = "folium"

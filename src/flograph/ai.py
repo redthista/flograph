@@ -23,7 +23,7 @@ from .core import NodeScriptError, parse_spec
 
 DEFAULT_BASE_URL = "http://localhost:11434/v1"  # Ollama's OpenAI-compatible endpoint
 DEFAULT_MODEL = "llama3.1"
-DEFAULT_TIMEOUT = 60.0
+DEFAULT_TIMEOUT = 240
 MODELS_TIMEOUT = 5.0  # GET /models is metadata, not generation — fail fast
 
 _SYSTEM_PROMPT = """You edit node scripts for flograph, a visual dataflow app. \
