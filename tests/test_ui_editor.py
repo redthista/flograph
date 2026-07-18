@@ -2,7 +2,7 @@
 code editor behaviors."""
 import pytest
 from PySide6.QtGui import QUndoStack
-from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
+from PySide6.QtWidgets import QCheckBox, QComboBox, QInputDialog, QLineEdit
 
 from flograph.core import Graph, NodeRegistry
 from flograph.engine import NodeError
@@ -183,6 +183,79 @@ class TestEditorPanelTempEdits:
         panel.set_node(node_a.id)
         assert "# edit on a" in panel.editor.toPlainText()
         assert "# edit on b" not in panel.editor.toPlainText()
+
+
+class TestAskAI:
+    def _panel(self, qtbot, graph, stack, registry):
+        panel = EditorPanel(graph, stack, registry)
+        qtbot.addWidget(panel)
+        return panel
+
+    def test_ask_ai_loads_suggestion_for_review_without_applying(
+            self, qtbot, env, registry, monkeypatch):
+        from flograph import ai as ai_module
+
+        graph, stack, _ = env
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
+        panel = self._panel(qtbot, graph, stack, registry)
+        panel.set_node(node.id)
+        original_source = panel.editor.toPlainText()
+
+        suggested = original_source + "\n# ai edit\n"
+        monkeypatch.setattr(
+            ai_module, "suggest_node_update",
+            lambda source, instruction, type_id=None, config=None: suggested,
+        )
+        monkeypatch.setattr(
+            QInputDialog, "getMultiLineText",
+            staticmethod(lambda *a, **k: ("do the thing", True)),
+        )
+
+        with qtbot.waitSignal(panel.ai.succeeded, timeout=5000):
+            panel._ask_ai()
+
+        assert panel.editor.toPlainText() == suggested
+        assert not panel._unsaved_indicator.isHidden()
+        assert node.spec.source == original_source  # never applied automatically
+
+        panel.apply_code()
+        assert node.spec.source == suggested
+
+    def test_ask_ai_shows_error_on_failure(self, qtbot, env, registry, monkeypatch):
+        from flograph import ai as ai_module
+
+        graph, stack, _ = env
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
+        panel = self._panel(qtbot, graph, stack, registry)
+        panel.set_node(node.id)
+
+        def boom(*a, **k):
+            raise ai_module.LLMError("could not reach local LLM")
+
+        monkeypatch.setattr(ai_module, "suggest_node_update", boom)
+        monkeypatch.setattr(
+            QInputDialog, "getMultiLineText",
+            staticmethod(lambda *a, **k: ("do the thing", True)),
+        )
+
+        with qtbot.waitSignal(panel.ai.failed, timeout=5000):
+            panel._ask_ai()
+
+        assert "could not reach" in panel._message.text()
+        assert panel._ask_ai_btn.isEnabled()
+
+    def test_ask_ai_cancelled_dialog_does_nothing(self, qtbot, env, registry, monkeypatch):
+        graph, stack, _ = env
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
+        panel = self._panel(qtbot, graph, stack, registry)
+        panel.set_node(node.id)
+
+        monkeypatch.setattr(
+            QInputDialog, "getMultiLineText",
+            staticmethod(lambda *a, **k: ("", False)),
+        )
+        panel._ask_ai()  # no waitSignal — nothing should be emitted
+        assert panel.editor.toPlainText() == node.spec.source
 
 
 class TestParamsPanel:

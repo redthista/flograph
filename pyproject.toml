@@ -43,6 +43,7 @@ matplotlib = ["matplotlib>=3.8"]
 parquet = ["pyarrow"]
 plotly = ["plotly"]
 geo = ["geopandas", "folium"]
+ai = ["requests"]
 
 [project.scripts]
 flograph = "flograph.app:main"
