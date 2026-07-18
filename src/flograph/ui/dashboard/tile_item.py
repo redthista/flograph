@@ -25,7 +25,7 @@ from ..canvas.grid import (
 from ..canvas.node_item import (
     BUTTON_H, BUTTON_W, card_kind, kpi_caption, kpi_text,
 )
-from ..slicer_list import SlicerListWidget, selected_param_values
+from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
@@ -100,6 +100,7 @@ class TileItem(QGraphicsObject):
         self._plotly_widget = None
         self._table_view = None
         self._slicer_widget: Optional[SlicerListWidget] = None
+        self._slicer_toolbar: Optional[SlicerToolbar] = None
         self._generic_host: Optional[QWidget] = None
         self._generic_child: Optional[QWidget] = None
         self._kpi_value: object = None  # kpi tiles paint, they hold no widget
@@ -215,6 +216,10 @@ class TileItem(QGraphicsObject):
             widget = SlicerListWidget()
             widget.selection_committed.connect(self._commit_slicer_selection)
             self._slicer_widget = widget
+            toolbar = SlicerToolbar(widget)
+            toolbar.hide()
+            self._host_layout.addWidget(toolbar)
+            self._slicer_toolbar = toolbar
         elif kind == "generic":
             widget = QWidget()
             QVBoxLayout(widget).setContentsMargins(0, 0, 0, 0)
@@ -316,13 +321,21 @@ class TileItem(QGraphicsObject):
                                      self.tile.node_id)
             if options is None:
                 widget.hide()
+                if self._slicer_toolbar is not None:
+                    self._slicer_toolbar.hide()
                 self._placeholder.setText(RUN_PROMPT)
                 self._placeholder.show()
             else:
+                mode = str(node.params.get("mode", "multi") or "multi")
+                self._slicer_widget.set_mode(mode)
                 self._slicer_widget.set_options(
                     options,
                     set(selected_param_values(
                         node.params.get("selected", ""))))
+                if self._slicer_toolbar is not None:
+                    self._slicer_toolbar.set_mode(mode)
+                    self._slicer_toolbar.refresh_summary()
+                    self._slicer_toolbar.show()
                 self._placeholder.hide()
                 widget.show()
         elif kind == "table":
@@ -368,8 +381,14 @@ class TileItem(QGraphicsObject):
             self.update()
         elif kind == "slicer" and self._slicer_widget is not None \
                 and not self._slicer_widget.isHidden() and node is not None:
+            mode = str(node.params.get("mode", "multi") or "multi")
+            self._slicer_widget.set_mode(mode)
+            if self._slicer_toolbar is not None:
+                self._slicer_toolbar.set_mode(mode)
             self._slicer_widget.sync_checks(
                 set(selected_param_values(node.params.get("selected", ""))))
+            if self._slicer_toolbar is not None:
+                self._slicer_toolbar.refresh_summary()
 
     def refresh_render_ratio(self) -> None:
         """Keep embedded matplotlib figures crisp under view zoom and DPR —
