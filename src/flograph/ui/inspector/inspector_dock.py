@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QVBoxLayout, QWid
 from flograph.core import Connection, Graph
 from flograph.engine import ExecutionEngine, summarize
 
-from .spec_view import spec_view_for
+from .spec_view import is_tabular, spec_view_for
 from .view_for import view_for as _view_for
 
 
@@ -98,17 +98,40 @@ class InspectorPanel(QWidget):
             meta = QLabel(f"{port.type.value} · {summarize(value)}")
             meta.setStyleSheet("color: #6b7280; font-size: 8pt; padding: 0 4px;")
             host_layout.addWidget(meta)
-            spec = spec_view_for(value)
-            if spec is None:
-                host_layout.addWidget(_view_for(value, embed_figures=False), 1)
-            else:
+            if is_tabular(value):
                 # table values get a column spec next to the data
                 sub = QTabWidget()
                 sub.setDocumentMode(True)
                 sub.addTab(_view_for(value, embed_figures=False), "Data")
-                sub.addTab(spec, "Spec")
+                self._add_lazy_spec_tab(sub, value)
                 host_layout.addWidget(sub, 1)
+            else:
+                host_layout.addWidget(_view_for(value, embed_figures=False), 1)
             self._tabs.addTab(host, port.name)
+
+    def _add_lazy_spec_tab(self, sub: QTabWidget, value) -> None:
+        """Column stats (nunique/min/max) walk the whole table, which is slow
+        for large data — build the Spec tab only once the user opens it,
+        instead of on every node click."""
+        placeholder = QLabel("Spec loads when this tab is opened —\n"
+                              "can be slow for very large tables.")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setStyleSheet("color: #6b7280;")
+        spec_host = QWidget()
+        spec_layout = QVBoxLayout(spec_host)
+        spec_layout.setContentsMargins(0, 0, 0, 0)
+        spec_layout.addWidget(placeholder)
+        spec_index = sub.addTab(spec_host, "Spec")
+
+        def build_spec(index: int) -> None:
+            if index != spec_index:
+                return
+            sub.currentChanged.disconnect(build_spec)
+            spec_layout.removeWidget(placeholder)
+            placeholder.deleteLater()
+            spec_layout.addWidget(spec_view_for(value))
+
+        sub.currentChanged.connect(build_spec)
 
     # --------------------------------------------------------------- events
 
