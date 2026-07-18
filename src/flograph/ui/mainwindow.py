@@ -204,6 +204,8 @@ class MainWindow(QMainWindow):
         # --- tools
         self.action_packages = act("Manage &Packages…", None,
                                    self._show_packages)
+        self.action_ai_settings = act("AI Assistant &Settings…", None,
+                                      self._show_ai_settings)
 
         for action in (self.action_run, self.action_run_selected,
                        self.action_cancel):
@@ -246,6 +248,7 @@ class MainWindow(QMainWindow):
 
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self.action_packages)
+        tools_menu.addAction(self.action_ai_settings)
 
         view_menu = self.menuBar().addMenu("&View")
         for dock in self.findChildren(QDockWidget):
@@ -598,6 +601,10 @@ class MainWindow(QMainWindow):
             self._packages_dialog = dialog
         dialog.show()
         dialog.raise_()
+
+    def _show_ai_settings(self) -> None:
+        from .ai_settings_dialog import AiSettingsDialog
+        AiSettingsDialog(self).exec()
         dialog.activateWindow()
 
     # ------------------------------------------------------- action button

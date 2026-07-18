@@ -103,6 +103,65 @@ class TestChatCompletion:
             ai.chat_completion([{"role": "user", "content": "hi"}])
 
 
+class TestListModels:
+    def test_returns_sorted_model_ids(self, monkeypatch):
+        captured = {}
+
+        def fake_get(url, headers=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["timeout"] = timeout
+            return _FakeResponse(
+                {"data": [{"id": "qwen2.5-coder"}, {"id": "llama3.1"}]}
+            )
+
+        import requests
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        result = ai.list_models()
+
+        assert result == ["llama3.1", "qwen2.5-coder"]
+        assert captured["url"] == f"{ai.DEFAULT_BASE_URL}/models"
+        assert captured["timeout"] == ai.MODELS_TIMEOUT
+        assert "Authorization" not in captured["headers"]
+
+    def test_sends_api_key_when_configured(self, monkeypatch):
+        captured = {}
+
+        def fake_get(url, headers=None, timeout=None):
+            captured["headers"] = headers
+            return _FakeResponse({"data": []})
+
+        import requests
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        ai.list_models(ai.LLMConfig(api_key="secret"))
+        assert captured["headers"]["Authorization"] == "Bearer secret"
+
+    def test_missing_requests_raises_actionable_error(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "requests", None)
+        with pytest.raises(ai.LLMError, match="requests"):
+            ai.list_models()
+
+    def test_connection_failure_raises_llm_error(self, monkeypatch):
+        import requests
+
+        def fake_get(*a, **k):
+            raise requests.ConnectionError("refused")
+
+        monkeypatch.setattr(requests, "get", fake_get)
+        with pytest.raises(ai.LLMError, match="could not reach"):
+            ai.list_models()
+
+    def test_malformed_response_raises_llm_error(self, monkeypatch):
+        import requests
+        monkeypatch.setattr(
+            requests, "get", lambda *a, **k: _FakeResponse({"nope": True})
+        )
+        with pytest.raises(ai.LLMError, match="unexpected response"):
+            ai.list_models()
+
+
 class TestSuggestNodeUpdate:
     def _mock_reply(self, monkeypatch, content):
         import requests

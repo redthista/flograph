@@ -24,6 +24,7 @@ from .core import NodeScriptError, parse_spec
 DEFAULT_BASE_URL = "http://localhost:11434/v1"  # Ollama's OpenAI-compatible endpoint
 DEFAULT_MODEL = "llama3.1"
 DEFAULT_TIMEOUT = 60.0
+MODELS_TIMEOUT = 5.0  # GET /models is metadata, not generation — fail fast
 
 _SYSTEM_PROMPT = """You edit node scripts for flograph, a visual dataflow app. \
 Each node is a single Python file with this exact contract:
@@ -68,11 +69,10 @@ class LLMConfig:
     timeout: float = DEFAULT_TIMEOUT
 
 
-def chat_completion(messages: list[dict], config: Optional[LLMConfig] = None) -> str:
-    """POST an OpenAI-style chat-completions request; return the reply text."""
-    config = config or LLMConfig()
+def _import_requests():
     try:
         import requests
+        return requests
     except ImportError:
         raise LLMError(
             "the 'requests' package is not installed — add it via "
@@ -80,10 +80,44 @@ def chat_completion(messages: list[dict], config: Optional[LLMConfig] = None) ->
             "AI node assistant"
         ) from None
 
-    headers = {"Content-Type": "application/json"}
+
+def _auth_headers(config: LLMConfig) -> dict:
+    headers = {}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
+    return headers
 
+
+def list_models(config: Optional[LLMConfig] = None) -> list[str]:
+    """GET {base_url}/models — sorted model ids the server currently has
+    loaded/available. Any OpenAI-compatible server (Ollama, LM Studio,
+    llama.cpp server, ...) implements this."""
+    config = config or LLMConfig()
+    requests = _import_requests()
+
+    url = config.base_url.rstrip("/") + "/models"
+    try:
+        response = requests.get(
+            url, headers=_auth_headers(config), timeout=MODELS_TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise LLMError(
+            f"could not reach local LLM at {url} — is it running? ({exc})"
+        ) from exc
+
+    try:
+        data = response.json()
+        return sorted(entry["id"] for entry in data["data"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise LLMError(f"unexpected response from local LLM: {exc}") from exc
+
+
+def chat_completion(messages: list[dict], config: Optional[LLMConfig] = None) -> str:
+    """POST an OpenAI-style chat-completions request; return the reply text."""
+    config = config or LLMConfig()
+    requests = _import_requests()
+
+    headers = {"Content-Type": "application/json", **_auth_headers(config)}
     url = config.base_url.rstrip("/") + "/chat/completions"
     try:
         response = requests.post(
