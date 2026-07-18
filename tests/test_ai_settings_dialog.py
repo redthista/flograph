@@ -44,7 +44,7 @@ class TestAiSettingsDialog:
         dialog = mod.AiSettingsDialog()
         qtbot.addWidget(dialog)
         dialog._base_url.setText("http://localhost:1234/v1")
-        dialog._model.setText("qwen2.5-coder")
+        dialog._model.setCurrentText("qwen2.5-coder")
         dialog._api_key.setText("sk-test")
         dialog._save()
 
@@ -57,7 +57,7 @@ class TestAiSettingsDialog:
         dialog = mod.AiSettingsDialog()
         qtbot.addWidget(dialog)
         dialog._base_url.setText("   ")
-        dialog._model.setText("")
+        dialog._model.setCurrentText("")
         dialog._save()
 
         config = mod.load_llm_config()
@@ -80,4 +80,76 @@ class TestAiSettingsDialog:
         dialog = mod.AiSettingsDialog()
         qtbot.addWidget(dialog)
         assert dialog._base_url.text() == "http://localhost:1234/v1"
-        assert dialog._model.text() == "qwen2.5-coder"
+        assert dialog._model.currentText() == "qwen2.5-coder"
+
+
+class TestFetchModelsButton:
+    def _dialog(self, qtbot):
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+        return dialog
+
+    def test_fetch_success_populates_combo_and_keeps_current_selection(
+            self, qtbot, monkeypatch):
+        dialog = self._dialog(qtbot)
+        dialog._model.setCurrentText("llama3.1")
+        monkeypatch.setattr(
+            mod.ai, "list_models",
+            lambda config: ["llama3.1", "qwen2.5-coder"])
+
+        dialog._fetch_models()
+
+        items = [dialog._model.itemText(i) for i in range(dialog._model.count())]
+        assert items == ["llama3.1", "qwen2.5-coder"]
+        assert dialog._model.currentText() == "llama3.1"
+        assert dialog._fetch_models_btn.isEnabled()
+
+    def test_fetch_success_falls_back_to_first_when_current_not_listed(
+            self, qtbot, monkeypatch):
+        dialog = self._dialog(qtbot)
+        dialog._model.setCurrentText("something-else")
+        monkeypatch.setattr(
+            mod.ai, "list_models",
+            lambda config: ["llama3.1", "qwen2.5-coder"])
+
+        dialog._fetch_models()
+
+        assert dialog._model.currentText() == "llama3.1"
+
+    def test_fetch_uses_currently_typed_fields_not_saved_settings(
+            self, qtbot, monkeypatch):
+        dialog = self._dialog(qtbot)
+        dialog._base_url.setText("http://localhost:1234/v1")
+        dialog._api_key.setText("sk-test")
+        captured = {}
+
+        def fake_list_models(config):
+            captured["base_url"] = config.base_url
+            captured["api_key"] = config.api_key
+            return ["m"]
+
+        monkeypatch.setattr(mod.ai, "list_models", fake_list_models)
+        dialog._fetch_models()
+
+        assert captured["base_url"] == "http://localhost:1234/v1"
+        assert captured["api_key"] == "sk-test"
+
+    def test_fetch_failure_shows_warning_and_keeps_current_selection(
+            self, qtbot, monkeypatch):
+        dialog = self._dialog(qtbot)
+        dialog._model.setCurrentText("llama3.1")
+
+        def boom(config):
+            raise mod.ai.LLMError("could not reach local LLM")
+
+        monkeypatch.setattr(mod.ai, "list_models", boom)
+        warnings = []
+        monkeypatch.setattr(
+            mod.QMessageBox, "warning",
+            staticmethod(lambda *a, **k: warnings.append(a)))
+
+        dialog._fetch_models()
+
+        assert warnings
+        assert dialog._model.currentText() == "llama3.1"
+        assert dialog._fetch_models_btn.isEnabled()

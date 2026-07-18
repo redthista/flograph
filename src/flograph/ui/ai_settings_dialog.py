@@ -7,22 +7,23 @@ before firing an "Ask AI" request.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFormLayout, QLineEdit,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QHBoxLayout, QLineEdit, QMessageBox, QPushButton,
 )
 
-from flograph.ai import DEFAULT_BASE_URL, DEFAULT_MODEL, LLMConfig
+from flograph import ai
 
 _ORG = "flograph"
 _APP = "flograph"
 
 
-def load_llm_config() -> LLMConfig:
+def load_llm_config() -> ai.LLMConfig:
     settings = QSettings(_ORG, _APP)
-    return LLMConfig(
-        base_url=settings.value("ai/base_url", DEFAULT_BASE_URL, type=str),
-        model=settings.value("ai/model", DEFAULT_MODEL, type=str),
+    return ai.LLMConfig(
+        base_url=settings.value("ai/base_url", ai.DEFAULT_BASE_URL, type=str),
+        model=settings.value("ai/model", ai.DEFAULT_MODEL, type=str),
         api_key=settings.value("ai/api_key", "", type=str) or None,
     )
 
@@ -36,16 +37,29 @@ class AiSettingsDialog(QDialog):
         config = load_llm_config()
 
         self._base_url = QLineEdit(config.base_url)
-        self._base_url.setPlaceholderText(DEFAULT_BASE_URL)
-        self._model = QLineEdit(config.model)
-        self._model.setPlaceholderText(DEFAULT_MODEL)
+        self._base_url.setPlaceholderText(ai.DEFAULT_BASE_URL)
+
+        self._model = QComboBox()
+        self._model.setEditable(True)
+        self._model.setInsertPolicy(QComboBox.NoInsert)
+        self._model.addItem(config.model)
+        self._model.setCurrentText(config.model)
+        self._fetch_models_btn = QPushButton("Fetch Models")
+        self._fetch_models_btn.setToolTip(
+            "Query the server's /models endpoint, using the Base URL and "
+            "API key above")
+        self._fetch_models_btn.clicked.connect(self._fetch_models)
+        model_row = QHBoxLayout()
+        model_row.addWidget(self._model, 1)
+        model_row.addWidget(self._fetch_models_btn)
+
         self._api_key = QLineEdit(config.api_key or "")
         self._api_key.setPlaceholderText("(optional — most local servers don't need one)")
         self._api_key.setEchoMode(QLineEdit.Password)
 
         form = QFormLayout(self)
         form.addRow("Base URL", self._base_url)
-        form.addRow("Model", self._model)
+        form.addRow("Model", model_row)
         form.addRow("API key", self._api_key)
 
         buttons = QDialogButtonBox(
@@ -54,11 +68,37 @@ class AiSettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
+    def _fetch_models(self) -> None:
+        config = ai.LLMConfig(
+            base_url=self._base_url.text().strip() or ai.DEFAULT_BASE_URL,
+            api_key=self._api_key.text().strip() or None,
+        )
+        self._fetch_models_btn.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            models = ai.list_models(config)
+        except ai.LLMError as exc:
+            QMessageBox.warning(self, "Fetch Models", str(exc))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._fetch_models_btn.setEnabled(True)
+
+        if not models:
+            QMessageBox.information(
+                self, "Fetch Models", "The server returned no models.")
+            return
+
+        current = self._model.currentText()
+        self._model.clear()
+        self._model.addItems(models)
+        self._model.setCurrentText(current if current in models else models[0])
+
     def _save(self) -> None:
         settings = QSettings(_ORG, _APP)
         settings.setValue(
-            "ai/base_url", self._base_url.text().strip() or DEFAULT_BASE_URL)
+            "ai/base_url", self._base_url.text().strip() or ai.DEFAULT_BASE_URL)
         settings.setValue(
-            "ai/model", self._model.text().strip() or DEFAULT_MODEL)
+            "ai/model", self._model.currentText().strip() or ai.DEFAULT_MODEL)
         settings.setValue("ai/api_key", self._api_key.text().strip())
         self.accept()
