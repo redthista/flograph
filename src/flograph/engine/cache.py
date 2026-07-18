@@ -16,6 +16,7 @@ class CacheEntry:
     outputs: dict[str, Any]
     wall_time: float                    # seconds spent computing
     timestamp: float = field(default_factory=time.time)
+    memory_bytes: int = 0                # estimated size of outputs, computed once at cache time
 
     def summary(self, port: str) -> str:
         return summarize(self.outputs.get(port))
@@ -26,7 +27,10 @@ class OutputCache:
         self._entries: dict[str, CacheEntry] = {}
 
     def set(self, node_id: str, outputs: dict[str, Any], wall_time: float) -> None:
-        self._entries[node_id] = CacheEntry(outputs=outputs, wall_time=wall_time)
+        memory_bytes = sum(estimate_size(v) for v in outputs.values())
+        self._entries[node_id] = CacheEntry(
+            outputs=outputs, wall_time=wall_time, memory_bytes=memory_bytes,
+        )
 
     def get(self, node_id: str) -> Optional[CacheEntry]:
         return self._entries.get(node_id)
@@ -37,6 +41,9 @@ class OutputCache:
     def outputs_for(self, node_id: str) -> dict[str, Any]:
         entry = self._entries.get(node_id)
         return entry.outputs if entry else {}
+
+    def total_bytes(self) -> int:
+        return sum(entry.memory_bytes for entry in self._entries.values())
 
     def evict(self, node_id: str) -> None:
         self._entries.pop(node_id, None)
@@ -68,3 +75,25 @@ def summarize(value: Any) -> str:
     if isinstance(value, (list, tuple, dict, set)):
         return f"{type_name} · {len(value)} items"
     return type_name
+
+
+def estimate_size(value: Any) -> int:
+    """Best-effort byte size of a node output, for the status bar memory readout."""
+    import sys
+    pd = sys.modules.get("pandas")
+    if pd is not None:
+        if isinstance(value, (pd.DataFrame, pd.Series)):
+            return int(value.memory_usage(deep=True).sum())
+    np = sys.modules.get("numpy")
+    if np is not None and isinstance(value, np.ndarray):
+        return int(value.nbytes)
+    if isinstance(value, dict):
+        return sys.getsizeof(value) + sum(
+            estimate_size(k) + estimate_size(v) for k, v in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return sys.getsizeof(value) + sum(estimate_size(v) for v in value)
+    try:
+        return sys.getsizeof(value)
+    except Exception:
+        return 0
