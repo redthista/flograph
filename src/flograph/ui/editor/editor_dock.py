@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from flograph.core import Graph, NodeRegistry, NodeScriptError, parse_spec
 from flograph.engine import NodeError
 
+from ..ai_settings_dialog import load_llm_config
 from ..commands import ResetCodeCommand, SetCodeCommand
 from .ai_worker import AiAssistantController
 from .code_editor import CodeEditor
@@ -227,7 +228,7 @@ class EditorPanel(QWidget):
         self._show_message("Asking the local LLM…")
         self.ai.request_suggestion(
             self._ai_request_id, self.editor.toPlainText(),
-            instruction, node.type_id)
+            instruction, node.type_id, load_llm_config())
 
     def _on_ai_succeeded(self, request_id: int, code: str) -> None:
         self._ask_ai_btn.setEnabled(True)
