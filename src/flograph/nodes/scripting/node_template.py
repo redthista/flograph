@@ -23,7 +23,7 @@ NODE = {
 # PARAMS declares the widgets shown in the properties panel; each value
 # arrives in run() via ctx.params. Valid types: string (line edit), text
 # (multiline), int, float, bool, choice (needs "options"), file_open,
-# file_save, columns.
+# file_save, columns, password (masked, with a show/hide toggle).
 PARAMS = [
     {"name": "source", "type": "string", "label": "Source column",
      "default": "", "placeholder": "blank = first numeric column"},

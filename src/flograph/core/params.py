@@ -19,11 +19,13 @@ PARAM_TYPES = {
     "file_open",  # line edit + browse (existing file)
     "file_save",  # line edit + browse (save path)
     "columns",    # free string in v1; column picker later
+    "password",   # QLineEdit with masked echo + reveal toggle
 }
 
 _TYPE_DEFAULTS: dict[str, Any] = {
     "string": "", "text": "", "int": 0, "float": 0.0, "bool": False,
     "choice": None, "file_open": "", "file_save": "", "columns": "",
+    "password": "",
 }
 
 

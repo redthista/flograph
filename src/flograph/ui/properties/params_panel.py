@@ -168,6 +168,26 @@ class ParamsPanel(QScrollArea):
             row.addWidget(browse)
             return host, self._line_setter(edit)
 
+        if spec.type == "password":
+            host = QWidget()
+            row = QHBoxLayout(host)
+            row.setContentsMargins(0, 0, 0, 0)
+            edit = QLineEdit(str(value or ""))
+            edit.setObjectName(f"param_{name}")
+            edit.setEchoMode(QLineEdit.Password)
+            if spec.placeholder:
+                edit.setPlaceholderText(spec.placeholder)
+            edit.textEdited.connect(lambda v: self._commit(name, v))
+            reveal = QToolButton()
+            reveal.setObjectName(f"param_{name}_reveal")
+            reveal.setText("Show")
+            reveal.setCheckable(True)
+            reveal.toggled.connect(lambda checked, edit=edit, reveal=reveal:
+                                    self._toggle_password_reveal(edit, reveal, checked))
+            row.addWidget(edit, 1)
+            row.addWidget(reveal)
+            return host, self._line_setter(edit)
+
         if spec.type == "columns":
             return self._make_columns_widget(spec, value)
 
@@ -237,6 +257,12 @@ class ParamsPanel(QScrollArea):
             text = column
         edit.setText(text)
         self._commit(spec.name, text)
+
+    @staticmethod
+    def _toggle_password_reveal(edit: QLineEdit, reveal: QToolButton,
+                                checked: bool) -> None:
+        edit.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
+        reveal.setText("Hide" if checked else "Show")
 
     def _line_setter(self, edit: QLineEdit) -> Callable[[Any], None]:
         def set_line(v):
