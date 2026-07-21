@@ -5,8 +5,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDockWidget, QFileDialog,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
@@ -29,7 +30,7 @@ from .commands import (
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
 from .canvas import grid
-from .canvas.node_item import card_kind
+from .canvas.node_item import DEFAULT_LOD_THRESHOLD, card_kind
 from .canvas.palette import LibraryPanel, NodePalettePopup
 from .dashboard import (
     DashboardPage, PageTabBar, default_tile_port, default_tile_size,
@@ -41,6 +42,7 @@ from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
 from .properties.params_panel import ParamsPanel
 from .resource_monitor import ResourceMonitorWidget
+from .settings_dialog import SettingsDialog
 
 MAX_RECENT = 8
 PASTE_OFFSET = 30.0
@@ -74,6 +76,13 @@ class MainWindow(QMainWindow):
         self._project_path: Optional[str] = None
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
+        self._gpu_viewport_checked_on_show = False
+        self._settings_dialog: Optional[SettingsDialog] = None
+
+        self.lod_enabled = self.settings.value("canvas/lod_enabled", True, type=bool)
+        self.lod_threshold = self.settings.value(
+            "canvas/lod_threshold", DEFAULT_LOD_THRESHOLD, type=float)
+        self._apply_lod_settings()
 
         self._palette_popup = NodePalettePopup(registry, self)
         self._palette_scene_pos = QPointF()
@@ -203,6 +212,8 @@ class MainWindow(QMainWindow):
         self.action_reset_caches = act("Reset Caches", None, self._reset_caches)
 
         # --- tools
+        self.action_settings = act("&Settings…", QKeySequence("Ctrl+,"),
+                                   self._show_settings)
         self.action_packages = act("Manage &Packages…", None,
                                    self._show_packages)
         self.action_ai_settings = act("AI Assistant &Settings…", None,
@@ -248,12 +259,30 @@ class MainWindow(QMainWindow):
             run_menu.addAction(action)
 
         tools_menu = self.menuBar().addMenu("&Tools")
+        tools_menu.addAction(self.action_settings)
+        tools_menu.addSeparator()
         tools_menu.addAction(self.action_packages)
         tools_menu.addAction(self.action_ai_settings)
 
         view_menu = self.menuBar().addMenu("&View")
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
+
+        # GPU-Accelerated Canvas lives in Tools > Settings… (SettingsDialog),
+        # not directly in a menu — this QAction is just its state/signal
+        # holder, reused as-is by the dialog's checkbox.
+        self.action_gpu_viewport = QAction("GPU-Accelerated Canvas (experimental)", self)
+        self.action_gpu_viewport.setCheckable(True)
+        self.action_gpu_viewport.setToolTip(
+            "Render the canvas through an OpenGL viewport instead of "
+            "software rasterizing — off by default. If a card (figure, "
+            "table, webview) looks wrong after enabling, switch it back "
+            "off here; it also falls back on its own if this machine "
+            "can't actually provide GL.")
+        self.action_gpu_viewport.setChecked(
+            self.settings.value("canvas/gpu_viewport", False, type=bool))
+        self.action_gpu_viewport.toggled.connect(self._on_gpu_viewport_toggled)
+        self._apply_gpu_viewport_setting()
 
     def _build_snap_toolbar(self, toolbar: QToolBar) -> None:
         """Snap-to-grid toggle + resolution selector on the main toolbar — a
@@ -308,6 +337,104 @@ class MainWindow(QMainWindow):
             scene.grid_step = step
         for view in views:
             view.viewport().update()
+
+    @staticmethod
+    def _set_canvas_viewport(view, use_gl: bool) -> None:
+        view.setViewport(QOpenGLWidget() if use_gl else QWidget())
+
+    def _on_gpu_viewport_toggled(self, checked: bool) -> None:
+        self.settings.setValue("canvas/gpu_viewport", checked)
+        self._apply_gpu_viewport_setting()
+        # the window is already on screen by the time a user can click this
+        # menu action, so a real paint (and thus a GL context, if any) is
+        # only ever a repaint() away — safe to verify right now.
+        if checked and self.isVisible():
+            self._verify_gpu_viewport_soon()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # A GL context is only created on first paint, so verifying a
+        # persisted-on setting has to wait for the window to actually be
+        # shown — checking during __init__ would see no context yet on a
+        # perfectly capable machine and wrongly conclude GL is unavailable.
+        if not self._gpu_viewport_checked_on_show:
+            self._gpu_viewport_checked_on_show = True
+            if self.action_gpu_viewport.isChecked():
+                self._verify_gpu_viewport_soon()
+
+    def _apply_gpu_viewport_setting(self) -> None:
+        """Push the GPU-viewport toggle onto every canvas view (modeling
+        canvas + dashboard pages). Swaps the viewport widget only — whether
+        it actually took effect is confirmed separately, see
+        _verify_gpu_viewport_soon, since that requires the window to be
+        visible. If setViewport itself raises, revert immediately: an
+        environment that can't even construct a GL widget should never get
+        stuck with a broken canvas just because the setting was on from a
+        previous session."""
+        enabled = self.action_gpu_viewport.isChecked()
+        views = [self.view] + [page.view for page in self._dashboard_pages.values()]
+        try:
+            for view in views:
+                self._set_canvas_viewport(view, enabled)
+        except Exception:
+            self.action_gpu_viewport.blockSignals(True)
+            self.action_gpu_viewport.setChecked(False)
+            self.action_gpu_viewport.blockSignals(False)
+            self.settings.setValue("canvas/gpu_viewport", False)
+            for view in views:
+                self._set_canvas_viewport(view, False)
+
+    def _verify_gpu_viewport_soon(self) -> None:
+        """Force a synchronous paint (so a QOpenGLWidget viewport actually
+        gets the chance to create its context via initializeGL) before
+        checking it a tick later."""
+        self.view.viewport().repaint()
+        QTimer.singleShot(0, self._verify_gpu_viewport)
+
+    def _verify_gpu_viewport(self) -> None:
+        """Confirms the main view actually got a working GL context
+        (headless/software-only setups silently fail to, without raising)
+        and falls back to the raster viewport if not. This only catches
+        "no GL at all" — visual glitches from a GL viewport compositing the
+        embedded proxy widgets (figure/table/webview cards) incorrectly, if
+        any, aren't detectable this way; that's why the setting stays opt-in
+        rather than a guarantee nothing can go wrong."""
+        if not self.action_gpu_viewport.isChecked():
+            return  # toggled off again before this fired
+        viewport = self.view.viewport()
+        context = viewport.context() if isinstance(viewport, QOpenGLWidget) else None
+        if context is not None and context.isValid():
+            return
+        self.action_gpu_viewport.setChecked(False)  # -> reverts + persists off
+        self.statusBar().showMessage(
+            "GPU acceleration isn't available here — reverted to standard "
+            "rendering.", 6000)
+
+    # -------------------------------------------------------- zoom-out LOD
+
+    def set_lod_enabled(self, enabled: bool) -> None:
+        self.lod_enabled = enabled
+        self.settings.setValue("canvas/lod_enabled", enabled)
+        self._apply_lod_settings()
+
+    def set_lod_threshold(self, threshold: float) -> None:
+        self.lod_threshold = threshold
+        self.settings.setValue("canvas/lod_threshold", threshold)
+        self._apply_lod_settings()
+
+    def _apply_lod_settings(self) -> None:
+        """Push lod_enabled/lod_threshold onto every scene that supports the
+        LOD protocol and re-apply immediately against the current zoom, so a
+        Settings-dialog change takes effect without needing to zoom. Only
+        NodeGraphScene (the modeling canvas) implements it — DashboardScene
+        (report pages) shows tiles, not nodes, and has no LOD concept."""
+        scenes = [self.scene] + [page.scene for page in self._dashboard_pages.values()]
+        for scene in scenes:
+            if not hasattr(scene, "refresh_lod_settings"):
+                continue
+            scene.lod_enabled = self.lod_enabled
+            scene.lod_threshold = self.lod_threshold
+            scene.refresh_lod_settings()
 
     def _smart_edit(self, text_method: str, canvas_fn) -> None:
         """Route Ctrl+Z/X/C/V to the focused text widget when there is one,
@@ -447,6 +574,7 @@ class MainWindow(QMainWindow):
         self._dashboard_pages[page.id] = widget
         widget.scene.snap_enabled = self.action_snap_grid.isChecked()
         widget.scene.grid_step = self._current_grid_step()
+        self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)
 
@@ -607,6 +735,13 @@ class MainWindow(QMainWindow):
     def _show_ai_settings(self) -> None:
         from .ai_settings_dialog import AiSettingsDialog
         AiSettingsDialog(self).exec()
+
+    def _show_settings(self) -> None:
+        if self._settings_dialog is None:
+            self._settings_dialog = SettingsDialog(self, self)
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
 
     # ------------------------------------------------------- action button
 

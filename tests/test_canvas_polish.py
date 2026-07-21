@@ -71,6 +71,90 @@ class TestReroute:
         assert engine.cache.outputs_for(b.id)["out1"] == 7
 
 
+class TestZoomLOD:
+    """Nodes flatten and hide ports/embedded widgets below DEFAULT_LOD_THRESHOLD to keep
+    large graphs snappy zoomed out — and must restore fully on zoom back in."""
+
+    def test_plain_node_ports_hide_and_restore(self, env, registry):
+        from flograph.ui.canvas.node_item import DEFAULT_LOD_THRESHOLD
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.util.constant"))
+        item = scene.node_items[node.id]
+        port = next(iter(item.output_ports.values()))
+        assert port.isVisible() and not item._flat
+
+        scene.set_lod(DEFAULT_LOD_THRESHOLD - 0.05)
+        assert item._flat
+        assert not port.isVisible()
+
+        scene.set_lod(1.0)
+        assert not item._flat
+        assert port.isVisible()
+
+    def test_table_viewer_proxy_hides_and_restores(self, env, registry):
+        from flograph.ui.canvas.node_item import DEFAULT_LOD_THRESHOLD
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        item = scene.node_items[node.id]
+        proxy = item._table_viewer_proxy
+        assert proxy is not None and proxy.isVisible()
+
+        scene.set_lod(DEFAULT_LOD_THRESHOLD - 0.05)
+        assert not proxy.isVisible()
+
+        scene.set_lod(1.0)
+        assert proxy.isVisible()
+
+    def test_node_added_while_zoomed_out_starts_flat(self, env, registry):
+        from flograph.ui.canvas.node_item import DEFAULT_LOD_THRESHOLD
+        graph, stack, scene = env
+        scene.set_lod(DEFAULT_LOD_THRESHOLD - 0.05)
+        node = graph.add_node(registry.instantiate("flograph.util.constant"))
+        item = scene.node_items[node.id]
+        assert item._flat
+        port = next(iter(item.output_ports.values()))
+        assert not port.isVisible()
+
+    def test_lod_disabled_never_flattens_regardless_of_zoom(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.util.constant"))
+        item = scene.node_items[node.id]
+        scene.lod_enabled = False
+
+        scene.set_lod(0.01)  # as zoomed out as it gets
+        assert not item._flat
+        port = next(iter(item.output_ports.values()))
+        assert port.isVisible()
+
+    def test_custom_threshold_shifts_where_flattening_kicks_in(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.util.constant"))
+        item = scene.node_items[node.id]
+        scene.lod_threshold = 0.9  # much more aggressive than the default
+
+        scene.set_lod(0.8)  # would stay full-detail at the default threshold
+        assert item._flat
+
+        scene.set_lod(0.95)
+        assert not item._flat
+
+    def test_refresh_lod_settings_applies_immediately_without_a_zoom_change(
+            self, env, registry):
+        """The whole point of a live Settings toggle: flipping lod_enabled
+        or lod_threshold takes effect right away, not just on the next
+        zoom — mirrors what MainWindow.set_lod_enabled/set_lod_threshold do
+        after a Settings-dialog edit."""
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.util.constant"))
+        item = scene.node_items[node.id]
+        scene.set_lod(0.2)
+        assert item._flat
+
+        scene.lod_enabled = False
+        scene.refresh_lod_settings()
+        assert not item._flat
+
+
 class TestFrames:
     def test_frame_commands_round_trip(self, env):
         graph, stack, scene = env

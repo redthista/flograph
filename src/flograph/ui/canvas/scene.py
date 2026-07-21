@@ -24,7 +24,7 @@ from ..commands import (
 )
 from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
-from .node_item import NodeItem, PortItem
+from .node_item import DEFAULT_LOD_THRESHOLD, NodeItem, PortItem
 
 SCENE_EXTENT = 1_000_000.0
 REROUTE_TYPE = "flograph.util.reroute"
@@ -47,6 +47,12 @@ class NodeGraphScene(QGraphicsScene):
         self.node_items: dict[str, NodeItem] = {}
         self.connection_items: dict[str, ConnectionItem] = {}
         self.frame_items: dict[str, FrameItem] = {}
+        self._zoom = 1.0  # last zoom pushed by the view, see set_lod
+
+        # Zoom-out node simplification preference; the main window is the
+        # sole writer (see MainWindow.set_lod_enabled/set_lod_threshold).
+        self.lod_enabled = True
+        self.lod_threshold = DEFAULT_LOD_THRESHOLD
 
         # Snap-to-grid view preference; the main window is the sole writer.
         from .grid import DEFAULT_STEP
@@ -88,6 +94,7 @@ class NodeGraphScene(QGraphicsScene):
 
     def _on_node_added(self, node: NodeInstance) -> None:
         item = NodeItem(node)
+        item.set_lod(self._flat_state())
         self.addItem(item)
         self.node_items[node.id] = item
 
@@ -190,6 +197,29 @@ class NodeGraphScene(QGraphicsScene):
         for ci in self.connection_items.values():
             if node_id in (ci.conn.src_node, ci.conn.dst_node):
                 ci.update_path()
+
+    def _flat_state(self) -> bool:
+        return self.lod_enabled and self._zoom < self.lod_threshold
+
+    def _apply_lod(self) -> None:
+        flat = self._flat_state()
+        for item in self.node_items.values():
+            item.set_lod(flat)
+
+    def set_lod(self, zoom: float) -> None:
+        """Called by the view whenever its scale changes: push the decision
+        (zoom vs. lod_threshold, gated by lod_enabled) to every node, so
+        ports/embedded widgets hide and painting flattens — see
+        node_item.NodeItem.set_lod."""
+        self._zoom = zoom
+        self._apply_lod()
+
+    def refresh_lod_settings(self) -> None:
+        """Re-applies the flat/full-detail decision using the last-known
+        zoom — call after lod_enabled/lod_threshold change (e.g. from the
+        Settings dialog) so the effect is immediate rather than waiting for
+        the next zoom change."""
+        self._apply_lod()
 
     def refresh_render_ratios(self) -> None:
         """Re-target figure cards' render resolution — called by the view
