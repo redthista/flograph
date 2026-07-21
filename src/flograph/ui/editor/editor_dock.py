@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QUndoStack
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
     QHBoxLayout, QInputDialog, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
@@ -21,6 +21,14 @@ from .code_editor import CodeEditor
 from .completion import CompletionController
 
 _SYNTAX_LINE = re.compile(r"syntax error on line (\d+)")
+
+# The header title shows "<label> — <type_id>", and type_id can run long
+# (e.g. "flograph.scripting.python_script"). It's elided to fit whatever
+# width the title label actually has (recomputed on resize, see
+# resizeEvent()) rather than a fixed cap, so it uses all the room the header
+# gives it; the full text is always available as a tooltip. Used only
+# before the label has ever been laid out (width() == 0).
+_TITLE_FALLBACK_WIDTH = 220
 
 
 class EditorPanel(QWidget):
@@ -39,7 +47,8 @@ class EditorPanel(QWidget):
         # Cache unsaved edits keyed by node_id so switching away and back restores them.
         self._temp_edits: dict[str, str] = {}
 
-        self._title = QLabel("No node selected")
+        self._full_title = "No node selected"
+        self._title = QLabel(self._full_title)
         self._title.setStyleSheet("font-weight: bold;")
         self._badge = QLabel("modified from library")
         self._badge.setStyleSheet("color: #eab308;")
@@ -62,12 +71,8 @@ class EditorPanel(QWidget):
         self._ask_ai_btn.clicked.connect(self._ask_ai)
 
         header = QHBoxLayout()
-        header.addWidget(self._title)
+        header.addWidget(self._title, 1)
         header.addWidget(self._badge)
-        header.addStretch(1)
-        header.addWidget(self._ask_ai_btn)
-        header.addWidget(self._save_user_btn)
-        header.addWidget(self._reset_btn)
 
         self.editor = CodeEditor(self)
         self.editor.setEnabled(False)
@@ -93,6 +98,9 @@ class EditorPanel(QWidget):
         footer = QHBoxLayout()
         footer.addWidget(self._message, 1)
         footer.addWidget(self._unsaved_indicator)
+        footer.addWidget(self._ask_ai_btn)
+        footer.addWidget(self._save_user_btn)
+        footer.addWidget(self._reset_btn)
         footer.addWidget(self._apply_btn)
 
         layout = QVBoxLayout(self)
@@ -106,6 +114,20 @@ class EditorPanel(QWidget):
         graph.events.code_changed.connect(self._on_code_changed)
         graph.events.label_changed.connect(self._refresh_header)
         graph.events.node_removed.connect(self._on_node_removed)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(200, 100)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_title()
+
+    def _update_title(self) -> None:
+        width = self._title.width() or _TITLE_FALLBACK_WIDTH
+        metrics = QFontMetrics(self._title.font())
+        self._title.setText(
+            metrics.elidedText(self._full_title, Qt.ElideRight, width))
+        self._title.setToolTip(self._full_title)
 
     # -------------------------------------------------------------- binding
 
@@ -131,7 +153,8 @@ class EditorPanel(QWidget):
             self.editor.setEnabled(False)
             self._apply_btn.setEnabled(False)
             self._unsaved_indicator.hide()
-            self._title.setText("No node selected")
+            self._full_title = "No node selected"
+            self._update_title()
             self._badge.hide()
             self._reset_btn.hide()
             self._save_user_btn.hide()
@@ -168,7 +191,8 @@ class EditorPanel(QWidget):
         if node_id != self._node_id or self._node_id is None:
             return
         node = self._graph.node(node_id)
-        self._title.setText(f"{node.label}  —  {node.type_id}")
+        self._full_title = f"{node.label}  —  {node.type_id}"
+        self._update_title()
         library = self._registry.maybe_get(node.type_id)
         self._badge.setVisible(node.forked)
         self._reset_btn.setVisible(node.forked and library is not None

@@ -1,9 +1,15 @@
-"""Properties panel: an auto-generated form from a node's ParamSpecs.
+"""Properties panel: a resizable property/value table built from a node's
+ParamSpecs.
 
-Every ParamSpec type maps to exactly one widget; edits push SetParamCommand
-(mergeable while typing), and graph events flow back into the widgets so
-undo/redo keeps the form in sync. 'columns' params get a picker fed by the
-cached output of connected upstream nodes (see flograph.engine.introspect).
+Every ParamSpec type maps to exactly one widget, embedded in the value
+column of a two-column QTreeWidget; edits push SetParamCommand (mergeable
+while typing), and graph events flow back into the widgets so undo/redo
+keeps the table in sync. The property column is user-resizable (drag the
+header divider) so a node with long labels doesn't force the whole panel
+wider -- unlike a plain form layout, the column split is the user's choice,
+not something the widest label dictates. 'columns' params get a picker fed
+by the cached output of connected upstream nodes (see
+flograph.engine.introspect).
 """
 from __future__ import annotations
 
@@ -12,29 +18,17 @@ from typing import Any, Callable, Optional
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
-    QLabel, QLineEdit, QMenu, QPlainTextEdit, QScrollArea, QSpinBox,
-    QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QSpinBox,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph, ParamSpec
 
 from ..commands import SetLabelCommand, SetParamCommand
 
-# QFormLayout sizes its label column to the widest label's sizeHint, and a
-# plain str passed to addRow() never wraps -- a node with a long, descriptive
-# label (e.g. "Right suffix for overlapping columns") could blow the form's
-# minimum width out to 2-3x a node with short labels. Cap the label column so
-# long labels wrap onto a second line instead of stretching the form wider.
-_LABEL_MAX_WIDTH = 130
 
-# Same idea for numeric fields: a param with no min/max gets a huge range
-# (e.g. +/-2**31), and QSpinBox/QDoubleSpinBox size themselves to fit the
-# widest value they could ever display.
-_SPINBOX_MAX_WIDTH = 110
-
-
-class ParamsPanel(QScrollArea):
+class ParamsPanel(QWidget):
     def __init__(self, graph: Graph, undo_stack: QUndoStack, parent=None,
                  cache=None) -> None:
         super().__init__(parent)
@@ -45,26 +39,39 @@ class ParamsPanel(QScrollArea):
         self._setters: dict[str, Callable[[Any], None]] = {}
         self._updating = False
 
-        self.setWidgetResizable(True)
-        self._body = QWidget()
-        self.setWidget(self._body)
-        self._layout = QVBoxLayout(self._body)
-        self._layout.setAlignment(Qt.AlignTop)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self._doc_label = QLabel()
+        self._doc_label.setWordWrap(True)
+        self._doc_label.setStyleSheet("color: #9ca3af; font-size: 8pt;")
+        self._doc_label.hide()
+        layout.addWidget(self._doc_label)
+
         self._placeholder = QLabel("No node selected")
         self._placeholder.setStyleSheet("color: #6b7280;")
-        self._layout.addWidget(self._placeholder)
+        layout.addWidget(self._placeholder)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Property", "Value"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.header().setSectionResizeMode(QHeaderView.Interactive)
+        self.tree.header().setStretchLastSection(True)
+        self.tree.setColumnWidth(0, 140)
+        self.tree.hide()
+        layout.addWidget(self.tree, 1)
 
         graph.events.param_changed.connect(self._on_param_changed)
         graph.events.code_changed.connect(self._on_code_changed)
         graph.events.node_removed.connect(self._on_node_removed)
 
     def minimumSizeHint(self) -> QSize:
-        # A scroll area won't shrink narrower than its content widget's own
-        # minimum, and that minimum varies a lot by node (a form with long
-        # labels or several params needs much more room than a simple one).
-        # Pin our own floor low regardless, so the dock is never forced
-        # wider/taller than the user left it -- oversized forms scroll
-        # instead of pushing the dock around.
+        # Rows are only as tall as the embedded widgets demand, and a node
+        # with many params just grows the tree's scroll content -- but pin a
+        # small floor regardless so the dock is never forced wider/taller
+        # than the user left it.
         return QSize(200, 100)
 
     # -------------------------------------------------------------- binding
@@ -74,56 +81,51 @@ class ParamsPanel(QScrollArea):
         self._rebuild()
 
     def _clear(self) -> None:
-        while self._layout.count():
-            item = self._layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                # hide immediately -- taking it out of the layout alone
-                # doesn't stop it painting, and two rebuilds can happen back
-                # to back (e.g. clearSelection() + setSelected(True)) before
-                # deleteLater() actually runs, leaving stale widgets visible
-                # on top of the new form
-                widget.hide()
-                widget.deleteLater()
+        self.tree.clear()
         self._setters = {}
 
     def _rebuild(self) -> None:
         self._clear()
         if self._node_id is None or self._node_id not in self._graph.nodes:
-            placeholder = QLabel("No node selected")
-            placeholder.setStyleSheet("color: #6b7280;")
-            self._layout.addWidget(placeholder)
+            self._doc_label.hide()
+            self._placeholder.show()
+            self.tree.hide()
             return
         node = self._graph.node(self._node_id)
+        self._placeholder.hide()
+        self.tree.show()
 
         if node.spec.doc:
-            doc = QLabel(node.spec.doc.split("\n\n")[0])
-            doc.setWordWrap(True)
-            doc.setStyleSheet("color: #9ca3af; font-size: 8pt;")
-            self._layout.addWidget(doc)
-
-        form_host = QWidget()
-        form = QFormLayout(form_host)
-        form.setLabelAlignment(Qt.AlignRight)
-        self._layout.addWidget(form_host)
+            self._doc_label.setText(node.spec.doc.split("\n\n")[0])
+            self._doc_label.show()
+        else:
+            self._doc_label.hide()
 
         label_edit = QLineEdit(node.label_override or "")
         label_edit.setPlaceholderText(node.spec.label)
         label_edit.editingFinished.connect(
             lambda: self._commit_label(label_edit.text()))
-        form.addRow(self._row_label("Name"), label_edit)
+        self._add_row("Name", label_edit)
 
         for spec in node.spec.params:
             widget, setter = self._make_widget(spec, node.params.get(spec.name))
             self._setters[spec.name] = setter
-            form.addRow(self._row_label(spec.label or spec.name), widget)
+            self._add_row(spec.label or spec.name, widget)
 
-    @staticmethod
-    def _row_label(text: str) -> QLabel:
-        label = QLabel(text)
-        label.setWordWrap(True)
-        label.setMaximumWidth(_LABEL_MAX_WIDTH)
-        return label
+    def _add_row(self, label: str, widget: QWidget) -> None:
+        item = QTreeWidgetItem([label, ""])
+        item.setToolTip(0, label)
+        self.tree.addTopLevelItem(item)
+        self.tree.setItemWidget(item, 1, widget)
+        # rows default to a single text line's height -- taller widgets
+        # (the multiline "text" editor) would get clipped without this, but
+        # respect any maximumHeight the widget set on itself (e.g. the "text"
+        # editor caps at 90px; its sizeHint() alone would ask for ~190px).
+        # QSize requires a non-negative width to count as valid, or the
+        # whole hint (including the height we actually care about) is
+        # silently discarded -- so pass the widget's own preferred width.
+        height = max(24, min(widget.sizeHint().height(), widget.maximumHeight()))
+        item.setSizeHint(1, QSize(widget.sizeHint().width(), height))
 
     # -------------------------------------------------------------- widgets
 
@@ -140,7 +142,6 @@ class ParamsPanel(QScrollArea):
             spin.setRange(int(spec.minimum) if spec.minimum is not None else -2**31,
                           int(spec.maximum) if spec.maximum is not None else 2**31 - 1)
             spin.setValue(int(value or 0))
-            spin.setMaximumWidth(_SPINBOX_MAX_WIDTH)
             spin.valueChanged.connect(lambda v: self._commit(name, int(v)))
             return spin, lambda v: self._silently(spin.setValue, int(v or 0))
 
@@ -150,7 +151,6 @@ class ParamsPanel(QScrollArea):
             spin.setRange(spec.minimum if spec.minimum is not None else -1e18,
                           spec.maximum if spec.maximum is not None else 1e18)
             spin.setValue(float(value or 0.0))
-            spin.setMaximumWidth(_SPINBOX_MAX_WIDTH)
             spin.valueChanged.connect(lambda v: self._commit(name, float(v)))
             return spin, lambda v: self._silently(spin.setValue, float(v or 0.0))
 
