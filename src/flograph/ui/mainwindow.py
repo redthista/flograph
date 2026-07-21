@@ -607,7 +607,6 @@ class MainWindow(QMainWindow):
     def _show_ai_settings(self) -> None:
         from .ai_settings_dialog import AiSettingsDialog
         AiSettingsDialog(self).exec()
-        dialog.activateWindow()
 
     # ------------------------------------------------------- action button
 
