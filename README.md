@@ -23,6 +23,26 @@ python -m build          # or: uv build   ->   dist/flograph-*.whl
 > The project was renamed from **flopy** to **flograph** because `flopy` is
 > already taken on PyPI (USGS MODFLOW).
 
+### One-file script (no install)
+
+If you can't `pip install` on a given machine (locked-down work laptop,
+no package-index access, etc.) but PySide6, pandas, jedi, and psutil are
+already available there, build a single self-contained `.py` file instead:
+
+```bash
+python scripts/build_onefile.py          # writes dist/flograph_onefile.py
+```
+
+Copy (or email yourself) that one file and run it directly — no install
+step, no `flograph` package needed on the target machine:
+
+```bash
+python flograph_onefile.py               # or: python flograph_onefile.py project.flograph
+```
+
+It embeds flograph's own source as a base64 zip and unpacks it to a temp
+dir at startup; it does not bundle the third-party dependencies themselves.
+
 ## Run it
 
 ```bash
@@ -149,6 +169,10 @@ Architecture (src layout):
 - `flograph/ui` — canvas (QGraphicsView from scratch), code editor, inspector,
   properties, console. One rule everywhere: **QUndoCommands are the only
   writers to the graph**; items react to graph events.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for what's new in each version.
 
 ## License
 
