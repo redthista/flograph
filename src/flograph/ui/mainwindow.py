@@ -10,8 +10,9 @@ from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDockWidget, QFileDialog,
-    QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QPlainTextEdit, QStackedWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+    QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
+    QMessageBox, QPlainTextEdit, QStackedWidget, QTextEdit, QToolBar,
+    QVBoxLayout, QWidget,
 )
 
 from flograph.core import (
@@ -52,7 +53,6 @@ _CLIPBOARD_KEY = "flograph_clipboard"
 class MainWindow(QMainWindow):
     def __init__(self, registry: NodeRegistry) -> None:
         super().__init__()
-        self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowTabbedDocks)
         self.registry = registry
         self.graph = Graph()
         self.undo_stack = QUndoStack(self)
@@ -62,13 +62,14 @@ class MainWindow(QMainWindow):
         self._canvas_stack = QStackedWidget()
         self._canvas_stack.addWidget(self.view)
         self.page_bar = PageTabBar()
-        central = QWidget()
-        central_layout = QVBoxLayout(central)
-        central_layout.setContentsMargins(0, 0, 0, 0)
-        central_layout.setSpacing(0)
-        central_layout.addWidget(self._canvas_stack, 1)
-        central_layout.addWidget(self.page_bar)
-        self.setCentralWidget(central)
+        # docks/toolbars need a real QMainWindow, but the page bar has to
+        # live outside that dock system entirely (see _apply_page_bar_position)
+        # -- so the docks+canvas live in this nested QMainWindow, and it plus
+        # the page bar are arranged in the outer window's central widget.
+        self._dock_host = QMainWindow(self)
+        self._dock_host.setDockOptions(
+            QMainWindow.AnimatedDocks | QMainWindow.AllowTabbedDocks)
+        self._dock_host.setCentralWidget(self._canvas_stack)
         self._dashboard_pages: dict[str, DashboardPage] = {}
         self._restoring_pages = False
         self.engine = ExecutionEngine(self.graph, parent=self)
@@ -83,6 +84,10 @@ class MainWindow(QMainWindow):
         self.lod_threshold = self.settings.value(
             "canvas/lod_threshold", DEFAULT_LOD_THRESHOLD, type=float)
         self._apply_lod_settings()
+        self.page_bar_position = self.settings.value(
+            "canvas/page_bar_position", "top", type=str)
+        if self.page_bar_position not in ("top", "bottom"):
+            self.page_bar_position = "top"
 
         self._palette_popup = NodePalettePopup(registry, self)
         self._palette_scene_pos = QPointF()
@@ -98,6 +103,7 @@ class MainWindow(QMainWindow):
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self._update_title()
         self._restore_window_state()
+        self._on_current_page_changed(self.page_bar.current_page_id())
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self.statusBar().showMessage("Ready")
@@ -105,12 +111,13 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- docks
 
     def _build_docks(self) -> None:
+        host = self._dock_host
         self.library_panel = LibraryPanel(self.registry)
         self.library_tree = self.library_panel.tree
-        library_dock = QDockWidget("Node Library", self)
-        library_dock.setObjectName("dock_library")
-        library_dock.setWidget(self.library_panel)
-        self.addDockWidget(Qt.LeftDockWidgetArea, library_dock)
+        self.library_dock = QDockWidget("Node Library", host)
+        self.library_dock.setObjectName("dock_library")
+        self.library_dock.setWidget(self.library_panel)
+        host.addDockWidget(Qt.LeftDockWidgetArea, self.library_dock)
         self.library_tree.add_requested.connect(self._add_node_at_view_center)
         self.library_tree.new_group_requested.connect(self._new_user_group)
         self.library_tree.rename_user_node_requested.connect(
@@ -121,36 +128,81 @@ class MainWindow(QMainWindow):
 
         self.params_panel = ParamsPanel(self.graph, self.undo_stack,
                                         cache=self.engine.cache)
-        self.properties_dock = QDockWidget("Properties", self)
+        self.properties_dock = QDockWidget("Properties", host)
         self.properties_dock.setObjectName("dock_properties")
         self.properties_dock.setWidget(self.params_panel)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
+        host.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
         self.editor_panel = EditorPanel(self.graph, self.undo_stack, self.registry)
         self.editor_panel.save_as_user_node_requested.connect(
             self._save_as_user_node)
-        self.editor_dock = QDockWidget("Code", self)
+        self.editor_dock = QDockWidget("Code", host)
         self.editor_dock.setObjectName("dock_editor")
         self.editor_dock.setWidget(self.editor_panel)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.editor_dock)
-        self.tabifyDockWidget(self.properties_dock, self.editor_dock)
+        host.addDockWidget(Qt.RightDockWidgetArea, self.editor_dock)
+        host.tabifyDockWidget(self.properties_dock, self.editor_dock)
         self.properties_dock.raise_()
-        self.resizeDocks([self.properties_dock], [420], Qt.Horizontal)
+        host.resizeDocks([self.properties_dock], [420], Qt.Horizontal)
 
         self.inspector_panel = InspectorPanel(self.graph, self.engine)
-        self.inspector_dock = QDockWidget("Inspector", self)
+        self.inspector_dock = QDockWidget("Inspector", host)
         self.inspector_dock.setObjectName("dock_inspector")
         self.inspector_dock.setWidget(self.inspector_panel)
-        self.addDockWidget(Qt.BottomDockWidgetArea, self.inspector_dock)
+        host.addDockWidget(Qt.BottomDockWidgetArea, self.inspector_dock)
 
         self.log_console = LogConsole(self.graph, self.engine)
-        self.log_dock = QDockWidget("Log", self)
+        self.log_dock = QDockWidget("Log", host)
         self.log_dock.setObjectName("dock_log")
         self.log_dock.setWidget(self.log_console)
-        self.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
-        self.tabifyDockWidget(self.inspector_dock, self.log_dock)
+        host.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
+        host.tabifyDockWidget(self.inspector_dock, self.log_dock)
         self.inspector_dock.raise_()
-        self.resizeDocks([self.inspector_dock], [260], Qt.Vertical)
+        host.resizeDocks([self.inspector_dock], [260], Qt.Vertical)
+
+        self._apply_page_bar_position(self.page_bar_position)
+
+    def set_page_bar_position(self, position: str) -> None:
+        if position not in ("top", "bottom"):
+            return
+        if position == self.page_bar_position:
+            return
+        self.page_bar_position = position
+        self.settings.setValue("canvas/page_bar_position", position)
+        self._apply_page_bar_position(position)
+
+    def _apply_page_bar_position(self, position: str) -> None:
+        """Arrange the page bar (the page switcher -- stays put and
+        full-size even when every other dock is hidden, e.g. on a dashboard
+        page) against the given edge of the *window*, with the dock host
+        (canvas + every other dock) filling the rest.
+
+        This is deliberately a plain QBoxLayout, not another dock: a
+        QDockWidget here would need to sit in the *same* dock area as
+        Inspector/Log or Properties/Code to reach the window edge, and
+        splitDockWidget() against an anchor that already has a tab group
+        reliably corrupts that group the first time it's called more than
+        once on the same anchor (verified empirically -- not a timing or
+        ordering issue, a real limitation). A plain layout has no such
+        failure mode, and also has no resize handle to fight with -- a
+        boxed-in widget with a stretch-0 layout slot just can't be dragged.
+
+        Only top/bottom are supported -- left/right (vertical, rotated-label)
+        was pulled after the rotated text couldn't be made to render reliably
+        centered on real screens (offscreen pixel-grab tests kept passing
+        while the user still saw it broken, so trust the user's eyes over
+        that harness here)."""
+        old_container = self.centralWidget()
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        ordered = ([self.page_bar, self._dock_host] if position == "top"
+                  else [self._dock_host, self.page_bar])
+        for widget in ordered:
+            layout.addWidget(widget, 1 if widget is self._dock_host else 0)
+        self.setCentralWidget(container)
+        if old_container is not None:
+            old_container.deleteLater()
 
     # -------------------------------------------------------------- actions
 
@@ -593,6 +645,14 @@ class MainWindow(QMainWindow):
         widget = self._dashboard_pages.get(page_id) if page_id else None
         self._canvas_stack.setCurrentWidget(
             widget if widget is not None else self.view)
+        # dashboard/report pages have no node selection to configure, so free
+        # up the screen by hiding the model-only docks
+        is_model_page = page_id is None
+        self.library_dock.setVisible(is_model_page)
+        self.properties_dock.setVisible(is_model_page)
+        self.editor_dock.setVisible(is_model_page)
+        self.inspector_dock.setVisible(is_model_page)
+        self.log_dock.setVisible(is_model_page)
         if self._project_path and not self._restoring_pages:
             self.settings.setValue(f"active_page/{self._project_path}",
                                    page_id or "")
@@ -1167,15 +1227,15 @@ class MainWindow(QMainWindow):
 
     def _restore_window_state(self) -> None:
         geometry = self.settings.value("window_geometry")
-        state = self.settings.value("window_state")
+        state = self.settings.value("dock_state")
         if geometry is not None:
             self.restoreGeometry(geometry)
         if state is not None:
-            self.restoreState(state)
+            self._dock_host.restoreState(state)
 
     def _save_window_state(self) -> None:
         self.settings.setValue("window_geometry", self.saveGeometry())
-        self.settings.setValue("window_state", self.saveState())
+        self.settings.setValue("dock_state", self._dock_host.saveState())
 
     # ----------------------------------------------------------- copy/paste
 
