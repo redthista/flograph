@@ -51,6 +51,16 @@ class ZoomPanGraphicsView(QGraphicsView):
         if scene is not None and hasattr(scene, "refresh_render_ratios"):
             scene.refresh_render_ratios()
 
+    def _apply_lod(self) -> None:
+        """Push the new zoom to the scene right away (not gated by the zoom
+        settle timer) so nodes hide their ports/widgets and flatten as soon
+        as they cross the scene's lod_threshold, keeping large graphs
+        responsive mid-zoom (see NodeGraphScene.lod_enabled/lod_threshold,
+        user-configurable via Settings > Canvas)."""
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "set_lod"):
+            scene.set_lod(self.zoom)
+
     # ----------------------------------------------------------------- zoom
 
     @property
@@ -83,6 +93,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         after = self.mapToScene(pos)
         delta = after - before
         self.translate(delta.x(), delta.y())
+        self._apply_lod()
         self._zoom_settle.start()
 
     def _scrollable_widget_at(self, pos) -> QWidget | None:
@@ -129,6 +140,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         if self.zoom > 1.5:  # don't over-zoom on a single item
             factor = 1.5 / self.zoom
             self.scale(factor, factor)
+        self._apply_lod()
         self._zoom_settle.start()
 
     # ------------------------------------------------------------------ pan

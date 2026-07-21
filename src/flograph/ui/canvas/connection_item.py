@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsItem
 from flograph.core import Connection, PortType
 
 from .. import theme
-from .node_item import PortItem
+from .node_item import DEFAULT_LOD_THRESHOLD, PortItem
 
 
 def bezier_path(start: QPointF, end: QPointF) -> QPainterPath:
@@ -56,7 +56,12 @@ class ConnectionItem(QGraphicsPathItem):
         color = (theme.SELECTION_OUTLINE if self.isSelected()
                  else _color_for(self.src_port, self.dst_port))
         width = 3.0 if (self.isSelected() or self._hover) else 2.0
-        painter.setRenderHint(QPainter.Antialiasing)
+        scene = self.scene()
+        threshold = getattr(scene, "lod_threshold", DEFAULT_LOD_THRESHOLD)
+        lod_enabled = getattr(scene, "lod_enabled", True)
+        lod = option.levelOfDetailFromTransform(painter.worldTransform())
+        if not lod_enabled or lod >= threshold:  # a bezier is indistinguishable
+            painter.setRenderHint(QPainter.Antialiasing)  # from a line this small
         painter.setPen(QPen(color, width))
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(self.path())

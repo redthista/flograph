@@ -28,6 +28,14 @@ ROW_H = 20.0
 PAD_BOTTOM = 8.0
 LED_RADIUS = 5.0
 LABEL_LOD = 0.5  # hide port names below this zoom
+# Below this zoom, nodes paint as a flat rect (no path/text/LED) and hide
+# their ports and embedded widgets — the per-item cost that makes a large
+# graph sluggish scales with how many nodes are visible, so cutting it here
+# is what keeps zoomed-out canvases snappy regardless of node count. This is
+# just the out-of-the-box default: NodeGraphScene.lod_enabled/lod_threshold
+# (user-configurable via Settings > Canvas) are the actual source of truth —
+# see NodeGraphScene._flat_state.
+DEFAULT_LOD_THRESHOLD = 0.35
 
 NOTE_TYPE = "flograph.util.note"
 NOTE_PAD = 12.0
@@ -233,6 +241,7 @@ class NodeItem(QGraphicsObject):
         self._dragging = False  # a header-bar move is in progress (snap gate)
         self._move_suppressed = False  # body press cleared ItemIsMovable
         self._button_edit = False  # button in edit mode (right-click to enter)
+        self._flat = False  # painting as a flat rect with ports/widgets hidden (see set_lod)
         self._note_editor: QGraphicsProxyWidget | None = None
         self._note_editor_widget: QPlainTextEdit | None = None
         self._closing_note_edit = False
@@ -957,6 +966,9 @@ class NodeItem(QGraphicsObject):
             self.input_ports[spec.name] = PortItem(self, spec)
         for spec in self.node.spec.outputs:
             self.output_ports[spec.name] = PortItem(self, spec)
+        if self._flat:
+            for port in (*self.input_ports.values(), *self.output_ports.values()):
+                port.setVisible(False)
         self._layout_ports()
         self.update()
 
@@ -1009,7 +1021,35 @@ class NodeItem(QGraphicsObject):
         table = self.input_ports if direction == "input" else self.output_ports
         return table.get(name)
 
+    def set_lod(self, flat: bool) -> None:
+        """Called by the scene whenever the decision changes (zoom crossing
+        lod_threshold, or lod_enabled toggling): hide ports/embedded widgets
+        and switch to the cheap flat paint, or restore them. A reroute dot is
+        already minimal and stays as-is regardless."""
+        flat = flat and not self.compact
+        if flat == self._flat:
+            return
+        self._flat = flat
+        visible = not flat
+        for port in (*self.input_ports.values(), *self.output_ports.values()):
+            port.setVisible(visible)
+        for proxy in (self._note_editor, self._table_proxy, self._figure_proxy,
+                      self._table_viewer_proxy, self._slicer_proxy):
+            if proxy is not None:
+                proxy.setVisible(visible)
+        self.update()
+
     # ------------------------------------------------------------- painting
+
+    def _paint_flat(self, painter: QPainter) -> None:
+        """Cheap stand-in for the simplified state: one fill, no path/gradient/text —
+        the per-node cost that dominates when many nodes are visible at once."""
+        rect = QRectF(0, 0, self.width, self.body_height)
+        painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.5) if self.isSelected()
+                       else Qt.NoPen)
+        painter.setBrush(QBrush(theme.NODE_HEADER_BROKEN if self.broken
+                                else theme.NODE_BODY))
+        painter.drawRect(rect)
 
     def paint(self, painter: QPainter,
               option: QStyleOptionGraphicsItem, widget=None) -> None:
@@ -1021,6 +1061,9 @@ class NodeItem(QGraphicsObject):
             painter.setBrush(QBrush(theme.NODE_HEADER))
             painter.drawRoundedRect(
                 QRectF(0, 0, self.width, self.body_height), 10, 10)
+            return
+        if self._flat:
+            self._paint_flat(painter)
             return
         if self.note:
             self._paint_note(painter)
