@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
@@ -20,6 +20,18 @@ from PySide6.QtWidgets import (
 from flograph.core import Graph, ParamSpec
 
 from ..commands import SetLabelCommand, SetParamCommand
+
+# QFormLayout sizes its label column to the widest label's sizeHint, and a
+# plain str passed to addRow() never wraps -- a node with a long, descriptive
+# label (e.g. "Right suffix for overlapping columns") could blow the form's
+# minimum width out to 2-3x a node with short labels. Cap the label column so
+# long labels wrap onto a second line instead of stretching the form wider.
+_LABEL_MAX_WIDTH = 130
+
+# Same idea for numeric fields: a param with no min/max gets a huge range
+# (e.g. +/-2**31), and QSpinBox/QDoubleSpinBox size themselves to fit the
+# widest value they could ever display.
+_SPINBOX_MAX_WIDTH = 110
 
 
 class ParamsPanel(QScrollArea):
@@ -45,6 +57,15 @@ class ParamsPanel(QScrollArea):
         graph.events.param_changed.connect(self._on_param_changed)
         graph.events.code_changed.connect(self._on_code_changed)
         graph.events.node_removed.connect(self._on_node_removed)
+
+    def minimumSizeHint(self) -> QSize:
+        # A scroll area won't shrink narrower than its content widget's own
+        # minimum, and that minimum varies a lot by node (a form with long
+        # labels or several params needs much more room than a simple one).
+        # Pin our own floor low regardless, so the dock is never forced
+        # wider/taller than the user left it -- oversized forms scroll
+        # instead of pushing the dock around.
+        return QSize(200, 100)
 
     # -------------------------------------------------------------- binding
 
@@ -90,12 +111,19 @@ class ParamsPanel(QScrollArea):
         label_edit.setPlaceholderText(node.spec.label)
         label_edit.editingFinished.connect(
             lambda: self._commit_label(label_edit.text()))
-        form.addRow("Name", label_edit)
+        form.addRow(self._row_label("Name"), label_edit)
 
         for spec in node.spec.params:
             widget, setter = self._make_widget(spec, node.params.get(spec.name))
             self._setters[spec.name] = setter
-            form.addRow(spec.label or spec.name, widget)
+            form.addRow(self._row_label(spec.label or spec.name), widget)
+
+    @staticmethod
+    def _row_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setMaximumWidth(_LABEL_MAX_WIDTH)
+        return label
 
     # -------------------------------------------------------------- widgets
 
@@ -112,6 +140,7 @@ class ParamsPanel(QScrollArea):
             spin.setRange(int(spec.minimum) if spec.minimum is not None else -2**31,
                           int(spec.maximum) if spec.maximum is not None else 2**31 - 1)
             spin.setValue(int(value or 0))
+            spin.setMaximumWidth(_SPINBOX_MAX_WIDTH)
             spin.valueChanged.connect(lambda v: self._commit(name, int(v)))
             return spin, lambda v: self._silently(spin.setValue, int(v or 0))
 
@@ -121,6 +150,7 @@ class ParamsPanel(QScrollArea):
             spin.setRange(spec.minimum if spec.minimum is not None else -1e18,
                           spec.maximum if spec.maximum is not None else 1e18)
             spin.setValue(float(value or 0.0))
+            spin.setMaximumWidth(_SPINBOX_MAX_WIDTH)
             spin.valueChanged.connect(lambda v: self._commit(name, float(v)))
             return spin, lambda v: self._silently(spin.setValue, float(v or 0.0))
 
