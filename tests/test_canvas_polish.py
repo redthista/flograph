@@ -244,6 +244,7 @@ class TestCardResize:
 
     def test_output_port_follows_live_drag(self, env, registry):
         graph, scene, item = self._card(env, registry)
+        scene.snap_enabled = False  # exercise raw drag math, not snapping
         item.setSelected(True)
         item._resizing_card = True
         item._resize_start = (0.0, 0.0, item.width, item.body_height)

@@ -15,12 +15,14 @@ from PySide6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from .canvas import grid
+
 
 class SettingsDialog(QDialog):
     def __init__(self, window, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(560, 360)
+        self.resize(560, 520)
 
         self._nav = QListWidget()
         self._nav.setFixedWidth(150)
@@ -30,6 +32,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._nav)
         layout.addWidget(self._pages, 1)
 
+        self._add_page("General", self._build_general_page(window))
         self._add_page("Canvas", self._build_canvas_page(window))
 
         self._nav.currentRowChanged.connect(self._pages.setCurrentIndex)
@@ -52,6 +55,29 @@ class SettingsDialog(QDialog):
         font.setPointSizeF(font.pointSizeF() * 0.9)
         label.setFont(font)
         return label
+
+    @staticmethod
+    def _build_general_page(window) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        page_bar_row = QHBoxLayout()
+        page_bar_row.addWidget(QLabel("Page bar position:"))
+        page_bar_combo = QComboBox()
+        page_bar_combo.setObjectName("page_bar_position_combo")
+        positions = ["bottom", "top"]
+        page_bar_combo.addItems([p.capitalize() for p in positions])
+        page_bar_combo.setCurrentIndex(positions.index(window.page_bar_position))
+        page_bar_combo.currentIndexChanged.connect(
+            lambda index: window.set_page_bar_position(positions[index]))
+        page_bar_row.addWidget(page_bar_combo)
+        page_bar_row.addStretch(1)
+        layout.addLayout(page_bar_row)
+        layout.addWidget(SettingsDialog._hint(
+            "Which edge of the window the Model/page tabs live on."))
+
+        layout.addStretch(1)
+        return page
 
     @staticmethod
     def _build_canvas_page(window) -> QWidget:
@@ -113,20 +139,35 @@ class SettingsDialog(QDialog):
 
         layout.addSpacing(12)
 
-        page_bar_row = QHBoxLayout()
-        page_bar_row.addWidget(QLabel("Page bar position:"))
-        page_bar_combo = QComboBox()
-        page_bar_combo.setObjectName("page_bar_position_combo")
-        positions = ["bottom", "top"]
-        page_bar_combo.addItems([p.capitalize() for p in positions])
-        page_bar_combo.setCurrentIndex(positions.index(window.page_bar_position))
-        page_bar_combo.currentIndexChanged.connect(
-            lambda index: window.set_page_bar_position(positions[index]))
-        page_bar_row.addWidget(page_bar_combo)
-        page_bar_row.addStretch(1)
-        layout.addLayout(page_bar_row)
+        snap_check = QCheckBox("Snap to Grid")
+        snap_check.setObjectName("snap_enabled_checkbox")
+        snap_check.setToolTip(
+            "Snap moves and resizes to the grid (hold Ctrl to bypass)")
+        snap_check.setChecked(window.snap_enabled)
+        layout.addWidget(snap_check)
+
+        grid_row = QHBoxLayout()
+        grid_row.addWidget(QLabel("Grid resolution:"))
+        grid_combo = QComboBox()
+        grid_combo.setObjectName("grid_step_combo")
+        selected = 0
+        for index, (name, step) in enumerate(grid.GRID_PRESETS.items()):
+            grid_combo.addItem(f"{name} ({int(step)} px)", step)
+            if abs(step - window.grid_step) < 0.01:
+                selected = index
+        grid_combo.setCurrentIndex(selected)
+        grid_combo.setEnabled(snap_check.isChecked())
+        grid_row.addWidget(grid_combo)
+        grid_row.addStretch(1)
+        layout.addLayout(grid_row)
         layout.addWidget(SettingsDialog._hint(
-            "Which edge of the window the Model/page tabs live on."))
+            "Snapping applies to node/frame moves and resizes on the canvas "
+            "and dashboard tiles."))
+
+        snap_check.toggled.connect(window.set_snap_enabled)
+        snap_check.toggled.connect(grid_combo.setEnabled)
+        grid_combo.currentIndexChanged.connect(
+            lambda index: window.set_grid_step(grid_combo.itemData(index)))
 
         layout.addStretch(1)
         return page

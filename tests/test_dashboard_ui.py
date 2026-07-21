@@ -150,6 +150,36 @@ class TestPageTabs:
         assert window.settings.value("canvas/page_bar_position") == "bottom"
 
 
+class TestLibraryDockMinimumWidth:
+    """The Node Library dock had no floor, so a saved dock_state that ever
+    pinned it thin (e.g. from before this floor existed) stayed thin forever
+    -- restoreState() can only shrink a dock down to its widget's minimum."""
+
+    def test_library_panel_has_a_minimum_width(self, window):
+        assert window.library_panel.minimumWidth() >= 180
+
+    def test_restoring_a_thin_saved_layout_gets_clamped_up(
+            self, qtbot, registry):
+        first = mod.MainWindow(registry)
+        first.confirm_close = False
+        qtbot.addWidget(first)
+        first.resize(1400, 900)
+        first.show()
+        qtbot.wait(10)
+        first._dock_host.resizeDocks([first.library_dock], [70], Qt.Horizontal)
+        qtbot.wait(10)
+        first._save_window_state()
+        first.close()
+
+        second = mod.MainWindow(registry)
+        second.confirm_close = False
+        qtbot.addWidget(second)
+        second.resize(1400, 900)
+        second.show()
+        qtbot.wait(10)
+        assert second.library_dock.width() >= 180
+
+
 class TestVisualsPanelToggle:
     def test_defaults_to_visible(self, window):
         page = add_page(window)

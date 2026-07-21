@@ -1,13 +1,30 @@
 """Snap-to-grid: the snap math, edge hit-testing on cards/tiles, the
-_dragging gate on move snapping, and the main-window toggle propagation."""
+_dragging gate on move snapping, and the main-window toggle propagation.
+
+Snap-to-grid and grid resolution live in Settings > Canvas (moved off the
+main toolbar) and default to enabled -- see mainwindow.py's
+set_snap_enabled/set_grid_step.
+
+Settings kept off the real store (avoid polluting the developer's actual
+flograph.conf) -- see test_lod_settings.py's fixture of the same name."""
 import pytest
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtCore import QPointF, QSettings, Qt
+from PySide6.QtWidgets import QCheckBox, QComboBox, QGraphicsItem
 
 from flograph.core import Frame, NodeRegistry, Page, Tile
+from flograph.ui import mainwindow as mod
 from flograph.ui.canvas import grid
 from flograph.ui.commands import AddFrameCommand, AddPageCommand, AddTileCommand
 from flograph.ui.mainwindow import MainWindow
+from flograph.ui.settings_dialog import SettingsDialog
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings(tmp_path, monkeypatch):
+    ini_path = str(tmp_path / "test_settings.ini")
+    monkeypatch.setattr(
+        mod, "QSettings",
+        lambda *a, **k: QSettings(ini_path, QSettings.IniFormat))
 
 
 @pytest.fixture(scope="module")
@@ -170,21 +187,72 @@ class TestTileEdge:
 # ---------------------------------------------------- main-window plumbing
 
 class TestSnapSettings:
-    def test_toggle_applies_to_all_scenes(self, window):
-        # avoid writing real QSettings: flip the action and apply directly
-        window.action_snap_grid.blockSignals(True)
-        window.action_snap_grid.setChecked(True)
-        window.action_snap_grid.blockSignals(False)
-        window._apply_snap_settings()
+    def test_defaults_to_enabled(self, window):
+        assert window.snap_enabled is True
         assert window.scene.snap_enabled is True
+
+    def test_toggle_applies_to_all_scenes(self, window):
+        window.set_snap_enabled(False)
+        assert window.scene.snap_enabled is False
 
         # a page created afterwards inherits the current setting
         window.undo_stack.push(
             AddPageCommand(window.graph, Page(id="pp", title="X")))
-        assert window._dashboard_pages["pp"].scene.snap_enabled is True
+        assert window._dashboard_pages["pp"].scene.snap_enabled is False
 
     def test_default_grid_step_is_normal(self, window):
-        assert window._current_grid_step() == grid.DEFAULT_STEP
+        assert window.grid_step == grid.DEFAULT_STEP
+
+    def test_set_grid_step_applies_to_all_scenes(self, window):
+        window.set_grid_step(grid.GRID_PRESETS["Compact"])
+        assert window.scene.grid_step == grid.GRID_PRESETS["Compact"]
+
+    def test_persists_to_settings(self, window):
+        window.set_snap_enabled(False)
+        window.set_grid_step(grid.GRID_PRESETS["Relaxed"])
+        assert window.settings.value("snap/enabled", type=bool) is False
+        assert window.settings.value("snap/step", type=float) == \
+            grid.GRID_PRESETS["Relaxed"]
+
+    def test_reads_persisted_settings_on_construction(self, qtbot, registry,
+                                                        window):
+        window.set_snap_enabled(False)
+        window.set_grid_step(grid.GRID_PRESETS["Compact"])
+        second = MainWindow(registry)
+        second.confirm_close = False
+        qtbot.addWidget(second)
+        assert second.snap_enabled is False
+        assert second.grid_step == grid.GRID_PRESETS["Compact"]
+
+
+class TestSnapSettingsDialog:
+    def test_checkbox_and_combo_reflect_initial_state(self, window):
+        dlg = SettingsDialog(window, window)
+        checkbox = dlg.findChild(QCheckBox, "snap_enabled_checkbox")
+        combo = dlg.findChild(QComboBox, "grid_step_combo")
+        assert checkbox is not None and combo is not None
+        assert checkbox.isChecked() is True
+        assert combo.currentData() == grid.DEFAULT_STEP
+        assert combo.isEnabled()
+
+    def test_unchecking_disables_the_setting_and_the_combo(self, window):
+        dlg = SettingsDialog(window, window)
+        checkbox = dlg.findChild(QCheckBox, "snap_enabled_checkbox")
+        combo = dlg.findChild(QComboBox, "grid_step_combo")
+
+        checkbox.setChecked(False)
+        assert window.snap_enabled is False
+        assert window.scene.snap_enabled is False
+        assert not combo.isEnabled()
+
+    def test_changing_the_combo_updates_the_grid_step(self, window):
+        dlg = SettingsDialog(window, window)
+        combo = dlg.findChild(QComboBox, "grid_step_combo")
+
+        compact_index = list(grid.GRID_PRESETS).index("Compact")
+        combo.setCurrentIndex(compact_index)
+        assert window.grid_step == grid.GRID_PRESETS["Compact"]
+        assert window.scene.grid_step == grid.GRID_PRESETS["Compact"]
 
 
 # ------------------------------------------------------------------- frames

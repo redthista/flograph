@@ -14,5 +14,5 @@
 14. MEDIUM: Allow for writing descriptions in the properties of the node, maybe show as a tool tip when hovering over the top of the node. easier to keep track then of the nodes purpose.
 15. SMALL: right click Set node colors
 16. collapseable sidebar with icons, letting you effectivly minimise the side and bottom panels. 
-17. set snap to grid = tru by default, and move both options to the settings menu
+17. set snap to grid = tru by default, and move both options to the settings menu [done: defaults to on, moved to Settings > Canvas]
 18. 
