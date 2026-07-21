@@ -1,6 +1,6 @@
 """Page bar position setting (ideas.md follow-up): the Model/page tab strip
 can live on the top or bottom edge of the window, configurable in
-Settings > Canvas. (Left/right were pulled -- see mainwindow.py's
+Settings > General. (Left/right were pulled -- see mainwindow.py's
 _apply_page_bar_position docstring: the rotated label couldn't be made to
 render reliably centered on real screens.)
 

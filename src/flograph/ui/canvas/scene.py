@@ -56,7 +56,7 @@ class NodeGraphScene(QGraphicsScene):
 
         # Snap-to-grid view preference; the main window is the sole writer.
         from .grid import DEFAULT_STEP
-        self.snap_enabled = False
+        self.snap_enabled = True
         self.grid_step = DEFAULT_STEP
 
         self.setSceneRect(QRectF(-SCENE_EXTENT, -SCENE_EXTENT,

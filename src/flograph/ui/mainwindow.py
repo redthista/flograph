@@ -9,8 +9,8 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QComboBox, QDockWidget, QFileDialog,
-    QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
+    QApplication, QColorDialog, QDockWidget, QFileDialog,
+    QInputDialog, QLineEdit, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QStackedWidget, QTextEdit, QToolBar,
     QVBoxLayout, QWidget,
 )
@@ -88,6 +88,10 @@ class MainWindow(QMainWindow):
             "canvas/page_bar_position", "top", type=str)
         if self.page_bar_position not in ("top", "bottom"):
             self.page_bar_position = "top"
+        self.snap_enabled = self.settings.value("snap/enabled", True, type=bool)
+        self.grid_step = float(
+            self.settings.value("snap/step", grid.DEFAULT_STEP))
+        self._apply_snap_settings()
 
         self._palette_popup = NodePalettePopup(registry, self)
         self._palette_scene_pos = QPointF()
@@ -113,6 +117,10 @@ class MainWindow(QMainWindow):
     def _build_docks(self) -> None:
         host = self._dock_host
         self.library_panel = LibraryPanel(self.registry)
+        # a floor, not just a fresh-install default: restoreState() below
+        # can only shrink a dock down to its widget's minimum, so this also
+        # rescues anyone whose saved layout already pinned it thin.
+        self.library_panel.setMinimumWidth(180)
         self.library_tree = self.library_panel.tree
         self.library_dock = QDockWidget("Node Library", host)
         self.library_dock.setObjectName("dock_library")
@@ -277,8 +285,6 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.action_undo)
         toolbar.addAction(self.action_redo)
-        toolbar.addSeparator()
-        self._build_snap_toolbar(toolbar)
 
         file_menu = self.menuBar().addMenu("&File")
         for action in (self.action_new, self.action_open, self.action_save,
@@ -336,57 +342,28 @@ class MainWindow(QMainWindow):
         self.action_gpu_viewport.toggled.connect(self._on_gpu_viewport_toggled)
         self._apply_gpu_viewport_setting()
 
-    def _build_snap_toolbar(self, toolbar: QToolBar) -> None:
-        """Snap-to-grid toggle + resolution selector on the main toolbar — a
-        visual/view control, restored from QSettings. Applies to node/frame
-        moves and resizes on the canvas and dashboard tiles."""
-        self.action_snap_grid = QAction("Snap to Grid", self)
-        self.action_snap_grid.setCheckable(True)
-        self.action_snap_grid.setToolTip(
-            "Snap moves and resizes to the grid (hold Ctrl to bypass)")
-        self.action_snap_grid.setChecked(
-            self.settings.value("snap/enabled", False, type=bool))
-        self.action_snap_grid.toggled.connect(self._on_snap_toggled)
-        toolbar.addAction(self.action_snap_grid)
-
-        self._grid_combo = QComboBox()
-        self._grid_combo.setToolTip("Grid resolution")
-        current = float(self.settings.value("snap/step", grid.DEFAULT_STEP))
-        selected = 0
-        for index, (name, step) in enumerate(grid.GRID_PRESETS.items()):
-            self._grid_combo.addItem(f"{name} ({int(step)} px)", step)
-            if abs(step - current) < 0.01:
-                selected = index
-        self._grid_combo.setCurrentIndex(selected)
-        self._grid_combo.currentIndexChanged.connect(self._on_grid_resolution)
-        toolbar.addWidget(QLabel(" Grid: "))
-        toolbar.addWidget(self._grid_combo)
+    def set_snap_enabled(self, enabled: bool) -> None:
+        self.snap_enabled = enabled
+        self.settings.setValue("snap/enabled", enabled)
         self._apply_snap_settings()
 
-    def _current_grid_step(self) -> float:
-        return float(self._grid_combo.currentData())
-
-    def _on_snap_toggled(self, checked: bool) -> None:
-        self.settings.setValue("snap/enabled", checked)
-        self._apply_snap_settings()
-
-    def _on_grid_resolution(self, _index: int) -> None:
-        self.settings.setValue("snap/step", self._current_grid_step())
+    def set_grid_step(self, step: float) -> None:
+        self.grid_step = step
+        self.settings.setValue("snap/step", step)
         self._apply_snap_settings()
 
     def _apply_snap_settings(self) -> None:
         """Push the current snap toggle/step onto every scene and repaint so
-        the grid redraws at the new resolution."""
-        enabled = self.action_snap_grid.isChecked()
-        step = self._current_grid_step()
+        the grid redraws at the new resolution. Applies to node/frame moves
+        and resizes on the canvas and dashboard tiles."""
         views = [self.view]
         scenes = [self.scene]
         for page in self._dashboard_pages.values():
             scenes.append(page.scene)
             views.append(page.view)
         for scene in scenes:
-            scene.snap_enabled = enabled
-            scene.grid_step = step
+            scene.snap_enabled = self.snap_enabled
+            scene.grid_step = self.grid_step
         for view in views:
             view.viewport().update()
 
@@ -624,8 +601,8 @@ class MainWindow(QMainWindow):
             lambda node_id, pos, page_id=page.id:
             self._on_tile_dropped(page_id, node_id, pos))
         self._dashboard_pages[page.id] = widget
-        widget.scene.snap_enabled = self.action_snap_grid.isChecked()
-        widget.scene.grid_step = self._current_grid_step()
+        widget.scene.snap_enabled = self.snap_enabled
+        widget.scene.grid_step = self.grid_step
         self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)
