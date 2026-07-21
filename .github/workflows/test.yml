@@ -1,0 +1,33 @@
+name: test
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Create venv and install
+        run: |
+          uv venv
+          uv pip install -e ".[dev,matplotlib,plotly]"
+
+      - name: Run tests
+        run: |
+          QT_QPA_PLATFORM=offscreen uv run pytest tests/ -q
