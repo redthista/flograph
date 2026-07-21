@@ -41,11 +41,12 @@ class TestChatCompletion:
     def test_posts_openai_shape_and_returns_content(self, monkeypatch):
         captured = {}
 
-        def fake_post(url, headers=None, json=None, timeout=None):
+        def fake_post(url, headers=None, json=None, timeout=None, verify=None):
             captured["url"] = url
             captured["headers"] = headers
             captured["json"] = json
             captured["timeout"] = timeout
+            captured["verify"] = verify
             return _FakeResponse(
                 {"choices": [{"message": {"content": "hello"}}]}
             )
@@ -60,11 +61,12 @@ class TestChatCompletion:
         assert captured["json"]["model"] == ai.DEFAULT_MODEL
         assert captured["json"]["messages"] == [{"role": "user", "content": "hi"}]
         assert "Authorization" not in captured["headers"]
+        assert captured["verify"] is True
 
     def test_sends_api_key_when_configured(self, monkeypatch):
         captured = {}
 
-        def fake_post(url, headers=None, json=None, timeout=None):
+        def fake_post(url, headers=None, json=None, timeout=None, verify=None):
             captured["headers"] = headers
             return _FakeResponse({"choices": [{"message": {"content": "ok"}}]})
 
@@ -75,6 +77,21 @@ class TestChatCompletion:
         ai.chat_completion([{"role": "user", "content": "hi"}], config)
 
         assert captured["headers"]["Authorization"] == "Bearer secret"
+
+    def test_verify_ssl_false_disables_verification(self, monkeypatch):
+        captured = {}
+
+        def fake_post(url, headers=None, json=None, timeout=None, verify=None):
+            captured["verify"] = verify
+            return _FakeResponse({"choices": [{"message": {"content": "ok"}}]})
+
+        import requests
+        monkeypatch.setattr(requests, "post", fake_post)
+
+        config = ai.LLMConfig(verify_ssl=False)
+        ai.chat_completion([{"role": "user", "content": "hi"}], config)
+
+        assert captured["verify"] is False
 
     def test_missing_requests_raises_actionable_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "requests", None)
@@ -107,10 +124,11 @@ class TestListModels:
     def test_returns_sorted_model_ids(self, monkeypatch):
         captured = {}
 
-        def fake_get(url, headers=None, timeout=None):
+        def fake_get(url, headers=None, timeout=None, verify=None):
             captured["url"] = url
             captured["headers"] = headers
             captured["timeout"] = timeout
+            captured["verify"] = verify
             return _FakeResponse(
                 {"data": [{"id": "qwen2.5-coder"}, {"id": "llama3.1"}]}
             )
@@ -124,11 +142,12 @@ class TestListModels:
         assert captured["url"] == f"{ai.DEFAULT_BASE_URL}/models"
         assert captured["timeout"] == ai.MODELS_TIMEOUT
         assert "Authorization" not in captured["headers"]
+        assert captured["verify"] is True
 
     def test_sends_api_key_when_configured(self, monkeypatch):
         captured = {}
 
-        def fake_get(url, headers=None, timeout=None):
+        def fake_get(url, headers=None, timeout=None, verify=None):
             captured["headers"] = headers
             return _FakeResponse({"data": []})
 
@@ -137,6 +156,19 @@ class TestListModels:
 
         ai.list_models(ai.LLMConfig(api_key="secret"))
         assert captured["headers"]["Authorization"] == "Bearer secret"
+
+    def test_verify_ssl_false_disables_verification(self, monkeypatch):
+        captured = {}
+
+        def fake_get(url, headers=None, timeout=None, verify=None):
+            captured["verify"] = verify
+            return _FakeResponse({"data": []})
+
+        import requests
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        ai.list_models(ai.LLMConfig(verify_ssl=False))
+        assert captured["verify"] is False
 
     def test_missing_requests_raises_actionable_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "requests", None)
