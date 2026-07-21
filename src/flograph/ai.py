@@ -67,6 +67,7 @@ class LLMConfig:
     model: str = DEFAULT_MODEL
     api_key: Optional[str] = None
     timeout: float = DEFAULT_TIMEOUT
+    verify_ssl: bool = True
 
 
 def _import_requests():
@@ -98,7 +99,8 @@ def list_models(config: Optional[LLMConfig] = None) -> list[str]:
     url = config.base_url.rstrip("/") + "/models"
     try:
         response = requests.get(
-            url, headers=_auth_headers(config), timeout=MODELS_TIMEOUT)
+            url, headers=_auth_headers(config), timeout=MODELS_TIMEOUT,
+            verify=config.verify_ssl)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise LLMError(
@@ -129,6 +131,7 @@ def chat_completion(messages: list[dict], config: Optional[LLMConfig] = None) ->
                 "temperature": 0.2,
             },
             timeout=config.timeout,
+            verify=config.verify_ssl,
         )
         response.raise_for_status()
     except requests.RequestException as exc:

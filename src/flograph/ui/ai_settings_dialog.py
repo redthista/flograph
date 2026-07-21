@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QHBoxLayout, QLineEdit, QMessageBox, QPushButton,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QFormLayout, QHBoxLayout, QLineEdit, QMessageBox, QPushButton,
 )
 
 from flograph import ai
@@ -47,6 +47,7 @@ def load_llm_config() -> ai.LLMConfig:
         base_url=settings.value("ai/base_url", ai.DEFAULT_BASE_URL, type=str),
         model=settings.value("ai/model", ai.DEFAULT_MODEL, type=str),
         api_key=settings.value("ai/api_key", "", type=str) or None,
+        verify_ssl=settings.value("ai/verify_ssl", True, type=bool),
     )
 
 
@@ -79,10 +80,18 @@ class AiSettingsDialog(QDialog):
         self._api_key.setPlaceholderText("(optional — most local servers don't need one)")
         self._api_key.setEchoMode(QLineEdit.Password)
 
+        self._verify_ssl = QCheckBox("Verify SSL certificates")
+        self._verify_ssl.setChecked(config.verify_ssl)
+        self._verify_ssl.setToolTip(
+            "Uncheck only if the Base URL uses a self-signed or otherwise "
+            "untrusted certificate (e.g. behind a corporate proxy). This "
+            "makes the connection vulnerable to interception.")
+
         form = QFormLayout(self)
         form.addRow("Base URL", self._base_url)
         form.addRow("Model", model_row)
         form.addRow("API key", self._api_key)
+        form.addRow("", self._verify_ssl)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -100,6 +109,7 @@ class AiSettingsDialog(QDialog):
         config = ai.LLMConfig(
             base_url=self._base_url.text().strip() or ai.DEFAULT_BASE_URL,
             api_key=self._api_key.text().strip() or None,
+            verify_ssl=self._verify_ssl.isChecked(),
         )
         self._fetch_models_btn.setEnabled(False)
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -129,4 +139,5 @@ class AiSettingsDialog(QDialog):
         settings.setValue(
             "ai/model", self._model.currentText().strip() or ai.DEFAULT_MODEL)
         settings.setValue("ai/api_key", self._api_key.text().strip())
+        settings.setValue("ai/verify_ssl", self._verify_ssl.isChecked())
         self.accept()

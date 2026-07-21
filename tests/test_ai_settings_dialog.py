@@ -21,17 +21,20 @@ class TestLoadLlmConfig:
         assert config.base_url == DEFAULT_BASE_URL
         assert config.model == DEFAULT_MODEL
         assert config.api_key is None
+        assert config.verify_ssl is True
 
     def test_reflects_saved_values(self):
         settings = mod.QSettings()
         settings.setValue("ai/base_url", "http://localhost:1234/v1")
         settings.setValue("ai/model", "qwen2.5-coder")
         settings.setValue("ai/api_key", "sk-test")
+        settings.setValue("ai/verify_ssl", False)
 
         config = mod.load_llm_config()
         assert config.base_url == "http://localhost:1234/v1"
         assert config.model == "qwen2.5-coder"
         assert config.api_key == "sk-test"
+        assert config.verify_ssl is False
 
     def test_blank_api_key_is_none(self):
         settings = mod.QSettings()
@@ -46,12 +49,19 @@ class TestAiSettingsDialog:
         dialog._base_url.setText("http://localhost:1234/v1")
         dialog._model.setCurrentText("qwen2.5-coder")
         dialog._api_key.setText("sk-test")
+        dialog._verify_ssl.setChecked(False)
         dialog._save()
 
         config = mod.load_llm_config()
         assert config.base_url == "http://localhost:1234/v1"
         assert config.model == "qwen2.5-coder"
         assert config.api_key == "sk-test"
+        assert config.verify_ssl is False
+
+    def test_verify_ssl_defaults_checked(self, qtbot):
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+        assert dialog._verify_ssl.isChecked()
 
     def test_blank_fields_fall_back_to_defaults_not_empty_strings(self, qtbot):
         dialog = mod.AiSettingsDialog()
@@ -145,11 +155,13 @@ class TestFetchModelsButton:
         dialog = self._dialog(qtbot)
         dialog._base_url.setText("http://localhost:1234/v1")
         dialog._api_key.setText("sk-test")
+        dialog._verify_ssl.setChecked(False)
         captured = {}
 
         def fake_list_models(config):
             captured["base_url"] = config.base_url
             captured["api_key"] = config.api_key
+            captured["verify_ssl"] = config.verify_ssl
             return ["m"]
 
         monkeypatch.setattr(mod.ai, "list_models", fake_list_models)
@@ -157,6 +169,7 @@ class TestFetchModelsButton:
 
         assert captured["base_url"] == "http://localhost:1234/v1"
         assert captured["api_key"] == "sk-test"
+        assert captured["verify_ssl"] is False
 
     def test_fetch_failure_shows_warning_and_keeps_current_selection(
             self, qtbot, monkeypatch):
