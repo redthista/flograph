@@ -1,13 +1,27 @@
 """App view: dashboard page tabs under the canvas, live tiles, and the
-add-tile paths (drop + context-menu helpers)."""
+add-tile paths (drop + context-menu helpers).
+
+Settings kept off the real store (avoid polluting the developer's actual
+flograph.conf) -- see test_lod_settings.py's fixture of the same name."""
 import pandas as pd
 import pytest
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import QVBoxLayout
 
 from flograph.core import NodeRegistry, Page, Tile
+from flograph.ui import mainwindow as mod
 from flograph.ui.commands import AddPageCommand, AddTileCommand
 from flograph.ui.dashboard.tile_item import MISSING_NODE, RUN_PROMPT
 from flograph.ui.dashboard.visuals_list import TILE_NODE_MIME
 from flograph.ui.mainwindow import MainWindow
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings(tmp_path, monkeypatch):
+    ini_path = str(tmp_path / "test_settings.ini")
+    monkeypatch.setattr(
+        mod, "QSettings",
+        lambda *a, **k: QSettings(ini_path, QSettings.IniFormat))
 
 
 @pytest.fixture(scope="module")
@@ -83,6 +97,84 @@ class TestPageTabs:
                 is window._dashboard_pages[page.id])
         window.page_bar.select_page(None)
         assert window._canvas_stack.currentWidget() is window.view
+
+    def test_dashboard_page_hides_model_only_docks(self, window):
+        docks = [window.library_dock, window.properties_dock,
+                 window.editor_dock, window.inspector_dock, window.log_dock]
+        page = add_page(window)
+        assert all(dock.isVisibleTo(window) for dock in docks)
+
+        window.page_bar.select_page(page.id)
+        assert not any(dock.isVisibleTo(window) for dock in docks)
+        # the page bar itself is the page switcher -- it must stay put
+        assert window.page_bar.isVisibleTo(window)
+
+        window.page_bar.select_page(None)
+        assert all(dock.isVisibleTo(window) for dock in docks)
+
+    def test_page_bar_position_default_is_top(self, window):
+        layout = window.centralWidget().layout()
+        assert isinstance(layout, QVBoxLayout)
+        assert layout.itemAt(0).widget() is window.page_bar
+        assert layout.itemAt(1).widget() is window._dock_host
+        assert window.log_dock in window._dock_host.tabifiedDockWidgets(
+            window.inspector_dock)
+
+    def test_set_page_bar_position_moves_it_and_preserves_tab_groups(self, window):
+        window.set_page_bar_position("bottom")
+        layout = window.centralWidget().layout()
+        assert isinstance(layout, QVBoxLayout)
+        assert layout.itemAt(0).widget() is window._dock_host
+        assert layout.itemAt(1).widget() is window.page_bar
+
+        window.set_page_bar_position("top")
+        layout = window.centralWidget().layout()
+        assert isinstance(layout, QVBoxLayout)
+        assert layout.itemAt(0).widget() is window.page_bar
+        assert layout.itemAt(1).widget() is window._dock_host
+
+        window.set_page_bar_position("bottom")
+        layout = window.centralWidget().layout()
+        assert isinstance(layout, QVBoxLayout)
+        assert layout.itemAt(0).widget() is window._dock_host
+        assert layout.itemAt(1).widget() is window.page_bar
+
+        # switching around never disturbed the pre-existing tab groups
+        assert window.log_dock in window._dock_host.tabifiedDockWidgets(
+            window.inspector_dock)
+        assert window.editor_dock in window._dock_host.tabifiedDockWidgets(
+            window.properties_dock)
+
+    def test_page_bar_position_persists_to_settings(self, window):
+        window.set_page_bar_position("bottom")
+        assert window.settings.value("canvas/page_bar_position") == "bottom"
+
+
+class TestVisualsPanelToggle:
+    def test_defaults_to_visible(self, window):
+        page = add_page(window)
+        widget = window._dashboard_pages[page.id]
+        assert widget._side.isVisibleTo(widget)
+
+    def test_toggle_button_hides_and_restores_the_panel(self, window):
+        page = add_page(window)
+        widget = window._dashboard_pages[page.id]
+
+        widget._toggle_btn.click()
+        assert not widget._side.isVisibleTo(widget)
+
+        widget._toggle_btn.click()
+        assert widget._side.isVisibleTo(widget)
+
+    def test_set_visuals_visible_updates_arrow_direction(self, window):
+        page = add_page(window)
+        widget = window._dashboard_pages[page.id]
+
+        widget.set_visuals_visible(False)
+        assert widget._toggle_btn.arrowType() == Qt.ArrowType.RightArrow
+
+        widget.set_visuals_visible(True)
+        assert widget._toggle_btn.arrowType() == Qt.ArrowType.LeftArrow
 
 
 class TestTiles:

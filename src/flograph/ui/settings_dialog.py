@@ -11,7 +11,7 @@ no separate Save step.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QListWidget, QSpinBox,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QSpinBox,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -110,6 +110,23 @@ class SettingsDialog(QDialog):
         lod_check.toggled.connect(threshold_spin.setEnabled)
         threshold_spin.valueChanged.connect(
             lambda value: window.set_lod_threshold(value / 100.0))
+
+        layout.addSpacing(12)
+
+        page_bar_row = QHBoxLayout()
+        page_bar_row.addWidget(QLabel("Page bar position:"))
+        page_bar_combo = QComboBox()
+        page_bar_combo.setObjectName("page_bar_position_combo")
+        positions = ["bottom", "top"]
+        page_bar_combo.addItems([p.capitalize() for p in positions])
+        page_bar_combo.setCurrentIndex(positions.index(window.page_bar_position))
+        page_bar_combo.currentIndexChanged.connect(
+            lambda index: window.set_page_bar_position(positions[index]))
+        page_bar_row.addWidget(page_bar_combo)
+        page_bar_row.addStretch(1)
+        layout.addLayout(page_bar_row)
+        layout.addWidget(SettingsDialog._hint(
+            "Which edge of the window the Model/page tabs live on."))
 
         layout.addStretch(1)
         return page
