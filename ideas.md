@@ -8,11 +8,10 @@
 8. SMALL: Drag-Drop of csv, parquet, excel files to the canvas from systems file explorer, then creates a node of that type and adds its path as the input. [done]
 9. MEDIUM?: Excel Reader, CSV Reader - we have first row as header, which is nice, but we also want to pick where the data starting row and manual column selection if the user desires it.
 10. Let me add labels to reroutes to show on the canvas
-11. Join Node: let me pick from left on and right on ans well as on. [done]
+
 12. SMALL: drag to resize from right, bottom, and left walls, as well as the existing bottom right drag to resize. this helps with resizing when the bottom right is out of view.
 13. Some nodes push the properties "min" allowed width large, and prevents you from making it smaller, anyway we can keep it one size? or resizeable ?  
 14. MEDIUM: Allow for writing descriptions in the properties of the node, maybe show as a tool tip when hovering over the top of the node. easier to keep track then of the nodes purpose.
 15. SMALL: right click Set node colors
 16. collapseable sidebar with icons, letting you effectivly minimise the side and bottom panels. 
-17. set snap to grid = tru by default, and move both options to the settings menu [done: defaults to on, moved to Settings > Canvas]
-18. 
+17. 

@@ -1,0 +1,2 @@
+1. Layers, like in photoshop etc, but allow me to create layers, and enable / disable them. one base layer is the wires, the next is normally nodes, and i can create other layers, this way i can do all sorts of things, like overlay things, hide wires, maybe i want a chart to cover all of the inner workings on the canvas, then if i toggle visability of the layer i have called visuals, then i see all the nodes etc. when disabled do we save resources on large flows?  
+2. flow variables (as in other node-based ETL tools)
