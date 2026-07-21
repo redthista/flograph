@@ -24,9 +24,10 @@ from flograph.paths import user_nodes_dir
 
 from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
-    RemovePageCommand, RenamePageCommand, SetLabelCommand,
+    RemovePageCommand, RenamePageCommand, SetLabelCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
+from .canvas.file_drop import resolve_dropped_file
 from .canvas import grid
 from .canvas.node_item import card_kind
 from .canvas.palette import LibraryPanel, NodePalettePopup
@@ -349,6 +350,7 @@ class MainWindow(QMainWindow):
         self.view.add_node_requested.connect(self._show_add_node_menu)
         self.view.palette_requested.connect(self._show_palette)
         self.view.node_dropped.connect(self._add_node_at)
+        self.view.files_dropped.connect(self._add_reader_nodes_for_files)
         self.view.node_context_requested.connect(self._show_node_menu)
         self.view.frame_context_requested.connect(self._show_frame_menu)
         self.scene.selectionChanged.connect(self._on_selection_changed)
@@ -692,6 +694,31 @@ class MainWindow(QMainWindow):
     def _add_node_at_view_center(self, type_id: str) -> None:
         center = self.view.mapToScene(self.view.viewport().rect().center())
         self._add_node_at(type_id, center)
+
+    def _add_reader_nodes_for_files(
+            self, paths: list[str], scene_pos: QPointF) -> None:
+        targets = [(p, resolve_dropped_file(p)) for p in paths]
+        targets = [(p, t) for p, t in targets if t is not None]
+        if not targets:
+            return
+        self.undo_stack.beginMacro(
+            "drop file" if len(targets) == 1 else "drop files")
+        new_ids = []
+        for i, (path, (type_id, param_name)) in enumerate(targets):
+            node = self.registry.instantiate(
+                type_id,
+                pos=(scene_pos.x() + i * PASTE_OFFSET,
+                     scene_pos.y() + i * PASTE_OFFSET))
+            self.undo_stack.push(AddNodeCommand(self.graph, node))
+            self.undo_stack.push(SetParamCommand(
+                self.graph, node.id, param_name, path))
+            new_ids.append(node.id)
+        self.undo_stack.endMacro()
+        self.scene.clearSelection()
+        for node_id in new_ids:
+            item = self.scene.node_items.get(node_id)
+            if item is not None:
+                item.setSelected(True)
 
     # ---------------------------------------------------------- user nodes
 

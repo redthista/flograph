@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 
 from .base_view import ZoomPanGraphicsView
+from .file_drop import resolve_dropped_file
 from .scene import NodeGraphScene
 
 
@@ -14,6 +15,7 @@ class NodeGraphView(ZoomPanGraphicsView):
     add_node_requested = Signal(QPointF, QPoint)   # scene pos, global pos
     palette_requested = Signal(QPointF, QPoint)    # scene pos, global pos
     node_dropped = Signal(str, QPointF)            # type_id, scene pos
+    files_dropped = Signal(list, QPointF)          # local file paths, scene pos
     node_context_requested = Signal(str, QPoint)   # node_id, global pos
     frame_context_requested = Signal(str, QPoint)  # frame_id, global pos
 
@@ -115,10 +117,22 @@ class NodeGraphView(ZoomPanGraphicsView):
 
     # ---------------------------------------------------------- drag & drop
 
+    def _matching_dropped_files(self, mime) -> list[str]:
+        """Local file paths in `mime` that map to a known reader node."""
+        if not mime.hasUrls():
+            return []
+        local_paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+        return [p for p in local_paths if resolve_dropped_file(p)]
+
     def dragEnterEvent(self, event) -> None:
         from .palette import NODE_TYPE_MIME
         if event.mimeData().hasFormat(NODE_TYPE_MIME):
             event.acceptProposedAction()
+        elif event.mimeData().hasUrls():
+            if self._matching_dropped_files(event.mimeData()):
+                event.acceptProposedAction()
+            else:
+                event.ignore()
         else:
             super().dragEnterEvent(event)
 
@@ -126,6 +140,11 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .palette import NODE_TYPE_MIME
         if event.mimeData().hasFormat(NODE_TYPE_MIME):
             event.acceptProposedAction()
+        elif event.mimeData().hasUrls():
+            if self._matching_dropped_files(event.mimeData()):
+                event.acceptProposedAction()
+            else:
+                event.ignore()
         else:
             super().dragMoveEvent(event)
 
@@ -136,5 +155,13 @@ class NodeGraphView(ZoomPanGraphicsView):
             self.node_dropped.emit(
                 type_id, self.mapToScene(event.position().toPoint()))
             event.acceptProposedAction()
+        elif event.mimeData().hasUrls():
+            paths = self._matching_dropped_files(event.mimeData())
+            if paths:
+                self.files_dropped.emit(
+                    paths, self.mapToScene(event.position().toPoint()))
+                event.acceptProposedAction()
+            else:
+                event.ignore()
         else:
             super().dropEvent(event)
