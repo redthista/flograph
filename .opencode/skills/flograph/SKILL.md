@@ -5,7 +5,7 @@ description: Workspace navigation for the flograph project — a visual node-bas
 
 # flograph — workspace reference
 
-Visual node-based Python dataflow programming environment (MIT, v0.1.6). Nodes
+Visual node-based Python dataflow programming environment (MIT, v0.1.7). Nodes
 are Python scripts loaded as text; execution is topological; the canvas is an
 infinite QGraphicsView Blueprint-style editor.
 
