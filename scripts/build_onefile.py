@@ -11,7 +11,7 @@ already be importable in whatever Python runs the script.
 Usage:
     python scripts/build_onefile.py [output_path]
 
-Default output: dist/flograph_onefile.py
+Default output: dist/flograph_onefile_<version>.py
 """
 from __future__ import annotations
 
@@ -110,5 +110,8 @@ def build(output_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "dist" / "flograph_onefile.py"
+    if len(sys.argv) > 1:
+        out = Path(sys.argv[1])
+    else:
+        out = REPO_ROOT / "dist" / f"flograph_onefile_{_read_version()}.py"
     build(out)
