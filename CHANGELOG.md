@@ -21,6 +21,7 @@
 | Feature | Password param type | Node scripts can declare `{"type": "password"}` in `PARAMS` for a masked field with a Show/Hide toggle. |
 | Feature | Canvas preview toggle | Right-click a figure/webview/table/slicer node for a "Disable/Enable Canvas Preview" action — hides the embedded widget on the model canvas to save render cost while the node still renders fully on Dashboard pages. |
 | Feature | About page in Settings | New **Settings > About** page shows the installed flograph version (read live from package metadata), plus Python/Qt versions. |
+| Feature | Table node tiles on dashboard pages | The IO > Table node (the manually-editable spreadsheet source) can now be dragged onto Dashboard pages like the other visuals, showing its output DataFrame as a live read-only table. |
 | Performance | GPU-accelerated canvas + zoom LOD | New **Tools > Settings…** (Ctrl+,) dialog; opt-in OpenGL viewport (auto-reverts if GL isn't available) and zoom-out node simplification to keep large graphs responsive. |
 | UI | Code editor header cleanup | "Ask AI…", "Save as user node…", and "Reset to library" moved from the header down to the footer, next to Apply; the node title now stretches to fill the available width and elides with a tooltip instead of truncating at a fixed size. |
 | UI | Properties panel redesigned as a resizable table | Node parameters now show in a two-column Property/Value table instead of an auto-generated form — drag the column divider to resize, so long labels or params never force the panel wider. |

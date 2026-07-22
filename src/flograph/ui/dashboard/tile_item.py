@@ -29,7 +29,7 @@ from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
-    "webview", "figure", "table_viewer", "kpi", "slicer", "button"})
+    "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid"})
 
 
 def is_tile_able(node) -> bool:
@@ -49,7 +49,7 @@ MISSING_NODE = ("The node behind this tile was deleted.\n"
 def default_tile_port(node) -> Optional[str]:
     """The output port a tile of this node renders — its first declared output
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
-    if card_kind(node) in ("webview", "figure", "table_viewer", "kpi"):
+    if card_kind(node) in ("webview", "figure", "table_viewer", "kpi", "grid"):
         return node.spec.outputs[0].name if node.spec.outputs else None
     # action buttons have no ports; slicer tiles show upstream options,
     # not their own (already filtered) output
@@ -154,6 +154,7 @@ class TileItem(QGraphicsObject):
             "webview": "plotly",
             "figure": "figure",
             "table_viewer": "table",
+            "grid": "table",
             "button": "button",
             "kpi": "kpi",
             "slicer": "slicer",
