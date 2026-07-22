@@ -30,14 +30,14 @@ no package-index access, etc.) but PySide6, pandas, jedi, and psutil are
 already available there, build a single self-contained `.py` file instead:
 
 ```bash
-python scripts/build_onefile.py          # writes dist/flograph_onefile.py
+python scripts/build_onefile.py          # writes dist/flograph_onefile_<version>.py
 ```
 
 Copy (or email yourself) that one file and run it directly — no install
 step, no `flograph` package needed on the target machine:
 
 ```bash
-python flograph_onefile.py               # or: python flograph_onefile.py project.flograph
+python flograph_onefile_<version>.py     # or: python flograph_onefile_<version>.py project.flograph
 ```
 
 It embeds flograph's own source as a base64 zip and unpacks it to a temp
