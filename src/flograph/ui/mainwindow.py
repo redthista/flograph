@@ -1113,19 +1113,32 @@ class MainWindow(QMainWindow):
                 action.setData(spec.type_id)
         menu.addSeparator()
         frame_action = menu.addAction("Add Frame Here")
+        paste_action = None
+        if self._clipboard_payload() is not None:
+            menu.addSeparator()
+            paste_action = menu.addAction("Paste")
         chosen = menu.exec(global_pos)
         if chosen is frame_action:
             self._add_frame_at(scene_pos)
+        elif paste_action is not None and chosen is paste_action:
+            self._paste()
         elif chosen is not None and chosen.data():
             self._add_node_at(chosen.data(), scene_pos)
 
     def _show_frame_menu(self, frame_id: str, global_pos: QPoint) -> None:
         if frame_id not in self.graph.frames:
             return
+        item = self.scene.frame_items.get(frame_id)
+        if item is not None and not item.isSelected():
+            self.scene.clearSelection()
+            item.setSelected(True)
         menu = QMenu(self)
+        copy_action = menu.addAction("Copy")
         change_color = menu.addAction("Change colour…")
         chosen = menu.exec(global_pos)
-        if chosen is change_color:
+        if chosen is copy_action:
+            self._copy_selection()
+        elif chosen is change_color:
             self._pick_frame_color(frame_id)
 
     def _pick_frame_color(self, frame_id: str) -> None:
@@ -1166,6 +1179,7 @@ class MainWindow(QMainWindow):
                 submenu.addSeparator()
             new_page_action = submenu.addAction("New Page…")
         menu.addSeparator()
+        copy_action = menu.addAction("Copy")
         delete = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
         if chosen is run_to:
@@ -1179,6 +1193,8 @@ class MainWindow(QMainWindow):
         elif preview_action is not None and chosen is preview_action:
             self.undo_stack.push(SetPreviewEnabledCommand(
                 self.graph, node_id, not node.canvas_preview_enabled))
+        elif chosen is copy_action:
+            self._copy_selection()
         elif chosen is delete:
             self.scene.delete_selection()
         elif new_page_action is not None and chosen is new_page_action:
@@ -1290,8 +1306,15 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------- copy/paste
 
     def _selection_payload(self) -> Optional[dict]:
-        nodes = [item.node for item in self.scene.selected_node_items()]
-        if not nodes:
+        frame_items = self.scene.selected_frame_items()
+        node_ids = {item.node.id for item in self.scene.selected_node_items()}
+        for item in frame_items:
+            # a frame carries the nodes sitting inside it, same as a drag
+            node_ids.update(self._frame_node_ids_by_id(item.frame.id))
+        nodes = [self.graph.nodes[nid] for nid in node_ids
+                if nid in self.graph.nodes]
+        frames = [item.frame for item in frame_items]
+        if not nodes and not frames:
             return None
         ids = {n.id for n in nodes}
         return {
@@ -1305,6 +1328,9 @@ class MainWindow(QMainWindow):
                 "src": [c.src_node, c.src_port], "dst": [c.dst_node, c.dst_port],
             } for c in self.graph.connections.values()
                 if c.src_node in ids and c.dst_node in ids],
+            "frames": [{
+                "title": f.title, "rect": list(f.rect), "color": f.color,
+            } for f in frames],
         }
 
     def _copy_selection(self) -> None:
@@ -1318,14 +1344,19 @@ class MainWindow(QMainWindow):
             QApplication.clipboard().setText(json.dumps(payload))
             self.scene.delete_selection()
 
-    def _paste(self) -> None:
+    def _clipboard_payload(self) -> Optional[dict]:
         try:
             payload = json.loads(QApplication.clipboard().text())
         except (json.JSONDecodeError, ValueError):
-            return
+            return None
         if not isinstance(payload, dict) or _CLIPBOARD_KEY not in payload:
-            return
-        self._insert_payload(payload)
+            return None
+        return payload
+
+    def _paste(self) -> None:
+        payload = self._clipboard_payload()
+        if payload is not None:
+            self._insert_payload(payload)
 
     def _duplicate(self) -> None:
         payload = self._selection_payload()
@@ -1333,6 +1364,8 @@ class MainWindow(QMainWindow):
             self._insert_payload(payload)
 
     def _insert_payload(self, payload: dict) -> None:
+        from flograph.core import Frame
+        from .commands import AddFrameCommand
         id_map: dict[str, str] = {}
         new_nodes: list[NodeInstance] = []
         for entry in payload.get("nodes", []):
@@ -1355,11 +1388,22 @@ class MainWindow(QMainWindow):
                      entry["pos"][1] + PASTE_OFFSET),
                 label_override=entry.get("label"),
             ))
-        if not new_nodes:
+        new_frames: list[Frame] = []
+        for entry in payload.get("frames", []):
+            rect = entry.get("rect", [0.0, 0.0, 300.0, 200.0])
+            new_frames.append(Frame(
+                id=uuid.uuid4().hex, title=entry.get("title", "Frame"),
+                rect=(rect[0] + PASTE_OFFSET, rect[1] + PASTE_OFFSET,
+                     rect[2], rect[3]),
+                color=entry.get("color") or "#33415c",
+            ))
+        if not new_nodes and not new_frames:
             return
         self.undo_stack.beginMacro("paste")
         for node in new_nodes:
             self.undo_stack.push(AddNodeCommand(self.graph, node))
+        for frame in new_frames:
+            self.undo_stack.push(AddFrameCommand(self.graph, frame))
         for conn in payload.get("connections", []):
             src_node, src_port = conn["src"]
             dst_node, dst_port = conn["dst"]
@@ -1371,6 +1415,10 @@ class MainWindow(QMainWindow):
         self.scene.clearSelection()
         for node in new_nodes:
             item = self.scene.node_items.get(node.id)
+            if item is not None:
+                item.setSelected(True)
+        for frame in new_frames:
+            item = self.scene.frame_items.get(frame.id)
             if item is not None:
                 item.setSelected(True)
 

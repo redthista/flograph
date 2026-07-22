@@ -2,11 +2,26 @@
 import json
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMenu
 
 from flograph.core import NodeRegistry
 from flograph.core.serialization import graph_to_dict
+from flograph.ui import mainwindow as mw
 from flograph.ui.mainwindow import MainWindow
+
+
+def _pick_menu_action(monkeypatch, text):
+    """Context menus are built as `QMenu(...)` then driven with a blocking
+    `.exec()` -- under the offscreen QPA platform that popup never gets a
+    click and hangs forever. Patching QMenu.exec directly doesn't help:
+    PySide dispatches the compiled method regardless of what's assigned on
+    the class. Swapping in a real subclass (a genuine Python override) does
+    take effect, so patch the `QMenu` name mainwindow.py resolves at call
+    time to one that skips the popup and returns the named action."""
+    class _Picker(QMenu):
+        def exec(self, *args):
+            return next((a for a in self.actions() if a.text() == text), None)
+    monkeypatch.setattr(mw, "QMenu", _Picker)
 
 
 @pytest.fixture(scope="module")
@@ -243,3 +258,103 @@ class TestCopyPaste:
         QApplication.clipboard().setText("just some text")
         window._paste()
         assert len(window.graph.nodes) == 2
+
+    def test_copy_paste_frame_alone(self, window):
+        from flograph.core import Frame
+        from flograph.ui.commands import AddFrameCommand
+        frame = Frame(id="f1", rect=(500.0, 500.0, 300.0, 200.0),
+                      title="Notes", color="#ff0000")
+        window.undo_stack.push(AddFrameCommand(window.graph, frame))
+        window.scene.frame_items["f1"].setSelected(True)
+
+        window._copy_selection()
+        payload = json.loads(QApplication.clipboard().text())
+        assert payload["frames"] == [{
+            "title": "Notes", "rect": [500.0, 500.0, 300.0, 200.0],
+            "color": "#ff0000",
+        }]
+        assert payload["nodes"] == []
+
+        window._paste()
+        assert len(window.graph.frames) == 2
+        new_frame = next(f for f in window.graph.frames.values()
+                         if f.id != "f1")
+        assert new_frame.title == "Notes"
+        assert new_frame.color == "#ff0000"
+        assert new_frame.rect == (530.0, 530.0, 300.0, 200.0)
+        selected = window.scene.selected_frame_items()
+        assert len(selected) == 1
+        assert selected[0].frame.id == new_frame.id
+
+    def test_copy_paste_frame_carries_contained_nodes(self, window):
+        from flograph.core import Frame
+        from flograph.ui.commands import AddFrameCommand
+        const, script = build_small_project(window)
+        center = window.scene.node_items[const.id].sceneBoundingRect().center()
+        frame = Frame(id="f1", rect=(center.x() - 100, center.y() - 100,
+                                     200.0, 200.0))
+        window.undo_stack.push(AddFrameCommand(window.graph, frame))
+        # only the frame is selected -- the const node it contains rides
+        # along, same as a frame drag
+        window.scene.frame_items["f1"].setSelected(True)
+
+        window._copy_selection()
+        payload = json.loads(QApplication.clipboard().text())
+        assert len(payload["frames"]) == 1
+        assert [n["id"] for n in payload["nodes"]] == [const.id]
+
+        window._paste()
+        assert len(window.graph.frames) == 2
+        assert len(window.graph.nodes) == 3
+
+    def test_frame_context_menu_copy(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+        from flograph.core import Frame
+        from flograph.ui.commands import AddFrameCommand
+        frame = Frame(id="f1", rect=(0.0, 0.0, 300.0, 200.0), title="Notes")
+        window.undo_stack.push(AddFrameCommand(window.graph, frame))
+        _pick_menu_action(monkeypatch, "Copy")
+
+        window._show_frame_menu("f1", QPoint(0, 0))
+
+        payload = json.loads(QApplication.clipboard().text())
+        assert len(payload["frames"]) == 1
+        assert payload["frames"][0]["title"] == "Notes"
+
+    def test_node_context_menu_copy(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+        const, _script = build_small_project(window)
+        _pick_menu_action(monkeypatch, "Copy")
+
+        window._show_node_menu(const.id, QPoint(0, 0))
+
+        payload = json.loads(QApplication.clipboard().text())
+        assert [n["id"] for n in payload["nodes"]] == [const.id]
+
+    def test_canvas_context_menu_no_paste_without_clipboard(self, window,
+                                                             monkeypatch):
+        from PySide6.QtCore import QPoint, QPointF
+        QApplication.clipboard().setText("")
+        seen = {}
+
+        class _Inspector(QMenu):
+            def exec(self, *args):
+                seen["actions"] = [a.text() for a in self.actions()]
+                return None
+        monkeypatch.setattr(mw, "QMenu", _Inspector)
+
+        window._show_add_node_menu(QPointF(0, 0), QPoint(0, 0))
+
+        assert "Paste" not in seen["actions"]
+
+    def test_canvas_context_menu_paste_with_clipboard(self, window,
+                                                       monkeypatch):
+        from PySide6.QtCore import QPoint, QPointF
+        const, _script = build_small_project(window)
+        window.scene.node_items[const.id].setSelected(True)
+        window._copy_selection()
+        _pick_menu_action(monkeypatch, "Paste")
+
+        window._show_add_node_menu(QPointF(0, 0), QPoint(0, 0))
+
+        assert len(window.graph.nodes) == 3

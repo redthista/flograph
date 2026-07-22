@@ -199,6 +199,9 @@ class NodeGraphScene(QGraphicsScene):
     def selected_node_items(self) -> list[NodeItem]:
         return [i for i in self.selectedItems() if isinstance(i, NodeItem)]
 
+    def selected_frame_items(self) -> list[FrameItem]:
+        return [i for i in self.selectedItems() if isinstance(i, FrameItem)]
+
     def node_item_moved(self, node_id: str) -> None:
         for ci in self.connection_items.values():
             if node_id in (ci.conn.src_node, ci.conn.dst_node):
