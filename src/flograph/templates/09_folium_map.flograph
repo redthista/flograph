@@ -1,0 +1,26 @@
+{
+  "flograph_version": "0.1.7",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "n_folium_map",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "width": 480,
+          "height": 380,
+          "scale": 100
+        },
+        "code": "\"\"\"Folium Map\n\nA Show Web View forked to build a live folium (Leaflet.js) map. Return the\nfolium Map object directly — no need to call m.get_root().render() yourself,\nthe webview card's to_html() already knows how to unwrap folium/branca\nobjects into a standalone document. Map tiles stream from the network when\nthe card is viewed.\n\"\"\"\nNODE = {\n    \"label\": \"Folium Map\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [],\n    \"outputs\": [(\"view\", \"object\")],\n}\nPARAMS = [\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 480, \"min\": 260, \"max\": 1600},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 380, \"min\": 200, \"max\": 2000},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400},\n]\n\n\ndef run(ctx):\n    try:\n        import folium\n    except ImportError:\n        raise ImportError(\n            \"folium is not installed — add it via Tools > Manage Packages\"\n        ) from None\n\n    m = folium.Map(location=[51.5072, -0.1276], zoom_start=11,\n                   tiles=\"cartodbpositron\")\n    folium.Marker(\n        location=[51.5072, -0.1276],\n        tooltip=\"London\",\n        popup=\"Pan and scroll-zoom the map — it's a live Leaflet map, not a picture.\",\n    ).add_to(m)\n    ctx.log(\"built folium map with 1 marker\")\n    return {\"view\": m}\n",
+        "label": "Folium Map"
+      }
+    ],
+    "connections": [],
+    "frames": [],
+    "pages": []
+  }
+}

@@ -34,7 +34,7 @@ def template_path(name: str):
 
 
 class TestBundledExamples:
-    def test_exactly_eight_templates_bundled(self):
+    def test_exactly_nine_templates_bundled(self):
         root = importlib.resources.files("flograph.templates")
         names = sorted(e.name for e in root.iterdir() if e.name.endswith(".flograph"))
         assert names == [
@@ -46,11 +46,12 @@ class TestBundledExamples:
             "06_script_pipeline_frame.flograph",
             "07_retail_ops_command_center.flograph",
             "08_geo_population_map.flograph",
+            "09_folium_map.flograph",
         ]
 
-    def test_examples_menu_lists_all_eight(self, window):
+    def test_examples_menu_lists_all_nine(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 8
+        assert len(window._examples_menu.actions()) == 9
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -232,3 +233,21 @@ class TestBundledExamples:
 
         top = cache.outputs_for("t8sort_cities")["table"]
         assert top.iloc[0]["city"] == "London"
+
+    def test_folium_map_returns_a_renderable_leaflet_document(self, qtbot, window):
+        pytest.importorskip("folium")
+        window._open_example(template_path("09_folium_map.flograph"))
+        wait_run(qtbot, window.engine)
+        cache = window.engine.cache
+
+        # unlike 08's folium node, this one returns the raw folium.Map
+        # object (not pre-rendered via get_root().render()) — the point of
+        # the example is that the webview card's to_html() now unwraps it
+        # automatically, so a node author no longer has to do that by hand.
+        folium_map = cache.outputs_for("n_folium_map")["view"]
+        assert type(folium_map).__name__ == "Map"
+
+        from flograph.ui.inspector.plotly_view import to_html
+        html = to_html(folium_map)
+        assert "leaflet" in html.lower()
+        assert "trust" not in html.lower()
