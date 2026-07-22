@@ -29,6 +29,7 @@
 | UI | Snap-to-Grid on by default | Previously off by default; now enabled out of the box (toggle and grid resolution still configurable in Settings). |
 | UI | Settings nav sorted alphabetically | The Settings category list (General/Canvas/About, etc.) now sorts ascending instead of insertion order. |
 | UI | Dashboard tile close button removed | Tiles no longer show a red X in the corner — right-click to select, then press Delete, same as every other tile-removal path. The title bar text now uses the full width instead of leaving a gap where the button was. |
+| UI | Dashboard page tab close button removed | Dashboard page tabs no longer show Qt's native red X — right-click a tab for Rename/Duplicate/Delete instead. |
 
 ## 0.1.6
 
