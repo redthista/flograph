@@ -1,6 +1,8 @@
 """ideas.md item 20: an About page in Settings showing the installed
 flograph version (plus Python/Qt versions), so users can tell what build
-they're running without checking pyproject.toml.
+they're running without checking pyproject.toml. Also covers the Settings
+nav being sorted ascending (General/Canvas/About -> About/Canvas/General)
+rather than insertion order.
 
 Settings kept off the real store (avoid polluting the developer's actual
 flograph.conf) -- see test_lod_settings.py's fixture of the same name."""
@@ -59,3 +61,10 @@ class TestAboutPage:
 
     def test_version_helper_matches_installed_metadata(self):
         assert _flograph_version() == importlib.metadata.version("flograph")
+
+
+class TestNavSortOrder:
+    def test_nav_entries_are_sorted_ascending(self, window):
+        dialog = SettingsDialog(window)
+        items = [dialog._nav.item(i).text() for i in range(dialog._nav.count())]
+        assert items == sorted(items)

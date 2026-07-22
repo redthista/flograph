@@ -1,7 +1,8 @@
 """General app Settings window (Tools > Settings…, Ctrl+,): a category list
 on the left, one page per category on the right. Start here when adding a new
-app-wide preference instead of a one-off menu toggle — add a page in
-__init__ and it shows up in the nav automatically.
+app-wide preference instead of a one-off menu toggle — add a page to the
+`pages` dict in __init__ and it shows up in the nav automatically, sorted
+alphabetically alongside the rest.
 
 Non-modal and live-apply: pages bind straight to the setting they control
 (e.g. an existing QAction's checked state, or MainWindow.set_lod_*) so a
@@ -43,9 +44,13 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._nav)
         layout.addWidget(self._pages, 1)
 
-        self._add_page("General", self._build_general_page(window))
-        self._add_page("Canvas", self._build_canvas_page(window))
-        self._add_page("About", self._build_about_page())
+        pages = {
+            "General": self._build_general_page(window),
+            "Canvas": self._build_canvas_page(window),
+            "About": self._build_about_page(),
+        }
+        for name in sorted(pages):
+            self._add_page(name, pages[name])
 
         self._nav.currentRowChanged.connect(self._pages.setCurrentIndex)
         self._nav.setCurrentRow(0)
