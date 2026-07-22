@@ -106,11 +106,13 @@ def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> No
             stale.unlink(missing_ok=True)
 
 
-def load_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> list[str]:
-    """Restore whatever cache entries are still valid for the *current*
-    graph. Returns the ids of nodes that were restored — the caller is
-    responsible for marking them clean/DONE and notifying the UI. Never
-    raises: any problem just means fewer (or zero) nodes get restored."""
+def resolve_entries(
+    graph: Graph, project_path: str | Path,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Cheap half of restoring a cache: read the manifest and keep only the
+    entries whose fingerprint still matches the *current* graph — no blobs
+    are touched. Returns `[(node_id, meta), ...]` in manifest order; each
+    still needs `load_blob` to actually fetch its output. Never raises."""
     cache_dir = _cache_dir_for(project_path)
     manifest_path = cache_dir / "manifest.json"
     if not manifest_path.exists():
@@ -123,7 +125,7 @@ def load_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> li
         return []
 
     memo: dict[str, str] = {}
-    restored = []
+    entries = []
     for node_id, meta in manifest.get("nodes", {}).items():
         if node_id not in graph.nodes:
             continue
@@ -133,8 +135,34 @@ def load_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> li
             continue
         if fp != meta.get("fingerprint"):
             continue
+        entries.append((node_id, meta))
+    return entries
+
+
+def load_blob(project_path: str | Path, node_id: str) -> Any:
+    """Expensive half: unpickle one node's cached output. This is the part
+    that can take a long time for large DataFrames/figures — callers that
+    care about UI responsiveness (see flograph.engine.cache_worker) run this
+    off the GUI thread, one node at a time. Raises on any failure; the
+    caller decides whether to skip or surface it."""
+    cache_dir = _cache_dir_for(project_path)
+    return pickle.loads((cache_dir / f"{node_id}.pkl").read_bytes())
+
+
+def load_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> list[str]:
+    """Restore whatever cache entries are still valid for the *current*
+    graph. Returns the ids of nodes that were restored — the caller is
+    responsible for marking them clean/DONE and notifying the UI. Never
+    raises: any problem just means fewer (or zero) nodes get restored.
+
+    Synchronous end-to-end (resolve + unpickle) — fine for small caches and
+    for tests/headless use. The GUI opens a project through
+    flograph.engine.cache_worker instead, so unpickling large blobs doesn't
+    block the event loop."""
+    restored = []
+    for node_id, meta in resolve_entries(graph, project_path):
         try:
-            outputs = pickle.loads((cache_dir / f"{node_id}.pkl").read_bytes())
+            outputs = load_blob(project_path, node_id)
         except Exception:
             continue
         cache.set(node_id, outputs, meta.get("wall_time", 0.0))
