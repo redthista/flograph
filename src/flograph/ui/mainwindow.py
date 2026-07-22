@@ -1154,6 +1154,16 @@ class MainWindow(QMainWindow):
         if color.isValid():
             self.scene.push_frame_color(frame_id, color.name())
 
+    def _pick_node_color(self, node_id: str) -> None:
+        if node_id not in self.graph.nodes:
+            return
+        node = self.graph.nodes[node_id]
+        from . import theme
+        current = QColor(node.color) if node.color else theme.NODE_HEADER
+        color = QColorDialog.getColor(current, self, "Node colour")
+        if color.isValid():
+            self.scene.push_node_color(node_id, color.name())
+
     def _show_node_menu(self, node_id: str, global_pos: QPoint) -> None:
         if node_id not in self.graph.nodes:
             return
@@ -1167,6 +1177,8 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         edit_code = menu.addAction("Edit Code")
         rename = menu.addAction("Rename")
+        colour = menu.addAction("Change colour…")
+        reset_colour = menu.addAction("Reset colour") if node.color else None
         rerun = menu.addAction("Mark Dirty")
         preview_action = None
         if card_kind(node) in PREVIEW_TOGGLABLE_KINDS:
@@ -1193,6 +1205,10 @@ class MainWindow(QMainWindow):
             self._on_node_double_clicked(node_id)
         elif chosen is rename:
             self._rename_node(node_id)
+        elif chosen is colour:
+            self._pick_node_color(node_id)
+        elif reset_colour is not None and chosen is reset_colour:
+            self.scene.push_node_color(node_id, None)
         elif chosen is rerun:
             self.graph.mark_dirty(node_id)
         elif preview_action is not None and chosen is preview_action:
@@ -1327,7 +1343,7 @@ class MainWindow(QMainWindow):
             "nodes": [{
                 "id": n.id, "type": n.type_id, "pos": list(n.pos),
                 "params": dict(n.params), "code": n.code_override,
-                "label": n.label_override,
+                "label": n.label_override, "color": n.color,
             } for n in nodes],
             "connections": [{
                 "src": [c.src_node, c.src_port], "dst": [c.dst_node, c.dst_port],
@@ -1392,6 +1408,7 @@ class MainWindow(QMainWindow):
                 pos=(entry["pos"][0] + PASTE_OFFSET,
                      entry["pos"][1] + PASTE_OFFSET),
                 label_override=entry.get("label"),
+                color=entry.get("color"),
             ))
         new_frames: list[Frame] = []
         for entry in payload.get("frames", []):

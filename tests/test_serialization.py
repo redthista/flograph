@@ -27,6 +27,20 @@ def test_round_trip_dict_equality(registry):
     assert graph_to_dict(restored) == data
 
 
+def test_node_color_survives_round_trip(registry):
+    graph = build_project_graph(registry)
+    const = next(n for n in graph.nodes.values()
+                 if n.type_id == "flograph.util.constant")
+    graph.set_color(const.id, "#ab12cd")
+    data = graph_to_dict(graph)
+    restored = graph_from_dict(json.loads(json.dumps(data)), registry)
+    assert restored.nodes[const.id].color == "#ab12cd"
+    # untouched nodes keep the default (None)
+    script = next(n for n in graph.nodes.values()
+                  if n.type_id == "flograph.scripting.python_script")
+    assert restored.nodes[script.id].color is None
+
+
 def test_loaded_nodes_are_dirty_and_idle(registry):
     graph = build_project_graph(registry)
     for node_id in graph.nodes:

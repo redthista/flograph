@@ -74,6 +74,8 @@ class NodeInstance:
     # webview/table/slicer) on the model canvas to save render cost; the
     # node still renders fully on Dashboard pages regardless of this flag.
     canvas_preview_enabled: bool = True
+    # custom header colour (hex string); None = default theme colour
+    color: Optional[str] = None
     status: NodeStatus = NodeStatus.IDLE
     status_message: str = ""
     dirty: bool = True

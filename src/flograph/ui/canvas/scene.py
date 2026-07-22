@@ -20,7 +20,7 @@ from flograph.core.node import NodeStatus
 
 from ..commands import (
     AddNodeCommand, ConnectCommand, DisconnectCommand, MoveNodesCommand,
-    RemoveSelectionCommand, UpdateFrameCommand,
+    RemoveSelectionCommand, SetNodeColorCommand, UpdateFrameCommand,
 )
 from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
@@ -78,6 +78,7 @@ class NodeGraphScene(QGraphicsScene):
         events.dirty_changed.connect(self._on_dirty_changed)
         events.label_changed.connect(self._on_label_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
+        events.color_changed.connect(self._on_color_changed)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
@@ -166,6 +167,11 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.set_preview_enabled(enabled)
+
+    def _on_color_changed(self, node_id: str) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.update()
 
     def _on_temp_edit_changed(self, node_id: str, has_temp_edit: bool) -> None:
         item = self.node_items.get(node_id)
@@ -329,6 +335,9 @@ class NodeGraphScene(QGraphicsScene):
 
     def push_frame_color(self, frame_id: str, color: str) -> None:
         self.undo_stack.push(UpdateFrameCommand(self.graph, frame_id, color=color))
+
+    def push_node_color(self, node_id: str, color: Optional[str]) -> None:
+        self.undo_stack.push(SetNodeColorCommand(self.graph, node_id, color))
 
     # -------------------------------------------------------------- reroute
 

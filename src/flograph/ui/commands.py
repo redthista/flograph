@@ -261,6 +261,22 @@ class SetPreviewEnabledCommand(QUndoCommand):
         self._graph.set_preview_enabled(self._node_id, self._old)
 
 
+class SetNodeColorCommand(QUndoCommand):
+    def __init__(self, graph: Graph, node_id: str, color: Optional[str],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("change node colour", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).color
+        self._new = color
+
+    def redo(self) -> None:
+        self._graph.set_color(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_color(self._node_id, self._old)
+
+
 class AddFrameCommand(QUndoCommand):
     def __init__(self, graph: Graph, frame: Frame,
                  parent: Optional[QUndoCommand] = None) -> None:

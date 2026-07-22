@@ -42,6 +42,7 @@ class GraphEvents:
         self.code_changed = Event()    # (node_id: str)
         self.label_changed = Event()   # (node_id: str)
         self.preview_enabled_changed = Event()  # (node_id: str, enabled: bool)
+        self.color_changed = Event()   # (node_id: str)
         self.dirty_changed = Event()   # (node_id: str, dirty: bool)
         self.status_changed = Event()  # (node_id: str, status: NodeStatus, message: str)
         self.temp_edit_changed = Event()  # (node_id: str, has_temp_edit: bool)
