@@ -6,6 +6,7 @@ one-way flow is what makes undo/redo, load, and paste all take the same path.
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any, Optional
 
 from PySide6.QtGui import QUndoCommand
@@ -340,6 +341,38 @@ class RenamePageCommand(QUndoCommand):
 
     def undo(self) -> None:
         self._graph.update_page(self._page_id, title=self._old)
+
+
+class DuplicatePageCommand(QUndoCommand):
+    def __init__(self, graph: Graph, page_id: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("duplicate page", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._new_page: Optional[Page] = None
+
+    def redo(self) -> None:
+        if self._new_page is not None:
+            # Already created; just ensure it's in the graph (redo may be called again after undo)
+            if self._new_page.id not in self._graph.pages:
+                self._graph.add_page(self._new_page)
+            return
+        src = self._graph.page(self._page_id)
+        new_tiles = {
+            uuid.uuid4().hex: Tile(id=uuid.uuid4().hex, node_id=t.node_id, port=t.port,
+                                   rect=t.rect)
+            for tid, t in src.tiles.items()
+        }
+        self._new_page = Page(
+            id=uuid.uuid4().hex,
+            title=f"{src.title} (copy)",
+            tiles=new_tiles,
+        )
+        self._graph.add_page(self._new_page)
+
+    def undo(self) -> None:
+        if self._new_page is not None and self._new_page.id in self._graph.pages:
+            self._graph.remove_page(self._new_page.id)
 
 
 class AddTileCommand(QUndoCommand):

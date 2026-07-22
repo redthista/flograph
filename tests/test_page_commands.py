@@ -7,7 +7,7 @@ from PySide6.QtGui import QUndoStack
 from flograph.core import Graph, Page, Tile
 from flograph.core.serialization import graph_to_dict
 from flograph.ui.commands import (
-    AddPageCommand, AddTileCommand, MoveResizeTileCommand,
+    AddPageCommand, AddTileCommand, DuplicatePageCommand, MoveResizeTileCommand,
     RemovePageCommand, RemoveTileCommand, RenamePageCommand,
 )
 
@@ -107,3 +107,32 @@ def test_moves_of_different_tiles_do_not_merge(env):
     stack.push(MoveResizeTileCommand(graph, "p1", "t2",
                                      (0, 0, 420, 320), (0, 10, 420, 320)))
     assert stack.count() == count + 2
+
+
+def test_duplicate_page_no_tiles(env):
+    graph, stack = env
+    stack.push(AddPageCommand(graph, Page(id="p1", title="Sales")))
+    before = snapshot(graph)
+    stack.push(DuplicatePageCommand(graph, "p1"))
+    after = snapshot(graph)
+    assert len(graph.pages) == 2
+    titles = {p.title for p in graph.pages.values()}
+    assert "Sales (copy)" in titles
+    dup_id = [pid for pid in graph.pages if graph.pages[pid].title == "Sales (copy)"][0]
+    assert graph.pages[dup_id].tiles == {}
+    assert_undo_redo_stable(stack, graph, before, after)
+
+
+def test_duplicate_page_with_tiles(env):
+    graph, stack = env
+    stack.push(AddPageCommand(graph, Page(id="p1", title="Dashboard")))
+    stack.push(AddTileCommand(graph, "p1", Tile(id="t1", node_id="n1", port="table")))
+    stack.push(AddTileCommand(graph, "p1", Tile(id="t2", node_id="n2", port="figure", rect=(50, 50, 400, 300))))
+    before = snapshot(graph)
+    stack.push(DuplicatePageCommand(graph, "p1"))
+    dup_id = [pid for pid in graph.pages if graph.pages[pid].title == "Dashboard (copy)"][0]
+    assert len(graph.pages[dup_id].tiles) == 2
+    tile_ids = set(graph.pages[dup_id].tiles.keys())
+    # tiles should have new ids (not the originals)
+    assert "t1" not in tile_ids and "t2" not in tile_ids
+    assert_undo_redo_stable(stack, graph, before, snapshot(graph))
