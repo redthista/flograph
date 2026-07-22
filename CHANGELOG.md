@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8 (unreleased)
+
+| Category | Change | Details |
+| --- | --- | --- |
+| Example | Folium Map | New bundled example (File > Open Example) demonstrating a web-view node that returns a raw `folium.Map` object directly — showing off the 0.1.7 fix that lets the webview card unwrap folium/branca objects without calling `get_root().render()` by hand. |
+
 ## 0.1.7
 
 | Category | Change | Details |
