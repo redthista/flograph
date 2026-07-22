@@ -14,6 +14,8 @@
 | Feature | Join node overhaul | The default Join node now supports the full range of pandas `join` features. |
 | Feature | Password param type | Node scripts can declare `{"type": "password"}` in `PARAMS` for a masked field with a Show/Hide toggle. |
 | Performance | GPU-accelerated canvas + zoom LOD | New **Tools > Settings…** (Ctrl+,) dialog; opt-in OpenGL viewport (auto-reverts if GL isn't available) and zoom-out node simplification to keep large graphs responsive. |
+| UI | Code editor header cleanup | "Ask AI…", "Save as user node…", and "Reset to library" moved from the header down to the footer, next to Apply; the node title now stretches to fill the available width and elides with a tooltip instead of truncating at a fixed size. |
+| UI | Properties panel redesigned as a resizable table | Node parameters now show in a two-column Property/Value table instead of an auto-generated form — drag the column divider to resize, so long labels or params never force the panel wider. |
 | UI | Settings window reorganized | Snap-to-Grid and grid resolution moved from the toolbar into **Settings > Canvas**; page bar position got its own new **Settings > General** page. |
 | UI | Snap-to-Grid on by default | Previously off by default; now enabled out of the box (toggle and grid resolution still configurable in Settings). |
 
