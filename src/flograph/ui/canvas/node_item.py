@@ -95,6 +95,13 @@ def card_kind(node) -> Optional[str]:
     return node.spec.card or _LEGACY_CARD_BY_TYPE_ID.get(node.type_id)
 
 
+# Card kinds with a real, expensive embedded output-preview widget — the ones
+# the canvas-preview toggle (idea #21) applies to. "kpi" is painted directly
+# with no widget, so it's excluded; "grid" is user *input*, not a computed
+# preview, so it's excluded too.
+PREVIEW_TOGGLABLE_KINDS = {"figure", "webview", "table_viewer", "slicer"}
+
+
 def kpi_text(value, fmt: str) -> str:
     """A KPI value rendered for display: the node's format spec when it
     applies, otherwise sensible number formatting. Shared with dashboard
@@ -290,6 +297,8 @@ class NodeItem(QGraphicsObject):
             self._build_table_viewer_widget()
         if self.slicer:
             self._build_slicer_widget()
+        if not node.canvas_preview_enabled:
+            self._apply_proxy_visibility()  # honor a preview-disabled node loaded from disk
         if node.status == NodeStatus.ERROR:
             self.setToolTip(node.status_message)
 
@@ -1021,6 +1030,18 @@ class NodeItem(QGraphicsObject):
         table = self.input_ports if direction == "input" else self.output_ports
         return table.get(name)
 
+    def _apply_proxy_visibility(self) -> None:
+        """Content-proxy visibility is gated by two independent switches: LOD
+        flattening (zoomed out, transient) and the canvas-preview toggle
+        (persisted, per-node). Either one hides the proxy; ports/header are
+        driven by LOD alone (see set_lod), since a preview-disabled node
+        stays full-size and wireable."""
+        visible = not self._flat and self.node.canvas_preview_enabled
+        for proxy in (self._note_editor, self._table_proxy, self._figure_proxy,
+                      self._table_viewer_proxy, self._slicer_proxy):
+            if proxy is not None:
+                proxy.setVisible(visible)
+
     def set_lod(self, flat: bool) -> None:
         """Called by the scene whenever the decision changes (zoom crossing
         lod_threshold, or lod_enabled toggling): hide ports/embedded widgets
@@ -1030,13 +1051,29 @@ class NodeItem(QGraphicsObject):
         if flat == self._flat:
             return
         self._flat = flat
-        visible = not flat
         for port in (*self.input_ports.values(), *self.output_ports.values()):
-            port.setVisible(visible)
-        for proxy in (self._note_editor, self._table_proxy, self._figure_proxy,
-                      self._table_viewer_proxy, self._slicer_proxy):
-            if proxy is not None:
-                proxy.setVisible(visible)
+            port.setVisible(not flat)
+        self._apply_proxy_visibility()
+        self.update()
+
+    def set_preview_enabled(self, enabled: bool) -> None:
+        """Show/hide this card's embedded proxy per the canvas-preview
+        toggle. Ports stay visible — only the widget hides. On disable, also
+        clears the widget's held content (matplotlib Figure / table model /
+        slicer options) to actually free memory, not just skip future
+        pushes; the last-known data lives in engine.cache regardless, so
+        re-enabling repopulates it without forcing a re-run (see
+        mainwindow._on_preview_enabled_changed)."""
+        self._apply_proxy_visibility()
+        if not enabled:
+            if self.plotly_card:
+                self.set_plotly_figure(None)
+            elif self.figure_card:
+                self.set_figure(None)
+            elif self.table_viewer:
+                self.set_table_data(None)
+            elif self.slicer:
+                self.set_slicer_options(None)
         self.update()
 
     # ------------------------------------------------------------- painting
@@ -1076,6 +1113,8 @@ class NodeItem(QGraphicsObject):
             return
         if self.figure_card or self.table_viewer or self.slicer:
             self._paint_widget_card(painter)
+            if not self.node.canvas_preview_enabled:
+                self._paint_preview_disabled_hint(painter)
             return
         if self.kpi_card:
             self._paint_kpi(painter)
@@ -1277,6 +1316,20 @@ class NodeItem(QGraphicsObject):
                 painter.drawLine(
                     QPointF(handle.right() - i, handle.bottom() - 2),
                     QPointF(handle.right() - 2, handle.bottom() - i))
+
+    def _paint_preview_disabled_hint(self, painter: QPainter) -> None:
+        """Overlay drawn where the (hidden) content proxy would otherwise
+        show through, so a preview-disabled card reads distinctly from one
+        that's merely zoomed out (see set_lod/_flat, painted separately)."""
+        rect = QRectF(4, HEADER_H + 4, self.width - 8,
+                      self.body_height - HEADER_H - 8)
+        painter.setPen(QPen(theme.NODE_SUBTEXT))
+        font = painter.font()
+        font.setBold(False)
+        font.setPointSizeF(8.0)
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap,
+                         "Preview off — right-click to enable")
 
     def _paint_note(self, painter: QPainter) -> None:
         rect = QRectF(0, 0, self.width, self.body_height)

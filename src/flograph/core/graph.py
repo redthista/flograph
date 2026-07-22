@@ -108,6 +108,11 @@ class Graph:
         node.label_override = label or None
         self.events.label_changed.emit(node_id)
 
+    def set_preview_enabled(self, node_id: str, enabled: bool) -> None:
+        node = self.node(node_id)
+        node.canvas_preview_enabled = enabled
+        self.events.preview_enabled_changed.emit(node_id, enabled)
+
     def set_param(self, node_id: str, name: str, value: Any) -> None:
         node = self.node(node_id)
         if node.spec.param(name) is None:

@@ -51,6 +51,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "params": dict(n.params),
                     "code": n.code_override,
                     "label": n.label_override,
+                    "preview": n.canvas_preview_enabled,
                 }
                 for n in graph.nodes.values()
             ],
@@ -128,6 +129,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             params={**spec.default_params(), **entry.get("params", {})},
             pos=tuple(entry.get("pos", (0.0, 0.0))),
             label_override=entry.get("label"),
+            canvas_preview_enabled=entry.get("preview", True),
         )
         if spec.broken:
             node.status = NodeStatus.ERROR

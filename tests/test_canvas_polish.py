@@ -155,6 +155,88 @@ class TestZoomLOD:
         assert not item._flat
 
 
+class TestPreviewToggle:
+    """idea #21: a per-node, persisted toggle that hides a card's embedded
+    preview widget on the model canvas (Dashboard tiles are unaffected —
+    they're a separate rendering path) without disturbing wireability."""
+
+    def test_toggle_hides_proxy_but_keeps_ports_and_geometry(self, env, registry):
+        from flograph.ui.commands import SetPreviewEnabledCommand
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        item = scene.node_items[node.id]
+        proxy = item._table_viewer_proxy
+        port = next(iter(item.input_ports.values()))
+        assert proxy.isVisible() and node.canvas_preview_enabled
+
+        stack.push(SetPreviewEnabledCommand(graph, node.id, False))
+        assert not node.canvas_preview_enabled
+        assert not proxy.isVisible()
+        assert port.isVisible()  # still wireable, unlike LOD flattening
+
+        stack.undo()
+        assert node.canvas_preview_enabled
+        assert proxy.isVisible()
+
+    def test_disabling_clears_held_widget_content(self, env, registry):
+        from flograph.ui.commands import SetPreviewEnabledCommand
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
+        item = scene.node_items[node.id]
+        import matplotlib.figure
+        item.set_figure(matplotlib.figure.Figure())
+        assert item._figure_view.isVisible()
+
+        stack.push(SetPreviewEnabledCommand(graph, node.id, False))
+        assert item._figure_view._canvas is None  # matplotlib canvas released
+
+    def test_serialization_round_trips_preview_flag(self, registry):
+        from flograph.core.serialization import graph_from_dict, graph_to_dict
+        graph = Graph()
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        graph.set_preview_enabled(node.id, False)
+
+        data = graph_to_dict(graph)
+        assert data["graph"]["nodes"][0]["preview"] is False
+
+        reloaded = graph_from_dict(data, registry)
+        assert reloaded.node(node.id).canvas_preview_enabled is False
+
+    def test_old_save_files_without_the_key_default_to_enabled(self, registry):
+        from flograph.core.serialization import graph_from_dict, graph_to_dict
+        graph = Graph()
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        data = graph_to_dict(graph)
+        del data["graph"]["nodes"][0]["preview"]  # simulate a pre-idea-21 file
+
+        reloaded = graph_from_dict(data, registry)
+        assert reloaded.node(node.id).canvas_preview_enabled is True
+
+    def test_combines_with_lod_flattening_without_fighting_over_visibility(
+            self, env, registry):
+        from flograph.ui.canvas.node_item import DEFAULT_LOD_THRESHOLD
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        item = scene.node_items[node.id]
+        proxy = item._table_viewer_proxy
+
+        graph.set_preview_enabled(node.id, False)
+        assert not proxy.isVisible()
+
+        scene.set_lod(DEFAULT_LOD_THRESHOLD - 0.05)  # zoom out too
+        assert not proxy.isVisible()
+        scene.set_lod(1.0)  # zoom back in — still off, preview is disabled
+        assert not proxy.isVisible()
+
+        graph.set_preview_enabled(node.id, True)
+        assert proxy.isVisible()  # zoom is full-detail, preview re-enabled
+
+    def test_kpi_card_has_no_toggle_target(self, registry):
+        from flograph.ui.canvas.node_item import PREVIEW_TOGGLABLE_KINDS, card_kind
+        node = registry.instantiate("flograph.viz.card")
+        assert card_kind(node) not in PREVIEW_TOGGLABLE_KINDS
+
+
 class TestFrames:
     def test_frame_commands_round_trip(self, env):
         graph, stack, scene = env
