@@ -245,6 +245,22 @@ class SetLabelCommand(QUndoCommand):
         self._graph.set_label(self._node_id, self._old)
 
 
+class SetPreviewEnabledCommand(QUndoCommand):
+    def __init__(self, graph: Graph, node_id: str, enabled: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("toggle canvas preview", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).canvas_preview_enabled
+        self._new = enabled
+
+    def redo(self) -> None:
+        self._graph.set_preview_enabled(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_preview_enabled(self._node_id, self._old)
+
+
 class AddFrameCommand(QUndoCommand):
     def __init__(self, graph: Graph, frame: Frame,
                  parent: Optional[QUndoCommand] = None) -> None:

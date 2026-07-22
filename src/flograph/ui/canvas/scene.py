@@ -77,6 +77,7 @@ class NodeGraphScene(QGraphicsScene):
         events.status_changed.connect(self._on_status_changed)
         events.dirty_changed.connect(self._on_dirty_changed)
         events.label_changed.connect(self._on_label_changed)
+        events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
@@ -160,6 +161,11 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.update()
+
+    def _on_preview_enabled_changed(self, node_id: str, enabled: bool) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.set_preview_enabled(enabled)
 
     def _on_temp_edit_changed(self, node_id: str, has_temp_edit: bool) -> None:
         item = self.node_items.get(node_id)
