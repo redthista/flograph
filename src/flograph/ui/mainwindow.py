@@ -32,12 +32,14 @@ from flograph.paths import user_nodes_dir
 from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
-    SetLabelCommand, SetParamCommand,
+    SetLabelCommand, SetParamCommand, SetPreviewEnabledCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
 from .canvas import grid
-from .canvas.node_item import DEFAULT_LOD_THRESHOLD, card_kind
+from .canvas.node_item import (
+    DEFAULT_LOD_THRESHOLD, PREVIEW_TOGGLABLE_KINDS, card_kind,
+)
 from .canvas.palette import LibraryPanel, NodePalettePopup
 from .dashboard import (
     DashboardPage, PageTabBar, default_tile_port, default_tile_size,
@@ -508,6 +510,8 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_table_viewer_node_succeeded)
         engine.node_succeeded.connect(self._on_kpi_node_succeeded)
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
+        self.graph.events.preview_enabled_changed.connect(
+            self._on_preview_enabled_changed)
 
     def _wire_canvas(self) -> None:
         self.view.add_node_requested.connect(self._show_add_node_menu)
@@ -528,6 +532,8 @@ class MainWindow(QMainWindow):
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "figure":
             return
+        if not node.canvas_preview_enabled:
+            return
         item = self.scene.node_items.get(node_id)
         if item is None:
             return
@@ -537,6 +543,8 @@ class MainWindow(QMainWindow):
     def _on_plotly_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "webview":
+            return
+        if not node.canvas_preview_enabled:
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
@@ -549,6 +557,8 @@ class MainWindow(QMainWindow):
     def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "table_viewer":
+            return
+        if not node.canvas_preview_enabled:
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
@@ -579,12 +589,36 @@ class MainWindow(QMainWindow):
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "slicer":
             return
+        if not node.canvas_preview_enabled:
+            return
         item = self.scene.node_items.get(node_id)
         if item is None:
             return
         from flograph.engine.introspect import slicer_options
         item.set_slicer_options(
             slicer_options(self.graph, self.engine.cache, node_id))
+
+    def _on_preview_enabled_changed(self, node_id: str, enabled: bool) -> None:
+        if enabled:
+            self._refresh_node_card(node_id)  # repopulate from cache, no re-run
+
+    def _refresh_node_card(self, node_id: str) -> None:
+        """Push the last-known cached output into this node's embedded
+        preview widget — shared by the *_node_succeeded handlers (via
+        engine.node_succeeded) and by re-enabling a disabled preview, so
+        re-enable never forces a re-run."""
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return
+        kind = card_kind(node)
+        if kind == "figure":
+            self._on_figure_node_succeeded(node_id)
+        elif kind == "webview":
+            self._on_plotly_node_succeeded(node_id)
+        elif kind == "table_viewer":
+            self._on_table_viewer_node_succeeded(node_id)
+        elif kind == "slicer":
+            self._on_slicer_node_succeeded(node_id)
 
     # ------------------------------------------------------ dashboard pages
 
@@ -1096,12 +1130,18 @@ class MainWindow(QMainWindow):
         if item is not None and not item.isSelected():
             self.scene.clearSelection()
             item.setSelected(True)
+        node = self.graph.nodes[node_id]
         menu = QMenu(self)
         run_to = menu.addAction("Run To This Node")
         menu.addSeparator()
         edit_code = menu.addAction("Edit Code")
         rename = menu.addAction("Rename")
         rerun = menu.addAction("Mark Dirty")
+        preview_action = None
+        if card_kind(node) in PREVIEW_TOGGLABLE_KINDS:
+            preview_action = menu.addAction(
+                "Disable Canvas Preview" if node.canvas_preview_enabled
+                else "Enable Canvas Preview")
         view_actions = self._add_view_actions(menu, node_id)
         page_actions: list = []
         new_page_action = None
@@ -1123,6 +1163,9 @@ class MainWindow(QMainWindow):
             self._rename_node(node_id)
         elif chosen is rerun:
             self.graph.mark_dirty(node_id)
+        elif preview_action is not None and chosen is preview_action:
+            self.undo_stack.push(SetPreviewEnabledCommand(
+                self.graph, node_id, not node.canvas_preview_enabled))
         elif chosen is delete:
             self.scene.delete_selection()
         elif new_page_action is not None and chosen is new_page_action:
