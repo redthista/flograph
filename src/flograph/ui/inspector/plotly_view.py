@@ -49,6 +49,18 @@ def to_html(obj) -> str | None:
                           config={"responsive": True})
         except TypeError:
             return _wrap(render())
+    # folium / branca objects: _repr_html_() wraps the map in an <iframe
+    # srcdoc=...> whose "Make this Notebook Trusted to load map" placeholder
+    # QtWebEngine leaves visible. Render the full standalone document instead.
+    root = getattr(obj, "get_root", None)
+    if callable(root):
+        try:
+            rendered = root()
+        except Exception:
+            rendered = None
+        page = getattr(rendered, "render", None)
+        if callable(page):
+            return _wrap(page())
     render = getattr(obj, "_repr_html_", None)
     if callable(render):
         return _wrap(render())
@@ -90,9 +102,18 @@ class PlotlyView(QWidget):
             return self.view
         try:
             from PySide6.QtWebEngineWidgets import QWebEngineView
+            from PySide6.QtWebEngineCore import QWebEngineSettings
         except ImportError:
             return None
         view = QWebEngineView()
+        # content is loaded from a local temp file (see set_content), and Qt
+        # WebEngine's default local-content sandbox blocks that file from
+        # fetching remote subresources — so a folium/Leaflet map or any
+        # library relying on a CDN script tag would load the page but never
+        # run the script it points to.
+        view.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
+            True)
         view.hide()
         self._layout.addWidget(view, 1)
         self.view = view
