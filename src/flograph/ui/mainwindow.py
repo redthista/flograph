@@ -1135,11 +1135,16 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         copy_action = menu.addAction("Copy")
         change_color = menu.addAction("Change colour…")
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
         if chosen is copy_action:
             self._copy_selection()
         elif chosen is change_color:
             self._pick_frame_color(frame_id)
+        elif chosen is delete_action:
+            from .commands import RemoveFrameCommand
+            self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
 
     def _pick_frame_color(self, frame_id: str) -> None:
         if frame_id not in self.graph.frames:
