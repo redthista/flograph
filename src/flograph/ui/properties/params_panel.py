@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
 
 from flograph.core import Graph, ParamSpec
 
-from ..commands import SetLabelCommand, SetParamCommand
+from ..canvas.node_item import card_kind
+from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
 
 
 class ParamsPanel(QWidget):
@@ -106,6 +107,14 @@ class ParamsPanel(QWidget):
         label_edit.editingFinished.connect(
             lambda: self._commit_label(label_edit.text()))
         self._add_row("Name", label_edit)
+
+        if card_kind(node) == "reroute":
+            desc_edit = QPlainTextEdit(node.description)
+            desc_edit.setMaximumHeight(60)
+            desc_edit.setPlaceholderText("Shown as a tooltip when hovering the reroute")
+            desc_edit.textChanged.connect(
+                lambda: self._commit_description(desc_edit.toPlainText()))
+            self._add_row("Description", desc_edit)
 
         for spec in node.spec.params:
             widget, setter = self._make_widget(spec, node.params.get(spec.name))
@@ -319,6 +328,14 @@ class ParamsPanel(QWidget):
         new = text.strip() or None
         if new != node.label_override:
             self._undo_stack.push(SetLabelCommand(self._graph, self._node_id, new))
+
+    def _commit_description(self, text: str) -> None:
+        if self._updating or self._node_id is None:
+            return
+        node = self._graph.node(self._node_id)
+        if node.description == text:
+            return
+        self._undo_stack.push(SetDescriptionCommand(self._graph, self._node_id, text))
 
     def _silently(self, setter: Callable, value: Any) -> None:
         self._updating = True

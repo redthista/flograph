@@ -1,10 +1,12 @@
 """M7: reroute insertion, frames, alignment, wire-drop palette plumbing."""
 import pytest
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QUndoStack
+from PySide6.QtWidgets import QInputDialog
 
 from flograph.core import Frame, Graph, NodeRegistry
-from flograph.core.serialization import graph_to_dict
+from flograph.core.node import NodeStatus
+from flograph.core.serialization import graph_from_dict, graph_to_dict
 from flograph.ui.canvas import FrameItem, NodeGraphScene
 from flograph.ui.commands import AddFrameCommand, RemoveFrameCommand, UpdateFrameCommand
 from flograph.ui.mainwindow import MainWindow
@@ -69,6 +71,86 @@ class TestReroute:
         with qtbot.waitSignal(engine.run_finished, timeout=5000):
             engine.run_all()
         assert engine.cache.outputs_for(b.id)["out1"] == 7
+
+
+class TestRerouteLabel:
+    def test_labelless_by_default(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        item = scene.node_items[node.id]
+
+        assert node.label_override is None
+        assert item._reroute_label_rect() is None
+        assert item.boundingRect() == QRectF(-2, -2, item.width + 4, item.body_height + 4)
+
+    def test_label_expands_bounding_rect(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        item = scene.node_items[node.id]
+
+        graph.set_label(node.id, "Split point")
+        label_rect = item._reroute_label_rect()
+        assert label_rect is not None
+        assert item.boundingRect().contains(label_rect)
+        assert item.boundingRect().top() < -2  # grew upward to fit the pill above the dot
+
+    def test_rename_dialog_unedited_stays_labelless(self, window, monkeypatch):
+        node = window.registry.instantiate("flograph.util.reroute")
+        window.graph.add_node(node)
+        # simulate the user opening Rename and clicking OK without editing --
+        # the dialog pre-fills with node.label (the resolved default), so an
+        # unguarded commit would silently turn that default into an override
+        monkeypatch.setattr(
+            QInputDialog, "getText",
+            staticmethod(lambda *a, **k: (k.get("text", ""), True)),
+        )
+        window._rename_node(node.id)
+        assert node.label_override is None
+
+    def test_description_tooltip_yields_to_error(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        item = scene.node_items[node.id]
+        assert item.toolTip() == ""
+
+        graph.set_description(node.id, "splits the value stream")
+        assert item.toolTip() == "splits the value stream"
+
+        graph.set_status(node.id, NodeStatus.ERROR, "boom")
+        assert item.toolTip() == "boom"
+
+        graph.set_status(node.id, NodeStatus.IDLE, "")
+        assert item.toolTip() == "splits the value stream"
+
+    def test_label_and_description_round_trip_serialization(self, registry):
+        graph = Graph()
+        node = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        graph.set_label(node.id, "Split point")
+        graph.set_description(node.id, "splits the value stream")
+
+        loaded = graph_from_dict(graph_to_dict(graph), registry)
+        loaded_node = next(iter(loaded.nodes.values()))
+        assert loaded_node.label_override == "Split point"
+        assert loaded_node.description == "splits the value stream"
+
+    def test_copy_paste_carries_label_and_description(self, window):
+        node = window.registry.instantiate("flograph.util.reroute")
+        window.graph.add_node(node)
+        window.graph.set_label(node.id, "Split point")
+        window.graph.set_description(node.id, "splits the value stream")
+
+        window.scene.node_items[node.id].setSelected(True)
+        payload = window._selection_payload()
+        assert payload is not None
+        entry = payload["nodes"][0]
+        assert entry["label"] == "Split point"
+        assert entry["description"] == "splits the value stream"
+
+        window._insert_payload(payload)
+        pasted = [n for n in window.graph.nodes.values() if n.id != node.id]
+        assert len(pasted) == 1
+        assert pasted[0].label_override == "Split point"
+        assert pasted[0].description == "splits the value stream"
 
 
 class TestZoomLOD:

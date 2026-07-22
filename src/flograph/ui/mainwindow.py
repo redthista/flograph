@@ -805,6 +805,11 @@ class MainWindow(QMainWindow):
             self, "Rename node", "Label:", text=node.label)
         if ok:
             new = text.strip() or None
+            if new == node.spec.label:
+                # dialog pre-fills with the resolved label (falls back to the
+                # spec default when unset) — clicking OK unedited must not
+                # turn that default into an explicit override
+                new = None
             if new != node.label_override:
                 self.undo_stack.push(SetLabelCommand(self.graph, node_id, new))
 
@@ -1344,6 +1349,7 @@ class MainWindow(QMainWindow):
                 "id": n.id, "type": n.type_id, "pos": list(n.pos),
                 "params": dict(n.params), "code": n.code_override,
                 "label": n.label_override, "color": n.color,
+                "description": n.description,
             } for n in nodes],
             "connections": [{
                 "src": [c.src_node, c.src_port], "dst": [c.dst_node, c.dst_port],
@@ -1409,6 +1415,7 @@ class MainWindow(QMainWindow):
                      entry["pos"][1] + PASTE_OFFSET),
                 label_override=entry.get("label"),
                 color=entry.get("color"),
+                description=entry.get("description", ""),
             ))
         new_frames: list[Frame] = []
         for entry in payload.get("frames", []):
