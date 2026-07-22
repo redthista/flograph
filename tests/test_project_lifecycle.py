@@ -68,6 +68,9 @@ class TestSaveOpen:
         window._replace_graph(Graph())
         assert window.open_path(path, confirm=False)
 
+        # cache blobs are unpickled on a pool thread; wait for it to land
+        qtbot.waitUntil(lambda: window._cache_load_signals is None, timeout=5000)
+
         reloaded_const = window.graph.nodes[const.id]
         reloaded_script = window.graph.nodes[script.id]
         assert not reloaded_const.dirty
@@ -139,6 +142,62 @@ class TestSaveOpen:
         node = registry.instantiate("flograph.util.constant")
         window.undo_stack.push(AddNodeCommand(window.graph, node))
         assert window.isWindowModified()
+
+
+class TestCacheLoadInProgress:
+    """Opening a project restores its cache on a background thread (see
+    flograph.engine.cache_worker) so unpickling large blobs doesn't freeze
+    the window. These guard the two hazards that introduces: a second
+    open/new-project racing the in-flight one, and closing the window
+    while a load is still pending."""
+
+    def test_open_refused_while_cache_still_loading(self, window, tmp_path):
+        from flograph.engine import CacheLoadSignals
+        window._cache_load_signals = CacheLoadSignals()
+        try:
+            other = str(tmp_path / "other.flograph")
+            assert window.open_path(other, confirm=False) is False
+        finally:
+            # nothing will ever emit `finished` on this stand-in signals
+            # object — clear it so qtbot's teardown close() doesn't sit in
+            # _wait_for_cache_load until its (generous) timeout
+            window._cache_load_signals = None
+
+    def test_new_project_refused_while_cache_still_loading(self, window):
+        from flograph.engine import CacheLoadSignals
+        build_small_project(window)
+        node_ids_before = set(window.graph.nodes)
+        window._cache_load_signals = CacheLoadSignals()
+        try:
+            window._new_project()
+            assert set(window.graph.nodes) == node_ids_before
+        finally:
+            window._cache_load_signals = None
+
+    def test_close_does_not_hang_on_a_finished_signal_queued_before_the_wait(
+            self, window):
+        """Regression: `finished` is a cross-thread signal, so Qt posts it
+        to the event queue against whatever's connected *at emit time*.
+        _wait_for_cache_load must not rely on connecting its own listener
+        after that post (it would never see an emit that already happened).
+        Reproduce the queued-before-connect ordering directly, with no real
+        background thread, and confirm close() returns rather than
+        blocking forever."""
+        from PySide6.QtCore import Qt
+        from flograph.engine import CacheLoadSignals
+
+        signals = CacheLoadSignals()
+        window._cache_load_signals = signals
+
+        def on_finished():
+            window._cache_load_signals = None
+
+        signals.finished.connect(on_finished, Qt.QueuedConnection)
+        signals.finished.emit()  # posted now; on_finished hasn't run yet
+        assert window._cache_load_signals is signals
+
+        window.close()  # would hang forever pre-fix; must return here
+        assert window._cache_load_signals is None
 
 
 class TestCopyPaste:

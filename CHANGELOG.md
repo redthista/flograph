@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Bug Fix | Opening a project with a large cache froze the window | Restoring cached node outputs unpickles one blob per cached node from disk; with many cached nodes this could block the GUI thread long enough to look hung. That work now runs on a background thread with a progress dialog ("Restoring cached results…"), and a second open/new-project attempt while it's running is refused with a status-bar message rather than racing it. A single node with an extremely large cached value can still cause a multi-second stutter (unpickling one blob is not itself chunked), but the common many-node case no longer blocks at all. |
 | Example | Folium Map | New bundled example (File > Open Example) demonstrating a web-view node that returns a raw `folium.Map` object directly — showing off the 0.1.7 fix that lets the webview card unwrap folium/branca objects without calling `get_root().render()` by hand. |
 
 ## 0.1.7

@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt, QTimer
+from PySide6.QtCore import (
+    QEventLoop, QPoint, QPointF, QRectF, QSettings, Qt, QThreadPool, QTimer,
+)
 from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDockWidget, QFileDialog,
     QInputDialog, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QStackedWidget, QTextEdit, QToolBar,
-    QVBoxLayout, QWidget,
+    QMessageBox, QPlainTextEdit, QProgressDialog, QStackedWidget, QTextEdit,
+    QToolBar, QVBoxLayout, QWidget,
 )
 
 from flograph.core import (
@@ -21,7 +24,9 @@ from flograph.core import (
 )
 from flograph.core import serialization
 from flograph.core import user_nodes
-from flograph.engine import ExecutionEngine, cache_persistence
+from flograph.engine import (
+    CacheLoadRunnable, CacheLoadSignals, ExecutionEngine, cache_persistence,
+)
 from flograph.paths import user_nodes_dir
 
 from .commands import (
@@ -75,6 +80,7 @@ class MainWindow(QMainWindow):
         self.engine = ExecutionEngine(self.graph, parent=self)
         self.settings = QSettings("flograph", "flograph")
         self._project_path: Optional[str] = None
+        self._cache_load_signals: Optional[CacheLoadSignals] = None
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
@@ -1325,12 +1331,52 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if not self.confirm_close or self._confirm_discard():
+            self._wait_for_cache_load()
             self._save_window_state()
             event.accept()
         else:
             event.ignore()
 
+    _CACHE_LOAD_CLOSE_TIMEOUT_S = 120  # generous: matches large-blob load times
+
+    def _wait_for_cache_load(self) -> None:
+        """Pump events (not a hard freeze — other events still process)
+        until a pending cache-restore runnable's `finished` is delivered.
+        Without this, closing mid-load can tear down the signals QObject
+        while the pool thread is still emitting into it. Polling
+        `_cache_load_signals` rather than connecting a fresh `loop.quit` to
+        `finished` avoids missing an emit that was already queued (and thus
+        has no listener yet) before this method runs.
+
+        Bounded: the runnable shares QThreadPool.globalInstance() with node
+        execution, so in principle it could sit queued behind a long-running
+        script indefinitely. Give up after the timeout rather than hanging
+        the close forever — the risk that accepting the close race hits the
+        one-in-a-blue-moon in-flight emit is far better than never closing."""
+        if self._cache_load_signals is None:
+            return
+        deadline = time.monotonic() + self._CACHE_LOAD_CLOSE_TIMEOUT_S
+        while self._cache_load_signals is not None and time.monotonic() < deadline:
+            QApplication.processEvents(QEventLoop.WaitForMoreEvents, 500)
+        # timed out: the runnable is still out there and will still emit
+        # into `signals` eventually — disconnect so that lands as a no-op
+        # instead of touching this (possibly torn-down) window later
+        signals, self._cache_load_signals = self._cache_load_signals, None
+        if signals is not None:
+            signals.entry_loaded.disconnect()
+            signals.finished.disconnect()
+
+    def _cache_still_loading(self) -> bool:
+        if self._cache_load_signals is None:
+            return False
+        self.statusBar().showMessage(
+            "Still restoring cached results from the previous project — try again in a moment",
+            4000)
+        return True
+
     def _new_project(self) -> None:
+        if self._cache_still_loading():
+            return
         if not self._confirm_discard():
             return
         self._replace_graph(Graph())
@@ -1338,6 +1384,8 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _open_dialog(self) -> None:
+        if self._cache_still_loading():
+            return
         if not self._confirm_discard():
             return
         path, _ = QFileDialog.getOpenFileName(
@@ -1369,6 +1417,8 @@ class MainWindow(QMainWindow):
                 lambda checked=False, p=Path(str(entry)): self._open_example(p))
 
     def _open_example(self, path: Path) -> None:
+        if self._cache_still_loading():
+            return
         if not self._confirm_discard():
             return
         try:
@@ -1383,6 +1433,8 @@ class MainWindow(QMainWindow):
             f"Loaded example '{path.stem}' — use Save As to keep it", 4000)
 
     def open_path(self, path: str, confirm: bool = True) -> bool:
+        if self._cache_still_loading():
+            return False
         if confirm and not self._confirm_discard():
             return False
         try:
@@ -1394,11 +1446,6 @@ class MainWindow(QMainWindow):
         self._project_path = path
         self._push_recent(path)
         self._update_title()
-        restored = cache_persistence.load_cache(self.graph, self.engine.cache, path)
-        for node_id in restored:
-            self.graph.mark_clean(node_id)
-            self.graph.set_status(node_id, NodeStatus.DONE)
-            self.engine.node_succeeded.emit(node_id)
         saved_page = self.settings.value(f"active_page/{path}", "")
         if saved_page and saved_page in self.graph.pages:
             self.page_bar.select_page(saved_page)
@@ -1407,12 +1454,51 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Opened {path} — {broken} node(s) couldn't be resolved and "
                 f"were loaded as broken placeholders", 6000)
-        elif restored:
-            self.statusBar().showMessage(
-                f"Opened {path} — {len(restored)} node(s) restored from cache", 4000)
         else:
             self.statusBar().showMessage(f"Opened {path}", 4000)
+        self._restore_cache(path, quiet=bool(broken))
         return True
+
+    def _restore_cache(self, path: str, quiet: bool = False) -> None:
+        """Restore cached node outputs for the just-opened project. Resolving
+        which entries are still valid is cheap and happens here; unpickling
+        each blob can be slow for large cached DataFrames/figures, so that
+        part runs on a pool thread (flograph.engine.cache_worker) with a
+        progress dialog rather than freezing the window."""
+        entries = cache_persistence.resolve_entries(self.graph, path)
+        if not entries:
+            return
+
+        dialog = QProgressDialog(
+            "Restoring cached results…", "", 0, len(entries), self)
+        dialog.setWindowTitle("Loading")
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setCancelButton(None)
+        dialog.setMinimumDuration(400)
+        dialog.setValue(0)
+
+        signals = CacheLoadSignals()  # created on the GUI thread, before pool.start
+        restored: list[str] = []
+
+        def on_entry(node_id: str, outputs: dict, wall_time: float) -> None:
+            self.engine.cache.set(node_id, outputs, wall_time)
+            self.graph.mark_clean(node_id)
+            self.graph.set_status(node_id, NodeStatus.DONE)
+            self.engine.node_succeeded.emit(node_id)
+            restored.append(node_id)
+            dialog.setValue(len(restored))
+
+        def on_finished() -> None:
+            dialog.close()
+            self._cache_load_signals = None
+            if not quiet:
+                self.statusBar().showMessage(
+                    f"Opened {path} — {len(restored)} node(s) restored from cache", 4000)
+
+        signals.entry_loaded.connect(on_entry)
+        signals.finished.connect(on_finished)
+        self._cache_load_signals = signals  # keep alive until finished
+        QThreadPool.globalInstance().start(CacheLoadRunnable(path, entries, signals))
 
     def _replace_graph(self, loaded: Graph) -> None:
         self._restoring_pages = True
