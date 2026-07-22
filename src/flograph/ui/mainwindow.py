@@ -31,7 +31,8 @@ from flograph.paths import user_nodes_dir
 
 from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
-    RemovePageCommand, RenamePageCommand, SetLabelCommand, SetParamCommand,
+    DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
+    SetLabelCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
@@ -595,6 +596,7 @@ class MainWindow(QMainWindow):
         self.page_bar.add_page_requested.connect(self._add_page)
         self.page_bar.rename_page_requested.connect(self._rename_page)
         self.page_bar.delete_page_requested.connect(self._delete_page)
+        self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
 
@@ -656,6 +658,15 @@ class MainWindow(QMainWindow):
         page = self.graph.pages.get(page_id)
         if page is not None and title != page.title:
             self.undo_stack.push(RenamePageCommand(self.graph, page_id, title))
+
+    def _duplicate_page(self, page_id: str) -> None:
+        self.undo_stack.push(DuplicatePageCommand(self.graph, page_id))
+        dup = self.graph.pages[self._last_duped_id]
+        self.page_bar.select_page(dup.id)
+
+    @property
+    def _last_duped_id(self) -> str:
+        return list(self.graph.pages.keys())[-1]
 
     def _delete_page(self, page_id: str) -> None:
         page = self.graph.pages.get(page_id)

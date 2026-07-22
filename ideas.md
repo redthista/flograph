@@ -14,4 +14,7 @@
 14. MEDIUM: Allow for writing descriptions in the properties of the node, maybe show as a tool tip when hovering over the top of the node. easier to keep track then of the nodes purpose.
 15. SMALL: right click Set node colors
 16. collapseable sidebar with icons, letting you effectivly minimise the side and bottom panels. 
-17. 
+17. remove the x button on the pages next to the model tab, and add a right click, duplicate, and delete. 
+18. right click context - delete on frames
+19. right click copy and paste on nodes.
+20. add about screen showing version number to settings
