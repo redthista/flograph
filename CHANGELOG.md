@@ -5,6 +5,10 @@
 | Category | Change | Details |
 | --- | --- | --- |
 | Bug Fix | AI Assistant Settings crash fix | Fixed a `NameError` when opening the AI Assistant Settings dialog. |
+| Bug Fix | Folium/branca maps in web-view nodes | Rendered via their standalone document instead of the Jupyter-only `_repr_html_()` iframe, which left a stuck "Make this Notebook Trusted to load map" placeholder over the map. |
+| Bug Fix | Web-view nodes couldn't load CDN scripts | The embedded webview loads content from a local file, and Qt WebEngine blocks local content from fetching remote resources by default — so a folium/Leaflet map (or anything else pulling JS from a CDN) loaded but never ran. `LocalContentCanAccessRemoteUrls` is now enabled on the view. |
+| Bug Fix | Scroll wheel over a web-view card zoomed the canvas | Hovering a folium/Leaflet map (or any other web-view card) and scrolling now lets the embedded map handle its own zoom/pan, instead of the wheel tick always zooming the graph canvas. |
+| Bug Fix | One-file build script filename | `scripts/build_onefile_0_1_6.py` renamed to the unversioned `scripts/build_onefile.py` that the README, the script's own docstring, and `tests/test_onefile.py` all already expected — the test was silently failing. |
 | Bug Fix | Node Library dock minimum width | Fixes the panel loading too thin, including for layouts saved before this fix existed. |
 | Bug Fix | Settings dialog resize | Fixed Canvas page text being clipped top/bottom. |
 | Feature | Configurable page bar position | Model/page tab strip can be pinned to the top or bottom of the window (Settings > General), persisted across sessions. |

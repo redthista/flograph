@@ -11,6 +11,11 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import (QAbstractScrollArea, QGraphicsProxyWidget,
                                QGraphicsView, QScrollBar, QWidget)
 
+try:
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+except ImportError:  # trimmed PySide6 installs ship without QtWebEngine
+    QWebEngineView = None
+
 from .. import theme
 
 ZOOM_MIN = 0.1
@@ -98,9 +103,11 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def _scrollable_widget_at(self, pos) -> QWidget | None:
         """The embedded widget under the viewport point that could consume a
-        wheel tick — a scroll area with actual scroll range, or a scrollbar
-        itself. Painted cards and widgets whose content fits return None so
-        the canvas keeps zoom-to-cursor."""
+        wheel tick — a scroll area with actual scroll range, a scrollbar
+        itself, or a web view (folium/Leaflet and friends handle their own
+        wheel-zoom/pan internally, regardless of Qt scroll range). Painted
+        cards and widgets whose content fits return None so the canvas keeps
+        zoom-to-cursor."""
         scene_pos = self.mapToScene(pos)
         for item in self.items(pos):
             if not isinstance(item, QGraphicsProxyWidget):
@@ -117,6 +124,9 @@ class ZoomPanGraphicsView(QGraphicsView):
                     return child
                 if (isinstance(child, QAbstractScrollArea)
                         and self._has_scroll_range(child)):
+                    return child
+                if QWebEngineView is not None and isinstance(
+                        child, QWebEngineView):
                     return child
                 child = child.parentWidget()
         return None
