@@ -70,6 +70,10 @@ class NodeInstance:
     params: dict[str, Any] = field(default_factory=dict)
     pos: tuple[float, float] = (0.0, 0.0)
     label_override: Optional[str] = None
+    # canvas-UI-only: hides this node's embedded preview widget (figure/
+    # webview/table/slicer) on the model canvas to save render cost; the
+    # node still renders fully on Dashboard pages regardless of this flag.
+    canvas_preview_enabled: bool = True
     status: NodeStatus = NodeStatus.IDLE
     status_message: str = ""
     dirty: bool = True
