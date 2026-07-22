@@ -88,9 +88,13 @@ class Minimap(QWidget):
             rect = item.sceneBoundingRect()
             top_left = self._to_mini(rect.topLeft(), content, s)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(theme.status_color(item.node.status)
-                             if item.node.status.value != "idle"
-                             else theme.NODE_HEADER.lighter(150))
+            if item.node.status.value != "idle":
+                brush = theme.status_color(item.node.status)
+            elif item.node.color:
+                brush = QColor(item.node.color)
+            else:
+                brush = theme.NODE_HEADER.lighter(150)
+            painter.setBrush(brush)
             painter.drawRect(QRectF(top_left, rect.size() * s).toRect())
 
         viewport = self._view.mapToScene(

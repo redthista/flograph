@@ -9,7 +9,8 @@ from flograph.core.serialization import graph_to_dict
 from flograph.ui.canvas import NodeGraphScene
 from flograph.ui.commands import (
     AddNodeCommand, ConnectCommand, DisconnectCommand, MoveNodesCommand,
-    RemoveSelectionCommand, SetCodeCommand, SetParamCommand,
+    RemoveSelectionCommand, SetCodeCommand, SetNodeColorCommand,
+    SetParamCommand,
 )
 
 
@@ -164,3 +165,22 @@ def run(ctx, payload):
     assert not script.forked
     assert len(graph.connections) == 1
     assert "in1" in scene.node_items[script.id].input_ports
+
+
+def test_set_node_color_undo_redo(env, registry):
+    graph, stack, scene = env
+    node = registry.instantiate("flograph.util.constant")
+    stack.push(AddNodeCommand(graph, node))
+    before = snapshot(graph)
+    stack.push(SetNodeColorCommand(graph, node.id, "#ff0000"))
+    after = snapshot(graph)
+    assert node.color == "#ff0000"
+    assert_undo_redo_stable(stack, graph, before, after)
+    stack.undo()
+    assert node.color is None
+    # reset back to default is itself undoable
+    stack.push(SetNodeColorCommand(graph, node.id, "#ff0000"))
+    stack.push(SetNodeColorCommand(graph, node.id, None))
+    assert node.color is None
+    stack.undo()
+    assert node.color == "#ff0000"

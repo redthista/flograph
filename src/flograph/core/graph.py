@@ -113,6 +113,11 @@ class Graph:
         node.canvas_preview_enabled = enabled
         self.events.preview_enabled_changed.emit(node_id, enabled)
 
+    def set_color(self, node_id: str, color: Optional[str]) -> None:
+        node = self.node(node_id)
+        node.color = color or None
+        self.events.color_changed.emit(node_id)
+
     def set_param(self, node_id: str, name: str, value: Any) -> None:
         node = self.node(node_id)
         if node.spec.param(name) is None:
