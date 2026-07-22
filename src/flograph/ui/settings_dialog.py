@@ -1,7 +1,8 @@
 """General app Settings window (Tools > Settings…, Ctrl+,): a category list
 on the left, one page per category on the right. Start here when adding a new
-app-wide preference instead of a one-off menu toggle — add a page in
-__init__ and it shows up in the nav automatically.
+app-wide preference instead of a one-off menu toggle — add a page to the
+`pages` dict in __init__ and it shows up in the nav automatically, sorted
+alphabetically alongside the rest.
 
 Non-modal and live-apply: pages bind straight to the setting they control
 (e.g. an existing QAction's checked state, or MainWindow.set_lod_*) so a
@@ -10,12 +11,23 @@ no separate Save step.
 """
 from __future__ import annotations
 
+import platform
+
+from PySide6.QtCore import qVersion
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QSpinBox,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .canvas import grid
+
+
+def _flograph_version() -> str:
+    import importlib.metadata
+    try:
+        return importlib.metadata.version("flograph")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 class SettingsDialog(QDialog):
@@ -32,8 +44,13 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._nav)
         layout.addWidget(self._pages, 1)
 
-        self._add_page("General", self._build_general_page(window))
-        self._add_page("Canvas", self._build_canvas_page(window))
+        pages = {
+            "General": self._build_general_page(window),
+            "Canvas": self._build_canvas_page(window),
+            "About": self._build_about_page(),
+        }
+        for name in sorted(pages):
+            self._add_page(name, pages[name])
 
         self._nav.currentRowChanged.connect(self._pages.setCurrentIndex)
         self._nav.setCurrentRow(0)
@@ -168,6 +185,33 @@ class SettingsDialog(QDialog):
         snap_check.toggled.connect(grid_combo.setEnabled)
         grid_combo.currentIndexChanged.connect(
             lambda index: window.set_grid_step(grid_combo.itemData(index)))
+
+        layout.addStretch(1)
+        return page
+
+    @staticmethod
+    def _build_about_page() -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        name_label = QLabel("flograph")
+        font = name_label.font()
+        font.setPointSizeF(font.pointSizeF() * 1.6)
+        font.setBold(True)
+        name_label.setFont(font)
+        layout.addWidget(name_label)
+
+        layout.addWidget(QLabel(f"Version {_flograph_version()}"))
+        layout.addSpacing(8)
+        layout.addWidget(SettingsDialog._hint(
+            "Visual node-based Python programming environment "
+            "(flow-based dataflow, Blueprint-style canvas)."))
+
+        layout.addSpacing(16)
+        layout.addWidget(SettingsDialog._hint(
+            f"Python {platform.python_version()}  ·  Qt {qVersion()}"))
+        layout.addWidget(SettingsDialog._hint(
+            "MIT License — https://github.com/redthista/flograph"))
 
         layout.addStretch(1)
         return page
