@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QInputDialog
 from flograph.core import Frame
 
 from .. import theme
-from .grid import grid_step, snap, snap_point, snapping_active
+from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 
 TITLE_H = 24.0
 HANDLE = 14.0
@@ -33,6 +33,7 @@ class FrameItem(QGraphicsObject):
         self.setPos(frame.rect[0], frame.rect[1])
         self._size = (frame.rect[2], frame.rect[3])
         self._resizing = False
+        self._resize_edge = "corner"  # which edge/corner the drag grabbed
         self._press_scene_pos = QPointF()
         self._press_size = self._size
         self._press_pos = QPointF()
@@ -60,6 +61,25 @@ class FrameItem(QGraphicsObject):
     def _handle_rect(self) -> QRectF:
         w, h = self._size
         return QRectF(w - HANDLE, h - HANDLE, HANDLE, HANDLE)
+
+    def _edge_at(self, pos: QPointF) -> str | None:
+        """Which resize edge/corner (if any) a point grabs: "right",
+        "bottom", "left", "corner" (bottom-right), or None."""
+        w, h = self._size
+        near_right = w - EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
+        near_bottom = h - EDGE_MARGIN <= pos.y() <= h + EDGE_MARGIN
+        near_left = -EDGE_MARGIN <= pos.x() <= EDGE_MARGIN
+        within_h = -EDGE_MARGIN <= pos.y() <= h + EDGE_MARGIN
+        within_w = -EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
+        if self._handle_rect().contains(pos) or (near_right and near_bottom):
+            return "corner"
+        if near_right and within_h:
+            return "right"
+        if near_bottom and within_w:
+            return "bottom"
+        if near_left and within_h:
+            return "left"
+        return None
 
     def _run_button_rect(self) -> QRectF:
         w, _h = self._size
@@ -124,10 +144,16 @@ class FrameItem(QGraphicsObject):
             self.update()
         if hovering:
             self.setCursor(Qt.PointingHandCursor)
-        elif self._handle_rect().contains(event.pos()):
-            self.setCursor(Qt.SizeFDiagCursor)
         else:
-            self.setCursor(Qt.ArrowCursor)
+            edge = self._edge_at(event.pos())
+            if edge == "corner":
+                self.setCursor(Qt.SizeFDiagCursor)
+            elif edge in ("right", "left"):
+                self.setCursor(Qt.SizeHorCursor)
+            elif edge == "bottom":
+                self.setCursor(Qt.SizeVerCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
@@ -155,8 +181,10 @@ class FrameItem(QGraphicsObject):
         self._press_scene_pos = event.scenePos()
         self._press_pos = self.pos()
         self._press_size = self._size
-        if self._handle_rect().contains(event.pos()):
+        edge = self._edge_at(event.pos())
+        if edge is not None:
             self._resizing = True
+            self._resize_edge = edge
             event.accept()
             return
         scene = self.scene()
@@ -185,14 +213,26 @@ class FrameItem(QGraphicsObject):
             return
         if self._resizing:
             delta = event.scenePos() - self._press_scene_pos
-            width = self._press_size[0] + delta.x()
-            height = self._press_size[1] + delta.y()
+            edge = self._resize_edge
+            press_w, press_h = self._press_size
+            width, height = press_w, press_h
+            if edge in ("right", "corner"):
+                width = press_w + delta.x()
+            if edge in ("bottom", "corner"):
+                height = press_h + delta.y()
+            if edge == "left":
+                width = press_w - delta.x()
             if snapping_active(self.scene(), event.modifiers()):
                 step = grid_step(self.scene())
                 width = snap(width, step)
                 height = snap(height, step)
+            width = max(120.0, width)
+            height = max(60.0, height)
+            if edge == "left":
+                self.setPos(self._press_pos.x() + press_w - width,
+                           self.pos().y())
             self.prepareGeometryChange()
-            self._size = (max(120.0, width), max(60.0, height))
+            self._size = (width, height)
             self.update()
             event.accept()
             return
@@ -211,6 +251,7 @@ class FrameItem(QGraphicsObject):
             return
         if self._resizing:
             self._resizing = False
+            self._resize_edge = None
             scene.push_frame_rect(self.frame.id, self.pos(), self._size)
             event.accept()
             return
