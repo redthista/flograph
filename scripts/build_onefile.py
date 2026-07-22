@@ -61,8 +61,7 @@ Run with:  python flograph_onefile.py [project.flograph]
 Requires PySide6, pandas, jedi, and psutil to already be importable in
 whatever Python runs this file (see flograph's pyproject.toml for the
 pinned minimum versions). This file does not install anything — it only
-carries flograph's own source, so you can hand your Python environment
-this one file instead of asking IT to approve a package install.
+carries flograph's own source.
 """
 from __future__ import annotations
 
