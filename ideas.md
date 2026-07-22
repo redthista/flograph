@@ -17,5 +17,5 @@
 17. remove the x button on the pages next to the model tab, and add a right click, duplicate, and delete. 
 18. right click context - delete on frames
 19. right click copy and paste on nodes.
-20. add about screen showing version number to settings
+20. add about screen showing version number to settings [done: "About" page in Settings showing app version, Python/Qt versions, and license]
 21. allow the "disable" of visual nodes, we we only see the contents on the dashboard pages but can save resources on the model canvas if desired. maybe a rightclick and well named option to enable or disable this
