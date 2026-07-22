@@ -186,6 +186,21 @@ class SettingsDialog(QDialog):
         grid_combo.currentIndexChanged.connect(
             lambda index: window.set_grid_step(grid_combo.itemData(index)))
 
+        layout.addSpacing(12)
+
+        minimap_check = QCheckBox("Show Minimap")
+        minimap_check.setObjectName("minimap_enabled_checkbox")
+        minimap_check.setToolTip(
+            "Show the navigation overlay in the canvas corner")
+        minimap_check.setChecked(window.minimap_enabled)
+        layout.addWidget(minimap_check)
+        layout.addWidget(SettingsDialog._hint(
+            "A small overlay in the canvas corner showing all nodes and "
+            "the current viewport — click or drag on it to jump around a "
+            "large graph."))
+
+        minimap_check.toggled.connect(window.set_minimap_enabled)
+
         layout.addStretch(1)
         return page
 

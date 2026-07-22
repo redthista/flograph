@@ -101,6 +101,9 @@ class MainWindow(QMainWindow):
         self.grid_step = float(
             self.settings.value("snap/step", grid.DEFAULT_STEP))
         self._apply_snap_settings()
+        self.minimap_enabled = self.settings.value(
+            "canvas/minimap_enabled", True, type=bool)
+        self.view.minimap.setVisible(self.minimap_enabled)
 
         self._palette_popup = NodePalettePopup(registry, self)
         self._palette_scene_pos = QPointF()
@@ -361,6 +364,11 @@ class MainWindow(QMainWindow):
         self.settings.setValue("snap/step", step)
         self._apply_snap_settings()
 
+    def set_minimap_enabled(self, enabled: bool) -> None:
+        self.minimap_enabled = enabled
+        self.settings.setValue("canvas/minimap_enabled", enabled)
+        self.view.minimap.setVisible(enabled)
+
     def _apply_snap_settings(self) -> None:
         """Push the current snap toggle/step onto every scene and repaint so
         the grid redraws at the new resolution. Applies to node/frame moves
@@ -421,6 +429,11 @@ class MainWindow(QMainWindow):
             self.settings.setValue("canvas/gpu_viewport", False)
             for view in views:
                 self._set_canvas_viewport(view, False)
+        # setViewport() installs a brand new viewport widget, which lands on
+        # top of the minimap (a sibling overlay, not a viewport child) in
+        # stacking order — without this it's invisible behind the viewport
+        # every time this runs, including the unconditional startup call.
+        self.view.minimap.raise_()
 
     def _verify_gpu_viewport_soon(self) -> None:
         """Force a synchronous paint (so a QOpenGLWidget viewport actually
