@@ -13,6 +13,7 @@ _KIND_GLYPHS = {
     "figure": "📈",
     "webview": "📊",
     "table_viewer": "▦",
+    "grid": "▦",
     "kpi": "🔢",
     "slicer": "⑂",
     "button": "▶",
