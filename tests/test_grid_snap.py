@@ -300,6 +300,72 @@ class TestFrameSnap:
         assert frame._size == (437, 283)
         frame._resizing = False
 
+    def test_edge_at_all_sides(self, window):
+        frame = self._frame(window)
+        w, h = frame._size
+        assert frame._edge_at(QPointF(w, h / 2)) == "right"
+        assert frame._edge_at(QPointF(w / 2, h)) == "bottom"
+        assert frame._edge_at(QPointF(0, h / 2)) == "left"
+        assert frame._edge_at(QPointF(w, h)) == "corner"
+        assert frame._edge_at(QPointF(w / 2, h / 2)) is None
+
+    def test_resize_from_right_grows_width_only(self, window):
+        frame = self._frame(window)
+        window.scene.snap_enabled = False
+        frame._resizing = True
+        frame._resize_edge = "right"
+        frame._press_pos = frame.pos()
+        frame._press_scene_pos = QPointF(0, 0)
+        frame._press_size = (400, 260)
+        frame.mouseMoveEvent(_FrameDrag(QPointF(50, 0)))
+        assert frame._size == (450, 260)
+        assert frame.pos() == frame._press_pos
+        frame._resizing = False
+
+    def test_resize_from_bottom_grows_height_only(self, window):
+        frame = self._frame(window)
+        window.scene.snap_enabled = False
+        frame._resizing = True
+        frame._resize_edge = "bottom"
+        frame._press_pos = frame.pos()
+        frame._press_scene_pos = QPointF(0, 0)
+        frame._press_size = (400, 260)
+        frame.mouseMoveEvent(_FrameDrag(QPointF(0, 30)))
+        assert frame._size == (400, 290)
+        assert frame.pos() == frame._press_pos
+        frame._resizing = False
+
+    def test_resize_from_left_shrinks_and_moves_origin(self, window):
+        frame = self._frame(window)
+        window.scene.snap_enabled = False
+        start_pos = frame.pos()
+        frame._resizing = True
+        frame._resize_edge = "left"
+        frame._press_pos = start_pos
+        frame._press_scene_pos = QPointF(0, 0)
+        frame._press_size = (400, 260)
+        frame.mouseMoveEvent(_FrameDrag(QPointF(50, 0)))
+        assert frame._size == (350, 260)
+        assert frame.pos().x() == start_pos.x() + 50
+        assert frame.pos().y() == start_pos.y()
+        frame._resizing = False
+
+    def test_resize_from_left_clamps_to_min_width(self, window):
+        frame = self._frame(window)
+        window.scene.snap_enabled = False
+        start_pos = frame.pos()
+        frame._resizing = True
+        frame._resize_edge = "left"
+        frame._press_pos = start_pos
+        frame._press_scene_pos = QPointF(0, 0)
+        frame._press_size = (400, 260)
+        # dragging the left edge far to the right would shrink below the
+        # 120px minimum -- the right edge (pos + old width) must stay fixed
+        frame.mouseMoveEvent(_FrameDrag(QPointF(350, 0)))
+        assert frame._size[0] == 120.0
+        assert frame.pos().x() == start_pos.x() + 400 - 120.0
+        frame._resizing = False
+
     def test_move_snaps_only_while_dragging(self, window):
         frame = self._frame(window)
         window.scene.snap_enabled = True
