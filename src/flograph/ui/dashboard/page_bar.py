@@ -39,21 +39,13 @@ class PageTabBar(QTabBar):
         super().__init__(parent)
         self.setExpanding(False)
         self.setDocumentMode(True)
-        self.setTabsClosable(True)
         self.setDrawBase(False)
         self._syncing = True
         self.addTab("Model")   # tabData None = the modeling canvas
         self.addTab("+")
         self.setTabToolTip(1, "Add a dashboard page")
-        self._strip_close_button(0)
-        self._strip_close_button(1)
         self._syncing = False
         self.currentChanged.connect(self._on_current_changed)
-        self.tabCloseRequested.connect(self._on_close_requested)
-
-    def _strip_close_button(self, index: int) -> None:
-        for side in (QTabBar.LeftSide, QTabBar.RightSide):
-            self.setTabButton(index, side, None)
 
     def _plus_index(self) -> int:
         return self.count() - 1
@@ -103,11 +95,6 @@ class PageTabBar(QTabBar):
         if self._syncing or index < 0:
             return
         self.current_page_changed.emit(self.tabData(index))
-
-    def _on_close_requested(self, index: int) -> None:
-        page_id = self.tabData(index)
-        if page_id is not None:
-            self.delete_page_requested.emit(page_id)
 
     def mousePressEvent(self, event) -> None:
         # handle "+" on press and swallow it so the tab never becomes

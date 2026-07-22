@@ -328,6 +328,31 @@ class TestTiles:
         window.undo_stack.undo()
         assert not window.graph.pages
 
+    def test_table_input_node_can_be_dropped_and_shows_its_dataframe(
+            self, window):
+        """The Table node (IO folder, card='grid') is a data source, not a
+        Show* visual, but it still has a real DataFrame output worth viewing
+        on a dashboard — it should drop like any other tile-able node."""
+        add_page(window)
+        node = window.registry.instantiate("flograph.io.table", pos=(0, 0))
+        window.graph.add_node(node)
+        view = window._dashboard_pages["p1"].view
+        from PySide6.QtCore import QPointF
+        view.tile_dropped.emit(node.id, QPointF(0, 0))
+
+        tiles = window.graph.pages["p1"].tiles
+        assert len(tiles) == 1
+        tile = next(iter(tiles.values()))
+        assert tile.port == "table"
+
+        item = window._dashboard_pages["p1"].scene.tile_items[tile.id]
+        df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        window.engine.cache.set(node.id, {"table": df}, 0.01)
+        window.engine.node_succeeded.emit(node.id)
+        assert item._table_view is not None
+        assert item._table_view.model() is not None
+        assert item._table_view.model().rowCount() == 2
+
 
 class TestVisualsList:
     def test_lists_only_tile_able_nodes_and_packs_node_id(self, window):

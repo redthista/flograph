@@ -29,7 +29,7 @@ from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
-    "webview", "figure", "table_viewer", "kpi", "slicer", "button"})
+    "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid"})
 
 
 def is_tile_able(node) -> bool:
@@ -38,7 +38,6 @@ def is_tile_able(node) -> bool:
 
 TITLE_H = 24.0
 HANDLE = 14.0
-CLOSE_BTN = 16.0
 MIN_W, MIN_H = 160.0, 90.0
 
 RUN_PROMPT = "Run the flow to populate this tile."
@@ -49,7 +48,7 @@ MISSING_NODE = ("The node behind this tile was deleted.\n"
 def default_tile_port(node) -> Optional[str]:
     """The output port a tile of this node renders — its first declared output
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
-    if card_kind(node) in ("webview", "figure", "table_viewer", "kpi"):
+    if card_kind(node) in ("webview", "figure", "table_viewer", "kpi", "grid"):
         return node.spec.outputs[0].name if node.spec.outputs else None
     # action buttons have no ports; slicer tiles show upstream options,
     # not their own (already filtered) output
@@ -90,8 +89,6 @@ class TileItem(QGraphicsObject):
         self._press_scene_pos = QPointF()
         self._press_pos = QPointF()
         self._press_size = self._size
-        self._close_pressed = False
-        self._hover_close = False
 
         # persistent content widgets — at most one of these exists, by kind
         # (button tiles have none: the button face is painted, like on the
@@ -127,11 +124,6 @@ class TileItem(QGraphicsObject):
         w, h = self._size
         return QRectF(w - HANDLE, h - HANDLE, HANDLE, HANDLE)
 
-    def _close_rect(self) -> QRectF:
-        w, _h = self._size
-        return QRectF(w - CLOSE_BTN - 5.0, (TITLE_H - CLOSE_BTN) / 2,
-                      CLOSE_BTN, CLOSE_BTN)
-
     def _content_rect(self) -> QRectF:
         w, h = self._size
         return QRectF(1, TITLE_H, w - 2,
@@ -154,6 +146,7 @@ class TileItem(QGraphicsObject):
             "webview": "plotly",
             "figure": "figure",
             "table_viewer": "table",
+            "grid": "table",
             "button": "button",
             "kpi": "kpi",
             "slicer": "slicer",
@@ -444,7 +437,7 @@ class TileItem(QGraphicsObject):
         painter.setFont(font)
         stale = self._is_stale()
         stale_w = 44.0 if stale else 0.0
-        painter.drawText(QRectF(10, 0, w - 20 - CLOSE_BTN - stale_w, TITLE_H),
+        painter.drawText(QRectF(10, 0, w - 20 - stale_w, TITLE_H),
                          Qt.AlignVCenter | Qt.AlignLeft, self._title())
         if stale:
             painter.setPen(QPen(QColor("#eab308")))
@@ -452,19 +445,8 @@ class TileItem(QGraphicsObject):
             small.setPointSizeF(7.5)
             painter.setFont(small)
             painter.drawText(
-                QRectF(0, 0, w - CLOSE_BTN - 10, TITLE_H),
+                QRectF(0, 0, w - 10, TITLE_H),
                 Qt.AlignVCenter | Qt.AlignRight, "STALE")
-
-        btn = self._close_rect()
-        chip = QColor(theme.NODE_BORDER)
-        chip.setAlphaF(0.9 if self._hover_close else 0.4)
-        painter.setBrush(QBrush(chip))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(btn, 4, 4)
-        painter.setPen(QPen(theme.NODE_SUBTEXT, 1.6))
-        cx, cy = btn.center().x(), btn.center().y()
-        painter.drawLine(QPointF(cx - 3.5, cy - 3.5), QPointF(cx + 3.5, cy + 3.5))
-        painter.drawLine(QPointF(cx - 3.5, cy + 3.5), QPointF(cx + 3.5, cy - 3.5))
 
         painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
         hr = self._handle_rect()
@@ -565,21 +547,10 @@ class TileItem(QGraphicsObject):
         if self._kind() == "button":
             super().hoverMoveEvent(event)
             return
-        hovering = self._close_rect().contains(event.pos())
-        if hovering != self._hover_close:
-            self._hover_close = hovering
-            self.setToolTip("Remove this tile" if hovering else "")
-            self.update()
-        if hovering:
-            self.setCursor(Qt.PointingHandCursor)
-        else:
-            self._apply_edge_cursor(event.pos())
+        self._apply_edge_cursor(event.pos())
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
-        if self._hover_close:
-            self._hover_close = False
-            self.update()
         self.unsetCursor()
         super().hoverLeaveEvent(event)
 
@@ -605,11 +576,6 @@ class TileItem(QGraphicsObject):
                 self.setSelected(True)
                 event.accept()
                 return
-        elif self._close_rect().contains(event.pos()):
-            # button semantics: swallow the drag, act on release-inside
-            self._close_pressed = True
-            event.accept()
-            return
         self._press_scene_pos = event.scenePos()
         self._press_pos = self.pos()
         self._press_size = self._size
@@ -631,9 +597,6 @@ class TileItem(QGraphicsObject):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._close_pressed:
-            event.accept()
-            return
         if self._resizing:
             edge = self._resize_edge
             width, height = self._size
@@ -660,12 +623,6 @@ class TileItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
-        if self._close_pressed:
-            self._close_pressed = False
-            if self._close_rect().contains(event.pos()) and scene is not None:
-                scene.remove_tile(self.tile.id)
-            event.accept()
-            return
         if self._resizing:
             self._resizing = False
             if scene is not None and self._size != self._press_size:
