@@ -16,6 +16,7 @@ from flograph.core import Connection, Frame, Graph, NodeInstance, NodeSpec, Page
 _ID_MOVE = 1001
 _ID_PARAM = 1002
 _ID_TILE_RECT = 1003
+_ID_DESCRIPTION = 1004
 
 
 class AddNodeCommand(QUndoCommand):
@@ -243,6 +244,35 @@ class SetLabelCommand(QUndoCommand):
 
     def undo(self) -> None:
         self._graph.set_label(self._node_id, self._old)
+
+
+class SetDescriptionCommand(QUndoCommand):
+    """Edits merge while it stays the latest command, same as SetParamCommand
+    -- the field commits on every keystroke, and per-keystroke undo steps
+    would make undo useless."""
+
+    def __init__(self, graph: Graph, node_id: str, new_description: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("set node description", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).description
+        self._new = new_description
+
+    def id(self) -> int:
+        return _ID_DESCRIPTION
+
+    def redo(self) -> None:
+        self._graph.set_description(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_description(self._node_id, self._old)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if not isinstance(other, SetDescriptionCommand) or other._node_id != self._node_id:
+            return False
+        self._new = other._new
+        return True
 
 
 class SetPreviewEnabledCommand(QUndoCommand):

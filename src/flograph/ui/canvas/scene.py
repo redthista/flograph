@@ -77,6 +77,7 @@ class NodeGraphScene(QGraphicsScene):
         events.status_changed.connect(self._on_status_changed)
         events.dirty_changed.connect(self._on_dirty_changed)
         events.label_changed.connect(self._on_label_changed)
+        events.description_changed.connect(self._on_description_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
         events.color_changed.connect(self._on_color_changed)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
@@ -150,8 +151,7 @@ class NodeGraphScene(QGraphicsScene):
     def _on_status_changed(self, node_id: str, status: NodeStatus, message: str) -> None:
         item = self.node_items.get(node_id)
         if item is not None:
-            item.on_status_changed()
-            item.setToolTip(message if status == NodeStatus.ERROR else "")
+            item.on_status_changed()  # also refreshes the tooltip
 
     def _on_dirty_changed(self, node_id: str, dirty: bool) -> None:
         item = self.node_items.get(node_id)
@@ -161,7 +161,13 @@ class NodeGraphScene(QGraphicsScene):
     def _on_label_changed(self, node_id: str) -> None:
         item = self.node_items.get(node_id)
         if item is not None:
+            item.prepareGeometryChange()  # compact nodes resize their bounding rect for the label
             item.update()
+
+    def _on_description_changed(self, node_id: str) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item._refresh_tooltip()
 
     def _on_preview_enabled_changed(self, node_id: str, enabled: bool) -> None:
         item = self.node_items.get(node_id)

@@ -5,7 +5,7 @@ from typing import Optional
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QVariantAnimation
 from PySide6.QtGui import (
-    QAbstractTextDocumentLayout, QBrush, QColor, QFont, QPainter,
+    QAbstractTextDocumentLayout, QBrush, QColor, QFont, QFontMetrics, QPainter,
     QPainterPath, QPalette, QPen, QTextCursor, QTextDocument,
 )
 from PySide6.QtWidgets import (
@@ -45,6 +45,11 @@ NOTE_MIN_H, NOTE_MAX_H = 60.0, 2000.0
 TABLE_TYPE = "flograph.io.table"
 TABLE_MIN_W, TABLE_MAX_W = 220.0, 1600.0
 TABLE_MIN_H, TABLE_MAX_H = 140.0, 2000.0
+
+REROUTE_LABEL_FONT_SIZE = 8.0
+REROUTE_LABEL_PAD_X = 6.0
+REROUTE_LABEL_H = 16.0
+REROUTE_LABEL_GAP = 4.0  # vertical gap between the dot and its label pill
 
 BUTTON_TYPE = "flograph.util.action_button"
 BUTTON_W, BUTTON_H = 150.0, 50.0
@@ -299,8 +304,7 @@ class NodeItem(QGraphicsObject):
             self._build_slicer_widget()
         if not node.canvas_preview_enabled:
             self._apply_proxy_visibility()  # honor a preview-disabled node loaded from disk
-        if node.status == NodeStatus.ERROR:
-            self.setToolTip(node.status_message)
+        self._refresh_tooltip()
 
     # ------------------------------------------------------------- geometry
 
@@ -959,7 +963,29 @@ class NodeItem(QGraphicsObject):
         return f"C{i}"
 
     def boundingRect(self) -> QRectF:
-        return QRectF(-2, -2, self.width + 4, self.body_height + 4)
+        base = QRectF(-2, -2, self.width + 4, self.body_height + 4)
+        label_rect = self._reroute_label_rect()
+        if label_rect is not None:
+            return base.united(label_rect.adjusted(-2, -2, 2, 2))
+        return base
+
+    def _reroute_label_rect(self) -> Optional[QRectF]:
+        """Local-coordinate rect of the reroute's label pill, centered between
+        its input/output ports and sitting above the dot — or None when the
+        reroute is unlabeled (the default, labelless look)."""
+        if not (self.compact and self.node.label_override):
+            return None
+        metrics = QFontMetrics(self._reroute_label_font())
+        pill_w = metrics.horizontalAdvance(self.node.label_override) + REROUTE_LABEL_PAD_X * 2
+        x = self.width / 2 - pill_w / 2
+        y = -REROUTE_LABEL_GAP - REROUTE_LABEL_H
+        return QRectF(x, y, pill_w, REROUTE_LABEL_H)
+
+    @staticmethod
+    def _reroute_label_font() -> QFont:
+        font = QFont()
+        font.setPointSizeF(REROUTE_LABEL_FONT_SIZE)
+        return font
 
     def rebuild_ports(self) -> None:
         """(Re)create port items from the current spec — called at build time
@@ -1117,6 +1143,15 @@ class NodeItem(QGraphicsObject):
             painter.setBrush(QBrush(self._header_color()))
             painter.drawRoundedRect(
                 QRectF(0, 0, self.width, self.body_height), 10, 10)
+            label_rect = self._reroute_label_rect()
+            if label_rect is not None:
+                painter.setPen(QPen(theme.NODE_BORDER, 1))
+                painter.setBrush(QBrush(theme.NODE_HEADER))
+                painter.drawRoundedRect(label_rect, label_rect.height() / 2,
+                                        label_rect.height() / 2)
+                painter.setPen(QPen(theme.NODE_TEXT))
+                painter.setFont(self._reroute_label_font())
+                painter.drawText(label_rect, Qt.AlignCenter, self.node.label_override)
             return
         if self._flat:
             self._paint_flat(painter)
@@ -1641,7 +1676,16 @@ class NodeItem(QGraphicsObject):
             self._start_pulse()
         else:
             self._stop_pulse()
+        self._refresh_tooltip()
         self.update()
+
+    def _refresh_tooltip(self) -> None:
+        """Error status always wins the tooltip slot; otherwise fall back to
+        the node's own description (currently only surfaced for reroutes)."""
+        if self.node.status == NodeStatus.ERROR:
+            self.setToolTip(self.node.status_message)
+        else:
+            self.setToolTip(self.node.description)
 
     def _start_pulse(self) -> None:
         if self._pulse_anim is not None:
