@@ -18,3 +18,4 @@
 18. right click context - delete on frames
 19. right click copy and paste on nodes.
 20. add about screen showing version number to settings
+21. allow the "disable" of visual nodes, we we only see the contents on the dashboard pages but can save resources on the model canvas if desired. maybe a rightclick and well named option to enable or disable this [done: right-click "Disable/Enable Canvas Preview" on figure/webview/table/slicer cards]
