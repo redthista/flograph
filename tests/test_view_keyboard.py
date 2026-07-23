@@ -62,13 +62,13 @@ def test_arrow_keys_in_table_move_cell_cursor_not_node(env, registry):
     table = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[table.id]
     grid = item._table_widget
-    grid.setCurrentCell(0, 0)
+    grid.setCurrentIndex(grid.model().index(0, 0))
     grid.setFocus()
     before_pos = item.pos()
 
     QTest.keyClick(grid, Qt.Key_Right)
 
-    assert grid.currentColumn() == 1
+    assert grid.currentIndex().column() == 1
     assert item.pos() == before_pos
 
 

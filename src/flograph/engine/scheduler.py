@@ -11,6 +11,7 @@ from typing import Iterable, Optional
 from PySide6.QtCore import QObject, QThreadPool, Signal
 
 from flograph.core.graph import Graph
+from flograph.core.links import from_problem
 from flograph.core.node import NodeStatus
 
 from .cache import OutputCache
@@ -133,7 +134,10 @@ class ExecutionEngine(QObject):
             conn = self.graph.input_connection(node_id, port.name)
             if conn is None:
                 if not port.optional:
-                    return f"not configured: input {port.name!r} is not connected"
+                    # a From's input is a link the canvas doesn't draw, so the
+                    # generic message would name a port the user can't see
+                    return (from_problem(self.graph, node_id)
+                            or f"not configured: input {port.name!r} is not connected")
                 continue
             if not self.cache.has(conn.src_node):
                 return f"upstream node did not produce output"

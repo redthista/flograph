@@ -20,12 +20,13 @@ PARAM_TYPES = {
     "file_save",  # line edit + browse (save path)
     "columns",    # free string in v1; column picker later
     "password",   # QLineEdit with masked echo + reveal toggle
+    "node_ref",   # QComboBox of other nodes in the graph; stores a node id
 }
 
 _TYPE_DEFAULTS: dict[str, Any] = {
     "string": "", "text": "", "int": 0, "float": 0.0, "bool": False,
     "choice": None, "file_open": "", "file_save": "", "columns": "",
-    "password": "",
+    "password": "", "node_ref": "",
 }
 
 
@@ -40,6 +41,8 @@ class ParamSpec:
     minimum: Optional[float] = None
     maximum: Optional[float] = None
     multi: bool = True  # columns only: comma list (True) or single column
+    hidden: bool = False  # not shown in the properties panel (edited elsewhere)
+    ref_kind: str = ""  # node_ref only: card kind the referenced node must have
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], where: str = "PARAMS") -> "ParamSpec":
@@ -68,4 +71,6 @@ class ParamSpec:
             minimum=d.get("min"),
             maximum=d.get("max"),
             multi=bool(d.get("multi", True)),
+            hidden=bool(d.get("hidden", False)),
+            ref_kind=str(d.get("ref_kind", "")),
         )

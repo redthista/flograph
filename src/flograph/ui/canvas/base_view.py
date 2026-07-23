@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import (QAbstractScrollArea, QGraphicsProxyWidget,
                                QGraphicsView, QScrollBar, QWidget)
@@ -26,6 +26,8 @@ FINE_GRID_LOD = 0.4
 
 
 class ZoomPanGraphicsView(QGraphicsView):
+    zoom_changed = Signal(float)   # the new zoom factor (1.0 = 100%)
+
     def __init__(self, scene, parent=None) -> None:
         super().__init__(scene, parent)
         # SmoothPixmapTransform matters for the embedded figure/webview
@@ -72,6 +74,22 @@ class ZoomPanGraphicsView(QGraphicsView):
     def zoom(self) -> float:
         return self.transform().m11()
 
+    def _zoom_updated(self) -> None:
+        self._apply_lod()
+        self._zoom_settle.start()
+        self.zoom_changed.emit(self.zoom)
+
+    def set_zoom(self, value: float) -> None:
+        """Jump to an absolute zoom factor, keeping the view centre put."""
+        value = max(ZOOM_MIN, min(ZOOM_MAX, value))
+        factor = value / self.zoom
+        if math.isclose(factor, 1.0):
+            return
+        center = self.mapToScene(self.viewport().rect().center())
+        self.scale(factor, factor)
+        self.centerOn(center)
+        self._zoom_updated()
+
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._scrollable_widget_at(event.position().toPoint()) is not None:
             # a table/list card under the cursor can scroll — let the scene
@@ -98,8 +116,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         after = self.mapToScene(pos)
         delta = after - before
         self.translate(delta.x(), delta.y())
-        self._apply_lod()
-        self._zoom_settle.start()
+        self._zoom_updated()
 
     def _scrollable_widget_at(self, pos) -> QWidget | None:
         """The embedded widget under the viewport point that could consume a
@@ -150,8 +167,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         if self.zoom > 1.5:  # don't over-zoom on a single item
             factor = 1.5 / self.zoom
             self.scale(factor, factor)
-        self._apply_lod()
-        self._zoom_settle.start()
+        self._zoom_updated()
 
     # ------------------------------------------------------------------ pan
 

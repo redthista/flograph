@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDockWidget, QFileDialog,
     QInputDialog, QLineEdit, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QProgressDialog, QStackedWidget, QTextEdit,
-    QToolBar, QVBoxLayout, QWidget,
+    QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import (
@@ -117,12 +117,36 @@ class MainWindow(QMainWindow):
         self._wire_pages()
         # bound method (not a lambda): Qt auto-disconnects it on deletion
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
+        self._zoom_indicator = QToolButton(self)
+        self._zoom_indicator.setAutoRaise(True)
+        self._zoom_indicator.setText("100%")
+        self._zoom_indicator.setToolTip(
+            "Canvas zoom — click to reset to 100%")
+        self._zoom_indicator.clicked.connect(
+            lambda: self._active_canvas_view().set_zoom(1.0))
+        self.view.zoom_changed.connect(self._on_canvas_zoom_changed)
+        self.statusBar().addPermanentWidget(self._zoom_indicator)
         self._update_title()
         self._restore_window_state()
         self._on_current_page_changed(self.page_bar.current_page_id())
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self.statusBar().showMessage("Ready")
+
+    def _active_canvas_view(self):
+        """The zoom-pan view of whatever page is showing: the model canvas,
+        or the active dashboard page's view."""
+        widget = self._canvas_stack.currentWidget()
+        return getattr(widget, "view", None) or self.view
+
+    def _on_canvas_zoom_changed(self, zoom: float) -> None:
+        # every page's view reports here; only the visible one drives the label
+        if self.sender() is self._active_canvas_view():
+            self._zoom_indicator.setText(f"{round(zoom * 100)}%")
+
+    def _refresh_zoom_indicator(self) -> None:
+        self._zoom_indicator.setText(
+            f"{round(self._active_canvas_view().zoom * 100)}%")
 
     # ---------------------------------------------------------------- docks
 
@@ -489,12 +513,30 @@ class MainWindow(QMainWindow):
 
     def _smart_edit(self, text_method: str, canvas_fn) -> None:
         """Route Ctrl+Z/X/C/V to the focused text widget when there is one,
-        to the canvas otherwise."""
+        to a focused spreadsheet grid for cut/copy/paste, and to the canvas
+        otherwise."""
         widget = QApplication.focusWidget()
         if isinstance(widget, (QPlainTextEdit, QTextEdit, QLineEdit)):
             getattr(widget, text_method)()
-        else:
-            canvas_fn()
+            return
+        grid = self._focused_spreadsheet()
+        if grid is not None and text_method in ("cut", "copy", "paste"):
+            {"cut": grid.cut_selection, "copy": grid.copy_selection,
+             "paste": grid.paste_clipboard}[text_method]()
+            return
+        canvas_fn()
+
+    @staticmethod
+    def _focused_spreadsheet():
+        """The SpreadsheetView owning focus (itself or an ancestor of the
+        focus widget), or None."""
+        from .spreadsheet import SpreadsheetView
+        widget = QApplication.focusWidget()
+        while widget is not None:
+            if isinstance(widget, SpreadsheetView):
+                return widget
+            widget = widget.parentWidget()
+        return None
 
     # --------------------------------------------------------------- wiring
 
@@ -521,6 +563,7 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_figure_node_succeeded)
         engine.node_succeeded.connect(self._on_plotly_node_succeeded)
         engine.node_succeeded.connect(self._on_table_viewer_node_succeeded)
+        engine.node_succeeded.connect(self._on_grid_node_succeeded)
         engine.node_succeeded.connect(self._on_kpi_node_succeeded)
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
         self.graph.events.preview_enabled_changed.connect(
@@ -581,6 +624,54 @@ class MainWindow(QMainWindow):
         # "spec" for Table Spec
         port = node.spec.outputs[0].name if node.spec.outputs else "table"
         item.set_table_data(entry.outputs.get(port) if entry else None)
+
+    def _on_grid_node_succeeded(self, node_id: str) -> None:
+        """After a linked Table run, show the merged sheet on the card:
+        input-owned columns refreshed, the user's own columns (formula
+        sources intact) carried over."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or card_kind(node) != "grid":
+            return
+        item = self.scene.node_items.get(node_id)
+        merged = self._merged_linked_sheet(node_id)
+        if item is not None and merged is not None:
+            item.show_linked_sheet(merged)
+
+    def _merged_linked_sheet(self, node_id: str):
+        """The linked-refresh merge of a Table node's cached input with its
+        stored sheet, as a sheet dict — None when there's no usable input."""
+        from flograph.core.sheet import (merge_linked_sheet, parse_sheet,
+                                         sheet_from_dataframe, sheet_to_dict)
+        frame = self._table_import_source(node_id)
+        if frame is None:
+            return None
+        node = self.graph.nodes[node_id]
+        merged = merge_linked_sheet(sheet_from_dataframe(frame),
+                                    parse_sheet(node.params.get("data")))
+        return sheet_to_dict(merged)
+
+    def _table_import_source(self, node_id: str):
+        """The cached upstream DataFrame feeding a Table node's input, or
+        None when unconnected / not run / not a frame."""
+        conn = self.graph.input_connection(node_id, "table")
+        if conn is None:
+            return None
+        entry = self.engine.cache.get(conn.src_node)
+        value = entry.outputs.get(conn.src_port) if entry else None
+        return value if hasattr(value, "itertuples") else None
+
+    def _import_input_into_table(self, node_id: str) -> None:
+        """Snapshot the linked data into the node's stored sheet (keeping
+        the user's own columns), one undoable step."""
+        import json as _json
+        merged = self._merged_linked_sheet(node_id)
+        if merged is None:
+            return
+        self.undo_stack.push(SetParamCommand(
+            self.graph, node_id, "data", _json.dumps(merged), merge=False))
+        self.statusBar().showMessage(
+            "Input copied into the table — disconnect the input to make "
+            "this snapshot fully yours", 5000)
 
     def _on_kpi_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -656,6 +747,7 @@ class MainWindow(QMainWindow):
             lambda node_id, pos, page_id=page.id:
             self._on_tile_dropped(page_id, node_id, pos))
         self._dashboard_pages[page.id] = widget
+        widget.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         widget.scene.snap_enabled = self.snap_enabled
         widget.scene.grid_step = self.grid_step
         self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
@@ -685,6 +777,7 @@ class MainWindow(QMainWindow):
         self.editor_dock.setVisible(is_model_page)
         self.inspector_dock.setVisible(is_model_page)
         self.log_dock.setVisible(is_model_page)
+        self._refresh_zoom_indicator()
         if self._project_path and not self._restoring_pages:
             self.settings.setValue(f"active_page/{self._project_path}",
                                    page_id or "")
@@ -814,6 +907,10 @@ class MainWindow(QMainWindow):
                 self.undo_stack.push(SetLabelCommand(self.graph, node_id, new))
 
     def _rename_selected(self) -> None:
+        grid = self._focused_spreadsheet()
+        if grid is not None:   # F2 inside a table card edits the cell
+            grid.edit_current()
+            return
         items = self.scene.selected_node_items()
         if len(items) == 1:
             self._rename_node(items[0].node.id)
@@ -1190,6 +1287,10 @@ class MainWindow(QMainWindow):
             preview_action = menu.addAction(
                 "Disable Canvas Preview" if node.canvas_preview_enabled
                 else "Enable Canvas Preview")
+        import_action = None
+        if (card_kind(node) == "grid"
+                and self._table_import_source(node_id) is not None):
+            import_action = menu.addAction("Import input into table")
         view_actions = self._add_view_actions(menu, node_id)
         page_actions: list = []
         new_page_action = None
@@ -1219,6 +1320,8 @@ class MainWindow(QMainWindow):
         elif preview_action is not None and chosen is preview_action:
             self.undo_stack.push(SetPreviewEnabledCommand(
                 self.graph, node_id, not node.canvas_preview_enabled))
+        elif import_action is not None and chosen is import_action:
+            self._import_input_into_table(node_id)
         elif chosen is copy_action:
             self._copy_selection()
         elif chosen is delete:
@@ -1386,14 +1489,38 @@ class MainWindow(QMainWindow):
             self._insert_payload(payload)
 
     def _duplicate(self) -> None:
+        grid = self._focused_spreadsheet()
+        if grid is not None:   # Ctrl+D inside a table card fills down
+            grid.fill_down_selection()
+            return
         payload = self._selection_payload()
         if payload is not None:
             self._insert_payload(payload)
 
+    @staticmethod
+    def _remap_node_refs(params: dict, spec, id_map: dict[str, str]) -> dict:
+        """Point pasted node references at the pasted copies.
+
+        A reference to a node that wasn't part of the payload is left alone —
+        copying a lone From keeps it reading the same Goto, while copying the
+        pair rewires the copies to each other.
+        """
+        for param in spec.params:
+            if param.type != "node_ref":
+                continue
+            target = params.get(param.name)
+            if isinstance(target, str) and target in id_map:
+                params[param.name] = id_map[target]
+        return params
+
     def _insert_payload(self, payload: dict) -> None:
         from flograph.core import Frame
         from .commands import AddFrameCommand
-        id_map: dict[str, str] = {}
+        # ids are assigned up front, before any node is built: a param that
+        # references another node (a From's Goto) may name an entry that comes
+        # later in the payload
+        id_map: dict[str, str] = {entry["id"]: uuid.uuid4().hex
+                                  for entry in payload.get("nodes", [])}
         new_nodes: list[NodeInstance] = []
         for entry in payload.get("nodes", []):
             code = entry.get("code")
@@ -1401,16 +1528,19 @@ class MainWindow(QMainWindow):
                 try:
                     spec = parse_spec(code, entry["type"])
                 except Exception:
+                    id_map.pop(entry["id"], None)
                     continue
             else:
                 spec = self.registry.maybe_get(entry["type"])
                 if spec is None:
+                    id_map.pop(entry["id"], None)
                     continue
-            new_id = uuid.uuid4().hex
-            id_map[entry["id"]] = new_id
+            new_id = id_map[entry["id"]]
             new_nodes.append(NodeInstance(
                 id=new_id, spec=spec, code_override=code,
-                params={**spec.default_params(), **entry.get("params", {})},
+                params=self._remap_node_refs(
+                    {**spec.default_params(), **entry.get("params", {})},
+                    spec, id_map),
                 pos=(entry["pos"][0] + PASTE_OFFSET,
                      entry["pos"][1] + PASTE_OFFSET),
                 label_override=entry.get("label"),

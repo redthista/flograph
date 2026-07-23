@@ -15,8 +15,8 @@ import platform
 
 from PySide6.QtCore import qVersion
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QSpinBox,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .canvas import grid
@@ -47,6 +47,7 @@ class SettingsDialog(QDialog):
         pages = {
             "General": self._build_general_page(window),
             "Canvas": self._build_canvas_page(window),
+            "Table Node": self._build_table_node_page(),
             "About": self._build_about_page(),
         }
         for name in sorted(pages):
@@ -200,6 +201,48 @@ class SettingsDialog(QDialog):
             "large graph."))
 
         minimap_check.toggled.connect(window.set_minimap_enabled)
+
+        layout.addStretch(1)
+        return page
+
+    @staticmethod
+    def _build_table_node_page() -> QWidget:
+        from .spreadsheet import (autosize_default_enabled,
+                                  date_formats_setting, set_autosize_default,
+                                  set_date_formats_setting)
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        autosize_check = QCheckBox("Auto-size columns to content by default")
+        autosize_check.setObjectName("table_autosize_checkbox")
+        autosize_check.setChecked(autosize_default_enabled())
+        autosize_check.toggled.connect(set_autosize_default)
+        layout.addWidget(autosize_check)
+        layout.addWidget(SettingsDialog._hint(
+            "Table cards and the pop-out editor re-fit every column to its "
+            "content and header after each edit. When off, columns keep the "
+            "widths you drag or fit manually, which are saved with the "
+            "node. Open grids pick the change up on their next edit."))
+
+        layout.addSpacing(12)
+
+        formats_row = QHBoxLayout()
+        formats_row.addWidget(QLabel("Custom date formats:"))
+        formats_edit = QLineEdit()
+        formats_edit.setObjectName("table_date_formats_edit")
+        formats_edit.setPlaceholderText("%d-%b-%y, %d/%m/%Y")
+        formats_edit.setText(date_formats_setting())
+        formats_edit.textChanged.connect(set_date_formats_setting)
+        formats_row.addWidget(formats_edit, 1)
+        layout.addLayout(formats_row)
+        layout.addWidget(SettingsDialog._hint(
+            "Extra date formats for the Table node's date columns, "
+            "comma-separated, in Python strptime notation (%d day, %m month "
+            "number, %b month name, %y two-digit year, %Y four-digit year "
+            "— e.g. 07-Mar-12 is %d-%b-%y). Tried before the built-in "
+            "formats when validating cells and when converting a column to "
+            "the date type, so they win for ambiguous dates."))
 
         layout.addStretch(1)
         return page
