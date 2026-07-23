@@ -328,6 +328,285 @@ class TestIONodes:
             run_node(registry, "flograph.io.read_sqlite",
                      {"path": str(tmp_path / "x.db")})
 
+    def test_read_csv_tab_separator_and_row_window(self, registry, tmp_path):
+        path = tmp_path / "in.tsv"
+        path.write_text("junk line\na\tb\n1\t2\n3\t4\n5\t6\n")
+        out = run_node(registry, "flograph.io.read_csv",
+                       {"path": str(path), "sep": "\\t", "skiprows": 1,
+                        "nrows": 2})
+        assert list(out.columns) == ["a", "b"]
+        assert out["a"].tolist() == [1, 3]
+
+    def test_read_csv_sniffs_separator(self, registry, tmp_path):
+        path = tmp_path / "in.txt"
+        path.write_text("a;b\n1;2\n")
+        out = run_node(registry, "flograph.io.read_csv",
+                       {"path": str(path), "sep": "auto"})
+        assert list(out.columns) == ["a", "b"]
+
+    def test_read_csv_columns_dtypes_and_na(self, registry, tmp_path):
+        path = tmp_path / "in.csv"
+        path.write_text("# a comment\nid,name,score\n1,ann,-\n2,bob,7\n")
+        out = run_node(registry, "flograph.io.read_csv",
+                       {"path": str(path), "columns": "id, score",
+                        "comment": "#", "na_values": "-",
+                        "dtypes": "id = string"})
+        assert list(out.columns) == ["id", "score"]
+        assert out["id"].tolist() == ["1", "2"]
+        assert out["score"].isna().tolist() == [True, False]
+
+    def test_read_csv_index_decimal_thousands_parse_dates(self, registry,
+                                                          tmp_path):
+        path = tmp_path / "in.csv"
+        path.write_text("day;amount;price\n2024-01-02;1.234;9,5\n")
+        out = run_node(registry, "flograph.io.read_csv",
+                       {"path": str(path), "sep": ";", "index_col": "day",
+                        "decimal": ",", "thousands": ".",
+                        "parse_dates": "day"})
+        assert out.index.name == "day"
+        assert str(out.index[0])[:10] == "2024-01-02"
+        assert out["amount"].tolist() == [1234]
+        assert out["price"].tolist() == [9.5]
+
+    def test_read_csv_skips_bad_lines(self, registry, tmp_path):
+        path = tmp_path / "in.csv"
+        path.write_text("a,b\n1,2\n3,4,5\n6,7\n")
+        out = run_node(registry, "flograph.io.read_csv",
+                       {"path": str(path), "on_bad_lines": "skip"})
+        assert out["a"].tolist() == [1, 6]
+
+    def test_read_csv_rejects_bad_dtype_line(self, registry, tmp_path):
+        path = tmp_path / "in.csv"
+        path.write_text("a\n1\n")
+        with pytest.raises(ValueError, match="column = dtype"):
+            run_node(registry, "flograph.io.read_csv",
+                     {"path": str(path), "dtypes": "just-a-word"})
+
+    def test_read_excel_sheet_by_name_and_options(self, registry, table,
+                                                  tmp_path):
+        pytest.importorskip("openpyxl")
+        path = tmp_path / "out.xlsx"
+        table.to_excel(path, sheet_name="sales", index=False)
+        out = run_node(registry, "flograph.io.read_excel",
+                       {"path": str(path), "sheet_name": "sales",
+                        "columns": "region, units", "nrows": 2,
+                        "dtypes": "units = float"})
+        assert list(out.columns) == ["region", "units"]
+        assert len(out) == 2
+        assert out["units"].dtype == float
+
+    def test_read_excel_all_sheets_stacked(self, registry, table, tmp_path):
+        pytest.importorskip("openpyxl")
+        path = tmp_path / "out.xlsx"
+        with pd.ExcelWriter(path) as writer:
+            table.to_excel(writer, sheet_name="first", index=False)
+            table.to_excel(writer, sheet_name="second", index=False)
+        out = run_node(registry, "flograph.io.read_excel",
+                       {"path": str(path), "sheet_name": "*"})
+        assert list(out.columns)[0] == "sheet"
+        assert len(out) == 2 * len(table)
+        assert set(out["sheet"]) == {"first", "second"}
+
+    def test_read_excel_letter_range_columns(self, registry, table, tmp_path):
+        pytest.importorskip("openpyxl")
+        path = tmp_path / "out.xlsx"
+        table.to_excel(path, index=False)
+        out = run_node(registry, "flograph.io.read_excel",
+                       {"path": str(path), "columns": "A:B"})
+        assert list(out.columns) == ["region", "units"]
+
+    def test_read_json_flatten_nested(self, registry, tmp_path):
+        path = tmp_path / "in.json"
+        path.write_text('[{"id": 1, "who": {"name": "ann", "age": 3}},'
+                        ' {"id": 2, "who": {"name": "bob", "age": 4}}]')
+        out = run_node(registry, "flograph.io.read_json",
+                       {"path": str(path), "flatten": True})
+        assert list(out.columns) == ["id", "who.name", "who.age"]
+        assert out["who.name"].tolist() == ["ann", "bob"]
+
+    def test_read_json_lines_nrows_and_flatten(self, registry, tmp_path):
+        path = tmp_path / "in.jsonl"
+        path.write_text('{"id": 1, "who": {"name": "ann"}}\n'
+                        '{"id": 2, "who": {"name": "bob"}}\n'
+                        '{"id": 3, "who": {"name": "cat"}}\n')
+        out = run_node(registry, "flograph.io.read_json",
+                       {"path": str(path), "layout": "lines",
+                        "flatten": True, "nrows": 2})
+        assert out["id"].tolist() == [1, 2]
+        assert "who.name" in out.columns
+
+    def test_read_json_flatten_needs_record_layout(self, registry, tmp_path):
+        path = tmp_path / "in.json"
+        path.write_text("{}")
+        with pytest.raises(ValueError, match="records or lines"):
+            run_node(registry, "flograph.io.read_json",
+                     {"path": str(path), "layout": "columns",
+                      "flatten": True})
+
+    def test_read_parquet_row_filters(self, registry, table, tmp_path):
+        pytest.importorskip("pyarrow")
+        path = tmp_path / "out.parquet"
+        table.to_parquet(path)
+        out = run_node(registry, "flograph.io.read_parquet",
+                       {"path": str(path),
+                        "filters": "region == north\nunits >= 20"})
+        assert out["units"].tolist() == [30]
+        both = run_node(registry, "flograph.io.read_parquet",
+                        {"path": str(path),
+                         "filters": "region in north, south\nunits < 25"})
+        assert len(both) == 2
+
+    def test_read_parquet_rejects_bad_filter(self, registry, table, tmp_path):
+        pytest.importorskip("pyarrow")
+        path = tmp_path / "out.parquet"
+        table.to_parquet(path)
+        with pytest.raises(ValueError, match="column op value"):
+            run_node(registry, "flograph.io.read_parquet",
+                     {"path": str(path), "filters": "region"})
+
+    def test_read_parquet_nullable_backend(self, registry, table, tmp_path):
+        pytest.importorskip("pyarrow")
+        path = tmp_path / "out.parquet"
+        table.to_parquet(path)
+        out = run_node(registry, "flograph.io.read_parquet",
+                       {"path": str(path), "dtype_backend": "numpy_nullable"})
+        assert out["units"].dtype == "Int64"
+
+    def test_read_sqlite_table_mode(self, registry, table, tmp_path):
+        path = tmp_path / "out.db"
+        run_node(registry, "flograph.io.write_sqlite",
+                 {"path": str(path), "table_name": "sales"}, table=table)
+        out = run_node(registry, "flograph.io.read_sqlite",
+                       {"path": str(path), "source": "table",
+                        "table": "sales", "index_col": "region",
+                        "dtypes": "units = float"})
+        assert out.index.name == "region"
+        assert out["units"].dtype == float
+        assert len(out) == len(table)
+
+    def test_read_sqlite_table_mode_lists_tables(self, registry, table,
+                                                 tmp_path):
+        path = tmp_path / "out.db"
+        run_node(registry, "flograph.io.write_sqlite",
+                 {"path": str(path), "table_name": "sales"}, table=table)
+        with pytest.raises(ValueError, match="tables in this database: sales"):
+            run_node(registry, "flograph.io.read_sqlite",
+                     {"path": str(path), "source": "table"})
+
+    def test_write_csv_append_skips_header(self, registry, table, tmp_path):
+        path = tmp_path / "out.csv"
+        run_node(registry, "flograph.io.write_csv", {"path": str(path)},
+                 table=table)
+        run_node(registry, "flograph.io.write_csv",
+                 {"path": str(path), "mode": "append"}, table=table)
+        back = run_node(registry, "flograph.io.read_csv", {"path": str(path)})
+        assert len(back) == 2 * len(table)
+        assert path.read_text().count("region,units") == 1
+
+    def test_write_csv_formatting_options(self, registry, tmp_path):
+        path = tmp_path / "out.tsv"
+        frame = pd.DataFrame({"a": [1.234, None], "b": ["x", "y"]})
+        run_node(registry, "flograph.io.write_csv",
+                 {"path": str(path), "sep": "\\t", "na_rep": "NULL",
+                  "float_format": "%.1f"}, table=frame)
+        assert path.read_text() == "a\tb\n1.2\tx\nNULL\ty\n"
+
+    def test_write_csv_column_subset_and_quoting(self, registry, table,
+                                                 tmp_path):
+        path = tmp_path / "out.csv"
+        run_node(registry, "flograph.io.write_csv",
+                 {"path": str(path), "columns": "region, units",
+                  "quoting": "all"}, table=table)
+        assert path.read_text().splitlines()[0] == '"region","units"'
+        with pytest.raises(ValueError, match="columns not in table"):
+            run_node(registry, "flograph.io.write_csv",
+                     {"path": str(path), "columns": "nope"}, table=table)
+
+    def test_write_excel_add_sheet_to_existing(self, registry, table,
+                                               tmp_path):
+        pytest.importorskip("openpyxl")
+        path = tmp_path / "out.xlsx"
+        run_node(registry, "flograph.io.write_excel",
+                 {"path": str(path), "sheet_name": "first"}, table=table)
+        run_node(registry, "flograph.io.write_excel",
+                 {"path": str(path), "sheet_name": "second",
+                  "mode": "add sheet"}, table=table)
+        both = run_node(registry, "flograph.io.read_excel",
+                        {"path": str(path), "sheet_name": "*"})
+        assert set(both["sheet"]) == {"first", "second"}
+        # replacing an existing sheet keeps the others intact
+        run_node(registry, "flograph.io.write_excel",
+                 {"path": str(path), "sheet_name": "second",
+                  "mode": "add sheet", "if_sheet_exists": "replace"},
+                 table=table.head(1))
+        both = run_node(registry, "flograph.io.read_excel",
+                        {"path": str(path), "sheet_name": "*"})
+        assert len(both) == len(table) + 1
+
+    def test_write_excel_offset_and_freeze(self, registry, table, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        path = tmp_path / "out.xlsx"
+        run_node(registry, "flograph.io.write_excel",
+                 {"path": str(path), "startrow": 2, "freeze_header": True},
+                 table=table)
+        back = run_node(registry, "flograph.io.read_excel",
+                        {"path": str(path), "skiprows": 2})
+        assert list(back.columns) == list(table.columns)
+        assert len(back) == len(table)
+        sheet = openpyxl.load_workbook(path).active
+        assert sheet.freeze_panes == "A4"  # row after the offset header
+
+    def test_write_json_iso_dates_and_unicode(self, registry, tmp_path):
+        path = tmp_path / "out.json"
+        frame = pd.DataFrame({"day": pd.to_datetime(["2024-01-02"]),
+                              "name": ["café"]})
+        run_node(registry, "flograph.io.write_json",
+                 {"path": str(path), "date_format": "iso",
+                  "force_ascii": False, "indent": 0}, table=frame)
+        raw = path.read_text()
+        assert "2024-01-02" in raw
+        assert "café" in raw
+
+    def test_write_parquet_compression_and_partitions(self, registry, table,
+                                                      tmp_path):
+        pytest.importorskip("pyarrow")
+        path = tmp_path / "out.parquet"
+        run_node(registry, "flograph.io.write_parquet",
+                 {"path": str(path), "compression": "gzip"}, table=table)
+        assert run_node(registry, "flograph.io.read_parquet",
+                        {"path": str(path)}).equals(table)
+
+        folder = tmp_path / "partitioned"
+        run_node(registry, "flograph.io.write_parquet",
+                 {"path": str(folder), "partition_cols": "region"},
+                 table=table)
+        assert (folder / "region=north").is_dir()
+        back = run_node(registry, "flograph.io.read_parquet",
+                        {"path": str(folder)})
+        assert len(back) == len(table)
+        with pytest.raises(ValueError, match="partition columns not in table"):
+            run_node(registry, "flograph.io.write_parquet",
+                     {"path": str(folder), "partition_cols": "nope"},
+                     table=table)
+
+    def test_write_sqlite_sql_types_and_index_label(self, registry, table,
+                                                    tmp_path):
+        import sqlite3
+        path = tmp_path / "out.db"
+        run_node(registry, "flograph.io.write_sqlite",
+                 {"path": str(path), "table_name": "sales",
+                  "dtypes": "units = TEXT", "index": True,
+                  "index_label": "row_id", "chunksize": 2}, table=table)
+        with sqlite3.connect(path) as conn:
+            types = {row[1]: row[2] for row in
+                     conn.execute("PRAGMA table_info(sales)")}
+        assert types["units"] == "TEXT"
+        assert "row_id" in types
+        back = run_node(registry, "flograph.io.read_sqlite",
+                        {"path": str(path), "source": "table",
+                         "table": "sales"})
+        assert len(back) == len(table)
+
 
 class TestVizNodes:
     def test_plot_line_defaults(self, registry, table):
