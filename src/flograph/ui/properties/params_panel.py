@@ -29,6 +29,19 @@ from ..canvas.node_item import card_kind
 from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
 
 
+class _NodeRefCombo(QComboBox):
+    """Combo whose items are rebuilt each time it opens — the set of nodes it
+    can point at changes while the panel stays put."""
+
+    def __init__(self, refresh: Callable[[], None], parent=None) -> None:
+        super().__init__(parent)
+        self._refresh = refresh
+
+    def showPopup(self) -> None:
+        self._refresh()
+        super().showPopup()
+
+
 class ParamsPanel(QWidget):
     def __init__(self, graph: Graph, undo_stack: QUndoStack, parent=None,
                  cache=None) -> None:
@@ -117,6 +130,8 @@ class ParamsPanel(QWidget):
             self._add_row("Description", desc_edit)
 
         for spec in node.spec.params:
+            if spec.hidden:   # edited elsewhere (e.g. the Table node's grid)
+                continue
             widget, setter = self._make_widget(spec, node.params.get(spec.name))
             self._setters[spec.name] = setter
             self._add_row(spec.label or spec.name, widget)
@@ -230,6 +245,9 @@ class ParamsPanel(QWidget):
         if spec.type == "columns":
             return self._make_columns_widget(spec, value)
 
+        if spec.type == "node_ref":
+            return self._make_node_ref_widget(spec, value)
+
         # string / anything else -> line edit
         edit = QLineEdit(str(value or ""))
         if spec.placeholder:
@@ -263,6 +281,48 @@ class ParamsPanel(QWidget):
         row.addWidget(edit, 1)
         row.addWidget(pick)
         return host, self._line_setter(edit)
+
+    def _make_node_ref_widget(self, spec: ParamSpec, value: Any):
+        """Combo of the graph's nodes whose card kind matches spec.ref_kind,
+        storing the chosen node's *id* while showing its current name (the
+        From node's Goto picker). Refilled every time it drops down, so a Goto
+        added or renamed while this node stays selected still shows up."""
+        combo = _NodeRefCombo(lambda: self._fill_node_refs(combo, spec))
+        self._fill_node_refs(combo, spec, str(value or ""))
+        # `activated` fires on user choice only — programmatic refills (below,
+        # and the setter) must never look like edits
+        combo.activated.connect(
+            lambda _i: self._commit(spec.name, combo.currentData() or ""))
+
+        def set_ref(v, combo=combo, spec=spec):
+            self._fill_node_refs(combo, spec, str(v or ""))
+        return combo, set_ref
+
+    def _fill_node_refs(self, combo: QComboBox, spec: ParamSpec,
+                        value: Optional[str] = None) -> None:
+        from flograph.core.links import link_label
+
+        if value is None:
+            value = combo.currentData() or ""
+            if self._node_id in self._graph.nodes:
+                value = self._graph.node(self._node_id).params.get(spec.name) or value
+        self._updating = True
+        try:
+            combo.clear()
+            combo.addItem("— none —", "")
+            for node in self._graph.nodes.values():
+                if node.spec.card != spec.ref_kind or node.id == self._node_id:
+                    continue
+                combo.addItem(link_label(node), node.id)
+            index = combo.findData(value)
+            if index < 0 and value:
+                # the target was deleted: keep the dangling choice visible
+                # rather than silently showing (and later committing) another
+                combo.addItem("⚠ missing", value)
+                index = combo.count() - 1
+            combo.setCurrentIndex(max(0, index))
+        finally:
+            self._updating = False
 
     def _fill_columns_menu(self, menu: QMenu, edit: QLineEdit,
                            spec: ParamSpec) -> None:

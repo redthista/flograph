@@ -81,6 +81,13 @@ class CompletionController(QObject):
         self._completer.setCompletionMode(QCompleter.PopupCompletion)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive)
         self._completer.activated.connect(self._insert)
+        # Enter/Tab must accept the highlighted suggestion. QCompleter
+        # forwards popup keys to the editor first, and CodeEditor handles
+        # Return (auto-indent) and Tab (indent) itself — accepting the
+        # event, which made QCompleter just hide the popup instead of
+        # completing. Filtering the popup directly (installed after
+        # QCompleter's own filter, so it runs first) sidesteps that.
+        self._completer.popup().installEventFilter(self)
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -104,6 +111,19 @@ class CompletionController(QObject):
             self._warmed = True
             # so the first real completion is snappy
             self._request_completions.emit(-1, "import os\nos.", 2, 3)
+        popup = self._completer.popup()
+        if obj is popup and popup.isVisible() and event.type() == QEvent.KeyPress:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):
+                index = popup.currentIndex()
+                if not index.isValid():
+                    index = self._completer.completionModel().index(0, 0)
+                if index.isValid():
+                    self._insert(str(index.data()))
+                popup.hide()
+                return True
+            if event.key() == Qt.Key_Escape:
+                popup.hide()
+                return True
         return super().eventFilter(obj, event)
 
     def shutdown(self) -> None:
@@ -166,6 +186,9 @@ class CompletionController(QObject):
         rect.setWidth(self._completer.popup().sizeHintForColumn(0)
                       + self._completer.popup().verticalScrollBar().sizeHint().width())
         self._completer.complete(rect)
+        # highlight the first suggestion so a bare Enter/Tab accepts it
+        self._completer.popup().setCurrentIndex(
+            self._completer.completionModel().index(0, 0))
 
     def _on_signatures(self, request_id: int, text: str) -> None:
         if text and self._editor.hasFocus():

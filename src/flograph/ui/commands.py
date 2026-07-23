@@ -143,19 +143,25 @@ class MoveNodesCommand(QUndoCommand):
 
 
 class SetParamCommand(QUndoCommand):
-    """Edits of the same param merge while it stays the latest command."""
+    """Edits of the same param merge while it stays the latest command.
+
+    Pass merge=False for edits that must stay individual undo steps
+    (e.g. spreadsheet cell edits, where one Ctrl+Z should revert one cell).
+    """
 
     def __init__(self, graph: Graph, node_id: str, name: str, new_value: Any,
-                 parent: Optional[QUndoCommand] = None) -> None:
+                 parent: Optional[QUndoCommand] = None, *,
+                 merge: bool = True) -> None:
         super().__init__(f"set {name}", parent)
         self._graph = graph
         self._node_id = node_id
         self._name = name
         self._old = graph.node(node_id).params.get(name)
         self._new = new_value
+        self._merge = merge
 
     def id(self) -> int:
-        return _ID_PARAM
+        return _ID_PARAM if self._merge else -1   # -1: Qt never merges
 
     def redo(self) -> None:
         self._graph.set_param(self._node_id, self._name, self._new)
@@ -165,6 +171,7 @@ class SetParamCommand(QUndoCommand):
 
     def mergeWith(self, other: QUndoCommand) -> bool:
         if (not isinstance(other, SetParamCommand)
+                or not self._merge or not other._merge
                 or other._node_id != self._node_id
                 or other._name != self._name):
             return False

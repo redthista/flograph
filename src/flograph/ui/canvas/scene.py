@@ -80,6 +80,7 @@ class NodeGraphScene(QGraphicsScene):
         events.description_changed.connect(self._on_description_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
         events.color_changed.connect(self._on_color_changed)
+        events.links_changed.connect(self._refresh_link_cards)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
@@ -92,6 +93,10 @@ class NodeGraphScene(QGraphicsScene):
             self._on_connected(conn)
         for frame in graph.frames.values():
             self._on_frame_added(frame)
+        self._refresh_link_cards()
+        # Goto/From pairs have no wire to trace, so selecting one end glows
+        # the other -- the only on-canvas evidence that a link exists
+        self.selectionChanged.connect(self._highlight_link_partners)
 
     # ------------------------------------------------------- event mirrors
 
@@ -100,6 +105,7 @@ class NodeGraphScene(QGraphicsScene):
         item.set_lod(self._flat_state())
         self.addItem(item)
         self.node_items[node.id] = item
+        item.refresh_link_card()  # its text needs the scene's graph to resolve
 
     def _on_node_removed(self, node_id: str) -> None:
         item = self.node_items.pop(node_id, None)
@@ -113,6 +119,9 @@ class NodeGraphScene(QGraphicsScene):
         self.addItem(item)
         self.connection_items[conn.id] = item
         dst.update()  # input pin becomes filled
+        dst_node_item = self.node_items.get(conn.dst_node)
+        if dst_node_item is not None and dst_node_item.table:
+            dst_node_item.refresh_table_link()
 
     def _on_disconnected(self, conn: Connection) -> None:
         item = self.connection_items.pop(conn.id, None)
@@ -123,6 +132,8 @@ class NodeGraphScene(QGraphicsScene):
             port = dst_item.input_ports.get(conn.dst_port)
             if port is not None:
                 port.update()
+            if dst_item.table:
+                dst_item.refresh_table_link()
 
     def _on_node_moved(self, node_id: str, pos: tuple[float, float]) -> None:
         item = self.node_items.get(node_id)
@@ -147,6 +158,24 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.on_params_changed()
+        if item is not None and item.link_card:
+            # a Goto's name is shown on every From reading it, not just here
+            self._refresh_link_cards()
+
+    def _refresh_link_cards(self) -> None:
+        for item in self.node_items.values():
+            item.refresh_link_card()
+
+    def _highlight_link_partners(self) -> None:
+        selected = {item.node.id for item in self.selected_node_items()}
+        partners: set[str] = set()
+        for link in self.graph.links.values():
+            if link.src_node in selected:
+                partners.add(link.dst_node)
+            if link.dst_node in selected:
+                partners.add(link.src_node)
+        for node_id, item in self.node_items.items():
+            item.set_link_highlight(node_id in partners)
 
     def _on_status_changed(self, node_id: str, status: NodeStatus, message: str) -> None:
         item = self.node_items.get(node_id)

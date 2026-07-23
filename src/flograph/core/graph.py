@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
+from . import links
 from .datatypes import can_connect
 from .events import GraphEvents
 from .node import NodeInstance, NodeStatus, NodeSpec
@@ -62,6 +63,10 @@ class Graph:
     def __init__(self) -> None:
         self.nodes: dict[str, NodeInstance] = {}
         self.connections: dict[str, Connection] = {}
+        # Derived Goto/From links, never serialized and never user-editable
+        # directly: see core.links and _refresh_links. Topology reads union
+        # them with `connections`; persistence and wire-drawing don't.
+        self.links: dict[str, Connection] = {}
         self.frames: dict[str, Frame] = {}
         self.pages: dict[str, Page] = {}
         self.events = GraphEvents()
@@ -79,6 +84,7 @@ class Graph:
             raise GraphError(f"node id {node.id!r} already in graph")
         self.nodes[node.id] = node
         self.events.node_added.emit(node)
+        self._refresh_links()
         return node
 
     def remove_node(self, node_id: str) -> tuple[NodeInstance, list[Connection]]:
@@ -96,6 +102,7 @@ class Graph:
             self.disconnect(conn.id)
         del self.nodes[node_id]
         self.events.node_removed.emit(node_id)
+        self._refresh_links()
         return node, removed
 
     def move_node(self, node_id: str, pos: tuple[float, float]) -> None:
@@ -129,6 +136,10 @@ class Graph:
             raise GraphError(f"node {node.label!r} has no param {name!r}")
         node.params[name] = value
         self.events.param_changed.emit(node_id, name, value)
+        if name == links.SOURCE_PARAM and links.is_from(node):
+            self._refresh_links()   # marks the Froms it moved dirty itself
+        if name == links.NAME_PARAM and links.is_link_node(node):
+            return  # renaming a link is cosmetic: don't invalidate its subtree
         self.mark_dirty(node_id)
 
     def set_code(self, node_id: str, source: str) -> list[Connection]:
@@ -159,6 +170,7 @@ class Graph:
         for conn in removed:
             self.disconnect(conn.id)
         self.events.code_changed.emit(node_id)
+        self._refresh_links()  # editing a node's code can add/remove its card
         self.mark_dirty(node_id)
         return removed
 
@@ -171,7 +183,32 @@ class Graph:
         node.params = {**spec.default_params(),
                        **{k: v for k, v in node.params.items() if spec.param(k)}}
         self.events.code_changed.emit(node_id)
+        self._refresh_links()
         self.mark_dirty(node_id)
+
+    # ---------------------------------------------------------------- links
+
+    def _refresh_links(self) -> None:
+        """Re-derive the whole Goto/From link set and adopt it.
+
+        Rebuilt whole, never patched — a From can exist before the Goto it
+        reads (the load path adds nodes in file order). Any From whose
+        incoming link appeared or vanished is marked dirty here: its input
+        changed without its own params changing, so nothing else would.
+        """
+        resolved = links.resolve_links(self)
+        if resolved == self.links:
+            return
+        moved = {
+            (resolved.get(key) or self.links[key]).dst_node
+            for key in set(resolved) | set(self.links)
+            if resolved.get(key) != self.links.get(key)
+        }
+        self.links = resolved
+        self.events.links_changed.emit()
+        for node_id in sorted(moved):
+            if node_id in self.nodes:
+                self.mark_dirty(node_id)
 
     # ----------------------------------------------------------- connections
 
@@ -203,7 +240,8 @@ class Graph:
         if self.would_cycle(src_node, dst_node):
             raise GraphError("connection would create a cycle")
 
-        displaced = self.input_connection(dst_node, dst_port)
+        # only a real wire can be displaced: links aren't the user's to drop
+        displaced = self.input_connection(dst_node, dst_port, include_links=False)
         if displaced is not None:
             self.disconnect(displaced.id)
 
@@ -215,6 +253,12 @@ class Graph:
         self.connections[conn.id] = conn
         self.events.connected.emit(conn)
         self.mark_dirty(dst_node)
+        # links are only accepted when they don't close a loop, so the real
+        # edge set is part of their input -- and the displacement above left a
+        # transient state. Re-derive once, here at the end, and the invariant
+        # "graph.links is acyclic against the current wires" holds after every
+        # public mutation.
+        self._refresh_links()
         return conn, displaced
 
     def disconnect(self, conn_id: str) -> Connection:
@@ -224,20 +268,28 @@ class Graph:
         self.events.disconnected.emit(conn)
         if conn.dst_node in self.nodes:
             self.mark_dirty(conn.dst_node)
+        self._refresh_links()  # removing a wire can unblock a refused link
         return conn
 
-    def input_connection(self, node_id: str, port: str) -> Optional[Connection]:
+    def _iter_edges(self) -> Iterable[Connection]:
+        """Every edge values flow along: drawn wires plus derived Goto/From
+        links. The one place link-awareness lives — everything below inherits
+        it. Persistence and wire-drawing read `self.connections` instead."""
+        return (*self.connections.values(), *self.links.values())
+
+    def input_connection(self, node_id: str, port: str,
+                         include_links: bool = True) -> Optional[Connection]:
+        edges = self._iter_edges() if include_links else self.connections.values()
         return next(
-            (c for c in self.connections.values()
-             if c.dst_node == node_id and c.dst_port == port),
+            (c for c in edges if c.dst_node == node_id and c.dst_port == port),
             None,
         )
 
     def in_connections(self, node_id: str) -> list[Connection]:
-        return [c for c in self.connections.values() if c.dst_node == node_id]
+        return [c for c in self._iter_edges() if c.dst_node == node_id]
 
     def out_connections(self, node_id: str) -> list[Connection]:
-        return [c for c in self.connections.values() if c.src_node == node_id]
+        return [c for c in self._iter_edges() if c.src_node == node_id]
 
     def _connections_of(self, node_id: str) -> list[Connection]:
         return [c for c in self.connections.values()
@@ -259,10 +311,10 @@ class Graph:
     # ------------------------------------------------------------- topology
 
     def successors(self, node_id: str) -> set[str]:
-        return {c.dst_node for c in self.connections.values() if c.src_node == node_id}
+        return {c.dst_node for c in self._iter_edges() if c.src_node == node_id}
 
     def predecessors(self, node_id: str) -> set[str]:
-        return {c.src_node for c in self.connections.values() if c.dst_node == node_id}
+        return {c.src_node for c in self._iter_edges() if c.dst_node == node_id}
 
     def would_cycle(self, src_node: str, dst_node: str) -> bool:
         """Would a wire src_node -> dst_node close a cycle? True iff src_node

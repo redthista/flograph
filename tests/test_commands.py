@@ -141,6 +141,20 @@ def test_set_param_merge_and_undo(env, registry):
     assert snapshot(graph) == after
 
 
+def test_set_param_merge_false_keeps_separate_undo_steps(env, registry):
+    graph, stack, scene = env
+    node = registry.instantiate("flograph.util.constant")
+    stack.push(AddNodeCommand(graph, node))
+    index_before = stack.index()
+    stack.push(SetParamCommand(graph, node.id, "value", "a", merge=False))
+    stack.push(SetParamCommand(graph, node.id, "value", "ab", merge=False))
+    assert stack.index() == index_before + 2   # no merging
+    stack.undo()
+    assert node.params["value"] == "a"
+    stack.undo()
+    assert node.params["value"] == ""
+
+
 def test_set_code_undo_restores_ports_and_wires(env, registry):
     graph, stack, scene = env
     const, script = build_pipeline(graph, stack, registry)

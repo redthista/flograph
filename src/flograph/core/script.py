@@ -48,7 +48,7 @@ class NodeScriptError(Exception):
 # canvas card / dashboard tile renders the node's output; None = ordinary node.
 CARD_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer",
-    "button", "note", "grid", "reroute",
+    "button", "note", "grid", "reroute", "goto", "from",
 })
 
 

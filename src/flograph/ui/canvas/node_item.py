@@ -10,12 +10,12 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout,
-    QInputDialog, QLabel, QPlainTextEdit, QStyleOptionGraphicsItem,
-    QTableView, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout,
-    QWidget,
+    QLabel, QPlainTextEdit, QStyleOptionGraphicsItem, QTableView,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import NodeInstance, PortSpec
+from flograph.core.links import link_label, source_id
 from flograph.core.node import NodeStatus
 
 from .. import theme
@@ -50,6 +50,13 @@ REROUTE_LABEL_FONT_SIZE = 8.0
 REROUTE_LABEL_PAD_X = 6.0
 REROUTE_LABEL_H = 16.0
 REROUTE_LABEL_GAP = 4.0  # vertical gap between the dot and its label pill
+
+# Goto/From link cards: a name tag with one visible port. The other port
+# exists in the spec (it carries the invisible link) but is never drawn.
+LINK_CARD_H = 26.0
+LINK_CARD_FONT_SIZE = 8.5
+LINK_CARD_PAD_X = 10.0
+LINK_CARD_MIN_W, LINK_CARD_MAX_W = 70.0, 240.0
 
 BUTTON_TYPE = "flograph.util.action_button"
 BUTTON_W, BUTTON_H = 150.0, 50.0
@@ -220,8 +227,15 @@ class NodeItem(QGraphicsObject):
         self.table_viewer = kind == "table_viewer"
         self.kpi_card = kind == "kpi"
         self.slicer = kind == "slicer"
+        # Goto/From: the two ends of a link the canvas doesn't draw
+        self.goto_card = kind == "goto"
+        self.from_card = kind == "from"
+        self.link_card = self.goto_card or self.from_card
+        self._link_partners: set[str] = set()  # highlighted with this node
         self.broken = node.spec.broken
-        if self.compact:
+        if self.link_card:
+            self.width = self._link_card_width()
+        elif self.compact:
             self.width = 28.0
         elif self.note:
             self.width = float(node.params.get("width", 280))
@@ -257,9 +271,11 @@ class NodeItem(QGraphicsObject):
         self._note_editor: QGraphicsProxyWidget | None = None
         self._note_editor_widget: QPlainTextEdit | None = None
         self._closing_note_edit = False
-        self._table_widget: QTableWidget | None = None
+        self._table_widget = None   # SpreadsheetView (grid cards only)
+        self._table_model = None    # SheetModel (grid cards only)
+        self._table_buttons: tuple = ()
+        self._table_expand = None
         self._table_proxy: QGraphicsProxyWidget | None = None
-        self._syncing_table = False
         self._figure_view = None
         self._figure_proxy: QGraphicsProxyWidget | None = None
         self._figure_placeholder: QLabel | None = None
@@ -310,6 +326,8 @@ class NodeItem(QGraphicsObject):
 
     @property
     def body_height(self) -> float:
+        if self.link_card:
+            return LINK_CARD_H
         if self.compact:
             return 24.0
         if self.button:
@@ -493,25 +511,9 @@ class NodeItem(QGraphicsObject):
         if self._table_proxy is not None:
             self._table_proxy.setGeometry(self._table_proxy_rect())
 
-    def _table_data(self) -> dict:
-        """The grid as {"columns": [...], "rows": [[...], ...]}, tolerant of
-        hand-edited JSON (dropped/short rows, missing keys)."""
-        import json
-        raw = self.node.params.get("data", "")
-        try:
-            parsed = json.loads(raw) if raw else {}
-        except (TypeError, ValueError):
-            parsed = {}
-        columns = [str(c) for c in (parsed.get("columns") or ["A", "B"])]
-        raw_rows = parsed.get("rows") or [["" for _ in columns]]
-        rows = []
-        for row in raw_rows:
-            row = [str(v) if v is not None else "" for v in row][:len(columns)]
-            row += [""] * (len(columns) - len(row))
-            rows.append(row)
-        return {"columns": columns, "rows": rows}
-
     def _build_table_widget(self) -> None:
+        from ..spreadsheet import SheetModel, SpreadsheetView
+
         host = QWidget()
         layout = QVBoxLayout(host)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -525,18 +527,25 @@ class NodeItem(QGraphicsObject):
         del_row = QToolButton(text="-Row")
         add_col = QToolButton(text="+Col")
         del_col = QToolButton(text="-Col")
-        for button in (add_row, del_row, add_col, del_col):
+        fit = QToolButton(text="Fit")
+        fit.setToolTip("Auto-size columns to their content")
+        expand = QToolButton(text="⛶")
+        expand.setToolTip("Open the full spreadsheet editor")
+        for button in (add_row, del_row, add_col, del_col, fit):
             button.setAutoRaise(True)
             trow.addWidget(button)
         trow.addStretch(1)
+        expand.setAutoRaise(True)
+        trow.addWidget(expand)
         layout.addWidget(toolbar)
 
-        grid = QTableWidget()
-        grid.horizontalHeader().setDefaultSectionSize(72)
-        grid.verticalHeader().setDefaultSectionSize(22)
+        grid = SpreadsheetView()
+        # parent the model to the view so C++ destruction stays ordered
+        model = SheetModel(self.node.params.get("data"), parent=grid)
+        grid.setModel(model)
         grid.verticalHeader().setFixedWidth(28)
         grid.setStyleSheet(
-            f"QTableWidget {{ background: {theme.NODE_BODY.name()};"
+            f"QTableView {{ background: {theme.NODE_BODY.name()};"
             f" color: {theme.NODE_TEXT.name()}; border: none;"
             f" gridline-color: {theme.NODE_BORDER.name()}; font-size: 8.5pt; }}"
             f"QHeaderView::section {{ background: {theme.NODE_HEADER.name()};"
@@ -548,54 +557,47 @@ class NodeItem(QGraphicsObject):
         del_row.clicked.connect(self._table_remove_row)
         add_col.clicked.connect(self._table_add_column)
         del_col.clicked.connect(self._table_remove_column)
-        grid.itemChanged.connect(self._on_table_item_changed)
-        grid.horizontalHeader().sectionDoubleClicked.connect(
-            self._table_rename_column)
+        fit.clicked.connect(lambda: grid.autosize_columns())
+        expand.clicked.connect(self._open_table_editor)
+        model.sheet_edited.connect(self._commit_table_data)
 
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(host)
         self._table_proxy = proxy
         self._table_widget = grid
-        self._sync_table_widget()
+        self._table_model = model
+        self._table_buttons = (add_row, del_row, add_col, del_col)
+        self._table_expand = expand
         self._layout_table_proxy()
 
     def _sync_table_widget(self) -> None:
-        grid = self._table_widget
-        if grid is None:
-            return
-        self._syncing_table = True
-        try:
-            data = self._table_data()
-            columns, rows = data["columns"], data["rows"]
-            grid.setRowCount(len(rows))
-            grid.setColumnCount(len(columns))
-            grid.setHorizontalHeaderLabels(columns)
-            for r, row in enumerate(rows):
-                for c, value in enumerate(row):
-                    item = grid.item(r, c)
-                    if item is None:
-                        item = QTableWidgetItem()
-                        grid.setItem(r, c, item)
-                    if item.text() != value:
-                        item.setText(value)
-        finally:
-            self._syncing_table = False
+        """Pull externally-changed data (undo/redo, Properties edit) into
+        the grid; SheetModel skips the reset when nothing changed."""
+        if self._table_model is not None:
+            self._table_model.set_sheet(self.node.params.get("data"))
 
-    def _current_grid(self) -> dict:
-        grid = self._table_widget
-        columns = [
-            grid.horizontalHeaderItem(c).text()
-            if grid.horizontalHeaderItem(c) is not None else f"col{c}"
-            for c in range(grid.columnCount())
-        ]
-        rows = []
-        for r in range(grid.rowCount()):
-            row = []
-            for c in range(grid.columnCount()):
-                item = grid.item(r, c)
-                row.append(item.text() if item is not None else "")
-            rows.append(row)
-        return {"columns": columns, "rows": rows}
+    def _table_input_connected(self) -> bool:
+        scene = self.scene()
+        return (scene is not None
+                and scene.graph.input_connection(self.node.id, "table")
+                is not None)
+
+    def refresh_table_link(self) -> None:
+        """The table's input was connected or disconnected. The grid stays
+        editable either way (a run refreshes input-owned columns; the
+        user's own columns survive) — on disconnect, fall back to the
+        stored cells."""
+        if not self.table or self._table_model is None:
+            return
+        if not self._table_input_connected():
+            self._sync_table_widget()
+
+    def show_linked_sheet(self, sheet_dict: dict) -> None:
+        """Display the merged result of a linked run (input columns
+        refreshed, user columns carried over) — editable; the first edit
+        commits this merged state to the node."""
+        if self._table_model is not None and sheet_dict:
+            self._table_model.set_sheet(sheet_dict)
 
     def _commit_table_data(self, data: dict) -> None:
         import json
@@ -606,50 +608,44 @@ class NodeItem(QGraphicsObject):
         new_json = json.dumps(data)
         if new_json == self.node.params.get("data"):
             return
+        # merge=False: every cell edit/paste/structural op is its own undo
+        # step — one Ctrl+Z reverts one edit, not the whole session
         scene.undo_stack.push(SetParamCommand(
-            scene.graph, self.node.id, "data", new_json))
-
-    def _on_table_item_changed(self, _item) -> None:
-        if self._syncing_table:
-            return
-        self._commit_table_data(self._current_grid())
+            scene.graph, self.node.id, "data", new_json, merge=False))
 
     def _table_add_row(self) -> None:
-        data = self._table_data()
-        data["rows"].append(["" for _ in data["columns"]])
-        self._commit_table_data(data)
+        model = self._table_model
+        model.insert_rows_at(model.rowCount())
 
     def _table_remove_row(self) -> None:
-        data = self._table_data()
-        if len(data["rows"]) > 1:
-            data["rows"].pop()
-        self._commit_table_data(data)
+        model = self._table_model
+        model.remove_rows_at([model.rowCount() - 1])
 
     def _table_add_column(self) -> None:
-        data = self._table_data()
-        data["columns"].append(self._next_column_name(data["columns"]))
-        for row in data["rows"]:
-            row.append("")
-        self._commit_table_data(data)
+        model = self._table_model
+        model.insert_columns_at(model.columnCount())
 
     def _table_remove_column(self) -> None:
-        data = self._table_data()
-        if len(data["columns"]) > 1:
-            data["columns"].pop()
-            for row in data["rows"]:
-                row.pop()
-        self._commit_table_data(data)
+        model = self._table_model
+        model.remove_columns_at([model.columnCount() - 1])
 
-    def _table_rename_column(self, index: int) -> None:
-        data = self._table_data()
-        if index >= len(data["columns"]):
-            return
-        current = data["columns"][index]
-        name, ok = QInputDialog.getText(
-            None, "Rename column", "Column name", text=current)
-        if ok and name and name != current:
-            data["columns"][index] = name
-            self._commit_table_data(data)
+    def _open_table_editor(self) -> None:
+        from ..spreadsheet import SheetEditorDialog
+
+        proxy = self._table_proxy
+        if proxy is not None:
+            proxy.setEnabled(False)   # no concurrent card edits underneath
+        try:
+            dialog = SheetEditorDialog(
+                self.node.params.get("data"),
+                title=f"Edit Table — {self.node.label}")
+            dialog.on_apply = self._commit_table_data
+            if dialog.exec():
+                self._commit_table_data(dialog.sheet_dict())
+        finally:
+            if proxy is not None:
+                proxy.setEnabled(True)
+            self._sync_table_widget()
 
     # -------------------------------------------------------------- figure
 
@@ -987,6 +983,89 @@ class NodeItem(QGraphicsObject):
         font.setPointSizeF(REROUTE_LABEL_FONT_SIZE)
         return font
 
+    # ------------------------------------------------------------ link cards
+
+    @staticmethod
+    def _link_card_font() -> QFont:
+        font = QFont()
+        font.setPointSizeF(LINK_CARD_FONT_SIZE)
+        return font
+
+    def _link_card_text(self) -> str:
+        """What a Goto/From card shows: the link's name. A From reads it from
+        the Goto it points at, so renaming one end renames both."""
+        if self.goto_card:
+            return link_label(self.node)
+        graph = getattr(self.scene(), "graph", None)
+        if graph is None:
+            return link_label(self.node)
+        if not source_id(self.node):
+            return "pick a Goto"
+        target = graph.nodes.get(source_id(self.node))
+        return link_label(target) if target is not None else "missing Goto"
+
+    def _link_card_width(self) -> float:
+        text = self._link_card_text()
+        width = QFontMetrics(self._link_card_font()).horizontalAdvance(text)
+        return min(LINK_CARD_MAX_W,
+                   max(LINK_CARD_MIN_W, width + LINK_CARD_PAD_X * 2 + 12.0))
+
+    def refresh_link_card(self) -> None:
+        """Re-measure and repaint after the link name, or the link itself,
+        changed. Cheap enough to call for every link card on the canvas."""
+        if not self.link_card:
+            return
+        width = self._link_card_width()
+        if width != self.width:
+            self.prepareGeometryChange()
+            self.width = width
+            self._ports_follow_width()
+        self._refresh_tooltip()
+        self.update()
+
+    def set_link_highlight(self, on: bool) -> None:
+        """Glow this card while its partner at the other end is selected —
+        with no wire drawn, this is the only way to see a link on the canvas."""
+        if self.link_card and on != bool(self._link_partners):
+            self._link_partners = {"on"} if on else set()
+            self.update()
+
+    def _paint_link_card(self, painter: QPainter) -> None:
+        rect = QRectF(0, 0, self.width, self.body_height)
+        painter.setRenderHint(QPainter.Antialiasing)
+        if self.isSelected():
+            pen = QPen(theme.SELECTION_OUTLINE, 2.0)
+        elif self._link_partners:
+            pen = QPen(theme.SELECTION_OUTLINE, 1.4, Qt.DashLine)
+        elif self.node.status == NodeStatus.ERROR:
+            # a broken link has no wire to look wrong: say it on the card
+            pen = QPen(theme.status_color(NodeStatus.ERROR), 1.6)
+        elif self.broken:
+            pen = QPen(theme.NODE_BORDER_BROKEN, 1.4)
+        else:
+            pen = QPen(theme.NODE_BORDER, 1.2)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(self._header_color()))
+        radius = self.body_height / 2
+        painter.drawRoundedRect(rect, radius, radius)
+
+        # chevron on the side the invisible link leaves/enters from
+        painter.setFont(self._link_card_font())
+        painter.setPen(QPen(theme.NODE_SUBTEXT))
+        chevron = QRectF(self.width - 14.0, 0, 12.0, self.body_height) \
+            if self.goto_card else QRectF(2.0, 0, 12.0, self.body_height)
+        painter.drawText(chevron, Qt.AlignCenter, "»")
+
+        text_rect = rect.adjusted(LINK_CARD_PAD_X + (0 if self.goto_card else 6),
+                                  0,
+                                  -LINK_CARD_PAD_X - (6 if self.goto_card else 0),
+                                  0)
+        painter.setPen(QPen(theme.NODE_TEXT))
+        metrics = QFontMetrics(self._link_card_font())
+        painter.drawText(text_rect, Qt.AlignCenter,
+                         metrics.elidedText(self._link_card_text(), Qt.ElideRight,
+                                            int(text_rect.width())))
+
     def rebuild_ports(self) -> None:
         """(Re)create port items from the current spec — called at build time
         and again whenever the node's code changes its ports."""
@@ -998,8 +1077,12 @@ class NodeItem(QGraphicsObject):
         self.output_ports.clear()
         self.prepareGeometryChange()
         for spec in self.node.spec.inputs:
+            if self.from_card:
+                continue  # the link end: real in the spec, never on the canvas
             self.input_ports[spec.name] = PortItem(self, spec)
         for spec in self.node.spec.outputs:
+            if self.goto_card:
+                continue
             self.output_ports[spec.name] = PortItem(self, spec)
         if self._flat:
             for port in (*self.input_ports.values(), *self.output_ports.values()):
@@ -1011,7 +1094,7 @@ class NodeItem(QGraphicsObject):
         """Pin port items to the current geometry. Cards resize at runtime,
         so this runs again on every width change — output ports (and the
         wires on them) must ride the right edge, not stay where they were."""
-        if self.compact:
+        if self.compact or self.link_card:
             for port in self.input_ports.values():
                 port.setPos(0, self.body_height / 2)
             for port in self.output_ports.values():
@@ -1136,6 +1219,12 @@ class NodeItem(QGraphicsObject):
     def paint(self, painter: QPainter,
               option: QStyleOptionGraphicsItem, widget=None) -> None:
         lod = option.levelOfDetailFromTransform(painter.worldTransform())
+        if self.link_card:
+            if self._flat:
+                self._paint_flat(painter)
+            else:
+                self._paint_link_card(painter)
+            return
         if self.compact:
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
@@ -1684,6 +1773,9 @@ class NodeItem(QGraphicsObject):
         the node's own description (currently only surfaced for reroutes)."""
         if self.node.status == NodeStatus.ERROR:
             self.setToolTip(self.node.status_message)
+        elif self.link_card and not self.node.description:
+            kind = "Goto" if self.goto_card else "From"
+            self.setToolTip(f"{kind}: {self._link_card_text()}")
         else:
             self.setToolTip(self.node.description)
 
