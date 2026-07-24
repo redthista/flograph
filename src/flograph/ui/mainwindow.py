@@ -239,8 +239,9 @@ class MainWindow(QMainWindow):
         every float/reset cycle. Re-docking each one explicitly has no such
         problem, and keeps the default readable as code."""
         host = self._dock_host
-        # a floated or closed dock has to come home before anything is
-        # arranged around it
+        # a floated or closed dock has to come home, and be visible, before
+        # anything can be arranged around it -- the page rule below puts them
+        # back out of sight if that is where they belong
         for dock in self._docks:
             dock.setFloating(False)
             dock.setVisible(True)
@@ -255,6 +256,20 @@ class MainWindow(QMainWindow):
         host.tabifyDockWidget(self.inspector_dock, self.log_dock)
         self.inspector_dock.raise_()
         self._apply_default_dock_sizes()
+        self._apply_model_dock_visibility(self.page_bar.current_page_id())
+
+    def _apply_model_dock_visibility(self, page_id) -> None:
+        """Show the model-only docks on the model page and hide them
+        everywhere else -- a dashboard page has no node selection to
+        configure, so it gets the screen to itself.
+
+        One rule in one place, because a layout reset has to agree with it:
+        showing all five panels unconditionally drops the Node Library,
+        Properties, Code, Inspector and Log on top of whatever dashboard the
+        user is looking at."""
+        is_model_page = page_id is None
+        for dock in self._docks:
+            dock.setVisible(is_model_page)
 
     def _apply_default_dock_sizes(self) -> None:
         """Split resizeDocks out because it only bites once the window has
@@ -876,12 +891,7 @@ class MainWindow(QMainWindow):
             widget if widget is not None else self.view)
         # dashboard/report pages have no node selection to configure, so free
         # up the screen by hiding the model-only docks
-        is_model_page = page_id is None
-        self.library_dock.setVisible(is_model_page)
-        self.properties_dock.setVisible(is_model_page)
-        self.editor_dock.setVisible(is_model_page)
-        self.inspector_dock.setVisible(is_model_page)
-        self.log_dock.setVisible(is_model_page)
+        self._apply_model_dock_visibility(page_id)
         self._refresh_zoom_indicator()
         if self._project_path and not self._restoring_pages:
             self.settings.setValue(f"active_page/{self._project_path}",

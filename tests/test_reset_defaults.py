@@ -181,6 +181,29 @@ class TestResetWindowLayout:
         window.reset_window_layout()
         assert (window.width(), window.height()) == mod.DEFAULT_WINDOW_SIZE
 
+    def test_it_leaves_a_dashboard_page_alone(self, window):
+        """A dashboard page hides the model-only docks to get the screen to
+        itself. A reset that shows all five unconditionally drops the Node
+        Library, Properties, Code, Inspector and Log on top of the board the
+        user is looking at."""
+        from flograph.core import Page
+        from flograph.ui.commands import AddPageCommand
+        window.undo_stack.push(
+            AddPageCommand(window.graph, Page(id="p1", title="Board")))
+        window.page_bar.select_page("p1")
+        assert not window.library_dock.isVisibleTo(window._dock_host)
+
+        window.reset_window_layout()
+        for dock in window._docks:
+            assert not dock.isVisibleTo(window._dock_host), dock.objectName()
+
+    def test_the_model_page_still_gets_its_docks_back(self, window):
+        for dock in window._docks:
+            dock.setVisible(False)
+        assert window.page_bar.current_page_id() is None
+        window.reset_window_layout()
+        assert window.library_dock.isVisibleTo(window._dock_host)
+
     def test_the_saved_layout_is_reset_too(self, window):
         """Otherwise the old arrangement comes straight back on relaunch."""
         window.settings.setValue("window_geometry", window.saveGeometry())
