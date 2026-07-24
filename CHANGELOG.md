@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8
+
+| Category | Change | Details |
+| --- | --- | --- |
+| Feature | Reorderable dashboard page tabs | Drag a page tab along the bar to reorder the pages; the new order is saved with the project and is a single undoable step. **Model** stays pinned first and the **+** button pinned last, so neither can be dragged away or dropped past. Undoing a page delete now also puts the page back in its original position rather than at the end. |
+
 ## 0.1.7
 
 | Category | Change | Details |
@@ -16,7 +22,6 @@
 | Bug Fix | Canvas minimap was hidden | The minimap was still created, but the opt-in GPU viewport swap landed a new viewport widget on top of it in stacking order, so it looked lost with no way back. The z-order is fixed, and the minimap got its own show/hide toggle in **Settings > Canvas**. |
 | Example | Folium Map | New bundled example (File > Open Example) demonstrating a web-view node that returns a raw `folium.Map` object directly — showing off the 0.1.7 fix that lets the webview card unwrap folium/branca objects without calling `get_root().render()` by hand. |
 | Feature | Configurable page bar position | Model/page tab strip can be pinned to the top or bottom of the window (Settings > General), persisted across sessions. |
-| Feature | Reorderable dashboard page tabs | Drag a page tab along the bar to reorder the pages; the new order is saved with the project and is a single undoable step. **Model** stays pinned first and the **+** button pinned last, so neither can be dragged away or dropped past. Undoing a page delete now also puts the page back in its original position rather than at the end. |
 | Feature | Dashboard Visuals panel toggle | Collapse/expand the Visuals panel on dashboard pages to give the canvas full width when it's not needed. |
 | Feature | Disable SSL verification for AI requests | New "Verify SSL certificates" checkbox in AI Assistant Settings, for local/proxied LLM servers with self-signed certs. |
 | Feature | Drag-and-drop file readers | Dropping a `.csv`/`.xlsx`/`.xls`/`.xlsm`/`.parquet` file from the OS file explorer onto the canvas creates the matching reader node with its path pre-filled. |
