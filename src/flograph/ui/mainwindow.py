@@ -32,7 +32,7 @@ from flograph.paths import user_nodes_dir
 from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
-    ReorderPagesCommand,
+    ReorderPagesCommand, SetPageColorCommand,
     SetLabelCommand, SetParamCommand, SetPreviewEnabledCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
@@ -738,6 +738,7 @@ class MainWindow(QMainWindow):
         self.page_bar.delete_page_requested.connect(self._delete_page)
         self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
         self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
+        self.page_bar.recolor_page_requested.connect(self._recolor_page)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
 
@@ -767,6 +768,7 @@ class MainWindow(QMainWindow):
 
     def _on_page_changed(self, page: Page) -> None:
         self.page_bar.set_page_title(page.id, page.title)
+        self.page_bar.set_page_color(page.id, page.color)
 
     def _on_pages_reordered(self, order: list[str]) -> None:
         self.page_bar.set_page_order(order)
@@ -804,6 +806,11 @@ class MainWindow(QMainWindow):
         page = self.graph.pages.get(page_id)
         if page is not None and title != page.title:
             self.undo_stack.push(RenamePageCommand(self.graph, page_id, title))
+
+    def _recolor_page(self, page_id: str, color) -> None:
+        page = self.graph.pages.get(page_id)
+        if page is not None and page.color != color:
+            self.undo_stack.push(SetPageColorCommand(self.graph, page_id, color))
 
     def _reorder_pages(self, order: list[str]) -> None:
         current = list(self.graph.pages)
