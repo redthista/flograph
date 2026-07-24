@@ -91,7 +91,10 @@ class Minimap(QWidget):
             if item.node.status.value != "idle":
                 brush = theme.status_color(item.node.status)
             elif item.node.color:
-                brush = QColor(item.node.color)
+                # same tint as the card header, so a node reads as the same
+                # colour in the minimap as it does on the canvas
+                brush = theme.tint(theme.NODE_HEADER, item.node.color,
+                                   theme.TINT_STRONG)
             else:
                 brush = theme.NODE_HEADER.lighter(150)
             painter.setBrush(brush)

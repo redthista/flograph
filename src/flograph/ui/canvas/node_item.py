@@ -1189,19 +1189,25 @@ class NodeItem(QGraphicsObject):
 
     def _header_color(self) -> QColor:
         """Effective header-strip colour: the broken warning red wins over the
-        user's custom colour (lightened a touch — the theme's header is a
-        lighter shade of its body too), which wins over the theme default."""
+        user's custom colour, which wins over the theme default.
+
+        The custom colour is tinted over the theme header rather than used
+        raw, so it stays the lighter shade of the body the theme intends and
+        picker colours arrive muted — the treatment frames and page tabs use."""
         if self.broken:
             return theme.NODE_HEADER_BROKEN
         if self.node.color:
-            return QColor(self.node.color).lighter(120)
+            return theme.tint(theme.NODE_HEADER, self.node.color,
+                              theme.TINT_STRONG)
         return theme.NODE_HEADER
 
     def _body_color(self) -> QColor:
-        """Effective card-body colour: the user's custom colour, or the theme
-        default. Broken nodes keep the plain body — header/border signal it."""
+        """Effective card-body colour: the user's custom colour tinted over
+        the theme body, or the theme default. Broken nodes keep the plain
+        body — header/border signal it."""
         if self.node.color:
-            return QColor(self.node.color)
+            return theme.tint(theme.NODE_BODY, self.node.color,
+                              theme.TINT_SOFT)
         return theme.NODE_BODY
 
     def _paint_flat(self, painter: QPainter) -> None:
@@ -1211,8 +1217,7 @@ class NodeItem(QGraphicsObject):
         painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.5) if self.isSelected()
                        else Qt.NoPen)
         fill = (theme.NODE_HEADER_BROKEN if self.broken
-                else QColor(self.node.color) if self.node.color
-                else theme.NODE_BODY)
+                else self._body_color())
         painter.setBrush(QBrush(fill))
         painter.drawRect(rect)
 
@@ -1367,8 +1372,9 @@ class NodeItem(QGraphicsObject):
         painter.setRenderHint(QPainter.Antialiasing)
         body = QPainterPath()
         body.addRoundedRect(rect, 10, 10)
-        painter.fillPath(body, QColor(self.node.color) if self.node.color
-                         else theme.BUTTON_ACCENT)
+        painter.fillPath(body, theme.tint(theme.BUTTON_ACCENT, self.node.color,
+                                          theme.TINT_STRONG)
+                         if self.node.color else theme.BUTTON_ACCENT)
         outline = QPen(theme.SELECTION_OUTLINE if self.isSelected()
                        else theme.NODE_BORDER,
                        2.0 if self.isSelected() else 1.2)
@@ -1477,7 +1483,7 @@ class NodeItem(QGraphicsObject):
     def _paint_note(self, painter: QPainter) -> None:
         rect = QRectF(0, 0, self.width, self.body_height)
         painter.setRenderHint(QPainter.Antialiasing)
-        body = QColor(self.node.color) if self.node.color else QColor(theme.NODE_BODY)
+        body = QColor(self._body_color())
         body.setAlphaF(0.75)
         painter.setBrush(QBrush(body))
         painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()

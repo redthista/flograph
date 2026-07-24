@@ -26,12 +26,13 @@ from .. import theme
 _DELAY = 500
 _menu_timer: Optional[QTimer] = None
 
-# Tab tinting, following FrameItem: the colour is never painted flat, it is
-# laid over the themed tab at low alpha so anything the colour picker returns
-# comes out muted rather than garish. The selected tab gets the stronger of
-# the two so selection still reads at a glance.
-TAB_TINT_SELECTED = 0.55
-TAB_TINT_NORMAL = 0.30
+# Tab tinting: the colour is never painted flat, it is laid over the themed
+# tab so anything the colour picker returns comes out muted rather than
+# garish. Strengths live in theme so tabs and node cards mute by the same
+# amount, and are read at paint time so Settings > Canvas reaches them
+# without a restart; the selected tab takes the stronger one so selection
+# still reads at a glance. Composited by the painter rather than by
+# theme.tint() because the base here is drawn by the style, not by us.
 
 # tabData sentinel for the trailing "+" tab. Model's tabData stays None, so the
 # three kinds of tab are told apart by data alone — which survives reordering,
@@ -173,8 +174,8 @@ class PageTabBar(QTabBar):
             color = self._colors.get(self.tabData(i))
             if color:
                 tint = QColor(color)
-                tint.setAlphaF(TAB_TINT_SELECTED if i == self.currentIndex()
-                               else TAB_TINT_NORMAL)
+                tint.setAlphaF(theme.TINT_STRONG if i == self.currentIndex()
+                               else theme.TINT_SOFT)
                 painter.fillRect(self.tabRect(i), tint)
             painter.drawControl(QStyle.CE_TabBarTabLabel, option)
 

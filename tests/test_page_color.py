@@ -10,9 +10,8 @@ from flograph.ui.commands import (
     AddPageCommand, DuplicatePageCommand, RemovePageCommand,
     SetPageColorCommand,
 )
-from flograph.ui.dashboard.page_bar import (
-    TAB_TINT_NORMAL, TAB_TINT_SELECTED, PageTabBar,
-)
+from flograph.ui import theme
+from flograph.ui.dashboard.page_bar import PageTabBar
 from flograph.ui.mainwindow import MainWindow
 
 RED = "#c04040"
@@ -154,7 +153,7 @@ class TestTabPainting:
         unselected = tab_pixel(bar, "p1")
         bar.select_page("p1")
         selected = tab_pixel(bar, "p1")
-        assert TAB_TINT_SELECTED > TAB_TINT_NORMAL
+        assert theme.TINT_STRONG > theme.TINT_SOFT
         assert redness(selected) > redness(unselected)
 
     def test_reset_returns_to_the_theme_background(self, bar):
