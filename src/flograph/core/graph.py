@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 
 from . import links
 from .datatypes import can_connect
@@ -450,6 +450,16 @@ class Graph:
             page.title = title
         self.events.page_changed.emit(page)
         return page
+
+    def reorder_pages(self, order: Sequence[str]) -> list[str]:
+        """Rearrange pages into `order`. Page order is the tab order and is
+        what serialization writes out, so this is the whole feature."""
+        if set(order) != set(self.pages) or len(order) != len(self.pages):
+            raise GraphError("reorder_pages needs every page id exactly once")
+        self.pages = {page_id: self.pages[page_id] for page_id in order}
+        result = list(self.pages)
+        self.events.pages_reordered.emit(result)
+        return result
 
     def add_tile(self, page_id: str, tile: Tile) -> Tile:
         # no node_id validation: dangling refs are legal (placeholder in UI)

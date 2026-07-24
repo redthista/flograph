@@ -54,6 +54,7 @@ class GraphEvents:
         self.page_added = Event()      # (page: Page)
         self.page_removed = Event()    # (page_id: str)
         self.page_changed = Event()    # (page: Page)
+        self.pages_reordered = Event()  # (order: list[str]) — page ids, new order
         self.tile_added = Event()      # (page_id: str, tile: Tile)
         self.tile_removed = Event()    # (page_id: str, tile_id: str)
         self.tile_changed = Event()    # (page_id: str, tile: Tile)

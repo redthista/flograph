@@ -32,6 +32,7 @@ from flograph.paths import user_nodes_dir
 from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
+    ReorderPagesCommand,
     SetLabelCommand, SetParamCommand, SetPreviewEnabledCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
@@ -731,10 +732,12 @@ class MainWindow(QMainWindow):
         events.page_added.connect(self._on_page_added)
         events.page_removed.connect(self._on_page_removed)
         events.page_changed.connect(self._on_page_changed)
+        events.pages_reordered.connect(self._on_pages_reordered)
         self.page_bar.add_page_requested.connect(self._add_page)
         self.page_bar.rename_page_requested.connect(self._rename_page)
         self.page_bar.delete_page_requested.connect(self._delete_page)
         self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
+        self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
 
@@ -764,6 +767,9 @@ class MainWindow(QMainWindow):
 
     def _on_page_changed(self, page: Page) -> None:
         self.page_bar.set_page_title(page.id, page.title)
+
+    def _on_pages_reordered(self, order: list[str]) -> None:
+        self.page_bar.set_page_order(order)
 
     def _on_current_page_changed(self, page_id) -> None:
         widget = self._dashboard_pages.get(page_id) if page_id else None
@@ -798,6 +804,14 @@ class MainWindow(QMainWindow):
         page = self.graph.pages.get(page_id)
         if page is not None and title != page.title:
             self.undo_stack.push(RenamePageCommand(self.graph, page_id, title))
+
+    def _reorder_pages(self, order: list[str]) -> None:
+        current = list(self.graph.pages)
+        if sorted(order) != sorted(current):
+            self.page_bar.set_page_order(current)  # bar drifted; re-sync from graph
+            return
+        if order != current:
+            self.undo_stack.push(ReorderPagesCommand(self.graph, order))
 
     def _duplicate_page(self, page_id: str) -> None:
         self.undo_stack.push(DuplicatePageCommand(self.graph, page_id))
