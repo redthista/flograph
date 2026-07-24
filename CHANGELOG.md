@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | Dashboard page tab colours | Right-click a page tab for **Change colour…** / **Reset colour**, saved with the project and undoable. The colour is laid over the themed tab at low alpha rather than painted flat — the same muting frame headers use — so picker colours come out muted instead of garish, and the selected tab carries a stronger tint so selection still reads. Duplicating a page carries its colour to the copy. |
 | Feature | Reorderable dashboard page tabs | Drag a page tab along the bar to reorder the pages; the new order is saved with the project and is a single undoable step. **Model** stays pinned first and the **+** button pinned last, so neither can be dragged away or dropped past. Undoing a page delete now also puts the page back in its original position rather than at the end. |
 
 ## 0.1.7

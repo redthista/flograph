@@ -57,6 +57,7 @@ class Page:
     id: str
     title: str = "Page"
     tiles: dict[str, Tile] = field(default_factory=dict)
+    color: Optional[str] = None   # None = the theme's default tab colour
 
 
 class Graph:
@@ -448,6 +449,14 @@ class Graph:
         page = self.page(page_id)
         if title is not None:
             page.title = title
+        self.events.page_changed.emit(page)
+        return page
+
+    def set_page_color(self, page_id: str, color: Optional[str]) -> Page:
+        """Separate from update_page so that None can mean "reset to the
+        theme default" rather than "leave unchanged" (mirrors set_color)."""
+        page = self.page(page_id)
+        page.color = color or None
         self.events.page_changed.emit(page)
         return page
 
