@@ -27,6 +27,32 @@ SELECTION_OUTLINE = QColor("#60a5fa")
 FRAME_TITLE = QColor("#d1d5db")
 BUTTON_ACCENT = QColor("#7c6cf6")
 
+# ------------------------------------------------------------------- tinting
+#
+# User-picked colours are never painted flat. A colour straight from the
+# picker is fully saturated and fights the dark theme; laid over the themed
+# surface at low alpha it keeps its hue but takes the theme's value, which is
+# why frames have always looked calm. These are the canonical strengths —
+# SOFT for large surfaces (a card body, an unselected tab), STRONG for the
+# smaller strip that has to stand out from it (a header, the selected tab).
+
+TINT_SOFT = 0.30
+TINT_STRONG = 0.55
+
+
+def tint(base: QColor, color, alpha: float) -> QColor:
+    """`color` laid over `base` at `alpha`, as an opaque colour.
+
+    Composited here rather than by painting translucently so callers get a
+    concrete colour they can hand to a brush, gradient or stylesheet.
+    """
+    over = QColor(color)
+    return QColor(
+        round(over.red() * alpha + base.red() * (1 - alpha)),
+        round(over.green() * alpha + base.green() * (1 - alpha)),
+        round(over.blue() * alpha + base.blue() * (1 - alpha)),
+    )
+
 STATUS_COLORS: dict[NodeStatus, QColor] = {
     NodeStatus.IDLE: QColor("#6b7280"),
     NodeStatus.QUEUED: QColor("#eab308"),

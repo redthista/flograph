@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| UI | Node colours are muted like frames | A custom node colour is now laid over the theme's card colours instead of painted raw, so picker colours come out muted rather than garish — the treatment frame headers and page tabs already use. Applies everywhere a node's colour shows: card body and header, the zoomed-out simplified card, note and Goto/From cards, and the minimap. The stored colour is unchanged, so existing projects keep their colours and just render calmer, and the colour picker still reopens on the colour you chose. |
 | Feature | Dashboard page tab colours | Right-click a page tab for **Change colour…** / **Reset colour**, saved with the project and undoable. The colour is laid over the themed tab at low alpha rather than painted flat — the same muting frame headers use — so picker colours come out muted instead of garish, and the selected tab carries a stronger tint so selection still reads. Duplicating a page carries its colour to the copy. |
 | Feature | Reorderable dashboard page tabs | Drag a page tab along the bar to reorder the pages; the new order is saved with the project and is a single undoable step. **Model** stays pinned first and the **+** button pinned last, so neither can be dragged away or dropped past. Undoing a page delete now also puts the page back in its original position rather than at the end. |
 
