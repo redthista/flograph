@@ -202,6 +202,49 @@ class SettingsDialog(QDialog):
 
         minimap_check.toggled.connect(window.set_minimap_enabled)
 
+        layout.addSpacing(12)
+
+        layout.addWidget(QLabel("Custom colour strength"))
+        layout.addWidget(SettingsDialog._hint(
+            "Colours you pick for nodes, frames and dashboard page tabs are "
+            "laid over the theme rather than painted flat, so they come out "
+            "muted instead of garish. Raise these to let more of the picked "
+            "colour through; 100% paints it raw."))
+
+        soft_row = QHBoxLayout()
+        soft_row.addWidget(QLabel("Card body, unselected tab:"))
+        soft_spin = QSpinBox()
+        soft_spin.setObjectName("tint_soft_spinbox")
+        soft_spin.setRange(0, 100)
+        soft_spin.setSingleStep(5)
+        soft_spin.setSuffix("%")
+        soft_spin.setToolTip("Muting for large surfaces")
+        soft_spin.setValue(round(window.tint_soft * 100))
+        soft_row.addWidget(soft_spin)
+        soft_row.addStretch(1)
+        layout.addLayout(soft_row)
+
+        strong_row = QHBoxLayout()
+        strong_row.addWidget(QLabel("Node header, selected tab:"))
+        strong_spin = QSpinBox()
+        strong_spin.setObjectName("tint_strong_spinbox")
+        strong_spin.setRange(0, 100)
+        strong_spin.setSingleStep(5)
+        strong_spin.setSuffix("%")
+        strong_spin.setToolTip(
+            "Muting for the smaller strip that has to stand out from the body")
+        strong_spin.setValue(round(window.tint_strong * 100))
+        strong_row.addWidget(strong_spin)
+        strong_row.addStretch(1)
+        layout.addLayout(strong_row)
+
+        def _push_tints() -> None:
+            window.set_tints(soft_spin.value() / 100.0,
+                             strong_spin.value() / 100.0)
+
+        soft_spin.valueChanged.connect(lambda _value: _push_tints())
+        strong_spin.valueChanged.connect(lambda _value: _push_tints())
+
         layout.addStretch(1)
         return page
 

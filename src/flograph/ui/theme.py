@@ -35,9 +35,24 @@ BUTTON_ACCENT = QColor("#7c6cf6")
 # why frames have always looked calm. These are the canonical strengths —
 # SOFT for large surfaces (a card body, an unselected tab), STRONG for the
 # smaller strip that has to stand out from it (a header, the selected tab).
+#
+# How muted is a matter of taste, so Settings > Canvas can retune both. The
+# current values are module state that painting code must read at paint time
+# (theme.TINT_SOFT, never a module-level copy taken at import) — otherwise a
+# settings change won't reach it until restart.
 
-TINT_SOFT = 0.30
-TINT_STRONG = 0.55
+DEFAULT_TINT_SOFT = 0.30
+DEFAULT_TINT_STRONG = 0.55
+
+TINT_SOFT = DEFAULT_TINT_SOFT
+TINT_STRONG = DEFAULT_TINT_STRONG
+
+
+def set_tints(soft: float, strong: float) -> None:
+    """Retune the muting. Callers repaint; this only moves the numbers."""
+    global TINT_SOFT, TINT_STRONG
+    TINT_SOFT = max(0.0, min(1.0, soft))
+    TINT_STRONG = max(0.0, min(1.0, strong))
 
 
 def tint(base: QColor, color, alpha: float) -> QColor:

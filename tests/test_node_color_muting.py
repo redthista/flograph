@@ -123,10 +123,12 @@ class TestOtherSurfaces:
 
 
 class TestSharedWithTabs:
-    def test_tabs_and_nodes_mute_by_the_same_amount(self):
+    def test_tabs_read_the_shared_strengths_at_paint_time(self):
+        """A module-level copy taken at import would ignore a settings
+        change until restart, so the tab bar must not keep one."""
         from flograph.ui.dashboard import page_bar
-        assert page_bar.TAB_TINT_NORMAL == theme.TINT_SOFT
-        assert page_bar.TAB_TINT_SELECTED == theme.TINT_STRONG
+        assert not hasattr(page_bar, "TAB_TINT_NORMAL")
+        assert not hasattr(page_bar, "TAB_TINT_SELECTED")
 
 
 class TestStoredValueUnchanged:

@@ -53,6 +53,7 @@ from .inspector.inspector_dock import InspectorPanel
 from .properties.params_panel import ParamsPanel
 from .resource_monitor import ResourceMonitorWidget
 from .settings_dialog import SettingsDialog
+from . import theme
 
 MAX_RECENT = 8
 PASTE_OFFSET = 30.0
@@ -105,6 +106,11 @@ class MainWindow(QMainWindow):
         self.minimap_enabled = self.settings.value(
             "canvas/minimap_enabled", True, type=bool)
         self.view.minimap.setVisible(self.minimap_enabled)
+        self.tint_soft = self.settings.value(
+            "canvas/tint_soft", theme.DEFAULT_TINT_SOFT, type=float)
+        self.tint_strong = self.settings.value(
+            "canvas/tint_strong", theme.DEFAULT_TINT_STRONG, type=float)
+        theme.set_tints(self.tint_soft, self.tint_strong)
 
         self._palette_popup = NodePalettePopup(registry, self)
         self._palette_scene_pos = QPointF()
@@ -393,6 +399,25 @@ class MainWindow(QMainWindow):
         self.minimap_enabled = enabled
         self.settings.setValue("canvas/minimap_enabled", enabled)
         self.view.minimap.setVisible(enabled)
+
+    def set_tints(self, soft: float, strong: float) -> None:
+        """Retune how strongly user-picked colours are muted against the
+        theme, and repaint everything that renders one."""
+        self.tint_soft, self.tint_strong = soft, strong
+        self.settings.setValue("canvas/tint_soft", soft)
+        self.settings.setValue("canvas/tint_strong", strong)
+        theme.set_tints(soft, strong)
+        self._repaint_tinted()
+
+    def _repaint_tinted(self) -> None:
+        """Node cards and the minimap live on the canvas; the page tabs are a
+        plain widget. Both have to be told, or half the window keeps the old
+        muting until something else happens to invalidate it."""
+        views = [self.view] + [page.view for page in self._dashboard_pages.values()]
+        for view in views:
+            view.viewport().update()
+        self.view.minimap.update()
+        self.page_bar.update()
 
     def _apply_snap_settings(self) -> None:
         """Push the current snap toggle/step onto every scene and repaint so
