@@ -78,6 +78,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                 {
                     "id": p.id,
                     "title": p.title,
+                    "color": p.color,
                     "tiles": [
                         {
                             "id": t.id,
@@ -161,6 +162,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
         page = graph.add_page(Page(
             id=entry["id"],
             title=entry.get("title", "Page"),
+            color=entry.get("color"),
         ))
         # tiles referencing missing nodes load as-is: the dashboard shows a
         # placeholder for them, mirroring the _broken_spec philosophy

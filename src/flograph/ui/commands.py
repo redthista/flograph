@@ -414,6 +414,22 @@ class RenamePageCommand(QUndoCommand):
         self._graph.update_page(self._page_id, title=self._old)
 
 
+class SetPageColorCommand(QUndoCommand):
+    def __init__(self, graph: Graph, page_id: str, color: Optional[str],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("change page colour", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).color
+        self._new = color
+
+    def redo(self) -> None:
+        self._graph.set_page_color(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_color(self._page_id, self._old)
+
+
 class ReorderPagesCommand(QUndoCommand):
     def __init__(self, graph: Graph, order: list[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -453,6 +469,7 @@ class DuplicatePageCommand(QUndoCommand):
             id=uuid.uuid4().hex,
             title=f"{src.title} (copy)",
             tiles=new_tiles,
+            color=src.color,
         )
         self._graph.add_page(self._new_page)
 

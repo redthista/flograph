@@ -13,13 +13,25 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal, QTimer
-from PySide6.QtGui import QAction, QContextMenuEvent
-from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QTabBar
+from PySide6.QtGui import QAction, QColor, QContextMenuEvent
+from PySide6.QtWidgets import (
+    QApplication, QColorDialog, QInputDialog, QMenu, QStyle, QStyleOptionTab,
+    QStylePainter, QTabBar,
+)
 
 from flograph.core import Page
 
+from .. import theme
+
 _DELAY = 500
 _menu_timer: Optional[QTimer] = None
+
+# Tab tinting, following FrameItem: the colour is never painted flat, it is
+# laid over the themed tab at low alpha so anything the colour picker returns
+# comes out muted rather than garish. The selected tab gets the stronger of
+# the two so selection still reads at a glance.
+TAB_TINT_SELECTED = 0.55
+TAB_TINT_NORMAL = 0.30
 
 # tabData sentinel for the trailing "+" tab. Model's tabData stays None, so the
 # three kinds of tab are told apart by data alone — which survives reordering,
@@ -42,6 +54,7 @@ class PageTabBar(QTabBar):
     delete_page_requested = Signal(str)        # page_id
     duplicate_page_requested = Signal(str)     # page_id to duplicate
     reorder_pages_requested = Signal(list)     # page_ids in their new order
+    recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
     current_page_changed = Signal(object)      # page_id, or None for Model
 
     def __init__(self, parent=None) -> None:
@@ -58,6 +71,7 @@ class PageTabBar(QTabBar):
         self._syncing = False
         self._drag_locked = False   # press landed on a tab that can't move
         self._reorder_pending = False
+        self._colors: dict[str, str] = {}   # page_id -> "#rrggbb"
         self.currentChanged.connect(self._on_current_changed)
         self.tabMoved.connect(self._on_tab_moved)
 
@@ -98,12 +112,24 @@ class PageTabBar(QTabBar):
         index = self.insertTab(self._plus_index(), page.title)
         self.setTabData(index, page.id)
         self._syncing = False
+        self.set_page_color(page.id, page.color)
+
+    def set_page_color(self, page_id: str, color: Optional[str]) -> None:
+        if color:
+            self._colors[page_id] = color
+        else:
+            self._colors.pop(page_id, None)
+        self.update()
+
+    def page_color(self, page_id: str) -> Optional[str]:
+        return self._colors.get(page_id)
 
     def remove_page_tab(self, page_id: str) -> None:
         index = self._index_of_page(page_id)
         if index < 0:
             return
         was_current = index == self.currentIndex()
+        self._colors.pop(page_id, None)
         self._syncing = True
         self.removeTab(index)
         if was_current or self.currentIndex() >= self._plus_index():
@@ -132,6 +158,25 @@ class PageTabBar(QTabBar):
         index = self._model_index() if page_id is None else self._index_of_page(page_id)
         if index >= 0:
             self.setCurrentIndex(index)
+
+    # ------------------------------------------------------------- painting
+
+    def paintEvent(self, event) -> None:
+        """Draw the themed tab, lay the page's colour over it at low alpha,
+        then the label on top — the shape and the label are separate style
+        elements, so the tint can sit between them without hiding the text."""
+        painter = QStylePainter(self)
+        for i in range(self.count()):
+            option = QStyleOptionTab()
+            self.initStyleOption(option, i)
+            painter.drawControl(QStyle.CE_TabBarTabShape, option)
+            color = self._colors.get(self.tabData(i))
+            if color:
+                tint = QColor(color)
+                tint.setAlphaF(TAB_TINT_SELECTED if i == self.currentIndex()
+                               else TAB_TINT_NORMAL)
+                painter.fillRect(self.tabRect(i), tint)
+            painter.drawControl(QStyle.CE_TabBarTabLabel, option)
 
     # ------------------------------------------------------------ gestures
 
@@ -201,13 +246,22 @@ class PageTabBar(QTabBar):
             menu = QMenu(self)
             rename_action = QAction("Rename", self)
             dup_action = QAction("Duplicate", self)
+            color_action = QAction("Change colour…", self)
+            reset_color_action = (QAction("Reset colour", self)
+                                  if page_id in self._colors else None)
             del_action = QAction("Delete", self)
             rename_action.triggered.connect(
                 lambda: self._prompt_rename(index, page_id))
             dup_action.triggered.connect(lambda: self.duplicate_page_requested.emit(page_id))
+            color_action.triggered.connect(lambda: self._prompt_color(page_id))
             del_action.triggered.connect(lambda: self.delete_page_requested.emit(page_id))
             menu.addAction(rename_action)
             menu.addAction(dup_action)
+            menu.addAction(color_action)
+            if reset_color_action is not None:
+                reset_color_action.triggered.connect(
+                    lambda: self.recolor_page_requested.emit(page_id, None))
+                menu.addAction(reset_color_action)
             menu.addAction(del_action)
             menu.exec(global_pos)
         finally:
@@ -217,6 +271,12 @@ class PageTabBar(QTabBar):
             _menu_timer.setSingleShot(True)
             _menu_timer.timeout.connect(lambda: app.removeEventFilter(_guard))
             _menu_timer.start(_DELAY)
+
+    def _prompt_color(self, page_id: str) -> None:
+        current = QColor(self._colors.get(page_id) or theme.NODE_HEADER)
+        color = QColorDialog.getColor(current, self, "Page colour")
+        if color.isValid():
+            self.recolor_page_requested.emit(page_id, color.name())
 
     def _prompt_rename(self, index: int, page_id: str) -> None:
         title, ok = QInputDialog.getText(
