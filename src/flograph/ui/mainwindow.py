@@ -1568,7 +1568,14 @@ class MainWindow(QMainWindow):
         closing one and not finding it again) is easy and has no undo, so
         this is the way back."""
         self._apply_default_dock_layout()
-        self.resize(*DEFAULT_WINDOW_SIZE)
+        # a maximized (or full-screen) window is left at the size it is. The
+        # compositor is free to refuse a resize it disagrees with, and Qt
+        # relays the widgets out for the size it asked for either way -- which
+        # leaves the panels crammed into a corner of a window that never
+        # actually shrank. Resetting where the panels sit shouldn't be
+        # un-maximizing the window in the first place.
+        if not (self.isMaximized() or self.isFullScreen()):
+            self.resize(*DEFAULT_WINDOW_SIZE)
         self.settings.setValue("dock_state", self._dock_host.saveState())
         self.settings.remove("window_geometry")
         self.statusBar().showMessage("Window layout reset", 4000)

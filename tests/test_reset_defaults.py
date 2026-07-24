@@ -181,6 +181,18 @@ class TestResetWindowLayout:
         window.reset_window_layout()
         assert (window.width(), window.height()) == mod.DEFAULT_WINDOW_SIZE
 
+    def test_a_maximized_window_keeps_its_size(self, window):
+        """The compositor can refuse a resize while Qt lays the widgets out
+        for the size it asked for anyway — panels crammed into a corner of a
+        window that never shrank. Panels still reset; the window doesn't."""
+        window.setWindowState(Qt.WindowMaximized)
+        assert window.isMaximized()
+        window.library_dock.setFloating(True)
+
+        window.reset_window_layout()
+        assert window.isMaximized()
+        assert window.library_dock.isFloating() is False
+
     def test_it_leaves_a_dashboard_page_alone(self, window):
         """A dashboard page hides the model-only docks to get the screen to
         itself. A reset that shows all five unconditionally drops the Node
