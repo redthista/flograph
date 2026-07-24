@@ -181,20 +181,22 @@ class TestLibraryDockMinimumWidth:
 
 
 class TestVisualsPanelToggle:
-    def test_defaults_to_visible(self, window):
+    def test_defaults_to_collapsed(self, window):
+        """A dashboard is for looking at: the page opens as canvas."""
         page = add_page(window)
         widget = window._dashboard_pages[page.id]
-        assert widget._side.isVisibleTo(widget)
+        assert not widget._side.isVisibleTo(widget)
+        assert widget._toggle_btn.arrowType() == Qt.ArrowType.RightArrow
 
-    def test_toggle_button_hides_and_restores_the_panel(self, window):
+    def test_toggle_button_restores_and_hides_the_panel(self, window):
         page = add_page(window)
         widget = window._dashboard_pages[page.id]
+
+        widget._toggle_btn.click()
+        assert widget._side.isVisibleTo(widget)
 
         widget._toggle_btn.click()
         assert not widget._side.isVisibleTo(widget)
-
-        widget._toggle_btn.click()
-        assert widget._side.isVisibleTo(widget)
 
     def test_set_visuals_visible_updates_arrow_direction(self, window):
         page = add_page(window)
@@ -205,6 +207,52 @@ class TestVisualsPanelToggle:
 
         widget.set_visuals_visible(True)
         assert widget._toggle_btn.arrowType() == Qt.ArrowType.LeftArrow
+
+    def test_reopening_restores_the_panel_width(self, window, qtbot):
+        """Hidden from the start, the splitter must still know how wide the
+        panel is -- otherwise it comes back as an unusable sliver."""
+        page = add_page(window)
+        widget = window._dashboard_pages[page.id]
+        widget.resize(1000, 600)
+        widget.set_visuals_visible(True)
+        qtbot.wait(10)
+        assert widget._splitter.sizes()[0] >= 100
+
+    def test_the_toggle_is_per_page(self, window):
+        """Opening the panel on one page does not open it on another."""
+        first = window._dashboard_pages[add_page(window, "p1").id]
+        second = window._dashboard_pages[add_page(window, "p2", "Two").id]
+        first.set_visuals_visible(True)
+        assert not second._side.isVisibleTo(second)
+
+
+class TestVisualsPanelDefaultIsRemembered:
+    def test_a_new_page_follows_the_last_toggle(self, window):
+        first = window._dashboard_pages[add_page(window, "p1").id]
+        first.set_visuals_visible(True)
+        second = window._dashboard_pages[add_page(window, "p2", "Two").id]
+        assert second._side.isVisibleTo(second)
+
+    def test_the_window_records_it(self, window):
+        assert window.visuals_visible is False
+        window._dashboard_pages[add_page(window).id].set_visuals_visible(True)
+        assert window.visuals_visible is True
+
+    def test_construction_does_not_overwrite_the_stored_default(self, window):
+        """Applying the start state must not look like a user toggle."""
+        window.visuals_visible = True
+        window._dashboard_pages[add_page(window).id]
+        assert window.visuals_visible is True
+
+    def test_it_survives_a_restart(self, window, registry, qtbot):
+        window._dashboard_pages[add_page(window).id].set_visuals_visible(True)
+        reopened = MainWindow(registry)
+        reopened.confirm_close = False
+        qtbot.addWidget(reopened)
+        assert reopened.visuals_visible is True
+        assert reopened._dashboard_pages[
+            add_page(reopened, "p2", "Two").id]._side.isVisibleTo(
+                reopened._dashboard_pages["p2"])
 
 
 class TestTiles:

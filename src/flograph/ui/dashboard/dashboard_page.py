@@ -3,7 +3,7 @@ infinite canvas. Owns the scene/view pair; dispose() must be called when the
 page is removed (core events hold strong refs to both scene and list)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QSplitter, QToolButton, QVBoxLayout, QWidget,
@@ -17,8 +17,13 @@ from .visuals_list import VisualsList
 
 
 class DashboardPage(QWidget):
+    # the user opened or closed the visuals panel -- the window remembers it
+    # as the starting state for pages made later
+    visuals_visibility_changed = Signal(bool)
+
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
-                 page_id: str, parent=None) -> None:
+                 page_id: str, parent=None,
+                 visuals_visible: bool = False) -> None:
         super().__init__(parent)
         self.page_id = page_id
         self.scene = DashboardScene(graph, engine, undo_stack, page_id,
@@ -44,6 +49,8 @@ class DashboardPage(QWidget):
         self._splitter.addWidget(self.view)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
+        # set before anything is hidden: the splitter keeps the width it was
+        # given, so reopening the panel restores it rather than a sliver
         self._splitter.setSizes([180, 1000])
         self._visuals_visible = True
 
@@ -68,13 +75,19 @@ class DashboardPage(QWidget):
         layout.addWidget(toggle_strip)
         layout.addWidget(self._splitter, 1)
 
-    def set_visuals_visible(self, visible: bool) -> None:
+        # a dashboard is for looking at, so the page opens as canvas and the
+        # visuals panel is asked for -- silently, since nothing has changed yet
+        self.set_visuals_visible(visuals_visible, notify=False)
+
+    def set_visuals_visible(self, visible: bool, notify: bool = True) -> None:
         self._visuals_visible = visible
         self._side.setVisible(visible)
         self._toggle_btn.setArrowType(
             Qt.ArrowType.LeftArrow if visible else Qt.ArrowType.RightArrow)
         self._toggle_btn.setToolTip(
             "Hide visuals panel" if visible else "Show visuals panel")
+        if notify:
+            self.visuals_visibility_changed.emit(visible)
 
     def dispose(self) -> None:
         self.scene.dispose()
