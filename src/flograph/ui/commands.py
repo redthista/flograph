@@ -388,12 +388,14 @@ class RemovePageCommand(QUndoCommand):
         self._graph = graph
         self._page_id = page_id
         self._page: Optional[Page] = None  # tiles ride along with the Page
+        self._order = list(graph.pages)    # so undo restores the tab position
 
     def redo(self) -> None:
         self._page = self._graph.remove_page(self._page_id)
 
     def undo(self) -> None:
-        self._graph.add_page(self._page)
+        self._graph.add_page(self._page)   # lands last; put it back where it was
+        self._graph.reorder_pages(self._order)
 
 
 class RenamePageCommand(QUndoCommand):
@@ -410,6 +412,21 @@ class RenamePageCommand(QUndoCommand):
 
     def undo(self) -> None:
         self._graph.update_page(self._page_id, title=self._old)
+
+
+class ReorderPagesCommand(QUndoCommand):
+    def __init__(self, graph: Graph, order: list[str],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("reorder pages", parent)
+        self._graph = graph
+        self._old = list(graph.pages)
+        self._new = list(order)
+
+    def redo(self) -> None:
+        self._graph.reorder_pages(self._new)
+
+    def undo(self) -> None:
+        self._graph.reorder_pages(self._old)
 
 
 class DuplicatePageCommand(QUndoCommand):
