@@ -59,6 +59,20 @@ MAX_RECENT = 8
 PASTE_OFFSET = 30.0
 _CLIPBOARD_KEY = "flograph_clipboard"
 
+# The value flograph ships with for every preference that isn't already a
+# named default elsewhere (see DEFAULT_LOD_THRESHOLD, grid.DEFAULT_STEP,
+# theme.DEFAULT_TINT_*). Read on startup *and* restored by reset_settings(),
+# so a "reset to defaults" can't drift away from what a fresh install gets.
+DEFAULT_LOD_ENABLED = True
+DEFAULT_PAGE_BAR_POSITION = "top"
+DEFAULT_SNAP_ENABLED = True
+DEFAULT_MINIMAP_ENABLED = True
+DEFAULT_GPU_VIEWPORT = False
+DEFAULT_VISUALS_VISIBLE = False
+DEFAULT_TABLE_AUTOSIZE = True
+DEFAULT_DATE_FORMATS = ""
+DEFAULT_WINDOW_SIZE = (1400, 900)
+
 
 class MainWindow(QMainWindow):
     def __init__(self, registry: NodeRegistry) -> None:
@@ -89,22 +103,25 @@ class MainWindow(QMainWindow):
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
+        self._dock_sizes_applied_on_show = False
         self._settings_dialog: Optional[SettingsDialog] = None
 
-        self.lod_enabled = self.settings.value("canvas/lod_enabled", True, type=bool)
+        self.lod_enabled = self.settings.value(
+            "canvas/lod_enabled", DEFAULT_LOD_ENABLED, type=bool)
         self.lod_threshold = self.settings.value(
             "canvas/lod_threshold", DEFAULT_LOD_THRESHOLD, type=float)
         self._apply_lod_settings()
         self.page_bar_position = self.settings.value(
-            "canvas/page_bar_position", "top", type=str)
+            "canvas/page_bar_position", DEFAULT_PAGE_BAR_POSITION, type=str)
         if self.page_bar_position not in ("top", "bottom"):
-            self.page_bar_position = "top"
-        self.snap_enabled = self.settings.value("snap/enabled", True, type=bool)
+            self.page_bar_position = DEFAULT_PAGE_BAR_POSITION
+        self.snap_enabled = self.settings.value(
+            "snap/enabled", DEFAULT_SNAP_ENABLED, type=bool)
         self.grid_step = float(
             self.settings.value("snap/step", grid.DEFAULT_STEP))
         self._apply_snap_settings()
         self.minimap_enabled = self.settings.value(
-            "canvas/minimap_enabled", True, type=bool)
+            "canvas/minimap_enabled", DEFAULT_MINIMAP_ENABLED, type=bool)
         self.view.minimap.setVisible(self.minimap_enabled)
         self.tint_soft = self.settings.value(
             "canvas/tint_soft", theme.DEFAULT_TINT_SOFT, type=float)
@@ -114,7 +131,7 @@ class MainWindow(QMainWindow):
         # dashboard pages open with the visuals panel closed; the last thing
         # the user did with the toggle becomes the start state for new pages
         self.visuals_visible = self.settings.value(
-            "dashboard/visuals_visible", False, type=bool)
+            "dashboard/visuals_visible", DEFAULT_VISUALS_VISIBLE, type=bool)
 
         self._palette_popup = NodePalettePopup(registry, self)
         self._palette_scene_pos = QPointF()
@@ -172,7 +189,6 @@ class MainWindow(QMainWindow):
         self.library_dock = QDockWidget("Node Library", host)
         self.library_dock.setObjectName("dock_library")
         self.library_dock.setWidget(self.library_panel)
-        host.addDockWidget(Qt.LeftDockWidgetArea, self.library_dock)
         self.library_tree.add_requested.connect(self._add_node_at_view_center)
         self.library_tree.new_group_requested.connect(self._new_user_group)
         self.library_tree.rename_user_node_requested.connect(
@@ -186,7 +202,6 @@ class MainWindow(QMainWindow):
         self.properties_dock = QDockWidget("Properties", host)
         self.properties_dock.setObjectName("dock_properties")
         self.properties_dock.setWidget(self.params_panel)
-        host.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
         self.editor_panel = EditorPanel(self.graph, self.undo_stack, self.registry)
         self.editor_panel.save_as_user_node_requested.connect(
@@ -194,27 +209,77 @@ class MainWindow(QMainWindow):
         self.editor_dock = QDockWidget("Code", host)
         self.editor_dock.setObjectName("dock_editor")
         self.editor_dock.setWidget(self.editor_panel)
-        host.addDockWidget(Qt.RightDockWidgetArea, self.editor_dock)
-        host.tabifyDockWidget(self.properties_dock, self.editor_dock)
-        self.properties_dock.raise_()
-        host.resizeDocks([self.properties_dock], [420], Qt.Horizontal)
 
         self.inspector_panel = InspectorPanel(self.graph, self.engine)
         self.inspector_dock = QDockWidget("Inspector", host)
         self.inspector_dock.setObjectName("dock_inspector")
         self.inspector_dock.setWidget(self.inspector_panel)
-        host.addDockWidget(Qt.BottomDockWidgetArea, self.inspector_dock)
 
         self.log_console = LogConsole(self.graph, self.engine)
         self.log_dock = QDockWidget("Log", host)
         self.log_dock.setObjectName("dock_log")
         self.log_dock.setWidget(self.log_console)
+
+        self._apply_default_dock_layout()
+        self._apply_page_bar_position(self.page_bar_position)
+
+    @property
+    def _docks(self) -> tuple[QDockWidget, ...]:
+        return (self.library_dock, self.properties_dock, self.editor_dock,
+                self.inspector_dock, self.log_dock)
+
+    def _apply_default_dock_layout(self) -> None:
+        """The panel arrangement flograph starts with, in one place: laid out
+        here at construction and replayed by reset_window_layout().
+
+        Deliberately re-run as the original addDockWidget/tabify calls rather
+        than restored from a saveState() blob taken at startup. A blob leaves
+        a dock that the user had floating sitting at a stale offset inside the
+        layout -- a visible gap where it used to be, which stacks up with
+        every float/reset cycle. Re-docking each one explicitly has no such
+        problem, and keeps the default readable as code."""
+        host = self._dock_host
+        # a floated or closed dock has to come home, and be visible, before
+        # anything can be arranged around it -- the page rule below puts them
+        # back out of sight if that is where they belong
+        for dock in self._docks:
+            dock.setFloating(False)
+            dock.setVisible(True)
+
+        host.addDockWidget(Qt.LeftDockWidgetArea, self.library_dock)
+        host.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
+        host.addDockWidget(Qt.RightDockWidgetArea, self.editor_dock)
+        host.tabifyDockWidget(self.properties_dock, self.editor_dock)
+        self.properties_dock.raise_()
+        host.addDockWidget(Qt.BottomDockWidgetArea, self.inspector_dock)
         host.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
         host.tabifyDockWidget(self.inspector_dock, self.log_dock)
         self.inspector_dock.raise_()
-        host.resizeDocks([self.inspector_dock], [260], Qt.Vertical)
+        self._apply_default_dock_sizes()
+        self._apply_model_dock_visibility(self.page_bar.current_page_id())
 
-        self._apply_page_bar_position(self.page_bar_position)
+    def _apply_model_dock_visibility(self, page_id) -> None:
+        """Show the model-only docks on the model page and hide them
+        everywhere else -- a dashboard page has no node selection to
+        configure, so it gets the screen to itself.
+
+        One rule in one place, because a layout reset has to agree with it:
+        showing all five panels unconditionally drops the Node Library,
+        Properties, Code, Inspector and Log on top of whatever dashboard the
+        user is looking at."""
+        is_model_page = page_id is None
+        for dock in self._docks:
+            dock.setVisible(is_model_page)
+
+    def _apply_default_dock_sizes(self) -> None:
+        """Split resizeDocks out because it only bites once the window has
+        been laid out -- called from here at construction (harmless, and
+        right for a window that is already up) and again on first show for a
+        fresh install, which otherwise starts with a Properties panel barely
+        half the width asked for."""
+        self._dock_host.resizeDocks([self.properties_dock], [420],
+                                    Qt.Horizontal)
+        self._dock_host.resizeDocks([self.inspector_dock], [260], Qt.Vertical)
 
     def set_page_bar_position(self, position: str) -> None:
         if position not in ("top", "bottom"):
@@ -372,6 +437,10 @@ class MainWindow(QMainWindow):
         view_menu = self.menuBar().addMenu("&View")
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
+        view_menu.addSeparator()
+        self.action_reset_layout = act("Reset Window &Layout", None,
+                                       self.reset_window_layout)
+        view_menu.addAction(self.action_reset_layout)
 
         # GPU-Accelerated Canvas lives in Tools > Settings… (SettingsDialog),
         # not directly in a menu — this QAction is just its state/signal
@@ -461,6 +530,12 @@ class MainWindow(QMainWindow):
             self._gpu_viewport_checked_on_show = True
             if self.action_gpu_viewport.isChecked():
                 self._verify_gpu_viewport_soon()
+        # only for a fresh install: anyone with a saved layout gets theirs,
+        # widths included, and must not be shoved back to the defaults
+        if not self._dock_sizes_applied_on_show:
+            self._dock_sizes_applied_on_show = True
+            if self.settings.value("dock_state") is None:
+                self._apply_default_dock_sizes()
 
     def _apply_gpu_viewport_setting(self) -> None:
         """Push the GPU-viewport toggle onto every canvas view (modeling
@@ -816,12 +891,7 @@ class MainWindow(QMainWindow):
             widget if widget is not None else self.view)
         # dashboard/report pages have no node selection to configure, so free
         # up the screen by hiding the model-only docks
-        is_model_page = page_id is None
-        self.library_dock.setVisible(is_model_page)
-        self.properties_dock.setVisible(is_model_page)
-        self.editor_dock.setVisible(is_model_page)
-        self.inspector_dock.setVisible(is_model_page)
-        self.log_dock.setVisible(is_model_page)
+        self._apply_model_dock_visibility(page_id)
         self._refresh_zoom_indicator()
         if self._project_path and not self._restoring_pages:
             self.settings.setValue(f"active_page/{self._project_path}",
@@ -1483,12 +1553,64 @@ class MainWindow(QMainWindow):
         state = self.settings.value("dock_state")
         if geometry is not None:
             self.restoreGeometry(geometry)
+        else:
+            self.resize(*DEFAULT_WINDOW_SIZE)
         if state is not None:
             self._dock_host.restoreState(state)
 
     def _save_window_state(self) -> None:
         self.settings.setValue("window_geometry", self.saveGeometry())
         self.settings.setValue("dock_state", self._dock_host.saveState())
+
+    def reset_window_layout(self) -> None:
+        """Put the docks back where a fresh install has them, and the window
+        back to its starting size. Dragging a panel somewhere unusable (or
+        closing one and not finding it again) is easy and has no undo, so
+        this is the way back."""
+        self._apply_default_dock_layout()
+        # a maximized (or full-screen) window is left at the size it is. The
+        # compositor is free to refuse a resize it disagrees with, and Qt
+        # relays the widgets out for the size it asked for either way -- which
+        # leaves the panels crammed into a corner of a window that never
+        # actually shrank. Resetting where the panels sit shouldn't be
+        # un-maximizing the window in the first place.
+        if not (self.isMaximized() or self.isFullScreen()):
+            self.resize(*DEFAULT_WINDOW_SIZE)
+        self.settings.setValue("dock_state", self._dock_host.saveState())
+        self.settings.remove("window_geometry")
+        self.statusBar().showMessage("Window layout reset", 4000)
+
+    def reset_settings(self) -> None:
+        """Put every app preference back to the value flograph ships with.
+
+        Goes through the same set_* methods the menus and the Settings dialog
+        use, so each change applies live and persists by the one code path --
+        nothing here can quietly forget to repaint.
+
+        Deliberately left alone: recent files and the remembered active page
+        (history, not preferences) and the AI assistant's credentials -- a
+        reset that silently binned an API key would be a nasty surprise. The
+        window layout is its own action, reset_window_layout()."""
+        from .spreadsheet import set_autosize_default, set_date_formats_setting
+
+        self.set_page_bar_position(DEFAULT_PAGE_BAR_POSITION)
+        self.set_lod_enabled(DEFAULT_LOD_ENABLED)
+        self.set_lod_threshold(DEFAULT_LOD_THRESHOLD)
+        self.set_snap_enabled(DEFAULT_SNAP_ENABLED)
+        self.set_grid_step(grid.DEFAULT_STEP)
+        self.set_minimap_enabled(DEFAULT_MINIMAP_ENABLED)
+        self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)
+        # setChecked only signals on a real change, so write the stored value
+        # too -- otherwise an already-off action leaves a stale True behind
+        self.action_gpu_viewport.setChecked(DEFAULT_GPU_VIEWPORT)
+        self.settings.setValue("canvas/gpu_viewport", DEFAULT_GPU_VIEWPORT)
+        self._set_visuals_visible(DEFAULT_VISUALS_VISIBLE)
+        for page_widget in self._dashboard_pages.values():
+            page_widget.set_visuals_visible(DEFAULT_VISUALS_VISIBLE,
+                                            notify=False)
+        set_autosize_default(DEFAULT_TABLE_AUTOSIZE)
+        set_date_formats_setting(DEFAULT_DATE_FORMATS)
+        self.statusBar().showMessage("Settings reset to defaults", 4000)
 
     # ----------------------------------------------------------- copy/paste
 

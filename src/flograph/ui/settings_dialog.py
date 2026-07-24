@@ -16,7 +16,8 @@ import platform
 from PySide6.QtCore import qVersion
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QListWidget, QMessageBox, QPushButton, QSpinBox, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from .canvas import grid
@@ -33,6 +34,7 @@ def _flograph_version() -> str:
 class SettingsDialog(QDialog):
     def __init__(self, window, parent=None) -> None:
         super().__init__(parent)
+        self._window = window
         self.setWindowTitle("Settings")
         self.resize(560, 520)
 
@@ -40,25 +42,88 @@ class SettingsDialog(QDialog):
         self._nav.setFixedWidth(150)
         self._pages = QStackedWidget()
 
-        layout = QHBoxLayout(self)
-        layout.addWidget(self._nav)
-        layout.addWidget(self._pages, 1)
+        body = QHBoxLayout()
+        body.addWidget(self._nav)
+        body.addWidget(self._pages, 1)
 
+        layout = QVBoxLayout(self)
+        layout.addLayout(body, 1)
+        layout.addWidget(self._build_footer())
+
+        self._nav.currentRowChanged.connect(self._pages.setCurrentIndex)
+        self._fill_pages()
+
+    def _build_footer(self) -> QWidget:
+        """The two resets, out at the bottom where they apply to the whole
+        dialog rather than hiding on whichever page you happen to be on."""
+        footer = QWidget()
+        row = QHBoxLayout(footer)
+        row.setContentsMargins(0, 0, 0, 0)
+
+        reset_layout = QPushButton("Reset Window Layout")
+        reset_layout.setObjectName("reset_layout_button")
+        reset_layout.setToolTip(
+            "Put the panels back where they started, at the original "
+            "window size")
+        reset_layout.clicked.connect(self._reset_window_layout)
+        row.addWidget(reset_layout)
+
+        reset_settings = QPushButton("Reset Settings…")
+        reset_settings.setObjectName("reset_settings_button")
+        reset_settings.setToolTip(
+            "Put every setting in this window back to its default")
+        reset_settings.clicked.connect(self._reset_settings)
+        row.addWidget(reset_settings)
+
+        row.addStretch(1)
+        return footer
+
+    def _fill_pages(self) -> None:
         pages = {
-            "General": self._build_general_page(window),
-            "Canvas": self._build_canvas_page(window),
+            "General": self._build_general_page(self._window),
+            "Canvas": self._build_canvas_page(self._window),
             "Table Node": self._build_table_node_page(),
             "About": self._build_about_page(),
         }
         for name in sorted(pages):
             self._add_page(name, pages[name])
-
-        self._nav.currentRowChanged.connect(self._pages.setCurrentIndex)
         self._nav.setCurrentRow(0)
 
     def _add_page(self, name: str, page: QWidget) -> None:
         self._nav.addItem(name)
         self._pages.addWidget(page)
+
+    def _rebuild_pages(self) -> None:
+        """Rebuild every page from the window's current values. The controls
+        are built from those values once, at construction, so after something
+        changes them behind the dialog's back (a reset) the only honest fix is
+        to build them again."""
+        current = self._nav.currentRow()
+        self._nav.clear()
+        while self._pages.count():
+            page = self._pages.widget(0)
+            self._pages.removeWidget(page)
+            # deleted, not just detached: the old controls are still connected
+            # to the window's signals, and Qt only drops those on destruction
+            page.deleteLater()
+        self._fill_pages()
+        if 0 <= current < self._nav.count():
+            self._nav.setCurrentRow(current)
+
+    def _reset_settings(self) -> None:
+        confirm = QMessageBox.question(
+            self, "Reset Settings",
+            "Put every setting back to its default?\n\n"
+            "Your projects, recent files and AI assistant credentials are "
+            "not affected.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if confirm != QMessageBox.Yes:
+            return
+        self._window.reset_settings()
+        self._rebuild_pages()
+
+    def _reset_window_layout(self) -> None:
+        self._window.reset_window_layout()
 
     @staticmethod
     def _hint(text: str) -> QLabel:

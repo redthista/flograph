@@ -34,8 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     registry.load_builtins()
     registry.load_user_nodes(user_nodes_dir())
 
+    # no resize() here: the window sizes itself from the saved geometry, or
+    # DEFAULT_WINDOW_SIZE on a fresh install. Resizing it from out here would
+    # override the size the user left it at every launch.
     window = MainWindow(registry)
-    window.resize(1400, 900)
     window.show()
 
     args = app.arguments()[1:]
