@@ -111,6 +111,10 @@ class MainWindow(QMainWindow):
         self.tint_strong = self.settings.value(
             "canvas/tint_strong", theme.DEFAULT_TINT_STRONG, type=float)
         theme.set_tints(self.tint_soft, self.tint_strong)
+        # dashboard pages open with the visuals panel closed; the last thing
+        # the user did with the toggle becomes the start state for new pages
+        self.visuals_visible = self.settings.value(
+            "dashboard/visuals_visible", False, type=bool)
 
         self._palette_popup = NodePalettePopup(registry, self)
         self._palette_scene_pos = QPointF()
@@ -769,7 +773,8 @@ class MainWindow(QMainWindow):
 
     def _on_page_added(self, page: Page) -> None:
         widget = DashboardPage(self.graph, self.engine, self.undo_stack,
-                               page.id)
+                               page.id, visuals_visible=self.visuals_visible)
+        widget.visuals_visibility_changed.connect(self._set_visuals_visible)
         widget.scene.button_fired.connect(self._on_button_fired)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
         widget.view.tile_dropped.connect(
@@ -794,6 +799,13 @@ class MainWindow(QMainWindow):
     def _on_page_changed(self, page: Page) -> None:
         self.page_bar.set_page_title(page.id, page.title)
         self.page_bar.set_page_color(page.id, page.color)
+
+    def _set_visuals_visible(self, visible: bool) -> None:
+        """Remember the toggle as the start state for pages made later. Pages
+        already open keep theirs -- the panel is per page, this is the default
+        it starts from."""
+        self.visuals_visible = visible
+        self.settings.setValue("dashboard/visuals_visible", visible)
 
     def _on_pages_reordered(self, order: list[str]) -> None:
         self.page_bar.set_page_order(order)
