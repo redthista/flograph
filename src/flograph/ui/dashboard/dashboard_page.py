@@ -62,9 +62,9 @@ class DashboardPage(QWidget):
         self._toggle_btn.setAutoRaise(True)
         self._toggle_btn.clicked.connect(
             lambda: self.set_visuals_visible(not self._visuals_visible))
-        toggle_strip = QWidget()
-        toggle_strip.setFixedWidth(20)
-        toggle_layout = QVBoxLayout(toggle_strip)
+        self._toggle_strip = QWidget()
+        self._toggle_strip.setFixedWidth(20)
+        toggle_layout = QVBoxLayout(self._toggle_strip)
         toggle_layout.setContentsMargins(0, 0, 0, 0)
         toggle_layout.addWidget(self._toggle_btn)
         toggle_layout.addStretch(1)
@@ -72,12 +72,33 @@ class DashboardPage(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(toggle_strip)
+        layout.addWidget(self._toggle_strip)
         layout.addWidget(self._splitter, 1)
+
+        self.scene.fullscreen_requested.connect(self._toggle_fullscreen)
+        self.view.fullscreen_changed.connect(self._on_fullscreen_changed)
 
         # a dashboard is for looking at, so the page opens as canvas and the
         # visuals panel is asked for -- silently, since nothing has changed yet
         self.set_visuals_visible(visuals_visible, notify=False)
+
+    # ----------------------------------------------------------- fullscreen
+
+    def _toggle_fullscreen(self, tile_id: str) -> None:
+        item = self.scene.tile_items.get(tile_id)
+        if item is not None:
+            self.view.toggle_fullscreen(item)
+
+    def _on_fullscreen_changed(self, active: bool) -> None:
+        """Give a maximized tile the whole page: the visuals panel and its
+        toggle strip step aside, and come back on the way out.
+
+        Deliberately not via set_visuals_visible() -- maximizing is not the
+        user asking for the panel, so it must leave _visuals_visible alone
+        and stay off visuals_visibility_changed, which would otherwise make
+        fullscreen rewrite the start state new pages open with."""
+        self._side.setVisible(self._visuals_visible and not active)
+        self._toggle_strip.setVisible(not active)
 
     def set_visuals_visible(self, visible: bool, notify: bool = True) -> None:
         self._visuals_visible = visible
