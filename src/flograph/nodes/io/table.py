@@ -25,8 +25,11 @@ with custom columns beside a Power Query load: every run refreshes the
 columns the input owns (matched by name), while columns you add on top
 survive — their formulas fill down as rows grow. Edits to input-owned
 cells are overwritten on the next run; put your work in your own columns.
-Right-click the node for "Import input into table" to snapshot everything
-into the grid (then disconnect to fully own the data).
+
+Disconnect the input and the contents stay — whatever the grid was showing
+is written into the table as your own cells, so the node carries the data
+from there on. Undo puts the wire and the old sheet back together. Right-
+click for "Import input into table" to do the same without disconnecting.
 """
 import json
 

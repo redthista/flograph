@@ -590,9 +590,10 @@ class TileItem(QGraphicsObject):
             self.update()
         elif kind == "sheet" and self._sheet_model is not None:
             # set_sheet no-ops when nothing changed, so the edit that caused
-            # this doesn't reset the grid under the user's cursor
-            self._sheet_model.set_sheet(node.params.get("data")
-                                        if node is not None else None)
+            # this doesn't reset the grid under the user's cursor. Goes
+            # through _sheet_source so a linked table redraws its merge and
+            # not the handful of columns the node stores.
+            self._sheet_model.set_sheet(self._sheet_source())
         elif kind == "control" and self._control_widget is not None \
                 and node is not None:
             # sync() holds a guard, so the edit that caused this can't come

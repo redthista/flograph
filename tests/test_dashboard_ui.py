@@ -563,6 +563,25 @@ class TestEditableTableTile:
         assert model.sheet.column_names()[0] == "Price"
         assert model.data(model.index(0, 0), Qt.DisplayRole) == "10"
 
+    def test_a_param_edit_does_not_revert_a_linked_tile(self, window):
+        """Only the user's own columns are stored, so re-syncing the grid
+        from params alone would blank a linked tile until the next run."""
+        add_page(window)
+        node, item = self.add_table(window)
+        src = window.registry.instantiate("flograph.util.constant", pos=(0, 0))
+        window.graph.add_node(src)
+        window.graph.connect(src.id, src.spec.outputs[0].name,
+                             node.id, "table")
+        window.engine.cache.set(
+            src.id, {src.spec.outputs[0].name:
+                     pd.DataFrame({"Price": [10, 20]})}, 0.01)
+        window.engine.node_succeeded.emit(node.id)
+
+        window.graph.set_param(node.id, "width", 500)
+        model = item._sheet_model
+        assert model.sheet.column_names()[0] == "Price"
+        assert model.data(model.index(0, 0), Qt.DisplayRole) == "10"
+
     def test_delete_in_a_focused_cell_does_not_delete_the_tile(self, window):
         """Delete clears the selected cells; the view only takes it as
         "remove this tile" when no embedded widget has the keyboard."""
