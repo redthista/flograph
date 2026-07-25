@@ -15,7 +15,10 @@ Each column has a type (right-click its header): auto guesses numbers,
 while text/number/integer/date/bool make the output dtype explicit —
 values that don't fit become missing (the grid flags them red as you
 type). Use the expand button on the card for the full editor with a
-formula bar, and paste straight from Excel or Sheets.
+formula bar, and paste straight from Excel or Sheets. Drag the node
+onto a dashboard page and the grid comes with it, still editable —
+maximize that tile for a full-page spreadsheet, and edits re-run the
+visuals beside it.
 
 The optional input links the table to upstream data, like an Excel table
 with custom columns beside a Power Query load: every run refreshes the

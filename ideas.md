@@ -3,7 +3,6 @@
 3. restore crashed workflows from undo history? how possible is this? 
 4. ctrl-f for find in the code editor
 5. slicer outputs selected values also.
-6. On dashbaord pages we want tables to be editable, and full screen in the dashbaord, this way we can have a table fill the whole dashboard space.
 7. right click nodes - deactivate.
 8. when i fill a table from an input and i want to disconnect the input, the contents should stay on the table. 
 9. number slider visual / between int / float

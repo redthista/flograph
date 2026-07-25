@@ -33,6 +33,35 @@ def slicer_options(graph: Graph, cache: OutputCache,
     return sorted(source[column].astype(str).unique())
 
 
+def linked_table_source(graph: Graph, cache: OutputCache, node_id: str):
+    """The cached upstream DataFrame feeding a Table node's "table" input,
+    or None when it's unconnected, hasn't run, or isn't a frame."""
+    conn = graph.input_connection(node_id, "table")
+    entry = cache.get(conn.src_node) if conn else None
+    value = entry.outputs.get(conn.src_port) if entry else None
+    return value if hasattr(value, "itertuples") else None
+
+
+def merged_linked_sheet(graph: Graph, cache: OutputCache,
+                        node_id: str) -> "dict | None":
+    """A linked Table node's sheet as it should be *shown* after a run —
+    input-owned columns refreshed from upstream, the user's own columns
+    (formula sources intact) carried over — as a sheet dict.
+
+    None when there's no usable input, which means the node's stored sheet
+    already stands on its own. Every host that displays a Table node's grid
+    goes through here, so the canvas card and a dashboard tile of the same
+    node never disagree about what a run produced."""
+    from flograph.core.sheet import (merge_linked_sheet, parse_sheet,
+                                     sheet_from_dataframe, sheet_to_dict)
+    frame = linked_table_source(graph, cache, node_id)
+    node = graph.nodes.get(node_id)
+    if frame is None or node is None:
+        return None
+    return sheet_to_dict(merge_linked_sheet(
+        sheet_from_dataframe(frame), parse_sheet(node.params.get("data"))))
+
+
 def upstream_columns(graph: Graph, cache: OutputCache, node_id: str) -> list[str]:
     """Column names of every cached DataFrame feeding node_id's inputs,
     in port order, deduplicated. Empty when nothing upstream has run yet."""

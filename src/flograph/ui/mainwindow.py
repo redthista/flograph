@@ -670,25 +670,14 @@ class MainWindow(QMainWindow):
     def _merged_linked_sheet(self, node_id: str):
         """The linked-refresh merge of a Table node's cached input with its
         stored sheet, as a sheet dict — None when there's no usable input."""
-        from flograph.core.sheet import (merge_linked_sheet, parse_sheet,
-                                         sheet_from_dataframe, sheet_to_dict)
-        frame = self._table_import_source(node_id)
-        if frame is None:
-            return None
-        node = self.graph.nodes[node_id]
-        merged = merge_linked_sheet(sheet_from_dataframe(frame),
-                                    parse_sheet(node.params.get("data")))
-        return sheet_to_dict(merged)
+        from flograph.engine.introspect import merged_linked_sheet
+        return merged_linked_sheet(self.graph, self.engine.cache, node_id)
 
     def _table_import_source(self, node_id: str):
         """The cached upstream DataFrame feeding a Table node's input, or
         None when unconnected / not run / not a frame."""
-        conn = self.graph.input_connection(node_id, "table")
-        if conn is None:
-            return None
-        entry = self.engine.cache.get(conn.src_node)
-        value = entry.outputs.get(conn.src_port) if entry else None
-        return value if hasattr(value, "itertuples") else None
+        from flograph.engine.introspect import linked_table_source
+        return linked_table_source(self.graph, self.engine.cache, node_id)
 
     def _import_input_into_table(self, node_id: str) -> None:
         """Snapshot the linked data into the node's stored sheet (keeping
@@ -777,6 +766,7 @@ class MainWindow(QMainWindow):
         widget.visuals_visibility_changed.connect(self._set_visuals_visible)
         widget.scene.button_fired.connect(self._on_button_fired)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
+        widget.scene.sheet_edited.connect(self._on_dashboard_sheet_edited)
         widget.view.tile_dropped.connect(
             lambda node_id, pos, page_id=page.id:
             self._on_tile_dropped(page_id, node_id, pos))
@@ -1034,6 +1024,16 @@ class MainWindow(QMainWindow):
         flight this is a no-op and the affected nodes just stay stale."""
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "slicer":
+            return
+        self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
+
+    def _on_dashboard_sheet_edited(self, node_id: str) -> None:
+        """A cell changed in a Table tile: re-run it and everything it feeds,
+        so the charts and KPIs on the page follow the number that was just
+        typed. Same deal as a Slicer — the SetParamCommand already dirtied
+        the subgraph, and a run already in flight makes this a no-op."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or card_kind(node) != "grid":
             return
         self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
 

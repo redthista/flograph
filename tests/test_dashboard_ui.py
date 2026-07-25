@@ -8,7 +8,9 @@ import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QGraphicsItem, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication, QGraphicsItem, QToolButton, QVBoxLayout,
+)
 
 from flograph.core import NodeRegistry, Page, Tile
 from flograph.ui import mainwindow as mod
@@ -405,11 +407,11 @@ class TestTiles:
         window.undo_stack.undo()
         assert not window.graph.pages
 
-    def test_table_input_node_can_be_dropped_and_shows_its_dataframe(
+    def test_table_input_node_can_be_dropped_and_shows_its_cells(
             self, window):
         """The Table node (IO folder, card='grid') is a data source, not a
-        Show* visual, but it still has a real DataFrame output worth viewing
-        on a dashboard — it should drop like any other tile-able node."""
+        Show* visual, but it drops like any other tile-able node — and the
+        tile is the node's own spreadsheet, live without a run."""
         add_page(window)
         node = window.registry.instantiate("flograph.io.table", pos=(0, 0))
         window.graph.add_node(node)
@@ -423,12 +425,11 @@ class TestTiles:
         assert tile.port == "table"
 
         item = window._dashboard_pages["p1"].scene.tile_items[tile.id]
-        df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
-        window.engine.cache.set(node.id, {"table": df}, 0.01)
-        window.engine.node_succeeded.emit(node.id)
-        assert item._table_view is not None
-        assert item._table_view.model() is not None
-        assert item._table_view.model().rowCount() == 2
+        assert item._table_view is None      # not the read-only viewer
+        assert item._sheet_view is not None  # the editable grid
+        # the default sheet is 2x2 and needs no run to show
+        assert item._sheet_model.rowCount() == 2
+        assert item._sheet_model.columnCount() == 2
 
 
 class TestVisualsList:
@@ -445,6 +446,151 @@ class TestVisualsList:
 
         mime = visuals.mimeData([visuals.item(0)])
         assert bytes(mime.data(TILE_NODE_MIME)).decode() == shown.id
+
+
+class TestEditableTableTile:
+    """A Table node's tile is its spreadsheet, not a picture of its output:
+    the point is dashboard pages you type into, with the visuals beside them
+    following what you typed."""
+
+    def add_table(self, window, page_id="p1", tile_id="t1"):
+        node = window.registry.instantiate("flograph.io.table", pos=(0, 0))
+        window.graph.add_node(node)
+        item = add_tile(window, node, page_id=page_id, tile_id=tile_id)
+        return node, item
+
+    def cell(self, item, row, col):
+        return item._sheet_model.index(row, col)
+
+    def test_cells_are_editable(self, window):
+        add_page(window)
+        _node, item = self.add_table(window)
+        flags = item._sheet_model.flags(self.cell(item, 0, 0))
+        assert flags & Qt.ItemIsEditable
+
+    def test_typing_a_cell_writes_it_to_the_node(self, window):
+        add_page(window)
+        node, item = self.add_table(window)
+        item._sheet_model.setData(self.cell(item, 0, 0), "7", Qt.EditRole)
+
+        import json
+        assert json.loads(node.params["data"])["rows"][0][0] == "7"
+
+    def test_an_edit_is_one_undo_step(self, window):
+        add_page(window)
+        node, item = self.add_table(window)
+        before = node.params["data"]
+        item._sheet_model.setData(self.cell(item, 0, 0), "7", Qt.EditRole)
+        assert window.undo_stack.undoText() == "set data"
+
+        window.undo_stack.undo()
+        assert node.params["data"] == before
+        # the grid follows the undo, it isn't left showing the reverted edit
+        assert item._sheet_model.cell_source(0, 0) == ""
+
+    def test_formulas_work_like_the_canvas_card(self, window):
+        add_page(window)
+        _node, item = self.add_table(window)
+        model = item._sheet_model
+        model.setData(self.cell(item, 0, 0), "2", Qt.EditRole)
+        model.setData(self.cell(item, 1, 0), "3", Qt.EditRole)
+        model.setData(self.cell(item, 0, 1), "=A1+A2", Qt.EditRole)
+        assert model.data(self.cell(item, 0, 1), Qt.DisplayRole) == "5"
+
+    def test_an_edit_elsewhere_syncs_into_the_tile(self, window):
+        """The same node's canvas card, the properties panel, a redo -- all
+        arrive as param_changed, and the tile must not go on showing stale
+        cells."""
+        add_page(window)
+        node, item = self.add_table(window)
+        import json
+        from flograph.ui.commands import SetParamCommand
+        data = json.dumps({"version": 2,
+                           "columns": [{"name": "A", "type": "auto"}],
+                           "rows": [["42"]]})
+        window.undo_stack.push(
+            SetParamCommand(window.graph, node.id, "data", data))
+        assert item._sheet_model.cell_source(0, 0) == "42"
+
+    def test_editing_reruns_the_node_and_what_it_feeds(self, window):
+        """Typing a number and then hunting for the Run button would defeat
+        the point of a dashboard -- an edit runs the subgraph, like a
+        slicer's tick does."""
+        add_page(window)
+        node, item = self.add_table(window)
+        ran = []
+        window.engine.run_targets = lambda targets: ran.append(list(targets))
+
+        item._sheet_model.setData(self.cell(item, 0, 0), "7", Qt.EditRole)
+        assert ran and ran[0][0] == node.id
+
+    def test_no_rerun_when_the_edit_changes_nothing(self, window):
+        add_page(window)
+        _node, item = self.add_table(window)
+        ran = []
+        window.engine.run_targets = lambda targets: ran.append(list(targets))
+
+        # setting a cell to what it already holds
+        item._sheet_model.setData(self.cell(item, 0, 0), "", Qt.EditRole)
+        assert ran == []
+
+    def test_toolbar_adds_a_row(self, window):
+        add_page(window)
+        node, item = self.add_table(window)
+        before = item._sheet_model.rowCount()
+        buttons = item._sheet_toolbar.findChildren(QToolButton)
+        next(b for b in buttons if b.text() == "+Row").click()
+
+        assert item._sheet_model.rowCount() == before + 1
+        import json
+        assert len(json.loads(node.params["data"])["rows"]) == before + 1
+
+    def test_a_linked_table_shows_the_merged_upstream_sheet(self, window):
+        """Linked mode on the canvas refreshes input-owned columns on every
+        run; a tile of the same node must show the same thing."""
+        add_page(window)
+        node, item = self.add_table(window)
+        src = window.registry.instantiate("flograph.util.constant", pos=(0, 0))
+        window.graph.add_node(src)
+        window.graph.connect(src.id, src.spec.outputs[0].name,
+                             node.id, "table")
+        window.engine.cache.set(
+            src.id, {src.spec.outputs[0].name:
+                     pd.DataFrame({"Price": [10, 20]})}, 0.01)
+        window.engine.node_succeeded.emit(node.id)
+
+        model = item._sheet_model
+        assert model.sheet.column_names()[0] == "Price"
+        assert model.data(model.index(0, 0), Qt.DisplayRole) == "10"
+
+    def test_delete_in_a_focused_cell_does_not_delete_the_tile(self, window):
+        """Delete clears the selected cells; the view only takes it as
+        "remove this tile" when no embedded widget has the keyboard."""
+        add_page(window)
+        _node, item = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        item.setSelected(True)
+        page.scene.setFocusItem(item._proxy)
+
+        QTest.keyClick(page.view, Qt.Key_Delete)
+        assert "t1" in page.scene.tile_items
+
+    def test_the_tile_is_never_marked_stale(self, window):
+        """The grid shows the cells being typed, not a render of an output,
+        so a STALE badge over it would be a lie."""
+        add_page(window)
+        node, item = self.add_table(window)
+        item._sheet_model.setData(self.cell(item, 0, 0), "7", Qt.EditRole)
+        assert node.dirty
+        assert not item._is_stale()
+
+    def test_a_spreadsheet_page_can_be_maximized(self, window):
+        add_page(window)
+        _node, item = self.add_table(window)
+        assert item.can_fullscreen()
+        window._dashboard_pages["p1"].scene.toggle_fullscreen("t1")
+        assert item.is_fullscreen
+        assert window.graph.pages["p1"].maximized_tile == "t1"
 
 
 class TestPersistence:
