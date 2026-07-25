@@ -5,6 +5,7 @@ import json
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QUndoStack
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from flograph.core import Graph, NodeRegistry
@@ -193,6 +194,20 @@ def view(qtbot):
     return view
 
 
+@pytest.fixture
+def qt_messages():
+    """Qt's own warnings (qWarning), which never reach Python otherwise --
+    some Qt misuse only ever announces itself on stderr."""
+    from PySide6.QtCore import qInstallMessageHandler
+    messages: list[str] = []
+    previous = qInstallMessageHandler(
+        lambda mode, context, message: messages.append(message))
+    try:
+        yield messages
+    finally:
+        qInstallMessageHandler(previous)
+
+
 def select_rect(view, r0, c0, r1, c1):
     model = view.model()
     view.setCurrentIndex(model.index(r0, c0))
@@ -248,6 +263,36 @@ class TestSpreadsheetView:
         select_rect(view, 0, 2, 1, 2)
         view.fill_down_selection()
         assert view.model().cell_source(1, 2) == "=A2+B2"
+
+    def test_enter_steps_down_and_shift_enter_steps_up(self, view):
+        view.setCurrentIndex(view.model().index(0, 1))
+        QTest.keyClick(view, Qt.Key_Return)
+        assert (view.currentIndex().row(), view.currentIndex().column()) == (1, 1)
+        QTest.keyClick(view, Qt.Key_Return, Qt.ShiftModifier)
+        assert view.currentIndex().row() == 0
+
+    def test_enter_in_an_open_editor_commits_once_and_steps_down(
+            self, view, qtbot, qt_messages):
+        """Enter used to be handled twice -- once by the view (stepping the
+        current cell) and once by the open editor's own commit -- so the
+        step moved the current index out from under the editor before Qt
+        committed it, and Qt then warned about committing an editor the view
+        had already released. The editor owns Enter; closeEditor() steps."""
+        view.show()
+        qtbot.waitExposed(view)
+        view.setCurrentIndex(view.model().index(0, 0))
+        view.edit(view.model().index(0, 0))
+        qtbot.wait(20)
+        editor = view.viewport().focusWidget()
+        assert editor is not None
+
+        QTest.keyClicks(editor, "42")
+        QTest.keyClick(editor, Qt.Key_Return)
+        qtbot.wait(50)
+
+        assert view.model().cell_source(0, 0) == "42"
+        assert view.currentIndex().row() == 1       # moved down, like Excel
+        assert not [m for m in qt_messages if "commitData" in m], qt_messages
 
     def test_autosize_columns_fits_content_and_header(self, view):
         model = view.model()
@@ -515,7 +560,9 @@ class TestSheetEditorDialog:
         QTest.keyClicks(editor, "42")
         QTest.keyClick(editor, Qt.Key_Return)
         assert dialog.isVisible()   # Enter must not "click" OK
-        assert dialog.model.cell_source(0, 0) == "42"
+        # the delegate commits an open editor through a queued call, so the
+        # model catches up on the next trip round the event loop
+        qtbot.waitUntil(lambda: dialog.model.cell_source(0, 0) == "42")
         assert dialog.view.currentIndex().row() == 1   # and moved down
         dialog.close()
 
