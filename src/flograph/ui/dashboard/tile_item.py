@@ -39,6 +39,11 @@ def is_tile_able(node) -> bool:
 TITLE_H = 24.0
 HANDLE = 14.0
 MIN_W, MIN_H = 160.0, 90.0
+FS_BTN = 16.0  # the maximize/restore glyph box at the right of the title bar
+
+# Kinds with nothing to enlarge: an Action Button is a fixed-size trigger,
+# and a tile whose node was deleted only has the placeholder to show.
+NO_FULLSCREEN_KINDS = frozenset({"button", "missing"})
 
 RUN_PROMPT = "Run the flow to populate this tile."
 MISSING_NODE = ("The node behind this tile was deleted.\n"
@@ -83,6 +88,10 @@ class TileItem(QGraphicsObject):
         self._resize_edge = "corner"  # which edge/corner the drag grabbed
         self._dragging = False  # a title-bar move is in progress (snap gate)
         self._move_suppressed = False  # body press cleared ItemIsMovable
+        # Maximized over the whole page: geometry comes from the view, not
+        # from the model, and no move/resize is possible until it's cleared.
+        self._fullscreen = False
+        self._fs_hover = False  # cursor is over the maximize/restore glyph
         x, y, w, h = tile.rect
         self.setPos(x, y)
         self._size = (w, h)
@@ -109,6 +118,10 @@ class TileItem(QGraphicsObject):
     # ------------------------------------------------------------- geometry
 
     def sync_from_model(self) -> None:
+        if self._fullscreen:
+            # the view owns the geometry while maximized; the stored rect is
+            # picked back up on the way out
+            return
         x, y, w, h = self.tile.rect
         self.prepareGeometryChange()
         if (self.pos().x(), self.pos().y()) != (x, y):
@@ -124,6 +137,11 @@ class TileItem(QGraphicsObject):
         w, h = self._size
         return QRectF(w - HANDLE, h - HANDLE, HANDLE, HANDLE)
 
+    def _fs_button_rect(self) -> QRectF:
+        w, _ = self._size
+        return QRectF(w - FS_BTN - 6.0, (TITLE_H - FS_BTN) / 2.0,
+                      FS_BTN, FS_BTN)
+
     def _content_rect(self) -> QRectF:
         w, h = self._size
         return QRectF(1, TITLE_H, w - 2,
@@ -131,6 +149,47 @@ class TileItem(QGraphicsObject):
 
     def _layout_proxy(self) -> None:
         self._proxy.setGeometry(self._content_rect())
+
+    # ----------------------------------------------------------- fullscreen
+
+    @property
+    def is_fullscreen(self) -> bool:
+        return self._fullscreen
+
+    def can_fullscreen(self) -> bool:
+        # already maximized always counts: deleting the node behind a
+        # maximized tile must not strand it without a restore button
+        return self._fullscreen or self._kind() not in NO_FULLSCREEN_KINDS
+
+    def set_fullscreen_rect(self, rect: QRectF) -> None:
+        """Pin the tile to an exact scene rect — the view calls this on the
+        way into fullscreen and on every resize after, so the embedded chart
+        or table grows with the window. Never touches the stored rect: this
+        is view state, not something to save or undo."""
+        self._fullscreen = True
+        self._move_suppressed = False
+        self._dragging = False
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self.prepareGeometryChange()
+        self.setPos(rect.topLeft())
+        self._size = (max(MIN_W, rect.width()), max(MIN_H, rect.height()))
+        self._layout_proxy()
+        self.refresh_render_ratio()
+        self.update()
+
+    def clear_fullscreen(self) -> None:
+        """Drop back to the geometry the model holds."""
+        if not self._fullscreen:
+            return
+        self._fullscreen = False
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.sync_from_model()
+        self.refresh_render_ratio()
+
+    def _request_fullscreen(self) -> None:
+        scene = self.scene()
+        if scene is not None and self.can_fullscreen():
+            scene.fullscreen_requested.emit(self.tile.id)
 
     # -------------------------------------------------------------- content
 
@@ -437,7 +496,8 @@ class TileItem(QGraphicsObject):
         painter.setFont(font)
         stale = self._is_stale()
         stale_w = 44.0 if stale else 0.0
-        painter.drawText(QRectF(10, 0, w - 20 - stale_w, TITLE_H),
+        glyph_w = FS_BTN + 8.0 if self.can_fullscreen() else 0.0
+        painter.drawText(QRectF(10, 0, w - 20 - stale_w - glyph_w, TITLE_H),
                          Qt.AlignVCenter | Qt.AlignLeft, self._title())
         if stale:
             painter.setPen(QPen(QColor("#eab308")))
@@ -445,8 +505,10 @@ class TileItem(QGraphicsObject):
             small.setPointSizeF(7.5)
             painter.setFont(small)
             painter.drawText(
-                QRectF(0, 0, w - 10, TITLE_H),
+                QRectF(0, 0, w - 10 - glyph_w, TITLE_H),
                 Qt.AlignVCenter | Qt.AlignRight, "STALE")
+        if self.can_fullscreen():
+            self._paint_fullscreen_glyph(painter)
 
         painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
         hr = self._handle_rect()
@@ -456,6 +518,27 @@ class TileItem(QGraphicsObject):
 
         if self._kind() == "kpi" and self._kpi_has_value:
             self._paint_kpi_value(painter)
+
+    def _paint_fullscreen_glyph(self, painter: QPainter) -> None:
+        """Four corner brackets, like a video player's fullscreen toggle:
+        drawn on the outer box to maximize, on a smaller inner one to
+        restore."""
+        box = self._fs_button_rect().adjusted(2, 2, -2, -2)
+        if self._fullscreen:
+            box = box.adjusted(2, 2, -2, -2)
+        # shorter arms on the smaller box, or the four brackets close up
+        # into a plain square
+        arm = box.width() / (3.6 if self._fullscreen else 2.6)
+        painter.setPen(QPen(theme.NODE_TEXT if self._fs_hover
+                            else theme.NODE_SUBTEXT, 1.3))
+        for corner, sx, sy in ((box.topLeft(), 1, 1),
+                               (box.topRight(), -1, 1),
+                               (box.bottomRight(), -1, -1),
+                               (box.bottomLeft(), 1, -1)):
+            painter.drawLine(corner,
+                             QPointF(corner.x() + sx * arm, corner.y()))
+            painter.drawLine(corner,
+                             QPointF(corner.x(), corner.y() + sy * arm))
 
     def _paint_kpi_value(self, painter: QPainter) -> None:
         """The KPI number and caption, painted like the canvas Card body —
@@ -514,8 +597,9 @@ class TileItem(QGraphicsObject):
 
     def _edge_at(self, pos: QPointF) -> Optional[str]:
         """Which resize edge/corner (if any) a point grabs: "right", "bottom",
-        "corner", or None. Buttons are fixed-size and never resize."""
-        if self._kind() == "button":
+        "corner", or None. Buttons are fixed-size and never resize; a
+        maximized tile is sized by the viewport, not by dragging."""
+        if self._kind() == "button" or self._fullscreen:
             return None
         w, h = self._size
         near_right = w - EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
@@ -530,15 +614,20 @@ class TileItem(QGraphicsObject):
             return "bottom"
         return None
 
+    def _over_fs_button(self, pos: QPointF) -> bool:
+        return self.can_fullscreen() and self._fs_button_rect().contains(pos)
+
     def _apply_edge_cursor(self, pos: QPointF) -> None:
         edge = self._edge_at(pos)
-        if edge == "corner":
+        if self._over_fs_button(pos):
+            self.setCursor(Qt.PointingHandCursor)
+        elif edge == "corner":
             self.setCursor(Qt.SizeFDiagCursor)
         elif edge == "right":
             self.setCursor(Qt.SizeHorCursor)
         elif edge == "bottom":
             self.setCursor(Qt.SizeVerCursor)
-        elif pos.y() < TITLE_H:
+        elif pos.y() < TITLE_H and not self._fullscreen:
             self.setCursor(Qt.SizeAllCursor)  # the title drag bar
         else:
             self.setCursor(Qt.ArrowCursor)
@@ -547,12 +636,22 @@ class TileItem(QGraphicsObject):
         if self._kind() == "button":
             super().hoverMoveEvent(event)
             return
+        self._set_fs_hover(self._over_fs_button(event.pos()))
         self._apply_edge_cursor(event.pos())
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
+        self._set_fs_hover(False)
         self.unsetCursor()
         super().hoverLeaveEvent(event)
+
+    def _set_fs_hover(self, hovered: bool) -> None:
+        if hovered == self._fs_hover:
+            return
+        self._fs_hover = hovered
+        self.setToolTip(("Restore (Esc)" if self._fullscreen
+                         else "Maximize to fill the page") if hovered else "")
+        self.update()
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self._dragging \
@@ -576,6 +675,10 @@ class TileItem(QGraphicsObject):
                 self.setSelected(True)
                 event.accept()
                 return
+        if event.button() == Qt.LeftButton and self._over_fs_button(event.pos()):
+            self._request_fullscreen()
+            event.accept()
+            return
         self._press_scene_pos = event.scenePos()
         self._press_pos = self.pos()
         self._press_size = self._size
@@ -586,7 +689,7 @@ class TileItem(QGraphicsObject):
             self._resize_edge = edge
             event.accept()
             return
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton and not self._fullscreen:
             # Only the title bar starts a move; a press on the body just
             # selects. Buttons have no title bar, so they drag whole-body.
             if self._kind() != "button" and event.pos().y() >= TITLE_H:
@@ -621,8 +724,24 @@ class TileItem(QGraphicsObject):
             return
         super().mouseMoveEvent(event)
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        """Double-clicking the title bar maximizes/restores, the way a window
+        title bar does. The body belongs to the embedded widget (the proxy
+        sits on top of it), so its double-clicks never reach us."""
+        if event.button() == Qt.LeftButton and self.can_fullscreen() \
+                and event.pos().y() < TITLE_H:
+            self._request_fullscreen()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
+        if self._fullscreen:
+            # geometry is view-owned while maximized — never push a rect
+            self._resizing = False
+            super().mouseReleaseEvent(event)
+            return
         if self._resizing:
             self._resizing = False
             if scene is not None and self._size != self._press_size:

@@ -5,8 +5,10 @@ Settings kept off the real store (avoid polluting the developer's actual
 flograph.conf) -- see test_lod_settings.py's fixture of the same name."""
 import pandas as pd
 import pytest
-from PySide6.QtCore import QSettings, Qt
-from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QGraphicsItem, QVBoxLayout
 
 from flograph.core import NodeRegistry, Page, Tile
 from flograph.ui import mainwindow as mod
@@ -438,3 +440,209 @@ class TestPersistence:
         assert "p1" in window._dashboard_pages
         assert "t1" in window._dashboard_pages["p1"].scene.tile_items
         assert window.page_bar.count() == 3
+
+
+class TestTileFullscreen:
+    """Maximizing one tile over the whole page (ideas.md #4): the tile is
+    pinned to the viewport in scene coordinates, so it grows with the window
+    and the embedded chart/table grows with it.
+
+    Geometry assertions need a *shown* view -- a hidden QAbstractScrollArea
+    never lays its viewport out, so a standalone DashboardView on the page's
+    scene stands in for the (unshown) MainWindow, as elsewhere in this file."""
+
+    def shown_view(self, window, qtbot, size=(900, 600)):
+        from flograph.ui.dashboard.dashboard_view import DashboardView
+        view = DashboardView(window._dashboard_pages["p1"].scene)
+        qtbot.addWidget(view)
+        view.resize(*size)
+        view.show()
+        qtbot.waitExposed(view)
+        return view
+
+    def viewport_rect(self, view):
+        return view.mapToScene(view.viewport().rect()).boundingRect()
+
+    def test_fills_the_viewport_and_hides_other_tiles(self, window, qtbot):
+        add_page(window)
+        node = add_show_table(window)
+        item = add_tile(window, node)
+        other = add_tile(window, node, tile_id="t2")
+        rect_before = window.graph.pages["p1"].tiles["t1"].rect
+        view = self.shown_view(window, qtbot)
+
+        view.enter_fullscreen(item)
+        assert item.is_fullscreen
+        assert view.fullscreen_tile is item
+        rect = self.viewport_rect(view)
+        assert item._size[0] == pytest.approx(rect.width() - 12.0)
+        assert item._size[1] == pytest.approx(rect.height() - 12.0)
+        assert item.pos().x() == pytest.approx(rect.left() + 6.0)
+        assert item.pos().y() == pytest.approx(rect.top() + 6.0)
+        assert not other.isVisible()
+        # view state only -- the stored rect and the undo stack are untouched
+        assert window.graph.pages["p1"].tiles["t1"].rect == rect_before
+        assert not window.undo_stack.canRedo()
+
+        view.toggle_fullscreen(item)
+        assert not item.is_fullscreen
+        assert view.fullscreen_tile is None
+        assert other.isVisible()
+        assert (item.pos().x(), item.pos().y(),
+                *item._size) == pytest.approx(rect_before)
+
+    def test_window_resize_grows_the_tile(self, window, qtbot):
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        view = self.shown_view(window, qtbot)
+        view.enter_fullscreen(item)
+        before = item._size
+
+        view.resize(1400, 900)
+        assert item._size[0] > before[0]
+        assert item._size[1] > before[1]
+        assert item._size[0] == pytest.approx(
+            self.viewport_rect(view).width() - 12.0)
+        # the content widget follows the item -- that is what makes an
+        # embedded chart or table redraw at the new size
+        assert item._proxy.geometry().width() == pytest.approx(
+            item._size[0] - 2)
+
+    def test_zoom_is_pinned_at_1_to_1_and_restored_on_exit(self, window, qtbot):
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        view = self.shown_view(window, qtbot)
+        view.set_zoom(0.5)
+
+        view.enter_fullscreen(item)
+        assert view.zoom == pytest.approx(1.0)
+        view.exit_fullscreen()
+        assert view.zoom == pytest.approx(0.5)
+
+    def test_escape_restores(self, window, qtbot):
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        view = self.shown_view(window, qtbot)
+        view.enter_fullscreen(item)
+
+        QTest.keyClick(view, Qt.Key_Escape)
+        assert not item.is_fullscreen
+
+    def test_wheel_does_not_zoom_while_maximized(self, window, qtbot):
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        view = self.shown_view(window, qtbot)
+        view.enter_fullscreen(item)
+
+        pos = view.viewport().rect().topLeft() + QPoint(4, 4)  # off the tile
+        event = QWheelEvent(
+            QPointF(pos), QPointF(view.viewport().mapToGlobal(pos)),
+            QPoint(0, 0), QPoint(0, 120), Qt.NoButton, Qt.NoModifier,
+            Qt.NoScrollPhase, False)
+        QApplication.sendEvent(view.viewport(), event)
+        assert view.zoom == pytest.approx(1.0)
+
+    def test_maximized_tile_cannot_be_moved_or_resized(self, window, qtbot):
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        self.shown_view(window, qtbot).enter_fullscreen(item)
+
+        assert not item.flags() & QGraphicsItem.ItemIsMovable
+        assert item._edge_at(QPointF(*item._size)) is None
+        # a model-driven re-sync (undo of someone else's move) is ignored
+        window.graph.pages["p1"].tiles["t1"].rect = (5.0, 5.0, 50.0, 50.0)
+        item.sync_from_model()
+        assert item._size[0] > 50.0
+
+    def test_page_signal_toggles_and_frees_the_page_chrome(self, window):
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        page = window._dashboard_pages["p1"]
+        page.set_visuals_visible(True)  # pages open collapsed; open it first
+
+        page.scene.fullscreen_requested.emit("t1")
+        assert page.view.fullscreen_tile is page.scene.tile_items["t1"]
+        assert not page._side.isVisibleTo(page)
+        assert not page._toggle_strip.isVisibleTo(page)
+
+        page.scene.fullscreen_requested.emit("t1")
+        assert page.view.fullscreen_tile is None
+        assert page._side.isVisibleTo(page)
+        assert page._toggle_strip.isVisibleTo(page)
+
+    def test_maximizing_leaves_a_collapsed_panel_collapsed(self, window):
+        """Stepping aside is not the user asking for the panel: it must not
+        reopen on exit, nor emit the toggle signal that would rewrite the
+        state new pages open with."""
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        page = window._dashboard_pages["p1"]
+        toggled = []
+        page.visuals_visibility_changed.connect(toggled.append)
+
+        page.scene.fullscreen_requested.emit("t1")
+        page.view.exit_fullscreen()
+        assert not page._side.isVisibleTo(page)
+        assert page._toggle_strip.isVisibleTo(page)
+        assert page._visuals_visible is False
+        assert toggled == []
+
+    def test_tile_added_while_maximized_stays_hidden_until_exit(self, window):
+        add_page(window)
+        node = add_show_table(window)
+        add_tile(window, node)
+        page = window._dashboard_pages["p1"]
+        page.scene.fullscreen_requested.emit("t1")
+
+        late = add_tile(window, node, tile_id="t2")
+        assert not late.isVisible()
+        page.view.exit_fullscreen()
+        assert late.isVisible()
+
+    def test_deleting_the_maximized_tile_leaves_fullscreen(self, window):
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        page = window._dashboard_pages["p1"]
+        page.scene.fullscreen_requested.emit("t1")
+
+        page.scene.remove_tile("t1")
+        assert page.view.fullscreen_tile is None
+        assert page._toggle_strip.isVisibleTo(page)
+
+    def test_deleting_the_node_keeps_the_restore_affordance(self, window):
+        from flograph.ui.commands import RemoveSelectionCommand
+        add_page(window)
+        node = add_show_table(window)
+        item = add_tile(window, node)
+        window._dashboard_pages["p1"].scene.fullscreen_requested.emit("t1")
+
+        window.undo_stack.push(
+            RemoveSelectionCommand(window.graph, [node.id]))
+        assert item.is_fullscreen
+        assert item.can_fullscreen()  # the restore glyph is still painted
+
+    def test_title_bar_glyph_and_double_click_toggle(self, window, qtbot):
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        view = self.shown_view(window, qtbot)
+        requested = []
+        view.scene().fullscreen_requested.connect(requested.append)
+
+        glyph = view.mapFromScene(item.mapToScene(
+            item._fs_button_rect().center()))
+        QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, glyph)
+        title = view.mapFromScene(item.mapToScene(QPointF(30.0, 12.0)))
+        QTest.mouseDClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, title)
+        assert requested == ["t1", "t1"]
+
+    def test_button_tiles_do_not_maximize(self, window, qtbot):
+        add_page(window)
+        node = window.registry.instantiate("flograph.util.action_button",
+                                           pos=(0, 0))
+        window.graph.add_node(node)
+        item = add_tile(window, node, port=None)
+
+        assert not item.can_fullscreen()
+        view = self.shown_view(window, qtbot)
+        view.enter_fullscreen(item)
+        assert view.fullscreen_tile is None
