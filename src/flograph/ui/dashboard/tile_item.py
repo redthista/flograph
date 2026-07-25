@@ -1,5 +1,6 @@
 """TileItem: one visual element placed on a dashboard page — a live view of
-a node's cached output (figure, table, plotly chart) or an Action Button.
+a node's cached output (figure, table, plotly chart), an editable Table
+node grid, or an Action Button.
 
 The content widget is persistent: refresh_content() pushes new data into it
 rather than rebuilding, so re-runs never recreate webviews or table views.
@@ -12,8 +13,8 @@ from typing import Optional
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QLabel,
-    QTableView, QVBoxLayout, QWidget,
+    QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout, QLabel,
+    QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Tile
@@ -50,6 +51,19 @@ MISSING_NODE = ("The node behind this tile was deleted.\n"
                 "Select the tile and press Delete to remove it.")
 
 
+def _grid_stylesheet() -> str:
+    """Table styling shared by the read-only viewer and the editable grid,
+    matching the cards on the modeling canvas."""
+    return (f"QTableView {{ background: {theme.NODE_BODY.name()};"
+            f" color: {theme.NODE_TEXT.name()}; border: none;"
+            f" gridline-color: {theme.NODE_BORDER.name()};"
+            f" font-size: 8.5pt; }}"
+            f"QHeaderView::section {{ background: {theme.NODE_HEADER.name()};"
+            f" color: {theme.NODE_SUBTEXT.name()};"
+            f" border: 1px solid {theme.NODE_BORDER.name()};"
+            f" padding: 2px; }}")
+
+
 def default_tile_port(node) -> Optional[str]:
     """The output port a tile of this node renders — its first declared output
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
@@ -69,6 +83,10 @@ def default_tile_size(node) -> tuple[float, float]:
         return (220.0, 120.0)
     if kind == "slicer":
         return (200.0, 260.0)
+    if kind == "grid":
+        # a spreadsheet is for typing in, so it lands wide enough to show
+        # several columns without a horizontal scrollbar
+        return (560.0, 360.0)
     return (420.0, 320.0)
 
 
@@ -109,6 +127,9 @@ class TileItem(QGraphicsObject):
         self._figure_view = None
         self._plotly_widget = None
         self._table_view = None
+        self._sheet_view = None     # SpreadsheetView (Table node tiles)
+        self._sheet_model = None    # SheetModel (Table node tiles)
+        self._sheet_toolbar: Optional[QWidget] = None
         self._slicer_widget: Optional[SlicerListWidget] = None
         self._slicer_toolbar: Optional[SlicerToolbar] = None
         self._generic_host: Optional[QWidget] = None
@@ -209,7 +230,7 @@ class TileItem(QGraphicsObject):
             "webview": "plotly",
             "figure": "figure",
             "table_viewer": "table",
-            "grid": "table",
+            "grid": "sheet",
             "button": "button",
             "kpi": "kpi",
             "slicer": "slicer",
@@ -236,7 +257,7 @@ class TileItem(QGraphicsObject):
 
     def _content_widget(self) -> Optional[QWidget]:
         for widget in (self._figure_view, self._plotly_widget,
-                       self._table_view, self._slicer_widget,
+                       self._table_view, self._sheet_view, self._slicer_widget,
                        self._generic_host):
             if widget is not None:
                 return widget
@@ -256,18 +277,11 @@ class TileItem(QGraphicsObject):
             self._plotly_widget = widget
         elif kind == "table":
             widget = QTableView()
-            widget.setStyleSheet(
-                f"QTableView {{ background: {theme.NODE_BODY.name()};"
-                f" color: {theme.NODE_TEXT.name()}; border: none;"
-                f" gridline-color: {theme.NODE_BORDER.name()};"
-                f" font-size: 8.5pt; }}"
-                f"QHeaderView::section {{"
-                f" background: {theme.NODE_HEADER.name()};"
-                f" color: {theme.NODE_SUBTEXT.name()};"
-                f" border: 1px solid {theme.NODE_BORDER.name()};"
-                f" padding: 2px; }}")
+            widget.setStyleSheet(_grid_stylesheet())
             widget.setSortingEnabled(True)
             self._table_view = widget
+        elif kind == "sheet":
+            widget = self._build_sheet_widget()
         elif kind == "slicer":
             widget = SlicerListWidget()
             widget.selection_committed.connect(self._commit_slicer_selection)
@@ -285,6 +299,82 @@ class TileItem(QGraphicsObject):
         widget.hide()
         self._host_layout.addWidget(widget, 1)
         return widget
+
+    # ------------------------------------------------------- editable sheet
+
+    def _build_sheet_widget(self) -> QWidget:
+        """The Table node's own spreadsheet, live on the dashboard: the same
+        SpreadsheetView the canvas card uses, so formulas, column types,
+        Excel paste and the header menus all come along. Edits commit
+        through the undo stack exactly like edits on the card."""
+        from ..spreadsheet import SheetModel, SpreadsheetView
+
+        toolbar = QWidget()
+        row = QHBoxLayout(toolbar)
+        row.setContentsMargins(0, 0, 0, 2)
+        row.setSpacing(3)
+
+        grid = SpreadsheetView()
+        # parent the model to the view so C++ destruction stays ordered
+        model = SheetModel(self._sheet_source(), parent=grid)
+        grid.setModel(model)
+        grid.verticalHeader().setFixedWidth(28)
+        grid.setStyleSheet(_grid_stylesheet())
+        model.sheet_edited.connect(self._commit_sheet_data)
+
+        for text, tip, slot in (
+                ("+Row", "Add a row at the bottom",
+                 lambda: model.insert_rows_at(model.rowCount())),
+                ("-Row", "Remove the last row",
+                 lambda: model.remove_rows_at([model.rowCount() - 1])),
+                ("+Col", "Add a column at the right",
+                 lambda: model.insert_columns_at(model.columnCount())),
+                ("-Col", "Remove the last column",
+                 lambda: model.remove_columns_at([model.columnCount() - 1])),
+                ("Fit", "Auto-size columns to their content",
+                 lambda: grid.autosize_columns())):
+            button = QToolButton(text=text)
+            button.setToolTip(tip)
+            button.setAutoRaise(True)
+            button.clicked.connect(slot)
+            row.addWidget(button)
+        row.addStretch(1)
+
+        self._host_layout.addWidget(toolbar)
+        self._sheet_toolbar = toolbar
+        self._sheet_view = grid
+        self._sheet_model = model
+        return grid
+
+    def _sheet_source(self) -> object:
+        """What the grid should show: the merged result of a linked run
+        (upstream columns refreshed, the user's own carried over) when there
+        is one, otherwise the node's stored cells."""
+        from flograph.engine.introspect import merged_linked_sheet
+        node = self._node()
+        if node is None:
+            return None
+        merged = merged_linked_sheet(self._graph, self._engine.cache, node.id)
+        return merged if merged is not None else node.params.get("data")
+
+    def _commit_sheet_data(self, data: dict) -> None:
+        """One undo step per edit, then re-run so the visuals beside the
+        spreadsheet catch up — a dashboard is for reading, so typing a
+        number and waiting for a manual run would defeat the point. Mirrors
+        how a slicer tile commits and re-runs."""
+        import json
+        scene = self.scene()
+        node = self._node()
+        if scene is None or node is None:
+            return
+        new_json = json.dumps(data)
+        if new_json == node.params.get("data"):
+            return
+        from ..commands import SetParamCommand
+        # merge=False: one Ctrl+Z undoes one cell edit, not the session
+        scene.undo_stack.push(SetParamCommand(
+            self._graph, node.id, "data", new_json, merge=False))
+        scene.sheet_edited.emit(node.id)
 
     def _dialog_parent_widget(self) -> Optional[QWidget]:
         scene = self.scene()
@@ -394,6 +484,14 @@ class TileItem(QGraphicsObject):
                     self._slicer_toolbar.show()
                 self._placeholder.hide()
                 widget.show()
+        elif kind == "sheet":
+            # a Table node holds its own data, so there is nothing to wait
+            # for: the grid is live from the moment the tile is placed
+            self._placeholder.hide()
+            self._sheet_model.set_sheet(self._sheet_source())
+            if self._sheet_toolbar is not None:
+                self._sheet_toolbar.show()
+            widget.show()
         elif kind == "table":
             import sys
             pd = sys.modules.get("pandas")
@@ -427,14 +525,20 @@ class TileItem(QGraphicsObject):
         self.update()
 
     def on_param_changed(self) -> None:
-        """Params drive the painted caption/format of kpi tiles and the tick
-        states of slicer tiles (properties panel edits, undo) — keep those
+        """Params drive the painted caption/format of kpi tiles, the cells of
+        Table node tiles and the tick states of slicer tiles (properties
+        panel edits, undo, an edit to the same node elsewhere) — keep those
         live without rebuilding anything. Other tile kinds only re-render on
         runs."""
         kind = self._kind()
         node = self._node()
         if kind == "kpi":
             self.update()
+        elif kind == "sheet" and self._sheet_model is not None:
+            # set_sheet no-ops when nothing changed, so the edit that caused
+            # this doesn't reset the grid under the user's cursor
+            self._sheet_model.set_sheet(node.params.get("data")
+                                        if node is not None else None)
         elif kind == "slicer" and self._slicer_widget is not None \
                 and not self._slicer_widget.isHidden() and node is not None:
             mode = str(node.params.get("mode", "multi") or "multi")
@@ -466,7 +570,10 @@ class TileItem(QGraphicsObject):
         engine evicts the cache on dirtying, but our content widgets hold
         the last-rendered data by reference until the next run."""
         node = self._node()
-        if node is None or not node.dirty or self._kind() == "button":
+        # a Table node tile shows the cells the user is typing, not a
+        # rendered output, so "STALE" would be wrong there as well
+        if node is None or not node.dirty \
+                or self._kind() in ("button", "sheet"):
             return False
         if self._kind() == "kpi":  # painted, not widget-backed
             return self._kpi_has_value

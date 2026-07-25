@@ -27,6 +27,7 @@ from .tile_item import TileItem
 class DashboardScene(QGraphicsScene):
     button_fired = Signal(str)  # node_id — an Action Button tile was clicked
     slicer_changed = Signal(str)  # node_id — a Slicer tile's selection changed
+    sheet_edited = Signal(str)  # node_id — a Table tile's cells were edited
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
