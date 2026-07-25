@@ -229,6 +229,148 @@ class TestSlicerCard:
         assert item._slicer_list._mode == "single"
         assert item._slicer_toolbar._select_all.isHidden()
 
+    def test_single_mode_draws_radios_not_checkboxes(self, qtbot):
+        """ideas.md item 14: a checkbox promises you can tick several, which
+        single mode then silently undoes. Painting only — the list still
+        stores and reports check state."""
+        from flograph.ui.slicer_list import SlicerListWidget
+        widget = SlicerListWidget()
+        qtbot.addWidget(widget)
+        widget.set_options(["north", "south"], {"north"})
+        assert not widget._delegate.radio
+        widget.set_mode("single")
+        assert widget._delegate.radio
+        assert widget.selected_values() == ["north"]  # unchanged underneath
+        widget.set_mode("multi")
+        assert not widget._delegate.radio
+
+    def test_radio_rows_keep_the_checkbox_layout(self, qtbot):
+        """The radio is drawn by dropping the check indicator and painting
+        one in its place; that also collapses the column it occupied, so
+        without compensating the label slides left underneath the radio.
+        Rendered and diffed rather than reasoned about: the two modes must
+        differ *only* inside the indicator's own rectangle."""
+        from PySide6.QtGui import QPixmap
+        from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+        from flograph.ui.slicer_list import SlicerListWidget
+
+        widgets = {}
+
+        def render(mode):
+            widget = SlicerListWidget()
+            qtbot.addWidget(widget)
+            widget.resize(220, 80)
+            widget.set_mode(mode)
+            widget.set_options(["north", "south"], {"north"})
+            widgets[mode] = widget
+            pixmap = QPixmap(widget.size())
+            widget.render(pixmap)
+            return pixmap.toImage()
+
+        multi, single = render("multi"), render("single")
+        assert multi.size() == single.size()
+
+        widget = widgets["multi"]
+        option = QStyleOptionViewItem()
+        option.rect = widget.visualItemRect(widget.item(0))
+        option.features |= \
+            QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        indicator = widget.style().subElementRect(
+            QStyle.SE_ItemViewItemCheckIndicator, option, widget)
+
+        differing = {x for x in range(multi.width())
+                     for y in range(multi.height())
+                     if multi.pixelColor(x, y) != single.pixelColor(x, y)}
+        assert differing, "single mode drew an identical checkbox"
+        assert min(differing) >= indicator.left()
+        assert max(differing) <= indicator.right()
+
+    @pytest.mark.parametrize("mode", ["multi", "single"])
+    def test_clicking_the_label_ticks_the_row(self, qtbot, mode):
+        """The row is one target: hitting the 14px tick box exactly is
+        needless precision, and the label looked dead when it only
+        selected."""
+        from flograph.ui.slicer_list import SlicerListWidget
+        widget = SlicerListWidget()
+        qtbot.addWidget(widget)
+        widget.resize(220, 80)
+        widget.set_mode(mode)
+        widget.set_options(["north", "south"], set())
+        widget.show()
+        qtbot.waitExposed(widget)
+
+        item = widget.item(0)
+        label = widget.visualItemRect(item).center()
+        assert not widget._indicator_rect(item).contains(label)
+
+        with qtbot.waitSignal(widget.selection_committed):
+            qtbot.mouseClick(widget.viewport(), Qt.LeftButton, pos=label)
+        assert widget.selected_values() == ["north"]
+
+        # and clicking it again clears it, same as clicking the box
+        with qtbot.waitSignal(widget.selection_committed):
+            qtbot.mouseClick(widget.viewport(), Qt.LeftButton, pos=label)
+        assert widget.selected_values() == []
+
+    @pytest.mark.parametrize("mode", ["multi", "single"])
+    def test_clicking_the_tick_box_still_toggles_once(self, qtbot, mode):
+        """The box is left to the base class; toggling there as well would
+        cancel out and leave the row looking unclickable."""
+        from flograph.ui.slicer_list import SlicerListWidget
+        widget = SlicerListWidget()
+        qtbot.addWidget(widget)
+        widget.resize(220, 80)
+        widget.set_mode(mode)
+        widget.set_options(["north", "south"], set())
+        widget.show()
+        qtbot.waitExposed(widget)
+
+        item = widget.item(0)
+        with qtbot.waitSignal(widget.selection_committed):
+            qtbot.mouseClick(widget.viewport(), Qt.LeftButton,
+                             pos=widget._indicator_rect(item).center())
+        assert widget.selected_values() == ["north"]
+
+    def test_clicking_a_label_in_single_mode_replaces_the_selection(
+            self, qtbot):
+        from flograph.ui.slicer_list import SlicerListWidget
+        widget = SlicerListWidget()
+        qtbot.addWidget(widget)
+        widget.resize(220, 80)
+        widget.set_mode("single")
+        widget.set_options(["north", "south"], {"north"})
+        widget.show()
+        qtbot.waitExposed(widget)
+
+        with qtbot.waitSignal(widget.selection_committed):
+            qtbot.mouseClick(widget.viewport(), Qt.LeftButton,
+                             pos=widget.visualItemRect(widget.item(1)).center())
+        assert widget.selected_values() == ["south"]
+
+    def test_clicking_the_truncation_note_does_nothing(self, qtbot):
+        from flograph.ui.slicer_list import MAX_OPTIONS, SlicerListWidget
+        widget = SlicerListWidget()
+        qtbot.addWidget(widget)
+        widget.resize(220, 80)
+        widget.set_options([str(i) for i in range(MAX_OPTIONS + 5)], set())
+        widget.show()
+        qtbot.waitExposed(widget)
+
+        note = widget.item(widget.count() - 1)
+        assert not (note.flags() & Qt.ItemIsUserCheckable)
+        widget.scrollToItem(note)
+        qtbot.mouseClick(widget.viewport(), Qt.LeftButton,
+                         pos=widget.visualItemRect(note).center())
+        assert widget.selected_values() == []
+
+    def test_mode_syncs_the_delegate_from_the_param(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        win.graph.set_param(slicer.id, "mode", "single")
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        assert win.scene.node_items[slicer.id]._slicer_list._delegate.radio
+
     def test_toolbar_count_label_tracks_ticks(self, qtbot, window):
         win = window
         _source, slicer, _shown = _add_sliced_flow(win)

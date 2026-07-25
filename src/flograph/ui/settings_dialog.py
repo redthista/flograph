@@ -16,7 +16,8 @@ import platform
 from PySide6.QtCore import qVersion
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QListWidget, QMessageBox, QPushButton, QSpinBox, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from .canvas import grid
@@ -55,6 +56,72 @@ class SettingsDialog(QDialog):
 
         self._nav.currentRowChanged.connect(self._pages.setCurrentIndex)
         self._nav.setCurrentRow(0)
+
+    def refresh_from(self, window) -> None:
+        """Re-read every control from the window. The pages bind once at
+        build time and live-apply from there, which is right for a user
+        turning knobs — but a reset changes the values underneath an already
+        open dialog, so it has to be pulled back into sync afterwards."""
+        from .spreadsheet import autosize_default_enabled, date_formats_setting
+
+        combo_values = {
+            "page_bar_position_combo": ["bottom", "top"].index(
+                window.page_bar_position),
+        }
+        checks = {
+            "gpu_viewport_checkbox": window.action_gpu_viewport.isChecked(),
+            "lod_enabled_checkbox": window.lod_enabled,
+            "snap_enabled_checkbox": window.snap_enabled,
+            "minimap_enabled_checkbox": window.minimap_enabled,
+            "table_autosize_checkbox": autosize_default_enabled(),
+        }
+        spins = {
+            "lod_threshold_spinbox": round(window.lod_threshold * 100),
+            "tint_soft_spinbox": round(window.tint_soft * 100),
+            "tint_strong_spinbox": round(window.tint_strong * 100),
+        }
+        for name, value in {**combo_values, **checks, **spins}.items():
+            widget = self.findChild(QWidget, name)
+            if widget is None:
+                continue
+            # blocked: these setters exist to *push* user intent at the
+            # window, and replaying them here would be a no-op at best
+            blocked = widget.blockSignals(True)
+            try:
+                if name in combo_values:
+                    widget.setCurrentIndex(value)
+                elif name in checks:
+                    widget.setChecked(value)
+                else:
+                    widget.setValue(value)
+            finally:
+                widget.blockSignals(blocked)
+
+        grid_combo = self.findChild(QComboBox, "grid_step_combo")
+        if grid_combo is not None:
+            blocked = grid_combo.blockSignals(True)
+            try:
+                index = grid_combo.findData(window.grid_step)
+                grid_combo.setCurrentIndex(max(0, index))
+            finally:
+                grid_combo.blockSignals(blocked)
+
+        formats_edit = self.findChild(QLineEdit, "table_date_formats_edit")
+        if formats_edit is not None:
+            blocked = formats_edit.blockSignals(True)
+            try:
+                formats_edit.setText(date_formats_setting())
+            finally:
+                formats_edit.blockSignals(blocked)
+
+        # dependent enablement isn't re-derived by the setters above
+        for check_name, dependent in (
+                ("lod_enabled_checkbox", "lod_threshold_spinbox"),
+                ("snap_enabled_checkbox", "grid_step_combo")):
+            check = self.findChild(QWidget, check_name)
+            target = self.findChild(QWidget, dependent)
+            if check is not None and target is not None:
+                target.setEnabled(check.isChecked())
 
     def _add_page(self, name: str, page: QWidget) -> None:
         self._nav.addItem(name)
@@ -95,7 +162,54 @@ class SettingsDialog(QDialog):
             "Which edge of the window the Model/page tabs live on."))
 
         layout.addStretch(1)
+
+        layout.addWidget(QLabel("Reset"))
+
+        layout_btn = QPushButton("Reset window layout…")
+        layout_btn.setObjectName("reset_layout_button")
+        layout_btn.clicked.connect(
+            lambda: SettingsDialog._confirm_reset(
+                page, window, layout=True))
+        layout.addWidget(layout_btn, 0)
+        layout.addWidget(SettingsDialog._hint(
+            "Puts the Library, Properties, Code, Inspector and Log panels "
+            "back where they start, without touching anything else. Use this "
+            "when a panel has been dragged somewhere unrecoverable."))
+
+        all_btn = QPushButton("Reset all settings to defaults…")
+        all_btn.setObjectName("reset_settings_button")
+        all_btn.clicked.connect(
+            lambda: SettingsDialog._confirm_reset(page, window, layout=False))
+        layout.addWidget(all_btn, 0)
+        layout.addWidget(SettingsDialog._hint(
+            "Clears every stored preference — everything on these pages, the "
+            "window layout, the AI assistant settings and the recent files "
+            "list — and applies the defaults straight away. Your saved "
+            "projects are not touched."))
         return page
+
+    @staticmethod
+    def _confirm_reset(parent: QWidget, window, layout: bool) -> None:
+        """Both resets throw away something the user configured by hand, and
+        neither is undoable, so both ask first."""
+        if layout:
+            title, question = ("Reset window layout",
+                               "Put every panel back where it starts?")
+        else:
+            title, question = (
+                "Reset all settings",
+                "Clear every stored preference — including the AI settings "
+                "and the recent files list — and go back to defaults?\n\n"
+                "Saved projects are not affected.")
+        confirmed = QMessageBox.question(
+            parent, title, question,
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if confirmed != QMessageBox.Yes:
+            return
+        if layout:
+            window.reset_window_layout()
+        else:
+            window.reset_settings()
 
     @staticmethod
     def _build_canvas_page(window) -> QWidget:

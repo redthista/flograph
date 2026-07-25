@@ -17,6 +17,8 @@ GUTTER_FG = QColor("#5c6370")
 GUTTER_FG_CURRENT = QColor("#9ca3af")
 CURRENT_LINE_BG = QColor("#24262d")
 ERROR_LINE_BG = QColor("#4b1d24")
+MATCH_BG = QColor("#3b4a2a")          # every hit while the find bar is open
+CURRENT_MATCH_BG = QColor("#6b5a1a")  # the one Enter/F3 just landed on
 ERROR_DOT = QColor("#ef4444")
 INDENT = "    "
 
@@ -45,6 +47,8 @@ class CodeEditor(QPlainTextEdit):
         self.highlighter = PythonHighlighter(self.document())
         self._gutter = _Gutter(self)
         self._error_line: Optional[int] = None
+        # (cursor, is_current) pairs owned by the find bar; empty when it's shut
+        self._search_hits: list[tuple[QTextCursor, bool]] = []
 
         self.blockCountChanged.connect(self._update_gutter_width)
         self.updateRequest.connect(self._update_gutter_area)
@@ -59,6 +63,17 @@ class CodeEditor(QPlainTextEdit):
         self._error_line = line
         self._update_extra_selections()
         self._gutter.update()
+
+    # -------------------------------------------------------------- search
+
+    def set_search_highlights(
+            self, hits: list[tuple[QTextCursor, bool]]) -> None:
+        """Paint every find-bar match, the current one more strongly. Routed
+        through the editor rather than set directly because extra selections
+        are a single list — the current-line and error-line marks would wipe
+        each other out otherwise."""
+        self._search_hits = list(hits)
+        self._update_extra_selections()
 
     # -------------------------------------------------------------- gutter
 
@@ -131,6 +146,13 @@ class CodeEditor(QPlainTextEdit):
                 error.format.setProperty(QTextFormat.FullWidthSelection, True)
                 error.cursor = QTextCursor(block)
                 selections.append(error)
+
+        # last, so a match stays visible on the current and error lines
+        for cursor, is_current in self._search_hits:
+            hit = QTextEdit.ExtraSelection()
+            hit.format.setBackground(CURRENT_MATCH_BG if is_current else MATCH_BG)
+            hit.cursor = cursor
+            selections.append(hit)
 
         self.setExtraSelections(selections)
         self._gutter.update()

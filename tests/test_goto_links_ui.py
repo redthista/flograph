@@ -134,6 +134,23 @@ class TestGotoPicker:
         assert [combo.itemText(i) for i in range(combo.count())] == \
             ["— none —", "Late"]
 
+    def test_gotos_are_listed_alphabetically(self, env, qtbot, registry):
+        """ideas.md item 13: insertion order is unusable once a graph has a
+        dozen Gotos — you'd have to remember which you dropped first."""
+        graph, stack, _ = env
+        for name in ("Zulu", "alpha", "Mike"):
+            goto = graph.add_node(registry.instantiate(GOTO))
+            graph.set_param(goto.id, "name", name)
+        node = graph.add_node(registry.instantiate(FROM))
+        panel = ParamsPanel(graph, stack)
+        qtbot.addWidget(panel)
+        panel.set_node(node.id)
+        combo = panel.tree.itemWidget(panel.tree.topLevelItem(1), 1)
+        names = [combo.itemText(i) for i in range(1, combo.count())]
+        # case-insensitive: "alpha" belongs between Mike and Zulu, not after
+        assert names == ["alpha", "Mike", "Zulu"]
+        assert combo.itemText(0) == "— none —"  # still pinned to the top
+
     def test_a_deleted_target_stays_visible_as_missing(self, env, qtbot,
                                                        registry):
         graph, stack, _ = env

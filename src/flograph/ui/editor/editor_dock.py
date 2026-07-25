@@ -5,10 +5,11 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
-    QHBoxLayout, QInputDialog, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QInputDialog, QLabel, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
 from flograph.core import Graph, NodeRegistry, NodeScriptError, parse_spec
@@ -19,6 +20,7 @@ from ..commands import ResetCodeCommand, SetCodeCommand
 from .ai_worker import AiAssistantController
 from .code_editor import CodeEditor
 from .completion import CompletionController
+from .find_bar import FindBar
 
 _SYNTAX_LINE = re.compile(r"syntax error on line (\d+)")
 
@@ -29,6 +31,18 @@ _SYNTAX_LINE = re.compile(r"syntax error on line (\d+)")
 # gives it; the full text is always available as a tooltip. Used only
 # before the label has ever been laid out (width() == 0).
 _TITLE_FALLBACK_WIDTH = 220
+
+
+class _ClickableLabel(QLabel):
+    """A QLabel that reports clicks — the error line under the editor, so a
+    traceback can be lifted out with one click instead of being retyped."""
+
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self.rect().contains(event.pos()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 class EditorPanel(QWidget):
@@ -77,14 +91,21 @@ class EditorPanel(QWidget):
         self.editor = CodeEditor(self)
         self.editor.setEnabled(False)
         self.completion = CompletionController(self.editor)
+        self.find_bar = FindBar(self.editor, self)
 
         self._ai_request_id = 0
         self.ai = AiAssistantController(self.editor)
         self.ai.succeeded.connect(self._on_ai_succeeded)
         self.ai.failed.connect(self._on_ai_failed)
 
-        self._message = QLabel("")
+        self._message = _ClickableLabel("")
         self._message.setWordWrap(True)
+        self._message.clicked.connect(self._copy_message)
+        # what a click puts on the clipboard: the full traceback when the
+        # engine gave us one, so the copy is worth more than the one line
+        # that fits in the footer. "" = nothing worth copying.
+        self._copy_text = ""
+        self._restore_message: Optional[tuple[str, bool]] = None
         self._apply_btn = QPushButton("Apply  (Ctrl+Enter)")
         self._apply_btn.setEnabled(False)
         self._apply_btn.clicked.connect(self.apply_code)
@@ -107,13 +128,31 @@ class EditorPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.addLayout(header)
         layout.addWidget(self.editor, 1)
+        layout.addWidget(self.find_bar)
         layout.addLayout(footer)
 
         QShortcut(QKeySequence("Ctrl+Return"), self.editor, self.apply_code)
+        # WidgetWithChildren, so Ctrl+F in the canvas or a table doesn't get
+        # swallowed by a code panel that merely happens to be open
+        for keys, slot in (
+                ("Ctrl+F", lambda: self.find_bar.open_bar()),
+                ("Ctrl+H", lambda: self.find_bar.open_bar(replace=True)),
+                ("F3", lambda: self._find_again()),
+                ("Shift+F3", lambda: self._find_again(backwards=True))):
+            shortcut = QShortcut(QKeySequence(keys), self, slot)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
 
         graph.events.code_changed.connect(self._on_code_changed)
         graph.events.label_changed.connect(self._refresh_header)
         graph.events.node_removed.connect(self._on_node_removed)
+
+    def _find_again(self, backwards: bool = False) -> None:
+        """F3 with the bar shut opens it rather than searching invisibly —
+        highlighting matches nobody asked to see, with no ✕ to clear them."""
+        if self.find_bar.isHidden():
+            self.find_bar.open_bar()
+        else:
+            self.find_bar.find_next(backwards=backwards)
 
     def minimumSizeHint(self) -> QSize:
         return QSize(200, 100)
@@ -147,6 +186,9 @@ class EditorPanel(QWidget):
 
         self._node_id = node_id
         self.editor.set_error_line(None)
+        # highlights point into the document we're about to replace
+        if not self.find_bar.isHidden():
+            self.find_bar.close_bar()
         self._show_message("")
         if node_id is None:
             self.editor.setPlainText("")
@@ -299,17 +341,45 @@ class EditorPanel(QWidget):
         if node_id != self._node_id:
             return
         self.editor.set_error_line(error.script_line)
-        self._show_message(error.message, error=True)
-        if error.formatted_tb:
-            self._message.setToolTip(error.formatted_tb)
+        self._show_message(error.message, error=True,
+                           copy_text=error.formatted_tb or error.message)
 
     def on_node_succeeded(self, node_id: str) -> None:
         if node_id == self._node_id:
             self.editor.set_error_line(None)
             self._show_message("")
 
-    def _show_message(self, text: str, error: bool = False) -> None:
+    def _show_message(self, text: str, error: bool = False,
+                      copy_text: Optional[str] = None) -> None:
+        self._restore_message = None
         self._message.setText(text)
-        self._message.setToolTip("")
+        # errors are the thing worth lifting out; "Applied." is not
+        self._copy_text = copy_text if copy_text is not None \
+            else (text if error else "")
+        # the tooltip carries the full traceback the one-line label elides
+        self._message.setToolTip(f"{self._copy_text}\n\n(click to copy)"
+                                 if self._copy_text else "")
+        self._message.setCursor(Qt.PointingHandCursor if self._copy_text
+                                else Qt.ArrowCursor)
         self._message.setStyleSheet(
             "color: #ef4444;" if error else "color: #9ca3af;")
+
+    def _copy_message(self) -> None:
+        """Put the current error on the clipboard, confirming in the label
+        itself and putting the error back a moment later — a status bar
+        message would be nowhere near where the click happened."""
+        if not self._copy_text:
+            return
+        QApplication.clipboard().setText(self._copy_text)
+        if self._restore_message is None:
+            self._restore_message = (self._message.text(),
+                                     "#ef4444" in self._message.styleSheet())
+        self._message.setText("Copied to clipboard.")
+        QTimer.singleShot(1200, self._restore_after_copy)
+
+    def _restore_after_copy(self) -> None:
+        if self._restore_message is None:
+            return  # a new message landed meanwhile; leave it alone
+        text, error = self._restore_message
+        copy_text = self._copy_text
+        self._show_message(text, error=error, copy_text=copy_text)

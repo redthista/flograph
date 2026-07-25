@@ -5,16 +5,68 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QToolButton,
-    QWidget,
+    QApplication, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QStyle, QStyleOptionButton, QStyleOptionViewItem, QStyledItemDelegate,
+    QToolButton, QWidget,
 )
 
 from . import theme
 
 MAX_OPTIONS = 500  # checkbox rows shown before truncating
 MODES = ("multi", "single")
+
+
+class _IndicatorDelegate(QStyledItemDelegate):
+    """Swaps each row's check indicator for a radio button in single mode.
+
+    Qt has no "exclusive" list widget, so single mode is still checkboxes
+    underneath — but a checkbox promises you can tick several, which single
+    mode then silently undoes. Every tool this borrows from (Power BI, Excel)
+    draws radios there, so the widget does too. Purely cosmetic: check state
+    is still what the list stores and reports.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.radio = False
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        has_check = bool(opt.features
+                         & QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator)
+        if not self.radio or not has_check:
+            super().paint(painter, option, index)
+            return
+
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        # both measured while the indicator is still declared: dropping it is
+        # what lets the row draw without a checkbox, but it also collapses the
+        # column the indicator occupied, sliding the label left over the radio
+        rect = style.subElementRect(
+            QStyle.SE_ItemViewItemCheckIndicator, opt, opt.widget)
+        text_left = style.subElementRect(
+            QStyle.SE_ItemViewItemText, opt, opt.widget).left()
+        checked = opt.checkState == Qt.Checked
+
+        opt.features &= ~QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        opt.checkState = Qt.Unchecked
+        # measured rather than assumed: the gap a style leaves around the
+        # indicator is a style detail, and the text layout is linear in
+        # rect.left, so re-indenting by the difference lands it exactly back
+        collapsed_left = style.subElementRect(
+            QStyle.SE_ItemViewItemText, opt, opt.widget).left()
+        opt.rect = option.rect.adjusted(text_left - collapsed_left, 0, 0, 0)
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+
+        button = QStyleOptionButton()
+        button.rect = rect
+        button.state = QStyle.State_Enabled | (
+            QStyle.State_On if checked else QStyle.State_Off)
+        style.drawPrimitive(
+            QStyle.PE_IndicatorRadioButton, button, painter, opt.widget)
 
 
 def selected_param_values(raw) -> list[str]:
@@ -46,7 +98,34 @@ class SlicerListWidget(QListWidget):
         self._syncing = False
         self._mode = "multi"
         self._filter_text = ""
+        self._delegate = _IndicatorDelegate(self)
+        self.setItemDelegate(self._delegate)
         self.itemChanged.connect(self._on_item_changed)
+
+    def _indicator_rect(self, item: QListWidgetItem) -> QRect:
+        """Where this row's tick box is drawn, in viewport coordinates."""
+        option = QStyleOptionViewItem()
+        self.initViewItemOption(option)
+        option.rect = self.visualItemRect(item)
+        option.features |= \
+            QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        return self.style().subElementRect(
+            QStyle.SE_ItemViewItemCheckIndicator, option, self)
+
+    def mouseReleaseEvent(self, event) -> None:
+        """Clicking anywhere on a row ticks it, not just the tick box itself.
+        A slicer row reads as one target — Power BI and Excel both treat it
+        that way — and hitting a 14px box is needless precision. The box is
+        left to the base class, which already toggles it; doing both would
+        toggle twice and cancel out."""
+        position = event.position().toPoint()
+        item = self.itemAt(position)
+        if item is not None and item.flags() & Qt.ItemIsUserCheckable \
+                and not self._indicator_rect(item).contains(position):
+            item.setCheckState(Qt.Unchecked
+                               if item.checkState() == Qt.Checked
+                               else Qt.Checked)
+        super().mouseReleaseEvent(event)
 
     def set_options(self, values: list[str], selected: set[str]) -> None:
         """Rebuild the checkbox rows from a column's unique values, ticking
@@ -83,6 +162,8 @@ class SlicerListWidget(QListWidget):
         mode = mode if mode in MODES else "multi"
         entering_single = mode == "single" and self._mode != "single"
         self._mode = mode
+        self._delegate.radio = mode == "single"
+        self.viewport().update()
         if entering_single:
             self._trim_to_single_selection()
 

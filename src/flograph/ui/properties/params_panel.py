@@ -310,9 +310,12 @@ class ParamsPanel(QWidget):
         try:
             combo.clear()
             combo.addItem("— none —", "")
-            for node in self._graph.nodes.values():
-                if node.spec.card != spec.ref_kind or node.id == self._node_id:
-                    continue
+            candidates = [node for node in self._graph.nodes.values()
+                          if node.spec.card == spec.ref_kind
+                          and node.id != self._node_id]
+            # alphabetical, not insertion order: a graph with a dozen Gotos is
+            # unusable if the list is ordered by whenever each was dropped
+            for node in sorted(candidates, key=lambda n: link_label(n).lower()):
                 combo.addItem(link_label(node), node.id)
             index = combo.findData(value)
             if index < 0 and value:
