@@ -138,6 +138,9 @@ class MainWindow(QMainWindow):
         self.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         self.statusBar().addPermanentWidget(self._zoom_indicator)
         self._update_title()
+        # captured before any saved layout is applied, so "reset window
+        # layout" has a real default to go back to rather than a guess
+        self._default_dock_state = self._dock_host.saveState()
         self._restore_window_state()
         self._on_current_page_changed(self.page_bar.current_page_id())
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
@@ -1489,6 +1492,46 @@ class MainWindow(QMainWindow):
     def _save_window_state(self) -> None:
         self.settings.setValue("window_geometry", self.saveGeometry())
         self.settings.setValue("dock_state", self._dock_host.saveState())
+
+    def reset_window_layout(self) -> None:
+        """Put the docks back where a fresh install has them. Geometry is
+        left alone deliberately — someone whose panels have gone missing
+        wants them back, not their window resized out from under them."""
+        self.settings.remove("dock_state")
+        self._dock_host.restoreState(self._default_dock_state)
+        for dock in (self.library_dock, self.properties_dock, self.editor_dock,
+                     self.inspector_dock, self.log_dock):
+            dock.show()
+        # the Inspector/Log pair is tabbed; restoreState leaves whichever was
+        # last raised on top, which after a reset should be the default
+        self.inspector_dock.raise_()
+        self.statusBar().showMessage("Window layout reset.", 4000)
+
+    def reset_settings(self) -> None:
+        """Wipe every stored preference and re-apply the defaults live, so
+        the app looks like a fresh install without needing a restart. Recent
+        files and per-project state go too — this is the "start over" button,
+        not a per-page reset."""
+        self.settings.clear()
+        self.set_page_bar_position("top")
+        self.set_lod_enabled(True)
+        self.set_lod_threshold(DEFAULT_LOD_THRESHOLD)
+        self.set_snap_enabled(True)
+        self.set_grid_step(grid.DEFAULT_STEP)
+        self.set_minimap_enabled(True)
+        self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)
+        self.action_gpu_viewport.setChecked(False)
+        from .spreadsheet import set_autosize_default, set_date_formats_setting
+        set_autosize_default(True)
+        set_date_formats_setting("")
+        self.reset_window_layout()
+        self._rebuild_recent_menu()
+        if self._settings_dialog is not None:
+            # deferred: this usually runs from a button inside that dialog,
+            # and rewriting its widgets mid-click is asking for trouble
+            QTimer.singleShot(
+                0, lambda: self._settings_dialog.refresh_from(self))
+        self.statusBar().showMessage("Settings reset to defaults.", 4000)
 
     # ----------------------------------------------------------- copy/paste
 
