@@ -83,6 +83,8 @@ class MainWindow(QMainWindow):
         self._dashboard_pages: dict[str, DashboardPage] = {}
         self._restoring_pages = False
         self.engine = ExecutionEngine(self.graph, parent=self)
+        # the scene predates the engine, so it gets the cache handed to it
+        self.scene.output_cache = self.engine.cache
         self.settings = QSettings("flograph", "flograph")
         self._project_path: Optional[str] = None
         self._cache_load_signals: Optional[CacheLoadSignals] = None
@@ -618,6 +620,17 @@ class MainWindow(QMainWindow):
         self.scene.slicer_changed.connect(self._on_slicer_changed)
         self.scene.control_changed.connect(self._on_control_changed)
         self.scene.frame_run_requested.connect(self._on_frame_run_requested)
+        self.scene.tables_kept.connect(self._on_tables_kept)
+
+    def _on_tables_kept(self, node_ids: list) -> None:
+        """Say when cutting a wire wrote the linked data into a Table — it
+        is the one disconnect that also edits a node, and undo takes both
+        back together."""
+        labels = ", ".join(self.graph.nodes[n].label for n in node_ids
+                           if n in self.graph.nodes)
+        if labels:
+            self.statusBar().showMessage(
+                f"{labels}: kept the linked contents in the table", 5000)
 
     def _on_figure_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -694,8 +707,8 @@ class MainWindow(QMainWindow):
         self.undo_stack.push(SetParamCommand(
             self.graph, node_id, "data", _json.dumps(merged), merge=False))
         self.statusBar().showMessage(
-            "Input copied into the table — disconnect the input to make "
-            "this snapshot fully yours", 5000)
+            "Input copied into the table — the cells are yours to edit now, "
+            "though a run will refresh the input's columns again", 5000)
 
     def _on_kpi_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)

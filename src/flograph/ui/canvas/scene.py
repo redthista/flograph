@@ -38,6 +38,8 @@ class NodeGraphScene(QGraphicsScene):
     slicer_changed = Signal(str)        # node_id — a Slicer's selection changed
     control_changed = Signal(str)       # node_id — an input control was moved
     frame_run_requested = Signal(str)   # frame_id — a frame's run glyph was clicked
+    tables_kept = Signal(list)          # node_ids — Tables that kept their
+                                        # contents as their input was cut
 
     def __init__(self, graph: Graph, undo_stack: QUndoStack,
                  registry: Optional[NodeRegistry] = None, parent=None) -> None:
@@ -45,6 +47,11 @@ class NodeGraphScene(QGraphicsScene):
         self.graph = graph
         self.undo_stack = undo_stack
         self.registry = registry
+        # The engine's OutputCache, injected by the main window once the
+        # engine exists. Only used to freeze what a linked Table is showing
+        # before its wire is cut (see _push_orphan_snapshots); None simply
+        # means no snapshot, which is what a scene without an engine wants.
+        self.output_cache = None
         self.node_items: dict[str, NodeItem] = {}
         self.connection_items: dict[str, ConnectionItem] = {}
         self.frame_items: dict[str, FrameItem] = {}
@@ -346,11 +353,38 @@ class NodeGraphScene(QGraphicsScene):
             return
         self.undo_stack.beginMacro("delete selection")
         if node_ids or conn_ids:
+            self._push_orphan_snapshots(conn_ids=conn_ids, node_ids=node_ids)
             self.undo_stack.push(
                 RemoveSelectionCommand(self.graph, node_ids, conn_ids))
         for frame_id in frame_ids:
             self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
         self.undo_stack.endMacro()
+
+    def _push_orphan_snapshots(self, *, conn_ids=(), node_ids=()) -> None:
+        """Freeze what a linked Table is *showing* into its own sheet before
+        the wire feeding it is cut, so disconnecting an input keeps the
+        contents instead of collapsing the grid back to the user's own
+        columns. Pushed inside the caller's macro, so one Ctrl+Z takes the
+        wire and the snapshot back together.
+
+        Must run before the removal command, while the connection is still
+        there to follow upstream.
+        """
+        if self.output_cache is None:
+            return
+        from flograph.engine.introspect import orphaned_table_sheets
+
+        from ..commands import SetParamCommand
+        kept = []
+        for node_id, data in orphaned_table_sheets(
+                self.graph, self.output_cache,
+                conn_ids=conn_ids, node_ids=node_ids):
+            self.undo_stack.push(SetParamCommand(
+                self.graph, node_id, "data", data, merge=False))
+            kept.append(node_id)
+        if kept:
+            # rewriting someone's sheet behind their back deserves saying so
+            self.tables_kept.emit(kept)
 
     # ---------------------------------------------------------- frame edits
 
@@ -442,6 +476,7 @@ class NodeGraphScene(QGraphicsScene):
                 return  # dropped back where it was
             if detach is not None:
                 self.undo_stack.beginMacro("move wire")
+                self._push_orphan_snapshots(conn_ids=[detach.id])
                 self.undo_stack.push(DisconnectCommand(self.graph, detach.id))
                 self.undo_stack.push(ConnectCommand(
                     self.graph, src.node_id, src.spec.name,
@@ -453,7 +488,10 @@ class NodeGraphScene(QGraphicsScene):
                     dst.node_id, dst.spec.name))
         elif target is None and detach is not None:
             # dragged an existing wire off into empty space
+            self.undo_stack.beginMacro("disconnect")
+            self._push_orphan_snapshots(conn_ids=[detach.id])
             self.undo_stack.push(DisconnectCommand(self.graph, detach.id))
+            self.undo_stack.endMacro()
         elif target is None:
             # dropped a fresh wire on the canvas: offer compatible nodes
             self.wire_dropped.emit(fixed, scene_pos)

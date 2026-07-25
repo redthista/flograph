@@ -136,6 +136,51 @@ def merged_linked_sheet(graph: Graph, cache: OutputCache,
         sheet_from_dataframe(frame), parse_sheet(node.params.get("data"))))
 
 
+def orphaned_table_sheets(graph: Graph, cache: OutputCache, *,
+                          conn_ids=(), node_ids=()) -> "list[tuple[str, str]]":
+    """(table_node_id, sheet JSON) for every linked Table node that is about
+    to lose its input because these wires — and the wires attached to these
+    doomed nodes — are being removed.
+
+    Call it *before* the removal, while the connections are still there to
+    follow, and store each result in the node's "data" param in the same
+    undo step. That is the whole of "the contents stay on the table when I
+    disconnect the input": a linked Table's grid is a merge of upstream data
+    with the user's own columns, and only the user's half is persisted, so
+    without this the upstream half evaporates the moment the wire goes.
+
+    Nodes being removed are skipped (their sheet is going with them), as are
+    tables whose input never produced anything — an unrun link has nothing
+    to preserve, and writing the empty merge over the stored sheet would
+    *destroy* the user's columns rather than protect them.
+    """
+    import json
+
+    from flograph.core.sheet import parse_sheet, sheet_to_json
+    doomed, cut = set(node_ids), set(conn_ids)
+    losing: list[str] = []
+    for conn in graph.connections.values():
+        if conn.dst_port != "table" or conn.dst_node in doomed:
+            continue
+        if conn.id not in cut and conn.src_node not in doomed:
+            continue
+        node = graph.nodes.get(conn.dst_node)
+        if node is not None and node.spec.card == "grid":
+            losing.append(conn.dst_node)
+
+    snapshots = []
+    for table_id in losing:
+        merged = merged_linked_sheet(graph, cache, table_id)
+        if merged is None:
+            continue
+        stored = graph.nodes[table_id].params.get("data")
+        # a no-op write would still land as an undo step, leaving the user
+        # pressing Ctrl+Z twice to get one wire back
+        if sheet_to_json(parse_sheet(stored)) != json.dumps(merged):
+            snapshots.append((table_id, json.dumps(merged)))
+    return snapshots
+
+
 def upstream_columns(graph: Graph, cache: OutputCache, node_id: str) -> list[str]:
     """Column names of every cached DataFrame feeding node_id's inputs,
     in port order, deduplicated. Empty when nothing upstream has run yet."""

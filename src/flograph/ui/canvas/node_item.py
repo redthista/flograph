@@ -604,10 +604,28 @@ class NodeItem(QGraphicsObject):
         self._layout_table_proxy()
 
     def _sync_table_widget(self) -> None:
-        """Pull externally-changed data (undo/redo, Properties edit) into
-        the grid; SheetModel skips the reset when nothing changed."""
+        """Pull externally-changed data (undo/redo, a Properties edit, a
+        resize writing width/height) into the grid; SheetModel skips the
+        reset when nothing changed.
+
+        While linked, the card shows the *merge* of the stored sheet with
+        the cached upstream frame — so this re-derives that merge rather
+        than reading the stored sheet, which holds only the user's own
+        columns and would blank the grid until the next run."""
         if self._table_model is not None:
-            self._table_model.set_sheet(self.node.params.get("data"))
+            self._table_model.set_sheet(
+                self._linked_sheet() or self.node.params.get("data"))
+
+    def _linked_sheet(self):
+        """The merged sheet a linked table should be showing, or None when
+        it isn't linked, nothing upstream has run, or there's no engine
+        behind the scene to ask."""
+        scene = self.scene()
+        cache = getattr(scene, "output_cache", None)
+        if scene is None or cache is None:
+            return None
+        from flograph.engine.introspect import merged_linked_sheet
+        return merged_linked_sheet(scene.graph, cache, self.node.id)
 
     def _table_input_connected(self) -> bool:
         scene = self.scene()
@@ -619,11 +637,11 @@ class NodeItem(QGraphicsObject):
         """The table's input was connected or disconnected. The grid stays
         editable either way (a run refreshes input-owned columns; the
         user's own columns survive) — on disconnect, fall back to the
-        stored cells."""
+        stored cells, and on connect show the merge straight away if the
+        upstream data is already cached."""
         if not self.table or self._table_model is None:
             return
-        if not self._table_input_connected():
-            self._sync_table_widget()
+        self._sync_table_widget()
 
     def show_linked_sheet(self, sheet_dict: dict) -> None:
         """Display the merged result of a linked run (input columns
