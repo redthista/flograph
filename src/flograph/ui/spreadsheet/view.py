@@ -328,6 +328,16 @@ class SpreadsheetView(QTableView):
             event.accept()
             return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if self.state() == QAbstractItemView.EditingState:
+                # An open editor already owns Enter: the delegate commits it
+                # and closes with SubmitModelCache, which steps down in
+                # closeEditor() below. Stepping here as well moved the
+                # current cell out from under the editor before that commit
+                # landed, leaving Qt to commit an editor the view had
+                # already released ("commitData called with an editor that
+                # does not belong to this view").
+                super().keyPressEvent(event)
+                return
             self._step_current(-1 if event.modifiers() & Qt.ShiftModifier else 1, 0)
             event.accept()
             return
