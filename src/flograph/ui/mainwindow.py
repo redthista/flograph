@@ -599,6 +599,7 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_grid_node_succeeded)
         engine.node_succeeded.connect(self._on_kpi_node_succeeded)
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
+        engine.node_succeeded.connect(self._on_control_node_succeeded)
         self.graph.events.preview_enabled_changed.connect(
             self._on_preview_enabled_changed)
 
@@ -615,6 +616,7 @@ class MainWindow(QMainWindow):
         self.scene.wire_dropped.connect(self._on_wire_dropped)
         self.scene.button_fired.connect(self._on_button_fired)
         self.scene.slicer_changed.connect(self._on_slicer_changed)
+        self.scene.control_changed.connect(self._on_control_changed)
         self.scene.frame_run_requested.connect(self._on_frame_run_requested)
 
     def _on_figure_node_succeeded(self, node_id: str) -> None:
@@ -745,6 +747,21 @@ class MainWindow(QMainWindow):
             self._on_table_viewer_node_succeeded(node_id)
         elif kind == "slicer":
             self._on_slicer_node_succeeded(node_id)
+        elif kind == "control":
+            self._on_control_node_succeeded(node_id)
+
+    def _on_control_node_succeeded(self, node_id: str) -> None:
+        """Re-read whatever this control's own inputs supplied on that run —
+        a Choice's options, a Slider's bounds, a Date's calendar range. What
+        makes a control configure itself from the data instead of from
+        constants somebody typed."""
+        node = self.graph.nodes.get(node_id)
+        item = self.scene.node_items.get(node_id)
+        if node is None or item is None or card_kind(node) != "control":
+            return
+        from flograph.engine.introspect import control_upstream
+        item.set_control_upstream(
+            control_upstream(self.graph, self.engine.cache, node_id))
 
     # ------------------------------------------------------ dashboard pages
 
@@ -769,6 +786,7 @@ class MainWindow(QMainWindow):
         widget.visuals_visibility_changed.connect(self._set_visuals_visible)
         widget.scene.button_fired.connect(self._on_button_fired)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
+        widget.scene.control_changed.connect(self._on_control_changed)
         widget.scene.sheet_edited.connect(self._on_dashboard_sheet_edited)
         widget.view.tile_dropped.connect(
             lambda node_id, pos, page_id=page.id:
@@ -1027,6 +1045,17 @@ class MainWindow(QMainWindow):
         flight this is a no-op and the affected nodes just stay stale."""
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "slicer":
+            return
+        self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
+
+    def _on_control_changed(self, node_id: str) -> None:
+        """A slider moved, a date was picked, a box was typed into: re-run
+        that control and everything it feeds, so the charts answer straight
+        away. Same contract as a Slicer tick — the SetParamCommand already
+        dirtied the subgraph, and a run already in flight makes this a
+        no-op."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or card_kind(node) != "control":
             return
         self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
 

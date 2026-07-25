@@ -242,6 +242,9 @@ class ParamsPanel(QWidget):
             row.addWidget(reveal)
             return host, self._line_setter(edit)
 
+        if spec.type == "date":
+            return self._make_date_widget(spec, value)
+
         if spec.type == "columns":
             return self._make_columns_widget(spec, value)
 
@@ -254,6 +257,35 @@ class ParamsPanel(QWidget):
             edit.setPlaceholderText(spec.placeholder)
         edit.textEdited.connect(lambda v: self._commit(name, v))
         return edit, self._line_setter(edit)
+
+    def _make_date_widget(self, spec: ParamSpec, value: Any):
+        """Calendar picker storing an ISO "YYYY-MM-DD" string. A blank param
+        is a real state (no date chosen), so the editor stays empty until
+        something is picked rather than silently committing today."""
+        from PySide6.QtWidgets import QDateEdit
+
+        from ..controls import iso_to_qdate, qdate_to_iso
+
+        name = spec.name
+        edit = QDateEdit()
+        edit.setObjectName(f"param_{name}")
+        edit.setCalendarPopup(True)
+        edit.setDisplayFormat("yyyy-MM-dd")
+        stored = iso_to_qdate(value)
+        if stored is not None:
+            edit.setDate(stored)
+        edit.dateChanged.connect(
+            lambda d: self._commit(name, qdate_to_iso(d)))
+
+        def set_date(v, edit=edit):
+            parsed = iso_to_qdate(v)
+            if parsed is not None and parsed != edit.date():
+                blocked = edit.blockSignals(True)
+                try:
+                    edit.setDate(parsed)
+                finally:
+                    edit.blockSignals(blocked)
+        return edit, set_date
 
     def _make_columns_widget(self, spec: ParamSpec, value: Any):
         """Line edit plus a picker button listing the columns of whatever

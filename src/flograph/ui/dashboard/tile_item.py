@@ -30,7 +30,8 @@ from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
-    "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid"})
+    "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid",
+    "control"})
 
 
 def is_tile_able(node) -> bool:
@@ -69,8 +70,8 @@ def default_tile_port(node) -> Optional[str]:
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
     if card_kind(node) in ("webview", "figure", "table_viewer", "kpi", "grid"):
         return node.spec.outputs[0].name if node.spec.outputs else None
-    # action buttons have no ports; slicer tiles show upstream options,
-    # not their own (already filtered) output
+    # action buttons have no ports; slicer tiles show upstream options, not
+    # their own (already filtered) output; a control tile is the input itself
     return None
 
 
@@ -87,6 +88,10 @@ def default_tile_size(node) -> tuple[float, float]:
         # a spreadsheet is for typing in, so it lands wide enough to show
         # several columns without a horizontal scrollbar
         return (560.0, 360.0)
+    if kind == "control":
+        from ..controls import control_size
+        width, height = control_size(node.spec.control or "")
+        return (width, height + TITLE_H)
     return (420.0, 320.0)
 
 
@@ -132,6 +137,7 @@ class TileItem(QGraphicsObject):
         self._sheet_toolbar: Optional[QWidget] = None
         self._slicer_widget: Optional[SlicerListWidget] = None
         self._slicer_toolbar: Optional[SlicerToolbar] = None
+        self._control_widget = None  # ControlWidget (input control tiles)
         self._generic_host: Optional[QWidget] = None
         self._generic_child: Optional[QWidget] = None
         self._kpi_value: object = None  # kpi tiles paint, they hold no widget
@@ -234,6 +240,7 @@ class TileItem(QGraphicsObject):
             "button": "button",
             "kpi": "kpi",
             "slicer": "slicer",
+            "control": "control",
         }.get(card_kind(node), "generic")
 
     def _build_host(self) -> None:
@@ -258,7 +265,7 @@ class TileItem(QGraphicsObject):
     def _content_widget(self) -> Optional[QWidget]:
         for widget in (self._figure_view, self._plotly_widget,
                        self._table_view, self._sheet_view, self._slicer_widget,
-                       self._generic_host):
+                       self._control_widget, self._generic_host):
             if widget is not None:
                 return widget
         return None
@@ -290,6 +297,10 @@ class TileItem(QGraphicsObject):
             toolbar.hide()
             self._host_layout.addWidget(toolbar)
             self._slicer_toolbar = toolbar
+        elif kind == "control":
+            widget = self._build_control_widget()
+            if widget is None:
+                return None
         elif kind == "generic":
             widget = QWidget()
             QVBoxLayout(widget).setContentsMargins(0, 0, 0, 0)
@@ -299,6 +310,39 @@ class TileItem(QGraphicsObject):
         widget.hide()
         self._host_layout.addWidget(widget, 1)
         return widget
+
+    # ------------------------------------------------------- input controls
+
+    def _build_control_widget(self):
+        """The node's own control widget, live on the dashboard — the same
+        one the canvas card builds, so a slider behaves identically in both
+        places and neither host knows what a slider is. None for a shape
+        this build doesn't know, which leaves the tile on its placeholder
+        rather than refusing to open the project."""
+        from ..controls import build_control
+
+        node = self._node()
+        widget = build_control(node.spec.control or "") if node else None
+        if widget is None:
+            return None
+        widget.sync(node.params)
+        widget.value_committed.connect(self._commit_control_value)
+        self._control_widget = widget
+        return widget
+
+    def _commit_control_value(self, value) -> None:
+        """One undo step per adjustment, then re-run so the visuals beside
+        the control catch up. A dashboard where you move a slider and then
+        go hunting for a Run button is not a dashboard."""
+        scene = self.scene()
+        node = self._node()
+        if scene is None or node is None:
+            return
+        if value != node.params.get("value"):
+            from ..commands import SetParamCommand
+            scene.undo_stack.push(SetParamCommand(
+                self._graph, node.id, "value", value, merge=False))
+        scene.control_changed.emit(node.id)
 
     # ------------------------------------------------------- editable sheet
 
@@ -484,6 +528,16 @@ class TileItem(QGraphicsObject):
                     self._slicer_toolbar.show()
                 self._placeholder.hide()
                 widget.show()
+        elif kind == "control":
+            # a control holds its own value, so like a Table tile there is
+            # nothing to wait for — it's live the moment it's placed. A run
+            # only ever refreshes the options a Choice offers.
+            from flograph.engine.introspect import control_upstream
+            self._placeholder.hide()
+            self._control_widget.sync(node.params)
+            self._control_widget.set_upstream(control_upstream(
+                self._graph, self._engine.cache, self.tile.node_id))
+            widget.show()
         elif kind == "sheet":
             # a Table node holds its own data, so there is nothing to wait
             # for: the grid is live from the moment the tile is placed
@@ -539,6 +593,11 @@ class TileItem(QGraphicsObject):
             # this doesn't reset the grid under the user's cursor
             self._sheet_model.set_sheet(node.params.get("data")
                                         if node is not None else None)
+        elif kind == "control" and self._control_widget is not None \
+                and node is not None:
+            # sync() holds a guard, so the edit that caused this can't come
+            # straight back out as another commit
+            self._control_widget.sync(node.params)
         elif kind == "slicer" and self._slicer_widget is not None \
                 and not self._slicer_widget.isHidden() and node is not None:
             mode = str(node.params.get("mode", "multi") or "multi")
@@ -570,10 +629,11 @@ class TileItem(QGraphicsObject):
         engine evicts the cache on dirtying, but our content widgets hold
         the last-rendered data by reference until the next run."""
         node = self._node()
-        # a Table node tile shows the cells the user is typing, not a
-        # rendered output, so "STALE" would be wrong there as well
+        # a Table node tile shows the cells the user is typing, and a
+        # control tile shows the value being set — both are input, not a
+        # rendered output, so "STALE" would be wrong on either
         if node is None or not node.dirty \
-                or self._kind() in ("button", "sheet"):
+                or self._kind() in ("button", "sheet", "control"):
             return False
         if self._kind() == "kpi":  # painted, not widget-backed
             return self._kpi_has_value

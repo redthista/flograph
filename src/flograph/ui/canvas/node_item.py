@@ -83,6 +83,11 @@ SLICER_TYPE = "flograph.viz.slicer"
 SLICER_MIN_W, SLICER_MAX_W = 140.0, 600.0
 SLICER_MIN_H, SLICER_MAX_H = 120.0, 2000.0
 
+# Input controls (slider, toggle, date, ...). One card path for every shape:
+# the widget comes from ui.controls, keyed on the node's NODE["control"].
+CONTROL_MIN_W, CONTROL_MAX_W = 120.0, 800.0
+CONTROL_MIN_H, CONTROL_MAX_H = 48.0, 600.0
+
 # Rich cards are chosen by a node's declared NODE["card"] kind (carried in its
 # source, so it survives fork/save). This legacy map covers nodes whose source
 # predates the marker — already-forked instances and old project files still
@@ -227,6 +232,7 @@ class NodeItem(QGraphicsObject):
         self.table_viewer = kind == "table_viewer"
         self.kpi_card = kind == "kpi"
         self.slicer = kind == "slicer"
+        self.control = kind == "control"
         # Goto/From: the two ends of a link the canvas doesn't draw
         self.goto_card = kind == "goto"
         self.from_card = kind == "from"
@@ -257,6 +263,10 @@ class NodeItem(QGraphicsObject):
         elif self.slicer:
             self.width = min(SLICER_MAX_W, max(
                 SLICER_MIN_W, float(node.params.get("width", 200))))
+        elif self.control:
+            self.width = min(CONTROL_MAX_W, max(
+                CONTROL_MIN_W, float(node.params.get(
+                    "width", self._control_default_size()[0]))))
         else:
             self.width = NODE_WIDTH
         self._note_doc: QTextDocument | None = None
@@ -289,6 +299,8 @@ class NodeItem(QGraphicsObject):
         self._slicer_toolbar: SlicerToolbar | None = None
         self._slicer_proxy: QGraphicsProxyWidget | None = None
         self._slicer_placeholder: QLabel | None = None
+        self._control_widget = None  # ControlWidget (control cards only)
+        self._control_proxy: QGraphicsProxyWidget | None = None
         self.setFlags(
             QGraphicsItem.ItemIsSelectable
             | QGraphicsItem.ItemSendsGeometryChanges
@@ -318,6 +330,8 @@ class NodeItem(QGraphicsObject):
             self._build_table_viewer_widget()
         if self.slicer:
             self._build_slicer_widget()
+        if self.control:
+            self._build_control_widget()
         if not node.canvas_preview_enabled:
             self._apply_proxy_visibility()  # honor a preview-disabled node loaded from disk
         self._refresh_tooltip()
@@ -367,6 +381,12 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             fixed = float(self.node.params.get("height", 240) or 240)
             return min(SLICER_MAX_H, max(SLICER_MIN_H, fixed))
+        if self.control:
+            if self._live_height is not None:
+                return self._live_height
+            default = self._control_default_size()[1]
+            fixed = float(self.node.params.get("height", default) or default)
+            return min(CONTROL_MAX_H, max(CONTROL_MIN_H, fixed))
         rows = max(len(self.node.spec.inputs), len(self.node.spec.outputs), 1)
         return HEADER_H + rows * ROW_H + PAD_BOTTOM
 
@@ -432,6 +452,19 @@ class NodeItem(QGraphicsObject):
                 SLICER_MIN_W, float(self.node.params.get("width", 200))))
             self._sync_slicer_checks()
             self._layout_slicer_proxy()
+            self._ports_follow_width()
+            self.update()
+            return
+        if self.control:
+            # a control's params *are* its state — range, caption, options
+            # and the value itself all live there, so any edit re-syncs it
+            self.prepareGeometryChange()
+            default = self._control_default_size()[0]
+            self.width = min(CONTROL_MAX_W, max(
+                CONTROL_MIN_W,
+                float(self.node.params.get("width", default) or default)))
+            self.sync_control()
+            self._layout_control_proxy()
             self._ports_follow_width()
             self.update()
 
@@ -947,6 +980,65 @@ class NodeItem(QGraphicsObject):
                 scene.graph, self.node.id, "selected", new_value))
         scene.slicer_changed.emit(self.node.id)
 
+    # -------------------------------------------------------------- controls
+
+    def _control_default_size(self) -> tuple[float, float]:
+        from ..controls import control_size
+        return control_size(self.node.spec.control or "")
+
+    def _control_proxy_rect(self) -> QRectF:
+        height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
+        return QRectF(0, HEADER_H, self.width, height)
+
+    def _layout_control_proxy(self) -> None:
+        if self._control_proxy is not None:
+            self._control_proxy.setGeometry(self._control_proxy_rect())
+
+    def _build_control_widget(self) -> None:
+        """One card path for every control shape — the widget knows what it
+        is, this only hosts it. An unknown shape (a project from a newer
+        flograph) leaves the card empty rather than refusing to load."""
+        from ..controls import build_control
+
+        widget = build_control(self.node.spec.control or "")
+        if widget is None:
+            return
+        widget.sync(self.node.params)
+        widget.value_committed.connect(self._on_control_committed)
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(widget)
+        self._control_widget = widget
+        self._control_proxy = proxy
+        self._layout_control_proxy()
+
+    def set_control_upstream(self, values: dict) -> None:
+        """Settings this control's own input ports supplied on the last run
+        — bounds, options, labels. Called once the engine reports it done."""
+        if self._control_widget is not None:
+            self._control_widget.set_upstream(values)
+
+    def sync_control(self) -> None:
+        """Re-read the widget from this node's params — keeps the card
+        honest when they change elsewhere (properties panel, undo)."""
+        if self._control_widget is not None:
+            self._control_widget.sync(self.node.params)
+
+    def _on_control_committed(self, value) -> None:
+        """The user moved the control: commit its new value (which dirties
+        this node and everything downstream) and ask the window to re-run
+        from here, so the visuals follow live. Same contract as a slicer
+        tick — a control you have to leave to go press Run is not a
+        control."""
+        scene = self.scene()
+        if scene is None:
+            return
+        if value != self.node.params.get("value"):
+            from ..commands import SetParamCommand
+            # merge=False: one Ctrl+Z undoes one adjustment, not the session
+            scene.undo_stack.push(SetParamCommand(
+                scene.graph, self.node.id, "value", value, merge=False))
+        scene.control_changed.emit(self.node.id)
+
     @staticmethod
     def _next_column_name(columns: list[str]) -> str:
         import string
@@ -1101,7 +1193,7 @@ class NodeItem(QGraphicsObject):
                 port.setPos(self.width, self.body_height / 2)
             return
         if self.table or self.figure_card or self.table_viewer \
-                or self.kpi_card or self.slicer:
+                or self.kpi_card or self.slicer or self.control:
             self._space_header_ports(self.input_ports.values(), 0)
             self._space_header_ports(self.output_ports.values(), self.width)
             return
@@ -1147,7 +1239,8 @@ class NodeItem(QGraphicsObject):
         stays full-size and wireable."""
         visible = not self._flat and self.node.canvas_preview_enabled
         for proxy in (self._note_editor, self._table_proxy, self._figure_proxy,
-                      self._table_viewer_proxy, self._slicer_proxy):
+                      self._table_viewer_proxy, self._slicer_proxy,
+                      self._control_proxy):
             if proxy is not None:
                 proxy.setVisible(visible)
 
@@ -1259,7 +1352,8 @@ class NodeItem(QGraphicsObject):
         if self.button:
             self._paint_button(painter)
             return
-        if self.figure_card or self.table_viewer or self.slicer:
+        if self.figure_card or self.table_viewer or self.slicer \
+                or self.control:
             self._paint_widget_card(painter)
             if not self.node.canvas_preview_enabled:
                 self._paint_preview_disabled_hint(painter)
@@ -1522,6 +1616,9 @@ class NodeItem(QGraphicsObject):
             return KPI_MIN_W, KPI_MAX_W, KPI_MIN_H, KPI_MAX_H
         if self.slicer:
             return SLICER_MIN_W, SLICER_MAX_W, SLICER_MIN_H, SLICER_MAX_H
+        if self.control:
+            return (CONTROL_MIN_W, CONTROL_MAX_W,
+                    CONTROL_MIN_H, CONTROL_MAX_H)
         if self.button:
             return BUTTON_MIN_W, BUTTON_MAX_W, BUTTON_MIN_H, BUTTON_MAX_H
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
@@ -1529,7 +1626,7 @@ class NodeItem(QGraphicsObject):
     def _resizable(self) -> bool:
         return bool(self.note or self.table or self.figure_card
                     or self.table_viewer or self.kpi_card or self.slicer
-                    or (self.button and self._button_edit))
+                    or self.control or (self.button and self._button_edit))
 
     def _header_h(self) -> float:
         """Height of the drag bar — the only region a move can start from.
@@ -1707,6 +1804,8 @@ class NodeItem(QGraphicsObject):
                     self._layout_table_viewer_proxy()
                 elif self.slicer:
                     self._layout_slicer_proxy()
+                elif self.control:
+                    self._layout_control_proxy()
                 self.update()
             event.accept()
             return
@@ -1751,6 +1850,8 @@ class NodeItem(QGraphicsObject):
                 self._layout_table_viewer_proxy()
             elif self.slicer:
                 self._layout_slicer_proxy()
+            elif self.control:
+                self._layout_control_proxy()
             event.accept()
             return
         if self._move_suppressed:

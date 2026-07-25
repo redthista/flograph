@@ -37,6 +37,10 @@ class NodeSpec:
     # canvas/dashboard rendering. Lives in `source`, so it survives fork/save —
     # unlike the old type_id-based dispatch. None = an ordinary node.
     card: Optional[str] = None
+    # which widget a card == "control" node draws (NODE["control"]): "slider",
+    # "toggle", ... None for every other card kind. Like `card`, it lives in
+    # `source`, so forking or saving the node keeps it.
+    control: Optional[str] = None
     # placeholder standing in for a type_id serialization couldn't resolve
     broken: bool = False
     # library sub-section for user-saved nodes; None/"" = ungrouped, top-level

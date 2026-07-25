@@ -46,6 +46,19 @@ Every node script must define:
 - `def run(ctx, **inputs) -> dict`: returns dict keyed by output port names
 
 Port types: `any, dataframe, series, number, string, bool, object, figure`.
+
+Optional `NODE["card"]` gives a node a rich canvas card / dashboard tile
+(`figure`, `webview`, `table_viewer`, `kpi`, `grid`, `slicer`, `button`,
+`note`, `control`, ...). `card: "control"` additionally requires
+`NODE["control"]` naming the widget shape (`slider`, `number`, `text`,
+`date`, `toggle`, `choice`) — one host in `ui/controls.py` renders all of
+them from that plus `PARAMS`, so a new control node is usually just a
+script (see `nodes/scripting/control_template.py`). A control's settings
+may also come from its own optional input ports, resolved by
+`engine.introspect.control_upstream()`. Anything a control's widget and its
+`run()` must agree on — option lists, bounds, clamping — lives in
+`core/controls.py` and is never duplicated: if they disagree, the card
+shows one number and the flow carries another.
 Relevant skills: `.opencode/skills/new-node/` and `.opencode/skills/flograph/`.
 
 ## Project structure
@@ -54,7 +67,7 @@ Relevant skills: `.opencode/skills/new-node/` and `.opencode/skills/flograph/`.
 src/flograph/
 ├── core/       # Qt-free data model (graph, ports, registry, serialization)
 ├── engine/     # Background execution, caching, headless runner
-├── nodes/      # Stdlib node scripts (io/, transform/, viz/, util/, scripting/)
+├── nodes/      # Stdlib node scripts (io/, input/, transform/, viz/, util/, scripting/)
 ├── ui/         # QGraphicsView canvas, editor, inspector, console, dashboard
 ├── templates/  # Built-in .flograph project files
 ├── app.py      # QApplication bootstrap + main window

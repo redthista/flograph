@@ -36,6 +36,7 @@ class NodeGraphScene(QGraphicsScene):
     wire_dropped = Signal(object, QPointF)  # fixed PortItem, scene pos
     button_fired = Signal(str)          # node_id — an Action Button was clicked
     slicer_changed = Signal(str)        # node_id — a Slicer's selection changed
+    control_changed = Signal(str)       # node_id — an input control was moved
     frame_run_requested = Signal(str)   # frame_id — a frame's run glyph was clicked
 
     def __init__(self, graph: Graph, undo_stack: QUndoStack,
