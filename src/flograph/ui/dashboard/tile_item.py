@@ -92,6 +92,10 @@ class TileItem(QGraphicsObject):
         # from the model, and no move/resize is possible until it's cleared.
         self._fullscreen = False
         self._fs_hover = False  # cursor is over the maximize/restore glyph
+        # A press that toggled fullscreen owns the rest of its gesture. The
+        # toggle moves and resizes the tile out from under the cursor, so the
+        # move/release that follow must not be read as a drag of it.
+        self._fs_gesture = False
         x, y, w, h = tile.rect
         self.setPos(x, y)
         self._size = (w, h)
@@ -189,7 +193,7 @@ class TileItem(QGraphicsObject):
     def _request_fullscreen(self) -> None:
         scene = self.scene()
         if scene is not None and self.can_fullscreen():
-            scene.fullscreen_requested.emit(self.tile.id)
+            scene.toggle_fullscreen(self.tile.id)
 
     # -------------------------------------------------------------- content
 
@@ -676,6 +680,9 @@ class TileItem(QGraphicsObject):
                 event.accept()
                 return
         if event.button() == Qt.LeftButton and self._over_fs_button(event.pos()):
+            self._fs_gesture = True
+            self._press_pos = self.pos()
+            self._press_size = self._size
             self._request_fullscreen()
             event.accept()
             return
@@ -700,6 +707,11 @@ class TileItem(QGraphicsObject):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._fs_gesture:
+            # the toggle already re-enabled ItemIsMovable; without this, hand
+            # drift before the button comes back up drags the restored tile
+            event.accept()
+            return
         if self._resizing:
             edge = self._resize_edge
             width, height = self._size
@@ -730,6 +742,11 @@ class TileItem(QGraphicsObject):
         sits on top of it), so its double-clicks never reach us."""
         if event.button() == Qt.LeftButton and self.can_fullscreen() \
                 and event.pos().y() < TITLE_H:
+            # same gesture ownership as the button: the release that follows
+            # a double-click must not push the toggled geometry as a move
+            self._fs_gesture = True
+            self._press_pos = self.pos()
+            self._press_size = self._size
             self._request_fullscreen()
             event.accept()
             return
@@ -737,6 +754,14 @@ class TileItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
+        if self._fs_gesture:
+            # ends the toggle gesture, pushing nothing: the geometry either
+            # side of it is the view's doing, not a drag
+            self._fs_gesture = False
+            self._resizing = False
+            self._dragging = False
+            event.accept()
+            return
         if self._fullscreen:
             # geometry is view-owned while maximized — never push a rect
             self._resizing = False

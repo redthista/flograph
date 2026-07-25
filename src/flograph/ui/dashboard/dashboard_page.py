@@ -75,19 +75,16 @@ class DashboardPage(QWidget):
         layout.addWidget(self._toggle_strip)
         layout.addWidget(self._splitter, 1)
 
-        self.scene.fullscreen_requested.connect(self._toggle_fullscreen)
         self.view.fullscreen_changed.connect(self._on_fullscreen_changed)
 
         # a dashboard is for looking at, so the page opens as canvas and the
         # visuals panel is asked for -- silently, since nothing has changed yet
         self.set_visuals_visible(visuals_visible, notify=False)
+        # last, so a page saved with a tile maximized opens that way and the
+        # chrome it hides is not put back by the line above
+        self.scene.sync_fullscreen()
 
     # ----------------------------------------------------------- fullscreen
-
-    def _toggle_fullscreen(self, tile_id: str) -> None:
-        item = self.scene.tile_items.get(tile_id)
-        if item is not None:
-            self.view.toggle_fullscreen(item)
 
     def _on_fullscreen_changed(self, active: bool) -> None:
         """Give a maximized tile the whole page: the visuals panel and its

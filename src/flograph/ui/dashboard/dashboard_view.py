@@ -1,13 +1,14 @@
 """DashboardView: the pannable/zoomable viewport over one page's tiles,
 accepting drags from the visuals list.
 
-It also owns *fullscreen*: one tile pinned to the whole viewport, resizing
+It also renders *fullscreen*: one tile pinned to the whole viewport, resizing
 with the window so an embedded Plotly chart or table grows with it. The tile
 is laid out in scene coordinates at 1:1 zoom rather than lifted into a
 separate window — the content widget stays in its proxy, so nothing is
 rebuilt on the way in or out, and painted tiles (KPI) scale up too. The
-stored tile rect is never touched: fullscreen is view state, not a model
-change, so it neither saves nor lands on the undo stack."""
+stored tile *rect* is never touched; only the page's `maximized_tile` says
+what is maximized, and the scene is the sole caller of enter/exit here —
+turning fullscreen on or off is a model edit (see DashboardScene)."""
 from __future__ import annotations
 
 from typing import Optional
@@ -38,12 +39,6 @@ class DashboardView(ZoomPanGraphicsView):
     @property
     def fullscreen_tile(self) -> Optional[TileItem]:
         return self._fs_tile
-
-    def toggle_fullscreen(self, item: TileItem) -> None:
-        if self._fs_tile is item:
-            self.exit_fullscreen()
-        else:
-            self.enter_fullscreen(item)
 
     def enter_fullscreen(self, item: TileItem) -> None:
         if not item.can_fullscreen():
@@ -79,6 +74,13 @@ class DashboardView(ZoomPanGraphicsView):
             self.setTransform(transform)
             self.centerOn(center)
             self._zoom_updated()
+        # A fullscreen restored from the saved file was entered before the
+        # view had ever been laid out, so the centre captured then points
+        # nowhere useful. Whatever the reason, don't leave the user staring
+        # at empty canvas with the tile they were just reading off-screen.
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        if not visible.intersects(item.sceneBoundingRect()):
+            self.centerOn(item.sceneBoundingRect().center())
         self.fullscreen_changed.emit(False)
 
     def _layout_fullscreen(self) -> None:
@@ -117,7 +119,9 @@ class DashboardView(ZoomPanGraphicsView):
         key = event.key()
         if self._fs_tile is not None:
             if key == Qt.Key_Escape:
-                self.exit_fullscreen()
+                # through the model, like the button: the maximized tile is
+                # saved with the project
+                self.scene().exit_fullscreen()
                 event.accept()
                 return
             if key in (Qt.Key_Space, Qt.Key_F):  # no pan, no fit-to-items

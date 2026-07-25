@@ -58,6 +58,11 @@ class Page:
     title: str = "Page"
     tiles: dict[str, Tile] = field(default_factory=dict)
     color: Optional[str] = None   # None = the theme's default tab colour
+    # The tile shown maximized over the whole page, or None for the normal
+    # layout. Saved with the project so a dashboard travels the way it was
+    # laid out. May dangle (the tile was deleted) exactly like Tile.node_id
+    # does — the UI ignores an id it can't resolve.
+    maximized_tile: Optional[str] = None
 
 
 class Graph:
@@ -457,6 +462,16 @@ class Graph:
         theme default" rather than "leave unchanged" (mirrors set_color)."""
         page = self.page(page_id)
         page.color = color or None
+        self.events.page_changed.emit(page)
+        return page
+
+    def set_page_maximized_tile(self, page_id: str,
+                                tile_id: Optional[str]) -> Page:
+        """Maximize `tile_id` over the page, or None for the normal layout.
+        Separate from update_page for the same reason as set_page_color:
+        None has to mean "nothing maximized", not "leave unchanged"."""
+        page = self.page(page_id)
+        page.maximized_tile = tile_id or None
         self.events.page_changed.emit(page)
         return page
 

@@ -9,13 +9,17 @@ never hold event subscriptions. Core `Event.connect` keeps strong references
 receiving events and touches deleted Qt objects."""
 from __future__ import annotations
 
+from typing import Optional
+
 from PySide6.QtCore import QRectF, Signal
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
 from flograph.core import Graph, Tile
 
-from ..commands import MoveResizeTileCommand, RemoveTileCommand
+from ..commands import (
+    MoveResizeTileCommand, RemoveTileCommand, SetPageMaximizedTileCommand,
+)
 from ..canvas.scene import SCENE_EXTENT
 from .tile_item import TileItem
 
@@ -23,7 +27,6 @@ from .tile_item import TileItem
 class DashboardScene(QGraphicsScene):
     button_fired = Signal(str)  # node_id — an Action Button tile was clicked
     slicer_changed = Signal(str)  # node_id — a Slicer tile's selection changed
-    fullscreen_requested = Signal(str)  # tile_id — maximize/restore this tile
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -47,6 +50,7 @@ class DashboardScene(QGraphicsScene):
             (events.tile_added, self._on_tile_added),
             (events.tile_removed, self._on_tile_removed),
             (events.tile_changed, self._on_tile_changed),
+            (events.page_changed, self._on_page_changed),
             (events.node_added, self._on_node_presence_changed),
             (events.node_removed, self._on_node_presence_changed),
             (events.dirty_changed, self._on_dirty_changed),
@@ -85,16 +89,23 @@ class DashboardScene(QGraphicsScene):
             # a tile added (or undeleted) while another is maximized must not
             # pop up over it — it reappears when fullscreen is left
             item.setVisible(False)
+        # undoing the delete of a maximized tile brings it back maximized
+        self.sync_fullscreen()
 
     def _on_tile_removed(self, page_id: str, tile_id: str) -> None:
         if page_id != self.page_id:
             return
         item = self.tile_items.pop(tile_id, None)
         if item is not None:
-            for view in self.views():
-                if getattr(view, "fullscreen_tile", None) is item:
-                    view.exit_fullscreen()
+            # leaves page.maximized_tile dangling rather than writing to the
+            # graph outside a command — sync_fullscreen ignores an id with no
+            # tile, and undoing the delete resolves it again
+            self.sync_fullscreen()
             self.removeItem(item)
+
+    def _on_page_changed(self, page) -> None:
+        if page.id == self.page_id:
+            self.sync_fullscreen()
 
     def _on_tile_changed(self, page_id: str, tile: Tile) -> None:
         if page_id != self.page_id:
@@ -154,3 +165,39 @@ class DashboardScene(QGraphicsScene):
                        new_rect: tuple) -> None:
         self.undo_stack.push(MoveResizeTileCommand(
             self.graph, self.page_id, tile_id, old_rect, new_rect))
+
+    # ----------------------------------------------------------- fullscreen
+
+    def _maximized_tile_id(self) -> Optional[str]:
+        page = self.graph.pages.get(self.page_id)
+        return page.maximized_tile if page is not None else None
+
+    def toggle_fullscreen(self, tile_id: str) -> None:
+        """A tile's maximize/restore button (or a title-bar double-click).
+        Pushed rather than applied directly: which tile is maximized is saved
+        with the project, so it is a graph edit like any other."""
+        if self.page_id not in self.graph.pages:
+            return
+        target = None if self._maximized_tile_id() == tile_id else tile_id
+        self.undo_stack.push(SetPageMaximizedTileCommand(
+            self.graph, self.page_id, target))
+
+    def exit_fullscreen(self) -> None:
+        """Esc, and anything else that means "give me the page back"."""
+        if self._maximized_tile_id():
+            self.undo_stack.push(SetPageMaximizedTileCommand(
+                self.graph, self.page_id, None))
+
+    def sync_fullscreen(self) -> None:
+        """Point the views at whatever the model says is maximized. The one
+        place the view's fullscreen is turned on or off — everything else
+        edits the model and lands back here."""
+        tile_id = self._maximized_tile_id()
+        item = self.tile_items.get(tile_id) if tile_id else None
+        for view in self.views():
+            if not hasattr(view, "fullscreen_tile"):
+                continue  # a plain QGraphicsView attached for a screenshot
+            if item is None:
+                view.exit_fullscreen()
+            elif view.fullscreen_tile is not item:
+                view.enter_fullscreen(item)
