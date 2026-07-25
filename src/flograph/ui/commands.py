@@ -430,6 +430,27 @@ class SetPageColorCommand(QUndoCommand):
         self._graph.set_page_color(self._page_id, self._old)
 
 
+class SetPageMaximizedTileCommand(QUndoCommand):
+    """Maximize a tile over its page, or restore the normal layout. Saved
+    with the project, so it goes through the undo stack like every other
+    page edit rather than being written behind it."""
+
+    def __init__(self, graph: Graph, page_id: str, tile_id: Optional[str],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("maximize tile" if tile_id else "restore tile",
+                         parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).maximized_tile
+        self._new = tile_id
+
+    def redo(self) -> None:
+        self._graph.set_page_maximized_tile(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_maximized_tile(self._page_id, self._old)
+
+
 class ReorderPagesCommand(QUndoCommand):
     def __init__(self, graph: Graph, order: list[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -460,16 +481,21 @@ class DuplicatePageCommand(QUndoCommand):
                 self._graph.add_page(self._new_page)
             return
         src = self._graph.page(self._page_id)
+        # one id per copied tile: page.tiles is keyed by it *and* it is stored
+        # on the tile, and remove_tile looks the tile up by that key
+        id_map = {tile_id: uuid.uuid4().hex for tile_id in src.tiles}
         new_tiles = {
-            uuid.uuid4().hex: Tile(id=uuid.uuid4().hex, node_id=t.node_id, port=t.port,
-                                   rect=t.rect)
-            for tid, t in src.tiles.items()
+            id_map[tile_id]: Tile(id=id_map[tile_id], node_id=t.node_id,
+                                  port=t.port, rect=t.rect)
+            for tile_id, t in src.tiles.items()
         }
         self._new_page = Page(
             id=uuid.uuid4().hex,
             title=f"{src.title} (copy)",
             tiles=new_tiles,
             color=src.color,
+            # the copy opens looking like the original, remapped to its tiles
+            maximized_tile=id_map.get(src.maximized_tile),
         )
         self._graph.add_page(self._new_page)
 

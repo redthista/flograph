@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QGraphicsItem, QVBoxLayout
 from flograph.core import NodeRegistry, Page, Tile
 from flograph.ui import mainwindow as mod
 from flograph.ui.commands import AddPageCommand, AddTileCommand
-from flograph.ui.dashboard.tile_item import MISSING_NODE, RUN_PROMPT
+from flograph.ui.dashboard.tile_item import MISSING_NODE, RUN_PROMPT, TITLE_H
 from flograph.ui.dashboard.visuals_list import TILE_NODE_MIME
 from flograph.ui.mainwindow import MainWindow
 
@@ -53,10 +53,37 @@ def add_show_table(window, pos=(0, 0)):
     return node
 
 
-def add_tile(window, node, page_id="p1", tile_id="t1", port="table"):
-    window.undo_stack.push(AddTileCommand(
-        window.graph, page_id, Tile(id=tile_id, node_id=node.id, port=port)))
+def add_tile(window, node, page_id="p1", tile_id="t1", port="table",
+             rect=None):
+    tile = Tile(id=tile_id, node_id=node.id, port=port,
+                **({"rect": rect} if rect else {}))
+    window.undo_stack.push(AddTileCommand(window.graph, page_id, tile))
     return window._dashboard_pages[page_id].scene.tile_items[tile_id]
+
+
+@pytest.fixture
+def shown_page(window, qtbot):
+    """Builds a real, mapped DashboardPage on the window's graph. QTest mouse
+    events need a widget that is actually laid out, and the MainWindow itself
+    is never shown in these tests (see TestLibraryDockMinimumWidth for why
+    that is kept rare). Disposed on teardown -- core events hold strong refs
+    to the scene."""
+    from flograph.ui.dashboard import DashboardPage
+    built = []
+
+    def build(page_id="p1", size=(1000, 620)):
+        page = DashboardPage(window.graph, window.engine, window.undo_stack,
+                             page_id)
+        qtbot.addWidget(page)
+        page.resize(*size)
+        page.show()
+        qtbot.waitExposed(page)
+        built.append(page)
+        return page
+
+    yield build
+    for page in built:
+        page.dispose()
 
 
 class TestPageTabs:
@@ -480,11 +507,10 @@ class TestTileFullscreen:
         assert item.pos().x() == pytest.approx(rect.left() + 6.0)
         assert item.pos().y() == pytest.approx(rect.top() + 6.0)
         assert not other.isVisible()
-        # view state only -- the stored rect and the undo stack are untouched
+        # maximizing records which tile, never its rect
         assert window.graph.pages["p1"].tiles["t1"].rect == rect_before
-        assert not window.undo_stack.canRedo()
 
-        view.toggle_fullscreen(item)
+        view.exit_fullscreen()
         assert not item.is_fullscreen
         assert view.fullscreen_tile is None
         assert other.isVisible()
@@ -519,14 +545,17 @@ class TestTileFullscreen:
         view.exit_fullscreen()
         assert view.zoom == pytest.approx(0.5)
 
-    def test_escape_restores(self, window, qtbot):
+    def test_escape_restores(self, window, shown_page):
         add_page(window)
-        item = add_tile(window, add_show_table(window))
-        view = self.shown_view(window, qtbot)
-        view.enter_fullscreen(item)
+        add_tile(window, add_show_table(window))
+        page = shown_page()
+        page.scene.toggle_fullscreen("t1")
+        assert page.scene.tile_items["t1"].is_fullscreen
 
-        QTest.keyClick(view, Qt.Key_Escape)
-        assert not item.is_fullscreen
+        QTest.keyClick(page.view, Qt.Key_Escape)
+        assert not page.scene.tile_items["t1"].is_fullscreen
+        # Esc is the same edit as the button, not a view-only escape hatch
+        assert window.graph.pages["p1"].maximized_tile is None
 
     def test_wheel_does_not_zoom_while_maximized(self, window, qtbot):
         add_page(window)
@@ -554,18 +583,99 @@ class TestTileFullscreen:
         item.sync_from_model()
         assert item._size[0] > 50.0
 
+    def pushed(self, window, since):
+        """What landed on the undo stack, by command text -- these tests care
+        that a toggle never sneaks a "move tile" in."""
+        return [window.undo_stack.command(i).text()
+                for i in range(since, window.undo_stack.count())]
+
+    def click_glyph(self, page, item, drift=QPoint(3, 2)):
+        """Click the maximize/restore button the way a hand does -- with a
+        couple of pixels of drift between press and release."""
+        viewport = page.view.viewport()
+        pos = page.view.mapFromScene(
+            item.mapToScene(item._fs_button_rect().center()))
+        QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, pos)
+        QTest.mouseMove(viewport, pos + drift)
+        QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, pos + drift)
+
+    def test_restoring_via_the_button_leaves_the_tile_exactly_put(
+            self, window, shown_page):
+        """Regression: the toggle resizes the tile out from under the cursor
+        and re-enables ItemIsMovable, so the drift before the button came back
+        up was read as a drag -- the tile shifted and the move was written to
+        the model."""
+        add_page(window)
+        add_tile(window, add_show_table(window), rect=(140.0, 90.0, 420.0, 320.0))
+        page = shown_page()
+        item = page.scene.tile_items["t1"]
+        before = window.graph.pages["p1"].tiles["t1"].rect
+        undo_before = window.undo_stack.count()
+
+        self.click_glyph(page, item)
+        assert item.is_fullscreen
+        self.click_glyph(page, item)
+
+        assert not item.is_fullscreen
+        assert window.graph.pages["p1"].tiles["t1"].rect == before
+        assert (item.pos().x(), item.pos().y(),
+                *item._size) == pytest.approx(before)
+        assert self.pushed(window, undo_before) == ["maximize tile",
+                                                    "restore tile"]
+
+    def test_restoring_via_double_click_leaves_the_tile_exactly_put(
+            self, window, shown_page):
+        add_page(window)
+        add_tile(window, add_show_table(window), rect=(140.0, 90.0, 420.0, 320.0))
+        page = shown_page()
+        item = page.scene.tile_items["t1"]
+        before = window.graph.pages["p1"].tiles["t1"].rect
+        undo_before = window.undo_stack.count()
+
+        viewport = page.view.viewport()
+        for _ in range(2):  # maximize, then restore
+            pos = page.view.mapFromScene(
+                item.mapToScene(QPointF(30.0, TITLE_H / 2)))
+            # QTest.mouseDClick stops at the double-click event; a real one
+            # ends with a release, which is the half that used to push a move
+            QTest.mouseDClick(viewport, Qt.LeftButton, Qt.NoModifier, pos)
+            QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, pos)
+
+        assert not item.is_fullscreen
+        assert window.graph.pages["p1"].tiles["t1"].rect == before
+        assert self.pushed(window, undo_before) == ["maximize tile",
+                                                    "restore tile"]
+
+    def test_dragging_a_restored_tile_still_moves_it(self, window, shown_page):
+        """The gesture guard must not outlive the click that toggled."""
+        add_page(window)
+        add_tile(window, add_show_table(window), rect=(140.0, 90.0, 420.0, 320.0))
+        page = shown_page()
+        item = page.scene.tile_items["t1"]
+        self.click_glyph(page, item)
+        self.click_glyph(page, item)
+
+        viewport = page.view.viewport()
+        start = page.view.mapFromScene(item.mapToScene(QPointF(30.0, 12.0)))
+        QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, start)
+        QTest.mouseMove(viewport, start + QPoint(40, 25))
+        QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier,
+                           start + QPoint(40, 25))
+        assert window.graph.pages["p1"].tiles["t1"].rect[0] > 140.0
+        assert window.undo_stack.count() >= 1
+
     def test_page_signal_toggles_and_frees_the_page_chrome(self, window):
         add_page(window)
         add_tile(window, add_show_table(window))
         page = window._dashboard_pages["p1"]
         page.set_visuals_visible(True)  # pages open collapsed; open it first
 
-        page.scene.fullscreen_requested.emit("t1")
+        page.scene.toggle_fullscreen("t1")
         assert page.view.fullscreen_tile is page.scene.tile_items["t1"]
         assert not page._side.isVisibleTo(page)
         assert not page._toggle_strip.isVisibleTo(page)
 
-        page.scene.fullscreen_requested.emit("t1")
+        page.scene.toggle_fullscreen("t1")
         assert page.view.fullscreen_tile is None
         assert page._side.isVisibleTo(page)
         assert page._toggle_strip.isVisibleTo(page)
@@ -580,7 +690,7 @@ class TestTileFullscreen:
         toggled = []
         page.visuals_visibility_changed.connect(toggled.append)
 
-        page.scene.fullscreen_requested.emit("t1")
+        page.scene.toggle_fullscreen("t1")
         page.view.exit_fullscreen()
         assert not page._side.isVisibleTo(page)
         assert page._toggle_strip.isVisibleTo(page)
@@ -592,7 +702,7 @@ class TestTileFullscreen:
         node = add_show_table(window)
         add_tile(window, node)
         page = window._dashboard_pages["p1"]
-        page.scene.fullscreen_requested.emit("t1")
+        page.scene.toggle_fullscreen("t1")
 
         late = add_tile(window, node, tile_id="t2")
         assert not late.isVisible()
@@ -603,7 +713,7 @@ class TestTileFullscreen:
         add_page(window)
         add_tile(window, add_show_table(window))
         page = window._dashboard_pages["p1"]
-        page.scene.fullscreen_requested.emit("t1")
+        page.scene.toggle_fullscreen("t1")
 
         page.scene.remove_tile("t1")
         assert page.view.fullscreen_tile is None
@@ -614,26 +724,112 @@ class TestTileFullscreen:
         add_page(window)
         node = add_show_table(window)
         item = add_tile(window, node)
-        window._dashboard_pages["p1"].scene.fullscreen_requested.emit("t1")
+        window._dashboard_pages["p1"].scene.toggle_fullscreen("t1")
 
         window.undo_stack.push(
             RemoveSelectionCommand(window.graph, [node.id]))
         assert item.is_fullscreen
         assert item.can_fullscreen()  # the restore glyph is still painted
 
-    def test_title_bar_glyph_and_double_click_toggle(self, window, qtbot):
+    def test_title_bar_glyph_and_double_click_toggle(self, window, shown_page):
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        page = shown_page()
+        item = page.scene.tile_items["t1"]
+        maximized = lambda: window.graph.pages["p1"].maximized_tile
+
+        glyph = page.view.mapFromScene(item.mapToScene(
+            item._fs_button_rect().center()))
+        QTest.mouseClick(page.view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                         glyph)
+        assert maximized() == "t1"
+
+        title = page.view.mapFromScene(item.mapToScene(QPointF(30.0, 12.0)))
+        QTest.mouseDClick(page.view.viewport(), Qt.LeftButton, Qt.NoModifier,
+                          title)
+        assert maximized() is None
+
+    def test_maximized_tile_is_saved_and_reopens_maximized(
+            self, window, tmp_path):
+        """A dashboard travels the way it was laid out -- send someone the
+        file and the tile you maximized is maximized for them too."""
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        window._dashboard_pages["p1"].scene.toggle_fullscreen("t1")
+        assert window.graph.pages["p1"].maximized_tile == "t1"
+
+        path = str(tmp_path / "board.flograph")
+        window._project_path = path
+        assert window._save()
+
+        from flograph.core import Graph
+        window._replace_graph(Graph())
+        assert window.open_path(path, confirm=False)
+
+        assert window.graph.pages["p1"].maximized_tile == "t1"
+        page = window._dashboard_pages["p1"]
+        assert page.scene.tile_items["t1"].is_fullscreen
+        assert page.view.fullscreen_tile is page.scene.tile_items["t1"]
+        assert not page._toggle_strip.isVisibleTo(page)
+
+    def test_files_written_before_the_feature_load_unmaximized(
+            self, window, tmp_path):
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        path = tmp_path / "old.flograph"
+        window._project_path = str(path)
+        assert window._save()
+
+        import json
+        payload = json.loads(path.read_text())
+        for entry in payload["graph"]["pages"]:
+            del entry["maximized_tile"]  # as an older flograph wrote it
+        path.write_text(json.dumps(payload))
+
+        from flograph.core import Graph
+        window._replace_graph(Graph())
+        assert window.open_path(str(path), confirm=False)
+        assert window.graph.pages["p1"].maximized_tile is None
+        assert not window._dashboard_pages["p1"].scene.tile_items["t1"] \
+            .is_fullscreen
+
+    def test_maximizing_is_undoable(self, window):
         add_page(window)
         item = add_tile(window, add_show_table(window))
-        view = self.shown_view(window, qtbot)
-        requested = []
-        view.scene().fullscreen_requested.connect(requested.append)
+        scene = window._dashboard_pages["p1"].scene
 
-        glyph = view.mapFromScene(item.mapToScene(
-            item._fs_button_rect().center()))
-        QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, glyph)
-        title = view.mapFromScene(item.mapToScene(QPointF(30.0, 12.0)))
-        QTest.mouseDClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, title)
-        assert requested == ["t1", "t1"]
+        scene.toggle_fullscreen("t1")
+        assert item.is_fullscreen
+        window.undo_stack.undo()
+        assert not item.is_fullscreen
+        assert window.graph.pages["p1"].maximized_tile is None
+        window.undo_stack.redo()
+        assert item.is_fullscreen
+
+    def test_deleting_a_maximized_tile_and_undoing_restores_it_maximized(
+            self, window):
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen("t1")
+
+        page.scene.remove_tile("t1")
+        assert page.view.fullscreen_tile is None
+        window.undo_stack.undo()
+        assert page.scene.tile_items["t1"].is_fullscreen
+
+    def test_duplicating_a_page_carries_the_maximized_tile(self, window):
+        add_page(window)
+        add_tile(window, add_show_table(window))
+        window._dashboard_pages["p1"].scene.toggle_fullscreen("t1")
+
+        window._duplicate_page("p1")
+        copy = window.graph.pages[window._last_duped_id]
+        # tile ids are remapped by the copy, so the pointer must be too
+        assert copy.maximized_tile in copy.tiles
+        assert copy.maximized_tile != "t1"
+        assert window._dashboard_pages[copy.id].scene.tile_items[
+            copy.maximized_tile].is_fullscreen
 
     def test_button_tiles_do_not_maximize(self, window, qtbot):
         add_page(window)

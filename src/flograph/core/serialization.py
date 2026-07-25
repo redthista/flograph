@@ -79,6 +79,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "id": p.id,
                     "title": p.title,
                     "color": p.color,
+                    "maximized_tile": p.maximized_tile,
                     "tiles": [
                         {
                             "id": t.id,
@@ -163,6 +164,8 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             id=entry["id"],
             title=entry.get("title", "Page"),
             color=entry.get("color"),
+            # absent in files written before dashboards could maximize a tile
+            maximized_tile=entry.get("maximized_tile"),
         ))
         # tiles referencing missing nodes load as-is: the dashboard shows a
         # placeholder for them, mirroring the _broken_spec philosophy
