@@ -23,6 +23,7 @@ from .tile_item import TileItem
 class DashboardScene(QGraphicsScene):
     button_fired = Signal(str)  # node_id — an Action Button tile was clicked
     slicer_changed = Signal(str)  # node_id — a Slicer tile's selection changed
+    fullscreen_requested = Signal(str)  # tile_id — maximize/restore this tile
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -79,12 +80,20 @@ class DashboardScene(QGraphicsScene):
         item = TileItem(tile, self.graph, self.engine)
         self.addItem(item)
         self.tile_items[tile.id] = item
+        if any(getattr(view, "fullscreen_tile", None) is not None
+               for view in self.views()):
+            # a tile added (or undeleted) while another is maximized must not
+            # pop up over it — it reappears when fullscreen is left
+            item.setVisible(False)
 
     def _on_tile_removed(self, page_id: str, tile_id: str) -> None:
         if page_id != self.page_id:
             return
         item = self.tile_items.pop(tile_id, None)
         if item is not None:
+            for view in self.views():
+                if getattr(view, "fullscreen_tile", None) is item:
+                    view.exit_fullscreen()
             self.removeItem(item)
 
     def _on_tile_changed(self, page_id: str, tile: Tile) -> None:
