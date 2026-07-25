@@ -48,7 +48,21 @@ class NodeScriptError(Exception):
 # canvas card / dashboard tile renders the node's output; None = ordinary node.
 CARD_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer",
-    "button", "note", "grid", "reroute", "goto", "from",
+    "button", "note", "grid", "reroute", "goto", "from", "control",
+})
+
+# Widget shapes for NODE["card"] == "control": input controls whose value the
+# user sets on the card or on a dashboard page, rather than a rendered output.
+# One host renders all of them from this declaration plus the node's PARAMS,
+# so a new control is a node script — see flograph.ui.controls for the
+# well-known param names each shape reads.
+CONTROL_KINDS = frozenset({
+    "slider",    # value along a track, int or float
+    "number",    # spin box
+    "text",      # single-line text entry
+    "date",      # calendar picker
+    "toggle",    # single checkbox -> bool
+    "choice",    # dropdown of fixed or upstream-supplied options
 })
 
 
@@ -137,6 +151,18 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
             f"NODE['card'] {card!r} is not a valid card kind (valid: {valid})"
         )
 
+    control = node_decl.get("control")
+    if card == "control":
+        if control not in CONTROL_KINDS:
+            valid = ", ".join(sorted(CONTROL_KINDS))
+            raise NodeScriptError(
+                f"NODE['control'] {control!r} is not a valid control kind "
+                f"(valid: {valid}) — a card of 'control' must say which"
+            )
+    elif control is not None:
+        raise NodeScriptError(
+            "NODE['control'] only applies when NODE['card'] is 'control'")
+
     inputs = _parse_ports(node_decl.get("inputs", []), PortDirection.INPUT,
                           "NODE['inputs']")
     outputs = _parse_ports(node_decl.get("outputs", []), PortDirection.OUTPUT,
@@ -174,6 +200,7 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         builtin=builtin,
         doc=(namespace.get("__doc__") or "").strip(),
         card=card,
+        control=control,
     )
 
 

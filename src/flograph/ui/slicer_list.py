@@ -70,18 +70,11 @@ class _IndicatorDelegate(QStyledItemDelegate):
 
 
 def selected_param_values(raw) -> list[str]:
-    """The ticked values of a Slicer's "selected" param as strings: a JSON
-    array normally (this widget writes that), falling back to a
-    comma-separated list for hand edits."""
-    raw = str(raw or "").strip()
-    if not raw:
-        return []
-    try:
-        parsed = json.loads(raw)
-        return [str(v) for v in parsed] if isinstance(parsed, list) \
-            else [str(parsed)]
-    except ValueError:
-        return [part.strip() for part in raw.split(",") if part.strip()]
+    """The ticked values of a Slicer's "selected" param as strings. Lives in
+    core so the widget, the node's run() and the engine's introspection all
+    read a hand-edited param the same way."""
+    from flograph.core.controls import selected_values
+    return selected_values(raw)
 
 
 class SlicerListWidget(QListWidget):

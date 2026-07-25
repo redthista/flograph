@@ -17,6 +17,7 @@ _KIND_GLYPHS = {
     "kpi": "🔢",
     "slicer": "⑂",
     "button": "▶",
+    "control": "🎛",
 }
 
 

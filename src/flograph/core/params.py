@@ -21,12 +21,13 @@ PARAM_TYPES = {
     "columns",    # free string in v1; column picker later
     "password",   # QLineEdit with masked echo + reveal toggle
     "node_ref",   # QComboBox of other nodes in the graph; stores a node id
+    "date",       # QDateEdit with a calendar popup; stores an ISO "YYYY-MM-DD"
 }
 
 _TYPE_DEFAULTS: dict[str, Any] = {
     "string": "", "text": "", "int": 0, "float": 0.0, "bool": False,
     "choice": None, "file_open": "", "file_save": "", "columns": "",
-    "password": "", "node_ref": "",
+    "password": "", "node_ref": "", "date": "",
 }
 
 
