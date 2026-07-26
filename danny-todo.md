@@ -1,75 +1,11 @@
 # Danny's testing to-do
 
 Manual test passes waiting to be run in the app. Tick a line when it
-behaves; strike a section through once the whole thing is signed off and
-committed. Anything that misbehaves — note it under the item rather than
-deleting it.
-
----
-
-## Layers — bring to front / send to back (idea #15) — TESTED, GOOD
-
-Committed? **yes** — `871dc45`.
-
-Right-click a node, frame or dashboard tile for a **Layer** submenu, or use
-`Ctrl+]` / `Ctrl+[` (add `Shift` for all-the-way).
-
-### Canvas
-
-- [x] Overlap two big cards (Table, Plotly). Right-click the buried one →
-      **Layer › Bring to Front**.
-- [x] `Ctrl+]` / `Ctrl+[` step it one place at a time; `Ctrl+Shift+[`
-      buries it completely.
-- [x] Select **several** overlapping cards and bring them forward
-      repeatedly — they keep their order relative to each other.
-- [x] `Ctrl+Z` — one press undoes one action.
-- [x] Overlap two **frames** and restack them. A node still draws over
-      both; wires still draw over frames but under cards.
-- [x] Select a **node and a frame together** → Bring to Front. Both rise
-      among their own kind, as a single undo step.
-- [x] `Ctrl+]` with nothing selected, or on something already at the
-      front — does nothing at all, and adds no undo step.
-
-### Dashboard
-
-- [x] Overlap a KPI on a chart, right-click, restack. (Tiles had no
-      right-click menu before this — that's new.)
-- [x] **Maximize** a tile that is stacked *below* another — nothing shows
-      through over it.
-
-### Persistence
-
-- [x] **Save, close, reopen** — the stacking comes back.
-- [x] **Duplicate a page** with restacked tiles — the copy matches.
-- [x] Open an **older project** — everything looks exactly as it did
-      before.
-
----
-
-## Missing library at the top of a node (idea #21) — TESTED, GOOD
-
-Committed? **yes** — `871dc45`.
-
-Setup: fork any node (Edit Code) and put `import some_package_you_dont_have`
-on the **first line**, above `NODE`. Save the project, close it.
-
-- [x] **Reopen the project.** It opens. Before this it refused entirely.
-- [x] The bad node shows an error naming the package and pointing at
-      **Manage Packages…**; every other node is fine and still wired to it.
-- [x] **Save it again and reopen** — the node's code, params, label,
-      colour and description all survive the round trip.
-- [x] Open **Edit Code** on the broken node — the code is still there.
-- [x] Hit **Apply** without changing anything → same error, still broken.
-- [x] Now change the import to something you *do* have (e.g. `import json`)
-      and Apply → the node repairs itself, ports and label come back.
-- [x] Sanity check: on a **healthy** node, Apply with no edits still says
-      "No changes to apply."
-- [x] Put the import **inside `run()`** instead, with a package you don't
-      have, and run → only that node errors, and the message says to
-      install it. The app keeps running.
-- [x] Drop a `.py` with a bad top-level import into your **user nodes**
-      folder and reload the library → status bar names the file *and* the
-      reason; the rest of the library still loads.
+behaves. Anything that misbehaves — note it under the item rather than
+deleting it. Once a whole section is signed off and committed, delete it
+and leave a one-liner under **Done and signed off**; the detail lives in
+the commit message and the changelog, and a file of ticked boxes is a file
+nobody reads.
 
 ---
 
@@ -130,52 +66,10 @@ embeds only resolve for nodes that have produced something.
 
 ---
 
-## Chart per value + Report cards (idea #18, and your report-node idea) — PARTLY TESTED
+## Report cards (the report-node idea) — NOT YET TESTED
 
-Committed? **yes** — `871dc45`. The chart/grid half is signed off; the
-Report card lines below are still unrun.
-
-The underlying rule: **a node output that is a list renders as a stack**,
-everywhere a single one would.
-
-### One chart per value (#18)
-
-- [ ] Drop **Viz > Chart per Value**, wire a table in, set "Split by" to a
-      low-cardinality column, pick X and Y. Run.
-- [x] The card shows one chart per value, **scrollable**.
-      **BUG FOUND + FIXED 2026-07-26:** the canvas card showed only the
-      "run to view" placeholder while the report embed of the same node
-      worked. `_on_figure_node_succeeded` read a hardcoded "figure" port;
-      Chart per Value emits "figures". It now reads the node's own first
-      output, like every other card kind already did.
-- [x] Scroll the stack with the **wheel over a chart**, not just the
-      scrollbar.
-      **BUG FOUND + FIXED 2026-07-26:** matplotlib canvases consume wheel
-      ticks for their own zoom, so with the cursor over a chart — which is
-      nearly always — the scroll area never saw them and only dragging the
-      scrollbar worked. Stacked canvases now decline the wheel so it falls
-      through. A lone chart still keeps its toolbar and pan/zoom.
-- [x] "Same Y scale" on → all panels share a scale so they compare.
-      Off → each scales to itself. *Danny: shared scale is exactly right,
-      it replaces facetting and eye-comparison is the point. Keep it on by
-      default. 40 max charts is fine.*
-- [x] Set "Max charts" to 2 → it trims and says so in the log.
-- [x] Drag the node onto a **dashboard page** → the stack scrolls there too.
-- [x] **Plotly per Region** is now pre-built in 01-everything.flograph
-      (bottom middle of the canvas). Run and check: one scrolling page, not
-      three webviews, and it shouldn't feel slow. Verified headless: 3
-      charts, one shared plotly.js, 4.65 MB instead of 13.9 MB.
-- [x] Embed the same node in a **report page** with `![[Chart per Value]]`
-      → all the charts appear in a row down the page. Export the PDF.
-      **FIXED 2026-07-26 after Danny reported the single chart looked
-      pixelated next to the stacked ones:** both were in fact at the same
-      198dpi — a flat 2x up-scale, which is simply too low for print and
-      shows most on a big chart with thin crossing lines. Charts are now
-      scaled to a *target* 300dpi (PRINT_DPI) rather than a fixed
-      multiplier, so every chart lands the same on paper whatever size it
-      was authored at. **Re-export and check both.**
-
-### Report cards (your idea)
+Committed? **yes** — `871dc45`. The chart/grid half of that work is signed
+off; these lines are what's left unrun.
 
 - [ ] Drop **Viz > Report**. Wire a chart into input **a** and a KPI into
       **b**. Run.
@@ -197,135 +91,36 @@ everywhere a single one would.
       deliberate (its embeds come from upstream, unlike a Table tile) but it
       means a text-only edit shows STALE too. Tell me if that's annoying.
 
----
-
-## Chart grid + inline report editing (2026-07-26) — TESTED, GOOD
-
-Committed? **yes** — `871dc45`.
-
-### Grid: Columns / Rows / Fill
-
-On **Chart per Value** and **Plotly per Region**; any node returning a list
-can declare them.
-
-- [x] Fill = down / across with both counts 0 → one column / one row.
-      **BUG FIXED:** "across" still stacked top-down — with nothing else set
-      the direction had no effect on the shape.
-- [x] Columns N / Rows N constrain it into a grid.
-- [x] An explicitly-sized grid **keeps its shape**, e.g. 2 cols x 3 rows
-      with 3 charts leaves a blank row.
-      **BUG FIXED (Danny spotted):** all three hosts only created rows that
-      had something in them, so the grid silently collapsed and the charts
-      were re-sized to a grid nobody asked for.
-- [x] Changes apply **immediately**, no re-run.
-      **BUG FIXED:** a param change evicted the cache, leaving nothing to
-      re-lay out.
-- [x] Layout params are `"cosmetic": True` — they don't dirty the node, so
-      a slow split isn't re-run just to show it in two columns.
-      **BUG FIXED (Danny spotted):** that broke report page/card/tile
-      refresh, which all keyed off the run signal. *Cosmetic means don't
-      recompute, not don't redraw.*
-- [x] No torn strip on first draw.
-      **BUG FIXED:** canvases were rasterised before the grid had sized
-      them; a resize was fixing it.
-- [x] Plotly charts fill the available height, and a 3rd chart no longer
-      paints over the 1st.
-      **BUG FIXED:** plotly sizes in pixels at init and spilled out of its
-      cell; nothing clipped it.
-- [x] Same layout on canvas card, dashboard tile, report page and PDF.
-
-### Report card inline editing
-
-- [x] Double-click the card body → markdown editor in place.
-      **BUG FIXED:** did nothing — the rendered view sits in a proxy widget
-      over the card and swallowed the double-click.
-- [x] Commit / cancel / one undo step / header still renames.
-
-### Still open from this round
-
-- Charts render "larger in scale" than before the 300dpi change. Consistent,
-  so parked — revisit with per-embed sizing (`![[chart|width=50%]]`).
-- `width`/`height` params still dirty their node like any other. Same class
-  of thing as the layout params; left alone because it touches every card
-  node.
+Also still worth doing from that round: **re-export a report PDF** and
+compare a single chart against a stacked one, since the 300dpi change
+(`PRINT_DPI`) landed after the last export was checked.
 
 ---
 
-## Open in Browser for web-view nodes (idea #21) — SIGNED OFF
+## Known and parked
 
-Committed? **yes** — `36ce5fb`, on Danny's "yeah all looks good" after the
-refresh fix below. He drove it in the app rather than working down this list,
-so the boxes are left unticked deliberately: they record what is *worth*
-checking, not what went unchecked. Anything they turn up later is a
-follow-up, not a blocker.
+Not bugs to fix now — decisions we took knowingly, recorded so they aren't
+rediscovered as surprises.
 
-Setup: a **Show Plotly** or **Show Web View** node with something wired in,
-and **run it**. The entry only appears once the node has produced something.
-
-### The basics
-
-- [ ] Right-click the node → **Open in Browser**. Your real browser opens on
-      the chart.
-- [ ] The **browser tab is named after the node**, not after a temp file.
-- [ ] The status bar names the node and the file it wrote.
-- [ ] It fills the browser window — not a small box in the corner.
-- [ ] Right-click a node you **haven't run** → no such entry at all (not
-      greyed out; flograph omits actions it can't do).
-- [ ] Right-click a **non-web-view** node (a Python Script returning a
-      string, say) → also no entry. Deliberate: a plain string coerces to
-      HTML, so "anything that could render" would put this on half the
-      library. Tell me if you'd rather have it everywhere.
-
-### The refresh loop — the bit worth actually using
-
-**Danny found this broken on the first cut (2026-07-26)** — the file was
-written once when you opened it and never again, so refreshing showed the
-old chart while the canvas showed the new one. The page is now rewritten on
-every run of a node you've opened.
-
-- [ ] With the browser tab still open, **change your data, re-run the flow,
-      and press F5 in the browser.** It should now match the canvas, without
-      touching flograph at all.
-- [ ] The re-run must **not** pop a new tab or steal focus — you could be
-      mid-edit when the flow finishes.
-- [ ] **Open in Browser again** after a re-run: same tab/file, not a second
-      one.
-- [ ] Break the node so the run fails, then refresh → the tab should still
-      show the last good chart rather than going blank. (Deliberate: an
-      empty tab can't tell you whether the node broke or the refresh did.)
-- [ ] Two different nodes → two separate pages, even if you named them the
-      same thing, and running one doesn't touch the other's page.
-- [ ] Rename the node after opening it, re-run → the tab you have open still
-      refreshes (the file is fixed when the tab opens).
-- [ ] Open a **different project** while a tab is open, run something →
-      nothing writes over the old page.
-
-### Stacks and dashboards
-
-- [ ] **Chart per Value / Plotly per Region** with Columns/Rows set → opens
-      with the same grid, using the whole browser height. This is the one I
-      most expect to be an improvement on the card.
-- [ ] Drop a web-view node on a **dashboard page**, right-click the tile →
-      **Open in Browser** is under the Layer entries.
-- [ ] Do it on a **maximized** tile — right-click is disabled while
-      maximized, so you'll need to restore first. Tell me if that's annoying.
-
-### Edge cases
-
-- [ ] **Edit the node without re-running** (so it goes STALE), then open it →
-      it opens the last run's output and the status bar says the node is
-      dirty. Check that reads clearly — the whole risk here is looking at an
-      old chart in a window that doesn't show the STALE badge.
-- [ ] A **folium map** node. Should be *better* than the card: in a real
-      browser the CDN scripts load normally.
-- [ ] Close flograph, then reload the browser tab → the file is gone (it
-      lives in a temp dir cleaned up on exit). Say if you'd rather these
-      survived, or wanted a "Save page as…" instead.
+- **Charts render "larger in scale"** than before the 300dpi change.
+  Consistent, so parked — revisit with per-embed sizing
+  (`![[chart|width=50%]]`).
+- **`width`/`height` params still dirty their node** like any other, unlike
+  the layout params which are `cosmetic`. Same class of thing; left alone
+  because changing it touches every card node.
 
 ---
 
 ## Done and signed off
 
+- ~~Open in Browser for web-view nodes (idea #21)~~ — signed off, `36ce5fb`;
+  folium maps confirmed working in a real browser too.
+- ~~Chart grid (Columns / Rows / Fill) and inline report-card editing~~ —
+  tested, `871dc45`.
+- ~~One chart per value, and lists rendering as stacks (idea #18)~~ —
+  tested, `871dc45`.
+- ~~Surviving a missing library at the top of a node~~ — tested, `871dc45`.
+- ~~Layers: bring to front / send to back (idea #15)~~ — tested, `871dc45`.
 - ~~Linked Table keeps its contents when the input is disconnected, and
   resizing a populated linked card no longer blanks it (idea #8)~~ —
-  tested, committed as `ca2542d`.
+  tested, `ca2542d`.
