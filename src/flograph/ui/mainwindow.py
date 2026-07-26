@@ -38,6 +38,7 @@ from .commands import (
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
 from .canvas import grid
+from .canvas.stacking import add_layer_menu
 from .canvas.node_item import (
     DEFAULT_LOD_THRESHOLD, PREVIEW_TOGGLABLE_KINDS, card_kind,
 )
@@ -148,6 +149,13 @@ class MainWindow(QMainWindow):
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self.statusBar().showMessage("Ready")
+
+    def _canvas_pages(self) -> list:
+        """Pages that actually have a scene and a view. Report pages are
+        documents, so every window-wide *canvas* setting — snap, LOD, the
+        GPU viewport, colour muting — has nothing on them to apply to."""
+        return [page for page in self._dashboard_pages.values()
+                if hasattr(page, "view") and hasattr(page, "scene")]
 
     def _active_canvas_view(self):
         """The zoom-pan view of whatever page is showing: the model canvas,
@@ -422,7 +430,7 @@ class MainWindow(QMainWindow):
         """Node cards and the minimap live on the canvas; the page tabs are a
         plain widget. Both have to be told, or half the window keeps the old
         muting until something else happens to invalidate it."""
-        views = [self.view] + [page.view for page in self._dashboard_pages.values()]
+        views = [self.view] + [page.view for page in self._canvas_pages()]
         for view in views:
             view.viewport().update()
         self.view.minimap.update()
@@ -434,7 +442,7 @@ class MainWindow(QMainWindow):
         and resizes on the canvas and dashboard tiles."""
         views = [self.view]
         scenes = [self.scene]
-        for page in self._dashboard_pages.values():
+        for page in self._canvas_pages():
             scenes.append(page.scene)
             views.append(page.view)
         for scene in scenes:
@@ -477,7 +485,7 @@ class MainWindow(QMainWindow):
         stuck with a broken canvas just because the setting was on from a
         previous session."""
         enabled = self.action_gpu_viewport.isChecked()
-        views = [self.view] + [page.view for page in self._dashboard_pages.values()]
+        views = [self.view] + [page.view for page in self._canvas_pages()]
         try:
             for view in views:
                 self._set_canvas_viewport(view, enabled)
@@ -538,7 +546,7 @@ class MainWindow(QMainWindow):
         Settings-dialog change takes effect without needing to zoom. Only
         NodeGraphScene (the modeling canvas) implements it — DashboardScene
         (report pages) shows tiles, not nodes, and has no LOD concept."""
-        scenes = [self.scene] + [page.scene for page in self._dashboard_pages.values()]
+        scenes = [self.scene] + [page.scene for page in self._canvas_pages()]
         for scene in scenes:
             if not hasattr(scene, "refresh_lod_settings"):
                 continue
@@ -602,6 +610,13 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_kpi_node_succeeded)
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
         engine.node_succeeded.connect(self._on_control_node_succeeded)
+        # every run: a report card's content lives upstream of it, so the
+        # cards that changed are not the ones that ran
+        engine.run_finished.connect(lambda *_: self._refresh_report_cards())
+        # ...and on a param change, because a *cosmetic* one (chart layout)
+        # deliberately never runs anything
+        self.graph.events.param_changed.connect(
+            lambda *_: self._refresh_report_cards())
         self.graph.events.preview_enabled_changed.connect(
             self._on_preview_enabled_changed)
 
@@ -642,7 +657,11 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         entry = self.engine.cache.get(node_id)
-        item.set_figure(entry.outputs.get("figure") if entry else None)
+        # the node's own first output, not a hardcoded "figure": a figure
+        # card is free to name its port anything (Chart per Value emits
+        # "figures"), and every other card kind already reads it this way
+        port = node.spec.outputs[0].name if node.spec.outputs else "figure"
+        item.set_figure(entry.outputs.get(port) if entry else None)
 
     def _on_plotly_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -657,6 +676,15 @@ class MainWindow(QMainWindow):
         # a webview node's rendered output is its first declared output port
         port = node.spec.outputs[0].name if node.spec.outputs else "figure"
         item.set_plotly_figure(entry.outputs.get(port) if entry else None)
+
+    def _refresh_report_cards(self) -> None:
+        """Re-render every report card on the canvas. Cheap (they are text
+        plus already-computed values) and blunt on purpose: working out
+        which cards embed which upstream node would duplicate the embed
+        parser for no gain."""
+        for item in self.scene.node_items.values():
+            if getattr(item, "report_card", False):
+                item.refresh_report()
 
     def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -794,6 +822,9 @@ class MainWindow(QMainWindow):
             self._on_current_page_changed)
 
     def _on_page_added(self, page: Page) -> None:
+        if page.kind == "report":
+            self._add_report_page(page)
+            return
         widget = DashboardPage(self.graph, self.engine, self.undo_stack,
                                page.id, visuals_visible=self.visuals_visible)
         widget.visuals_visibility_changed.connect(self._set_visuals_visible)
@@ -811,6 +842,52 @@ class MainWindow(QMainWindow):
         self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)
+
+    def _add_report_page(self, page: Page) -> None:
+        from .report import ReportPage
+        widget = ReportPage(self.graph, self.engine, self.undo_stack, page.id)
+        widget.export_requested.connect(self._export_report_pdf)
+        # kept in the same dict as dashboards: everything the window does
+        # with a page — switching, removing, disposing — is the same for
+        # both, and only the two places that need the difference ask
+        self._dashboard_pages[page.id] = widget
+        self._canvas_stack.addWidget(widget)
+        self.page_bar.add_page_tab(page)
+
+    def _export_report_pdf(self, page_id: str) -> None:
+        page = self.graph.pages.get(page_id)
+        widget = self._dashboard_pages.get(page_id)
+        if page is None or widget is None:
+            return
+        # next to the project, named after the page — the two things anyone
+        # exporting a report has just been looking at
+        folder = (Path(self._project_path).parent if self._project_path
+                  else Path.home())
+        safe = "".join(c for c in page.title
+                       if c.isalnum() or c in " -_").strip() or "report"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export report as PDF", str(folder / f"{safe}.pdf"),
+            "PDF documents (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        from .report import export_pdf
+        rendered = widget.rendered(for_print=True)
+        try:
+            export_pdf(rendered.document, path, title=page.title)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        # exported anyway — a report with a hole in it is still worth
+        # having, but nobody should find out about the hole from the PDF
+        if rendered.problems:
+            QMessageBox.warning(
+                self, "Exported with problems",
+                f"Exported to {path}, but some embeds didn't resolve:\n\n• "
+                + "\n• ".join(dict.fromkeys(rendered.problems)))
+        else:
+            self.statusBar().showMessage(f"Exported {path}", 6000)
 
     def _on_page_removed(self, page_id: str) -> None:
         widget = self._dashboard_pages.pop(page_id, None)
@@ -851,17 +928,23 @@ class MainWindow(QMainWindow):
             self.settings.setValue(f"active_page/{self._project_path}",
                                    page_id or "")
 
-    def _add_page(self) -> None:
-        page = Page(id=uuid.uuid4().hex, title=self._next_page_title())
+    def _add_page(self, kind: str = "dashboard") -> None:
+        from .report import STARTER_BODY
+        page = Page(id=uuid.uuid4().hex, title=self._next_page_title(kind),
+                    kind=kind,
+                    # a blank report page is a blank text box with no clue
+                    # that ![[...]] is a thing, so it starts with the syntax
+                    body=STARTER_BODY if kind == "report" else "")
         self.undo_stack.push(AddPageCommand(self.graph, page))
         self.page_bar.select_page(page.id)
 
-    def _next_page_title(self) -> str:
+    def _next_page_title(self, kind: str = "dashboard") -> str:
+        stem = "Report" if kind == "report" else "Page"
         titles = {p.title for p in self.graph.pages.values()}
         n = len(self.graph.pages) + 1
-        while f"Page {n}" in titles:
+        while f"{stem} {n}" in titles:
             n += 1
-        return f"Page {n}"
+        return f"{stem} {n}"
 
     def _rename_page(self, page_id: str, title: str) -> None:
         page = self.graph.pages.get(page_id)
@@ -1166,9 +1249,12 @@ class MainWindow(QMainWindow):
         errors = self.registry.reload_user_nodes(user_nodes_dir())
         self.library_tree.reload()
         if errors:
-            skipped = ", ".join(p.name for p, _ in errors)
+            # naming the file without saying why left the only clue in a
+            # message that had already timed out
+            path, reason = errors[0]
+            more = f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""
             self.statusBar().showMessage(
-                f"Some user nodes were skipped: {skipped}", 6000)
+                f"User node {path.name} was skipped{more}: {reason}", 10000)
 
     def _save_as_user_node(self, node_id: str) -> None:
         if node_id not in self.graph.nodes:
@@ -1340,10 +1426,13 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         copy_action = menu.addAction("Copy")
         change_color = menu.addAction("Change colour…")
+        layer_actions = add_layer_menu(menu)
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
-        if chosen is copy_action:
+        if chosen in layer_actions:
+            self.scene.restack_selection(layer_actions[chosen])
+        elif chosen is copy_action:
             self._copy_selection()
         elif chosen is change_color:
             self._pick_frame_color(frame_id)
@@ -1394,12 +1483,15 @@ class MainWindow(QMainWindow):
         if (card_kind(node) == "grid"
                 and self._table_import_source(node_id) is not None):
             import_action = menu.addAction("Import input into table")
+        layer_actions = add_layer_menu(menu)
         view_actions = self._add_view_actions(menu, node_id)
         page_actions: list = []
         new_page_action = None
         if is_tile_able(self.graph.nodes[node_id]):
             submenu = menu.addMenu("Add to Page")
             for page in self.graph.pages.values():
+                if page.kind != "dashboard":
+                    continue   # a report embeds by name, it holds no tiles
                 page_actions.append((submenu.addAction(page.title), page.id))
             if page_actions:
                 submenu.addSeparator()
@@ -1408,7 +1500,9 @@ class MainWindow(QMainWindow):
         copy_action = menu.addAction("Copy")
         delete = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
-        if chosen is run_to:
+        if chosen in layer_actions:
+            self.scene.restack_selection(layer_actions[chosen])
+        elif chosen is run_to:
             self.engine.run_to(node_id)
         elif chosen is edit_code:
             self._on_node_double_clicked(node_id)

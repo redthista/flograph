@@ -10,7 +10,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Optional
 
-from flograph.core.script import node_filename
+from flograph.core.script import missing_module_hint, node_filename
 
 
 @dataclass
@@ -45,9 +45,18 @@ def build_node_error(node_id: str, source: str, exc: BaseException) -> NodeError
             parts.append(f"    {frame.line.strip()}")
     parts.append(f"{type(exc).__name__}: {exc}")
 
+    # "No module named 'plotly'" is accurate and useless on its own — say
+    # where to get it, since the app can install packages itself
+    message = f"{type(exc).__name__}: {exc}"
+    hint = missing_module_hint(exc)
+    if hint:
+        message = f"{message} — {hint}"
+        parts.append("")
+        parts.append(hint)
+
     return NodeError(
         node_id=node_id,
-        message=f"{type(exc).__name__}: {exc}",
+        message=message,
         exc_type=type(exc).__name__,
         formatted_tb="\n".join(parts),
         script_line=script_line,

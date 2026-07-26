@@ -26,12 +26,13 @@ from ..canvas.grid import (
 from ..canvas.node_item import (
     BUTTON_H, BUTTON_W, card_kind, kpi_caption, kpi_text,
 )
+from ..canvas.stacking import FULLSCREEN_TILE_Z, z_for
 from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid",
-    "control"})
+    "control", "report"})
 
 
 def is_tile_able(node) -> bool:
@@ -68,7 +69,8 @@ def _grid_stylesheet() -> str:
 def default_tile_port(node) -> Optional[str]:
     """The output port a tile of this node renders — its first declared output
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
-    if card_kind(node) in ("webview", "figure", "table_viewer", "kpi", "grid"):
+    if card_kind(node) in ("webview", "figure", "table_viewer", "kpi", "grid",
+                          "report"):
         return node.spec.outputs[0].name if node.spec.outputs else None
     # action buttons have no ports; slicer tiles show upstream options, not
     # their own (already filtered) output; a control tile is the input itself
@@ -88,6 +90,10 @@ def default_tile_size(node) -> tuple[float, float]:
         # a spreadsheet is for typing in, so it lands wide enough to show
         # several columns without a horizontal scrollbar
         return (560.0, 360.0)
+    if kind == "report":
+        # a column of prose plus a chart or two — taller than wide, like
+        # the page it stands in for
+        return (480.0, 420.0)
     if kind == "control":
         from ..controls import control_size
         width, height = control_size(node.spec.control or "")
@@ -138,12 +144,14 @@ class TileItem(QGraphicsObject):
         self._slicer_widget: Optional[SlicerListWidget] = None
         self._slicer_toolbar: Optional[SlicerToolbar] = None
         self._control_widget = None  # ControlWidget (input control tiles)
+        self._report_view = None     # QTextBrowser (report card tiles)
         self._generic_host: Optional[QWidget] = None
         self._generic_child: Optional[QWidget] = None
         self._kpi_value: object = None  # kpi tiles paint, they hold no widget
         self._kpi_has_value = False
 
         self._build_host()
+        self.apply_stacking()
         self.refresh_content()
 
     # ------------------------------------------------------------- geometry
@@ -192,12 +200,20 @@ class TileItem(QGraphicsObject):
         # maximized tile must not strand it without a restore button
         return self._fullscreen or self._kind() not in NO_FULLSCREEN_KINDS
 
+    def apply_stacking(self) -> None:
+        """Take the tile's place in the page's stacking order — except while
+        maximized, when it owns the page and has to sit over tiles that are
+        merely stacked above it."""
+        self.setZValue(FULLSCREEN_TILE_Z if self._fullscreen
+                       else z_for(0.0, self.tile.z))
+
     def set_fullscreen_rect(self, rect: QRectF) -> None:
         """Pin the tile to an exact scene rect — the view calls this on the
         way into fullscreen and on every resize after, so the embedded chart
         or table grows with the window. Never touches the stored rect: this
         is view state, not something to save or undo."""
         self._fullscreen = True
+        self.apply_stacking()
         self._move_suppressed = False
         self._dragging = False
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
@@ -213,6 +229,7 @@ class TileItem(QGraphicsObject):
         if not self._fullscreen:
             return
         self._fullscreen = False
+        self.apply_stacking()
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.sync_from_model()
         self.refresh_render_ratio()
@@ -237,6 +254,7 @@ class TileItem(QGraphicsObject):
             "figure": "figure",
             "table_viewer": "table",
             "grid": "sheet",
+            "report": "report",
             "button": "button",
             "kpi": "kpi",
             "slicer": "slicer",
@@ -265,7 +283,8 @@ class TileItem(QGraphicsObject):
     def _content_widget(self) -> Optional[QWidget]:
         for widget in (self._figure_view, self._plotly_widget,
                        self._table_view, self._sheet_view, self._slicer_widget,
-                       self._control_widget, self._generic_host):
+                       self._control_widget, self._report_view,
+                       self._generic_host):
             if widget is not None:
                 return widget
         return None
@@ -287,6 +306,15 @@ class TileItem(QGraphicsObject):
             widget.setStyleSheet(_grid_stylesheet())
             widget.setSortingEnabled(True)
             self._table_view = widget
+        elif kind == "report":
+            from PySide6.QtWidgets import QTextBrowser
+            widget = QTextBrowser()
+            widget.setOpenExternalLinks(True)
+            widget.setStyleSheet(
+                f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
+                f" color: {theme.NODE_TEXT.name()}; border: none;"
+                f" padding: 6px; }}")
+            self._report_view = widget
         elif kind == "sheet":
             widget = self._build_sheet_widget()
         elif kind == "slicer":
@@ -389,6 +417,23 @@ class TileItem(QGraphicsObject):
         self._sheet_view = grid
         self._sheet_model = model
         return grid
+
+    def _render_report(self) -> None:
+        """Draw a Report card's markdown with its wired inputs placed into
+        it — the same renderer the canvas card and a report page use, so a
+        report reads identically wherever it is shown."""
+        node = self._node()
+        if self._report_view is None or node is None:
+            return
+        from ..report.render import render_card
+        rendered = render_card(str(node.params.get("text", "") or ""),
+                               self._graph, self._engine.cache, node.id,
+                               width=int(self._size[0]) - 48)
+        document = rendered.document
+        document.setDefaultStyleSheet(
+            document.defaultStyleSheet()
+            + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
+        self._report_view.setDocument(document)
 
     def _sheet_source(self) -> object:
         """What the grid should show: the merged result of a linked run
@@ -499,11 +544,15 @@ class TileItem(QGraphicsObject):
             else:
                 self._placeholder.hide()
                 self.refresh_render_ratio()
+                from flograph.core.chart_grid import grid_settings
+                self._figure_view.set_grid(*grid_settings(node.params))
                 self._figure_view.set_figure(value)
                 widget.show()
         elif kind == "plotly":
             self._placeholder.hide()
             widget.show()
+            from flograph.core.chart_grid import grid_settings
+            self._plotly_widget.set_grid(*grid_settings(node.params))
             self._plotly_widget.set_figure(value)
         elif kind == "slicer":
             from flograph.engine.introspect import slicer_options
@@ -537,6 +586,13 @@ class TileItem(QGraphicsObject):
             self._control_widget.sync(node.params)
             self._control_widget.set_upstream(control_upstream(
                 self._graph, self._engine.cache, self.tile.node_id))
+            widget.show()
+        elif kind == "report":
+            # like a Table tile there is nothing to wait for: the text is a
+            # param. Its *embeds* come from upstream, which is why this
+            # re-renders on every refresh rather than only on a text edit.
+            self._placeholder.hide()
+            self._render_report()
             widget.show()
         elif kind == "sheet":
             # a Table node holds its own data, so there is nothing to wait
@@ -594,6 +650,10 @@ class TileItem(QGraphicsObject):
             # through _sheet_source so a linked table redraws its merge and
             # not the handful of columns the node stores.
             self._sheet_model.set_sheet(self._sheet_source())
+        elif kind == "report" and self._report_view is not None:
+            # the text is the param that just changed — but re-render
+            # through the same path, so its embeds stay in step too
+            self._render_report()
         elif kind == "control" and self._control_widget is not None \
                 and node is not None:
             # sync() holds a guard, so the edit that caused this can't come

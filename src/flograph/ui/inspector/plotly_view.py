@@ -14,6 +14,8 @@ import uuid
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from flograph.core.chart_grid import DEFAULT_DIRECTION
+
 RUN_PROMPT = "Run the graph to see the view here."
 NO_WEBENGINE = ("Qt WebEngine is not available — install the full PySide6 "
                 "package (Tools > Manage Packages) to display web views.")
@@ -30,7 +32,8 @@ def _plotly_html_path(token: str):
     return Path(_plotly_tmp.name) / f"{token}.html"
 
 
-def to_html(obj) -> str | None:
+def to_html(obj, columns: int = 0, rows: int = 0,
+            direction: str = DEFAULT_DIRECTION) -> str | None:
     """Coerce a node output to a full HTML page, or None if it can't render.
 
     Order: a raw HTML string is used verbatim; then `to_html()` (Plotly and
@@ -39,6 +42,8 @@ def to_html(obj) -> str | None:
     full-bleed document so they fill the card."""
     if obj is None:
         return None
+    if isinstance(obj, (list, tuple)):
+        return _stack(obj, columns, rows, direction)
     if isinstance(obj, str):
         return _wrap(obj)
     render = getattr(obj, "to_html", None)
@@ -67,6 +72,102 @@ def to_html(obj) -> str | None:
     return None
 
 
+STACK_ITEM_HEIGHT = "68vh"
+
+
+def _fragment(obj, first: bool) -> "str | None":
+    """One chart of a stack as an HTML fragment.
+
+    Only the first carries plotly.js. It is ~3 MB, they all share one
+    document, and repeating it per chart is the difference between a page
+    that opens and one that doesn't.
+    """
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        return obj
+    render = getattr(obj, "to_html", None)
+    if callable(render):
+        try:
+            return render(full_html=False, include_plotlyjs=bool(first),
+                          default_width="100%", default_height="100%",
+                          config={"responsive": True})
+        except TypeError:
+            return render()
+    render = getattr(obj, "_repr_html_", None)
+    return render() if callable(render) else None
+
+
+def _stack(items, columns: int = 0, rows: int = 0,
+           direction: str = DEFAULT_DIRECTION) -> "str | None":
+    """A list of figures as one scrolling document.
+
+    A list is how a node says "the same chart, once per value of a column" —
+    a loop in the node's own code, no faceting UI to learn. Stacking them
+    into a single page rather than a widget each keeps it to one webview,
+    gives native scrolling for free, and carries plotly.js once.
+
+    Laid out on a CSS grid from the same rules the matplotlib stack and the
+    PDF use (core.chart_grid), so one node's charts are arranged the same
+    way wherever they are shown. Explicit row/column placement rather than
+    letting the grid flow, because "down" fills columns first and auto-flow
+    only does rows.
+    """
+    from flograph.core.chart_grid import cells, grid_shape
+
+    usable = [item for item in items if item is not None]
+    n_columns, n_rows = grid_shape(len(usable), columns, rows, direction)
+    placement = cells(len(usable), columns, rows, direction)
+
+    fragments = []
+    for item, (row, column) in zip(usable, placement):
+        fragment = _fragment(item, first=not fragments)
+        if fragment is None:
+            continue
+        fragments.append(
+            f'<div class="flograph-stack-item" style="grid-row:{row + 1};'
+            f'grid-column:{column + 1}">{fragment}</div>')
+    if not fragments:
+        return None
+
+    # Side by side means less width each, so the tall single-column height
+    # would leave a wide grid absurdly long. minmax(min, 1fr) is what makes
+    # a short stack grow into the spare height rather than leaving the card
+    # half empty, while a long one keeps its minimum and scrolls.
+    minimum = STACK_ITEM_HEIGHT if n_columns == 1 else f"{70 // n_columns + 8}vh"
+    body = "\n".join(fragments)
+    return ("<!doctype html><html><head><meta charset='utf-8'><style>"
+            "html,body{margin:0;padding:0;height:100%;background:#fff}"
+            ".flograph-stack{display:grid;gap:6px;box-sizing:border-box;"
+            "min-height:100%;"
+            f"grid-template-columns:repeat({n_columns},minmax(0,1fr));"
+            # template-rows, not auto-rows: an implicit row only exists if
+            # something is placed in it, so a 2x3 grid holding 3 charts
+            # would silently collapse to the rows actually used. Asking for
+            # a shape should get you that shape, empty cells and all.
+            f"grid-template-rows:repeat({n_rows},minmax("
+            + str(minimum) + ",1fr))}"
+            # overflow:hidden is not tidiness — plotly sizes its plot in
+            # pixels at init, and if the grid hasn't settled by then it
+            # picks its own default and spills out of the cell, painting
+            # over the chart next door. Clipping keeps every chart in its
+            # own box whatever plotly decides.
+            ".flograph-stack-item{position:relative;overflow:hidden;"
+            "min-height:0;height:100%;padding:4px 0;box-sizing:border-box}"
+            ".flograph-stack-item>*{max-width:100%;height:100%}"
+            "</style></head><body>"
+            f'<div class="flograph-stack">{body}</div>'
+            # ...and once the grid *has* settled, tell plotly to re-measure,
+            # so the clip above never actually has anything to clip.
+            "<script>window.addEventListener('load',function(){"
+            "requestAnimationFrame(function(){"
+            "if(!window.Plotly)return;"
+            "document.querySelectorAll('.plotly-graph-div')"
+            ".forEach(function(d){try{Plotly.Plots.resize(d)}catch(e){}});"
+            "});});</script>"
+            "</body></html>")
+
+
 def _wrap(html: str) -> str:
     """Ensure an HTML fragment is a full, full-bleed document."""
     if "<html" in html.lower():
@@ -84,6 +185,10 @@ class PlotlyView(QWidget):
         # the same node must not race on one HTML file
         self._token = uuid.uuid4().hex
         self.view = None  # the QWebEngineView, once built
+        # (columns, rows, direction) for a stacked list — see
+        # core.chart_grid. The host sets it from the node's own params.
+        self._grid = (0, 0, DEFAULT_DIRECTION)
+        self._content = None   # last content, so set_grid can re-render
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -119,11 +224,27 @@ class PlotlyView(QWidget):
         self.view = view
         return view
 
+    def set_grid(self, columns: int = 0, rows: int = 0,
+                 direction: str = DEFAULT_DIRECTION) -> None:
+        """How a *list* of figures should be arranged: 0 means work it out.
+
+        Re-renders immediately from the content already on show — a param
+        change evicts the node's cache, so waiting for a run would leave
+        the old arrangement up (see FigureView.set_grid).
+        """
+        grid = (columns, rows, direction)
+        if grid == self._grid:
+            return
+        self._grid = grid
+        if isinstance(self._content, (list, tuple)) and self._content:
+            self.set_content(self._content)
+
     def set_content(self, content) -> None:
         """Render freshly computed content (or None) into the embedded webview
         — a raw HTML string, or any object with to_html()/_repr_html_(). Call
         from the GUI thread only."""
-        html = to_html(content)
+        self._content = content
+        html = to_html(content, *self._grid)
         if html is None:
             if self.view is not None:
                 self.view.hide()

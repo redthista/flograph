@@ -11,6 +11,7 @@ from flograph.core import Connection, PortType
 
 from .. import theme
 from .node_item import DEFAULT_LOD_THRESHOLD, PortItem
+from .stacking import PENDING_WIRE_Z, WIRE_Z
 
 
 def bezier_path(start: QPointF, end: QPointF) -> QPainterPath:
@@ -39,7 +40,7 @@ class ConnectionItem(QGraphicsPathItem):
         self.src_port = src
         self.dst_port = dst
         self._hover = False
-        self.setZValue(-1)
+        self.setZValue(WIRE_Z)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
         self.update_path()
@@ -87,7 +88,7 @@ class PendingConnectionItem(QGraphicsPathItem):
     def __init__(self, fixed_port: PortItem) -> None:
         super().__init__()
         self.fixed_port = fixed_port
-        self.setZValue(10)
+        self.setZValue(PENDING_WIRE_Z)
         pen = QPen(theme.WIRE_PENDING, 2, Qt.DashLine)
         self.setPen(pen)
 

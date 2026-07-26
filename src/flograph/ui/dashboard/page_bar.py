@@ -50,7 +50,7 @@ _guard = _MenuGuard()
 
 
 class PageTabBar(QTabBar):
-    add_page_requested = Signal()
+    add_page_requested = Signal(str)   # "dashboard" | "report"
     rename_page_requested = Signal(str, str)   # page_id, new title
     delete_page_requested = Signal(str)        # page_id
     duplicate_page_requested = Signal(str)     # page_id to duplicate
@@ -68,7 +68,7 @@ class PageTabBar(QTabBar):
         self.addTab("Model")   # tabData None = the modeling canvas
         plus = self.addTab("+")
         self.setTabData(plus, _PLUS)
-        self.setTabToolTip(plus, "Add a dashboard page")
+        self.setTabToolTip(plus, "Add a dashboard or report page")
         self._syncing = False
         self._drag_locked = False   # press landed on a tab that can't move
         self._reorder_pending = False
@@ -211,7 +211,7 @@ class PageTabBar(QTabBar):
         # handle "+" on press and swallow it so the tab never becomes
         # current — relying on tabBarClicked + reselect flickers
         if index == self._plus_index():
-            self.add_page_requested.emit()
+            self._show_add_menu(event.globalPosition().toPoint())
             event.accept()
             return
         # right-click: context menu for rename/duplicate/delete
@@ -238,6 +238,18 @@ class PageTabBar(QTabBar):
             # one request per drag, not one per swap Qt makes along the way
             self._reorder_pending = False
             self.reorder_pages_requested.emit(self.page_order())
+
+    def _show_add_menu(self, global_pos) -> None:
+        """"+" asks what kind of page. A menu rather than two buttons: the
+        strip is a tab bar, and dashboards stay the one-click-away default
+        by being first."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        choices = {menu.addAction("Dashboard page"): "dashboard",
+                   menu.addAction("Report page"): "report"}
+        chosen = menu.exec(global_pos)
+        if chosen in choices:
+            self.add_page_requested.emit(choices[chosen])
 
     def _show_context_menu(self, index: int, page_id: str, global_pos) -> None:
         global _menu_timer

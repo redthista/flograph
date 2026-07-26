@@ -250,9 +250,12 @@ class EditorPanel(QWidget):
             return
         node = self._graph.node(self._node_id)
         source = self.editor.toPlainText()
-        if source == node.source:
+        if source == node.source and not node.spec.broken:
             self._show_message("No changes to apply.")
             return
+        # ...a broken node is the exception: its code never loaded, so
+        # re-applying it unchanged is exactly the retry you want after
+        # installing the package it was missing
         try:
             parse_spec(source, node.type_id)
         except NodeScriptError as exc:

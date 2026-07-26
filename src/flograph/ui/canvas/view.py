@@ -9,6 +9,7 @@ from PySide6.QtGui import QKeyEvent
 from .base_view import ZoomPanGraphicsView
 from .file_drop import resolve_dropped_file
 from .scene import NodeGraphScene
+from .stacking import layer_action_for
 
 
 class NodeGraphView(ZoomPanGraphicsView):
@@ -63,6 +64,10 @@ class NodeGraphView(ZoomPanGraphicsView):
             return
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
             self._nudge_selection(key, 10.0 if not event.modifiers() & Qt.ShiftModifier else 1.0)
+            event.accept()
+            return
+        action = layer_action_for(event)
+        if action is not None and self.scene().restack_selection(action):
             event.accept()
             return
         super().keyPressEvent(event)  # space-pan lives in the base view

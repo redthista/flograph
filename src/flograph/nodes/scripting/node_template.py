@@ -38,8 +38,15 @@ PARAMS = [
 # run() is called with each input port as a keyword argument (unconnected
 # optional inputs arrive as None) and returns a dict keyed by output port
 # name. Treat inputs as read-only — outputs are cached and shared by
-# reference, so copy before mutating. Keep heavy imports inside run(), and
-# create figures with matplotlib.figure.Figure(), never pyplot.
+# reference, so copy before mutating. Create figures with
+# matplotlib.figure.Figure(), never pyplot.
+#
+# Import inside run(), not at the top of the file. This script is *executed*
+# to read NODE and PARAMS, so a top-level import runs every time the node is
+# loaded — and on a machine without that package the node loads as a broken
+# placeholder instead of working. Down here it costs nothing until the node
+# runs, and a missing package fails just this node with a message saying
+# what to install.
 #
 # ctx is the run context:
 #   ctx.params            current param values (dict)

@@ -17,6 +17,7 @@ _ID_MOVE = 1001
 _ID_PARAM = 1002
 _ID_TILE_RECT = 1003
 _ID_DESCRIPTION = 1004
+_ID_PAGE_BODY = 1005
 
 
 class AddNodeCommand(QUndoCommand):
@@ -107,6 +108,28 @@ class DisconnectCommand(QUndoCommand):
         c = self._conn
         self._graph.connect(c.src_node, c.src_port, c.dst_node, c.dst_port,
                             conn_id=c.id)
+
+
+class RestackCommand(QUndoCommand):
+    """Adopt a new stacking order for one kind (nodes, frames, or one page's
+    tiles). The previous order is captured up front rather than recomputed
+    in undo(), so a restack of a restack still walks back correctly."""
+
+    def __init__(self, graph: Graph, kind: str, order: list[str],
+                 page_id: Optional[str] = None, text: str = "restack",
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__(text, parent)
+        self._graph = graph
+        self._kind = kind
+        self._page_id = page_id
+        self._new = list(order)
+        self._old = graph.stacking_order(kind, page_id)
+
+    def redo(self) -> None:
+        self._graph.restack(self._kind, self._new, self._page_id)
+
+    def undo(self) -> None:
+        self._graph.restack(self._kind, self._old, self._page_id)
 
 
 class MoveNodesCommand(QUndoCommand):
@@ -414,6 +437,36 @@ class RenamePageCommand(QUndoCommand):
         self._graph.update_page(self._page_id, title=self._old)
 
 
+class SetPageBodyCommand(QUndoCommand):
+    """One report-page edit. Consecutive edits of the same page merge, so a
+    burst of typing is one Ctrl+Z rather than one per character — the same
+    bargain SetParamCommand makes for a text param."""
+
+    def __init__(self, graph: Graph, page_id: str, body: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("edit report", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).body
+        self._new = body
+
+    def id(self) -> int:
+        return _ID_PAGE_BODY
+
+    def redo(self) -> None:
+        self._graph.set_page_body(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_body(self._page_id, self._old)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (not isinstance(other, SetPageBodyCommand)
+                or other._page_id != self._page_id):
+            return False
+        self._new = other._new
+        return True
+
+
 class SetPageColorCommand(QUndoCommand):
     def __init__(self, graph: Graph, page_id: str, color: Optional[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -485,13 +538,18 @@ class DuplicatePageCommand(QUndoCommand):
         # on the tile, and remove_tile looks the tile up by that key
         id_map = {tile_id: uuid.uuid4().hex for tile_id in src.tiles}
         new_tiles = {
+            # z carried over: these bypass add_tile (they go straight into the
+            # new Page), so without it the copy would lose the stacking the
+            # original was arranged into
             id_map[tile_id]: Tile(id=id_map[tile_id], node_id=t.node_id,
-                                  port=t.port, rect=t.rect)
+                                  port=t.port, rect=t.rect, z=t.z)
             for tile_id, t in src.tiles.items()
         }
         self._new_page = Page(
             id=uuid.uuid4().hex,
             title=f"{src.title} (copy)",
+            kind=src.kind,
+            body=src.body,
             tiles=new_tiles,
             color=src.color,
             # the copy opens looking like the original, remapped to its tiles

@@ -61,6 +61,48 @@ may also come from its own optional input ports, resolved by
 shows one number and the flow carries another.
 Relevant skills: `.opencode/skills/new-node/` and `.opencode/skills/flograph/`.
 
+**Pages come in kinds.** `Page.kind` is `"dashboard"` (tiles on a canvas)
+or `"report"` (markdown in `Page.body`). One dataclass, because title,
+colour, order, duplication and undo are identical; the window switches on
+`kind` to build `DashboardPage` or `ReportPage`. Anything sweeping every
+page for a *canvas* setting must go through `MainWindow._canvas_pages()` —
+report pages have no scene or view. Report embeds (`![[Label]]`) are parsed
+in `core/report.py` (Qt-free) and resolved in `ui/report/render.py`; images
+are carried through Qt's markdown reader as tokens because it drops image
+syntax outright. The preview and the PDF share one QTextDocument, on
+purpose.
+
+A report **page** resolves embeds by node label (`by_label`) because a page
+is a view outside the flow. A report **card** (`card: "report"`) resolves
+them against its own wired inputs (`by_wired_input`) because a node is
+*inside* the flow — reaching across the graph would be a dependency the
+scheduler can't see, so it would neither re-run nor order correctly.
+
+**A list output renders as a stack.** Wherever one figure renders, a list of
+them renders stacked — `FigureView.set_figure`, `plotly_view.to_html`, and
+the report resolver each handle it. That is the whole "one chart per value
+of a column" mechanism: the loop belongs in the node's own script (see
+`nodes/viz/chart_per_value.py`), never in a faceting UI.
+
+**Node scripts are executed to be read.** `parse_spec` runs the whole
+script to get at `NODE`/`PARAMS`, so a *top-level* import happens at load
+time — building the library, opening a project, applying code. Imports
+belong inside `run()`. When a top-level one isn't installed,
+`MissingDependencyError` (a `NodeScriptError`) is raised and the node loads
+as a broken placeholder that keeps its code and params; installing the
+package and re-applying the unchanged code repairs it. Never let a script
+failure abort a whole project load — `graph_from_dict` falls back to
+`_broken_spec`.
+
+**Stacking order.** Nodes, frames and tiles carry a `z` — their index in a
+back-to-front order of their *own kind*, normalized to 0..n-1 on every
+change. The reordering rule is one pure function, `core/layers.restack()`;
+Qt z-values are derived from it through the bands in
+`ui/canvas/stacking.py` (frames below wires below nodes) and are never
+stored. `z=None` means "not placed yet" — `Graph.add_node`/`add_frame`/
+`add_tile` put it on top, which is also how files written before layering
+keep their old insertion-order stacking.
+
 ## Project structure
 
 ```
