@@ -9,7 +9,7 @@ deleting it.
 
 ## Layers — bring to front / send to back (idea #15) — TESTED, GOOD
 
-Committed? **no** — tested good 2026-07-26, ready to commit.
+Committed? **yes** — `871dc45`.
 
 Right-click a node, frame or dashboard tile for a **Layer** submenu, or use
 `Ctrl+]` / `Ctrl+[` (add `Shift` for all-the-way).
@@ -48,7 +48,7 @@ Right-click a node, frame or dashboard tile for a **Layer** submenu, or use
 
 ## Missing library at the top of a node (idea #21) — TESTED, GOOD
 
-Committed? **no** — tested good 2026-07-26, ready to commit.
+Committed? **yes** — `871dc45`.
 
 Setup: fork any node (Edit Code) and put `import some_package_you_dont_have`
 on the **first line**, above `NODE`. Save the project, close it.
@@ -75,8 +75,10 @@ on the **first line**, above `NODE`. Save the project, close it.
 
 ## Report pages + PDF export (idea #1, pass 1) — NOT YET TESTED
 
-Committed? **no** — waiting on this pass. This is the first go at a large
-idea; expect gaps, and note anything that feels wrong.
+Committed? **yes** — `871dc45`, on Danny's call that it is usable now and
+will be improved after real-world testing. The unticked lines below are
+still worth running; anything they turn up is a follow-up fix, not a
+blocker.
 
 Build a model with a chart, a table and a number first, and **run it** —
 embeds only resolve for nodes that have produced something.
@@ -128,9 +130,10 @@ embeds only resolve for nodes that have produced something.
 
 ---
 
-## Chart per value + Report cards (idea #18, and your report-node idea) — NOT YET TESTED
+## Chart per value + Report cards (idea #18, and your report-node idea) — PARTLY TESTED
 
-Committed? **no** — waiting on this pass.
+Committed? **yes** — `871dc45`. The chart/grid half is signed off; the
+Report card lines below are still unrun.
 
 The underlying rule: **a node output that is a list renders as a stack**,
 everywhere a single one would.
@@ -198,7 +201,7 @@ everywhere a single one would.
 
 ## Chart grid + inline report editing (2026-07-26) — TESTED, GOOD
 
-Committed? **no** — tested good 2026-07-26, ready to commit.
+Committed? **yes** — `871dc45`.
 
 ### Grid: Columns / Rows / Fill
 
