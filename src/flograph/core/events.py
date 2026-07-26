@@ -43,6 +43,8 @@ class GraphEvents:
         self.label_changed = Event()   # (node_id: str)
         self.description_changed = Event()  # (node_id: str)
         self.preview_enabled_changed = Event()  # (node_id: str, enabled: bool)
+        self.port_labels_changed = Event()  # (node_id: str)
+        self.ports_collapsed_changed = Event()  # (node_id: str)
         self.color_changed = Event()   # (node_id: str)
         self.links_changed = Event()   # () — the derived Goto/From link set moved
         self.dirty_changed = Event()   # (node_id: str, dirty: bool)

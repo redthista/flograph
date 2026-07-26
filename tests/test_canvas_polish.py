@@ -35,6 +35,13 @@ def window(qtbot, registry):
     return win
 
 
+def out_x(width: float) -> float:
+    """Where an output pin sits for a card of this width. Pins float clear
+    of the node's edge rather than being centred on it — see PORT_EDGE_GAP."""
+    from flograph.ui.canvas.node_item import PORT_EDGE_GAP, PortItem
+    return width + PortItem.RADIUS + PORT_EDGE_GAP
+
+
 class TestReroute:
     def test_insert_reroute_splits_wire(self, env, registry):
         graph, stack, scene = env
@@ -401,10 +408,10 @@ class TestCardResize:
     def test_output_port_follows_width_param(self, env, registry):
         graph, scene, item = self._card(env, registry)
         port = item.output_ports["figure"]
-        assert port.pos().x() == item.width
+        assert port.pos().x() == out_x(item.width)
         graph.set_param(item.node.id, "width", 800)
         assert item.width == 800.0
-        assert port.pos().x() == 800.0
+        assert port.pos().x() == out_x(800.0)
 
     def test_output_port_follows_live_drag(self, env, registry):
         graph, scene, item = self._card(env, registry)
@@ -427,7 +434,7 @@ class TestCardResize:
         start_width = item._resize_start[2]
         item.mouseMoveEvent(DragEvent())
         assert item.width == start_width + 150.0
-        assert item.output_ports["figure"].pos().x() == item.width
+        assert item.output_ports["figure"].pos().x() == out_x(item.width)
         item._resizing_card = False
         item._live_height = None
 
@@ -445,10 +452,10 @@ class TestCardResize:
     def test_show_table_and_table_cards_too(self, env, registry):
         graph, scene, item = self._card(env, registry, "flograph.viz.show_table")
         graph.set_param(item.node.id, "width", 700)
-        assert item.output_ports["table"].pos().x() == 700.0
+        assert item.output_ports["table"].pos().x() == out_x(700.0)
         graph, scene, item = self._card(env, registry, "flograph.io.table")
         graph.set_param(item.node.id, "width", 640)
-        assert item.output_ports["table"].pos().x() == 640.0
+        assert item.output_ports["table"].pos().x() == out_x(640.0)
 
 
 class TestWireDropPalette:

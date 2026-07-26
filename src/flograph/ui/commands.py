@@ -321,6 +321,44 @@ class SetPreviewEnabledCommand(QUndoCommand):
         self._graph.set_preview_enabled(self._node_id, self._old)
 
 
+class SetPortLabelsCommand(QUndoCommand):
+    """Show/hide one node's floating port names. `shown` of None hands the
+    node back to the canvas-wide preference."""
+
+    def __init__(self, graph: Graph, node_id: str, shown: Optional[bool],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("toggle port names", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).port_labels
+        self._new = shown
+
+    def redo(self) -> None:
+        self._graph.set_port_labels(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_port_labels(self._node_id, self._old)
+
+
+class SetPortsCollapsedCommand(QUndoCommand):
+    """Gather a node's pins into its header, or fan them back out."""
+
+    def __init__(self, graph: Graph, node_id: str, collapsed: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("collapse ports" if collapsed else "expand ports",
+                         parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).ports_collapsed
+        self._new = collapsed
+
+    def redo(self) -> None:
+        self._graph.set_ports_collapsed(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_ports_collapsed(self._node_id, self._old)
+
+
 class SetNodeColorCommand(QUndoCommand):
     def __init__(self, graph: Graph, node_id: str, color: Optional[str],
                  parent: Optional[QUndoCommand] = None) -> None:

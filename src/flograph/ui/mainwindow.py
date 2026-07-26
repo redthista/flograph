@@ -109,6 +109,9 @@ class MainWindow(QMainWindow):
         self.minimap_enabled = self.settings.value(
             "canvas/minimap_enabled", True, type=bool)
         self.view.minimap.setVisible(self.minimap_enabled)
+        self.port_labels_enabled = self.settings.value(
+            "canvas/port_labels", False, type=bool)
+        self.scene.set_port_labels_enabled(self.port_labels_enabled)
         self.tint_soft = self.settings.value(
             "canvas/tint_soft", theme.DEFAULT_TINT_SOFT, type=float)
         self.tint_strong = self.settings.value(
@@ -416,6 +419,13 @@ class MainWindow(QMainWindow):
         self.minimap_enabled = enabled
         self.settings.setValue("canvas/minimap_enabled", enabled)
         self.view.minimap.setVisible(enabled)
+
+    def set_port_labels_enabled(self, enabled: bool) -> None:
+        """Canvas-wide: float every port's name beside its pin. Nodes that
+        have been toggled on their own keep their own setting."""
+        self.port_labels_enabled = enabled
+        self.settings.setValue("canvas/port_labels", enabled)
+        self.scene.set_port_labels_enabled(enabled)
 
     def set_tints(self, soft: float, strong: float) -> None:
         """Retune how strongly user-picked colours are muted against the
@@ -1522,6 +1532,16 @@ class MainWindow(QMainWindow):
         browser_action = None
         if self._can_open_in_browser(node_id):
             browser_action = menu.addAction("Open in Browser")
+        # per-node override of Settings > Canvas > Show port names; the label
+        # says what clicking will do, so it reads off whatever is showing now
+        from .canvas.node_item import port_labels_on
+        showing = port_labels_on(node, self.scene)
+        labels_action = menu.addAction(
+            "Hide Port Names" if showing else "Show Port Names")
+        collapse_action = None
+        if item is not None and item.collapsible():
+            collapse_action = menu.addAction(
+                "Expand Ports" if node.ports_collapsed else "Collapse Ports")
         layer_actions = add_layer_menu(menu)
         view_actions = self._add_view_actions(menu, node_id)
         page_actions: list = []
@@ -1560,6 +1580,10 @@ class MainWindow(QMainWindow):
             self._import_input_into_table(node_id)
         elif browser_action is not None and chosen is browser_action:
             self._open_in_browser(node_id)
+        elif chosen is labels_action:
+            self._toggle_port_labels(node_id, not showing)
+        elif collapse_action is not None and chosen is collapse_action:
+            item.toggle_ports_collapsed()
         elif chosen is copy_action:
             self._copy_selection()
         elif chosen is delete:
@@ -1576,6 +1600,19 @@ class MainWindow(QMainWindow):
                 from .inspector.popup_view import PopupView
                 PopupView(self.graph, self.engine, node_id, port_name,
                           parent=self).show()
+
+    def _toggle_port_labels(self, node_id: str, shown: bool) -> None:
+        """Show/hide one node's port names.
+
+        Stored as None when the wanted state already matches the canvas-wide
+        preference, so toggling a node on and off again leaves it following
+        the global setting rather than pinned to whatever that setting
+        happened to be — no third "reset" menu item needed.
+        """
+        from .commands import SetPortLabelsCommand
+        override = None if shown == self.port_labels_enabled else shown
+        self.undo_stack.push(
+            SetPortLabelsCommand(self.graph, node_id, override))
 
     def _add_view_actions(self, menu: QMenu, node_id: str) -> list:
         """Add 'View Table (port)'/'View Visual (port)' entries for any
@@ -1696,6 +1733,7 @@ class MainWindow(QMainWindow):
         self.set_snap_enabled(True)
         self.set_grid_step(grid.DEFAULT_STEP)
         self.set_minimap_enabled(True)
+        self.set_port_labels_enabled(False)
         self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)
         self.action_gpu_viewport.setChecked(False)
         from .spreadsheet import set_autosize_default, set_date_formats_setting
