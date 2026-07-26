@@ -57,8 +57,10 @@ NODE = {
 #   toggle   text                     (the label beside the tick box)
 #   choice   items                    (one option per line)
 #
-# width/height are the card's size on the canvas; they're optional and
-# default to something sensible for the shape.
+# width/height are the card's size on the canvas. Declare them and the card
+# gets a corner resize grip that writes straight into them; leave them out
+# and the card is fixed at its default size, since a drag would have nowhere
+# to put the result.
 PARAMS = [
     {"name": "caption", "type": "string", "label": "Caption",
      "default": "Sample", "placeholder": "Shown above the slider"},
@@ -68,6 +70,14 @@ PARAMS = [
     {"name": "step", "type": "float", "label": "Step", "default": 5.0},
     {"name": "decimals", "type": "int", "label": "Decimals",
      "default": 0, "min": 0, "max": 6},
+    # Declare these to make the card resizable: the corner grip writes the
+    # new size straight into them, so a card without them has nowhere to
+    # store one and shows no grip at all. Same numbers as the built-in
+    # Slider, which is what this template is a copy of.
+    {"name": "width", "type": "int", "label": "Width",
+     "default": 240, "min": 140, "max": 600},
+    {"name": "height", "type": "int", "label": "Height",
+     "default": 96, "min": 60, "max": 400},
 ]
 
 

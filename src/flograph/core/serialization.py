@@ -57,6 +57,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "label": n.label_override,
                     "description": n.description,
                     "preview": n.canvas_preview_enabled,
+                    "port_labels": n.port_labels,
+                    "ports_collapsed": n.ports_collapsed,
                     "color": n.color,
                     "z": n.z,
                 }
@@ -155,6 +157,10 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             label_override=entry.get("label"),
             description=entry.get("description", ""),
             canvas_preview_enabled=entry.get("preview", True),
+            # absent = follow the canvas preference, which is
+            # what every node written before this existed wants
+            port_labels=entry.get("port_labels"),
+            ports_collapsed=entry.get("ports_collapsed", False),
             color=entry.get("color"),
             # absent before layering existed: add_node then assigns z in
             # load order, which is exactly the old stacking

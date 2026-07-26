@@ -68,6 +68,12 @@ class NodeGraphScene(QGraphicsScene):
         self.snap_enabled = True
         self.grid_step = DEFAULT_STEP
 
+        # Canvas-wide "float the port names beside the pins" preference; the
+        # main window is the sole writer (MainWindow.set_port_labels_enabled).
+        # A node that has been toggled on its own ignores this — see
+        # node_item.port_labels_on.
+        self.port_labels_enabled = False
+
         self.setSceneRect(QRectF(-SCENE_EXTENT, -SCENE_EXTENT,
                                  2 * SCENE_EXTENT, 2 * SCENE_EXTENT))
 
@@ -88,6 +94,9 @@ class NodeGraphScene(QGraphicsScene):
         events.label_changed.connect(self._on_label_changed)
         events.description_changed.connect(self._on_description_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
+        events.port_labels_changed.connect(self._on_port_labels_changed)
+        events.ports_collapsed_changed.connect(
+            self._on_ports_collapsed_changed)
         events.color_changed.connect(self._on_color_changed)
         events.links_changed.connect(self._refresh_link_cards)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
@@ -223,6 +232,36 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.set_preview_enabled(enabled)
+
+    def _on_ports_collapsed_changed(self, node_id: str) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item._refresh_ports_collapsed()
+
+    def _on_port_labels_changed(self, node_id: str) -> None:
+        self._repaint_ports(self.node_items.get(node_id))
+
+    def set_port_labels_enabled(self, enabled: bool) -> None:
+        """Canvas-wide preference. Repaints every node, because a pill
+        appearing changes each port's bounding rect — Qt would otherwise
+        leave the old one smeared on the canvas until something else
+        happened to redraw that region."""
+        if enabled == self.port_labels_enabled:
+            return
+        self.port_labels_enabled = enabled
+        for item in self.node_items.values():
+            self._repaint_ports(item)
+
+    @staticmethod
+    def _repaint_ports(item) -> None:
+        if item is None:
+            return
+        for port in (*item.input_ports.values(), *item.output_ports.values()):
+            # prepareGeometryChange, not update: the label pill lives outside
+            # the pin's usual 20x20 box, so the item's bounding rect really
+            # does change and Qt's index has to be told
+            port.prepareGeometryChange()
+            port.update()
 
     def _on_color_changed(self, node_id: str) -> None:
         item = self.node_items.get(node_id)

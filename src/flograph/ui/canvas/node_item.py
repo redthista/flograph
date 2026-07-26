@@ -10,7 +10,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout,
-    QLabel, QPlainTextEdit, QStyleOptionGraphicsItem, QTableView,
+    QLabel, QMenu, QPlainTextEdit, QStyleOptionGraphicsItem, QTableView,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -149,7 +149,79 @@ def kpi_caption(params: dict) -> str:
 
 CARD_HANDLE = 14.0  # bottom-right resize grip, shared by notes and tables
 
+# Floating port-name pills (Settings > Canvas > Show port names). Deliberately
+# the reroute label's dimensions: a small rounded pill of chrome-coloured text
+# floating outside the node is already a thing flograph does, and reusing it
+# means one visual language rather than two similar-but-different ones.
+PORT_LABEL_FONT_SIZE = 7.5
+PORT_LABEL_PAD_X = 5.0
+PORT_LABEL_H = 14.0
+PORT_LABEL_GAP = 7.0  # horizontal gap between the pin and its pill
+
+# Clear air between a node's edge and its pins. Pins used to be centred on
+# the edge, so half of every one was buried under the card — which read as
+# the pin being part of the border rather than a thing to grab, and on a
+# card whose body is a live widget it put the hit area over the content.
+# Floating them wholly outside costs nothing and makes the wire ends read as
+# terminals. Sized so the pin clears the border with a couple of px to spare.
+PORT_EDGE_GAP = 2.5
+
 CARD_SCALE_MIN, CARD_SCALE_MAX = 25.0, 400.0  # "scale" param, in percent
+
+def _port_label_font() -> QFont:
+    font = QFont()
+    font.setPointSizeF(PORT_LABEL_FONT_SIZE)
+    return font
+
+
+def port_labels_on(node, scene) -> bool:
+    """Whether `node` should float its port names.
+
+    The node's own setting wins; `None` — which is every node until somebody
+    right-clicks one — follows the canvas-wide preference. That is what lets
+    the global toggle stay meaningful after a node has been singled out: the
+    per-node choice is recorded as an *override*, not as a copy of whatever
+    the global happened to be at the time.
+    """
+    own = getattr(node, "port_labels", None)
+    if own is not None:
+        return bool(own)
+    return bool(getattr(scene, "port_labels_enabled", False))
+
+
+class CardTextEditor(QPlainTextEdit):
+    """The in-place markdown editor over a Note or Report card.
+
+    A QPlainTextEdit apart from its context menu, which on a Report card
+    carries an **Insert** submenu above the usual undo/cut/copy/paste. The
+    embed syntax is the one thing about a report card you cannot guess, and
+    right-clicking where you are typing is where you look for it — the
+    equivalent menu on a report *page* is a toolbar button, which a card has
+    no room for.
+    """
+
+    def __init__(self, text: str, item: "NodeItem") -> None:
+        super().__init__(text)
+        self._item = item
+
+    def contextMenuEvent(self, event) -> None:
+        # the standard menu's actions are already wired to this editor's
+        # own slots, so exec() runs whichever the user picks; only the
+        # inserts need handling here
+        menu = self.createStandardContextMenu()
+        inserts = self._item.add_insert_menu(menu)
+        chosen = menu.exec(event.globalPos())
+        if chosen in inserts:
+            self.insert_embed(inserts[chosen])
+        event.accept()
+
+    def insert_embed(self, label: str) -> None:
+        from ..report.render import embed_line
+        cursor = self.textCursor()
+        cursor.insertText(embed_line(label, cursor.atBlockStart()))
+        self.setTextCursor(cursor)
+        self.setFocus()
+
 
 class PortItem(QGraphicsItem):
     """A circular pin. Wire drags start here and are managed by the scene."""
@@ -177,10 +249,61 @@ class PortItem(QGraphicsItem):
             self._drag_tint = valid
             self.update()
 
+    def _label_shown(self) -> bool:
+        """Whether to float this port's name beside it.
+
+        Off unless the scene says otherwise, and never while the canvas is
+        flattened for zoom — the pins themselves aren't drawn at that
+        distance, so their names would be labels for nothing.
+        """
+        return port_labels_on(self.node_item.node, self.scene()) \
+            and not self.node_item._flat
+
+    def label_text(self) -> str:
+        """What the pill says.
+
+        Normally the port's name. When this pin is the one left showing for
+        a collapsed node, its own name would be a lie by omission — it reads
+        as though that is the only port there is. It says how many are
+        gathered behind it instead, matching the tooltip.
+        """
+        item = self.node_item
+        siblings = (item.input_ports if self.spec.direction.value == "input"
+                    else item.output_ports)
+        if item.ports_collapsed and len(siblings) > 1:
+            side = "inputs" if self.spec.direction.value == "input" \
+                else "outputs"
+            return f"{len(siblings)} {side}"
+        return self.spec.name
+
+    def _label_rect(self) -> Optional[QRectF]:
+        """Local-coordinate rect of the name pill: outside the node on the
+        port's own side, so an input's name reads leftwards away from the
+        card and an output's rightwards, and neither covers the content."""
+        if not self._label_shown():
+            return None
+        metrics = QFontMetrics(_port_label_font())
+        width = metrics.horizontalAdvance(self.label_text()) + PORT_LABEL_PAD_X * 2
+        outward = self.spec.direction.value == "output"
+        x = PORT_LABEL_GAP if outward else -PORT_LABEL_GAP - width
+        return QRectF(x, -PORT_LABEL_H / 2, width, PORT_LABEL_H)
+
     def boundingRect(self) -> QRectF:
-        return QRectF(-10, -10, 20, 20)
+        base = QRectF(-10, -10, 20, 20)
+        label = self._label_rect()
+        return base if label is None else base.united(label)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
+        label = self._label_rect()
+        if label is not None:
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(theme.NODE_BORDER, 1))
+            painter.setBrush(QBrush(theme.NODE_HEADER))
+            painter.drawRoundedRect(label, label.height() / 2,
+                                    label.height() / 2)
+            painter.setPen(QPen(theme.NODE_SUBTEXT))
+            painter.setFont(_port_label_font())
+            painter.drawText(label, Qt.AlignCenter, self.label_text())
         radius = self.RADIUS + (2 if self._hover else 0)
         color = theme.wire_color(self.spec.type)
         if self._drag_tint is True:
@@ -518,7 +641,7 @@ class NodeItem(QGraphicsObject):
         """
         if not (self.note or self.report_card) or self._note_editor is not None:
             return
-        editor = QPlainTextEdit(str(self.node.params.get("text", "")))
+        editor = CardTextEditor(str(self.node.params.get("text", "")), self)
         editor.setStyleSheet(
             f"QPlainTextEdit {{"
             f" background: {theme.NODE_BODY.name()};"
@@ -541,6 +664,64 @@ class NodeItem(QGraphicsObject):
         self._note_editor = proxy
         self._note_editor_widget = editor
         editor.setFocus()
+
+    def add_insert_menu(self, menu) -> dict:
+        """Add "Insert" entries to a Report card editor's context menu.
+
+        Returns {action: label to embed}; empty for a Note, which has no
+        embeds. Two sections, in the order the node's own help recommends:
+        the card's **inputs** first — the dependency the scheduler can see —
+        then any node on the canvas that has produced something.
+
+        Unwired inputs and duplicate labels are listed but disabled rather
+        than hidden: seeing that `c` exists but has nothing in it, or that
+        two nodes share a name, is the thing you need to know, and a menu
+        that silently omitted them would leave you wondering.
+        """
+        if not self.report_card:
+            return {}
+        from ..report.render import duplicate_labels, embeddable_nodes
+        scene = self.scene()
+        graph = getattr(scene, "graph", None)
+        cache = getattr(scene, "output_cache", None)
+        if graph is None:
+            return {}
+
+        actions: dict = {}
+        menu.addSeparator()
+        # built with an explicit parent rather than menu.addMenu(str): that
+        # returns a QMenu nothing on the Python side holds, and shiboken
+        # will collect the wrapper out from under the menu that owns it
+        submenu = QMenu("Insert", menu)
+        menu.addMenu(submenu)
+
+        wired = {c.dst_port for c in graph.connections.values()
+                 if c.dst_node == self.node.id}
+        for port in self.node.spec.inputs:
+            entry = submenu.addAction(
+                port.name if port.name in wired
+                else f"{port.name}  — nothing wired in")
+            entry.setEnabled(port.name in wired)
+            if port.name in wired:
+                actions[entry] = port.name
+
+        nodes = [n for n in embeddable_nodes(graph, cache)
+                 if n.id != self.node.id]
+        if nodes:
+            submenu.addSeparator()
+            ambiguous = duplicate_labels(graph)
+            for node in nodes:
+                clashes = node.label.casefold() in ambiguous
+                entry = submenu.addAction(
+                    f"{node.label}  — duplicate name, rename one first"
+                    if clashes else node.label)
+                entry.setEnabled(not clashes)
+                if not clashes:
+                    actions[entry] = node.label
+        elif not actions:
+            submenu.addAction(
+                "Wire something in, or run the flow first").setEnabled(False)
+        return actions
 
     def _finish_note_edit(self, commit: bool) -> None:
         if self._note_editor is None or self._closing_note_edit:
@@ -584,7 +765,23 @@ class NodeItem(QGraphicsObject):
                 return True
         if obj is self._note_editor_widget:
             if event.type() == QEvent.FocusOut:
-                self._finish_note_edit(commit=True)
+                # Commit when the user moves on *within the app* — not when
+                # the window merely stops being the active one.
+                #
+                # A popup (a context menu, a completer) takes focus while it
+                # is up, so committing on that closed the editor out from
+                # under the menu the user had just opened: right-clicking
+                # for the Insert submenu simply ended edit mode. Which
+                # reason Qt reports for a menu depends on the platform —
+                # here it raised three PopupFocusReason and then an
+                # ActiveWindowFocusReason as the menu window took over — so
+                # both are ignored. Alt-tabbing away therefore leaves the
+                # editor open too, which is the right answer anyway: coming
+                # back to a half-typed note beats finding it committed and
+                # closed.
+                if event.reason() not in (Qt.PopupFocusReason,
+                                          Qt.ActiveWindowFocusReason):
+                    self._finish_note_edit(commit=True)
             elif event.type() == QEvent.KeyPress:
                 if event.key() == Qt.Key_Escape:
                     self._finish_note_edit(commit=False)
@@ -1324,50 +1521,137 @@ class NodeItem(QGraphicsObject):
             if self.goto_card:
                 continue
             self.output_ports[spec.name] = PortItem(self, spec)
-        if self._flat:
-            for port in (*self.input_ports.values(), *self.output_ports.values()):
-                port.setVisible(False)
         self._layout_ports()
         self.update()
+
+    def _port_x(self) -> tuple[float, float]:
+        """(input x, output x): pins float clear of the node's edges rather
+        than being centred on them — see PORT_EDGE_GAP. A reroute is the
+        exception: it *is* a pin, so its ports stay at its own centre line
+        and nudging them outward would only smear the dot."""
+        if self.compact:
+            return 0.0, self.width
+        out = PortItem.RADIUS + PORT_EDGE_GAP
+        return -out, self.width + out
 
     def _layout_ports(self) -> None:
         """Pin port items to the current geometry. Cards resize at runtime,
         so this runs again on every width change — output ports (and the
         wires on them) must ride the right edge, not stay where they were."""
+        left, right = self._port_x()
         if self.compact or self.link_card:
             for port in self.input_ports.values():
-                port.setPos(0, self.body_height / 2)
+                port.setPos(left, self.body_height / 2)
             for port in self.output_ports.values():
-                port.setPos(self.width, self.body_height / 2)
+                port.setPos(right, self.body_height / 2)
             return
-        if self.table or self.figure_card or self.table_viewer \
-                or self.kpi_card or self.slicer or self.control \
-                or self.report_card:
-            self._space_header_ports(self.input_ports.values(), 0)
-            self._space_header_ports(self.output_ports.values(), self.width)
+        if self._card_ports():
+            self._space_card_ports(self.input_ports.values(), left)
+            self._space_card_ports(self.output_ports.values(), right)
             return
         for i, spec in enumerate(self.node.spec.inputs):
-            self.input_ports[spec.name].setPos(0, HEADER_H + ROW_H * (i + 0.5))
+            self.input_ports[spec.name].setPos(
+                left, HEADER_H + ROW_H * (i + 0.5))
         for i, spec in enumerate(self.node.spec.outputs):
             self.output_ports[spec.name].setPos(
-                self.width, HEADER_H + ROW_H * (i + 0.5))
+                right, HEADER_H + ROW_H * (i + 0.5))
 
-    @staticmethod
-    def _space_header_ports(ports, x: float) -> None:
-        """Card-type nodes usually have one port per side, centered in the
-        header; when a forked/custom card declares more, spread them evenly
-        so their pins (and wires) don't collapse into one indistinguishable
-        dot. A single port still lands dead center — unchanged from before."""
+    @property
+    def ports_collapsed(self) -> bool:
+        return bool(self.node.ports_collapsed)
+
+    def _card_ports(self) -> bool:
+        """Whether this node lays its ports out along a card edge rather
+        than in labelled rows. Only these can outgrow their node — an
+        ordinary node's height is derived from its port count."""
+        return bool(self.table or self.figure_card or self.table_viewer
+                    or self.kpi_card or self.slicer or self.control
+                    or self.report_card)
+
+    def collapsible(self) -> bool:
+        """Whether offering to collapse this node's ports means anything.
+        One pin a side is already as gathered as it gets."""
+        return self._card_ports() and (len(self.input_ports) > 1
+                                       or len(self.output_ports) > 1)
+
+    def _apply_port_visibility(self) -> None:
+        """The single place port visibility is decided.
+
+        Two independent reasons to hide a pin — the canvas is flattened for
+        zoom, or the node's ports are collapsed — and they used to be set
+        from two places, so un-flattening would happily un-collapse a node
+        as a side effect. Both are re-derived here together.
+        """
+        collapsed = self.ports_collapsed
+        for ports in (self.input_ports, self.output_ports):
+            items = list(ports.values())
+            for i, port in enumerate(items):
+                gathered = collapsed and len(items) > 1 and i > 0
+                port.setVisible(not self._flat and not gathered)
+            if not items:
+                continue
+            # The one pin left showing has to admit what it is: a wire
+            # dropped on it lands on that port, not on some notional bundle,
+            # and its name alone would imply the others aren't there.
+            lead = items[0]
+            if collapsed and len(items) > 1:
+                side = "inputs" if ports is self.input_ports else "outputs"
+                lead.setToolTip(
+                    f"{len(items)} {side}, collapsed — dropping a wire here "
+                    f"connects “{lead.spec.name}”. Expand to reach the rest.")
+            else:
+                lead.setToolTip(lead.spec.name)
+
+    def _space_card_ports(self, ports, x: float) -> None:
+        """Lay a card's ports down its edge, starting in the header.
+
+        Always from the header, whether there is one port or twenty: the
+        first pin lands where a single-port card has always put it, and the
+        rest follow at ROW_H — the same rhythm an ordinary node's port rows
+        use. That is what makes a card with two inputs look like the same
+        node as a card with one, rather than the pins jumping into the body
+        the moment a second appears.
+
+        The spacing never compresses. A node with twenty inputs simply runs
+        its pins past the bottom of the card and onto the canvas, which is
+        the honest thing to do: squeezing them back into the available
+        height recreates exactly the overlapping-blob problem this layout
+        exists to fix, and at twenty ports it would be far worse. Collapsing
+        is the answer to a node that has outgrown its card (see
+        ports_collapsed), not silently shrinking the gaps.
+        """
         items = list(ports)
-        n = len(items)
-        if n <= 1:
+        if self.ports_collapsed and len(items) > 1:
             for port in items:
                 port.setPos(x, HEADER_H / 2)
             return
-        spacing = min(14.0, (HEADER_H - 8.0) / (n - 1))
-        start = HEADER_H / 2 - spacing * (n - 1) / 2
         for i, port in enumerate(items):
-            port.setPos(x, start + spacing * i)
+            port.setPos(x, HEADER_H / 2 + ROW_H * i)
+
+    def toggle_ports_collapsed(self) -> None:
+        """Push the collapse through the undo stack like any other edit —
+        it is saved with the project, so it is a graph change, not a view
+        state the canvas can quietly own."""
+        scene = self.scene()
+        if scene is None:
+            return
+        from ..commands import SetPortsCollapsedCommand
+        scene.undo_stack.push(SetPortsCollapsedCommand(
+            scene.graph, self.node.id, not self.ports_collapsed))
+
+    def _refresh_ports_collapsed(self) -> None:
+        self.prepareGeometryChange()
+        self._layout_ports()
+        self._apply_port_visibility()
+        for port in (*self.input_ports.values(), *self.output_ports.values()):
+            # the label pill's text (and so its width) changes with the
+            # collapse, which is a real bounding-rect change
+            port.prepareGeometryChange()
+            port.update()
+        self.update()
+        scene = self.scene()
+        if scene is not None:
+            scene.node_item_moved(self.node.id)   # wires follow the pins
 
     def _ports_follow_width(self) -> None:
         """Re-anchor ports after a width change and re-route their wires."""
@@ -1402,8 +1686,7 @@ class NodeItem(QGraphicsObject):
         if flat == self._flat:
             return
         self._flat = flat
-        for port in (*self.input_ports.values(), *self.output_ports.values()):
-            port.setVisible(not flat)
+        self._apply_port_visibility()
         self._apply_proxy_visibility()
         self.update()
 
@@ -1544,6 +1827,40 @@ class NodeItem(QGraphicsObject):
                     QRectF(NODE_WIDTH / 2 - 12, y, NODE_WIDTH / 2, ROW_H),
                     Qt.AlignVCenter | Qt.AlignRight, spec.name)
 
+    def _collapse_toggle_rect(self) -> Optional[QRectF]:
+        """The chevron in the header that gathers the pins up, or None when
+        this node has nothing worth gathering.
+
+        Sits just inside the header's left edge: the first input pin is
+        centred on x=0 and only reaches x=5.5, so there is room before the
+        label without crowding either.
+        """
+        if not self.collapsible():
+            return None
+        return QRectF(7, HEADER_H / 2 - 5, 11, 10)
+
+    def _paint_collapse_toggle(self, painter: QPainter,
+                               rect: QRectF) -> None:
+        """A disclosure triangle: pointing down when the pins run down the
+        edge, right when they are gathered into the header — it shows which
+        way the ports lie, the way a tree view's does."""
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(theme.NODE_SUBTEXT))
+        path = QPainterPath()
+        if self.ports_collapsed:
+            path.moveTo(rect.left() + 1, rect.top())
+            path.lineTo(rect.right() - 2, rect.center().y())
+            path.lineTo(rect.left() + 1, rect.bottom())
+        else:
+            path.moveTo(rect.left(), rect.top() + 1)
+            path.lineTo(rect.right(), rect.top() + 1)
+            path.lineTo(rect.center().x(), rect.bottom() - 1)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.restore()
+
     def _paint_header(self, painter: QPainter, width: float) -> None:
         """Rounded header strip: label + status LED. Shared by the default
         node body and the table card, whose widths differ (fixed vs. resizable)."""
@@ -1557,7 +1874,11 @@ class NodeItem(QGraphicsObject):
         font.setPointSizeF(9.0)
         font.setBold(True)
         painter.setFont(font)
-        label_rect = QRectF(10, 0, width - 30, HEADER_H)
+        toggle = self._collapse_toggle_rect()
+        if toggle is not None:
+            self._paint_collapse_toggle(painter, toggle)
+        left = 10.0 if toggle is None else toggle.right() + 5
+        label_rect = QRectF(left, 0, width - left - 20, HEADER_H)
         label_text = f"⚠ {self.node.label}" if self.broken else self.node.label
         label = painter.fontMetrics().elidedText(
             label_text, Qt.ElideRight, int(label_rect.width()))
@@ -1775,10 +2096,23 @@ class NodeItem(QGraphicsObject):
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
 
     def _resizable(self) -> bool:
-        return bool(self.note or self.table or self.figure_card
+        """Whether this card offers a resize grip.
+
+        A card kind is not enough: the size is *stored* as the node's own
+        `width`/`height` params, so a node that doesn't declare them has
+        nowhere to put it. Committing a drag on one used to raise straight
+        out of the mouse handler ("node 'Control Template' has no param
+        'width'"), which is what happens to any forked card whose author
+        left the size params out — an easy thing to do, since they are
+        optional in every other respect.
+        """
+        if self.button:
+            return bool(self._button_edit)
+        card = bool(self.note or self.table or self.figure_card
                     or self.table_viewer or self.kpi_card or self.slicer
-                    or self.control or self.report_card
-                    or (self.button and self._button_edit))
+                    or self.control or self.report_card)
+        return card and all(self.node.spec.param(name) is not None
+                            for name in ("width", "height"))
 
     def _header_h(self) -> float:
         """Height of the drag bar — the only region a move can start from.
@@ -1865,6 +2199,15 @@ class NodeItem(QGraphicsObject):
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
+        toggle = self._collapse_toggle_rect()
+        if (event.button() == Qt.LeftButton and toggle is not None
+                and not self._flat
+                # generous: an 11x10 glyph is a small target, and hitting it
+                # by accident only ever costs one Ctrl+Z
+                and toggle.adjusted(-3, -4, 3, 4).contains(event.pos())):
+            self.toggle_ports_collapsed()
+            event.accept()
+            return
         if self.button and event.button() == Qt.LeftButton \
                 and not self._button_edit:
             # Default state: a left-click fires the action. Editing (move and
@@ -1977,8 +2320,16 @@ class NodeItem(QGraphicsObject):
             self.start_note_edit()
             event.accept()
             return
-        if (not self.compact and not self.button
-                and event.pos().y() < HEADER_H):
+        if self.compact:
+            # A reroute is all dot and no header, so there is no header to
+            # aim at — the whole thing renames. Its label is the floating
+            # pill above it, which is the only thing about a reroute worth
+            # editing; opening its code (what this used to do) is useless.
+            if scene is not None:
+                scene.node_rename_requested.emit(self.node.id)
+            event.accept()
+            return
+        if not self.button and event.pos().y() < HEADER_H:
             if scene is not None:
                 scene.node_rename_requested.emit(self.node.id)
             event.accept()

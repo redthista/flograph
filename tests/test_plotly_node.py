@@ -94,7 +94,9 @@ class TestCard:
         graph = env[0]
         graph.set_param(item.node.id, "width", 700)
         assert item.width == 700.0
-        assert item.output_ports["figure"].pos().x() == 700.0
+        from flograph.ui.canvas.node_item import PORT_EDGE_GAP, PortItem
+        assert (item.output_ports["figure"].pos().x()
+                == 700.0 + PortItem.RADIUS + PORT_EDGE_GAP)
 
     def test_figure_loads_into_webview(self, env, registry, monkeypatch):
         item = self._item(env, registry)

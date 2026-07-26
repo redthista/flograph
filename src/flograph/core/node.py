@@ -79,6 +79,18 @@ class NodeInstance:
     # webview/table/slicer) on the model canvas to save render cost; the
     # node still renders fully on Dashboard pages regardless of this flag.
     canvas_preview_enabled: bool = True
+    # canvas-UI-only: float this node's port names beside its pins.
+    # None — every node until somebody right-clicks one — means "follow the
+    # canvas-wide preference"; True/False is an explicit override for this
+    # node. Tri-state rather than a plain bool so the global toggle keeps
+    # working on nodes nobody has singled out.
+    port_labels: Optional[bool] = None
+    # canvas-UI-only: gather this node's pins back into the header instead of
+    # running them down its edge. For a node with many ports, whose pins
+    # otherwise extend past the bottom of the card by design. Expanded by
+    # default — a collapsed node hides which input is which, which is only
+    # worth paying once a graph is complex enough to want the quiet.
+    ports_collapsed: bool = False
     # custom header colour (hex string); None = default theme colour
     color: Optional[str] = None
     # Index in the canvas's back-to-front stacking order (see core.layers).

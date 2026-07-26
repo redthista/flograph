@@ -146,6 +146,20 @@ class Graph:
         node.canvas_preview_enabled = enabled
         self.events.preview_enabled_changed.emit(node_id, enabled)
 
+    def set_port_labels(self, node_id: str,
+                        shown: Optional[bool]) -> None:
+        """Show/hide this node's floating port names. None hands the node
+        back to the canvas-wide preference."""
+        node = self.node(node_id)
+        node.port_labels = shown
+        self.events.port_labels_changed.emit(node_id)
+
+    def set_ports_collapsed(self, node_id: str, collapsed: bool) -> None:
+        """Gather this node's pins into the header, or fan them back out."""
+        node = self.node(node_id)
+        node.ports_collapsed = collapsed
+        self.events.ports_collapsed_changed.emit(node_id)
+
     def set_color(self, node_id: str, color: Optional[str]) -> None:
         node = self.node(node_id)
         node.color = color or None
