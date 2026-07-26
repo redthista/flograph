@@ -44,6 +44,11 @@ class ParamSpec:
     multi: bool = True  # columns only: comma list (True) or single column
     hidden: bool = False  # not shown in the properties panel (edited elsewhere)
     ref_kind: str = ""  # node_ref only: card kind the referenced node must have
+    # Presentation-only: changing it cannot change what run() produces, so
+    # the node is NOT marked dirty and its cached output survives. For
+    # things like how a list of charts is arranged — re-running a heavy
+    # node because someone asked for two columns would be absurd.
+    cosmetic: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], where: str = "PARAMS") -> "ParamSpec":
@@ -56,6 +61,7 @@ class ParamSpec:
         if ptype not in PARAM_TYPES:
             valid = ", ".join(sorted(PARAM_TYPES))
             raise ValueError(f"{where}: param {name!r} has unknown type {ptype!r} (valid: {valid})")
+        cosmetic = bool(d.get("cosmetic", False))
         options = list(d.get("options", []))
         if ptype == "choice" and not options:
             raise ValueError(f"{where}: choice param {name!r} requires non-empty 'options'")
@@ -74,4 +80,5 @@ class ParamSpec:
             multi=bool(d.get("multi", True)),
             hidden=bool(d.get("hidden", False)),
             ref_kind=str(d.get("ref_kind", "")),
+            cosmetic=cosmetic,
         )

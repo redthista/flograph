@@ -81,6 +81,11 @@ class NodeInstance:
     canvas_preview_enabled: bool = True
     # custom header colour (hex string); None = default theme colour
     color: Optional[str] = None
+    # Index in the canvas's back-to-front stacking order (see core.layers).
+    # None means "not placed yet" — Graph.add_node puts it on top, which is
+    # both what a freshly dropped node wants and what a file written before
+    # layering existed gets, reproducing its old insertion-order stacking.
+    z: Optional[int] = None
     status: NodeStatus = NodeStatus.IDLE
     status_message: str = ""
     dirty: bool = True

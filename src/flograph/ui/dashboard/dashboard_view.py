@@ -17,6 +17,7 @@ from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 
 from ..canvas.base_view import ZoomPanGraphicsView
+from ..canvas.stacking import add_layer_menu, layer_action_for
 from .dashboard_scene import DashboardScene
 from .tile_item import TileItem
 from .visuals_list import TILE_NODE_MIME
@@ -138,7 +139,42 @@ class DashboardView(ZoomPanGraphicsView):
                                or list(scene.tile_items.values()))
                 event.accept()
                 return
+            action = layer_action_for(event)
+            if action is not None and self.scene().restack_selection(action):
+                event.accept()
+                return
         super().keyPressEvent(event)
+
+    # --------------------------------------------------------- context menu
+
+    def contextMenuEvent(self, event) -> None:
+        """Right-click a tile for its layer actions. Right-click selects
+        first (adding to the selection when Ctrl or Shift is held), so the
+        menu always acts on what the user is looking at — and a right-click
+        on an Action Button still can't fire it."""
+        from PySide6.QtWidgets import QMenu
+        item = self._tile_at(event.pos())
+        if item is None or self._fs_tile is not None:
+            super().contextMenuEvent(event)
+            return
+        if not item.isSelected():
+            if not event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):
+                self.scene().clearSelection()
+            item.setSelected(True)
+        menu = QMenu(self)
+        layer_actions = add_layer_menu(menu)
+        chosen = menu.exec(event.globalPos())
+        if chosen in layer_actions:
+            self.scene().restack_selection(layer_actions[chosen])
+        event.accept()
+
+    def _tile_at(self, pos) -> Optional[TileItem]:
+        for item in self.items(pos):
+            while item is not None and not isinstance(item, TileItem):
+                item = item.parentItem()
+            if item is not None:
+                return item
+        return None
 
     # ---------------------------------------------------------- drag & drop
 

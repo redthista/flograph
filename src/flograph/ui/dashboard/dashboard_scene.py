@@ -58,6 +58,7 @@ class DashboardScene(QGraphicsScene):
             (events.dirty_changed, self._on_dirty_changed),
             (events.label_changed, self._on_label_changed),
             (events.param_changed, self._on_param_changed),
+            (events.restacked, self._on_restacked),
         ]
         for event, callback in self._event_subs:
             event.connect(callback)
@@ -138,6 +139,12 @@ class DashboardScene(QGraphicsScene):
             item.refresh_content()
 
     def _on_param_changed(self, node_id: str, name: str, value) -> None:
+        # A report tile draws from nodes *upstream* of itself, so a param
+        # change it should react to usually belongs to some other node —
+        # and a cosmetic one never runs the flow to announce itself.
+        for item in self.tile_items.values():
+            if item._kind() == "report":
+                item._render_report()
         for item in self._tiles_for(node_id):
             item.on_param_changed()
 
@@ -167,6 +174,32 @@ class DashboardScene(QGraphicsScene):
                        new_rect: tuple) -> None:
         self.undo_stack.push(MoveResizeTileCommand(
             self.graph, self.page_id, tile_id, old_rect, new_rect))
+
+    # -------------------------------------------------------------- layering
+
+    def restack_selection(self, action: str) -> bool:
+        """Bring the selected tiles to the front / forward / backward / to
+        the back, in one undo step. Returns whether anything moved."""
+        from flograph.core.layers import restack
+
+        from ..canvas.stacking import LAYER_LABELS
+        from ..commands import RestackCommand
+        ids = {i.tile.id for i in self.selected_tile_items()}
+        if not ids or self.page_id not in self.graph.pages:
+            return False
+        current = self.graph.stacking_order("tile", self.page_id)
+        new = restack(current, ids, action)
+        if new == current:
+            return False
+        self.undo_stack.push(RestackCommand(
+            self.graph, "tile", new, self.page_id, LAYER_LABELS[action]))
+        return True
+
+    def _on_restacked(self, kind: str, page_id) -> None:
+        if kind != "tile" or page_id != self.page_id:
+            return
+        for item in self.tile_items.values():
+            item.apply_stacking()
 
     # ----------------------------------------------------------- fullscreen
 

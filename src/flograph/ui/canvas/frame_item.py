@@ -10,6 +10,7 @@ from flograph.core import Frame
 
 from .. import theme
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
+from .stacking import FRAME_Z, z_for
 
 TITLE_H = 24.0
 HANDLE = 14.0
@@ -22,7 +23,7 @@ class FrameItem(QGraphicsObject):
     def __init__(self, frame: Frame) -> None:
         super().__init__()
         self.frame = frame
-        self.setZValue(-10)
+        self.apply_stacking()
         self.setFlags(QGraphicsItem.ItemIsMovable
                       | QGraphicsItem.ItemIsSelectable
                       | QGraphicsItem.ItemSendsGeometryChanges)
@@ -51,6 +52,12 @@ class FrameItem(QGraphicsObject):
             self.setPos(x, y)
         self._size = (w, h)
         self.update()
+
+    def apply_stacking(self) -> None:
+        """Take the frame's place in the stacking order. Frames have their
+        own band below the wires, so restacking them can never lift one
+        over a node."""
+        self.setZValue(z_for(FRAME_Z, self.frame.z))
 
     def scene_rect(self) -> QRectF:
         return QRectF(self.pos().x(), self.pos().y(), *self._size)

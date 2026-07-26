@@ -12,6 +12,7 @@ from typing import Any, Iterable, Optional, Sequence
 from . import links
 from .datatypes import can_connect
 from .events import GraphEvents
+from .layers import next_z, order_of
 from .node import NodeInstance, NodeStatus, NodeSpec
 from .ports import PortDirection
 
@@ -35,6 +36,7 @@ class Frame:
     title: str = "Frame"
     rect: tuple[float, float, float, float] = (0.0, 0.0, 300.0, 200.0)
     color: str = "#33415c"
+    z: Optional[int] = None   # stacking order among frames; see core.layers
 
 
 @dataclass
@@ -49,13 +51,24 @@ class Tile:
     node_id: str
     port: Optional[str] = None  # output port to render; None for action buttons
     rect: tuple[float, float, float, float] = (0.0, 0.0, 420.0, 320.0)
+    z: Optional[int] = None   # stacking order on its page; see core.layers
 
 
 @dataclass
 class Page:
-    """A dashboard page: a named infinite canvas of tiles."""
+    """A page in the project: a dashboard (an infinite canvas of tiles) or a
+    report (a markdown document that embeds node outputs by name).
+
+    One dataclass for both because everything else about a page — title,
+    colour, tab order, duplication, undo — is identical, and `kind` is what
+    the window switches on to build the right widget. A report ignores
+    `tiles`/`maximized_tile`; a dashboard ignores `body`. Files written
+    before reports existed have no `kind` and load as dashboards.
+    """
     id: str
     title: str = "Page"
+    kind: str = "dashboard"       # "dashboard" | "report"
+    body: str = ""                # report pages: the markdown source
     tiles: dict[str, Tile] = field(default_factory=dict)
     color: Optional[str] = None   # None = the theme's default tab colour
     # The tile shown maximized over the whole page, or None for the normal
@@ -88,6 +101,8 @@ class Graph:
     def add_node(self, node: NodeInstance) -> NodeInstance:
         if node.id in self.nodes:
             raise GraphError(f"node id {node.id!r} already in graph")
+        if node.z is None:
+            node.z = next_z(self.nodes.values())
         self.nodes[node.id] = node
         self.events.node_added.emit(node)
         self._refresh_links()
@@ -138,7 +153,8 @@ class Graph:
 
     def set_param(self, node_id: str, name: str, value: Any) -> None:
         node = self.node(node_id)
-        if node.spec.param(name) is None:
+        spec = node.spec.param(name)
+        if spec is None:
             raise GraphError(f"node {node.label!r} has no param {name!r}")
         node.params[name] = value
         self.events.param_changed.emit(node_id, name, value)
@@ -146,6 +162,11 @@ class Graph:
             self._refresh_links()   # marks the Froms it moved dirty itself
         if name == links.NAME_PARAM and links.is_link_node(node):
             return  # renaming a link is cosmetic: don't invalidate its subtree
+        if spec.cosmetic:
+            # declared presentation-only, so the cached output is still
+            # correct — dirtying would re-run the node (and everything
+            # downstream) to produce exactly what it already produced
+            return
         self.mark_dirty(node_id)
 
     def set_code(self, node_id: str, source: str) -> list[Connection]:
@@ -402,6 +423,8 @@ class Graph:
     def add_frame(self, frame: Frame) -> Frame:
         if frame.id in self.frames:
             raise GraphError(f"frame id {frame.id!r} already in graph")
+        if frame.z is None:
+            frame.z = next_z(self.frames.values())
         self.frames[frame.id] = frame
         self.events.frame_added.emit(frame)
         return frame
@@ -465,6 +488,15 @@ class Graph:
         self.events.page_changed.emit(page)
         return page
 
+    def set_page_body(self, page_id: str, body: str) -> Page:
+        """Replace a report page's markdown source. Its own event, not
+        page_changed: the body arrives keystroke by keystroke and the tab
+        bar has no interest in any of it."""
+        page = self.page(page_id)
+        page.body = body or ""
+        self.events.page_body_changed.emit(page)
+        return page
+
     def set_page_maximized_tile(self, page_id: str,
                                 tile_id: Optional[str]) -> Page:
         """Maximize `tile_id` over the page, or None for the normal layout.
@@ -490,6 +522,8 @@ class Graph:
         page = self.page(page_id)
         if tile.id in page.tiles:
             raise GraphError(f"tile id {tile.id!r} already on page {page_id!r}")
+        if tile.z is None:
+            tile.z = next_z(page.tiles.values())
         page.tiles[tile.id] = tile
         self.events.tile_added.emit(page_id, tile)
         return tile
@@ -513,3 +547,38 @@ class Graph:
             tile.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
         self.events.tile_changed.emit(page_id, tile)
         return tile
+
+    # ------------------------------------------------------- stacking order
+
+    def _stack(self, kind: str, page_id: Optional[str] = None) -> dict:
+        if kind == "node":
+            return self.nodes
+        if kind == "frame":
+            return self.frames
+        if kind == "tile":
+            return self.page(page_id).tiles
+        raise GraphError(f"no stacking order for {kind!r} "
+                         "(valid: node, frame, tile)")
+
+    def stacking_order(self, kind: str,
+                       page_id: Optional[str] = None) -> list[str]:
+        """Back-to-front ids of one stackable kind — nodes and frames stack
+        on the model canvas, tiles on the page named by `page_id`."""
+        return order_of(self._stack(kind, page_id).values())
+
+    def restack(self, kind: str, order: Sequence[str],
+                page_id: Optional[str] = None) -> None:
+        """Adopt `order` (back-to-front) as the stacking order of that kind.
+
+        z is rewritten as 0..n-1 across the whole kind, not just the items
+        that moved — that normalization is what keeps saved files stable and
+        stops repeated restacks from growing the numbers without bound. Ids
+        missing from `order` keep their relative position at the back, so a
+        stale ordering can never silently drop an item.
+        """
+        items = self._stack(kind, page_id)
+        ranked = [i for i in order if i in items]
+        ranked = [i for i in items if i not in set(ranked)] + ranked
+        for index, item_id in enumerate(ranked):
+            items[item_id].z = index
+        self.events.restacked.emit(kind, page_id)

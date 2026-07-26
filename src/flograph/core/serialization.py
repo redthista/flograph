@@ -5,7 +5,11 @@ serialize by type_id only; a non-null "code" means the instance was forked
 (or is a user script node) and its spec is re-parsed from that code on load.
 A builtin type_id the registry no longer knows (missing plugin, renamed/
 removed stdlib node) becomes a broken placeholder node instead of failing
-the whole load — see `_broken_spec`.
+the whole load — see `_broken_spec`. So does a forked node whose script
+won't load here at all: a top-level `import` of a package this machine
+lacks must not cost you the rest of the project, so the node keeps its code
+and its params and carries the reason, and re-saving writes it back
+untouched.
 
 Cached outputs are never embedded in this JSON. A node loads dirty here
 unless flograph.engine.cache_persistence restores its output from a side-car
@@ -24,7 +28,7 @@ from .graph import Connection, Frame, Graph, GraphError, Page, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .ports import PortDirection, PortSpec
 from .registry import NodeRegistry
-from .script import parse_spec
+from .script import NodeScriptError, parse_spec
 
 try:  # stamp saved files with the installed distribution version (single source)
     FLOGRAPH_VERSION = _pkg_version("flograph")
@@ -54,6 +58,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "description": n.description,
                     "preview": n.canvas_preview_enabled,
                     "color": n.color,
+                    "z": n.z,
                 }
                 for n in graph.nodes.values()
             ],
@@ -71,6 +76,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "title": f.title,
                     "rect": list(f.rect),
                     "color": f.color,
+                    "z": f.z,
                 }
                 for f in graph.frames.values()
             ],
@@ -78,6 +84,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                 {
                     "id": p.id,
                     "title": p.title,
+                    "kind": p.kind,
+                    "body": p.body,
                     "color": p.color,
                     "maximized_tile": p.maximized_tile,
                     "tiles": [
@@ -86,6 +94,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                             "node": t.node_id,
                             "port": t.port,
                             "rect": list(t.rect),
+                            "z": t.z,
                         }
                         for t in p.tiles.values()
                     ],
@@ -116,16 +125,27 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     for entry in node_entries:
         type_id = entry["type"]
         code = entry.get("code")
+        broken_reason = None
         if code is not None:
-            spec = parse_spec(code, type_id, builtin=False)
+            try:
+                spec = parse_spec(code, type_id, builtin=False)
+            except NodeScriptError as exc:
+                # the file is still worth opening: one node that can't load
+                # here (a missing package, most often) must not take the
+                # other fifty with it
+                broken_reason = str(exc)
+                spec = None
         else:
+            # left with no reason on purpose: an unresolvable type_id keeps
+            # its own long-standing wording below
             spec = registry.maybe_get(type_id)
-            if spec is None:
-                spec = _broken_spec(
-                    type_id,
-                    inputs=input_ports_needed.get(entry["id"], ()),
-                    outputs=output_ports_needed.get(entry["id"], ()),
-                )
+        if spec is None:
+            spec = _broken_spec(
+                type_id,
+                inputs=input_ports_needed.get(entry["id"], ()),
+                outputs=output_ports_needed.get(entry["id"], ()),
+                reason=broken_reason,
+            )
         node = NodeInstance(
             id=entry["id"],
             spec=spec,
@@ -136,10 +156,13 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             description=entry.get("description", ""),
             canvas_preview_enabled=entry.get("preview", True),
             color=entry.get("color"),
+            # absent before layering existed: add_node then assigns z in
+            # load order, which is exactly the old stacking
+            z=entry.get("z"),
         )
         if spec.broken:
             node.status = NodeStatus.ERROR
-            node.status_message = (
+            node.status_message = broken_reason or (
                 f"Unknown node type {type_id!r} — the node script may have "
                 f"been removed, renamed, or belong to a missing plugin."
             )
@@ -157,12 +180,19 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             title=entry.get("title", "Frame"),
             rect=tuple(entry.get("rect", (0, 0, 300, 200))),
             color=entry.get("color", "#33415c"),
+            # absent before layering existed: add_frame then assigns z in
+            # load order, which is exactly the old stacking
+            z=entry.get("z"),
         ))
 
     for entry in payload.get("pages", []):
         page = graph.add_page(Page(
             id=entry["id"],
             title=entry.get("title", "Page"),
+            # absent before report pages existed — every old page is a
+            # dashboard, which is exactly what those files meant
+            kind=entry.get("kind") or "dashboard",
+            body=entry.get("body", ""),
             color=entry.get("color"),
             # absent in files written before dashboards could maximize a tile
             maximized_tile=entry.get("maximized_tile"),
@@ -175,17 +205,23 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
                 node_id=tile_entry["node"],
                 port=tile_entry.get("port"),
                 rect=tuple(tile_entry.get("rect", (0, 0, 420, 320))),
+                z=tile_entry.get("z"),
             ))
     return graph
 
 
 def _broken_spec(type_id: str, inputs: Iterable[str],
-                 outputs: Iterable[str]) -> NodeSpec:
-    """A placeholder spec for a builtin type_id the registry can't resolve.
+                 outputs: Iterable[str],
+                 reason: "str | None" = None) -> NodeSpec:
+    """A placeholder spec for a node whose real spec isn't available here —
+    an unresolvable type_id, or a forked script that won't load on this
+    machine.
 
     Ports are synthesized as PortType.ANY from the connections that touched
     this node in the file, so its wiring survives the round trip even though
-    the real port types are unknown; the node still won't run.
+    the real port types are unknown; the node still won't run. `reason` is
+    what the node shows and what the status bar reports, so it has to say
+    what would fix it.
     """
     return NodeSpec(
         type_id=type_id,
@@ -197,7 +233,8 @@ def _broken_spec(type_id: str, inputs: Iterable[str],
                 for n in sorted(outputs)],
         params=[],
         source="",
-        doc=f"Node type {type_id!r} is not available in this build of flograph.",
+        doc=reason or (f"Node type {type_id!r} is not available in this "
+                       "build of flograph."),
         broken=True,
     )
 

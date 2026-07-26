@@ -6,9 +6,18 @@ from __future__ import annotations
 
 from typing import Callable, Optional, Union
 
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import (
+    QGridLayout, QScrollArea, QVBoxLayout, QWidget,
+)
+
+from flograph.core.chart_grid import DEFAULT_DIRECTION
 
 DialogParent = Union[QWidget, Callable[[], Optional[QWidget]], None]
+
+# Minimum on-screen height of one chart in a stacked list. Big enough
+# to read, small enough that two are visible on a dashboard tile.
+STACK_ITEM_HEIGHT = 260
 
 # NavigationToolbar2's matplotlib event hooks, by the attribute the base
 # class stores each connection id under.
@@ -96,8 +105,29 @@ class FigureView(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._canvas = None
         self._toolbar = None
+        self._stack = None   # QScrollArea, when showing a list of figures
+        # (columns, rows, direction) for a stacked list — see
+        # core.chart_grid. The host sets it from the node's own params.
+        self._grid = (0, 0, DEFAULT_DIRECTION)
+        self._figures: list = []   # the list on show, so set_grid can re-lay it
         self._dialog_parent = dialog_parent
         self._render_ratio: float | None = None
+
+    def set_grid(self, columns: int = 0, rows: int = 0,
+                 direction: str = DEFAULT_DIRECTION) -> None:
+        """How a *list* of figures should be arranged: 0 means work it out.
+
+        Re-arranges immediately using the figures already on show. Layout
+        is not data, but changing a param dirties the node and evicts its
+        cache — so waiting for the next run would mean the card sat on the
+        old arrangement until something recomputed it.
+        """
+        grid = (columns, rows, direction)
+        if grid == self._grid:
+            return
+        self._grid = grid
+        if self._figures:
+            self._set_figures(self._figures)
 
     def set_render_ratio(self, ratio: float | None) -> None:
         """Absolute device pixels per logical pixel to render figures at
@@ -114,6 +144,9 @@ class FigureView(QWidget):
             self._sync_pixel_ratio(self._canvas)
 
     def set_figure(self, figure) -> None:
+        if isinstance(figure, (list, tuple)):
+            self._set_figures(figure)
+            return
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.backends.backend_qtagg import (
             NavigationToolbar2QT as _Base,
@@ -144,6 +177,7 @@ class FigureView(QWidget):
                 return super().devicePixelRatioF()
 
         self.clear()
+        self._figures = []
         self._canvas = _ScaledCanvas(figure)
         self._canvas._render_ratio = self._render_ratio
         self._toolbar = _Toolbar(self._canvas, self, self._dialog_parent)
@@ -177,7 +211,94 @@ class FigureView(QWidget):
         canvas._draw_pending = False
         canvas.draw()
 
+    def _set_figures(self, figures) -> None:
+        """A *list* of figures: one canvas each, stacked in a scroll area.
+
+        A list is how a node says "the same chart, once per value of a
+        column" — the loop lives in the node's own code, so there is no
+        faceting UI to learn and nothing that only works for one library.
+        No per-figure toolbar here: a dozen of them is noise, and the
+        pan/zoom of one chart in a stack is rarely the point.
+        """
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+        class _ScrollThroughCanvas(FigureCanvasQTAgg):
+            """Lets the wheel fall through to the scroll area behind it.
+
+            A matplotlib canvas consumes wheel ticks for its own zoom, which
+            in a stack means the list simply cannot be scrolled — the
+            cursor is nearly always over a chart. A stacked canvas has no
+            toolbar and no pan/zoom mode either, so there is nothing for
+            that tick to do; scrolling the stack is what it is for.
+            """
+
+            def wheelEvent(self, event) -> None:
+                event.ignore()
+
+        from flograph.core.chart_grid import cells, grid_shape
+
+        self._figures = list(figures)
+        drawable = [f for f in self._figures
+                    if f is not None and hasattr(f, "canvas")]
+        columns, rows, direction = self._grid
+        n_columns, n_rows = grid_shape(len(drawable), columns, rows, direction)
+        placement = cells(len(drawable), columns, rows, direction)
+
+        self.clear()
+        inner = QWidget()
+        grid = QGridLayout(inner)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(6)
+        canvases = []
+        for figure, (row, column) in zip(drawable, placement):
+            canvas = _ScrollThroughCanvas(figure)
+            # side by side, each chart gets less width, so the minimum
+            # height comes down with it or a 4-wide grid is unreadably tall
+            canvas.setMinimumHeight(max(120, STACK_ITEM_HEIGHT // n_columns
+                                        + STACK_ITEM_HEIGHT // 3))
+            grid.addWidget(canvas, row, column)
+            canvases.append(canvas)
+        # Reserve the whole grid, not just the cells that got a chart: ask
+        # for 2x3 with 3 charts and you should see the empty cell, with the
+        # charts sized for the grid you asked for rather than silently
+        # re-fitted to a smaller one.
+        item_height = max(120, STACK_ITEM_HEIGHT // n_columns
+                          + STACK_ITEM_HEIGHT // 3)
+        for column in range(n_columns):
+            grid.setColumnStretch(column, 1)
+        for row in range(n_rows):
+            grid.setRowStretch(row, 1)
+            grid.setRowMinimumHeight(row, item_height)
+
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QScrollArea.NoFrame)
+        area.setWidget(inner)
+        self._layout.addWidget(area, 1)
+        self._stack = area
+
+        # Draw only once the grid has actually sized them. Drawing during
+        # the loop above rasterises against whatever size the canvas had
+        # before layout, which showed as a torn strip down one side until
+        # a resize forced a repaint. activate() settles the geometry now;
+        # the deferred pass catches the scroll area's own later resize.
+        grid.activate()
+        for canvas in canvases:
+            canvas.draw()
+        QTimer.singleShot(0, lambda: self._redraw(canvases))
+
+    @staticmethod
+    def _redraw(canvases) -> None:
+        import shiboken6
+        for canvas in canvases:
+            if shiboken6.isValid(canvas):
+                canvas.draw_idle()
+
     def clear(self) -> None:
+        if self._stack is not None:
+            self._layout.removeWidget(self._stack)
+            self._stack.deleteLater()
+            self._stack = None
         if self._toolbar is not None and self._canvas is not None:
             # Unhook now rather than waiting for the deferred delete: the
             # caller may immediately attach a new canvas to the same figure

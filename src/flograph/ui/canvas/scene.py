@@ -25,6 +25,7 @@ from ..commands import (
 from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
 from .node_item import DEFAULT_LOD_THRESHOLD, NodeItem, PortItem
+from .stacking import LAYER_LABELS
 
 SCENE_EXTENT = 1_000_000.0
 REROUTE_TYPE = "flograph.util.reroute"
@@ -93,6 +94,7 @@ class NodeGraphScene(QGraphicsScene):
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
         events.frame_changed.connect(self._on_frame_changed)
+        events.restacked.connect(self._on_restacked)
 
         # mirror pre-existing graph content (e.g. a loaded project)
         for node in graph.nodes.values():
@@ -111,9 +113,20 @@ class NodeGraphScene(QGraphicsScene):
     def _on_node_added(self, node: NodeInstance) -> None:
         item = NodeItem(node)
         item.set_lod(self._flat_state())
+        item.apply_stacking()
         self.addItem(item)
         self.node_items[node.id] = item
         item.refresh_link_card()  # its text needs the scene's graph to resolve
+
+    def _on_restacked(self, kind: str, page_id) -> None:
+        """One kind's stacking order changed. Every item of that kind re-reads
+        its own z rather than the event naming the movers: a restack
+        renumbers the whole kind, so a partial update would leave stale
+        z-values behind on the items that merely shifted along."""
+        items = (self.node_items if kind == "node"
+                 else self.frame_items if kind == "frame" else {})
+        for item in items.values():
+            item.apply_stacking()
 
     def _on_node_removed(self, node_id: str) -> None:
         item = self.node_items.pop(node_id, None)
@@ -359,6 +372,40 @@ class NodeGraphScene(QGraphicsScene):
         for frame_id in frame_ids:
             self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
         self.undo_stack.endMacro()
+
+    # -------------------------------------------------------------- layering
+
+    def restack_selection(self, action: str) -> bool:
+        """Bring the selection to the front / forward / backward / to the
+        back. Nodes and frames restack within their own kind — a frame can't
+        be lifted over a node, so raising a mixed selection means raising
+        each of them among its own peers, in one undo step.
+
+        Returns whether anything actually moved, so a caller can leave the
+        keystroke to another handler when it didn't.
+        """
+        from flograph.core.layers import restack
+
+        from ..commands import RestackCommand
+        moves = []
+        for kind, ids in (("node", {i.node.id for i in self.selected_node_items()}),
+                          ("frame", {i.frame.id for i in self.selectedItems()
+                                     if isinstance(i, FrameItem)})):
+            if not ids:
+                continue
+            current = self.graph.stacking_order(kind)
+            new = restack(current, ids, action)
+            if new != current:
+                moves.append((kind, new))
+        if not moves:
+            return False
+        label = LAYER_LABELS[action]
+        self.undo_stack.beginMacro(label)
+        for kind, order in moves:
+            self.undo_stack.push(
+                RestackCommand(self.graph, kind, order, text=label))
+        self.undo_stack.endMacro()
+        return True
 
     def _push_orphan_snapshots(self, *, conn_ids=(), node_ids=()) -> None:
         """Freeze what a linked Table is *showing* into its own sheet before

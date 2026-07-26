@@ -24,6 +24,12 @@ Rules:
 - Treat inputs as read-only (outputs are cached and shared by reference).
 - Unconnected optional inputs arrive as None.
 - Heavy imports belong inside run(), top-level code should only declare.
+  This is not just about speed: the script is *executed* to read NODE and
+  PARAMS, so a top-level `import` runs whenever the node is loaded — when
+  the library is built, when a project is opened, when code is applied. An
+  import inside run() costs nothing until the node actually runs, and a
+  missing package then fails only that node. See MissingDependencyError for
+  what happens when a top-level one isn't available.
 - Create matplotlib figures with matplotlib.figure.Figure(), never pyplot.
 
 Scripts are executed with a virtual filename: parse_spec uses
@@ -44,11 +50,40 @@ class NodeScriptError(Exception):
     """The script text does not satisfy the node contract."""
 
 
+class MissingDependencyError(NodeScriptError):
+    """A node script's top-level code imports a package that isn't installed.
+
+    Its own class because it is the one script error that is nobody's
+    mistake: the script is fine, this machine just doesn't have the library.
+    That happens the moment a project moves between machines, so it has to
+    stay recoverable — the node loads as a placeholder holding its code, and
+    installing the package (or moving the import into run()) fixes it.
+    """
+
+    def __init__(self, module: str, where: str = "node script") -> None:
+        self.module = module
+        super().__init__(
+            f"{where} needs the {module!r} package, which isn't installed — "
+            "install it from Manage Packages…, or move the import inside "
+            "run() so it's only needed when the node actually runs")
+
+
+def missing_module_hint(exc: BaseException) -> "str | None":
+    """The "install this" line for a ModuleNotFoundError raised anywhere —
+    inside run() as well as at import time — or None for other errors."""
+    name = getattr(exc, "name", None)
+    if not isinstance(exc, ModuleNotFoundError) or not name:
+        return None
+    return (f"The {name!r} package isn't installed. Install it from "
+            "Manage Packages…, then run again.")
+
+
 # Rich-card kinds a node may declare via NODE["card"]. The value drives which
 # canvas card / dashboard tile renders the node's output; None = ordinary node.
 CARD_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer",
     "button", "note", "grid", "reroute", "goto", "from", "control",
+    "report",
 })
 
 # Widget shapes for NODE["card"] == "control": input controls whose value the
@@ -84,6 +119,10 @@ def _execute(source: str, filename: str) -> dict[str, Any]:
         ) from exc
     try:
         exec(code, namespace)
+    except ModuleNotFoundError as exc:
+        # told apart from every other load failure: the script is correct,
+        # this machine is just missing a package, and that is fixable
+        raise MissingDependencyError(exc.name or "?") from exc
     except Exception as exc:  # top-level code should only declare
         raise NodeScriptError(
             f"error while loading node script: {type(exc).__name__}: {exc}"

@@ -21,6 +21,7 @@ from flograph.core.node import NodeStatus
 from .. import theme
 from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
+from .stacking import NODE_Z, z_for
 
 NODE_WIDTH = 170.0
 HEADER_H = 26.0
@@ -72,6 +73,8 @@ PLOTLY_TYPE = "flograph.viz.show_plotly"
 # Show Table and Table Spec share the whole table-viewer card path; only the
 # DataFrame pushed into them differs (the data itself vs. its spec).
 TABLE_VIEWER_TYPES = {"flograph.viz.show_table", "flograph.viz.table_spec"}
+REPORT_MIN_W, REPORT_MAX_W = 240.0, 1600.0
+REPORT_MIN_H, REPORT_MAX_H = 140.0, 2000.0
 TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W = 260.0, 1600.0
 TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, 2000.0
 
@@ -230,6 +233,7 @@ class NodeItem(QGraphicsObject):
         # only the embedded widget differs (webview vs. matplotlib canvas)
         self.figure_card = kind == "figure" or self.plotly_card
         self.table_viewer = kind == "table_viewer"
+        self.report_card = kind == "report"
         self.kpi_card = kind == "kpi"
         self.slicer = kind == "slicer"
         self.control = kind == "control"
@@ -257,6 +261,9 @@ class NodeItem(QGraphicsObject):
         elif self.table_viewer:
             self.width = min(TABLE_VIEWER_MAX_W, max(
                 TABLE_VIEWER_MIN_W, float(node.params.get("width", 420))))
+        elif self.report_card:
+            self.width = min(REPORT_MAX_W, max(
+                REPORT_MIN_W, float(node.params.get("width", 460))))
         elif self.kpi_card:
             self.width = min(KPI_MAX_W, max(
                 KPI_MIN_W, float(node.params.get("width", 220))))
@@ -290,6 +297,8 @@ class NodeItem(QGraphicsObject):
         self._figure_proxy: QGraphicsProxyWidget | None = None
         self._figure_placeholder: QLabel | None = None
         self._plotly_widget = None  # shared PlotlyView, see _build_plotly_widget
+        self._report_view = None      # QTextBrowser (report cards only)
+        self._report_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_view: QTableView | None = None
         self._table_viewer_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_placeholder: QLabel | None = None
@@ -328,6 +337,8 @@ class NodeItem(QGraphicsObject):
             self._build_figure_widget()
         if self.table_viewer:
             self._build_table_viewer_widget()
+        if self.report_card:
+            self._build_report_widget()
         if self.slicer:
             self._build_slicer_widget()
         if self.control:
@@ -371,6 +382,11 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             fixed = float(self.node.params.get("height", 320) or 320)
             return min(TABLE_VIEWER_MAX_H, max(TABLE_VIEWER_MIN_H, fixed))
+        if self.report_card:
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", 340) or 340)
+            return min(REPORT_MAX_H, max(REPORT_MIN_H, fixed))
         if self.kpi_card:
             if self._live_height is not None:
                 return self._live_height
@@ -403,6 +419,11 @@ class NodeItem(QGraphicsObject):
             self._note_doc = doc
         return self._note_doc
 
+    def apply_stacking(self) -> None:
+        """Take the node's place in the stacking order — its band sits above
+        the wires, so a card always covers the wires that reach it."""
+        self.setZValue(z_for(NODE_Z, self.node.z))
+
     def on_params_changed(self) -> None:
         """Params drive geometry for notes (text/width) and tables
         (data/width/height); other node kinds ignore param edits."""
@@ -426,6 +447,9 @@ class NodeItem(QGraphicsObject):
             self.prepareGeometryChange()
             self.width = min(FIGURE_MAX_W, max(
                 FIGURE_MIN_W, float(self.node.params.get("width", 420))))
+            # Columns/Rows/Fill are layout, not data: re-arrange now rather
+            # than making the user re-run to see a grid change.
+            self.relayout_figures()
             self._layout_figure_proxy()
             self._ports_follow_width()
             self.update()
@@ -435,6 +459,17 @@ class NodeItem(QGraphicsObject):
             self.width = min(TABLE_VIEWER_MAX_W, max(
                 TABLE_VIEWER_MIN_W, float(self.node.params.get("width", 420))))
             self._layout_table_viewer_proxy()
+            self._ports_follow_width()
+            self.update()
+            return
+        if self.report_card:
+            # the text *is* a param, so an edit is both a re-render and
+            # possibly a resize
+            self.prepareGeometryChange()
+            self.width = min(REPORT_MAX_W, max(
+                REPORT_MIN_W, float(self.node.params.get("width", 460))))
+            self.refresh_report()
+            self._layout_report_proxy()
             self._ports_follow_width()
             self.update()
             return
@@ -475,8 +510,13 @@ class NodeItem(QGraphicsObject):
 
     def start_note_edit(self) -> None:
         """Open an in-place markdown editor over the card (Obsidian-style).
-        Commits on focus-out or Ctrl+Enter; Escape cancels."""
-        if not self.note or self._note_editor is not None:
+        Commits on focus-out or Ctrl+Enter; Escape cancels.
+
+        Shared by Note and Report cards: both are markdown living in a
+        "text" param, and both are quicker to edit where you are looking at
+        them than in the properties panel.
+        """
+        if not (self.note or self.report_card) or self._note_editor is not None:
             return
         editor = QPlainTextEdit(str(self.node.params.get("text", "")))
         editor.setStyleSheet(
@@ -491,8 +531,13 @@ class NodeItem(QGraphicsObject):
         editor.installEventFilter(self)
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(editor)
-        proxy.setGeometry(QRectF(0, 0, max(self.width, 200.0),
-                                 max(self.body_height, 120.0)))
+        # a report card keeps its header visible so you can still see which
+        # node you are typing into; a note has no header to keep
+        top = HEADER_H if self.report_card else 0.0
+        proxy.setGeometry(QRectF(0, top, max(self.width, 200.0),
+                                 max(self.body_height - top, 120.0)))
+        if self._report_proxy is not None:
+            self._report_proxy.hide()   # don't render behind the editor
         self._note_editor = proxy
         self._note_editor_widget = editor
         editor.setFocus()
@@ -513,14 +558,30 @@ class NodeItem(QGraphicsObject):
             proxy.deleteLater()
         finally:
             self._closing_note_edit = False
+        if self._report_proxy is not None:
+            self._report_proxy.show()
         scene = self.scene()
         if commit and scene is not None \
                 and text != self.node.params.get("text", ""):
             from ..commands import SetParamCommand
             scene.undo_stack.push(SetParamCommand(
                 scene.graph, self.node.id, "text", text))
+        elif self.report_card:
+            # cancelled, or nothing changed: no param event is coming, so
+            # put the rendered view back ourselves
+            self.refresh_report()
 
     def eventFilter(self, obj, event) -> bool:
+        if self._report_view is not None and obj in (
+                self._report_view, self._report_view.viewport()):
+            # The rendered view sits in a proxy widget over the card and
+            # swallows mouse events, so NodeItem.mouseDoubleClickEvent never
+            # fires on a report card. Catch it here instead — filtering
+            # rather than making the widget mouse-transparent, which would
+            # also cost scrolling and clickable links.
+            if event.type() == QEvent.MouseButtonDblClick:
+                self.start_note_edit()
+                return True
         if obj is self._note_editor_widget:
             if event.type() == QEvent.FocusOut:
                 self._finish_note_edit(commit=True)
@@ -791,6 +852,10 @@ class NodeItem(QGraphicsObject):
         called from the GUI thread once the engine reports this node done."""
         if self._figure_view is None:
             return
+        # a list is laid out on the grid the node itself declares, so its
+        # card, a tile of it and the PDF all arrange the charts alike
+        from flograph.core.chart_grid import grid_settings
+        self._figure_view.set_grid(*grid_settings(self.node.params))
         if figure is None:
             self._figure_view.clear()
             self._figure_view.hide()
@@ -817,14 +882,79 @@ class NodeItem(QGraphicsObject):
         self._figure_proxy = proxy  # reuses the figure card's resize plumbing
         self._layout_figure_proxy()
 
+    def relayout_figures(self) -> None:
+        """Re-arrange an already-shown list of figures against the node's
+        current grid settings. No-op unless a list is being shown."""
+        from flograph.core.chart_grid import grid_settings
+        view = self._plotly_widget if self.plotly_card else self._figure_view
+        if view is not None and hasattr(view, "set_grid"):
+            view.set_grid(*grid_settings(self.node.params))
+
     def set_plotly_figure(self, figure) -> None:
         """Render a freshly computed plotly figure (or None) into the
         embedded webview — called from the GUI thread once the engine
         reports this node done."""
         if not self.plotly_card:
             return
+        from flograph.core.chart_grid import grid_settings
+        self._plotly_widget.set_grid(*grid_settings(self.node.params))
         self._plotly_widget.set_figure(figure)
         self._plotly_widget.set_zoom(self._card_scale())
+
+    # ----------------------------------------------------------- report card
+
+    def _report_proxy_rect(self) -> QRectF:
+        height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
+        return QRectF(0, HEADER_H, self.width, height)
+
+    def _layout_report_proxy(self) -> None:
+        if self._report_proxy is not None:
+            self._scale_proxy_into(self._report_proxy,
+                                   self._report_proxy_rect())
+
+    def _build_report_widget(self) -> None:
+        from PySide6.QtWidgets import QTextBrowser
+        view = QTextBrowser()
+        view.setOpenExternalLinks(True)
+        view.setStyleSheet(
+            f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
+            f" color: {theme.NODE_TEXT.name()}; border: none;"
+            f" padding: 4px; }}")
+        self._report_view = view
+        view.installEventFilter(self)
+        view.viewport().installEventFilter(self)
+
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(view)
+        self._report_proxy = proxy
+        self._layout_report_proxy()
+        self.refresh_report()
+
+    def refresh_report(self) -> None:
+        """Re-render the card's markdown against whatever is wired in.
+
+        Called on a param edit and after any run — an embed's content lives
+        upstream, so the text staying the same doesn't mean the card does.
+        """
+        if not self.report_card or self._report_view is None:
+            return
+        scene = self.scene()
+        cache = getattr(scene, "output_cache", None) if scene else None
+        body = str(self.node.params.get("text", "") or "")
+        from ..report.render import render_card
+        rendered = render_card(body, scene.graph, cache, self.node.id,
+                               width=int(self.width) - 44) \
+            if scene is not None else None
+        if rendered is None:
+            self._report_view.setMarkdown(body)
+            return
+        # colours come from the card, not the document: a report card is
+        # part of the canvas and has to read against the dark body
+        document = rendered.document
+        document.setDefaultStyleSheet(
+            document.defaultStyleSheet()
+            + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
+        self._report_view.setDocument(document)
 
     # --------------------------------------------------------- table viewer
 
@@ -1211,7 +1341,8 @@ class NodeItem(QGraphicsObject):
                 port.setPos(self.width, self.body_height / 2)
             return
         if self.table or self.figure_card or self.table_viewer \
-                or self.kpi_card or self.slicer or self.control:
+                or self.kpi_card or self.slicer or self.control \
+                or self.report_card:
             self._space_header_ports(self.input_ports.values(), 0)
             self._space_header_ports(self.output_ports.values(), self.width)
             return
@@ -1258,7 +1389,7 @@ class NodeItem(QGraphicsObject):
         visible = not self._flat and self.node.canvas_preview_enabled
         for proxy in (self._note_editor, self._table_proxy, self._figure_proxy,
                       self._table_viewer_proxy, self._slicer_proxy,
-                      self._control_proxy):
+                      self._control_proxy, self._report_proxy):
             if proxy is not None:
                 proxy.setVisible(visible)
 
@@ -1371,7 +1502,7 @@ class NodeItem(QGraphicsObject):
             self._paint_button(painter)
             return
         if self.figure_card or self.table_viewer or self.slicer \
-                or self.control:
+                or self.control or self.report_card:
             self._paint_widget_card(painter)
             if not self.node.canvas_preview_enabled:
                 self._paint_preview_disabled_hint(painter)
@@ -1630,6 +1761,8 @@ class NodeItem(QGraphicsObject):
         if self.table_viewer:
             return (TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W,
                     TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H)
+        if self.report_card:
+            return REPORT_MIN_W, REPORT_MAX_W, REPORT_MIN_H, REPORT_MAX_H
         if self.kpi_card:
             return KPI_MIN_W, KPI_MAX_W, KPI_MIN_H, KPI_MAX_H
         if self.slicer:
@@ -1644,7 +1777,8 @@ class NodeItem(QGraphicsObject):
     def _resizable(self) -> bool:
         return bool(self.note or self.table or self.figure_card
                     or self.table_viewer or self.kpi_card or self.slicer
-                    or self.control or (self.button and self._button_edit))
+                    or self.control or self.report_card
+                    or (self.button and self._button_edit))
 
     def _header_h(self) -> float:
         """Height of the drag bar — the only region a move can start from.
@@ -1820,6 +1954,8 @@ class NodeItem(QGraphicsObject):
                     self._layout_figure_proxy()
                 elif self.table_viewer:
                     self._layout_table_viewer_proxy()
+                elif self.report_card:
+                    self._layout_report_proxy()
                 elif self.slicer:
                     self._layout_slicer_proxy()
                 elif self.control:
@@ -1835,6 +1971,12 @@ class NodeItem(QGraphicsObject):
             event.accept()
             return
         scene = self.scene()
+        if self.report_card and event.pos().y() >= HEADER_H:
+            # body: edit the text in place. The header still renames, and
+            # Edit Code is still on the context menu.
+            self.start_note_edit()
+            event.accept()
+            return
         if (not self.compact and not self.button
                 and event.pos().y() < HEADER_H):
             if scene is not None:
@@ -1866,6 +2008,8 @@ class NodeItem(QGraphicsObject):
                 self._layout_figure_proxy()
             elif self.table_viewer:
                 self._layout_table_viewer_proxy()
+            elif self.report_card:
+                self._layout_report_proxy()
             elif self.slicer:
                 self._layout_slicer_proxy()
             elif self.control:
