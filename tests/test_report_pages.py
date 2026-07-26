@@ -133,7 +133,7 @@ class TestTablesAndValues:
 
 
 class TestInlineMarkdown:
-    """Danny, 2026-07-26: a Python Script returning markdown showed the raw
+    """Reported 2026-07-26: a Python Script returning markdown showed the raw
     string. The string is built inside run(), so Python's indentation is on
     every line — and four spaces in markdown means code block. Markdown was
     behaving correctly; the trap is that the cause is invisible from the
@@ -185,7 +185,7 @@ class TestRendering:
 
     def test_an_indented_string_still_renders_as_markdown(self, env,
                                                           registry):
-        """Danny, 2026-07-26: a Python Script returning markdown showed the
+        """Reported 2026-07-26: a Python Script returning markdown showed the
         raw string instead of headings. The string is built inside run(), so
         Python's own indentation is on every line — and four spaces in
         markdown means code block. Markdown was right; the trap is that the
@@ -231,7 +231,7 @@ class TestRendering:
 
 
 class TestEmbeddingAReportCardOnAPage:
-    """Danny, 2026-07-26: "when i create a report page from a report node it
+    """Reported 2026-07-26: "when i create a report page from a report node it
     shows the text like ![[a]]". A page embedding a report card was inlining
     the card's *source*, because the page resolves one embed, gets a string,
     and a substituted string is not re-scanned. The card's contents are now

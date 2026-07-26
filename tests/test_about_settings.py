@@ -60,7 +60,7 @@ class TestAboutPage:
 
 
 class TestTheSettingsGrid:
-    """Danny, 2026-07-26: "settings is a little cramped now, can we move to
+    """Reported 2026-07-26: "settings is a little cramped now, can we move to
     a table style like we have with properties?" Each page is now a
     two-column grid; the paragraph that used to sit under every control
     became the row's tooltip, so the risk this guards is losing the
@@ -113,7 +113,7 @@ class TestTheSettingsGrid:
             assert dialog.findChild(QWidget, name) is not None, name
 
     def test_the_page_holds_only_settings_no_heading_rows(self, window):
-        """Danny: "when i click display it should only show the display
+        """Reported: "when i click display it should only show the display
         options. they we can remove the headers." The nav tree carries the
         structure now, so a heading inside the page said it twice."""
         _dialog, grid = self.page(window, "Canvas")
@@ -122,7 +122,7 @@ class TestTheSettingsGrid:
                                        "Custom colour strength"]
 
     def test_tooltips_are_wrapped_over_several_lines(self, window):
-        """Danny: "can we have a multi line tooltip? easier to read." Qt
+        """Reported: "can we have a multi line tooltip? easier to read." Qt
         treats a plain string as one unbreakable line, so a paragraph ran
         off the edge of the screen."""
         from flograph.ui.settings_dialog import TOOLTIP_WRAP
@@ -137,7 +137,7 @@ class TestTheSettingsGrid:
                 < TOOLTIP_WRAP + 30
 
     def test_it_opens_without_a_horizontal_scrollbar(self, window):
-        """Danny: "default size of the settings window should be slightly
+        """Reported: "default size of the settings window should be slightly
         wider, so it doesnt imediatly bring up the scroll horizontal bar".
         At 560 the view reckoned its content was 18px wider than its
         viewport — a scrollbar under a dialog with nothing to scroll to."""
@@ -162,7 +162,7 @@ class TestTheSettingsGrid:
 
 
 class TestTheNavTreeAndSearch:
-    """Danny, 2026-07-26: "could maybe add a treeview where the left list is
+    """Reported 2026-07-26: "could maybe add a treeview where the left list is
     and seperate it out that way, may need a search box also to search for
     settings"."""
 

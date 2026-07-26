@@ -1,6 +1,6 @@
 """Card ports: spacing when there are several, and floating name pills.
 
-Danny, 2026-07-26: "on nodes where i specify more than one input, it starts
+Reported 2026-07-26: "on nodes where i specify more than one input, it starts
 to bunch up, so report node as an example has 4 and they are really bunched
 up". They were: four 11px pins spaced 6px apart inside a 26px header, so
 each overlapped its neighbour by 5px — indistinguishable, and a lottery to
@@ -82,7 +82,7 @@ class TestPortsNoLongerBunch:
 
     def test_they_start_in_the_header_however_many_there_are(self, scene,
                                                              registry):
-        """Danny, on the first cut: "when there is one the connector is in
+        """Reported on the first cut: "when there is one the connector is in
         the node header, when there is more than one its in the node body,
         can we always start from the node header". The first pin now lands
         where a single-port card has always put it, so a second input
@@ -100,7 +100,7 @@ class TestPortsNoLongerBunch:
         assert list(item.input_ports.values())[0].pos().y() == HEADER_H / 2
 
     def test_pins_float_clear_of_the_node(self, scene, registry):
-        """Danny: "can we move them so they float a few px outside of the
+        """Reported: "can we move them so they float a few px outside of the
         node and node body? i think this will look cleaner". They used to be
         centred on the edge, so half of every pin was buried under the
         card."""
@@ -128,7 +128,7 @@ class TestPortsNoLongerBunch:
 
     def test_a_node_with_many_inputs_runs_its_pins_onto_the_canvas(
             self, scene, registry):
-        """Danny: "if i have a small node with 20inputs i want it to just
+        """Reported: "if i have a small node with 20inputs i want it to just
         force its way onto the sheet". Compressing to fit is how the pins
         overlapped in the first place — at twenty ports it would be far
         worse. Collapse is the answer to a node that outgrows its card."""
@@ -202,7 +202,7 @@ class TestFloatingPortNames:
 # -------------------------------------------------------- the per-node bit
 
 class TestPerNodeOverride:
-    """Danny: "as well as settings for all nodes, let me right click a node
+    """Reported: "as well as settings for all nodes, let me right click a node
     to show input output labels"."""
 
     def test_a_node_follows_the_canvas_by_default(self, scene, registry):
@@ -259,7 +259,7 @@ class TestPerNodeOverride:
 
 
 class TestCollapsingPorts:
-    """Danny: "we could keep its positioning and add a 'dropdown' toggle
+    """Reported: "we could keep its positioning and add a 'dropdown' toggle
     that collapses all the inputs to a single one in the header. and then i
     can expand and see they spaced out ... by default have everyhting
     expanded"."""
@@ -299,7 +299,7 @@ class TestCollapsingPorts:
 
     def test_the_collapsed_pin_s_label_counts_rather_than_naming(
             self, scene, registry):
-        """Danny: "when collapsing nodes with the labels enabled, it shows
+        """Reported: "when collapsing nodes with the labels enabled, it shows
         the first node name still, this could be confusing". It read as
         though that were the only port there is."""
         graph, sc = scene
@@ -437,7 +437,7 @@ class TestResizingNeedsSomewhereToStoreTheSize:
     ])
     def test_every_shipped_card_can_be_resized(self, scene, registry,
                                                type_id):
-        """Danny: "i cant resize control template at all now?" — the guard
+        """Reported: "i cant resize control template at all now?" — the guard
         was right, but the template was the thing that needed fixing."""
         graph, sc = scene
         node = graph.add_node(registry.instantiate(type_id))
@@ -448,7 +448,7 @@ class TestResizingNeedsSomewhereToStoreTheSize:
 
 
 class TestRenamingAReroute:
-    """Danny: "can we rename routes on double click? similar to how we do
+    """Reported: "can we rename routes on double click? similar to how we do
     with other nodes". A reroute is all dot and no header, so it fell
     through to the header-double-click test and opened its code instead —
     which is of no use to anyone."""
