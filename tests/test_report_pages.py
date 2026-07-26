@@ -14,7 +14,8 @@ from PySide6.QtGui import QUndoStack
 
 from flograph.core import Graph, NodeRegistry, Page
 from flograph.core.report import (find_embeds, format_scalar,
-                                  frame_to_markdown, replace_embeds)
+                                  frame_to_markdown, inline_markdown,
+                                  replace_embeds)
 from flograph.core.serialization import graph_from_dict, graph_to_dict
 from flograph.engine.cache import OutputCache
 from flograph.ui.report.render import render_report
@@ -131,6 +132,41 @@ class TestTablesAndValues:
         assert format_scalar(float("inf")) == "inf"
 
 
+class TestInlineMarkdown:
+    """Danny, 2026-07-26: a Python Script returning markdown showed the raw
+    string. The string is built inside run(), so Python's indentation is on
+    every line — and four spaces in markdown means code block. Markdown was
+    behaving correctly; the trap is that the cause is invisible from the
+    editor, and every user of the "build it from data" path meets it."""
+
+    def test_the_reported_case(self):
+        assert inline_markdown("\n    ## my markdown\n    ") == \
+            "\n## my markdown\n"
+
+    def test_a_flush_string_is_untouched(self):
+        assert inline_markdown("## Findings\n\nUp **12%**.\n") == \
+            "## Findings\n\nUp **12%**.\n"
+
+    def test_relative_indentation_survives(self):
+        """Nested lists are the everyday case — dedenting must shift the
+        whole block, never flatten it."""
+        assert inline_markdown("    - one\n        - nested\n") == \
+            "- one\n    - nested\n"
+
+    def test_a_deliberate_code_block_is_left_alone(self):
+        """Why textwrap.dedent and not inspect.cleandoc: cleandoc measures
+        the margin from every line *but the first*, so flush prose over an
+        indented code block reads as uniformly indented to it and the block
+        would be flattened into prose. dedent takes the common prefix of
+        every line — nothing here — and leaves it be."""
+        text = "Some text\n\n    def foo():\n        pass\n"
+        assert inline_markdown(text) == text
+
+    def test_tabs_and_empty_strings_survive(self):
+        assert inline_markdown("") == ""
+        assert inline_markdown("\t## tabbed\n") == "## tabbed\n"
+
+
 class TestRendering:
 
     def test_a_frame_embed_renders_as_a_table(self, env):
@@ -146,6 +182,21 @@ class TestRendering:
         html = html_of("![[Findings]]", env)
         assert "Findings</" in html          # rendered as a heading
         assert 'font-weight:700;">12%' in html
+
+    def test_an_indented_string_still_renders_as_markdown(self, env,
+                                                          registry):
+        """Danny, 2026-07-26: a Python Script returning markdown showed the
+        raw string instead of headings. The string is built inside run(), so
+        Python's own indentation is on every line — and four spaces in
+        markdown means code block. Markdown was right; the trap is that the
+        cause is invisible from the editor."""
+        graph, cache = env
+        node = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.set_label(node.id, "Indented")
+        cache.set(node.id, {"value": "\n    ## my markdown\n    "}, 0.0)
+        html = html_of("![[Indented]]", env)
+        assert "my markdown</" in html      # a heading, not a code block
+        assert "<pre" not in html
 
     def test_a_figure_embed_becomes_an_image(self, env):
         from matplotlib.figure import Figure
@@ -177,6 +228,116 @@ class TestRendering:
 
     def test_labels_match_case_insensitively(self, env):
         assert "<table" in html_of("![[sALES]]", env)
+
+
+class TestEmbeddingAReportCardOnAPage:
+    """Danny, 2026-07-26: "when i create a report page from a report node it
+    shows the text like ![[a]]". A page embedding a report card was inlining
+    the card's *source*, because the page resolves one embed, gets a string,
+    and a substituted string is not re-scanned. The card's contents are now
+    rendered in place — resolved against the card's own wired inputs, not
+    the page's labels."""
+
+    @pytest.fixture
+    def carded(self, env, registry):
+        graph, cache = env
+        card = graph.add_node(registry.instantiate("flograph.viz.report_card"))
+        graph.set_label(card.id, "Summary")
+        source = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.set_label(source.id, "Feeder")
+        graph.connect(source.id, "value", card.id, "a")
+        cache.set(source.id, {"value": 48250}, 0.0)
+        return graph, cache, card, source
+
+    def test_the_card_s_contents_land_on_the_page(self, carded, env):
+        graph, _cache, card, _source = carded
+        graph.set_param(card.id, "text", "Total was ![[a]].")
+        html = html_of("# Report\n\n![[Summary]]\n", env)
+        assert "48,250" in html
+        assert "![[a]]" not in html
+
+    def test_a_chart_inside_the_card_arrives_as_a_picture(self, carded, env):
+        """The nested render shares the page's resolver, so images collected
+        inside a card are spliced into the page's one document."""
+        from matplotlib.figure import Figure
+        graph, cache, card, source = carded
+        figure = Figure(figsize=(4, 2))
+        figure.add_subplot().plot([1, 2, 3])
+        cache.set(source.id, {"value": figure}, 0.0)
+        graph.set_param(card.id, "text", "![[a]]")
+        assert 'src="embed:0"' in html_of("![[Summary]]", env)
+
+    def test_a_nested_embed_resolves_the_card_s_inputs_first(self, carded,
+                                                             env):
+        """A card embedded on a page still resolves its own inputs first,
+        exactly as it does on the canvas — being embedded must not change
+        what its text means."""
+        graph, _cache, card, _source = carded
+        graph.set_param(card.id, "text", "![[a]] and ![[Sales]]")
+        html = html_of("![[Summary]]", env)
+        assert "48,250" in html     # ![[a]] — the card's own wired input
+        assert "North" in html      # ![[Sales]] — by label, now permitted
+
+    def test_a_card_input_still_beats_a_page_node_of_the_same_name(
+            self, carded, env, registry):
+        """The priority rule, checked from inside a page embed too: a name
+        that is one of the card's inputs resolves as that input even when a
+        node on the canvas answers to it."""
+        graph, cache, card, _source = carded
+        twin = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.set_label(twin.id, "a")
+        cache.set(twin.id, {"value": 999}, 0.0)
+        graph.set_param(card.id, "text", "![[a]]")
+        html = html_of("![[Summary]]", env)
+        assert "48,250" in html and "999" not in html
+
+    def test_text_after_the_embed_resolves_against_the_page_again(
+            self, carded, env):
+        """The lookup swap has to be put back, or everything following an
+        embedded card would resolve against that card's inputs."""
+        graph, _cache, card, _source = carded
+        graph.set_param(card.id, "text", "![[a]]")
+        html = html_of("![[Summary]]\n\nAnd ![[Total]].", env)
+        assert "48,250" in html and "3,500" in html
+
+    def test_a_card_wired_into_a_card_renders_its_contents(self, carded, env,
+                                                           registry):
+        """One level in: `![[b]]` on a card, where b is fed by another report
+        card, shows that card's contents rather than its source."""
+        from flograph.ui.report.render import render_card
+        graph, cache, card, source = carded
+        inner = graph.add_node(registry.instantiate("flograph.viz.report_card"))
+        graph.set_param(inner.id, "text", "inner says ![[a]]")
+        graph.connect(source.id, "value", inner.id, "a")
+        graph.connect(inner.id, "text", card.id, "b")
+        html = render_card("![[b]]", graph, cache, card.id).document.toHtml()
+        assert "inner says" in html and "48,250" in html
+
+    def test_nesting_stops_at_a_sane_depth(self, env, registry):
+        """Wires are acyclic so this can't run away, but a single ![[...]]
+        should still have a bound on how much it can pull in."""
+        from flograph.ui.report.render import _Resolver, render_card
+        graph, cache = env
+        cards = [graph.add_node(registry.instantiate("flograph.viz.report_card"))
+                 for _ in range(_Resolver.MAX_DEPTH + 2)]
+        for outer, inner in zip(cards, cards[1:]):
+            graph.connect(inner.id, "text", outer.id, "a")
+            graph.set_param(outer.id, "text", "![[a]]")
+        graph.set_param(cards[-1].id, "text", "the bottom")
+        rendered = render_card("![[a]]", graph, cache, cards[0].id)
+        assert any("nests reports" in p for p in rendered.problems)
+
+    def test_a_plain_string_node_is_still_inlined_as_before(self, env):
+        """Only report *cards* nest. An ordinary node returning markdown is
+        inlined verbatim — it has no inputs to resolve embeds against."""
+        assert "Findings</" in html_of("![[Findings]]", env)
+
+    def test_two_cards_of_the_same_name_still_complain(self, carded, env,
+                                                       registry):
+        graph, _cache, _card, _source = carded
+        twin = graph.add_node(registry.instantiate("flograph.viz.report_card"))
+        graph.set_label(twin.id, "Summary")
+        assert "2 nodes are called" in html_of("![[Summary]]", env)
 
 
 class TestWhenAnEmbedFails:

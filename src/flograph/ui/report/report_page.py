@@ -208,30 +208,14 @@ class ReportPage(QWidget):
     # ----------------------------------------------------------- insert menu
 
     def embeddable_nodes(self) -> list:
-        """Nodes worth offering: everything that has produced something.
-
-        Read from the cache rather than the graph, because an embed of a
-        node that has never run renders as a warning — offering those would
-        be offering to write a hole into the report.
-        """
-        cache = self._engine.cache
-        return sorted((node for node in self._graph.nodes.values()
-                       if cache.get(node.id) is not None
-                       and cache.get(node.id).outputs),
-                      key=lambda n: n.label.casefold())
+        """Nodes worth offering here — shared with the Report card's own
+        insert menu, so the two offer the same things."""
+        from .render import embeddable_nodes
+        return embeddable_nodes(self._graph, self._engine.cache)
 
     def duplicate_labels(self) -> set:
-        """Casefolded labels that more than one node carries.
-
-        Embeds resolve by label, so such a name is a question with no
-        answer — nothing but a rename can settle it. The insert menu greys
-        those out and the renderer refuses to guess.
-        """
-        seen: dict[str, int] = {}
-        for node in self._graph.nodes.values():
-            key = node.label.casefold()
-            seen[key] = seen.get(key, 0) + 1
-        return {label for label, count in seen.items() if count > 1}
+        from .render import duplicate_labels
+        return duplicate_labels(self._graph)
 
     def _show_insert_menu(self) -> None:
         menu = QMenu(self)
@@ -258,9 +242,9 @@ class ReportPage(QWidget):
         """Drop an embed at the cursor, on its own line — an embed sharing a
         line with a paragraph would render inline, which is almost never
         what someone picking a chart from a menu means."""
+        from .render import embed_line
         cursor = self.editor.textCursor()
-        prefix = "" if cursor.atBlockStart() else "\n\n"
-        cursor.insertText(f"{prefix}![[{label}]]\n")
+        cursor.insertText(embed_line(label, cursor.atBlockStart()))
         self.editor.setTextCursor(cursor)
         self.editor.setFocus()
 

@@ -27,8 +27,8 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QImage, QTextDocument
 
 from flograph.core.report import (IMAGE_TOKEN, format_scalar,
-                                  frame_to_markdown, missing_embed,
-                                  replace_embeds, unrun_embed)
+                                  frame_to_markdown, inline_markdown,
+                                  missing_embed, replace_embeds, unrun_embed)
 
 # Default rendered width of an embedded figure, in points: the printable
 # width of A4 portrait at the margins export.py uses (210mm - 2x15mm).
@@ -137,6 +137,113 @@ def _plotly_note(value) -> "str | None":
     return image   # bytes; the caller turns it into a QImage
 
 
+def _labelled(graph, ref: str) -> list:
+    """Every node whose label matches `ref`, case-insensitively."""
+    wanted = ref.strip().casefold()
+    return [n for n in graph.nodes.values() if n.label.casefold() == wanted]
+
+
+def embeddable_nodes(graph, cache) -> list:
+    """Nodes worth offering in an insert menu: everything that has produced
+    something, by label.
+
+    Read from the cache rather than the graph, because an embed of a node
+    that has never run renders as a warning — offering those would be
+    offering to write a hole into the report.
+    """
+    if cache is None:
+        return []
+    return sorted((node for node in graph.nodes.values()
+                   if cache.get(node.id) is not None
+                   and cache.get(node.id).outputs),
+                  key=lambda n: n.label.casefold())
+
+
+def duplicate_labels(graph) -> set:
+    """Casefolded labels that more than one node carries.
+
+    Embeds resolve by label, so such a name is a question with no answer —
+    nothing but a rename can settle it. Insert menus grey those out and the
+    renderer refuses to guess.
+    """
+    seen: dict[str, int] = {}
+    for node in graph.nodes.values():
+        key = node.label.casefold()
+        seen[key] = seen.get(key, 0) + 1
+    return {label for label, count in seen.items() if count > 1}
+
+
+def embed_line(label: str, at_block_start: bool) -> str:
+    """The text an insert menu drops in: an embed on a line of its own.
+
+    Sharing a line with a paragraph renders it inline, which is almost
+    never what someone picking a chart from a menu means.
+    """
+    return ("" if at_block_start else "\n\n") + f"![[{label}]]\n"
+
+
+def report_body(node) -> "str | None":
+    """A report card's markdown body, or None if `node` isn't one.
+
+    Checked off the card marker in the node's own source, which travels
+    with a fork, rather than the legacy type_id map — the report card
+    postdates the marker, so there is no old id to fall back to.
+    """
+    if node is None or getattr(node.spec, "card", None) != "report":
+        return None
+    return str(node.params.get("text", "") or "")
+
+
+def nested_by_label(graph, cache):
+    """For a page: when an embed names a report *card*, hand back what it
+    takes to render that card here — its body, and the lookups that resolve
+    the card's own `![[a]]` against its own wired inputs.
+
+    Without this a page embedding a report node showed the card's raw
+    markdown, `![[a]]` and all: the page resolved one embed, got a string
+    back, and a substituted string is not re-scanned (nor should it be —
+    that would let any node inject embeds into a page it isn't part of).
+    Going through the card's own lookup is what keeps the page honest: the
+    nested embeds still name *the card's* inputs, not the page's labels.
+    """
+    def find(ref: str, port: str):
+        matches = _labelled(graph, ref)
+        if len(matches) != 1:
+            return None            # missing or ambiguous: by_label complains
+        body = report_body(matches[0])
+        if body is None:
+            return None
+        node_id = matches[0].id
+        return (body, by_wired_input(graph, cache, node_id),
+                params_by_wired_input(graph, node_id))
+    return find
+
+
+def nested_by_wired_input(graph, cache, node_id: str):
+    """The same, one level in: a report card that names another report card
+    renders its contents rather than its source.
+
+    Follows the same order as by_wired_input — a wired input first, then a
+    node of that label — so both ways of naming a card nest identically.
+    """
+    def find(ref: str, port: str):
+        name = (port or ref).strip()
+        node = graph.nodes.get(node_id)
+        source = None
+        if node is not None and name in {p.name for p in node.spec.inputs}:
+            conn = graph.input_connection(node_id, name)
+            source = graph.nodes.get(conn.src_node) if conn else None
+        else:
+            matches = _labelled(graph, ref)
+            source = matches[0] if len(matches) == 1 else None
+        body = report_body(source)
+        if body is None:
+            return None
+        return (body, by_wired_input(graph, cache, source.id),
+                params_by_wired_input(graph, source.id))
+    return find
+
+
 def by_label(graph, cache):
     """Lookup for a report *page*: embeds name a node by its label.
 
@@ -149,9 +256,7 @@ def by_label(graph, cache):
     by_wired_input.
     """
     def lookup(ref: str, port: str):
-        wanted = ref.strip().casefold()
-        matches = [n for n in graph.nodes.values()
-                   if n.label.casefold() == wanted]
+        matches = _labelled(graph, ref)
         if not matches:
             return None, missing_embed(ref), f"no node called “{ref}”"
         if len(matches) > 1:
@@ -173,13 +278,22 @@ def by_label(graph, cache):
 
 
 def by_wired_input(graph, cache, node_id: str):
-    """Lookup for a report *card*: embeds name one of the node's own inputs.
+    """Lookup for a report *card*: embeds name one of the node's own inputs,
+    falling back to naming any node on the canvas by its label.
 
-    A card lives inside the flow, so it must not reach across the graph the
-    way a page does — a dependency the scheduler can't see wouldn't re-run
-    when its source changed, and wouldn't be ordered after it. Naming your
-    own wired inputs keeps the dependency real, visible on the canvas, and
-    correct on every run.
+    Wired inputs come first, and a name that is an input port always
+    resolves as one — even when unwired, where it reports that rather than
+    quietly finding a node of the same name. Unplugging a wire must not
+    silently swap the source of a paragraph.
+
+    The label fallback is a convenience with a real cost, and it is worth
+    knowing which you are using. An input is a dependency the scheduler can
+    see: it orders the card after its source and shows the relationship on
+    the canvas as a wire. A label is neither — a partial run (Run To This
+    Node) can leave a label embed with nothing to show, and nothing on the
+    canvas says where the value came from. The card's display refreshes
+    after every full run, so in ordinary use the difference is invisible,
+    which is exactly why it is written down here.
     """
     def lookup(ref: str, port: str):
         name = (port or ref).strip()
@@ -187,9 +301,7 @@ def by_wired_input(graph, cache, node_id: str):
         if node is None:
             return None, missing_embed(ref), f"no node for “{ref}”"
         if name not in {p.name for p in node.spec.inputs}:
-            return None, (f"> **⚠ No input called “{name}”** — wire it up, or "
-                          "edit the node's code to add the port."), \
-                f"no input called “{name}”"
+            return by_label(graph, cache)(ref, port)
         conn = graph.input_connection(node_id, name)
         if conn is None:
             return None, (f"> **⚠ Nothing wired into “{name}”** — connect "
@@ -208,8 +320,13 @@ class _Resolver:
     passed in — see by_label and by_wired_input."""
 
     def __init__(self, lookup, image_scale: float = 1.0,
-                 image_width: int = FIGURE_WIDTH, params=None) -> None:
+                 image_width: int = FIGURE_WIDTH, params=None,
+                 nested=None) -> None:
         self._lookup = lookup
+        # (ref, port) -> (body, lookup, params) when the embed names a report
+        # card, so its contents are rendered here instead of its source text.
+        self._nested = nested
+        self._depth = 0
         # (ref) -> the producing node's params, so a list embed can be laid
         # out on the grid that node configured. None = no grid settings.
         self._params = params
@@ -231,6 +348,9 @@ class _Resolver:
         return IMAGE_TOKEN.format(len(self.images) - 1)
 
     def render(self, embed) -> str:
+        nested = self._nested(embed.ref, embed.port) if self._nested else None
+        if nested is not None:
+            return self._render_nested(embed.ref, *nested)
         value, failure, problem = self._lookup(embed.ref, embed.port)
         if failure:
             self.problems.append(problem)
@@ -239,6 +359,36 @@ class _Resolver:
         # its charts are arranged the same on paper as on its own card
         self._grid = self._grid_for(embed)
         return self.render_value(value, embed.ref)
+
+    #: How many report cards deep an embed may go. Wires are acyclic, so
+    #: this can't actually run away — it is a guard against a graph state
+    #: nobody has thought of, and a bound on how much a single `![[...]]`
+    #: can pull into a page.
+    MAX_DEPTH = 5
+
+    def _render_nested(self, ref: str, body: str, lookup, params) -> str:
+        """Render a report card's body in place, on *this* resolver.
+
+        Reusing self rather than building a second one is the whole trick:
+        images are collected in one list and spliced into one document, so a
+        chart inside an embedded card arrives on the page like any other.
+        Only the lookup and params are swapped, and put back afterwards —
+        the nested embeds must resolve against the card's inputs, and
+        everything after it in the body against the page again.
+        """
+        if self._depth >= self.MAX_DEPTH:
+            self.problems.append(f"“{ref}” nests reports more than "
+                                 f"{self.MAX_DEPTH} deep")
+            return (f"> **⚠ “{ref}” nests reports too deeply** — a report "
+                    "card embedding another, more than "
+                    f"{self.MAX_DEPTH} levels down.")
+        was = (self._lookup, self._params, self._depth)
+        self._lookup, self._params = lookup, params
+        self._depth += 1
+        try:
+            return replace_embeds(body, self.render)
+        finally:
+            self._lookup, self._params, self._depth = was
 
     def _grid_for(self, embed) -> tuple:
         from flograph.core.chart_grid import grid_settings
@@ -339,9 +489,11 @@ class _Resolver:
 
         # A plain string is inlined *as markdown*, which is what makes a
         # report writable by the flow: a node that returns prose, headings
-        # and tables drops straight in.
+        # and tables drops straight in. Dedented on the way — the string was
+        # built inside run(), so Python's indentation is on every line, and
+        # four spaces in markdown is a code block (see inline_markdown).
         if isinstance(value, str):
-            return value
+            return inline_markdown(value)
 
         pd = sys.modules.get("pandas")
         if pd is not None and isinstance(value, (pd.DataFrame, pd.Series)):
@@ -363,19 +515,31 @@ def params_by_label(graph):
 
 
 def params_by_wired_input(graph, node_id: str):
-    """The params of whatever feeds this card's named input."""
+    """The params of whatever an embed on this card names — the node feeding
+    the input, or the node of that label. Same order as by_wired_input, so a
+    chart grid is laid out from its own node's settings either way."""
     def lookup(ref: str):
-        conn = graph.input_connection(node_id, ref.strip())
-        source = graph.nodes.get(conn.src_node) if conn else None
-        return source.params if source is not None else None
+        name = ref.strip()
+        node = graph.nodes.get(node_id)
+        if node is not None and name in {p.name for p in node.spec.inputs}:
+            conn = graph.input_connection(node_id, name)
+            source = graph.nodes.get(conn.src_node) if conn else None
+            return source.params if source is not None else None
+        matches = _labelled(graph, ref)
+        return matches[0].params if len(matches) == 1 else None
     return lookup
 
 
 def render_report(body: str, graph, cache,
                   image_scale: float = 1.0) -> RenderedReport:
-    """A report *page*: embeds name nodes by label."""
+    """A report *page*: embeds name nodes by label.
+
+    Naming a report *card* renders that card's contents onto the page —
+    charts, tables and all — rather than reproducing its source markdown.
+    """
     return render_body(body, by_label(graph, cache), image_scale=image_scale,
-                       params=params_by_label(graph))
+                       params=params_by_label(graph),
+                       nested=nested_by_label(graph, cache))
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -388,13 +552,15 @@ def render_card(body: str, graph, cache, node_id: str,
     """
     return render_body(body, by_wired_input(graph, cache, node_id),
                        image_width=width or FIGURE_WIDTH,
-                       params=params_by_wired_input(graph, node_id))
+                       params=params_by_wired_input(graph, node_id),
+                       nested=nested_by_wired_input(graph, cache, node_id))
 
 
 def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
-                image_scale: float = 1.0, params=None) -> RenderedReport:
+                image_scale: float = 1.0, params=None,
+                nested=None) -> RenderedReport:
     """Lay a report body out as a document ready to show or print."""
-    resolver = _Resolver(lookup, image_scale, image_width, params)
+    resolver = _Resolver(lookup, image_scale, image_width, params, nested)
     resolved = replace_embeds(body, resolver.render)
 
     staged = QTextDocument()
