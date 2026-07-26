@@ -35,8 +35,11 @@
    get. Today the preview and the PDF are literally the same QTextDocument
    so they cannot disagree; with a browser round trip the preview becomes an
    approximation and "open in browser" becomes the real preview.
-   Related: idea 21 below — same "open it in a browser" plumbing.
+   Groundwork already done 2026-07-26 by idea 21 (now shipped): the HTML
+   coercion lives in flograph/core/html.py (Qt-free), and flograph/ui/
+   browser.py writes a named page to a session temp dir and hands it to the
+   desktop. A report's HTML export only has to produce the document — the
+   "get it into a browser" half exists and is tested.
 3. restore crashed workflows from undo history? how possible is this? 
 7. right click nodes - deactivate.
 20. node context option "Lock Node" this locks the node and retains its value on run all, does this work with cache? and on reopen, will it retain the value?
-21. "open in browser" button for html nodes.

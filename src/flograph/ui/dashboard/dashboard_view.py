@@ -15,6 +15,7 @@ from typing import Optional
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QKeyEvent
+from PySide6.QtWidgets import QMenu
 
 from ..canvas.base_view import ZoomPanGraphicsView
 from ..canvas.stacking import add_layer_menu, layer_action_for
@@ -152,7 +153,6 @@ class DashboardView(ZoomPanGraphicsView):
         first (adding to the selection when Ctrl or Shift is held), so the
         menu always acts on what the user is looking at — and a right-click
         on an Action Button still can't fire it."""
-        from PySide6.QtWidgets import QMenu
         item = self._tile_at(event.pos())
         if item is None or self._fs_tile is not None:
             super().contextMenuEvent(event)
@@ -163,10 +163,32 @@ class DashboardView(ZoomPanGraphicsView):
             item.setSelected(True)
         menu = QMenu(self)
         layer_actions = add_layer_menu(menu)
+        browser_action = None
+        node = self._browsable_node(item)
+        if node is not None:
+            menu.addSeparator()
+            browser_action = menu.addAction("Open in Browser")
         chosen = menu.exec(event.globalPos())
         if chosen in layer_actions:
             self.scene().restack_selection(layer_actions[chosen])
+        elif browser_action is not None and chosen is browser_action:
+            from ..browser import open_node_from
+            scene = self.scene()
+            open_node_from(self, node, scene.engine.cache.get(node.id))
         event.accept()
+
+    def _browsable_node(self, item: TileItem):
+        """The node behind a webview tile that has something to open, else
+        None. A dashboard is where the tile is *smallest*, so handing the
+        page to a full browser window matters more here than on the canvas."""
+        from ..browser import can_open
+        from ..canvas.node_item import card_kind
+        scene = self.scene()
+        node = scene.graph.nodes.get(item.tile.node_id)
+        if node is None or card_kind(node) != "webview":
+            return None
+        entry = scene.engine.cache.get(node.id)
+        return node if can_open(node, entry) else None
 
     def _tile_at(self, pos) -> Optional[TileItem]:
         for item in self.items(pos):
