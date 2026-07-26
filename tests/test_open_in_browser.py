@@ -247,7 +247,7 @@ class TestOpening:
 
 
 class TestRefreshingAnOpenTab:
-    """Danny, 2026-07-26: "when i refresh the webpage ... and change the
+    """Reported 2026-07-26: "when i refresh the webpage ... and change the
     data, rerun the flow, it doesnt refresh to the same as the canvas."
 
     A stable path is not enough on its own — something has to rewrite the

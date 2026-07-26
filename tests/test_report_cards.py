@@ -215,7 +215,7 @@ class TestTheReportCard:
         assert all(f'src="embed:{i}"' in html for i in range(2))
 
     def test_an_indented_markdown_string_renders_as_markdown(self, env):
-        """Where Danny hit it (2026-07-26): a Python Script building its
+        """Where it turned up (2026-07-26): a Python Script building its
         markdown inside run() hands over Python's indentation on every line,
         and four spaces in markdown is a code block. The card resolves
         embeds through the same renderer as a page, so the dedent covers
@@ -241,7 +241,7 @@ class TestTheReportCard:
         assert "no node called" in self.html(env).casefold()
 
     def test_it_can_also_name_any_node_by_label(self, env):
-        """Danny, 2026-07-26: "i do like the idea of being able to call any
+        """Reported 2026-07-26: "i do like the idea of being able to call any
         node into the report canvas node aswell, can we enable this?"
 
         The trade-off is real and deliberate — a label is a dependency the
@@ -255,7 +255,7 @@ class TestTheReportCard:
         assert 'src="embed:0"' in self.html(env)
 
     def test_a_wired_input_wins_over_a_node_of_the_same_name(self, env):
-        """Danny's priority rule: "if a input abel and a node name match
+        """The priority rule: "if a input abel and a node name match
         then we should pick the input node as priority"."""
         graph, _scene, report = env
         # a *different* node now also answers to "b", the wired input's name
@@ -524,7 +524,7 @@ class TestEditingACardInPlace:
 
 
 class TestTheEditorContextMenu:
-    """Danny, 2026-07-26: "context menu on editmode of report node, for
+    """Reported 2026-07-26: "context menu on editmode of report node, for
     somthing like add -> list of addable items from canvas. and maybe a copy
     and paste option while we are there."
 
@@ -617,7 +617,7 @@ class TestTheEditorContextMenu:
         assert editor.toPlainText() == "Some prose.\n\n![[Revenue]]\n"
 
     def test_opening_the_menu_does_not_end_edit_mode(self, editing):
-        """Danny, 2026-07-26: "when i edit the node, and right click it just
+        """Reported 2026-07-26: "when i edit the node, and right click it just
         ends edit mode". The editor commits on focus-out, and a popup takes
         focus while it is up — so the menu closed the editor out from under
         itself and never appeared."""

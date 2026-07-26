@@ -26,7 +26,7 @@
      - browser print-to-PDF beats Qt for anything designed
    Shape:
      - a Jinja template the user can replace, plus a code node that injects
-       CSS (Danny's idea — fits how the rest of flograph works)
+       CSS (fits how the rest of flograph works)
      - "Export HTML" + "Open in browser" buttons on a report page
      - the embed resolver already produces the right intermediate (values
        keyed by ref); only the *rendering* forks

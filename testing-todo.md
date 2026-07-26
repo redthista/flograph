@@ -1,4 +1,4 @@
-# Danny's testing to-do
+# Testing to-do
 
 Manual test passes waiting to be run in the app. Tick a line when it
 behaves. Anything that misbehaves — note it under the item rather than
@@ -64,7 +64,7 @@ card lines that were never run.
       charts.
 - [ ] A Report tile **does** show STALE when its node is dirty. That's
       deliberate (its embeds come from upstream, unlike a Table tile) but it
-      means a text-only edit shows STALE too. Tell me if that's annoying.
+      means a text-only edit shows STALE too. Revisit if that grates.
 
 ---
 

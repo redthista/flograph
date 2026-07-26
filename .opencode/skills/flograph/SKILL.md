@@ -11,10 +11,8 @@ infinite QGraphicsView Blueprint-style editor.
 
 ## Project root
 
-```
-/home/dc/PycharmProjects/PythonProject/flopy/
-```
-The folder is named `flopy` (legacy) but the package is `flograph`.
+The checkout directory itself — every path below is relative to it. The
+folder is named `flopy` (legacy) but the package is `flograph`.
 
 ## Key files
 
