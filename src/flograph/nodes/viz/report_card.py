@@ -15,12 +15,20 @@ Code) and change the `inputs` list — `("summary", "any", {"optional": True})`
 gives you `![[summary]]`. Rename them to whatever the report is about; the
 embed follows the port name.
 
-Wired inputs rather than naming nodes across the graph, on purpose: this
-card lives *in* the flow, so its dependencies have to be ones the scheduler
-can see. Wire it up and it re-runs when its sources change, in the right
-order, and the wires show on the canvas what the report is built from. (A
-report *page* — the "+" button at the bottom — is outside the flow and does
-name nodes directly, because there it's a view, not a step.)
+You can also name **any node on the canvas by its label**:
+
+    ![[Sales Chart]]    that node's output, wherever it is
+
+If a name is both one of this node's inputs and a node's label, the **input
+wins** — so unplugging a wire reports that, rather than quietly swapping the
+paragraph to some other node that happens to share the name.
+
+Prefer wires where it matters. An input is a dependency the scheduler can
+see: it orders this card after its source, re-runs when that source changes,
+and shows on the canvas what the report is built from. A label is none of
+those — handy for pulling in a number from across a big graph, but a partial
+run (Run To This Node) can leave it with nothing to show, and nothing on the
+canvas says where the value came from.
 
 What each embed becomes depends on what arrives: a chart is placed as a
 picture, a table as a table, a number inline in your sentence, and a plain

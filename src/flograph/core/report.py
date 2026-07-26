@@ -107,6 +107,41 @@ def format_scalar(value) -> str:
     return str(value)
 
 
+def inline_markdown(text: str) -> str:
+    """A node's string output, ready to drop into a report body.
+
+    The one thing this does is remove the indentation Python put there. A
+    node builds its markdown inside `run()`, so the natural way to write it
+
+        def run(ctx):
+            return '''
+            ## Summary
+            '''
+
+    hands us four spaces on every line — and four spaces in markdown means
+    *code block*, so the heading came out as literal text. Every user
+    writing the "build the report from data" path hits this, and the cause
+    is invisible: the string looks right in the editor and wrong on the
+    page.
+
+    textwrap.dedent, deliberately, and not inspect.cleandoc. cleandoc also
+    handles the case where the first line is flush and the rest are
+    indented, but it computes the margin from the *remaining* lines only —
+    so prose followed by a genuinely indented code block
+
+        Some text
+
+            def foo(): ...
+
+    has a margin of four by its reckoning, and cleandoc would strip the
+    code block's indentation and turn it into prose. dedent takes the
+    common prefix of every line, which is nothing here, and leaves it
+    alone. Fixing the common case must not break the deliberate one.
+    """
+    import textwrap
+    return textwrap.dedent(text)
+
+
 def frame_to_markdown(frame, max_rows: int = 30) -> str:
     """A DataFrame (or Series) as a markdown table.
 

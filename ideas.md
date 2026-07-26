@@ -43,3 +43,6 @@
 3. restore crashed workflows from undo history? how possible is this? 
 7. right click nodes - deactivate.
 20. node context option "Lock Node" this locks the node and retains its value on run all, does this work with cache? and on reopen, will it retain the value?
+21. Report node - export to pdf on nodes context menu and show in browser? 
+22. system mem and file mem: node mem: are these all the ram thats being used for this? can we have cache size, total app ram usage. maybe we can have a colored bar added that represents the system ram, the amount of ram this app is using, and the amount of ram the currrent selected node is using out of that. so one bar, colors layered over, and tooltip on hover? 
+23. 

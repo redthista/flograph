@@ -168,6 +168,14 @@ class TestChartPerValue:
         assert len(out["figures"]) == 3
 
 
+def _constant(graph):
+    """A bare Constant node, for standing in as a same-named decoy."""
+    from flograph.core import NodeRegistry
+    reg = NodeRegistry()
+    reg.load_builtins()
+    return reg.instantiate("flograph.util.constant")
+
+
 class TestTheReportCard:
 
     @pytest.fixture
@@ -206,26 +214,65 @@ class TestTheReportCard:
         html = self.html(env)
         assert all(f'src="embed:{i}"' in html for i in range(2))
 
+    def test_an_indented_markdown_string_renders_as_markdown(self, env):
+        """Where Danny hit it (2026-07-26): a Python Script building its
+        markdown inside run() hands over Python's indentation on every line,
+        and four spaces in markdown is a code block. The card resolves
+        embeds through the same renderer as a page, so the dedent covers
+        both — this pins that they don't drift apart."""
+        graph, _scene, report = env
+        total = next(c.src_node for c in graph.connections.values()
+                     if c.dst_port == "b")
+        _scene.output_cache.set(total, {"value": "\n    ## my markdown\n    "},
+                                0.0)
+        graph.set_param(report.id, "text", "![[b]]")
+        html = self.html(env)
+        assert "my markdown</" in html
+        assert "## my markdown" not in html   # not left as literal text
+
     def test_an_unwired_input_says_to_wire_it(self, env):
         graph, _scene, report = env
         graph.set_param(report.id, "text", "![[c]]")
         assert "Nothing wired into" in self.html(env)
 
-    def test_an_input_that_does_not_exist_says_so(self, env):
+    def test_a_name_that_is_neither_an_input_nor_a_node_says_so(self, env):
         graph, _scene, report = env
         graph.set_param(report.id, "text", "![[zzz]]")
-        assert "No input called" in self.html(env)
+        assert "no node called" in self.html(env).casefold()
 
-    def test_it_cannot_reach_across_the_graph(self, env):
-        """The point of using wired inputs: naming another node by label
-        must NOT resolve. A card that pulled a value from anywhere in the
-        graph would depend on something the scheduler can't see, so it
-        wouldn't re-run when that node changed or be ordered after it."""
+    def test_it_can_also_name_any_node_by_label(self, env):
+        """Danny, 2026-07-26: "i do like the idea of being able to call any
+        node into the report canvas node aswell, can we enable this?"
+
+        The trade-off is real and deliberate — a label is a dependency the
+        scheduler cannot see, so it neither orders the card after that node
+        nor shows on the canvas as a wire. Wires stay the honest option;
+        this is the convenient one."""
         graph, _scene, report = env
         chart_id = next(n for n in graph.nodes if n != report.id)
         graph.set_label(chart_id, "Chart Node")
         graph.set_param(report.id, "text", "![[Chart Node]]")
-        assert "No input called" in self.html(env)
+        assert 'src="embed:0"' in self.html(env)
+
+    def test_a_wired_input_wins_over_a_node_of_the_same_name(self, env):
+        """Danny's priority rule: "if a input abel and a node name match
+        then we should pick the input node as priority"."""
+        graph, _scene, report = env
+        # a *different* node now also answers to "b", the wired input's name
+        decoy = graph.add_node(_constant(graph))
+        graph.set_label(decoy.id, "b")
+        graph.set_param(report.id, "text", "![[b]]")
+        assert "48,250" in self.html(env)      # the wired input, not the decoy
+
+    def test_an_unwired_input_reports_itself_rather_than_finding_a_node(
+            self, env):
+        """Unplugging a wire must not silently swap the source of a
+        paragraph to whatever node happens to share the port's name."""
+        graph, _scene, report = env
+        decoy = graph.add_node(_constant(graph))
+        graph.set_label(decoy.id, "c")
+        graph.set_param(report.id, "text", "![[c]]")
+        assert "Nothing wired into" in self.html(env)
 
     def test_widening_the_card_widens_its_charts(self, env):
         """Qt rich text has no percentage image sizing, so a chart drawn at
@@ -474,3 +521,142 @@ class TestEditingACardInPlace:
         item = scene.node_items[node.id]
         item.start_note_edit()
         assert item._note_editor is None
+
+
+class TestTheEditorContextMenu:
+    """Danny, 2026-07-26: "context menu on editmode of report node, for
+    somthing like add -> list of addable items from canvas. and maybe a copy
+    and paste option while we are there."
+
+    A report page has a toolbar button for this; a card has no room for one,
+    and the embed syntax is the one thing about a report card you cannot
+    guess — so it lives where you are typing."""
+
+    @pytest.fixture
+    def editing(self, qtbot, registry):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.engine.cache import OutputCache
+        from flograph.ui.canvas import NodeGraphScene
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        scene.output_cache = OutputCache()
+        card = graph.add_node(registry.instantiate("flograph.viz.report_card"))
+        wired = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.set_label(wired.id, "Revenue")
+        graph.connect(wired.id, "value", card.id, "a")
+        scene.output_cache.set(wired.id, {"value": 42}, 0.0)
+        item = scene.node_items[card.id]
+        item.start_note_edit()
+        return graph, scene, item
+
+    def menu(self, item):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu()
+        return menu, item.add_insert_menu(menu)
+
+    def entries(self, menu):
+        """(text, enabled) for everything in the Insert submenu."""
+        submenu = next(a.menu() for a in menu.actions()
+                       if a.menu() is not None and a.text() == "Insert")
+        return [(a.text(), a.isEnabled()) for a in submenu.actions()
+                if not a.isSeparator()]
+
+    def test_the_editor_offers_the_standard_copy_and_paste(self, editing):
+        """The "copy and paste option while we are there" — Qt's own menu
+        already carries them, so the job is to build on it rather than
+        replace it."""
+        _graph, _scene, item = editing
+        editor = item._note_editor_widget
+        standard = [a.text() for a in editor.createStandardContextMenu().actions()]
+        # "&" are keyboard mnemonics — Qt writes Cut as "cu&t"
+        joined = " ".join(standard).casefold().replace("&", "")
+        for wanted in ("copy", "paste", "cut", "undo"):
+            assert wanted in joined
+
+    def test_wired_inputs_come_first(self, editing):
+        _graph, _scene, item = editing
+        menu, _actions = self.menu(item)
+        assert self.entries(menu)[0] == ("a", True)
+
+    def test_an_unwired_input_is_listed_but_disabled(self, editing):
+        """Seeing that `c` exists and has nothing in it is the useful part;
+        omitting it would leave you wondering."""
+        _graph, _scene, item = editing
+        menu, _actions = self.menu(item)
+        assert ("c  — nothing wired in", False) in self.entries(menu)
+
+    def test_nodes_that_have_run_are_offered_by_label(self, editing):
+        _graph, _scene, item = editing
+        menu, _actions = self.menu(item)
+        assert ("Revenue", True) in self.entries(menu)
+
+    def test_it_does_not_offer_the_card_itself(self, editing):
+        graph, scene, item = editing
+        scene.output_cache.set(item.node.id, {"text": "hi"}, 0.0)
+        menu, _actions = self.menu(item)
+        assert all(text != item.node.label for text, _on in self.entries(menu))
+
+    def test_a_duplicate_label_is_disabled(self, editing):
+        graph, _scene, item = editing
+        twin = graph.add_node(
+            _constant(graph))
+        graph.set_label(twin.id, "Revenue")
+        menu, _actions = self.menu(item)
+        labels = dict(self.entries(menu))
+        assert labels.get("Revenue  — duplicate name, rename one first") is False
+
+    def test_choosing_one_writes_the_embed_on_its_own_line(self, editing):
+        _graph, _scene, item = editing
+        editor = item._note_editor_widget
+        editor.setPlainText("Some prose.")
+        cursor = editor.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        editor.setTextCursor(cursor)
+        editor.insert_embed("Revenue")
+        assert editor.toPlainText() == "Some prose.\n\n![[Revenue]]\n"
+
+    def test_opening_the_menu_does_not_end_edit_mode(self, editing):
+        """Danny, 2026-07-26: "when i edit the node, and right click it just
+        ends edit mode". The editor commits on focus-out, and a popup takes
+        focus while it is up — so the menu closed the editor out from under
+        itself and never appeared."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QFocusEvent
+        _graph, _scene, item = editing
+        editor = item._note_editor_widget
+        editor.setPlainText("half-written")
+
+        for reason in (Qt.PopupFocusReason, Qt.ActiveWindowFocusReason):
+            item.eventFilter(editor, QFocusEvent(QFocusEvent.Type.FocusOut,
+                                                 reason))
+            assert item._note_editor_widget is editor, reason  # still editing
+            assert item.node.params.get("text") != "half-written"
+
+    def test_clicking_away_still_commits(self, editing):
+        """The popup exemption must not swallow the ordinary case."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QFocusEvent
+        _graph, _scene, item = editing
+        editor = item._note_editor_widget
+        editor.setPlainText("done typing")
+
+        item.eventFilter(editor, QFocusEvent(QFocusEvent.Type.FocusOut,
+                                             Qt.MouseFocusReason))
+        assert item._note_editor_widget is None
+        assert item.node.params.get("text") == "done typing"
+
+    def test_a_note_card_gets_no_insert_menu(self, qtbot, registry):
+        """Notes are markdown too, but have no embeds to offer."""
+        from PySide6.QtGui import QUndoStack
+        from PySide6.QtWidgets import QMenu
+        from flograph.core import Graph
+        from flograph.ui.canvas import NodeGraphScene
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        note = graph.add_node(registry.instantiate("flograph.util.note"))
+        item = scene.node_items[note.id]
+        item.start_note_edit()
+        menu = QMenu()
+        assert item.add_insert_menu(menu) == {}
+        assert menu.actions() == []
