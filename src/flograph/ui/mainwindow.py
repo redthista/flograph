@@ -610,6 +610,7 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_kpi_node_succeeded)
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
         engine.node_succeeded.connect(self._on_control_node_succeeded)
+        engine.node_succeeded.connect(self._on_browser_node_succeeded)
         # every run: a report card's content lives upstream of it, so the
         # cards that changed are not the ones that ran
         engine.run_finished.connect(lambda *_: self._refresh_report_cards())
@@ -676,6 +677,41 @@ class MainWindow(QMainWindow):
         # a webview node's rendered output is its first declared output port
         port = node.spec.outputs[0].name if node.spec.outputs else "figure"
         item.set_plotly_figure(entry.outputs.get(port) if entry else None)
+
+    # ------------------------------------------------------ open in browser
+
+    def _can_open_in_browser(self, node_id: str) -> bool:
+        """Whether this node has HTML worth handing to a browser.
+
+        Restricted to webview cards rather than "anything that coerces" —
+        a raw string always coerces, so the looser rule would offer the
+        action on every node that happens to output text."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or card_kind(node) != "webview":
+            return False
+        from .browser import can_open
+        return can_open(node, self.engine.cache.get(node_id))
+
+    def _on_browser_node_succeeded(self, node_id: str) -> None:
+        """Keep an open browser tab level with the canvas.
+
+        The page is rewritten in place on every run of a node that has been
+        opened, so refreshing the tab shows what the card is showing. Without
+        this the file was written once and the tab quietly went stale — the
+        one failure mode where the user is looking at an old chart with
+        nothing on screen to say so."""
+        from .browser import refresh_node
+        node = self.graph.nodes.get(node_id)
+        if node is not None:
+            refresh_node(node, self.engine.cache.get(node_id))
+
+    def _open_in_browser(self, node_id: str) -> Optional[str]:
+        """Open a webview node's current output in the desktop browser."""
+        from .browser import open_node_from
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return None
+        return open_node_from(self, node, self.engine.cache.get(node_id))
 
     def _refresh_report_cards(self) -> None:
         """Re-render every report card on the canvas. Cheap (they are text
@@ -1483,6 +1519,9 @@ class MainWindow(QMainWindow):
         if (card_kind(node) == "grid"
                 and self._table_import_source(node_id) is not None):
             import_action = menu.addAction("Import input into table")
+        browser_action = None
+        if self._can_open_in_browser(node_id):
+            browser_action = menu.addAction("Open in Browser")
         layer_actions = add_layer_menu(menu)
         view_actions = self._add_view_actions(menu, node_id)
         page_actions: list = []
@@ -1519,6 +1558,8 @@ class MainWindow(QMainWindow):
                 self.graph, node_id, not node.canvas_preview_enabled))
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
+        elif browser_action is not None and chosen is browser_action:
+            self._open_in_browser(node_id)
         elif chosen is copy_action:
             self._copy_selection()
         elif chosen is delete:
@@ -2012,6 +2053,10 @@ class MainWindow(QMainWindow):
         QThreadPool.globalInstance().start(CacheLoadRunnable(path, entries, signals))
 
     def _replace_graph(self, loaded: Graph) -> None:
+        # pages opened in a browser belong to the project being closed; the
+        # incoming one must not inherit them and start rewriting its files
+        from .browser import forget_all
+        forget_all()
         self._restoring_pages = True
         for page_id in list(self.graph.pages):
             self.graph.remove_page(page_id)

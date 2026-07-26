@@ -251,6 +251,75 @@ can declare them.
 
 ---
 
+## Open in Browser for web-view nodes (idea #21) — NOT YET TESTED
+
+Committed? **not yet.**
+
+Setup: a **Show Plotly** or **Show Web View** node with something wired in,
+and **run it**. The entry only appears once the node has produced something.
+
+### The basics
+
+- [ ] Right-click the node → **Open in Browser**. Your real browser opens on
+      the chart.
+- [ ] The **browser tab is named after the node**, not after a temp file.
+- [ ] The status bar names the node and the file it wrote.
+- [ ] It fills the browser window — not a small box in the corner.
+- [ ] Right-click a node you **haven't run** → no such entry at all (not
+      greyed out; flograph omits actions it can't do).
+- [ ] Right-click a **non-web-view** node (a Python Script returning a
+      string, say) → also no entry. Deliberate: a plain string coerces to
+      HTML, so "anything that could render" would put this on half the
+      library. Tell me if you'd rather have it everywhere.
+
+### The refresh loop — the bit worth actually using
+
+**Danny found this broken on the first cut (2026-07-26)** — the file was
+written once when you opened it and never again, so refreshing showed the
+old chart while the canvas showed the new one. The page is now rewritten on
+every run of a node you've opened.
+
+- [ ] With the browser tab still open, **change your data, re-run the flow,
+      and press F5 in the browser.** It should now match the canvas, without
+      touching flograph at all.
+- [ ] The re-run must **not** pop a new tab or steal focus — you could be
+      mid-edit when the flow finishes.
+- [ ] **Open in Browser again** after a re-run: same tab/file, not a second
+      one.
+- [ ] Break the node so the run fails, then refresh → the tab should still
+      show the last good chart rather than going blank. (Deliberate: an
+      empty tab can't tell you whether the node broke or the refresh did.)
+- [ ] Two different nodes → two separate pages, even if you named them the
+      same thing, and running one doesn't touch the other's page.
+- [ ] Rename the node after opening it, re-run → the tab you have open still
+      refreshes (the file is fixed when the tab opens).
+- [ ] Open a **different project** while a tab is open, run something →
+      nothing writes over the old page.
+
+### Stacks and dashboards
+
+- [ ] **Chart per Value / Plotly per Region** with Columns/Rows set → opens
+      with the same grid, using the whole browser height. This is the one I
+      most expect to be an improvement on the card.
+- [ ] Drop a web-view node on a **dashboard page**, right-click the tile →
+      **Open in Browser** is under the Layer entries.
+- [ ] Do it on a **maximized** tile — right-click is disabled while
+      maximized, so you'll need to restore first. Tell me if that's annoying.
+
+### Edge cases
+
+- [ ] **Edit the node without re-running** (so it goes STALE), then open it →
+      it opens the last run's output and the status bar says the node is
+      dirty. Check that reads clearly — the whole risk here is looking at an
+      old chart in a window that doesn't show the STALE badge.
+- [ ] A **folium map** node. Should be *better* than the card: in a real
+      browser the CDN scripts load normally.
+- [ ] Close flograph, then reload the browser tab → the file is gone (it
+      lives in a temp dir cleaned up on exit). Say if you'd rather these
+      survived, or wanted a "Save page as…" instead.
+
+---
+
 ## Done and signed off
 
 - ~~Linked Table keeps its contents when the input is disconnected, and
