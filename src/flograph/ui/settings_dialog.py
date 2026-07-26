@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import platform
 
-from PySide6.QtCore import qVersion
+from PySide6.QtCore import QSize, Qt, qVersion
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMessageBox, QPushButton, QSpinBox, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QMessageBox, QPushButton, QSpinBox, QStackedWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .canvas import grid
@@ -31,18 +31,169 @@ def _flograph_version() -> str:
         return "unknown"
 
 
+#: Roughly how many characters a tooltip line should hold before wrapping.
+#: Qt only word-wraps a *rich text* tooltip, and then to whatever width it
+#: fancies — which for these explanations is one line most of the way across
+#: the screen. Wrapping them ourselves is the only way to get a readable
+#: measure, and 68 is about a comfortable line of prose.
+TOOLTIP_WRAP = 68
+
+
+def wrapped_tooltip(text: str) -> str:
+    """An explanation as a several-line tooltip rather than one long line.
+
+    Returned as rich text with explicit breaks: Qt treats a plain string as
+    a single unbreakable line, so the paragraph-length hints these settings
+    carry ran off the edge of the screen.
+    """
+    import html
+    import textwrap
+    lines = textwrap.wrap(" ".join(text.split()), width=TOOLTIP_WRAP) or [""]
+    # quote=False: this is body text, not an attribute value, and escaping
+    # every apostrophe to &#x27; only makes the source unreadable
+    return ("<qt>"
+            + "<br>".join(html.escape(line, quote=False) for line in lines)
+            + "</qt>")
+
+
+class SettingsGrid(QTreeWidget):
+    """A settings page as a two-column grid: name on the left, control on
+    the right, the way the Properties panel lays a node's params out.
+
+    The pages used to be a vertical run of controls each with a paragraph of
+    explanation under it, which grew unreadable as settings were added — a
+    lot of scrolling, and no way to see what a page *contains* at a glance.
+    The grid puts every setting on one line, and the explanation moves to
+    the row's tooltip, which is where the Properties panel already keeps a
+    param's description.
+
+    Controls keep their objectName so `SettingsDialog.refresh_from` can
+    still find them after a reset — a QTreeWidget's item widgets are
+    ordinary children, so findChild reaches them unchanged.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setColumnCount(2)
+        self.setHeaderLabels(["Setting", "Value"])
+        self.setRootIsDecorated(False)
+        self.setAlternatingRowColors(True)
+        self.header().setSectionResizeMode(QHeaderView.Interactive)
+        self.header().setStretchLastSection(True)
+        self.setColumnWidth(0, 250)
+        self.setSelectionMode(QTreeWidget.NoSelection)
+        self.setFocusPolicy(Qt.NoFocus)   # the controls take focus, not rows
+        #: (row, group title, searchable text) for every setting on the page
+        self.settings: list[tuple] = []
+        #: group titles in declaration order, for the nav tree
+        self._group_order: list[str] = []
+        self._current_group = ""
+
+    def add_group(self, title: str) -> None:
+        """Open a group: record the name for the nav tree and tag the
+        settings that follow. Draws nothing.
+
+        Groups used to be tinted heading rows inside the page. Once the nav
+        became a tree those headings said the same thing twice, and picking
+        a group in the tree now narrows the page to it — so a divider
+        between sections that are never shown together has nothing left to
+        divide.
+        """
+        if title not in self._group_order:
+            self._group_order.append(title)
+        self._current_group = title
+
+    def add(self, label: str, widget: QWidget, hint: str = "") -> QTreeWidgetItem:
+        item = QTreeWidgetItem([label, ""])
+        tip = wrapped_tooltip(hint or label)
+        item.setToolTip(0, tip)
+        item.setToolTip(1, tip)
+        if hint and not widget.toolTip():
+            widget.setToolTip(tip)
+        self.addTopLevelItem(item)
+        self.setItemWidget(item, 1, widget)
+        # Rows are one text line tall by default, which clips anything
+        # bigger. QSize needs a non-negative width to count as valid at all,
+        # so the widget's own preferred width comes along for the ride even
+        # though the column governs the actual width (see ParamsPanel).
+        height = max(24, widget.sizeHint().height())
+        item.setSizeHint(1, QSize(widget.sizeHint().width(), height))
+        # the group title joins the haystack, so "snapping" finds the snap
+        # settings and "colour strength" finds the pair under that heading
+        self.settings.append((item, self._current_group,
+                              f"{label} {hint} {self._current_group}".casefold()))
+        return item
+
+    # ------------------------------------------------- scoping + searching
+
+    @staticmethod
+    def _hit(entry, group: "str | None", needle: str) -> bool:
+        _item, own_group, haystack = entry
+        if group is not None and own_group != group:
+            return False
+        return not needle or needle in haystack
+
+    def apply(self, group: "str | None" = None, search: str = "") -> int:
+        """Show only the settings in `group` that match `search`.
+
+        `group` of None means the whole page — what selecting the page
+        itself gives you, rather than one of its groups. Returns how many
+        rows are left showing.
+        """
+        needle = search.strip().casefold()
+        shown = 0
+        for entry in self.settings:
+            hit = self._hit(entry, group, needle)
+            entry[0].setHidden(not hit)
+            shown += hit
+        return shown
+
+    def count(self, group: "str | None" = None, search: str = "") -> int:
+        """How many settings *would* show, without touching the view."""
+        needle = search.strip().casefold()
+        return sum(self._hit(entry, group, needle) for entry in self.settings)
+
+    def group_titles(self) -> list:
+        return list(self._group_order)
+
+
 class SettingsDialog(QDialog):
     def __init__(self, window, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(560, 520)
+        # Wide enough that the grid never opens with a horizontal scrollbar.
+        # The nav takes a fixed 180, the Setting column 250, and the value
+        # column has to clear the widest control's own size hint or the view
+        # decides its content is wider than its viewport — which at 560 it
+        # was, by 18px, for a dialog with nothing to scroll to. It clears
+        # from 620; this leaves headroom for a larger font.
+        self.resize(720, 560)
 
-        self._nav = QListWidget()
-        self._nav.setFixedWidth(150)
+        # The nav is a tree, not a flat list: a page's group headings appear
+        # under it, so the whole of Settings is visible at a glance and a
+        # group can be jumped to directly instead of scrolled for.
+        self._nav = QTreeWidget()
+        self._nav.setObjectName("settings_nav")
+        self._nav.setHeaderHidden(True)
+        self._nav.setFixedWidth(180)
+        self._nav.setIndentation(12)
+
+        self._search = QLineEdit()
+        self._search.setObjectName("settings_search")
+        self._search.setPlaceholderText("Search settings…")
+        self._search.setClearButtonEnabled(True)
+
         self._pages = QStackedWidget()
+        self._page_index: dict[str, int] = {}
+        self._grids: dict[str, SettingsGrid] = {}
+
+        side = QVBoxLayout()
+        side.setContentsMargins(0, 0, 0, 0)
+        side.addWidget(self._search)
+        side.addWidget(self._nav, 1)
 
         layout = QHBoxLayout(self)
-        layout.addWidget(self._nav)
+        layout.addLayout(side)
         layout.addWidget(self._pages, 1)
 
         pages = {
@@ -54,8 +205,9 @@ class SettingsDialog(QDialog):
         for name in sorted(pages):
             self._add_page(name, pages[name])
 
-        self._nav.currentRowChanged.connect(self._pages.setCurrentIndex)
-        self._nav.setCurrentRow(0)
+        self._nav.currentItemChanged.connect(self._on_nav_changed)
+        self._search.textChanged.connect(self._on_search)
+        self._nav.setCurrentItem(self._nav.topLevelItem(0))
 
     def refresh_from(self, window) -> None:
         """Re-read every control from the window. The pages bind once at
@@ -73,6 +225,7 @@ class SettingsDialog(QDialog):
             "lod_enabled_checkbox": window.lod_enabled,
             "snap_enabled_checkbox": window.snap_enabled,
             "minimap_enabled_checkbox": window.minimap_enabled,
+            "port_labels_checkbox": window.port_labels_enabled,
             "table_autosize_checkbox": autosize_default_enabled(),
         }
         spins = {
@@ -123,9 +276,94 @@ class SettingsDialog(QDialog):
             if check is not None and target is not None:
                 target.setEnabled(check.isChecked())
 
+    # ------------------------------------------------------ nav + search
+
+    def page_names(self) -> list:
+        """The top-level nav entries, in order."""
+        return [self._nav.topLevelItem(i).text(0)
+                for i in range(self._nav.topLevelItemCount())]
+
+    def _scope(self) -> tuple:
+        """(page name, group or None) for whatever the nav has selected."""
+        current = self._nav.currentItem()
+        if current is None:
+            return "", None
+        parent = current.parent()
+        if parent is None:
+            return current.text(0), None
+        return parent.text(0), current.text(0)
+
+    def _on_nav_changed(self, current, _previous) -> None:
+        """Show the selected page, narrowed to the selected group.
+
+        Picking a group shows *only* that group's settings rather than
+        scrolling to it — with the tree carrying the structure, a page that
+        still listed everything made the tree decorative.
+        """
+        if current is None:
+            return
+        page_name, group = self._scope()
+        index = self._page_index.get(page_name)
+        if index is None:
+            return
+        self._pages.setCurrentIndex(index)
+        grid = self._grids.get(page_name)
+        if grid is not None:
+            grid.apply(group, self._search.text())
+
+    def _on_search(self, text: str) -> None:
+        """Filter every page at once, and hide the nav entries that no
+        longer lead anywhere — a category still listed but empty when you
+        click it is worse than no result at all.
+
+        A search is deliberately page-wide: it lands on the *page* of the
+        first hit, not a group, because a match found under a group you had
+        not selected would otherwise be hidden by that selection — the
+        search would appear to find nothing.
+
+        The About page has no settings to match, so it is judged on its own
+        name; searching is for finding a control, and it holds none.
+        """
+        needle = text.strip().casefold()
+        first_hit = None
+        for i in range(self._nav.topLevelItemCount()):
+            entry = self._nav.topLevelItem(i)
+            name = entry.text(0)
+            grid = self._grids.get(name)
+            if grid is None:
+                hit = not needle or needle in name.casefold()
+            else:
+                hit = grid.count(search=text) > 0
+                for c in range(entry.childCount()):
+                    child = entry.child(c)
+                    child.setHidden(
+                        not grid.count(child.text(0), search=text))
+            entry.setHidden(not hit)
+            if hit and first_hit is None:
+                first_hit = entry
+        current = self._nav.currentItem()
+        if needle and first_hit is not None:
+            self._nav.setCurrentItem(first_hit)
+        elif current is not None and current.isHidden() \
+                and first_hit is not None:
+            self._nav.setCurrentItem(first_hit)
+        # setCurrentItem is a no-op when it is already current, so the page
+        # is re-filtered explicitly — otherwise clearing the box would leave
+        # the last search's rows hidden
+        self._on_nav_changed(self._nav.currentItem(), None)
+
     def _add_page(self, name: str, page: QWidget) -> None:
-        self._nav.addItem(name)
+        entry = QTreeWidgetItem([name])
+        self._nav.addTopLevelItem(entry)
+        self._page_index[name] = self._pages.count()
         self._pages.addWidget(page)
+
+        grid = page.findChild(SettingsGrid)
+        if grid is not None:
+            self._grids[name] = grid
+            for title in grid.group_titles():
+                entry.addChild(QTreeWidgetItem([title]))
+            entry.setExpanded(True)
 
     @staticmethod
     def _hint(text: str) -> QLabel:
@@ -145,9 +383,11 @@ class SettingsDialog(QDialog):
     def _build_general_page(window) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        rows = SettingsGrid()
+        layout.addWidget(rows, 1)
 
-        page_bar_row = QHBoxLayout()
-        page_bar_row.addWidget(QLabel("Page bar position:"))
+        rows.add_group("Window")
+
         page_bar_combo = QComboBox()
         page_bar_combo.setObjectName("page_bar_position_combo")
         positions = ["bottom", "top"]
@@ -155,37 +395,33 @@ class SettingsDialog(QDialog):
         page_bar_combo.setCurrentIndex(positions.index(window.page_bar_position))
         page_bar_combo.currentIndexChanged.connect(
             lambda index: window.set_page_bar_position(positions[index]))
-        page_bar_row.addWidget(page_bar_combo)
-        page_bar_row.addStretch(1)
-        layout.addLayout(page_bar_row)
-        layout.addWidget(SettingsDialog._hint(
-            "Which edge of the window the Model/page tabs live on."))
+        rows.add("Page bar position", page_bar_combo,
+                 "Which edge of the window the Model/page tabs live on.")
 
-        layout.addStretch(1)
+        rows.add_group("Reset")
 
-        layout.addWidget(QLabel("Reset"))
-
-        layout_btn = QPushButton("Reset window layout…")
+        # short labels: in a grid the row name carries the noun, and a
+        # button captioned with a whole sentence overflows its column
+        layout_btn = QPushButton("Reset…")
         layout_btn.setObjectName("reset_layout_button")
         layout_btn.clicked.connect(
-            lambda: SettingsDialog._confirm_reset(
-                page, window, layout=True))
-        layout.addWidget(layout_btn, 0)
-        layout.addWidget(SettingsDialog._hint(
-            "Puts the Library, Properties, Code, Inspector and Log panels "
-            "back where they start, without touching anything else. Use this "
-            "when a panel has been dragged somewhere unrecoverable."))
+            lambda: SettingsDialog._confirm_reset(page, window, layout=True))
+        rows.add("Window layout", layout_btn,
+                 "Puts the Library, Properties, Code, Inspector and Log "
+                 "panels back where they start, without touching anything "
+                 "else. Use this when a panel has been dragged somewhere "
+                 "unrecoverable.")
 
-        all_btn = QPushButton("Reset all settings to defaults…")
+        all_btn = QPushButton("Reset…")
         all_btn.setObjectName("reset_settings_button")
         all_btn.clicked.connect(
             lambda: SettingsDialog._confirm_reset(page, window, layout=False))
-        layout.addWidget(all_btn, 0)
-        layout.addWidget(SettingsDialog._hint(
-            "Clears every stored preference — everything on these pages, the "
-            "window layout, the AI assistant settings and the recent files "
-            "list — and applies the defaults straight away. Your saved "
-            "projects are not touched."))
+        rows.add("All settings", all_btn,
+                 "Clears every stored preference — everything on these pages, "
+                 "the window layout, the AI assistant settings and the recent "
+                 "files list — and applies the defaults straight away. Your "
+                 "saved projects are not touched.")
+
         return page
 
     @staticmethod
@@ -215,37 +451,35 @@ class SettingsDialog(QDialog):
     def _build_canvas_page(window) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        rows = SettingsGrid()
+        layout.addWidget(rows, 1)
 
-        gpu_check = QCheckBox("GPU-Accelerated Canvas (experimental)")
+        rows.add_group("Display")
+
+        gpu_check = QCheckBox()
         gpu_check.setObjectName("gpu_viewport_checkbox")
-        gpu_check.setToolTip(window.action_gpu_viewport.toolTip())
         gpu_check.setChecked(window.action_gpu_viewport.isChecked())
         # bind both ways: the checkbox drives the action, and an automatic
         # fallback revert (GL unavailable) drives the checkbox back
         gpu_check.toggled.connect(window.action_gpu_viewport.setChecked)
         window.action_gpu_viewport.toggled.connect(gpu_check.setChecked)
-        layout.addWidget(gpu_check)
-        layout.addWidget(SettingsDialog._hint(
-            "Renders the canvas through OpenGL instead of software "
-            "rasterizing. Off by default; falls back automatically if this "
-            "machine can't provide a working GL context. If a card "
-            "(figure/table/webview) looks wrong after enabling, switch it "
-            "back off here."))
+        rows.add("GPU-accelerated canvas (experimental)", gpu_check,
+                 "Renders the canvas through OpenGL instead of software "
+                 "rasterizing. Off by default; falls back automatically if "
+                 "this machine can't provide a working GL context. If a card "
+                 "(figure/table/webview) looks wrong after enabling, switch "
+                 "it back.")
 
-        layout.addSpacing(12)
-
-        lod_check = QCheckBox("Simplify nodes when zoomed out")
+        lod_check = QCheckBox()
         lod_check.setObjectName("lod_enabled_checkbox")
         lod_check.setChecked(window.lod_enabled)
-        layout.addWidget(lod_check)
-        layout.addWidget(SettingsDialog._hint(
-            "Below the zoom threshold, nodes hide their ports and embedded "
-            "widgets (tables/figures) and paint as a flat rectangle — keeps "
-            "large graphs responsive when zoomed way out. Turn off to "
-            "always render full detail, at the cost of that speed."))
+        rows.add("Simplify nodes when zoomed out", lod_check,
+                 "Below the zoom threshold, nodes hide their ports and "
+                 "embedded widgets (tables/figures) and paint as a flat "
+                 "rectangle — keeps large graphs responsive when zoomed way "
+                 "out. Turn off to always render full detail, at the cost of "
+                 "that speed.")
 
-        threshold_row = QHBoxLayout()
-        threshold_row.addWidget(QLabel("Zoom threshold:"))
         threshold_spin = QSpinBox()
         threshold_spin.setObjectName("lod_threshold_spinbox")
         # 10% is the canvas's minimum zoom (ZOOM_MIN in base_view.py) — below
@@ -256,30 +490,41 @@ class SettingsDialog(QDialog):
         threshold_spin.setRange(10, 100)
         threshold_spin.setSingleStep(5)
         threshold_spin.setSuffix("%")
-        threshold_spin.setToolTip(
-            "Simplify nodes below this zoom level (100% = actual size)")
         threshold_spin.setValue(round(window.lod_threshold * 100))
         threshold_spin.setEnabled(lod_check.isChecked())
-        threshold_row.addWidget(threshold_spin)
-        threshold_row.addStretch(1)
-        layout.addLayout(threshold_row)
+        rows.add("Zoom threshold", threshold_spin,
+                 "Simplify nodes below this zoom level (100% = actual size).")
 
-        lod_check.toggled.connect(window.set_lod_enabled)
-        lod_check.toggled.connect(threshold_spin.setEnabled)
-        threshold_spin.valueChanged.connect(
-            lambda value: window.set_lod_threshold(value / 100.0))
+        minimap_check = QCheckBox()
+        minimap_check.setObjectName("minimap_enabled_checkbox")
+        minimap_check.setChecked(window.minimap_enabled)
+        rows.add("Show minimap", minimap_check,
+                 "A small overlay in the canvas corner showing all nodes and "
+                 "the current viewport — click or drag on it to jump around "
+                 "a large graph.")
 
-        layout.addSpacing(12)
+        ports_check = QCheckBox()
+        ports_check.setObjectName("port_labels_checkbox")
+        ports_check.setChecked(window.port_labels_enabled)
+        rows.add("Show port names", ports_check,
+                 "Card nodes (charts, tables, reports) have no room to print "
+                 "their port names, so a node with several inputs is a row of "
+                 "identical pins. Turn this on to float each name beside its "
+                 "pin — inputs to the left, outputs to the right. You can "
+                 "also show or hide them for one node at a time by "
+                 "right-clicking it, which overrides this setting for that "
+                 "node.")
 
-        snap_check = QCheckBox("Snap to Grid")
+        rows.add_group("Snapping")
+
+        snap_check = QCheckBox()
         snap_check.setObjectName("snap_enabled_checkbox")
-        snap_check.setToolTip(
-            "Snap moves and resizes to the grid (hold Ctrl to bypass)")
         snap_check.setChecked(window.snap_enabled)
-        layout.addWidget(snap_check)
+        rows.add("Snap to grid", snap_check,
+                 "Snap moves and resizes to the grid (hold Ctrl to bypass). "
+                 "Applies to node/frame moves and resizes on the canvas and "
+                 "to dashboard tiles.")
 
-        grid_row = QHBoxLayout()
-        grid_row.addWidget(QLabel("Grid resolution:"))
         grid_combo = QComboBox()
         grid_combo.setObjectName("grid_step_combo")
         selected = 0
@@ -289,77 +534,51 @@ class SettingsDialog(QDialog):
                 selected = index
         grid_combo.setCurrentIndex(selected)
         grid_combo.setEnabled(snap_check.isChecked())
-        grid_row.addWidget(grid_combo)
-        grid_row.addStretch(1)
-        layout.addLayout(grid_row)
-        layout.addWidget(SettingsDialog._hint(
-            "Snapping applies to node/frame moves and resizes on the canvas "
-            "and dashboard tiles."))
+        rows.add("Grid resolution", grid_combo,
+                 "How far apart the snap points are.")
 
-        snap_check.toggled.connect(window.set_snap_enabled)
-        snap_check.toggled.connect(grid_combo.setEnabled)
-        grid_combo.currentIndexChanged.connect(
-            lambda index: window.set_grid_step(grid_combo.itemData(index)))
+        rows.add_group("Custom colour strength")
 
-        layout.addSpacing(12)
-
-        minimap_check = QCheckBox("Show Minimap")
-        minimap_check.setObjectName("minimap_enabled_checkbox")
-        minimap_check.setToolTip(
-            "Show the navigation overlay in the canvas corner")
-        minimap_check.setChecked(window.minimap_enabled)
-        layout.addWidget(minimap_check)
-        layout.addWidget(SettingsDialog._hint(
-            "A small overlay in the canvas corner showing all nodes and "
-            "the current viewport — click or drag on it to jump around a "
-            "large graph."))
-
-        minimap_check.toggled.connect(window.set_minimap_enabled)
-
-        layout.addSpacing(12)
-
-        layout.addWidget(QLabel("Custom colour strength"))
-        layout.addWidget(SettingsDialog._hint(
-            "Colours you pick for nodes, frames and dashboard page tabs are "
-            "laid over the theme rather than painted flat, so they come out "
-            "muted instead of garish. Raise these to let more of the picked "
-            "colour through; 100% paints it raw."))
-
-        soft_row = QHBoxLayout()
-        soft_row.addWidget(QLabel("Card body, unselected tab:"))
         soft_spin = QSpinBox()
         soft_spin.setObjectName("tint_soft_spinbox")
         soft_spin.setRange(0, 100)
         soft_spin.setSingleStep(5)
         soft_spin.setSuffix("%")
-        soft_spin.setToolTip("Muting for large surfaces")
         soft_spin.setValue(round(window.tint_soft * 100))
-        soft_row.addWidget(soft_spin)
-        soft_row.addStretch(1)
-        layout.addLayout(soft_row)
+        rows.add("Card body, unselected tab", soft_spin,
+                 "Colours you pick for nodes, frames and dashboard page tabs "
+                 "are laid over the theme rather than painted flat, so they "
+                 "come out muted instead of garish. Raise this to let more of "
+                 "the picked colour through on large surfaces; 100% paints it "
+                 "raw.")
 
-        strong_row = QHBoxLayout()
-        strong_row.addWidget(QLabel("Node header, selected tab:"))
         strong_spin = QSpinBox()
         strong_spin.setObjectName("tint_strong_spinbox")
         strong_spin.setRange(0, 100)
         strong_spin.setSingleStep(5)
         strong_spin.setSuffix("%")
-        strong_spin.setToolTip(
-            "Muting for the smaller strip that has to stand out from the body")
         strong_spin.setValue(round(window.tint_strong * 100))
-        strong_row.addWidget(strong_spin)
-        strong_row.addStretch(1)
-        layout.addLayout(strong_row)
+        rows.add("Node header, selected tab", strong_spin,
+                 "The same muting for the smaller strip that has to stand out "
+                 "from the body.")
 
         def _push_tints() -> None:
             window.set_tints(soft_spin.value() / 100.0,
                              strong_spin.value() / 100.0)
 
+        lod_check.toggled.connect(window.set_lod_enabled)
+        lod_check.toggled.connect(threshold_spin.setEnabled)
+        threshold_spin.valueChanged.connect(
+            lambda value: window.set_lod_threshold(value / 100.0))
+        minimap_check.toggled.connect(window.set_minimap_enabled)
+        ports_check.toggled.connect(window.set_port_labels_enabled)
+        snap_check.toggled.connect(window.set_snap_enabled)
+        snap_check.toggled.connect(grid_combo.setEnabled)
+        grid_combo.currentIndexChanged.connect(
+            lambda index: window.set_grid_step(grid_combo.itemData(index)))
         soft_spin.valueChanged.connect(lambda _value: _push_tints())
         strong_spin.valueChanged.connect(lambda _value: _push_tints())
 
-        layout.addStretch(1)
         return page
 
     @staticmethod
@@ -370,38 +589,34 @@ class SettingsDialog(QDialog):
 
         page = QWidget()
         layout = QVBoxLayout(page)
+        rows = SettingsGrid()
+        layout.addWidget(rows, 1)
 
-        autosize_check = QCheckBox("Auto-size columns to content by default")
+        autosize_check = QCheckBox()
         autosize_check.setObjectName("table_autosize_checkbox")
         autosize_check.setChecked(autosize_default_enabled())
         autosize_check.toggled.connect(set_autosize_default)
-        layout.addWidget(autosize_check)
-        layout.addWidget(SettingsDialog._hint(
-            "Table cards and the pop-out editor re-fit every column to its "
-            "content and header after each edit. When off, columns keep the "
-            "widths you drag or fit manually, which are saved with the "
-            "node. Open grids pick the change up on their next edit."))
+        rows.add("Auto-size columns to content by default", autosize_check,
+                 "Table cards and the pop-out editor re-fit every column to "
+                 "its content and header after each edit. When off, columns "
+                 "keep the widths you drag or fit manually, which are saved "
+                 "with the node. Open grids pick the change up on their next "
+                 "edit.")
 
-        layout.addSpacing(12)
-
-        formats_row = QHBoxLayout()
-        formats_row.addWidget(QLabel("Custom date formats:"))
         formats_edit = QLineEdit()
         formats_edit.setObjectName("table_date_formats_edit")
         formats_edit.setPlaceholderText("%d-%b-%y, %d/%m/%Y")
         formats_edit.setText(date_formats_setting())
         formats_edit.textChanged.connect(set_date_formats_setting)
-        formats_row.addWidget(formats_edit, 1)
-        layout.addLayout(formats_row)
-        layout.addWidget(SettingsDialog._hint(
-            "Extra date formats for the Table node's date columns, "
-            "comma-separated, in Python strptime notation (%d day, %m month "
-            "number, %b month name, %y two-digit year, %Y four-digit year "
-            "— e.g. 07-Mar-12 is %d-%b-%y). Tried before the built-in "
-            "formats when validating cells and when converting a column to "
-            "the date type, so they win for ambiguous dates."))
+        rows.add("Custom date formats", formats_edit,
+                 "Extra date formats for the Table node's date columns, "
+                 "comma-separated, in Python strptime notation (%d day, "
+                 "%m month number, %b month name, %y two-digit year, "
+                 "%Y four-digit year — e.g. 07-Mar-12 is %d-%b-%y). Tried "
+                 "before the built-in formats when validating cells and when "
+                 "converting a column to the date type, so they win for "
+                 "ambiguous dates.")
 
-        layout.addStretch(1)
         return page
 
     @staticmethod
