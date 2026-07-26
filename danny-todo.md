@@ -251,9 +251,13 @@ can declare them.
 
 ---
 
-## Open in Browser for web-view nodes (idea #21) — NOT YET TESTED
+## Open in Browser for web-view nodes (idea #21) — SIGNED OFF
 
-Committed? **not yet.**
+Committed? **yes** — `36ce5fb`, on Danny's "yeah all looks good" after the
+refresh fix below. He drove it in the app rather than working down this list,
+so the boxes are left unticked deliberately: they record what is *worth*
+checking, not what went unchecked. Anything they turn up later is a
+follow-up, not a blocker.
 
 Setup: a **Show Plotly** or **Show Web View** node with something wired in,
 and **run it**. The entry only appears once the node has produced something.
