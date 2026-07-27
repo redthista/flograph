@@ -1,6 +1,6 @@
 [project]
 name = "flograph"
-version = "0.1.7"
+version = "0.1.8"
 description = "Visual node-based Python programming environment (flow-based dataflow, Blueprint-style canvas)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -41,7 +41,7 @@ Issues = "https://github.com/redthista/flograph/issues"
 dev = ["pytest>=8", "pytest-qt>=4.4"]
 excel = ["openpyxl"]
 matplotlib = ["matplotlib>=3.8"]
-parquet = ["pyarrow"]
+parquet = ["pyarrow", "fastparquet"]
 plotly = ["plotly"]
 geo = ["geopandas", "folium"]
 ai = ["requests"]

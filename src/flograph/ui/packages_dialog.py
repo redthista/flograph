@@ -3,11 +3,15 @@ flograph's own environment (Tools > Manage Packages).
 
 The installer (pip, or `uv pip` when the venv has no pip) runs as a
 QProcess so the UI stays live and its output streams into the log pane.
-Nodes import from this same environment, so anything installed here is
-immediately available to `run()` code — except for *upgrades* of modules
-already imported by the running app, which need a restart to take effect.
+Nodes import from this same environment, but "installed" and "usable
+without a restart" are not the same thing: an upgrade cannot reach a module
+the app has already imported, and a fresh install cannot reach a library
+that checked for it at startup and cached its absence — pandas does exactly
+that with pyarrow. Both cases are reported in the log.
 """
 from __future__ import annotations
+
+import importlib
 
 from PySide6.QtCore import QProcess, Qt
 from PySide6.QtGui import QFontDatabase, QTextCursor
@@ -184,7 +188,17 @@ class PackagesDialog(QDialog):
     def _on_finished(self, action: str, code: int) -> None:
         self._append_log(f"— {action} "
                          f"{'finished' if code == 0 else f'failed ({code})'} —")
-        if code == 0 and action in ("upgrade", "uninstall"):
+        if code == 0 and action == "install":
+            # A directory Python has already listed keeps its cached
+            # listing, so a package installed just now stays invisible to
+            # import until the finders are told to look again.
+            importlib.invalidate_caches()
+            self._append_log(
+                "note: restart flograph before using a package that was "
+                "missing when it started — a library that checked for it at "
+                "import time cached its absence and will misbehave rather "
+                "than pick it up (pandas does this with pyarrow)")
+        elif code == 0 and action in ("upgrade", "uninstall"):
             self._append_log(
                 "note: modules already imported by the running app keep "
                 "their old version until flograph is restarted")

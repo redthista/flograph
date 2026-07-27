@@ -1,7 +1,13 @@
 """Write Parquet
 
-Write a DataFrame to a Parquet file (needs pyarrow). Passes the table
-through so the pipeline can continue.
+Write a DataFrame to a Parquet file. Passes the table through so the
+pipeline can continue.
+
+Needs one of the two engines pandas supports, pyarrow or fastparquet —
+both come with the 'parquet' extra, and either can be installed from
+Tools > Manage Packages. **Engine** picks between them; **auto** prefers
+pyarrow and falls back to fastparquet. Install one into a running app and
+flograph must be restarted before the node can use it.
 
 Partition columns turn the output into a directory tree with one folder
 level per column value (hive-style, e.g. `region=north/`), which the
@@ -27,7 +33,13 @@ PARAMS = [
 
 
 def run(ctx, table):
+    from flograph.packages import parquet_problem
+
     p = ctx.params
+    problem = parquet_problem(p.get("engine", "auto"))
+    if problem:
+        raise RuntimeError(problem)
+
     path = p["path"]
     if not path:
         raise ValueError("no output file set — choose one in the node's properties")
