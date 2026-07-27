@@ -74,7 +74,7 @@ Background execution runs on a single-thread pool (per-node isolation).
 | `introspect.py` | Inspect node inputs/outputs without running |
 | `__init__.py` | Re-exports |
 
-### nodes/ (30 scripts across 5 categories)
+### nodes/ (53 scripts across 6 categories)
 Each `.py` file is a node script **loaded as text**, never imported. Script
 contact: `NODE` dict, optional `PARAMS` list, `run(ctx, **inputs)` function.
 See the `new-node` skill for the authoring template.
@@ -82,10 +82,11 @@ See the `new-node` skill for the authoring template.
 | Category | Files |
 |----------|-------|
 | `io/` | `read_csv`, `read_excel`, `read_json`, `read_parquet`, `read_sqlite`, `table`, `write_csv`, `write_excel`, `write_json`, `write_parquet`, `write_sqlite` |
-| `transform/` | `concatenate`, `convert_types`, `duplicate_filter`, `expression`, `filter_rows`, `group_by`, `join`, `missing_values`, `pivot`, `rename_columns`, `row_sampling`, `select_columns`, `sort`, `statistics`, `string_manipulation`, `unpivot` |
-| `viz/` | `card`, `show_plot`, `show_plotly`, `show_table`, `show_web`, `slicer`, `table_spec` |
-| `util/` | `action_button`, `constant`, `note`, `reroute` |
-| `scripting/` | `node_template`, `python_script` |
+| `transform/` | `concatenate`, `convert_types`, `data_profile`, `duplicate_filter`, `expression`, `filter_rows`, `group_by`, `join`, `missing_values`, `pivot`, `rename_columns`, `row_sampling`, `select_columns`, `sort`, `statistics`, `string_manipulation`, `unpivot` |
+| `viz/` | `card`, `chart_per_value`, `chart_per_value_plotly`, `report_card`, `show_plot`, `show_plotly`, `show_table`, `show_web`, `slicer`, `table_spec` |
+| `input/` | `choice`, `date`, `number`, `slider`, `text`, `toggle` |
+| `util/` | `action_button`, `constant`, `goto`, `goto_from`, `note`, `reroute` |
+| `scripting/` | `control_template`, `node_template`, `python_script` |
 
 ### ui/ (44 files across 6 sub-packages)
 
@@ -156,7 +157,9 @@ Param types: `string, text, int, float, bool, choice, file_open, file_save, colu
 2. **Nodes treat inputs as read-only** — outputs are cached by reference.
 3. **Heavy imports go inside `run()`** — top-level code runs at registry load.
 4. **matplotlib uses OO API only** (`Figure()`, never `pyplot`).
-5. **Projects are plain JSON** (`.flograph`); caches are never saved.
+5. **Projects are plain JSON** (`.flograph`); output caches are written
+   beside them in a `<project>.flograph.cache/` side-car, never into the
+   project file itself.
 6. **The old `src/flopy/` tree** is a leftover from the pre-rename era. All
    active development is in `src/flograph/`.
 

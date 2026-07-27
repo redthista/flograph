@@ -168,6 +168,106 @@ class TestChartPerValue:
         assert len(out["figures"]) == 3
 
 
+class TestChartPerValuePlotly:
+    """The same node against the other backend. It earns its own class
+    because nothing is shared between the two but the idea: this one emits
+    plotly Figures onto a webview card, so the stack is HTML rather than a
+    column of canvases, and the assertions have to read the layout object
+    instead of matplotlib axes."""
+
+    def run_node(self, registry, table, **params):
+        spec = registry.get("flograph.viz.chart_per_value_plotly")
+        settings = spec.default_params()
+        settings.update(params)
+        context = FakeContext(params=settings)
+        return compile_run(spec.source, "t")(context, table), context
+
+    @pytest.fixture
+    def table(self):
+        return pd.DataFrame({
+            "region": ["N"] * 3 + ["S"] * 3 + ["E"] * 3,
+            "month": [1, 2, 3] * 3,
+            "revenue": [3, 5, 4, 4, 5, 5, 5, 6, 7]})
+
+    def test_it_is_a_webview_card_emitting_a_list(self, registry):
+        """The card kind is the whole difference — a figure card would try
+        to draw a plotly object with matplotlib and show nothing."""
+        spec = registry.get("flograph.viz.chart_per_value_plotly")
+        assert spec.card == "webview"
+        assert [p.name for p in spec.outputs] == ["figures"]
+
+    def test_one_chart_per_value(self, registry, table):
+        out, _ = self.run_node(registry, table, split_by="region",
+                               x="month", y="revenue")
+        assert len(out["figures"]) == 3
+        assert [f.layout.title.text for f in out["figures"]] == [
+            "region: E", "region: N", "region: S"]
+
+    def test_the_scale_is_shared_so_panels_compare(self, registry, table):
+        out, _ = self.run_node(registry, table, split_by="region",
+                               x="month", y="revenue")
+        ranges = {tuple(f.layout.yaxis.range) for f in out["figures"]}
+        assert len(ranges) == 1
+
+    def test_the_scale_can_be_left_alone(self, registry, table):
+        out, _ = self.run_node(registry, table, split_by="region", x="month",
+                               y="revenue", shared_scale=False)
+        assert {f.layout.yaxis.range for f in out["figures"]} == {None}
+
+    @pytest.mark.parametrize("kind", ["histogram", "box", "violin"])
+    def test_distribution_kinds_are_never_given_a_range(self, registry, table,
+                                                        kind):
+        """Their value axis is a count or a spread the figure derives
+        itself; bounding it to the source column's range would crop it."""
+        out, _ = self.run_node(registry, table, split_by="region",
+                               y="revenue", kind=kind)
+        assert {f.layout.yaxis.range for f in out["figures"]} == {None}
+
+    @pytest.mark.parametrize("kind", ["line", "bar", "scatter", "area"])
+    def test_every_offered_kind_actually_plots(self, registry, table, kind):
+        out, _ = self.run_node(registry, table, split_by="region",
+                               x="month", y="revenue", kind=kind)
+        assert len(out["figures"]) == 3
+
+    def test_the_stack_carries_plotly_js_once(self, registry, table):
+        """Twenty charts each bundling the ~3MB library is the difference
+        between a card that opens and one that doesn't."""
+        out, _ = self.run_node(registry, table, split_by="region",
+                               x="month", y="revenue")
+        html = to_html(out["figures"])
+        assert html.count('class="flograph-stack-item"') == 3
+        assert html.count("plotly.js v") == 1
+
+    def test_max_charts_guards_a_high_cardinality_column(self, registry,
+                                                         table):
+        out, context = self.run_node(registry, table, split_by="region",
+                                     x="month", y="revenue", max_charts=2)
+        assert len(out["figures"]) == 2
+        assert any("Max charts" in line for line in context.logs)
+
+    def test_it_refuses_without_a_split_column(self, registry, table):
+        with pytest.raises(ValueError, match="Split by"):
+            self.run_node(registry, table, y="revenue")
+
+    def test_it_refuses_an_unknown_split_column(self, registry, table):
+        with pytest.raises(ValueError, match="no column 'nope'"):
+            self.run_node(registry, table, split_by="nope")
+
+    def test_it_refuses_an_unknown_y_column(self, registry, table):
+        with pytest.raises(ValueError, match="ghost"):
+            self.run_node(registry, table, split_by="region", y="ghost")
+
+    def test_numeric_columns_are_picked_when_y_is_blank(self, registry, table):
+        out, _ = self.run_node(registry, table, split_by="region")
+        assert len(out["figures"]) == 3
+
+    def test_the_layout_params_are_cosmetic_like_the_other_one(self, registry):
+        """Re-arranging a slow split must not re-run it."""
+        spec = registry.get("flograph.viz.chart_per_value_plotly")
+        for name in ("columns", "rows", "direction"):
+            assert spec.param(name).cosmetic, name
+
+
 def _constant(graph):
     """A bare Constant node, for standing in as a same-named decoy."""
     from flograph.core import NodeRegistry

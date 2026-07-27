@@ -28,7 +28,7 @@ work. Optional extras pull in what individual nodes need:
 | Extra | Brings | For |
 | --- | --- | --- |
 | `matplotlib` | matplotlib | Show Plot, Chart per Value |
-| `plotly` | plotly | Show Plotly (interactive charts) |
+| `plotly` | plotly | Show Plotly, Chart per Value (Plotly) |
 | `excel` | openpyxl | Read/Write Excel |
 | `parquet` | pyarrow | Read/Write Parquet |
 | `geo` | geopandas, folium | maps in a web-view node |
@@ -215,8 +215,9 @@ Statistics, Data Profile.
 (a real interactive plotly.js chart embedded on the canvas — hover, zoom and
 pan in place), Show Web View (render *anything* that produces HTML: folium
 maps, altair, bokeh, your own template), Card (a Power BI-style KPI number),
-Table Spec (the incoming table's structure), Chart per Value (one chart per
-distinct value, as a scrolling stack), Slicer, Report.
+Table Spec (the incoming table's structure), Chart per Value and Chart per
+Value (Plotly) — one chart per distinct value of a column, as a stack, in
+either backend — Slicer, Report.
 
 Any web-view node has **Open in Browser** on its right-click menu — the same
 document, in a real browser, refreshed in place when the flow re-runs.
