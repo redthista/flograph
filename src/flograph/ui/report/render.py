@@ -121,20 +121,71 @@ def _as_image(value, scale: float = 1.0) -> "QImage | None":
         return None
 
 
-def _plotly_note(value) -> "str | None":
-    """Plotly figures are interactive HTML, not pictures. Static export
-    needs kaleido, which flograph doesn't require — so say so plainly
-    rather than leaving a blank space in a printed report."""
+# What a Plotly figure is drawn at when its layout does not say. Plotly's
+# own defaults, so a figure that never had a size set comes out shaped the
+# way it looks on a card.
+PLOTLY_SIZE = (700, 450)
+
+# On screen there is no paper to match, so charts are drawn at twice the
+# width they are placed at — enough to stay sharp on a HiDPI display
+# without paying print resolution for a preview.
+PREVIEW_OVERSAMPLE = 2
+
+
+def plotly_geometry(value, image_width: int, for_print: bool) -> tuple:
+    """(width, height, scale) to draw a Plotly figure at.
+
+    The split matters. Plotly lays out in CSS pixels and sizes its fonts in
+    them, so asking for a *wider* figure makes the text proportionally
+    smaller rather than the picture sharper — a chart exported at 2000px
+    comes out with unreadable labels. Resolution is the `scale` factor's
+    job, which multiplies the pixel density and leaves the layout alone.
+    Kaleido draws the same distinction; so does this.
+
+    So the figure keeps the size it was designed at, and only the density
+    follows the placement: on paper, enough to land at PRINT_DPI for the
+    width the picture is actually placed at. Capped, because the cost is
+    quadratic and a stack can hold forty charts.
+    """
+    layout = getattr(value, "layout", None)
+    width = int(getattr(layout, "width", None) or PLOTLY_SIZE[0])
+    height = int(getattr(layout, "height", None) or PLOTLY_SIZE[1])
+    if for_print:
+        wanted = image_width / 72.0 * PRINT_DPI
+    else:
+        wanted = image_width * PREVIEW_OVERSAMPLE
+    scale = max(1.0, min(MAX_IMAGE_SCALE, wanted / width))
+    return width, height, round(scale, 3)
+
+
+def _plotly_image(value, image_width: int, for_print: bool):
+    """A Plotly figure as PNG bytes, or a warning block if it cannot be.
+
+    Plotly figures are interactive HTML, not pictures, so a report has to
+    have one taken. The app's own Qt WebEngine does that (see
+    plotly_snapshot) and needs nothing installed; kaleido is tried second
+    for the case where WebEngine is missing but kaleido is not, since a
+    trimmed PySide6 build is exactly when it would be.
+    """
     module = type(value).__module__ or ""
     if not module.startswith("plotly"):
         return None
+    width, height, scale = plotly_geometry(value, image_width, for_print)
     try:
-        image = value.to_image(format="png", width=1100, height=650)
+        from .plotly_snapshot import snapshot
+        image = snapshot(value, width, height, scale)
     except Exception:
-        return ("> **⚠ Plotly charts need the `kaleido` package to appear in "
-                "a report** — install it from Manage Packages…, then run "
+        image = None
+    if image:
+        return image
+    try:
+        return value.to_image(format="png", width=width, height=height,
+                              scale=scale)
+    except Exception:
+        return ("> **⚠ This Plotly chart could not be drawn** — Qt "
+                "WebEngine is not available to take a picture of it. Install "
+                "the full PySide6 package from Manage Packages…, then run "
                 "again.")
-    return image   # bytes; the caller turns it into a QImage
 
 
 def _labelled(graph, ref: str) -> list:
@@ -478,13 +529,13 @@ class _Resolver:
         if image is not None:
             return self._token(image)
 
-        plotly = _plotly_note(value)
+        plotly = _plotly_image(value, self._image_width, self._for_print)
         if isinstance(plotly, bytes):
             image = QImage()
             image.loadFromData(plotly, "PNG")
             return self._token(image)
         if plotly is not None:
-            self.problems.append(f"“{ref}” needs kaleido to render")
+            self.problems.append(f"“{ref}” could not be drawn")
             return plotly
 
         # A plain string is inlined *as markdown*, which is what makes a
