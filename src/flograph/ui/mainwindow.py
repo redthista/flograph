@@ -2109,15 +2109,24 @@ class MainWindow(QMainWindow):
         signals = CacheLoadSignals()  # created on the GUI thread, before pool.start
         restored: list[str] = []
 
-        def on_entry(node_id: str, outputs: dict, wall_time: float) -> None:
-            self.engine.cache.set(node_id, outputs, wall_time)
+        def mark_restored(node_id: str) -> None:
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.engine.node_succeeded.emit(node_id)
             restored.append(node_id)
             dialog.setValue(len(restored))
 
+        def on_entry(node_id: str, outputs: dict, wall_time: float) -> None:
+            self.engine.cache.set(node_id, outputs, wall_time)
+            mark_restored(node_id)
+
         def on_finished() -> None:
+            # Goto/From/Reroute nodes share their source's value rather than
+            # carrying a copy, so they have no blob to wait for and are
+            # rebuilt here, on this thread, now the blobs are all in.
+            for node_id in cache_persistence.restore_aliases(
+                    self.graph, self.engine.cache, entries):
+                mark_restored(node_id)
             dialog.close()
             self._cache_load_signals = None
             if not quiet:
