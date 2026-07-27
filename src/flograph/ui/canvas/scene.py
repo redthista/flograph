@@ -93,6 +93,9 @@ class NodeGraphScene(QGraphicsScene):
         events.dirty_changed.connect(self._on_dirty_changed)
         events.label_changed.connect(self._on_label_changed)
         events.description_changed.connect(self._on_description_changed)
+        events.active_changed.connect(self._on_active_changed)
+        events.locked_changed.connect(self._on_locked_changed)
+        events.frozen_changed.connect(self._on_frozen_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
         events.port_labels_changed.connect(self._on_port_labels_changed)
         events.ports_collapsed_changed.connect(
@@ -227,6 +230,28 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item._refresh_tooltip()
+
+    def _on_active_changed(self, node_id: str, active: bool) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.set_active(active)
+
+    def _on_locked_changed(self, node_id: str, locked: bool) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.set_locked(locked)
+
+    def _on_frozen_changed(self, node_id: str, frozen: bool) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.set_frozen(frozen)
+
+    def refresh_stale_pins(self, stale: set) -> None:
+        """Amber the frozen nodes in `stale`, plain-grey the rest. Called
+        after a run, when the answer can have changed."""
+        for node_id, item in self.node_items.items():
+            if item.node.frozen:
+                item.set_frozen(True, node_id in stale)
 
     def _on_preview_enabled_changed(self, node_id: str, enabled: bool) -> None:
         item = self.node_items.get(node_id)

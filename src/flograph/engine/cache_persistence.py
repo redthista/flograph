@@ -42,6 +42,18 @@ def node_fingerprint(graph: Graph, node_id: str, memo: dict[str, str]) -> str:
     if node_id in memo:
         return memo[node_id]
     node = graph.node(node_id)
+    if node.frozen:
+        # A frozen node's output is pinned, so it no longer follows from its
+        # params or its inputs — it follows from the freeze. Hashing a
+        # constant is what lets the pin survive a reopen at all, and it also
+        # stops an edit *upstream* of a pin from invalidating the caches
+        # below it: those were computed from a value that has not moved, so
+        # recomputing them would be work for nothing. Unfreezing restores
+        # the real hash, which no longer matches, so the node loads dirty
+        # and runs again — exactly what unfreezing is for.
+        fp = hashlib.sha256(f"frozen:{node_id}".encode()).hexdigest()
+        memo[node_id] = fp
+        return fp
     upstream_fps = []
     for port in node.spec.inputs:
         conn = graph.input_connection(node_id, port.name)
@@ -56,6 +68,51 @@ def node_fingerprint(graph: Graph, node_id: str, memo: dict[str, str]) -> str:
     fp = hashlib.sha256(payload.encode()).hexdigest()
     memo[node_id] = fp
     return fp
+
+
+def freeze_fingerprint(graph: Graph, node_id: str) -> str:
+    """What a node's params and inputs hash to *right now*.
+
+    Recorded when a node is frozen and compared afterwards: if it has moved,
+    the pinned value no longer reflects what the node would produce, and the
+    pin is worth flagging. Deliberately not what node_fingerprint returns for
+    a frozen node — that one is a constant, which is the whole point of it.
+    """
+    memo: dict[str, str] = {}
+    node = graph.node(node_id)
+    upstream_fps = []
+    for port in node.spec.inputs:
+        conn = graph.input_connection(node_id, port.name)
+        if conn is not None:
+            upstream_fps.append(node_fingerprint(graph, conn.src_node, memo))
+    payload = json.dumps({
+        "type_id": node.type_id,
+        "source": node.source,
+        "params": node.params,
+        "upstream": sorted(upstream_fps),
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def stale_frozen(graph: Graph) -> list[str]:
+    """Frozen nodes whose params or inputs have changed since they were
+    frozen — the pins that are now telling the graph something untrue.
+
+    A pinned source node, which is what freezing is mostly for, can never
+    appear here: it has no inputs, so nothing moves under it unless its own
+    params are edited. That is deliberate. A warning that fires on every
+    frozen node is one nobody reads.
+    """
+    stale = []
+    for node_id, node in graph.nodes.items():
+        if not node.frozen or node.frozen_fingerprint is None:
+            continue
+        try:
+            if freeze_fingerprint(graph, node_id) != node.frozen_fingerprint:
+                stale.append(node_id)
+        except Exception:
+            continue      # a broken node is somebody else's error to report
+    return stale
 
 
 def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> None:

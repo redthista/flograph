@@ -305,6 +305,77 @@ class SetDescriptionCommand(QUndoCommand):
         return True
 
 
+class SetActiveCommand(QUndoCommand):
+    """Deactivate a node (and, in effect, everything downstream) or bring it
+    back. Nothing is recomputed either way — switching a branch back on
+    leaves it dirty, so the next run picks it up."""
+
+    def __init__(self, graph: Graph, node_id: str, active: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("activate node" if active else "deactivate node",
+                         parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).active
+        self._new = active
+
+    def redo(self) -> None:
+        self._graph.set_active(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_active(self._node_id, self._old)
+
+
+class SetFrozenCommand(QUndoCommand):
+    """Pin a node's output against every subsequent run, or release it.
+
+    The fingerprint is taken here, at the moment of freezing, so undo can put
+    back not just the flag but the reading it was paired with — a redo that
+    re-froze against a *newer* fingerprint would quietly launder a pin that
+    should have been showing as stale.
+    """
+
+    def __init__(self, graph: Graph, node_id: str, frozen: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("freeze node" if frozen else "unfreeze node", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).frozen
+        self._old_fp = graph.node(node_id).frozen_fingerprint
+        self._new = frozen
+        self._new_fp = None
+        if frozen:
+            from flograph.engine.cache_persistence import freeze_fingerprint
+            try:
+                self._new_fp = freeze_fingerprint(graph, node_id)
+            except Exception:
+                self._new_fp = None     # unhashable params: pin without one
+
+    def redo(self) -> None:
+        self._graph.set_frozen(self._node_id, self._new, self._new_fp)
+
+    def undo(self) -> None:
+        self._graph.set_frozen(self._node_id, self._old, self._old_fp)
+
+
+class SetLockedCommand(QUndoCommand):
+    """Freeze a node's params, code and position, or release them."""
+
+    def __init__(self, graph: Graph, node_id: str, locked: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("lock node" if locked else "unlock node", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).locked
+        self._new = locked
+
+    def redo(self) -> None:
+        self._graph.set_locked(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_locked(self._node_id, self._old)
+
+
 class SetPreviewEnabledCommand(QUndoCommand):
     def __init__(self, graph: Graph, node_id: str, enabled: bool,
                  parent: Optional[QUndoCommand] = None) -> None:

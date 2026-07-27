@@ -33,7 +33,8 @@ from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
     ReorderPagesCommand, SetPageColorCommand,
-    SetLabelCommand, SetParamCommand, SetPreviewEnabledCommand,
+    SetActiveCommand, SetFrozenCommand, SetLabelCommand, SetLockedCommand,
+    SetParamCommand, SetPreviewEnabledCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
@@ -606,8 +607,20 @@ class MainWindow(QMainWindow):
             self.action_cancel.setEnabled(False)
             self.action_run.setEnabled(True)
             self.action_run_selected.setEnabled(True)
-            self.statusBar().showMessage(
-                "Run finished" if ok else "Run finished with errors", 5000)
+            message = "Run finished" if ok else "Run finished with errors"
+            # Only pins the graph has moved on from get a mention. A frozen
+            # source node — which is most of them — never appears here, so
+            # this stays a warning worth reading rather than noise.
+            stale = self._refresh_stale_pins()
+            if stale:
+                names = ", ".join(sorted(self.graph.node(n).label
+                                         for n in stale)[:3])
+                more = f" (+{len(stale) - 3})" if len(stale) > 3 else ""
+                message += (f" — {len(stale)} frozen node"
+                            f"{'s' if len(stale) > 1 else ''} did not "
+                            f"refresh and no longer match their inputs: "
+                            f"{names}{more}")
+            self.statusBar().showMessage(message, 5000 if not stale else 15000)
 
         engine.run_started.connect(on_started)
         engine.run_finished.connect(on_finished)
@@ -1504,6 +1517,17 @@ class MainWindow(QMainWindow):
         if color.isValid():
             self.scene.push_node_color(node_id, color.name())
 
+    def _refresh_stale_pins(self) -> set:
+        """Recompute which frozen nodes the graph has moved on from, and
+        amber them on the canvas. Returns the set of node ids."""
+        from flograph.engine import cache_persistence
+        try:
+            stale = set(cache_persistence.stale_frozen(self.graph))
+        except Exception:
+            stale = set()
+        self.scene.refresh_stale_pins(stale)
+        return stale
+
     def _show_node_menu(self, node_id: str, global_pos: QPoint) -> None:
         if node_id not in self.graph.nodes:
             return
@@ -1520,6 +1544,12 @@ class MainWindow(QMainWindow):
         colour = menu.addAction("Change colour…")
         reset_colour = menu.addAction("Reset colour") if node.color else None
         rerun = menu.addAction("Mark Dirty")
+        menu.addSeparator()
+        active_action = menu.addAction(
+            "Deactivate" if node.active else "Activate")
+        freeze_action = menu.addAction("Unfreeze" if node.frozen else "Freeze")
+        lock_action = menu.addAction("Unlock" if node.locked else "Lock")
+        menu.addSeparator()
         preview_action = None
         if card_kind(node) in PREVIEW_TOGGLABLE_KINDS:
             preview_action = menu.addAction(
@@ -1573,6 +1603,15 @@ class MainWindow(QMainWindow):
             self.scene.push_node_color(node_id, None)
         elif chosen is rerun:
             self.graph.mark_dirty(node_id)
+        elif chosen is active_action:
+            self.undo_stack.push(SetActiveCommand(
+                self.graph, node_id, not node.active))
+        elif chosen is freeze_action:
+            self.undo_stack.push(SetFrozenCommand(
+                self.graph, node_id, not node.frozen))
+        elif chosen is lock_action:
+            self.undo_stack.push(SetLockedCommand(
+                self.graph, node_id, not node.locked))
         elif preview_action is not None and chosen is preview_action:
             self.undo_stack.push(SetPreviewEnabledCommand(
                 self.graph, node_id, not node.canvas_preview_enabled))
