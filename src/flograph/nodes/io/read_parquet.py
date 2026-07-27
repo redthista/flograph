@@ -1,7 +1,11 @@
 """Read Parquet
 
-Load a Parquet file into a DataFrame (needs pyarrow — install it from
-Tools > Manage Packages if missing).
+Load a Parquet file into a DataFrame. Needs one of the two engines pandas
+supports, pyarrow or fastparquet — both come with the 'parquet' extra, and
+either can be installed from Tools > Manage Packages. **Engine** picks
+between them; **auto** prefers pyarrow and falls back to fastparquet.
+Install one into a running app and flograph must be restarted before the
+node can use it.
 
 Row filters push down to the reader so filtered row groups are never
 loaded: one `column op value` per line (ops: == != < <= > >= in
@@ -68,7 +72,13 @@ def _filters(text):
 def run(ctx):
     import pandas as pd
 
+    from flograph.packages import parquet_problem
+
     p = ctx.params
+    problem = parquet_problem(p.get("engine", "auto"))
+    if problem:
+        raise RuntimeError(problem)
+
     path = p["path"]
     if not path:
         raise ValueError("no file selected — set 'Parquet file' in the node's properties")

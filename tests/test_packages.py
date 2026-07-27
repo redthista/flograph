@@ -6,6 +6,58 @@ import pytest
 from flograph import packages
 
 
+class TestParquetProblem:
+    def test_silent_when_pyarrow_is_usable(self):
+        pytest.importorskip("pyarrow")
+        assert packages.parquet_problem("auto") == ""
+        assert packages.parquet_problem("pyarrow") == ""
+
+    def test_silent_for_installed_fastparquet(self):
+        pytest.importorskip("fastparquet")
+        assert packages.parquet_problem("fastparquet") == ""
+
+    def test_named_engine_reports_only_its_own_package(self, monkeypatch):
+        """Choosing fastparquet must not be blocked by a missing pyarrow."""
+        monkeypatch.setattr(packages.importlib.util, "find_spec",
+                            lambda name: None if name == "pyarrow" else object())
+        assert packages.parquet_problem("fastparquet") == ""
+        assert "pyarrow package" in packages.parquet_problem("pyarrow")
+
+    def test_auto_falls_back_to_fastparquet(self, monkeypatch):
+        monkeypatch.setattr(packages.importlib.util, "find_spec",
+                            lambda name: None if name == "pyarrow" else object())
+        assert packages.parquet_problem("auto") == ""
+
+    def test_auto_reports_when_neither_engine_exists(self, monkeypatch):
+        monkeypatch.setattr(packages.importlib.util, "find_spec",
+                            lambda name: None)
+        assert "either" in packages.parquet_problem("auto")
+
+    def test_reports_pandas_stale_after_late_install(self, monkeypatch):
+        """pandas thinks pyarrow is absent, pyarrow says it is modern: the
+        state that makes to_parquet die on an unrelated ArrowKeyError."""
+        pytest.importorskip("pyarrow")
+        import pandas.compat.pyarrow as compat
+        monkeypatch.setattr(compat, "pa_version_under14p1", True)
+        assert "Restart flograph" in packages.parquet_problem("auto")
+
+    def test_stale_check_skipped_for_fastparquet(self, monkeypatch):
+        """fastparquet does not go through pandas' pyarrow compat flags."""
+        pytest.importorskip("fastparquet")
+        import pandas.compat.pyarrow as compat
+        monkeypatch.setattr(compat, "pa_version_under14p1", True)
+        assert packages.parquet_problem("fastparquet") == ""
+
+    def test_quiet_for_a_genuinely_old_pyarrow(self, monkeypatch):
+        """A real pre-14.0.1 pyarrow sets the same flag legitimately, and
+        pandas' own patching handles it — do not cry restart at it."""
+        pyarrow = pytest.importorskip("pyarrow")
+        import pandas.compat.pyarrow as compat
+        monkeypatch.setattr(compat, "pa_version_under14p1", True)
+        monkeypatch.setattr(pyarrow, "__version__", "13.0.0")
+        assert packages.parquet_problem("auto") == ""
+
+
 class TestHelpers:
     def test_list_installed_contains_deps(self):
         names = [name for name, _version in packages.list_installed()]
@@ -78,6 +130,22 @@ class TestDialog:
                             lambda *a: started.append(a))
         dialog._uninstall()
         assert warned and not started
+
+    def test_install_invalidates_import_caches(self, qtbot, monkeypatch):
+        """A package installed mid-session must become importable, and the
+        user must be told a restart is still needed — pandas caches
+        pyarrow's absence at import time and cannot be told otherwise."""
+        import importlib
+
+        from flograph.ui.packages_dialog import PackagesDialog
+        dialog = PackagesDialog()
+        qtbot.addWidget(dialog)
+        called = []
+        monkeypatch.setattr(importlib, "invalidate_caches",
+                            lambda: called.append(True))
+        dialog._on_finished("install", 0)
+        assert called, "import caches were not invalidated after an install"
+        assert "restart" in dialog._log.toPlainText().lower()
 
     def test_not_busy_initially(self, qtbot):
         from flograph.ui.packages_dialog import PackagesDialog
