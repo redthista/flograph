@@ -137,23 +137,9 @@ from wired data, which is the part worth reusing rather than rewriting.
 
 ---
 
-## F. Memory and resources  (was 22)
+## F. Charts  (was 27)
 
-**F1. A layered RAM bar.** The status bar already reports system memory,
-the project's total cached-output size, and the selected node's
-(`ui/resource_monitor.py`) — but as three numbers. Draw them instead as one
-bar with the three quantities layered over each other and the detail on
-hover: far faster to read at a glance.
-
-Open question from the original note, still open: are those numbers all the
-RAM in play? They cover cached outputs. They do not cover the interpreter,
-Qt itself, or the loaded libraries.
-
----
-
-## G. Charts  (was 27)
-
-**G1. Explicit Y bounds on the chart-per-value nodes.** Partly overtaken:
+**F1. Explicit Y bounds on the chart-per-value nodes.** Partly overtaken:
 the "shared scale picks the tallest column rather than the tallest stack"
 bug is fixed in both nodes — `_stacks()` bounds a stacked chart by the row
 totals, so charts no longer grow past the sheet. What is still missing is a
