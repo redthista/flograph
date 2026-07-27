@@ -54,6 +54,9 @@ from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
 from .properties.params_panel import ParamsPanel
 from .resource_monitor import ResourceMonitorWidget
+from flograph.engine.runstats import HISTORY_LIMIT
+
+from .stats_window import StatsWindow
 from .settings_dialog import SettingsDialog
 from . import theme
 
@@ -94,7 +97,14 @@ class MainWindow(QMainWindow):
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
         self._settings_dialog: Optional[SettingsDialog] = None
+        self._stats_window: Optional[StatsWindow] = None
 
+        self.stats_bar_enabled = self.settings.value(
+            "stats/bar_enabled", True, type=bool)
+        self.stats_sampling_enabled = self.settings.value(
+            "stats/sampling_enabled", True, type=bool)
+        self.stats_history_limit = self.settings.value(
+            "stats/history_limit", HISTORY_LIMIT, type=int)
         self.lod_enabled = self.settings.value("canvas/lod_enabled", True, type=bool)
         self.lod_threshold = self.settings.value(
             "canvas/lod_threshold", DEFAULT_LOD_THRESHOLD, type=float)
@@ -151,7 +161,9 @@ class MainWindow(QMainWindow):
         self._restore_window_state()
         self._on_current_page_changed(self.page_bar.current_page_id())
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
+        self.resource_monitor.clicked.connect(self._show_stats)
         self.statusBar().addPermanentWidget(self.resource_monitor)
+        self._apply_stats_settings()
         self.statusBar().showMessage("Ready")
 
     def _canvas_pages(self) -> list:
@@ -338,6 +350,8 @@ class MainWindow(QMainWindow):
         # --- tools
         self.action_settings = act("&Settings…", QKeySequence("Ctrl+,"),
                                    self._show_settings)
+        self.action_stats = act("&Statistics…", QKeySequence("Ctrl+Shift+I"),
+                                self._show_stats)
         self.action_packages = act("Manage &Packages…", None,
                                    self._show_packages)
         self.action_ai_settings = act("AI Assistant &Settings…", None,
@@ -381,6 +395,7 @@ class MainWindow(QMainWindow):
             run_menu.addAction(action)
 
         tools_menu = self.menuBar().addMenu("&Tools")
+        tools_menu.addAction(self.action_stats)
         tools_menu.addAction(self.action_settings)
         tools_menu.addSeparator()
         tools_menu.addAction(self.action_packages)
@@ -538,6 +553,28 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "GPU acceleration isn't available here — reverted to standard "
             "rendering.", 6000)
+
+    # ------------------------------------------------------------ statistics
+
+    def set_stats_bar_enabled(self, enabled: bool) -> None:
+        self.stats_bar_enabled = enabled
+        self.settings.setValue("stats/bar_enabled", enabled)
+        self.resource_monitor.bar.setVisible(enabled)
+
+    def set_stats_sampling_enabled(self, enabled: bool) -> None:
+        self.stats_sampling_enabled = enabled
+        self.settings.setValue("stats/sampling_enabled", enabled)
+        self.engine.sampling_enabled = enabled
+
+    def set_stats_history_limit(self, limit: int) -> None:
+        self.stats_history_limit = limit
+        self.settings.setValue("stats/history_limit", limit)
+        self.engine.history.set_limit(limit)
+
+    def _apply_stats_settings(self) -> None:
+        self.resource_monitor.bar.setVisible(self.stats_bar_enabled)
+        self.engine.sampling_enabled = self.stats_sampling_enabled
+        self.engine.history.set_limit(self.stats_history_limit)
 
     # -------------------------------------------------------- zoom-out LOD
 
@@ -1163,6 +1200,13 @@ class MainWindow(QMainWindow):
         from .ai_settings_dialog import AiSettingsDialog
         AiSettingsDialog(self).exec()
 
+    def _show_stats(self) -> None:
+        if self._stats_window is None:
+            self._stats_window = StatsWindow(self, self)
+        self._stats_window.show()
+        self._stats_window.raise_()
+        self._stats_window.activateWindow()
+
     def _show_settings(self) -> None:
         if self._settings_dialog is None:
             self._settings_dialog = SettingsDialog(self, self)
@@ -1767,6 +1811,9 @@ class MainWindow(QMainWindow):
         not a per-page reset."""
         self.settings.clear()
         self.set_page_bar_position("top")
+        self.set_stats_bar_enabled(True)
+        self.set_stats_sampling_enabled(True)
+        self.set_stats_history_limit(HISTORY_LIMIT)
         self.set_lod_enabled(True)
         self.set_lod_threshold(DEFAULT_LOD_THRESHOLD)
         self.set_snap_enabled(True)

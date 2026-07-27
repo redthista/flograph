@@ -199,6 +199,7 @@ class SettingsDialog(QDialog):
         pages = {
             "General": self._build_general_page(window),
             "Canvas": self._build_canvas_page(window),
+            "Statistics": self._build_stats_page(window),
             "Table Node": self._build_table_node_page(),
             "About": self._build_about_page(),
         }
@@ -227,11 +228,14 @@ class SettingsDialog(QDialog):
             "minimap_enabled_checkbox": window.minimap_enabled,
             "port_labels_checkbox": window.port_labels_enabled,
             "table_autosize_checkbox": autosize_default_enabled(),
+            "stats_bar_checkbox": window.stats_bar_enabled,
+            "stats_sampling_checkbox": window.stats_sampling_enabled,
         }
         spins = {
             "lod_threshold_spinbox": round(window.lod_threshold * 100),
             "tint_soft_spinbox": round(window.tint_soft * 100),
             "tint_strong_spinbox": round(window.tint_strong * 100),
+            "stats_history_spinbox": window.stats_history_limit,
         }
         for name, value in {**combo_values, **checks, **spins}.items():
             widget = self.findChild(QWidget, name)
@@ -578,6 +582,52 @@ class SettingsDialog(QDialog):
             lambda index: window.set_grid_step(grid_combo.itemData(index)))
         soft_spin.valueChanged.connect(lambda _value: _push_tints())
         strong_spin.valueChanged.connect(lambda _value: _push_tints())
+
+        return page
+
+    @staticmethod
+    def _build_stats_page(window) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        rows = SettingsGrid()
+        layout.addWidget(rows, 1)
+
+        rows.add_group("Status bar")
+
+        bar_check = QCheckBox()
+        bar_check.setObjectName("stats_bar_checkbox")
+        bar_check.setChecked(window.stats_bar_enabled)
+        bar_check.toggled.connect(window.set_stats_bar_enabled)
+        rows.add("Show the memory bar", bar_check,
+                 "The layered bar beside the memory figures: the project's "
+                 "cached outputs inside the flograph process inside the "
+                 "whole machine. Turning it off leaves the numbers and the "
+                 "run timings, which stay clickable.")
+
+        rows.add_group("Measurement")
+
+        sample_check = QCheckBox()
+        sample_check.setObjectName("stats_sampling_checkbox")
+        sample_check.setChecked(window.stats_sampling_enabled)
+        sample_check.toggled.connect(window.set_stats_sampling_enabled)
+        rows.add("Sample memory while nodes run", sample_check,
+                 "Reads the process's resident size ten times a second "
+                 "during a run and records the peak against whichever node "
+                 "was running. This is what catches a step that briefly "
+                 "builds something enormous and returns something small. "
+                 "Off, the statistics window still reports times and output "
+                 "sizes, just not peaks.")
+
+        history_spin = QSpinBox()
+        history_spin.setObjectName("stats_history_spinbox")
+        history_spin.setRange(1, 200)
+        history_spin.setValue(window.stats_history_limit)
+        history_spin.valueChanged.connect(window.set_stats_history_limit)
+        rows.add("Runs to remember", history_spin,
+                 "How many past runs the statistics window keeps, so a node "
+                 "that is getting slower can be seen doing it. Held in "
+                 "memory for this session only — nothing is written beside "
+                 "your project.")
 
         return page
 

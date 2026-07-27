@@ -104,12 +104,31 @@ def summarize(value: Any) -> str:
 
 
 def estimate_size(value: Any) -> int:
-    """Best-effort byte size of a node output, for the status bar memory readout."""
+    """Best-effort byte size of a node output, for the memory readouts.
+
+    Best-effort is load-bearing: this runs inside the engine's completion
+    slot for every node of every run, so an exception here does not merely
+    lose a number — it leaves the run unfinished and the Run button
+    disabled. Anything it cannot measure is worth zero, never a raise.
+    """
+    import sys
+    try:
+        return _measure(value)
+    except Exception:
+        return 0
+
+
+def _measure(value: Any) -> int:
     import sys
     pd = sys.modules.get("pandas")
     if pd is not None:
-        if isinstance(value, (pd.DataFrame, pd.Series)):
-            return int(value.memory_usage(deep=True).sum())
+        if isinstance(value, (pd.DataFrame, pd.Series, pd.Index)):
+            used = value.memory_usage(deep=True)
+            # A DataFrame answers with a Series, one entry per column; a
+            # Series and an Index answer with a plain int. Calling .sum() on
+            # all three is the obvious way to write this and raises on two
+            # of them — which used to wedge any flow containing a groupby.
+            return int(used.sum() if hasattr(used, "sum") else used)
     np = sys.modules.get("numpy")
     if np is not None and isinstance(value, np.ndarray):
         return int(value.nbytes)

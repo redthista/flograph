@@ -6,9 +6,10 @@ signals; all graph/cache mutation happens here, never on pool threads.
 """
 from __future__ import annotations
 
+import time
 from typing import Iterable, Optional
 
-from PySide6.QtCore import QObject, QThreadPool, Signal
+from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 
 from flograph.core.graph import Graph
 from flograph.core.links import from_problem
@@ -17,6 +18,8 @@ from flograph.core.node import NodeStatus
 from .cache import OutputCache
 from .context import CancellationToken
 from .errors import NodeError
+from .runstats import (SAMPLE_MS, NodeRun, ProcessSampler, RunHistory,
+                       RunRecord)
 from .worker import NodeRunnable, WorkerSignals
 
 
@@ -55,12 +58,46 @@ def build_plan(graph: Graph, targets: Iterable[str],
             if nid in wanted and graph.nodes[nid].dirty]
 
 
+def skipped_summary(graph: Graph, targets: Iterable[str],
+                    cache: "Optional[OutputCache]",
+                    plan: Iterable[str]) -> tuple:
+    """`(clean, frozen, inactive)` — why the nodes this run left out were
+    left out.
+
+    Walks the same closure build_plan does rather than having build_plan
+    hand the numbers back: the plan is what the engine needs and this is
+    what the stats panel needs, and keeping them apart leaves build_plan a
+    function that returns one thing.
+    """
+    considered = set(targets)
+    for target in list(considered):
+        considered |= graph.upstream(target)
+    blocked: set = set()
+    for node_id, node in graph.nodes.items():
+        if not node.active:
+            blocked |= {node_id} | graph.downstream(node_id)
+    running = set(plan)
+    clean = frozen = inactive = 0
+    for node_id in considered - running:
+        node = graph.nodes.get(node_id)
+        if node is None:
+            continue
+        if node_id in blocked:
+            inactive += 1
+        elif node.frozen and cache is not None and cache.has(node_id):
+            frozen += 1
+        else:
+            clean += 1
+    return clean, frozen, inactive
+
+
 class ExecutionEngine(QObject):
     run_started = Signal()
     run_finished = Signal(bool)            # ok: no node failed
     node_log = Signal(str, str, str)       # node_id, line, stream
     node_failed = Signal(str, object)      # node_id, NodeError
     node_succeeded = Signal(str)           # node_id
+    run_recorded = Signal(object)          # RunRecord — a finished run's cost
 
     def __init__(self, graph: Graph, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -78,6 +115,22 @@ class ExecutionEngine(QObject):
         self._token: Optional[CancellationToken] = None
         self._had_failure = False
         self._active = False
+
+        # What runs cost, kept for the session (see engine.runstats).
+        self.history = RunHistory()
+        # Polling process memory is cheap but not free and not everyone wants
+        # it; the main window drives this from Settings > Statistics.
+        self.sampling_enabled = True
+        self._sampler = ProcessSampler()
+        self._record: Optional[RunRecord] = None
+        self._node_run: Optional[NodeRun] = None
+        self._run_started = 0.0
+        # Polls process memory while a node holds the floor. Lives on the
+        # GUI thread, which is idle during a run — the work is on the pool —
+        # so it actually gets to fire.
+        self._sample_timer = QTimer(self)
+        self._sample_timer.setInterval(SAMPLE_MS)
+        self._sample_timer.timeout.connect(self._sample)
 
         graph.events.dirty_changed.connect(self._on_dirty_changed)
         graph.events.node_removed.connect(self.cache.evict)
@@ -103,6 +156,7 @@ class ExecutionEngine(QObject):
         if not self._plan:
             return
         self._active = True
+        self._open_record(targets)
         for node_id in self._plan:
             self.graph.set_status(node_id, NodeStatus.QUEUED)
         self.run_started.emit()
@@ -114,6 +168,8 @@ class ExecutionEngine(QObject):
         if not self._active or self._token is None:
             return
         self._token.cancel()
+        if self._record is not None:
+            self._record.cancelled = True
         for node_id in self._plan:
             self.graph.set_status(node_id, NodeStatus.IDLE)
         self._plan.clear()
@@ -189,6 +245,7 @@ class ExecutionEngine(QObject):
         signals.logged.connect(self.node_log)
 
         self._current = node_id
+        self._open_node_run(node_id)
         self.graph.set_status(node_id, NodeStatus.RUNNING)
         self.pool.start(NodeRunnable(
             node_id=node_id,
@@ -243,11 +300,14 @@ class ExecutionEngine(QObject):
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.node_succeeded.emit(node_id)
+        self._close_node_run("ok", wall_time, node_id)
         self._dispatch()
 
     def _on_node_failed(self, node_id: str, error: NodeError) -> None:
         self._current = None
         self._had_failure = self._had_failure or not error.cancelled
+        self._close_node_run(
+            "cancelled" if error.cancelled else "failed", None, node_id)
         if node_id in self.graph.nodes:
             self.graph.set_status(node_id, NodeStatus.ERROR, error.message)
             self._prune_downstream(node_id)
@@ -259,7 +319,76 @@ class ExecutionEngine(QObject):
             return
         self._active = False
         self._token = None
+        self._close_record()
         self.run_finished.emit(not self._had_failure)
+
+    # ----------------------------------------------------------- recording
+
+    def _open_record(self, targets: Iterable[str]) -> None:
+        rss = self._sampler.rss()
+        self._record = RunRecord(rss_start=rss, rss_peak=rss)
+        (self._record.skipped_clean, self._record.skipped_frozen,
+         self._record.skipped_inactive) = skipped_summary(
+            self.graph, targets, self.cache, self._plan)
+        self._run_started = time.perf_counter()
+        if self.sampling_enabled:
+            self._sample_timer.start()
+
+    def _open_node_run(self, node_id: str) -> None:
+        if self._record is None:
+            return
+        node = self.graph.nodes.get(node_id)
+        rss = self._sampler.rss()
+        self._node_run = NodeRun(
+            node_id=node_id,
+            label=node.label if node is not None else node_id,
+            started=time.perf_counter() - self._run_started,
+            rss_start=rss, rss_peak=rss,
+        )
+
+    def _close_node_run(self, outcome: str, wall_time: "Optional[float]",
+                        node_id: str) -> None:
+        run = self._node_run
+        self._node_run = None
+        if run is None or self._record is None or run.node_id != node_id:
+            return
+        run.outcome = outcome
+        # The worker's own measurement when there is one: it brackets the
+        # node's code and nothing else, where the clock here would also be
+        # charging it for the queued signal that carried the result back.
+        run.wall_time = (wall_time if wall_time is not None
+                         else max(0.0, time.perf_counter()
+                                  - self._run_started - run.started))
+        entry = self.cache.get(node_id)
+        if entry is not None:
+            run.output_bytes = entry.memory_bytes
+            first = next(iter(entry.outputs), None)
+            if first is not None:
+                run.summary = entry.summary(first)
+        self._record.nodes.append(run)
+
+    def _close_record(self) -> None:
+        record = self._record
+        self._record = None
+        self._node_run = None
+        self._sample_timer.stop()
+        if record is None:
+            return
+        record.wall_time = time.perf_counter() - self._run_started
+        record.ok = not self._had_failure
+        self.history.add(record)
+        self.run_recorded.emit(record)
+
+    def _sample(self) -> None:
+        """One poll of process memory, charged to whoever is running."""
+        rss = self._sampler.rss()
+        if not rss:
+            self._sample_timer.stop()   # unavailable here; stop asking
+            return
+        if self._record is not None:
+            self._record.rss_peak = max(self._record.rss_peak, rss)
+        if self._node_run is not None:
+            self._node_run.rss_peak = max(self._node_run.rss_peak, rss)
 
     # ------------------------------------------------------------ reactions
 

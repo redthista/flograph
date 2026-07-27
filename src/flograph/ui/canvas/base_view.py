@@ -5,6 +5,8 @@ zooming pauses."""
 from __future__ import annotations
 
 import math
+import time
+from collections import deque
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
@@ -18,11 +20,65 @@ except ImportError:  # trimmed PySide6 installs ship without QtWebEngine
 
 from .. import theme
 
+# How many recent frames the paint timer averages over. A couple of seconds
+# of continuous redraw, so a figure reflects what the canvas is doing now
+# rather than what it did during the last big pan.
+PAINT_WINDOW = 120
+
 ZOOM_MIN = 0.1
 ZOOM_MAX = 4.0
 GRID_FINE = 20.0
 GRID_COARSE = 100.0
 FINE_GRID_LOD = 0.4
+
+
+class PaintStats:
+    """How long this view is taking to draw itself.
+
+    A ring of recent frame times, filled by paintEvent. The measurement costs
+    two clock reads per frame, which is why it is always on rather than
+    something the stats window switches: a diagnostic you have to enable
+    before reproducing the problem is one you never have when you need it.
+
+    Frames are only produced when something asks for a repaint, so a still
+    canvas records nothing and `fps` is "how fast it redraws while it is
+    redrawing", not a running frame rate.
+    """
+
+    def __init__(self, window: int = PAINT_WINDOW) -> None:
+        self._frames: deque = deque(maxlen=window)
+        self.total = 0            # frames drawn since the view opened
+
+    def record(self, seconds: float) -> None:
+        self._frames.append(seconds)
+        self.total += 1
+
+    def reset(self) -> None:
+        self._frames.clear()
+
+    def recent(self) -> list:
+        """The window itself, oldest first — for anything that wants the
+        shape rather than the average."""
+        return list(self._frames)
+
+    @property
+    def samples(self) -> int:
+        return len(self._frames)
+
+    @property
+    def avg_ms(self) -> float:
+        return 1000 * sum(self._frames) / len(self._frames) if self._frames else 0.0
+
+    @property
+    def worst_ms(self) -> float:
+        return 1000 * max(self._frames) if self._frames else 0.0
+
+    @property
+    def fps(self) -> float:
+        """Frames a second the view could sustain at this cost — a ceiling,
+        not an observed rate."""
+        avg = self.avg_ms
+        return 1000.0 / avg if avg > 0 else 0.0
 
 
 class ZoomPanGraphicsView(QGraphicsView):
@@ -41,6 +97,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
+        self.paint_stats = PaintStats()
         self._panning = False
         self._pan_last = QPointF()
         self._space_held = False
@@ -242,6 +299,13 @@ class ZoomPanGraphicsView(QGraphicsView):
         if event.type() == QEvent.ActivationChange and not self.isActiveWindow():
             self._end_space_pan()
         super().changeEvent(event)
+
+    # --------------------------------------------------------------- paint
+
+    def paintEvent(self, event) -> None:
+        started = time.perf_counter()
+        super().paintEvent(event)
+        self.paint_stats.record(time.perf_counter() - started)
 
     # ------------------------------------------------------------------ bg
 

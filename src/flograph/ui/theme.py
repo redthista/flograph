@@ -31,6 +31,15 @@ PIN_STALE = QColor("#eab308")
 # has to be told apart from all four at four pixels across.
 PIN_HELD = QColor("#22d3ee")
 
+# Status-bar memory bar, brightest first: the project's own cached outputs,
+# the rest of the flograph process, everything else the machine is using.
+# One hue stepping down in brightness rather than three colours, so the bar
+# reads as "how much of this is mine" at a glance instead of asking to be
+# decoded against a key.
+MEM_CACHE = QColor("#60a5fa")
+MEM_APP = QColor("#3b6299")
+MEM_OTHER = QColor("#4b4e58")
+
 FRAME_TITLE = QColor("#d1d5db")
 BUTTON_ACCENT = QColor("#7c6cf6")
 
