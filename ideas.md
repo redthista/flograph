@@ -5,7 +5,6 @@
    - page setup: size/orientation/margins, and a cover page
    - headers/footers with page numbers, title, date
    - page breaks you can force, and keeping a chart off a page boundary
-   - plotly without needing kaleido (snapshot the webview instead)
    - figure sizing/alignment per embed, e.g. ![[chart|width=50%]]
    - export the whole project's reports at once / from the CLI (headless)
    - docx export?
@@ -41,8 +40,12 @@
    desktop. A report's HTML export only has to produce the document — the
    "get it into a browser" half exists and is tested.
 3. restore crashed workflows from undo history? how possible is this? 
-7. right click nodes - deactivate.
+7. right click nodes - deactivate/ lock.
 20. node context option "Lock Node" this locks the node and retains its value on run all, does this work with cache? and on reopen, will it retain the value?
 21. Report node - export to pdf on nodes context menu and show in browser? 
 22. system mem and file mem: node mem: are these all the ram thats being used for this? can we have cache size, total app ram usage. maybe we can have a colored bar added that represents the system ram, the amount of ram this app is using, and the amount of ram the currrent selected node is using out of that. so one bar, colors layered over, and tooltip on hover? 
-23. 
+23. when copying a whole table and pasting into another tool like excel, i want to also see the cols, copy columns by default when whole table is selected
+24. add a between slider. 
+25. collapseable frames - this should be nice for optomising and grouping, i can create a frame with all the data inputs and tables, set up some gotos, and then collapse, single node on canvas, keeping things fast.
+26. "disable canvas preview" on all vis nodes inc table node. this way i can have a dashboard page where i edit the data, but it doesnt hog the canvas resources.
+27. on plotly chart to values nodes, it picks a max from the individual values, rather than the potential max value of a stacked chart. this causes an issue where the charts can grow past the sheets, maybe we could also add a max_y and min_y option default to 0 which is current functionality, and we can set a value.
