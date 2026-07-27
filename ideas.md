@@ -1,51 +1,162 @@
-1. LARGE: Markdown report creator, allowing me to write markdown but use things like ![[my chart]] to place the chart on the page, this will be exporting to things like pdfs. this could be anther page type like "model" "dashboard" so when you click the + icon in the bottom canvas bar, you have the option to pick dashboard or mdreport. or approperatly named options. ii like what you can do with R-markdown stuff, and would like to make a python version.
-   PASS 1 DONE (report page kind, ![[node]] and ![[node|port]] embeds for
-   figures/tables/scalars/markdown-strings, live preview, PDF export).
-   Still to do, roughly in order:
-   - page setup: size/orientation/margins, and a cover page
-   - headers/footers with page numbers, title, date
-   - page breaks you can force, and keeping a chart off a page boundary
-   - figure sizing/alignment per embed, e.g. ![[chart|width=50%]]
-   - export the whole project's reports at once / from the CLI (headless)
-   - docx export?
-   - a Report Text node so prose can be templated from data more easily
-   - report *cards* exist now (Viz > Report, embeds its wired inputs,
-     tileable on a dashboard); consider letting a page embed a card
+# Ideas
 
-   BIG ONE, agreed 2026-07-26, do as its own pass: HTML export via Jinja,
-   then print from the browser. A SECOND export target alongside the PDF
-   one, not a replacement.
-   Why it's worth it — things Qt's text layout simply cannot do:
-     - real CSS: @page, @media print, forced page breaks, page-break-inside
-       avoid (the pagination weak spot), running headers/footers with
-       counters
-     - web fonts, flexbox/grid, proper design control
-     - Plotly stays INTERACTIVE in the browser, and needs no kaleido —
-       kills that limitation outright
-     - browser print-to-PDF beats Qt for anything designed
-   Shape:
-     - a Jinja template the user can replace, plus a code node that injects
-       CSS (fits how the rest of flograph works)
-     - "Export HTML" + "Open in browser" buttons on a report page
-     - the embed resolver already produces the right intermediate (values
-       keyed by ref); only the *rendering* forks
-     - asset handling: charts as embedded data URIs so one file travels
-   Cost to be honest about: the in-app preview stops being exactly what you
-   get. Today the preview and the PDF are literally the same QTextDocument
-   so they cannot disagree; with a browser round trip the preview becomes an
-   approximation and "open in browser" becomes the real preview.
-   Groundwork already done 2026-07-26 by idea 21 (now shipped): the HTML
-   coercion lives in flograph/core/html.py (Qt-free), and flograph/ui/
-   browser.py writes a named page to a session temp dir and hands it to the
-   desktop. A report's HTML export only has to produce the document — the
-   "get it into a browser" half exists and is tested.
-3. restore crashed workflows from undo history? how possible is this? 
-7. right click nodes - deactivate/ lock.
-20. node context option "Lock Node" this locks the node and retains its value on run all, does this work with cache? and on reopen, will it retain the value?
-21. Report node - export to pdf on nodes context menu and show in browser? 
-22. system mem and file mem: node mem: are these all the ram thats being used for this? can we have cache size, total app ram usage. maybe we can have a colored bar added that represents the system ram, the amount of ram this app is using, and the amount of ram the currrent selected node is using out of that. so one bar, colors layered over, and tooltip on hover? 
-23. when copying a whole table and pasting into another tool like excel, i want to also see the cols, copy columns by default when whole table is selected
-24. add a between slider. 
-25. collapseable frames - this should be nice for optomising and grouping, i can create a frame with all the data inputs and tables, set up some gotos, and then collapse, single node on canvas, keeping things fast.
-26. "disable canvas preview" on all vis nodes inc table node. this way i can have a dashboard page where i edit the data, but it doesnt hog the canvas resources.
-27. on plotly chart to values nodes, it picks a max from the individual values, rather than the potential max value of a stacked chart. this causes an issue where the charts can grow past the sheets, maybe we could also add a max_y and min_y option default to 0 which is current functionality, and we can set a value.
+Grouped into chunks that are buildable in one go. Each chunk is meant to be
+picked up whole: the pieces inside it touch the same code and share the same
+decisions, so doing them together costs much less than doing them apart.
+
+Old numbers are kept as "(was N)" — a couple of code comments still cite
+them, and they have already drifted once. Status notes were checked against
+the code on 2026-07-27.
+
+---
+
+## A. Reports — finish pass 1  (was 1)
+
+Pass 1 shipped: the report page kind, `![[node]]` and `![[node|port]]`
+embeds for figures / tables / scalars / markdown strings, a live preview,
+and PDF export. Plotly figures render without kaleido as of 0.1.8.
+
+**A1. Page setup.** Size, orientation, margins, and a cover page.
+
+**A2. Running headers and footers.** Page numbers, title, date.
+
+**A3. Pagination control.** Page breaks you can force, and keeping a chart
+off a page boundary. Qt's weakest spot — see chunk B.
+
+A1–A3 are really one job: all three are page geometry, all three have to be
+understood by both the preview and the PDF writer, and all three want the
+same settings surface. Doing them separately means building that surface
+three times.
+
+**A4. Per-embed sizing and alignment** — `![[chart|width=50%]]`. The embed
+parser already splits on `|` for the port name, so the syntax has room.
+
+**A5. A Report Text node**, so prose can be templated from data without
+hand-writing a Python Script node each time.
+
+**A6. Let a report page embed a report card.** Report cards exist (Viz >
+Report, embeds its wired inputs, tileable on a dashboard); a page cannot
+embed one yet.
+
+**A7. Export headless** — every report in a project at once, from the CLI.
+
+**A8. docx export?**
+
+**A9. Export PDF / Open in Browser from a report *card's* context menu**
+(was 21). A report *page* has toolbar buttons for this; a card has no
+equivalent. `ui/browser.py` already does the "get HTML in front of the
+user" half, so this is mostly wiring.
+
+A4–A9 are small and independent — pick any subset in any order.
+
+---
+
+## B. Reports — HTML export via Jinja  (was 1, "BIG ONE")
+
+Agreed 2026-07-26, to be done as its own pass. A **second** export target
+alongside the PDF one, not a replacement.
+
+Why it's worth it — things Qt's text layout simply cannot do:
+- real CSS: `@page`, `@media print`, forced page breaks,
+  `page-break-inside: avoid` (the A3 problem), running headers and footers
+  with counters
+- web fonts, flexbox/grid, proper design control
+- Plotly stays **interactive** in the browser
+- browser print-to-PDF beats Qt for anything designed
+
+Shape:
+- a Jinja template the user can replace, plus a code node that injects CSS
+  (fits how the rest of flograph works)
+- "Export HTML" and "Open in browser" buttons on a report page
+- the embed resolver already produces the right intermediate (values keyed
+  by ref); only the *rendering* forks
+- asset handling: charts as embedded data URIs, so one file travels
+
+Cost to be honest about: the in-app preview stops being exactly what you
+get. Today the preview and the PDF are literally the same QTextDocument, so
+they cannot disagree. With a browser round trip the preview becomes an
+approximation, and "open in browser" becomes the real preview.
+
+Groundwork already done: the HTML coercion lives in `core/html.py`
+(Qt-free), and `ui/browser.py` writes a named page to a session temp dir
+and hands it to the desktop. Both are tested.
+
+One of the original arguments has since evaporated: "and it needs no
+kaleido" was true when this was written, but 0.1.8 snapshots Plotly through
+the embedded Chromium, so the PDF path needs no extra library either. The
+CSS and pagination arguments stand on their own — this is just a smaller
+win than it looked.
+
+---
+
+## C. Recovering work  (was 3)
+
+Deactivate, Lock and Freeze all shipped in 0.1.8 — `NodeInstance.active`,
+`.locked` and `.frozen`, all three in the right-click menu. The three
+questions the original Lock note asked are answered in code: a pin survives
+save and reopen, it holds its cache against dirtying, and it contributes a
+constant to the cache fingerprint so an edit above it does not invalidate
+what is below.
+
+What is left under this heading is unrelated to those:
+
+**C4. Restore a crashed workflow from undo history** (was 3). Undo history
+is in-memory only today, so this means persisting it somewhere durable —
+worth a spike to size before it becomes a plan.
+
+---
+
+## D. Canvas at scale  (was 25)
+
+**D1. Collapsible frames.** Collapse a frame down to a single node-sized box:
+put the data inputs and tables in a frame, wire onward with gotos, collapse
+it, and the canvas stays fast. Frames are already a first-class model object
+(`core/graph.py`, `ui/canvas/frame_item.py`) with their own stacking order,
+so the code is a display state plus a rule for what happens to wires that
+cross the collapsed boundary — and that rule *is* the design question.
+
+Already shipped in this area, for reference: per-node canvas previews can be
+switched off (right-click a viz node), and zoom-out LOD flattening.
+
+---
+
+## E. Tables and controls  (was 23, 24)
+
+**E1. Copy a table with its column headers.** Copying a whole table and
+pasting into Excel should bring the column names with it. Bigger than it
+reads: the *sheet* page has a proper three-format clipboard
+(`ui/spreadsheet/clipboard.py` — TSV, HTML and an internal format), but the
+table views on node cards, dashboard tiles and the inspector are plain
+`QTableView`s with no copy handling at all, and Qt gives them none. So the
+work is "give the data table views a copy action, headers included when the
+selection is the whole table", with the sheet's helpers as the model.
+
+**E2. A "between" slider** — two handles emitting a low/high pair, for
+filtering to a range. The existing Slider node already derives its bounds
+from wired data, which is the part worth reusing rather than rewriting.
+
+---
+
+## F. Memory and resources  (was 22)
+
+**F1. A layered RAM bar.** The status bar already reports system memory,
+the project's total cached-output size, and the selected node's
+(`ui/resource_monitor.py`) — but as three numbers. Draw them instead as one
+bar with the three quantities layered over each other and the detail on
+hover: far faster to read at a glance.
+
+Open question from the original note, still open: are those numbers all the
+RAM in play? They cover cached outputs. They do not cover the interpreter,
+Qt itself, or the loaded libraries.
+
+---
+
+## G. Charts  (was 27)
+
+**G1. Explicit Y bounds on the chart-per-value nodes.** Partly overtaken:
+the "shared scale picks the tallest column rather than the tallest stack"
+bug is fixed in both nodes — `_stacks()` bounds a stacked chart by the row
+totals, so charts no longer grow past the sheet. What is still missing is a
+manual override: `min_y` / `max_y` params to pin the axis to a chosen range
+instead of a derived one.
+
