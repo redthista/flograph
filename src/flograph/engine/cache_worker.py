@@ -35,6 +35,11 @@ class CacheLoadRunnable(QRunnable):
 
     def run(self) -> None:  # executes on a pool thread
         for node_id, meta in self.entries:
+            if cache_persistence.is_alias(meta):
+                # shares another node's blob — there is nothing to unpickle,
+                # and rebuilding it means reading the cache, which belongs to
+                # the GUI thread (see cache_persistence.restore_aliases)
+                continue
             try:
                 outputs = cache_persistence.load_blob(self.project_path, node_id)
             except Exception:

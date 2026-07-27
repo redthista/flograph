@@ -1,9 +1,10 @@
 """Persist node output caches alongside a .flograph project file.
 
 A side-car directory named "<project>.flograph.cache/" holds one pickle blob
-per cached node plus a manifest keyed by a fingerprint of that node's type,
-source, and params, folded recursively with every upstream node's
-fingerprint — so any change to a node or anything upstream of it invalidates
+per cached node — bar the pass-through nodes, which get a manifest entry
+pointing at whoever owns the value instead of a blob of their own — plus a
+manifest keyed by a fingerprint of that node's type, source, and params,
+folded recursively with every upstream node's fingerprint — so any change to a node or anything upstream of it invalidates
 its entry. This deliberately does not touch the project file's own
 SCHEMA_VERSION: the .flograph JSON itself is untouched, only a sibling
 directory is added.
@@ -115,6 +116,63 @@ def stale_frozen(graph: Graph) -> list[str]:
     return stale
 
 
+def is_alias(meta: dict) -> bool:
+    """Does this manifest entry share another node's blob rather than own one?"""
+    return isinstance(meta.get("alias"), dict)
+
+
+def _alias_meta(graph: Graph, node_id: str, entry, manifest: dict):
+    """How to rebuild `entry` from another node's blob, or None if it has to
+    be written out itself.
+
+    The source must already be in the manifest. save_cache walks in
+    topological order, so a link's source has been dealt with by the time the
+    link is reached, and a source that was *skipped* — unpicklable, or
+    evicted while a frozen link kept its value alive — correctly falls
+    through to the link writing its own blob. A frozen node never aliases
+    either: its fingerprint is a constant, so it can come back from cache
+    when its source cannot, and it must not depend on a blob that will not
+    be there.
+    """
+    if entry.alias_of is None or entry.alias_port is None:
+        return None
+    if entry.alias_of not in manifest or len(entry.outputs) != 1:
+        return None
+    if graph.nodes[node_id].frozen:
+        return None
+    return {"node": entry.alias_of, "port": entry.alias_port,
+            "as": next(iter(entry.outputs))}
+
+
+def restore_aliases(graph: Graph, cache: OutputCache,
+                    entries: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    """Rebuild the entries that share another node's value, once the blobs
+    they point at are in the cache. Returns the ids actually restored.
+
+    Kept separate from the blob loading because that half runs on a pool
+    thread and this half must not: it reads the cache the GUI thread owns.
+    The entry list is in the order save_cache wrote it, which is topological,
+    so a chain (goto -> from -> from) resolves front to back in one pass. An
+    alias whose source did not come back is skipped and its node loads dirty,
+    exactly as it would have with no side-car cache at all.
+    """
+    restored = []
+    for node_id, meta in entries:
+        alias = meta.get("alias")
+        if not isinstance(alias, dict) or node_id not in graph.nodes:
+            continue
+        port, out_port = alias.get("port"), alias.get("as")
+        outputs = cache.outputs_for(alias.get("node"))
+        # `in`, not `.get() is not None`: None is a value a node may cache
+        if out_port is None or port not in outputs:
+            continue
+        cache.set(node_id, {out_port: outputs[port]},
+                  meta.get("wall_time", 0.0),
+                  alias_of=alias["node"], alias_port=port)
+        restored.append(node_id)
+    return restored
+
+
 def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> None:
     cache_dir = _cache_dir_for(project_path)
     memo: dict[str, str] = {}
@@ -123,6 +181,15 @@ def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> No
     for node_id in graph.topo_order():
         entry = cache.get(node_id)
         if entry is None:
+            continue
+        alias = _alias_meta(graph, node_id, entry, manifest)
+        if alias is not None:
+            manifest[node_id] = {
+                "fingerprint": node_fingerprint(graph, node_id, memo),
+                "wall_time": entry.wall_time,
+                "timestamp": entry.timestamp,
+                "alias": alias,
+            }
             continue
         try:
             blob = pickle.dumps(entry.outputs, protocol=pickle.HIGHEST_PROTOCOL)
@@ -217,11 +284,15 @@ def load_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> li
     flograph.engine.cache_worker instead, so unpickling large blobs doesn't
     block the event loop."""
     restored = []
-    for node_id, meta in resolve_entries(graph, project_path):
+    entries = resolve_entries(graph, project_path)
+    for node_id, meta in entries:
+        if is_alias(meta):
+            continue        # no blob of its own; rebuilt below from its source
         try:
             outputs = load_blob(project_path, node_id)
         except Exception:
             continue
         cache.set(node_id, outputs, meta.get("wall_time", 0.0))
         restored.append(node_id)
+    restored.extend(restore_aliases(graph, cache, entries))
     return restored

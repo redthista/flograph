@@ -3,6 +3,11 @@
 Values are held by reference (nodes must treat inputs as read-only — see the
 node contract). Invariant maintained by the engine: a node is clean iff its
 outputs are cached; dirtying a node evicts its entry.
+
+Some nodes hand their input straight back — Goto, From, Reroute — so several
+entries can end up serving one and the same object. Those entries record an
+`alias_of`, which is what keeps a single DataFrame from being counted, and
+later written to disk, once per hop.
 """
 from __future__ import annotations
 
@@ -17,6 +22,14 @@ class CacheEntry:
     wall_time: float                    # seconds spent computing
     timestamp: float = field(default_factory=time.time)
     memory_bytes: int = 0                # estimated size of outputs, computed once at cache time
+    # The node this entry is re-serving, if it is not carrying a value of its
+    # own: the object here *is* the object cached against `alias_of`, under
+    # port `alias_port` there. Set by the engine when a node returns its input
+    # untouched. `memory_bytes` stays truthful — it describes the value, and
+    # the value is real — so the per-node readout still says how big the thing
+    # is; it is the project total that has to stop adding it up twice.
+    alias_of: Optional[str] = None
+    alias_port: Optional[str] = None
 
     def summary(self, port: str) -> str:
         return summarize(self.outputs.get(port))
@@ -26,10 +39,13 @@ class OutputCache:
     def __init__(self) -> None:
         self._entries: dict[str, CacheEntry] = {}
 
-    def set(self, node_id: str, outputs: dict[str, Any], wall_time: float) -> None:
+    def set(self, node_id: str, outputs: dict[str, Any], wall_time: float,
+            alias_of: Optional[str] = None,
+            alias_port: Optional[str] = None) -> None:
         memory_bytes = sum(estimate_size(v) for v in outputs.values())
         self._entries[node_id] = CacheEntry(
             outputs=outputs, wall_time=wall_time, memory_bytes=memory_bytes,
+            alias_of=alias_of, alias_port=alias_port,
         )
 
     def get(self, node_id: str) -> Optional[CacheEntry]:
@@ -43,7 +59,17 @@ class OutputCache:
         return entry.outputs if entry else {}
 
     def total_bytes(self) -> int:
-        return sum(entry.memory_bytes for entry in self._entries.values())
+        """What the project is actually holding — each value counted once.
+
+        An alias is skipped only while the entry it shares with is still
+        here. That proviso is not pedantry: a frozen Goto keeps its value
+        when the node upstream is evicted, and at that point the link is the
+        only thing holding the object, so it is the one that has to be
+        counted.
+        """
+        return sum(entry.memory_bytes for entry in self._entries.values()
+                   if entry.alias_of is None
+                   or entry.alias_of not in self._entries)
 
     def evict(self, node_id: str) -> None:
         self._entries.pop(node_id, None)

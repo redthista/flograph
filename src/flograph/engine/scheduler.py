@@ -202,10 +202,44 @@ class ExecutionEngine(QObject):
 
     # ------------------------------------------- worker results (GUI thread)
 
+    def _alias_source(self, node_id: str, outputs: dict) -> tuple:
+        """`(source_node, source_port)` if this node merely re-served a value
+        that is already cached, `(None, None)` otherwise.
+
+        Goto, From and Reroute all return their input untouched, so what they
+        produce *is* the object sitting in the upstream entry. Saying so is
+        worth the few lines: without it one DataFrame behind a link chain is
+        counted once per hop in the memory readout, pickled once per hop into
+        the side-car cache, and — the part that actually costs RAM — comes
+        back as that many independent copies when the project is reopened.
+
+        The test is object identity, not node type. Identity is the thing
+        that matters: if it is the same object there is nothing extra to
+        account for, whatever produced it, and anything that builds a new
+        value fails the test and is cached normally. A frozen node is never
+        aliased — a pin has to own what it is pinning, or it would not
+        survive the upstream node being edited, which is the whole point of
+        it.
+        """
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.frozen or len(outputs) != 1:
+            return None, None
+        (value,) = outputs.values()
+        for port in node.spec.inputs:
+            conn = self.graph.input_connection(node_id, port.name)
+            if conn is None:
+                continue
+            entry = self.cache.get(conn.src_node)
+            if entry is not None and entry.outputs.get(conn.src_port) is value:
+                return conn.src_node, conn.src_port
+        return None, None
+
     def _on_node_finished(self, node_id: str, outputs: dict, wall_time: float) -> None:
         self._current = None
         if node_id in self.graph.nodes:
-            self.cache.set(node_id, outputs, wall_time)
+            alias_of, alias_port = self._alias_source(node_id, outputs)
+            self.cache.set(node_id, outputs, wall_time,
+                           alias_of=alias_of, alias_port=alias_port)
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.node_succeeded.emit(node_id)
