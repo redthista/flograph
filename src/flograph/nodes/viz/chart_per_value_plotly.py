@@ -92,6 +92,15 @@ PARAMS = [
 _UNSCALED = ("histogram", "box", "violin")
 
 
+def _stacks(kind, barmode):
+    """Whether this kind piles its series on top of one another.
+
+    px.area sets a stackgroup unconditionally, so it always does; bars only
+    when asked to. Either way the Y scale has to bound the row totals.
+    """
+    return kind == "area" or (kind == "bar" and barmode == "stack")
+
+
 def run(ctx, table):
     import importlib.util
 
@@ -123,6 +132,7 @@ def run(ctx, table):
         raise ValueError(f"columns not in table: {missing}")
 
     kind = ctx.params.get("kind", "line")
+    barmode = ctx.params.get("barmode", "group")
     limit = int(ctx.params.get("max_charts", 20))
     groups = list(table.groupby(split_by, sort=True, observed=True))
     if len(groups) > limit:
@@ -135,7 +145,13 @@ def run(ctx, table):
     limits = None
     if ctx.params.get("shared_scale", True) and kind not in _UNSCALED:
         values = table[y].apply(lambda s: s.astype("float64"), axis=0)
-        low, high = float(values.min().min()), float(values.max().max())
+        if _stacks(kind, barmode) and len(y) > 1:
+            # a stacked trace reaches the row's total, not its tallest
+            # column — bounding by the column max would crop every one
+            low = float(values.clip(upper=0).sum(axis=1).min())
+            high = float(values.clip(lower=0).sum(axis=1).max())
+        else:
+            low, high = float(values.min().min()), float(values.max().max())
         if low == low and high == high:      # not NaN
             pad = (high - low) * 0.05 or 1.0
             limits = (low - pad, high + pad)
@@ -154,7 +170,7 @@ def run(ctx, table):
         if limits is not None:
             figure.update_yaxes(range=list(limits))
         if kind in ("bar", "histogram"):
-            figure.update_layout(barmode=ctx.params.get("barmode", "group"))
+            figure.update_layout(barmode=barmode)
         # The stack sizes each cell itself; a figure that insists on its own
         # pixel height would overflow the cell it was given.
         figure.update_layout(autosize=True, margin={"t": 40, "b": 30,
