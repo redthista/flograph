@@ -16,6 +16,13 @@ skip the small ones, give each chart its own scale, mix chart kinds. Nothing
 here is special-cased, so any list of figures a node returns behaves the
 same way.
 
+**Bar mode** only matters for the bar kind. matplotlib has no equivalent
+of Plotly's barmode: drawn plainly, every series lands on the same x
+positions at full width and the later ones simply hide the earlier, so
+this node used to show only the last y column. **group** stands them side
+by side, **stack** piles them up, and **overlay** is the old draw-on-top
+behaviour, which is still useful with an alpha or a single series.
+
 **Fill** is the plain choice: all of them **down** the page, or all of them
 **across** it. With Columns and Rows both at 0 that is exactly what you
 get — one column, or one row that scrolls sideways.
@@ -47,6 +54,10 @@ PARAMS = [
      "placeholder": "column to make one chart per value of"},
     {"name": "kind", "type": "choice", "label": "Kind",
      "options": ["line", "bar", "scatter", "hist"], "default": "line"},
+    # Only the bar kind reads this. Side by side is nearly always what a
+    # comparison chart wants, and it matches the Plotly node's default.
+    {"name": "barmode", "type": "choice", "label": "Bar mode",
+     "options": ["group", "stack", "overlay"], "default": "group"},
     {"name": "x", "type": "columns", "label": "X column", "multi": False,
      "default": "", "placeholder": "(index)"},
     {"name": "y", "type": "columns", "label": "Y columns",
@@ -68,6 +79,43 @@ PARAMS = [
     {"name": "height", "type": "int", "label": "Height",
      "default": 380, "min": 200, "max": 2000},
 ]
+
+
+def _draw_bars(axes, group, x, y, mode):
+    """Every y column's bars on one axes, laid out by `mode`.
+
+    Offsetting a series sideways needs numbers to offset from, so the x
+    values become tick labels over arange() rather than matplotlib's own
+    categories. Rows are taken as they come: one bar per row, not one per
+    distinct x, which is what the other kinds here already do.
+    """
+    import numpy as np
+
+    labels = (group[x] if x else group.index).astype(str)
+    positions = np.arange(len(group))
+    if mode == "group" and len(y) > 1:
+        span = 0.8
+        width = span / len(y)
+        for index, column in enumerate(y):
+            axes.bar(positions - span / 2 + width * (index + 0.5),
+                     group[column], width=width, label=str(column))
+    elif mode == "stack":
+        # separate piles above and below zero, so a negative series does
+        # not eat into the height of the positive ones
+        up = np.zeros(len(group))
+        down = np.zeros(len(group))
+        for column in y:
+            values = group[column].to_numpy(dtype="float64", na_value=0.0)
+            bottom = np.where(values >= 0, up, down)
+            axes.bar(positions, values, width=0.8, bottom=bottom,
+                     label=str(column))
+            up = up + np.clip(values, 0, None)
+            down = down + np.clip(values, None, 0)
+    else:
+        for column in y:
+            axes.bar(positions, group[column], width=0.8, label=str(column))
+    axes.set_xticks(positions)
+    axes.set_xticklabels(labels)
 
 
 def run(ctx, table):
@@ -95,6 +143,7 @@ def run(ctx, table):
         raise ValueError("no numeric columns to plot")
 
     kind = ctx.params.get("kind", "line")
+    barmode = ctx.params.get("barmode", "group")
     limit = int(ctx.params.get("max_charts", 40))
     groups = list(table.groupby(split_by, sort=True, observed=True))
     if len(groups) > limit:
@@ -107,7 +156,13 @@ def run(ctx, table):
     limits = None
     if ctx.params.get("shared_scale", True) and kind != "hist":
         values = table[y].apply(lambda s: s.astype("float64"), axis=0)
-        low, high = float(values.min().min()), float(values.max().max())
+        if kind == "bar" and barmode == "stack":
+            # a stacked bar reaches the row's total, not its tallest
+            # column — bounding by the column max would crop every bar
+            low = float(values.clip(upper=0).sum(axis=1).min())
+            high = float(values.clip(lower=0).sum(axis=1).max())
+        else:
+            low, high = float(values.min().min()), float(values.max().max())
         if low == low and high == high:      # not NaN
             pad = (high - low) * 0.05 or 1.0
             limits = (low - pad, high + pad)
@@ -117,19 +172,19 @@ def run(ctx, table):
         ctx.check_cancelled()
         figure = Figure(figsize=(7, 3.2), layout="tight")
         axes = figure.add_subplot()
-        for column in y:
-            if kind == "hist":
-                axes.hist(group[column].dropna(), bins=20, label=str(column))
-            elif kind == "scatter":
-                axes.scatter(group[x] if x else group.index, group[column],
-                             s=12, label=str(column))
-            elif kind == "bar":
-                axes.bar(group[x].astype(str) if x
-                         else group.index.astype(str), group[column],
-                         label=str(column))
-            else:
-                axes.plot(group[x] if x else group.index, group[column],
-                          label=str(column))
+        if kind == "bar":
+            _draw_bars(axes, group, x, y, barmode)
+        else:
+            for column in y:
+                if kind == "hist":
+                    axes.hist(group[column].dropna(), bins=20,
+                              label=str(column))
+                elif kind == "scatter":
+                    axes.scatter(group[x] if x else group.index,
+                                 group[column], s=12, label=str(column))
+                else:
+                    axes.plot(group[x] if x else group.index, group[column],
+                              label=str(column))
         if limits is not None:
             axes.set_ylim(*limits)
         axes.set_title(f"{split_by}: {value}")
