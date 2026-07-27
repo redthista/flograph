@@ -4,6 +4,12 @@ Interactive Plotly chart rendered directly on the node card — hover,
 zoom and pan in place. Needs the 'plotly' package: install it from
 Tools > Manage Packages if missing. Outputs the plotly Figure object for
 further consumers.
+
+**Bar mode** only matters for bar and histogram. Plotly stacks multiple
+series on top of each other by default; **group** stands them side by
+side, which is what you want when the point is to compare them. **stack**
+is Plotly's own default, for when the total is the thing being read, and
+**overlay** draws them on top of one another.
 """
 NODE = {
     "label": "Show Plotly",
@@ -17,6 +23,11 @@ PARAMS = [
      "options": ["line", "scatter", "bar", "area", "histogram", "box",
                  "violin"],
      "default": "line"},
+    # Only bar and histogram read this. Plotly Express stacks bars by
+    # default; side by side is nearly always what a comparison chart wants,
+    # so that is the default here rather than Plotly's.
+    {"name": "barmode", "type": "choice", "label": "Bar mode",
+     "options": ["group", "stack", "overlay"], "default": "group"},
     {"name": "x", "type": "columns", "label": "X column", "multi": False,
      "default": "", "placeholder": "(index)"},
     {"name": "y", "type": "columns", "label": "Y columns",
@@ -64,6 +75,9 @@ def run(ctx, table):
         kwargs["color"] = color
     if ctx.params["title"]:
         kwargs["title"] = ctx.params["title"]
-    fig = getattr(px, ctx.params["kind"])(table, **kwargs)
-    ctx.log(f"plotted {len(y_cols)} series ({ctx.params['kind']})")
+    kind = ctx.params["kind"]
+    fig = getattr(px, kind)(table, **kwargs)
+    if kind in ("bar", "histogram"):
+        fig.update_layout(barmode=ctx.params.get("barmode", "group"))
+    ctx.log(f"plotted {len(y_cols)} series ({kind})")
     return {"figure": fig}
