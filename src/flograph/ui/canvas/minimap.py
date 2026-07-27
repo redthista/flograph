@@ -6,11 +6,67 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from flograph.core.node import NodeStatus
+
 from .. import theme
+from .node_item import DEACTIVATED_OPACITY
 
 WIDTH, HEIGHT = 200, 140
 MARGIN = 12
 REFRESH_MS = 200
+
+
+def _state_color(item) -> QColor:
+    """What one node reads as at four pixels across.
+
+    The order is the point. An error outranks everything — it is the one
+    thing worth crossing the map for. A frozen node comes next, *above* its
+    own run status, because that status is stale by definition: the node was
+    skipped, so it still shows whatever it last finished as, and a green
+    "done" is precisely the wrong thing to say about a node nobody is
+    refreshing. Only then does the live status apply, then the user's own
+    colour, which is organisation rather than state and yields to both.
+    """
+    node = item.node
+    if node.status == NodeStatus.ERROR:
+        return theme.status_color(node.status)
+    if node.frozen:
+        return theme.PIN_STALE if item.pin_stale else theme.PIN_HELD
+    if node.status != NodeStatus.IDLE:
+        return theme.status_color(node.status)
+    if node.color:
+        # same tint as the card header, so a node reads as the same colour
+        # in the minimap as it does on the canvas
+        return theme.tint(theme.NODE_HEADER, node.color, theme.TINT_STRONG)
+    return theme.NODE_HEADER.lighter(150)
+
+
+def _node_brush(item) -> QColor:
+    """The fill: the node's state colour, faded if it is deactivated.
+
+    Fading rather than recolouring is deliberate, and it is what the canvas
+    already does with opacity. A deactivated node has not become a different
+    kind of thing — it is the same node, out of play — and spending another
+    hue on it would put it in competition with the colours that do mean
+    something is happening.
+    """
+    colour = QColor(_state_color(item))
+    if not item.node.active:
+        colour.setAlphaF(DEACTIVATED_OPACITY)
+    return colour
+
+
+def _node_pen(item):
+    """The border: an outline on a locked node, nothing otherwise.
+
+    Locking says nothing about the run — it is about editing — so it must
+    not take the one channel that does. Putting it on the border instead
+    keeps everything legible at once: a node can be locked *and* frozen
+    *and* failing, and the map can say all three.
+    """
+    if item.node.locked:
+        return QPen(theme.NODE_TEXT, 1)
+    return Qt.NoPen
 
 
 class Minimap(QWidget):
@@ -87,17 +143,8 @@ class Minimap(QWidget):
         for item in scene.node_items.values():
             rect = item.sceneBoundingRect()
             top_left = self._to_mini(rect.topLeft(), content, s)
-            painter.setPen(Qt.NoPen)
-            if item.node.status.value != "idle":
-                brush = theme.status_color(item.node.status)
-            elif item.node.color:
-                # same tint as the card header, so a node reads as the same
-                # colour in the minimap as it does on the canvas
-                brush = theme.tint(theme.NODE_HEADER, item.node.color,
-                                   theme.TINT_STRONG)
-            else:
-                brush = theme.NODE_HEADER.lighter(150)
-            painter.setBrush(brush)
+            painter.setPen(_node_pen(item))
+            painter.setBrush(_node_brush(item))
             painter.drawRect(QRectF(top_left, rect.size() * s).toRect())
 
         viewport = self._view.mapToScene(

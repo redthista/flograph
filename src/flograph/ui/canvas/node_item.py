@@ -28,6 +28,9 @@ HEADER_H = 26.0
 ROW_H = 20.0
 PAD_BOTTOM = 8.0
 LED_RADIUS = 5.0
+# A deactivated node is faded rather than hidden: it is still part of the
+# graph, still wired, and still the thing you click to switch back on.
+DEACTIVATED_OPACITY = 0.35
 LABEL_LOD = 0.5  # hide port names below this zoom
 # Below this zoom, nodes paint as a flat rect (no path/text/LED) and hide
 # their ports and embedded widgets — the per-item cost that makes a large
@@ -165,6 +168,67 @@ PORT_LABEL_GAP = 7.0  # horizontal gap between the pin and its pill
 # Floating them wholly outside costs nothing and makes the wire ends read as
 # terminals. Sized so the pin clears the border with a couple of px to spare.
 PORT_EDGE_GAP = 2.5
+
+
+class NodeBadge(QGraphicsItem):
+    """A small status glyph pinned above a node.
+
+    Drawn, not typed. The obvious QGraphicsSimpleTextItem("\N{LOCK}")
+    measures a perfectly sensible bounding rect and then paints nothing:
+    colour-emoji fonts do not render through the path that item takes, so
+    the glyph vanishes silently rather than falling back to tofu. A dozen
+    lines of QPainterPath always draw, take the theme's colour, and stay
+    sharp at any zoom.
+
+    Badges sit *above* the header rather than inside it because the header
+    is already crowded — the collapse chevron, the label, the status LED and
+    the temp-edit dot all live there — and a badge has to appear on every
+    card kind, including the ones that fill their header differently.
+    """
+
+    W, H = 9.0, 11.0
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.colour = theme.NODE_SUBTEXT
+        self.setVisible(False)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(-1.0, -1.0, self.W + 2.0, self.H + 2.0)
+
+
+class LockBadge(NodeBadge):
+    """A padlock: this node cannot be edited or moved."""
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        # the shackle first, so the body's flat top covers where it lands
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(self.colour, 1.3))
+        painter.drawArc(QRectF(1.9, 0.7, self.W - 3.8, 8.0), 0, 180 * 16)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(self.colour))
+        painter.drawRoundedRect(QRectF(0.0, self.H - 6.5, self.W, 6.5),
+                                1.5, 1.5)
+
+
+class FreezeBadge(NodeBadge):
+    """A pause glyph: this node's output is pinned and it will not re-run.
+
+    Pause rather than a snowflake because that is what it means to the
+    person using it — the node is held, and pressing Run All will not
+    disturb it.
+    """
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(self.colour))
+        bar = (self.W - 3.0) / 2.0
+        for x in (0.0, bar + 3.0):
+            painter.drawRoundedRect(QRectF(x, 0.5, bar, self.H - 1.0),
+                                    1.0, 1.0)
 
 CARD_SCALE_MIN, CARD_SCALE_MAX = 25.0, 400.0  # "scale" param, in percent
 
@@ -446,6 +510,16 @@ class NodeItem(QGraphicsObject):
         self.setAcceptHoverEvents(True)  # drives the move/resize cursors
         self.setPos(*node.pos)
 
+        # A child item rather than something paint() draws: paint() forks nine
+        # ways by card kind, and a padlock has to appear on all nine. A child
+        # sits above whatever the branch drew, including the proxy widgets a
+        # painter cannot reach.
+        self._lock_badge = LockBadge(self)
+        self._freeze_badge = FreezeBadge(self)
+        # read by the minimap, which is too small for a badge and has to say
+        # the same thing in colour
+        self.pin_stale = False
+
         self.input_ports: dict[str, PortItem] = {}
         self.output_ports: dict[str, PortItem] = {}
         self._group_starts: dict | None = None  # group-drag snapshot
@@ -469,6 +543,11 @@ class NodeItem(QGraphicsObject):
         if not node.canvas_preview_enabled:
             self._apply_proxy_visibility()  # honor a preview-disabled node loaded from disk
         self._refresh_tooltip()
+        # Last: both read state the card kinds above have to have settled,
+        # and set_locked refreshes the tooltip a second time on purpose.
+        self.set_active(node.active)
+        self.set_frozen(node.frozen)
+        self.set_locked(node.locked)
 
     # ------------------------------------------------------------- geometry
 
@@ -1690,6 +1769,46 @@ class NodeItem(QGraphicsObject):
         self._apply_proxy_visibility()
         self.update()
 
+    def set_active(self, active: bool) -> None:
+        """Fade a deactivated node back instead of repainting it.
+
+        Opacity is the one signal that reaches every card kind at once. A
+        painted overlay would have to be added to each branch of paint() and
+        would still miss the embedded widgets, which are real QWidgets drawn
+        by Qt, not by us; item opacity dims those too.
+        """
+        self.setOpacity(1.0 if active else DEACTIVATED_OPACITY)
+        self.update()
+
+    def set_locked(self, locked: bool) -> None:
+        """Show the padlock. Refusing the move itself is itemChange's job —
+        clearing ItemIsMovable is not enough, because a button node toggles
+        that flag as it enters and leaves edit mode."""
+        self._lock_badge.setVisible(locked)
+        self._layout_badges()
+        self._refresh_tooltip()
+        self.update()
+
+    def set_frozen(self, frozen: bool, stale: bool = False) -> None:
+        """Show the pause glyph, ambered when the pin has been overtaken."""
+        self.pin_stale = bool(frozen and stale)
+        self._freeze_badge.setVisible(frozen)
+        self._freeze_badge.colour = (theme.PIN_STALE if stale
+                                     else theme.NODE_SUBTEXT)
+        self._freeze_badge.update()
+        self._layout_badges()
+        self._refresh_tooltip()
+        self.update()
+
+    def _layout_badges(self) -> None:
+        """Pack the visible badges left to right above the header, so a node
+        showing one of them never leaves the other's slot empty."""
+        x = 1.0
+        for badge in (self._freeze_badge, self._lock_badge):
+            if badge.isVisible():
+                badge.setPos(x, -(NodeBadge.H + 3.0))
+                x += NodeBadge.W + 4.0
+
     def set_preview_enabled(self, enabled: bool) -> None:
         """Show/hide this card's embedded proxy per the canvas-preview
         toggle. Ports stay visible — only the widget hides. On disable, also
@@ -2182,6 +2301,11 @@ class NodeItem(QGraphicsObject):
         self.update()
 
     def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self.node.locked:
+            # Refused here rather than by clearing ItemIsMovable: a group
+            # drag moves items the mouse never touched, and a button node
+            # sets that flag itself when it enters edit mode.
+            return self.pos()
         if change == QGraphicsItem.ItemPositionChange and self._dragging \
                 and snapping_active(self.scene()):
             step = grid_step(self.scene())
@@ -2391,7 +2515,16 @@ class NodeItem(QGraphicsObject):
     def _refresh_tooltip(self) -> None:
         """Error status always wins the tooltip slot; otherwise fall back to
         the node's own description (currently only surfaced for reroutes)."""
-        if self.node.status == NodeStatus.ERROR:
+        if self.node.locked:
+            # The padlock says *that* it is locked; only a tooltip has room
+            # to say what that means and how to undo it.
+            self.setToolTip("Locked — params, code and position are "
+                            "read-only. Right-click > Unlock to edit.")
+        elif self.node.frozen:
+            self.setToolTip("Frozen — serving its last output and skipped by "
+                            "every run. Right-click > Unfreeze to run it "
+                            "again.")
+        elif self.node.status == NodeStatus.ERROR:
             self.setToolTip(self.node.status_message)
         elif self.link_card and not self.node.description:
             kind = "Goto" if self.goto_card else "From"

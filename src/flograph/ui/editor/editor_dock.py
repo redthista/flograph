@@ -144,6 +144,7 @@ class EditorPanel(QWidget):
 
         graph.events.code_changed.connect(self._on_code_changed)
         graph.events.label_changed.connect(self._refresh_header)
+        graph.events.locked_changed.connect(self._on_locked_changed)
         graph.events.node_removed.connect(self._on_node_removed)
 
     def _find_again(self, backwards: bool = False) -> None:
@@ -216,7 +217,7 @@ class EditorPanel(QWidget):
         self.editor.setPlainText(source_to_load or "")
         self._loading = False
         self.editor.setEnabled(True)
-        self._apply_btn.setEnabled(True)
+        self._apply_locked(self._graph.node(node_id).locked)
         # Show unsaved indicator if the cached edit differs from graph.
         if source_to_load != self._graph.node(node_id).source:
             self._unsaved_indicator.show()
@@ -350,6 +351,22 @@ class EditorPanel(QWidget):
     def on_node_succeeded(self, node_id: str) -> None:
         if node_id == self._node_id:
             self.editor.set_error_line(None)
+            self._show_message("")
+
+    def _on_locked_changed(self, node_id: str, locked: bool) -> None:
+        if node_id == self._node_id:
+            self._apply_locked(locked)
+
+    def _apply_locked(self, locked: bool) -> None:
+        """Read-only, not disabled: the code of a locked node is still worth
+        reading, scrolling and copying out of — it is only editing that the
+        lock is there to stop."""
+        self.editor.setReadOnly(locked)
+        self._apply_btn.setEnabled(not locked)
+        if locked:
+            self._show_message("\N{LOCK} Locked — right-click the node and "
+                               "choose Unlock to edit.")
+        elif self._message.text().startswith("\N{LOCK}"):
             self._show_message("")
 
     def _show_message(self, text: str, error: bool = False,

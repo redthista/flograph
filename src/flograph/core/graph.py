@@ -141,6 +141,39 @@ class Graph:
         node.description = description
         self.events.description_changed.emit(node_id)
 
+    def set_active(self, node_id: str, active: bool) -> None:
+        """Include this node in runs, or skip it and everything below it."""
+        node = self.node(node_id)
+        node.active = active
+        self.events.active_changed.emit(node_id, active)
+
+    def set_frozen(self, node_id: str, frozen: bool,
+                   fingerprint: Optional[str] = None) -> None:
+        """Pin this node's output, or release it.
+
+        `fingerprint` is what the node's params and inputs hashed to at this
+        moment; it is stored so a pin can later be told from one the graph
+        has moved on from. The caller supplies it because computing it needs
+        the engine's hashing, which core does not import.
+        """
+        node = self.node(node_id)
+        node.frozen = frozen
+        node.frozen_fingerprint = fingerprint if frozen else None
+        self.events.frozen_changed.emit(node_id, frozen)
+        if not frozen:
+            # Releasing a pin is how you ask for the expensive thing to
+            # happen again, so the node has to be dirty afterwards or the
+            # next run would find nothing to do and quietly change nothing.
+            # Harmless on the way back: re-freezing pins the cached value
+            # again and dirtiness stops mattering.
+            self.mark_dirty(node_id)
+
+    def set_locked(self, node_id: str, locked: bool) -> None:
+        """Freeze this node's params, code and position against editing."""
+        node = self.node(node_id)
+        node.locked = locked
+        self.events.locked_changed.emit(node_id, locked)
+
     def set_preview_enabled(self, node_id: str, enabled: bool) -> None:
         node = self.node(node_id)
         node.canvas_preview_enabled = enabled

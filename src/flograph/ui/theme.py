@@ -23,6 +23,13 @@ NODE_BORDER_BROKEN = QColor("#7f1d1d")
 NODE_TEXT = QColor("#e5e7eb")
 NODE_SUBTEXT = QColor("#9ca3af")
 SELECTION_OUTLINE = QColor("#60a5fa")
+# A frozen node whose inputs have moved since it was pinned: the amber says
+# "this is deliberate but no longer true", which is exactly the state.
+PIN_STALE = QColor("#eab308")
+# A healthy pin. Ice, and deliberately not near any status colour — green
+# done, red error, blue running, amber queued — because in the minimap this
+# has to be told apart from all four at four pixels across.
+PIN_HELD = QColor("#22d3ee")
 
 FRAME_TITLE = QColor("#d1d5db")
 BUTTON_ACCENT = QColor("#7c6cf6")

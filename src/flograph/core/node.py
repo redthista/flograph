@@ -75,6 +75,26 @@ class NodeInstance:
     pos: tuple[float, float] = (0.0, 0.0)
     label_override: Optional[str] = None
     description: str = ""
+    # Skipped by every run, along with everything downstream of it. The node
+    # keeps its params, its wires and whatever it last produced; it simply
+    # does not execute. For trying a graph without one branch, or parking a
+    # step that is slow or broken without unwiring it.
+    active: bool = True
+    # Pinned output: the node serves whatever it last produced and is not
+    # re-run, however many times Run All is pressed. For the expensive step
+    # at the top of a flow — a slow read from a remote source — that is
+    # already set up and working. Unfreeze to pull it again.
+    frozen: bool = False
+    # What this node's params and inputs hashed to at the moment it was
+    # frozen. Compared after a run to tell a pin that still reflects the
+    # graph from one that has been quietly overtaken by an edit upstream;
+    # None on a node that was never frozen. See engine.cache_persistence.
+    frozen_fingerprint: Optional[str] = None
+    # Read-only guard: params, code and position are frozen so a working node
+    # cannot be nudged by accident. Purely a UI protection — a locked node
+    # runs exactly as it always did, and can still be deleted, that being an
+    # aimed and undoable act rather than the stray drag this is here to stop.
+    locked: bool = False
     # canvas-UI-only: hides this node's embedded preview widget (figure/
     # webview/table/slicer) on the model canvas to save render cost; the
     # node still renders fully on Dashboard pages regardless of this flag.

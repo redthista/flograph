@@ -66,6 +66,13 @@ class ParamsPanel(QWidget):
         self._placeholder.setStyleSheet("color: #6b7280;")
         layout.addWidget(self._placeholder)
 
+        self._locked_label = QLabel(
+            "\N{LOCK} Locked — right-click the node and choose Unlock to edit.")
+        self._locked_label.setWordWrap(True)
+        self._locked_label.setStyleSheet("color: #9ca3af; font-size: 8pt;")
+        self._locked_label.hide()
+        layout.addWidget(self._locked_label)
+
         self.tree = QTreeWidget()
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels(["Property", "Value"])
@@ -79,6 +86,7 @@ class ParamsPanel(QWidget):
 
         graph.events.param_changed.connect(self._on_param_changed)
         graph.events.code_changed.connect(self._on_code_changed)
+        graph.events.locked_changed.connect(self._on_locked_changed)
         graph.events.node_removed.connect(self._on_node_removed)
 
     def minimumSizeHint(self) -> QSize:
@@ -94,6 +102,19 @@ class ParamsPanel(QWidget):
         self._node_id = node_id
         self._rebuild()
 
+    def _on_locked_changed(self, node_id: str, locked: bool) -> None:
+        if node_id == self._node_id:
+            self._apply_locked(locked)
+
+    def _apply_locked(self, locked: bool) -> None:
+        """Grey the whole grid rather than each widget in turn.
+
+        Disabling the tree reaches every embedded editor at once, including
+        the ones built by _make_widget for param types added later — a
+        per-widget loop would silently miss those."""
+        self.tree.setEnabled(not locked)
+        self._locked_label.setVisible(locked)
+
     def _clear(self) -> None:
         self.tree.clear()
         self._setters = {}
@@ -102,12 +123,14 @@ class ParamsPanel(QWidget):
         self._clear()
         if self._node_id is None or self._node_id not in self._graph.nodes:
             self._doc_label.hide()
+            self._locked_label.hide()
             self._placeholder.show()
             self.tree.hide()
             return
         node = self._graph.node(self._node_id)
         self._placeholder.hide()
         self.tree.show()
+        self._apply_locked(node.locked)
 
         if node.spec.doc:
             self._doc_label.setText(node.spec.doc.split("\n\n")[0])

@@ -20,13 +20,37 @@ from .errors import NodeError
 from .worker import NodeRunnable, WorkerSignals
 
 
-def build_plan(graph: Graph, targets: Iterable[str]) -> list[str]:
+def build_plan(graph: Graph, targets: Iterable[str],
+               cache: "Optional[OutputCache]" = None) -> list[str]:
     """The nodes that must execute to satisfy `targets`: every *dirty* node
     among the targets and their ancestors, in topological order. Clean nodes
-    are skipped — their outputs come from the cache."""
+    are skipped — their outputs come from the cache.
+
+    `cache` is consulted only to tell a frozen node that has something to
+    serve from one that does not; None means "nothing is cached".
+    """
     wanted = set(targets)
     for target in list(wanted):
         wanted |= graph.upstream(target)
+    # A deactivated node never runs, and nor does anything that would have
+    # consumed its output. Dropping the descendants here rather than letting
+    # them start and fail matters: they would each report a missing upstream
+    # value, which reads as a broken graph instead of the deliberate choice
+    # it is. A node deactivated *downstream* of the targets is not in
+    # `wanted` to begin with, so this only ever removes.
+    for node_id, node in graph.nodes.items():
+        if not node.active:
+            wanted -= {node_id} | graph.downstream(node_id)
+        elif node.frozen and cache is not None and cache.has(node_id):
+            # The opposite of deactivating: the node itself is skipped but
+            # everything below it stays, running off the value it is
+            # pinning. Dirtiness does not get a say — a pin that a stray
+            # edit could knock loose would not be worth setting.
+            #
+            # A frozen node with nothing cached is left in on purpose. You
+            # cannot pause something that has not produced anything yet, so
+            # it runs once to fill the pin and is skipped from then on.
+            wanted.discard(node_id)
     return [nid for nid in graph.topo_order()
             if nid in wanted and graph.nodes[nid].dirty]
 
@@ -74,7 +98,7 @@ class ExecutionEngine(QObject):
         if self._active:
             return
         self._token = CancellationToken()
-        self._plan = build_plan(self.graph, targets)
+        self._plan = build_plan(self.graph, targets, self.cache)
         self._had_failure = False
         if not self._plan:
             return
@@ -207,4 +231,13 @@ class ExecutionEngine(QObject):
 
     def _on_dirty_changed(self, node_id: str, dirty: bool) -> None:
         if dirty:
+            node = self.graph.nodes.get(node_id)
+            if node is not None and node.frozen:
+                # The pin *is* the cached value, so evicting it here would
+                # destroy the thing the freeze exists to protect — and the
+                # node would then quietly run again on the next pass, which
+                # is the one outcome freezing is meant to rule out. Anything
+                # upstream marking it dirty is exactly the case being
+                # defended against, not an exception to it.
+                return
             self.cache.evict(node_id)
