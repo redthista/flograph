@@ -152,6 +152,44 @@ def as_iso_date(value: Any) -> str:
         return ""
 
 
+def range_values(raw: Any, low_default: float,
+                 high_default: float) -> tuple:
+    """A two-handled control's param as `(low, high)`.
+
+    One control, two numbers, and a host that writes exactly one `value` —
+    so the pair travels as JSON in that one param, the way a Slicer carries
+    its ticked values. The shape decides what its value means; the host
+    stays a host.
+
+    Blank or unreadable is the "never touched" state and falls back to the
+    bounds, so a fresh Between node spans its whole range instead of
+    emitting a degenerate one. A reversed pair is put back in order rather
+    than rejected: a range is the same range whichever handle was dragged
+    past the other.
+    """
+    import json
+
+    pair = None
+    if isinstance(raw, (list, tuple)) and len(raw) == 2:
+        pair = raw
+    else:
+        text = str(raw or "").strip()
+        if text:
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list) and len(parsed) == 2:
+                    pair = parsed
+            except ValueError:
+                parts = [part.strip() for part in text.split(",")]
+                if len(parts) == 2:
+                    pair = parts
+    if pair is None:
+        return low_default, high_default
+    low = as_number(pair[0], low_default)
+    high = as_number(pair[1], high_default)
+    return (low, high) if low <= high else (high, low)
+
+
 def clamp(value: float, minimum: float, maximum: float) -> float:
     """Keep a control's value inside its range.
 

@@ -93,6 +93,7 @@ CARD_KINDS = frozenset({
 # well-known param names each shape reads.
 CONTROL_KINDS = frozenset({
     "slider",    # value along a track, int or float
+    "range",     # two handles on one track -> a low/high pair
     "number",    # spin box
     "text",      # single-line text entry
     "date",      # calendar picker

@@ -11,13 +11,15 @@ and the dashboard tile (`ui/dashboard/tile_item.py`) each build one of these
 and connect the same two signals, so a control behaves identically wherever
 it is placed and neither host knows what a slider is.
 
-Adding a control shape means adding a class here and a node script under
-`flograph/nodes/input/`; adding a control *node* built on an existing shape
-means only the script. Each shape reads a fixed set of well-known params:
+Adding a control shape means adding a class here, naming it in
+`core.script.CONTROL_KINDS` so node scripts may declare it, and writing a
+node script under `flograph/nodes/input/`; adding a control *node* built on
+an existing shape means only the script. Each shape reads a fixed set of well-known params:
 
     every shape   value              the live value; what the node outputs
                   caption            label drawn above the widget
     slider        minimum maximum step decimals
+    range         minimum maximum step decimals  (value is a JSON pair)
     number        minimum maximum step decimals prefix suffix
     text          placeholder multiline
     date          minimum maximum    ISO bounds, blank for unbounded
@@ -37,7 +39,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QDate, QPointF, Qt, Signal
+from PySide6.QtCore import QDate, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox, QHBoxLayout, QLabel,
@@ -57,6 +59,7 @@ CHECK_ON = QColor("#3b82f6")
 # Chosen so the widget plus its caption fits without scrolling.
 CONTROL_SIZES: dict[str, tuple[float, float]] = {
     "slider": (240.0, 96.0),
+    "range": (260.0, 96.0),
     "number": (200.0, 84.0),
     "text": (240.0, 84.0),
     "date": (200.0, 84.0),
@@ -397,6 +400,330 @@ class SliderControl(ControlWidget):
         self._slider.setFocus()
 
 
+class RangeSlider(QWidget):
+    """Two handles on one track, drawn by hand.
+
+    Qt has no two-handled slider and no way to grow one: QSlider owns a
+    single value all the way down into the style. So this is painted
+    directly — which is also what lets the span between the handles be
+    filled in, and that fill is the whole reason a range control reads at a
+    glance instead of as two numbers that happen to be near each other.
+
+    Values are integer step indices, exactly as QSlider works internally,
+    and the control converts at the boundary. `isSliderDown` and `released`
+    mirror QSlider's names so the "commit once, on release" rule that keeps
+    a drag from queueing one run per pixel can be the same rule here.
+    """
+
+    moved = Signal()
+    released = Signal()
+
+    HANDLE_R = 6.5
+    TRACK_H = 4.0
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("range_slider")
+        self.setMinimumHeight(20)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._maximum = 100
+        self._low = 0
+        self._high = 100
+        self._active = 1          # which handle the keyboard drives
+        self._dragging = False
+
+    # -------------------------------------------------------------- values
+
+    def maximum(self) -> int:
+        return self._maximum
+
+    def setMaximum(self, value: int) -> None:
+        self._maximum = max(0, int(value))
+        self.setValues(self._low, self._high)
+
+    def values(self) -> tuple:
+        return self._low, self._high
+
+    def setValues(self, low: int, high: int) -> None:
+        low = max(0, min(self._maximum, int(low)))
+        high = max(0, min(self._maximum, int(high)))
+        if low > high:
+            low, high = high, low
+        changed = (low, high) != (self._low, self._high)
+        self._low, self._high = low, high
+        if changed:
+            self.update()
+
+    def isSliderDown(self) -> bool:
+        return self._dragging
+
+    # ------------------------------------------------------------ geometry
+
+    def _span(self) -> tuple:
+        """The x range the handle centres travel between."""
+        return self.HANDLE_R, max(self.HANDLE_R + 1,
+                                  self.width() - self.HANDLE_R)
+
+    def _x_for(self, step: int) -> float:
+        left, right = self._span()
+        if self._maximum <= 0:
+            return left
+        return left + (right - left) * step / self._maximum
+
+    def _step_for(self, x: float) -> int:
+        left, right = self._span()
+        if right <= left or self._maximum <= 0:
+            return 0
+        ratio = (x - left) / (right - left)
+        return max(0, min(self._maximum, round(ratio * self._maximum)))
+
+    def handle_centres(self) -> tuple:
+        return self._x_for(self._low), self._x_for(self._high)
+
+    # ------------------------------------------------------------- drawing
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+
+        left, right = self._span()
+        mid = self.height() / 2
+        track = QRectF(left, mid - self.TRACK_H / 2,
+                       right - left, self.TRACK_H)
+        painter.setBrush(theme.NODE_HEADER)
+        painter.drawRoundedRect(track, self.TRACK_H / 2, self.TRACK_H / 2)
+
+        low_x, high_x = self.handle_centres()
+        painter.setBrush(CHECK_ON)
+        painter.drawRoundedRect(
+            QRectF(low_x, track.top(), max(0.0, high_x - low_x), track.height()),
+            self.TRACK_H / 2, self.TRACK_H / 2)
+
+        for i, x in enumerate((low_x, high_x)):
+            # Both handles keep the light fill: half of a handle's travel is
+            # over the filled span, and one painted in the span's own colour
+            # disappears into it exactly where it is being dragged. Focus is
+            # a ring instead — the keyboard has to move a handle the user can
+            # see it is about to move.
+            focused = self.hasFocus() and i == self._active
+            painter.setPen(QPen(CHECK_ON, 2) if focused
+                           else QPen(theme.NODE_BORDER, 1))
+            painter.setBrush(theme.NODE_TEXT)
+            painter.drawEllipse(QPointF(x, mid), self.HANDLE_R, self.HANDLE_R)
+        painter.end()
+
+    # --------------------------------------------------------- interaction
+
+    def _nearest(self, x: float) -> int:
+        low_x, high_x = self.handle_centres()
+        if abs(x - low_x) == abs(x - high_x):
+            # tied — which happens whenever the handles coincide, and the
+            # range can only reopen if the click grabs the one it is
+            # dragging away from
+            return 0 if x < low_x else 1
+        return 0 if abs(x - low_x) < abs(x - high_x) else 1
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton:
+            super().mousePressEvent(event)
+            return
+        x = event.position().x()
+        self._active = self._nearest(x)
+        self._dragging = True
+        self._drag_to(x)
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._dragging:
+            self._drag_to(event.position().x())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._dragging and event.button() == Qt.LeftButton:
+            self._dragging = False
+            self.released.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _drag_to(self, x: float) -> None:
+        step = self._step_for(x)
+        low, high = self._low, self._high
+        if self._active == 0:
+            # Handles push past each other rather than blocking. Blocking
+            # means a drag silently stops and the pointer walks away from
+            # the handle; swapping keeps the grabbed handle under the
+            # finger, which is what every range control does.
+            if step > high:
+                low, high, self._active = high, step, 1
+            else:
+                low = step
+        else:
+            if step < low:
+                low, high, self._active = step, low, 0
+            else:
+                high = step
+        before = (self._low, self._high)
+        self.setValues(low, high)
+        if (self._low, self._high) != before:
+            self.moved.emit()
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key in (Qt.Key_Tab, Qt.Key_Backtab):
+            super().keyPressEvent(event)
+            return
+        if key == Qt.Key_Space:
+            self._active = 1 - self._active     # swap which handle moves
+            self.update()
+            event.accept()
+            return
+        step = 0
+        if key in (Qt.Key_Left, Qt.Key_Down):
+            step = -1
+        elif key in (Qt.Key_Right, Qt.Key_Up):
+            step = 1
+        elif key == Qt.Key_Home:
+            step = -self._maximum
+        elif key == Qt.Key_End:
+            step = self._maximum
+        if not step:
+            super().keyPressEvent(event)
+            return
+        low, high = self._low, self._high
+        if self._active == 0:
+            low = min(high, low + step)
+        else:
+            high = max(low, high + step)
+        before = (self._low, self._high)
+        self.setValues(low, high)
+        if (self._low, self._high) != before:
+            # `moved` alone: the control commits on a move that is not part
+            # of a drag, so emitting `released` here as well would push two
+            # undo steps and queue two runs for one keystroke.
+            self.moved.emit()
+        event.accept()
+
+
+class RangeControl(ControlWidget):
+    """A low/high pair on one track — "everything between these two".
+
+    Shares the slider's conventions deliberately: the bounds sit either side
+    of the track, the values ride under the handles, and a drag commits once
+    on release rather than once per pixel. The pair is stored as JSON in the
+    single `value` param the host writes (see core.controls.range_values),
+    so nothing about the hosting contract had to change to fit a control
+    that means two numbers.
+    """
+
+    def _build(self) -> None:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(5)
+        self._low_label = QLabel("")
+        self._low_label.setObjectName("bound")
+        self._high_label = QLabel("")
+        self._high_label.setObjectName("bound")
+        self._high_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._slider = RangeSlider()
+        self._slider.moved.connect(self._on_moved)
+        self._slider.released.connect(self._commit)
+        row.addWidget(self._low_label)
+        row.addWidget(self._slider, 1)
+        row.addWidget(self._high_label)
+        self._layout.addLayout(row)
+
+        self._readout_row = QWidget()
+        self._readout_row.setObjectName("readout_row")
+        self._readout_row.setFixedHeight(15)
+        self._readout = QLabel("", self._readout_row)
+        self._readout.setObjectName("control_readout")
+        self._layout.addWidget(self._readout_row)
+
+        self._minimum, self._step, self._decimals = 0.0, 1.0, 0
+
+    def _place_readout(self) -> None:
+        """Centred between the two handles — on the span it describes rather
+        than on the card, so it stays attached to what it is reporting."""
+        low_x, high_x = self._slider.handle_centres()
+        centre = (self._slider.x() + (low_x + high_x) / 2
+                  - self._readout_row.x())
+        self._readout.adjustSize()
+        self._readout.move(
+            SliderControl._readout_left(centre, self._readout.width(),
+                                        self._readout_row.width()), 0)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._place_readout()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._place_readout()
+
+    def _apply(self, params: dict) -> None:
+        from flograph.core.controls import as_number, clamp, range_values
+
+        self._minimum = as_number(
+            self._wired("minimum", params.get("minimum", 0)), 0.0)
+        maximum = as_number(
+            self._wired("maximum", params.get("maximum", 100)), 100.0)
+        self._step = float(params.get("step", 1) or 1) or 1.0
+        self._decimals = max(0, int(params.get("decimals", 0) or 0))
+        if maximum < self._minimum:
+            maximum = self._minimum
+        self._slider.setMaximum(
+            max(0, round((maximum - self._minimum) / self._step)))
+
+        low, high = range_values(params.get("value"), self._minimum, maximum)
+        low = clamp(low, self._minimum, maximum)
+        high = clamp(high, self._minimum, maximum)
+        if not self._slider.isSliderDown():
+            self._slider.setValues(self._to_step(low), self._to_step(high))
+        self._low_label.setText(self._format(self._minimum))
+        self._high_label.setText(self._format(maximum))
+        self._update_readout()
+
+    def _to_step(self, value: float) -> int:
+        return max(0, min(self._slider.maximum(),
+                          round((value - self._minimum) / self._step)))
+
+    def _from_step(self, step: int) -> float:
+        value = self._minimum + step * self._step
+        return round(value, self._decimals) if self._decimals \
+            else int(round(value))
+
+    def _format(self, value) -> str:
+        return f"{value:,.{self._decimals}f}" if self._decimals \
+            else f"{int(value):,}"
+
+    def _update_readout(self) -> None:
+        low, high = self._read_pair()
+        # an en dash, not a hyphen: these are numbers that may be negative
+        self._readout.setText(f"{self._format(low)} – {self._format(high)}")
+        self._place_readout()
+
+    def _read_pair(self) -> tuple:
+        low, high = self._slider.values()
+        return self._from_step(low), self._from_step(high)
+
+    def _read(self):
+        import json
+        return json.dumps(list(self._read_pair()))
+
+    def _on_moved(self, *_args) -> None:
+        self._update_readout()
+        if not self._slider.isSliderDown():
+            super()._commit()
+
+    def focus_editor(self) -> None:
+        self._slider.setFocus()
+
+
 class NumberControl(ControlWidget):
     """A spin box. Integer when `decimals` is 0, which is the default."""
 
@@ -574,6 +901,7 @@ class ChoiceControl(ControlWidget):
 
 _CONTROLS = {
     "slider": SliderControl,
+    "range": RangeControl,
     "number": NumberControl,
     "text": TextControl,
     "date": DateControl,
