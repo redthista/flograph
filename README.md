@@ -261,8 +261,10 @@ list.
 
 Rules that matter:
 
-- **Treat inputs as read-only** — outputs are cached by reference. Use
-  `df.copy(deep=False)` before changing shape.
+- **Treat inputs as read-only** — outputs are cached by reference. A pandas
+  input arrives as a copy-on-write shallow copy, so writing to it is free and
+  stays local to your node; a list, dict or numpy array is shared as it is,
+  so copy that yourself before changing it.
 - **Heavy imports go inside `run()`.** Node scripts are executed to be read,
   so a top-level import runs at library-load time.
 - **matplotlib: the OO API only** (`matplotlib.figure.Figure()`), never

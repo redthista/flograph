@@ -34,7 +34,7 @@ flograph
 - **`flograph/core/` is Qt-free.** No PySide6, no pandas, no matplotlib at top level. Enforced by poison test.
 - **QUndoCommands are the sole writers to the graph.** UI items react to graph events; never mutate the graph directly from a click handler.
 - **Nodes are text scripts, never imported.** They live under `src/flograph/nodes/<category>/` and are parsed by `flograph.core.script.parse_spec()`.
-- **Nodes treat inputs as read-only** — outputs are cached by reference. Use `df.copy(deep=False)` before mutating shape.
+- **Nodes treat inputs as read-only** — outputs are cached by reference. Pandas inputs are handed over as copy-on-write shallow copies by `scheduler._read_only_view`, so writing to one cannot reach the entry cached upstream; other types are shared as-is and the contract is the only guard.
 - **Heavy imports go inside `run()`, not top-level** — top-level code executes at registry load for every node.
 - **matplotlib: OO API only** (`matplotlib.figure.Figure()`), never `pyplot`. Not thread-safe from the worker.
 

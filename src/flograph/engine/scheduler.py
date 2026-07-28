@@ -23,6 +23,39 @@ from .runstats import (SAMPLE_MS, NodeRun, ProcessSampler, RunHistory,
 from .worker import NodeRunnable, WorkerSignals
 
 
+def _read_only_view(value):
+    """What a node actually receives on an input port.
+
+    Cached outputs are handed downstream by reference, so the node contract
+    has always been "treat your inputs as read-only". Nothing enforced it,
+    and a node that wrote to its input instead reached back into the entry
+    cached against the node *upstream* — silently rewriting a value other
+    branches had already been served, or were about to be.
+
+    For pandas that costs nothing to fix. Under copy-on-write a shallow copy
+    shares every block with the original (fifty of them over a 16 MB frame
+    cost 0.09 MB), yet the first write through it copies just the block being
+    touched and leaves the original alone. So the node still gets the same
+    data with no duplication, and the contract stops being a promise the
+    engine merely hopes for.
+
+    Anything that is not a pandas object is passed straight through: there is
+    no equivalent free guard for a list, a dict or a numpy array, and a real
+    copy of those is a cost the engine should not impose behind the user's
+    back. Inputs remain read-only by contract there.
+    """
+    copy = getattr(value, "copy", None)
+    if copy is None:
+        return value
+    cls = type(value).__mro__
+    if not any(c.__module__.startswith("pandas.") for c in cls):
+        return value
+    try:
+        return copy(deep=False)
+    except (TypeError, ValueError):
+        return value
+
+
 def build_plan(graph: Graph, targets: Iterable[str],
                cache: "Optional[OutputCache]" = None) -> list[str]:
     """The nodes that must execute to satisfy `targets`: every *dirty* node
@@ -112,6 +145,10 @@ class ExecutionEngine(QObject):
 
         self._plan: list[str] = []
         self._current: Optional[str] = None
+        # id(shallow copy handed to the running node) -> (src_node, src_port),
+        # so a pass-through node returning its input is still recognised as
+        # serving the upstream value rather than one of its own.
+        self._handed_in: dict[int, tuple[str, str]] = {}
         self._token: Optional[CancellationToken] = None
         self._had_failure = False
         self._active = False
@@ -232,12 +269,17 @@ class ExecutionEngine(QObject):
     def _start_node(self, node_id: str) -> None:
         node = self.graph.nodes[node_id]
         inputs = {}
+        self._handed_in = {}
         for port in node.spec.inputs:
             conn = self.graph.input_connection(node_id, port.name)
-            inputs[port.name] = (
-                self.cache.outputs_for(conn.src_node).get(conn.src_port)
-                if conn is not None else None
-            )
+            if conn is None:
+                inputs[port.name] = None
+                continue
+            value = self.cache.outputs_for(conn.src_node).get(conn.src_port)
+            guarded = _read_only_view(value)
+            inputs[port.name] = guarded
+            if guarded is not value:
+                self._handed_in[id(guarded)] = (conn.src_node, conn.src_port)
 
         signals = WorkerSignals()  # created on the GUI thread, before pool.start
         signals.finished.connect(self._on_node_finished)
@@ -282,6 +324,14 @@ class ExecutionEngine(QObject):
         if node is None or node.frozen or len(outputs) != 1:
             return None, None
         (value,) = outputs.values()
+        # A pandas input arrives as a copy-on-write shallow copy (see
+        # _read_only_view), so a pass-through node hands back that copy rather
+        # than the cached object itself. It is still the same data — the copy
+        # shares every block — so it still aliases; the identity to test is
+        # against what was handed in.
+        handed = self._handed_in.get(id(value))
+        if handed is not None:
+            return handed
         for port in node.spec.inputs:
             conn = self.graph.input_connection(node_id, port.name)
             if conn is None:

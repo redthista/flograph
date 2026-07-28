@@ -46,7 +46,8 @@ Each node is a single Python file with this exact contract:
       return {"out_port": value, ...}   # or a bare value iff exactly one output
 
 Rules:
-- Treat inputs as read-only; call df.copy() before mutating shape.
+- Treat inputs as read-only. A pandas input is already a copy-on-write
+  shallow copy, so writing to it is safe; copy other types before mutating.
 - Heavy imports (pandas, etc.) go inside run(), never at module top level.
 - Raise plain exceptions with actionable messages on bad input.
 - Reply with ONLY the complete updated Python source for the node script —

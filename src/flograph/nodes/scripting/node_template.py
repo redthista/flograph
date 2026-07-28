@@ -38,7 +38,9 @@ PARAMS = [
 # run() is called with each input port as a keyword argument (unconnected
 # optional inputs arrive as None) and returns a dict keyed by output port
 # name. Treat inputs as read-only — outputs are cached and shared by
-# reference, so copy before mutating. Create figures with
+# reference. A pandas input arrives as a copy-on-write shallow copy, so
+# writing to it is safe and free; copy anything else before mutating it.
+# Create figures with
 # matplotlib.figure.Figure(), never pyplot.
 #
 # Import inside run(), not at the top of the file. This script is *executed*
