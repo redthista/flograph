@@ -902,9 +902,14 @@ class NodeItem(QGraphicsObject):
         del_col = QToolButton(text="-Col")
         fit = QToolButton(text="Fit")
         fit.setToolTip("Auto-size columns to their content")
+        copy_headers = QToolButton(text="Copy")
+        copy_headers.setToolTip(
+            "Copy the selection to the clipboard with column headers on "
+            "top — plain Ctrl+C leaves them out. Copies the whole table "
+            "if nothing is selected")
         expand = QToolButton(text="⛶")
         expand.setToolTip("Open the full spreadsheet editor")
-        for button in (add_row, del_row, add_col, del_col, fit):
+        for button in (add_row, del_row, add_col, del_col, fit, copy_headers):
             button.setAutoRaise(True)
             trow.addWidget(button)
         trow.addStretch(1)
@@ -931,6 +936,7 @@ class NodeItem(QGraphicsObject):
         add_col.clicked.connect(self._table_add_column)
         del_col.clicked.connect(self._table_remove_column)
         fit.clicked.connect(lambda: grid.autosize_columns())
+        copy_headers.clicked.connect(grid.copy_selection_with_headers)
         expand.clicked.connect(self._open_table_editor)
         model.sheet_edited.connect(self._commit_table_data)
 
