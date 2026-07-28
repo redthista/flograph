@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtWidgets import QTableView, QWidget
+from PySide6.QtWidgets import QWidget
+
+from ..data_table import DataTableView
 
 from flograph.core.spec import SPEC_COLUMNS, spec_frame  # noqa: F401 — re-export
 
@@ -31,7 +33,7 @@ def spec_view_for(value: Any) -> Optional[QWidget]:
     if not isinstance(value, pd.DataFrame):
         return None
     from .pandas_model import PandasModel
-    view = QTableView()
+    view = DataTableView()
     view.setModel(PandasModel(spec_frame(value), parent=view))
     view.verticalHeader().setVisible(False)  # row numbers mean nothing here
     return view
