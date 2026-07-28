@@ -65,6 +65,23 @@ def source_id(node) -> str:
     return value if isinstance(value, str) else ""
 
 
+def linked_from_nodes(graph: "Graph", goto_id: str) -> list:
+    """Every From node currently, validly reading this Goto, sorted by each
+    From's own canvas label — link_label would give every entry the same
+    name (the Goto's), which is no help telling them apart in a menu."""
+    ids = [link.dst_node for link in graph.links.values()
+          if link.src_node == goto_id]
+    nodes = [graph.nodes[i] for i in ids if i in graph.nodes]
+    return sorted(nodes, key=lambda n: n.label.lower())
+
+
+def linked_goto_node(graph: "Graph", from_id: str):
+    """The Goto this From is currently, validly reading — or None (unset,
+    deleted, or rejected as a loop, same cases from_problem explains)."""
+    link = graph.links.get(link_id(from_id))
+    return graph.nodes.get(link.src_node) if link is not None else None
+
+
 def resolve_links(graph: "Graph") -> dict[str, "Connection"]:
     """The full link set for a graph, keyed by link id.
 

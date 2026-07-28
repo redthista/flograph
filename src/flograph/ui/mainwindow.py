@@ -1610,6 +1610,38 @@ class MainWindow(QMainWindow):
         browser_action = None
         if self._can_open_in_browser(node_id):
             browser_action = menu.addAction("Open in Browser")
+        connected_actions: list = []
+        from flograph.core.links import (is_from, is_goto, link_label,
+                                         linked_from_nodes, linked_goto_node)
+        if is_goto(node):
+            # every From here shares one link name (the Goto's), so it's
+            # useless for telling them apart — the node's own label is the
+            # only thing that can distinguish them
+            targets = linked_from_nodes(self.graph, node_id)
+            target_text = lambda t: t.label
+        elif is_from(node):
+            # the reverse case has the opposite problem: a Goto's own label
+            # is generic ("Goto") unless renamed, while its link name is
+            # what's shown everywhere else this Goto appears (its card, the
+            # From's picker) — so use that instead for a familiar name
+            goto = linked_goto_node(self.graph, node_id)
+            targets = [goto] if goto is not None else []
+            target_text = link_label
+        else:
+            targets = []
+            target_text = lambda t: t.label
+        if len(targets) == 1:
+            connected_actions.append(
+                (menu.addAction(f"Go to {target_text(targets[0])}"),
+                 targets[0].id))
+        elif targets:
+            # a Goto's glow highlights every From at once, which stops
+            # helping once they're scattered across a big graph — this is
+            # the "jump to one of them" the glow can't offer
+            submenu = menu.addMenu("Go to Connected Node")
+            for target in targets:
+                connected_actions.append(
+                    (submenu.addAction(target_text(target)), target.id))
         # per-node override of Settings > Canvas > Show port names; the label
         # says what clicking will do, so it reads off whatever is showing now
         from .canvas.node_item import port_labels_on
@@ -1687,6 +1719,22 @@ class MainWindow(QMainWindow):
                 from .inspector.popup_view import PopupView
                 PopupView(self.graph, self.engine, node_id, port_name,
                           parent=self).show()
+                return
+            target_id = next((t for a, t in connected_actions if a is chosen),
+                             None)
+            if target_id is not None:
+                self._go_to_node(target_id)
+
+    def _go_to_node(self, node_id: str) -> None:
+        """Select a node and centre the model canvas on it — the Goto/From
+        'Go to Connected Node' menu jumps here without the user having to
+        hunt for it by eye across a big graph."""
+        item = self.scene.node_items.get(node_id)
+        if item is None:
+            return
+        self.scene.clearSelection()
+        item.setSelected(True)
+        self.view.centerOn(item)
 
     def _toggle_port_labels(self, node_id: str, shown: bool) -> None:
         """Show/hide one node's port names.
