@@ -804,6 +804,8 @@ class MainWindow(QMainWindow):
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "grid":
             return
+        if not node.canvas_preview_enabled:
+            return
         item = self.scene.node_items.get(node_id)
         merged = self._merged_linked_sheet(node_id)
         if item is not None and merged is not None:
@@ -886,6 +888,8 @@ class MainWindow(QMainWindow):
             self._on_slicer_node_succeeded(node_id)
         elif kind == "control":
             self._on_control_node_succeeded(node_id)
+        elif kind == "grid":
+            self._on_grid_node_succeeded(node_id)
 
     def _on_control_node_succeeded(self, node_id: str) -> None:
         """Re-read whatever this control's own inputs supplied on that run —

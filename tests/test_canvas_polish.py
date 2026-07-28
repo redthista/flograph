@@ -325,6 +325,29 @@ class TestPreviewToggle:
         node = registry.instantiate("flograph.viz.card")
         assert card_kind(node) not in PREVIEW_TOGGLABLE_KINDS
 
+    def test_table_node_toggle_hides_grid_but_keeps_its_data(self, env, registry):
+        """The Table node's spreadsheet is as expensive to paint as a
+        chart/table-viewer card, so it gets the same toggle — but its data
+        lives in params, not a recomputed cache entry, so disabling must
+        never clear it (unlike figure/table_viewer/slicer)."""
+        from flograph.ui.commands import SetPreviewEnabledCommand
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.io.table"))
+        item = scene.node_items[node.id]
+        proxy = item._table_proxy
+        port = next(iter(item.output_ports.values()))
+        assert proxy.isVisible() and node.canvas_preview_enabled
+
+        stack.push(SetPreviewEnabledCommand(graph, node.id, False))
+        assert not node.canvas_preview_enabled
+        assert not proxy.isVisible()
+        assert port.isVisible()  # still wireable
+        assert item._table_model is not None  # data is not cleared
+
+        stack.undo()
+        assert node.canvas_preview_enabled
+        assert proxy.isVisible()
+
 
 class TestFrames:
     def test_frame_commands_round_trip(self, env):

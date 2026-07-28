@@ -119,11 +119,13 @@ def card_kind(node) -> Optional[str]:
     return node.spec.card or _LEGACY_CARD_BY_TYPE_ID.get(node.type_id)
 
 
-# Card kinds with a real, expensive embedded output-preview widget — the ones
-# the canvas-preview toggle (idea #21) applies to. "kpi" is painted directly
-# with no widget, so it's excluded; "grid" is user *input*, not a computed
-# preview, so it's excluded too.
-PREVIEW_TOGGLABLE_KINDS = {"figure", "webview", "table_viewer", "slicer"}
+# Card kinds with a real, expensive embedded widget — the ones the
+# canvas-preview toggle (idea #21) applies to. "kpi" is painted directly with
+# no widget, so it's excluded. "grid" (the Table node) is user *input* rather
+# than a computed preview, but its spreadsheet widget is just as costly to
+# paint with several on screen, so it gets the same toggle — disabling it
+# only hides the interactive widget, never the node's stored data.
+PREVIEW_TOGGLABLE_KINDS = {"figure", "webview", "table_viewer", "slicer", "grid"}
 
 
 def kpi_text(value, fmt: str) -> str:
@@ -1900,6 +1902,8 @@ class NodeItem(QGraphicsObject):
             return
         if self.table:
             self._paint_table(painter)
+            if not self.node.canvas_preview_enabled:
+                self._paint_preview_disabled_hint(painter)
             return
         if self.button:
             self._paint_button(painter)
