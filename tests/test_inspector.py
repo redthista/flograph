@@ -125,6 +125,40 @@ class TestInspector:
         qtbot.addWidget(popup)
         assert isinstance(popup._current_widget, FigureView)
 
+    def test_stale_event_after_close_does_not_crash(
+            self, qtbot, registry, tmp_path):
+        """Crash report: WA_DeleteOnClose destruction is deferred, and a
+        dirty_changed/node_succeeded event already in flight when the popup
+        is torn down (e.g. from a WebEngine chart pumping the event loop
+        reentrantly) could reach _refresh() after the dialog's C++ side —
+        and its QVBoxLayout — was already gone, raising 'Internal C++
+        object already deleted' from inside QUndoCommand.redo()."""
+        csv = tmp_path / "d.csv"
+        csv.write_text("x,y\n1,2\n2,4\n3,9\n")
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        plot = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
+        graph.set_param(reader.id, "path", str(csv))
+        graph.connect(reader.id, "table", plot.id, "table")
+        self._run(qtbot, engine)
+
+        from flograph.ui.inspector.popup_view import PopupView
+        popup = PopupView(graph, engine, plot.id, "figure")
+        # Not qtbot.addWidget()'d: this test forces destruction itself below,
+        # and qtbot's own teardown-time close() would hit the same deleted
+        # C++ object.
+
+        from PySide6.QtCore import QCoreApplication, QEvent
+        popup.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+        # Simulates a callback still in flight after the C++ object is
+        # already gone — must not raise.
+        popup._on_dirty_changed(plot.id, True)
+        popup._on_node_ran(plot.id)
+        popup._on_node_removed(plot.id)
+
 
 class TestFigureViewTeardown:
     """Regression for the locLabel segfault: matplotlib keeps event
