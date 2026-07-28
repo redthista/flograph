@@ -120,26 +120,9 @@ switched off (right-click a viz node), and zoom-out LOD flattening.
 
 ---
 
-## E. Tables and controls  (was 23, 24)
+## E. Charts  (was 27)
 
-**E1. Copy a table with its column headers.** Copying a whole table and
-pasting into Excel should bring the column names with it. Bigger than it
-reads: the *sheet* page has a proper three-format clipboard
-(`ui/spreadsheet/clipboard.py` — TSV, HTML and an internal format), but the
-table views on node cards, dashboard tiles and the inspector are plain
-`QTableView`s with no copy handling at all, and Qt gives them none. So the
-work is "give the data table views a copy action, headers included when the
-selection is the whole table", with the sheet's helpers as the model.
-
-**E2. A "between" slider** — two handles emitting a low/high pair, for
-filtering to a range. The existing Slider node already derives its bounds
-from wired data, which is the part worth reusing rather than rewriting.
-
----
-
-## F. Charts  (was 27)
-
-**F1. Explicit Y bounds on the chart-per-value nodes.** Partly overtaken:
+**E1. Explicit Y bounds on the chart-per-value nodes.** Partly overtaken:
 the "shared scale picks the tallest column rather than the tallest stack"
 bug is fixed in both nodes — `_stacks()` bounds a stacked chart by the row
 totals, so charts no longer grow past the sheet. What is still missing is a
