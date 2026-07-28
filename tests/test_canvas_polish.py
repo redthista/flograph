@@ -349,6 +349,48 @@ class TestPreviewToggle:
         assert proxy.isVisible()
 
 
+class TestFlushPendingEdits:
+    """issues.md #4: F5/Run Selected/Reset Caches/the run-node menu actions
+    all read node.params synchronously, but Qt only commits a table cell's
+    open editor on Tab/click-away/FocusOut — so a value just typed and not
+    yet closed off was invisible to the very run meant to pick it up.
+    _flush_pending_edits closes that gap by blurring a still-open editor
+    (found via _focused_spreadsheet) before any of those actions run."""
+
+    def test_flush_commits_an_open_cell_editor(self, window, qtbot):
+        import json
+
+        from flograph.ui.spreadsheet import SheetModel, SpreadsheetView
+
+        grid = SpreadsheetView()
+        model = SheetModel(json.dumps({
+            "version": 2,
+            "columns": [{"name": "A", "type": "auto"}],
+            "rows": [[""]],
+        }), parent=grid)
+        grid.setModel(model)
+        grid.show()
+        qtbot.addWidget(grid)
+        qtbot.waitExposed(grid)
+
+        index = model.index(0, 0)
+        grid.setCurrentIndex(index)
+        grid.edit(index)
+        qtbot.wait(20)
+        editor = grid.viewport().focusWidget()
+        assert editor is not None
+
+        from PySide6.QtTest import QTest
+        QTest.keyClicks(editor, "hello")
+        assert model.cell_source(0, 0) == ""  # not committed yet
+
+        window._flush_pending_edits()
+        assert model.cell_source(0, 0) == "hello"
+
+    def test_flush_is_a_no_op_without_an_open_editor(self, window):
+        window._flush_pending_edits()  # must not raise
+
+
 class TestFrames:
     def test_frame_commands_round_trip(self, env):
         graph, stack, scene = env

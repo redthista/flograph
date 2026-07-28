@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
                                  lambda: self._align("dist_v"))
 
         # --- run
-        self.action_run = act("Run All", Qt.Key_F5, self.engine.run_all)
+        self.action_run = act("Run All", Qt.Key_F5, self._run_all)
         self.action_run_selected = act("Run Selected", Qt.Key_F6,
                                        self._run_selected)
         self.action_cancel = act("Cancel", Qt.Key_Escape, self.engine.cancel)
@@ -628,6 +628,16 @@ class MainWindow(QMainWindow):
                 return widget
             widget = widget.parentWidget()
         return None
+
+    def _flush_pending_edits(self) -> None:
+        """Force a still-open grid cell editor to commit before a run reads
+        node.params. Qt only commits a cell's editor on Tab/click-away/
+        FocusOut, so a value just typed and not yet closed off is invisible
+        to node.params — and so to the very run meant to pick it up. F5/F6
+        and the run-node menu actions don't touch focus on their own, so
+        without this a run can silently execute against stale data."""
+        if self._focused_spreadsheet() is not None:
+            QApplication.focusWidget().clearFocus()
 
     # --------------------------------------------------------------- wiring
 
@@ -1180,12 +1190,18 @@ class MainWindow(QMainWindow):
         if len(items) == 1:
             self._rename_node(items[0].node.id)
 
+    def _run_all(self) -> None:
+        self._flush_pending_edits()
+        self.engine.run_all()
+
     def _run_selected(self) -> None:
+        self._flush_pending_edits()
         targets = [item.node.id for item in self.scene.selected_node_items()]
         if targets:
             self.engine.run_targets(targets)
 
     def _reset_caches(self) -> None:
+        self._flush_pending_edits()
         for node_id in self.graph.nodes:
             self.graph.mark_dirty(node_id)
         self.engine.cache.clear()
@@ -1224,6 +1240,7 @@ class MainWindow(QMainWindow):
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "button":
             return
+        self._flush_pending_edits()
         action = node.params.get("action", "Run nodes")
         if action == "Show message":
             self._show_button_message(node)
@@ -1301,6 +1318,7 @@ class MainWindow(QMainWindow):
         return self._nodes_in_rect(QRectF(*frame.rect))
 
     def _on_frame_run_requested(self, frame_id: str) -> None:
+        self._flush_pending_edits()
         targets = self._frame_node_ids_by_id(frame_id)
         if not targets:
             self.statusBar().showMessage("Frame is empty — nothing to run", 4000)
@@ -1672,6 +1690,7 @@ class MainWindow(QMainWindow):
         if chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
         elif chosen is run_to:
+            self._flush_pending_edits()
             self.engine.run_to(node_id)
         elif chosen is edit_code:
             self._on_node_double_clicked(node_id)
