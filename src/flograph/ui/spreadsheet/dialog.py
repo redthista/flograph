@@ -177,6 +177,13 @@ class SheetEditorDialog(QDialog):
         toolbar.addAction("Fit columns", lambda: view.autosize_columns())
         toolbar.addAction("Sort ↑", lambda: model.sort_by(current_col(), True))
         toolbar.addAction("Sort ↓", lambda: model.sort_by(current_col(), False))
+        toolbar.addSeparator()
+        copy_headers = toolbar.addAction(
+            "Copy w/ Headers", view.copy_selection_with_headers)
+        copy_headers.setToolTip(
+            "Copy the selection to the clipboard with column headers on "
+            "top — plain Ctrl+C leaves them out. Copies the whole table "
+            "if nothing is selected")
         self._toolbar = toolbar
         return toolbar
 

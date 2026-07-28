@@ -228,6 +228,20 @@ class TestSpreadsheetView:
         payload = json.loads(bytes(mime.data(MIME_CELLS).data()).decode())
         assert payload["cells"] == [["1", "2", "=A1+B1"]]
 
+    def test_copy_with_headers_puts_a_header_row_on_top(self, view):
+        select_rect(view, 0, 0, 1, 2)
+        view.copy_selection_with_headers()
+        mime = QApplication.clipboard().mimeData()
+        assert mime.text() == "A\tB\tC\n1\t2\t3\n4\t5\t"
+        assert not mime.hasFormat(MIME_CELLS)   # not meant for repasting in
+
+    def test_copy_with_headers_and_nothing_selected_copies_the_whole_table(
+            self, view):
+        assert not view.selectionModel().hasSelection()
+        view.copy_selection_with_headers()
+        mime = QApplication.clipboard().mimeData()
+        assert mime.text() == "A\tB\tC\n1\t2\t3\n4\t5\t"
+
     def test_internal_paste_shifts_relative_refs(self, view):
         select_rect(view, 0, 2, 0, 2)   # the =A1+B1 cell
         view.copy_selection()

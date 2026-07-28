@@ -158,6 +158,33 @@ class SpreadsheetView(QTableView):
         mime.setData(MIME_CELLS, encode_cells((row0, col0), sources))
         QApplication.clipboard().setMimeData(mime)
 
+    def copy_selection_with_headers(self) -> None:
+        """Like copy_selection, but with a column-header row on top — for
+        pasting into a spreadsheet outside the app. With nothing selected,
+        copies the whole table rather than a lone current cell, so the
+        button works as a get-everything action without a Ctrl+A first. No
+        internal cell format goes on the clipboard, unlike copy_selection: a
+        header row would throw off paste_clipboard's relative-reference
+        shifting, and this action isn't meant for repasting into the grid
+        anyway."""
+        model = self.sheet_model()
+        if model is None or model.rowCount() == 0 or model.columnCount() == 0:
+            return
+        selection = self.selectionModel()
+        rect = (self._selection_rect()
+                if selection is not None and selection.hasSelection() else None)
+        row0, col0, row1, col1 = rect or (
+            0, 0, model.rowCount() - 1, model.columnCount() - 1)
+        headers = [model.headerData(c, Qt.Horizontal, Qt.DisplayRole)
+                  for c in range(col0, col1 + 1)]
+        values = [[model.value_text(r, c) for c in range(col0, col1 + 1)]
+                  for r in range(row0, row1 + 1)]
+        block = [headers] + values
+        mime = QMimeData()
+        mime.setText(block_to_tsv(block))
+        mime.setHtml(block_to_html(block))
+        QApplication.clipboard().setMimeData(mime)
+
     def cut_selection(self) -> None:
         self.copy_selection()
         self.delete_selection()
