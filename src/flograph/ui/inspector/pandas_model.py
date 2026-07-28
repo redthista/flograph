@@ -32,6 +32,15 @@ class PandasModel(QAbstractTableModel):
         self._df = df
         self._loaded = min(PAGE_SIZE, len(df))
 
+    def dataframe(self) -> pd.DataFrame:
+        """The frame behind the model, whole — not just the rows paged in.
+
+        Copying the whole table goes through this rather than through the
+        view, so asking for a million rows does not first have to fetchMore
+        its way there.
+        """
+        return self._df
+
     # ------------------------------------------------------------- shape
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
@@ -64,6 +73,21 @@ class PandasModel(QAbstractTableModel):
                 return "NaN"
             if isinstance(value, float):
                 return f"{value:.{FLOAT_PRECISION}g}"
+            return str(value)
+        if role == Qt.EditRole:
+            # What a copy puts on the clipboard. DisplayRole is rounded to
+            # six significant figures for reading, and pasting *that* into
+            # Excel would quietly lose precision from every float in the
+            # table. Missing goes out empty rather than "NaN", which is what
+            # a spreadsheet reads as a blank cell.
+            if _is_missing(value):
+                return ""
+            if isinstance(value, float):
+                # float() first: numpy scalars are float subclasses whose
+                # own repr is "np.float64(1234.5)", which is not a number
+                # any spreadsheet will take. Python's float repr is the
+                # shortest string that round-trips, so nothing is lost.
+                return repr(float(value))
             return str(value)
         if role == Qt.ForegroundRole and _is_missing(value):
             return _NAN_COLOR

@@ -19,6 +19,7 @@ from flograph.core.links import link_label, source_id
 from flograph.core.node import NodeStatus
 
 from .. import theme
+from ..data_table import DataTableView
 from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .stacking import NODE_Z, z_for
@@ -486,7 +487,7 @@ class NodeItem(QGraphicsObject):
         self._plotly_widget = None  # shared PlotlyView, see _build_plotly_widget
         self._report_view = None      # QTextBrowser (report cards only)
         self._report_proxy: QGraphicsProxyWidget | None = None
-        self._table_viewer_view: QTableView | None = None
+        self._table_viewer_view: "DataTableView | None" = None
         self._table_viewer_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_placeholder: QLabel | None = None
         self._kpi_value: object = None
@@ -1255,7 +1256,7 @@ class NodeItem(QGraphicsObject):
         layout.addWidget(placeholder, 1)
         self._table_viewer_placeholder = placeholder
 
-        view = QTableView()
+        view = DataTableView()
         view.setStyleSheet(
             f"QTableView {{ background: {theme.NODE_BODY.name()};"
             f" color: {theme.NODE_TEXT.name()}; border: none;"

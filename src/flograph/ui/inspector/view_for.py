@@ -6,11 +6,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtWidgets import QTableView, QWidget
+from PySide6.QtWidgets import QWidget
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel
 
+from ..data_table import DataTableView
 from .figure_view import FigureView
 from .object_view import ObjectView
 from .pandas_model import PandasModel
@@ -30,11 +31,11 @@ def view_for(value: Any, embed_figures: bool = True) -> QWidget:
     import sys
     pd = sys.modules.get("pandas")
     if pd is not None and isinstance(value, pd.DataFrame):
-        table = QTableView()
+        table = DataTableView()
         table.setModel(PandasModel(value, parent=table))
         return table
     if pd is not None and isinstance(value, pd.Series):
-        table = QTableView()
+        table = DataTableView()
         table.setModel(PandasModel(value.to_frame(), parent=table))
         return table
     if is_figure(value):

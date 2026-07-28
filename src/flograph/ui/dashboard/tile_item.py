@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from flograph.core import Tile
 
 from .. import theme
+from ..data_table import DataTableView
 from ..canvas.grid import (
     EDGE_MARGIN, grid_step, snap, snap_point, snapping_active,
 )
@@ -302,7 +303,7 @@ class TileItem(QGraphicsObject):
             widget = PlotlyView()
             self._plotly_widget = widget
         elif kind == "table":
-            widget = QTableView()
+            widget = DataTableView()
             widget.setStyleSheet(_grid_stylesheet())
             widget.setSortingEnabled(True)
             self._table_view = widget
