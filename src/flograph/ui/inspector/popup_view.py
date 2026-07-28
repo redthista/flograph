@@ -50,6 +50,14 @@ class PopupView(QDialog):
                 pass
 
     def _refresh(self) -> None:
+        # Last-ditch guard: WA_DeleteOnClose destruction is deferred, so an
+        # event already in flight (dirty_changed/node_succeeded firing from
+        # a reentrant event-loop pump, e.g. a WebEngine chart rendering) can
+        # reach here after this dialog's C++ side — and its layout — is
+        # already gone, before _disconnect() has had a chance to run.
+        import shiboken6
+        if not shiboken6.isValid(self):
+            return
         entry = self._engine.cache.get(self._node_id)
         value = entry.outputs.get(self._port_name) if entry else None
         if self._current_widget is not None:
@@ -73,4 +81,6 @@ class PopupView(QDialog):
 
     def _on_node_removed(self, node_id: str) -> None:
         if node_id == self._node_id:
-            self.close()
+            import shiboken6
+            if shiboken6.isValid(self):
+                self.close()
