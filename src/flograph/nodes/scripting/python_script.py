@@ -4,7 +4,9 @@ A free-form Python node. Edit NODE to change the ports, add PARAMS for
 configuration widgets, and write run() to compute the outputs.
 
 Inputs arrive as keyword arguments (unconnected optional inputs are None).
-Treat inputs as read-only — outputs are cached and shared by reference.
+Treat inputs as read-only — outputs are cached and shared by reference. A
+pandas input arrives as a copy-on-write shallow copy, so writing to it is
+safe and free; other types are shared as they are.
 Return a dict keyed by output port name (or a bare value if there is exactly
 one output).
 """

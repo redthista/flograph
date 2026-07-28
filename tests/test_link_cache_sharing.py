@@ -126,11 +126,20 @@ class TestEngineDetectsPassThrough:
             assert (entry.alias_of, entry.alias_port) == (n["goto"].id, "value")
 
     def test_the_value_really_is_shared(self, qtbot, chain):
+        """Not the same Python object — a node receives its input as a
+        copy-on-write shallow copy, so that writing to it cannot reach back
+        into the entry cached upstream — but the same *data*: the copy shares
+        every block, which is what keeps one frame behind a link chain from
+        costing a frame per hop."""
+        import numpy as np
         graph, n = chain
         engine = run_graph(qtbot, graph)
         owned = engine.cache.outputs_for(n["src"].id)["result"]
         for key in ("goto", "first", "second"):
-            assert engine.cache.outputs_for(n[key].id)["value"] is owned
+            served = engine.cache.outputs_for(n[key].id)["value"]
+            assert served.equals(owned)
+            assert all(np.shares_memory(served[col].values, owned[col].values)
+                       for col in owned.columns)
 
     def test_reroute_aliases_too(self, qtbot, registry):
         graph = Graph()
