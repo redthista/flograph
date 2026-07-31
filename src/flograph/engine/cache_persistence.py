@@ -37,11 +37,32 @@ def _cache_dir_for(project_path: str | Path) -> Path:
 
 
 def node_fingerprint(graph: Graph, node_id: str, memo: dict[str, str]) -> str:
-    """Recursive hash over a node's type/source/params and every upstream
-    node's fingerprint. Identical fingerprint across a save/load round trip
-    means "safe to reuse this node's cached output"."""
+    """Hash over a node's type/source/params and every upstream node's
+    fingerprint. Identical fingerprint across a save/load round trip means
+    "safe to reuse this node's cached output".
+
+    Iterative, with an explicit stack, rather than the obvious recursion:
+    the walk is as deep as the graph is long, so a chain of more than about
+    a thousand nodes hit Python's recursion limit and raised — and since
+    this runs inside both `save_cache` and `resolve_entries`, that meant a
+    deep enough project could not be saved or reopened at all.
+    """
     if node_id in memo:
         return memo[node_id]
+    # (node, its parents already fingerprinted?) — a node is pushed twice:
+    # once to discover its parents, once to be hashed after they are done.
+    stack: list[tuple[str, bool]] = [(node_id, False)]
+    while stack:
+        current, resolved = stack.pop()
+        if current in memo:
+            continue
+        _fingerprint_one(graph, current, resolved, memo, stack)
+    return memo[node_id]
+
+
+def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
+                     memo: dict[str, str],
+                     stack: list[tuple[str, bool]]) -> None:
     node = graph.node(node_id)
     if node.frozen:
         # A frozen node's output is pinned, so it no longer follows from its
@@ -52,23 +73,28 @@ def node_fingerprint(graph: Graph, node_id: str, memo: dict[str, str]) -> str:
         # recomputing them would be work for nothing. Unfreezing restores
         # the real hash, which no longer matches, so the node loads dirty
         # and runs again — exactly what unfreezing is for.
-        fp = hashlib.sha256(f"frozen:{node_id}".encode()).hexdigest()
-        memo[node_id] = fp
-        return fp
-    upstream_fps = []
+        memo[node_id] = hashlib.sha256(f"frozen:{node_id}".encode()).hexdigest()
+        return
+    # Port order, and one entry per *connected* port, so two ports fed by the
+    # same node still contribute twice — as the recursive version did.
+    parents = []
     for port in node.spec.inputs:
         conn = graph.input_connection(node_id, port.name)
         if conn is not None:
-            upstream_fps.append(node_fingerprint(graph, conn.src_node, memo))
+            parents.append(conn.src_node)
+    if not resolved:
+        pending = [p for p in parents if p not in memo]
+        if pending:
+            stack.append((node_id, True))
+            stack.extend((p, False) for p in pending)
+            return
     payload = json.dumps({
         "type_id": node.type_id,
         "source": node.source,
         "params": node.params,
-        "upstream": sorted(upstream_fps),
+        "upstream": sorted(memo[p] for p in parents),
     }, sort_keys=True, default=str)
-    fp = hashlib.sha256(payload.encode()).hexdigest()
-    memo[node_id] = fp
-    return fp
+    memo[node_id] = hashlib.sha256(payload.encode()).hexdigest()
 
 
 def freeze_fingerprint(graph: Graph, node_id: str) -> str:
