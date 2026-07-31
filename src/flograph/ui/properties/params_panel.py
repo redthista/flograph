@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
@@ -27,6 +27,12 @@ from flograph.core import Graph, ParamSpec
 
 from ..canvas.node_item import card_kind
 from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
+
+# How long typing has to pause before a text param reaches the graph. Long
+# enough that a normal typing rate never commits mid-word, short enough that
+# it feels immediate on release. A run flushes it regardless, so this delays
+# nothing the user then asks for.
+TYPING_IDLE_MS = 200
 
 
 class _NodeRefCombo(QComboBox):
@@ -84,6 +90,15 @@ class ParamsPanel(QWidget):
         self.tree.hide()
         layout.addWidget(self.tree, 1)
 
+        # Typed params land here first and reach the graph once typing
+        # pauses — see _commit_typed. One timer for the panel, not one per
+        # widget: only one field can have the keyboard at a time.
+        self._pending: dict[str, Any] = {}
+        self._typing = QTimer(self)
+        self._typing.setSingleShot(True)
+        self._typing.setInterval(TYPING_IDLE_MS)
+        self._typing.timeout.connect(self.flush_pending)
+
         graph.events.param_changed.connect(self._on_param_changed)
         graph.events.code_changed.connect(self._on_code_changed)
         graph.events.locked_changed.connect(self._on_locked_changed)
@@ -99,6 +114,9 @@ class ParamsPanel(QWidget):
     # -------------------------------------------------------------- binding
 
     def set_node(self, node_id: Optional[str]) -> None:
+        # anything half-typed belongs to the node being left, so it has to
+        # land before _node_id moves
+        self.flush_pending()
         self._node_id = node_id
         self._rebuild()
 
@@ -213,7 +231,7 @@ class ParamsPanel(QWidget):
             text = QPlainTextEdit(str(value or ""))
             text.setMaximumHeight(90)
             text.textChanged.connect(
-                lambda: self._commit(name, text.toPlainText()))
+                lambda: self._commit_typed(name, text.toPlainText()))
 
             def set_text(v, text=text):
                 # echoing the user's own keystroke back through setPlainText
@@ -254,7 +272,10 @@ class ParamsPanel(QWidget):
             edit.setEchoMode(QLineEdit.Password)
             if spec.placeholder:
                 edit.setPlaceholderText(spec.placeholder)
-            edit.textEdited.connect(lambda v: self._commit(name, v))
+            edit.textEdited.connect(lambda v: self._commit_typed(name, v))
+            # leaving the field (focus-out or Enter) is a settled
+            # value — don't make it wait out the timer
+            edit.editingFinished.connect(self.flush_pending)
             reveal = QToolButton()
             reveal.setObjectName(f"param_{name}_reveal")
             reveal.setText("Show")
@@ -278,7 +299,10 @@ class ParamsPanel(QWidget):
         edit = QLineEdit(str(value or ""))
         if spec.placeholder:
             edit.setPlaceholderText(spec.placeholder)
-        edit.textEdited.connect(lambda v: self._commit(name, v))
+        edit.textEdited.connect(lambda v: self._commit_typed(name, v))
+        # leaving the field (focus-out or Enter) is a settled
+        # value — don't make it wait out the timer
+        edit.editingFinished.connect(self.flush_pending)
         return edit, self._line_setter(edit)
 
     def _make_date_widget(self, spec: ParamSpec, value: Any):
@@ -321,7 +345,10 @@ class ParamsPanel(QWidget):
         edit = QLineEdit(str(value or ""))
         if spec.placeholder:
             edit.setPlaceholderText(spec.placeholder)
-        edit.textEdited.connect(lambda v: self._commit(name, v))
+        edit.textEdited.connect(lambda v: self._commit_typed(name, v))
+        # leaving the field (focus-out or Enter) is a settled
+        # value — don't make it wait out the timer
+        edit.editingFinished.connect(self.flush_pending)
 
         pick = QToolButton()
         pick.setText("▾")
@@ -430,9 +457,43 @@ class ParamsPanel(QWidget):
 
     # --------------------------------------------------------------- commit
 
+    def _commit_typed(self, name: str, value: Any) -> None:
+        """A keystroke. Held back until typing pauses.
+
+        Committing per character is what a QLineEdit invites, and it is far
+        from free: every commit pushes an undo command, marks the node and
+        its whole downstream cone dirty, evicts that cone from the cache and
+        re-renders the report cards. On a large graph that is milliseconds of
+        model work per character, before anything repaints.
+
+        Undo behaviour is unchanged — SetParamCommand already merges
+        consecutive edits of the same param into one step.
+        """
+        if self._updating or self._node_id is None:
+            return
+        self._pending[name] = value
+        self._typing.start()
+
+    def flush_pending(self) -> None:
+        """Commit anything typed but not yet settled.
+
+        Called on the idle timer, when the panel moves to another node, and
+        by MainWindow before every run — a run reading a param the user has
+        just typed but not paused after is exactly the stale-value bug that
+        `_flush_pending_edits` exists to prevent for grid cells.
+        """
+        self._typing.stop()
+        if not self._pending:
+            return
+        pending, self._pending = self._pending, {}
+        for name, value in pending.items():
+            self._commit(name, value)
+
     def _commit(self, name: str, value: Any) -> None:
         if self._updating or self._node_id is None:
             return
+        # a settled value supersedes a keystroke still waiting on the timer
+        self._pending.pop(name, None)
         node = self._graph.node(self._node_id)
         if node.params.get(name) == value:
             return

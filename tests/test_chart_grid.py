@@ -447,8 +447,12 @@ class TestCosmeticChangesStillReachTheViews:
         window.graph.set_param(card.id, "text", "![[a]]")
 
         item = window.scene.node_items[card.id]
+        window._refresh_report_cards()
         assert item._report_view.document().toHtml().count("<td") == 0
         window.graph.set_param(source.id, "columns", 2)
+        # a param edit schedules the re-render rather than doing it inline,
+        # so a burst of them costs one pass — fire the pending one
+        window._refresh_report_cards()
         assert item._report_view.document().toHtml().count("<td") == 4
 
     def test_a_report_tile_re_renders(self, window):

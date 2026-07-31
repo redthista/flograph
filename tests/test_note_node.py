@@ -139,4 +139,8 @@ def test_params_panel_text_keeps_cursor_while_typing(qtbot, env, registry):
     text.setTextCursor(cursor)
     qtbot.keyClicks(text, "abc")
     assert text.toPlainText() == "start:abc"
+    # typing is held back until it pauses, so the echo this guards against
+    # arrives after the flush rather than after each character
+    panel.flush_pending()
     assert graph.node(note.id).params["text"] == "start:abc"
+    assert text.toPlainText() == "start:abc"
