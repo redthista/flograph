@@ -138,6 +138,13 @@ class MainWindow(QMainWindow):
         self._pending_wire = None
         self._palette_popup.chosen.connect(self._add_node_from_palette)
 
+        # Coalesces a burst of param edits into one report re-render — see
+        # _refresh_report_cards. Before _wire_engine, which connects to it.
+        self._report_refresh = QTimer(self)
+        self._report_refresh.setSingleShot(True)
+        self._report_refresh.setInterval(120)
+        self._report_refresh.timeout.connect(self._refresh_report_cards)
+
         self._build_docks()
         self._build_actions()
         self._wire_engine()
@@ -618,6 +625,10 @@ class MainWindow(QMainWindow):
             {"cut": grid.cut_selection, "copy": grid.copy_selection,
              "paste": grid.paste_clipboard}[text_method]()
             return
+        # A param edit still waiting on the typing timer has not reached the
+        # undo stack yet, so undoing now would step over it and revert
+        # whatever came before instead.
+        self.params_panel.flush_pending()
         canvas_fn()
 
     @staticmethod
@@ -641,6 +652,10 @@ class MainWindow(QMainWindow):
         without this a run can silently execute against stale data."""
         if self._focused_spreadsheet() is not None:
             QApplication.focusWidget().clearFocus()
+        # Same hazard, different editor: a text param is held back until
+        # typing pauses, so hitting F5 mid-word would otherwise run against
+        # the value as it was one keystroke ago.
+        self.params_panel.flush_pending()
 
     # --------------------------------------------------------------- wiring
 
@@ -707,7 +722,7 @@ class MainWindow(QMainWindow):
         # ...and on a param change, because a *cosmetic* one (chart layout)
         # deliberately never runs anything
         self.graph.events.param_changed.connect(
-            lambda *_: self._refresh_report_cards())
+            lambda *_: self._report_refresh.start())
         self.graph.events.preview_enabled_changed.connect(
             self._on_preview_enabled_changed)
 
@@ -804,10 +819,16 @@ class MainWindow(QMainWindow):
         return open_node_from(self, node, self.engine.cache.get(node_id))
 
     def _refresh_report_cards(self) -> None:
-        """Re-render every report card on the canvas. Cheap (they are text
-        plus already-computed values) and blunt on purpose: working out
-        which cards embed which upstream node would duplicate the embed
-        parser for no gain."""
+        """Re-render every report card on the canvas. Blunt on purpose:
+        working out which cards embed which upstream node would duplicate
+        the embed parser for no gain.
+
+        Blunt is not the same as free, though — each card re-renders its
+        markdown and re-reads its embeds — so the param-change path goes
+        through `_report_refresh` to coalesce a burst of edits into one
+        pass. A finished run calls this directly; there is only one of those.
+        """
+        self._report_refresh.stop()
         for item in self.scene.node_items.values():
             if getattr(item, "report_card", False):
                 item.refresh_report()

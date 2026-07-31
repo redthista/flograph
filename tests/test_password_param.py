@@ -6,6 +6,7 @@ from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QLineEdit, QToolButton
 
 from flograph.core import Graph, ParamSpec
+from flograph.ui.properties.params_panel import TYPING_IDLE_MS
 from tests.conftest import make_node
 
 SOURCE = """
@@ -68,16 +69,31 @@ class TestPasswordParamWidget:
         assert edit.echoMode() == QLineEdit.Password
         assert reveal.text() == "Show"
 
-    def test_typing_commits_the_param(self, panel, qtbot):
+    def test_typing_commits_the_param_once_typing_pauses(self, panel, qtbot):
         panel, graph, node = panel
         edit, _reveal = self._widgets(panel)
         qtbot.keyClicks(edit, "hunter2")
+        # still at its default, not per keystroke: that is the whole point of
+        # the debounce, since a commit dirties and evicts the node's entire
+        # downstream cone
+        assert graph.node(node.id).params["api_key"] == ""
+        qtbot.wait(TYPING_IDLE_MS + 100)
+        assert graph.node(node.id).params["api_key"] == "hunter2"
+
+    def test_leaving_the_field_commits_without_waiting(self, panel, qtbot):
+        panel, graph, node = panel
+        edit, _reveal = self._widgets(panel)
+        qtbot.keyClicks(edit, "hunter2")
+        edit.editingFinished.emit()      # focus-out or Enter
         assert graph.node(node.id).params["api_key"] == "hunter2"
 
     def test_undo_redo_syncs_widget_text(self, panel, qtbot):
         panel, graph, node = panel
         edit, _reveal = self._widgets(panel)
         qtbot.keyClicks(edit, "hunter2")
+        # what MainWindow does before routing an undo to the canvas — without
+        # it the keystrokes are still on the timer and undo steps over them
+        panel.flush_pending()
         panel._undo_stack.undo()
         assert edit.text() == ""
         panel._undo_stack.redo()
