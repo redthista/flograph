@@ -88,6 +88,10 @@ class SpreadsheetView(QTableView):
         # per pixel, so pending widths debounce into one commit
         self._applying_widths = False
         self._pending_widths: dict[int, int] = {}
+        # See set_defer_autosize: a canvas card puts off fitting its columns
+        # until something actually paints it.
+        self._defer_autosize = False
+        self._autosize_pending = False
         self._width_commit_timer = QTimer(self)
         self._width_commit_timer.setSingleShot(True)
         self._width_commit_timer.setInterval(300)
@@ -281,6 +285,29 @@ class SpreadsheetView(QTableView):
         if len(cols) > 1:
             self.autosize_columns(cols)
 
+    def set_defer_autosize(self, defer: bool) -> None:
+        """Put off the automatic column fit until this view is first painted.
+
+        For a view embedded in a canvas card. Fitting reads every cell to
+        measure it, and on a canvas holding many Table nodes that was a
+        large share of the cost of opening the project — spent on cards that
+        are mostly off-screen and may never be looked at. A view inside a
+        QGraphicsProxyWidget is only painted when it is actually on screen,
+        so waiting for that skips the work entirely for the rest.
+
+        Not for a standalone view (the pop-out editor, tests): there is one
+        of those and the user is looking at it.
+        """
+        self._defer_autosize = defer
+
+    def paintEvent(self, event) -> None:
+        if self._autosize_pending:
+            self._autosize_pending = False
+            # not inline: resizing columns changes geometry, and doing that
+            # part-way through a paint invites recursion
+            QTimer.singleShot(0, lambda: self.autosize_columns(persist=False))
+        super().paintEvent(event)
+
     def _sync_column_widths(self) -> None:
         """On load/reset: apply the widths stored with the node, or re-fit
         everything when the default-autosize setting is on."""
@@ -288,7 +315,10 @@ class SpreadsheetView(QTableView):
         if model is None:
             return
         if autosize_default_enabled():
-            self.autosize_columns(persist=False)
+            if self._defer_autosize:
+                self._autosize_pending = True
+            else:
+                self.autosize_columns(persist=False)
             return
         self._applying_widths = True
         try:

@@ -29,6 +29,13 @@ HEADER_H = 26.0
 ROW_H = 20.0
 PAD_BOTTOM = 8.0
 LED_RADIUS = 5.0
+
+# The only QGraphicsItem changes NodeItem.itemChange acts on; see there.
+_HANDLED_ITEM_CHANGES = frozenset({
+    QGraphicsItem.ItemPositionChange,
+    QGraphicsItem.ItemPositionHasChanged,
+    QGraphicsItem.ItemSelectedHasChanged,
+})
 # A deactivated node is faded rather than hidden: it is still part of the
 # graph, still wired, and still the thing you click to switch back on.
 DEACTIVATED_OPACITY = 0.35
@@ -934,6 +941,8 @@ class NodeItem(QGraphicsObject):
         layout.addWidget(toolbar)
 
         grid = SpreadsheetView()
+        # a canvas full of these fits its columns on first paint, not at load
+        grid.set_defer_autosize(True)
         # parent the model to the view so C++ destruction stays ordered
         model = SheetModel(self.node.params.get("data"), parent=grid)
         grid.setModel(model)
@@ -2355,6 +2364,13 @@ class NodeItem(QGraphicsObject):
         self.update()
 
     def itemChange(self, change, value):
+        # Qt calls this for every kind of change — children added, scene
+        # assigned, transform, visibility — and only three are acted on. The
+        # rest used to fall through four comparisons each; there are tens of
+        # thousands of them while a project loads and a steady stream of them
+        # while anything is dragged.
+        if change not in _HANDLED_ITEM_CHANGES:
+            return super().itemChange(change, value)
         if change == QGraphicsItem.ItemPositionChange and self.node.locked:
             # Refused here rather than by clearing ItemIsMovable: a group
             # drag moves items the mouse never touched, and a button node
