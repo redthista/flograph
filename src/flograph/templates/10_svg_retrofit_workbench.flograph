@@ -1,0 +1,771 @@
+{
+ "flograph_version": "0.1.8",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "svg_note",
+    "type": "flograph.util.note",
+    "pos": [
+     -1700,
+     -1660
+    ],
+    "params": {
+     "text": "# Retrofit an SVG a page is already wired to\n\nA designer sends back redrawn artwork. The page it replaces has popups, styles and links bound to the **old ids** \u2014 and the new export renamed every one of them.\n\nThis flow works out what the new artwork lost, hands the old ids back to the elements that survived, and shows you the page before and after, live, so you can click the popups yourself.\n\n**Press F5**, then open the **Before / After** page.\n\nIt runs on a built-in sample as it stands. For your own files, set **Path** on the two Source File nodes \u2014 everything downstream follows.",
+     "width": 520
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "svg_src_page",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -1700,
+     -1300
+    ],
+    "params": {
+     "sample": "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Northgate Works \u2014 site plan</title>\n<style>\n  body { margin:0; background:#0b1220; color:#e2e8f0;\n         font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }\n  header { padding:14px 18px; border-bottom:1px solid #1e293b; }\n  h1 { margin:0; font-size:15px; letter-spacing:.01em; }\n  p { margin:4px 0 0; font-size:12px; color:#94a3b8; }\n  a { color:#38bdf8; }\n  svg { display:block; margin:14px auto; }\n  .room { cursor:pointer; transition:filter .12s; }\n  .room:hover { filter:brightness(1.28); }\n  #pipe-main { stroke:#38bdf8; stroke-width:5; fill:none; stroke-dasharray:7 5; }\n  #popup { position:fixed; left:18px; bottom:18px; max-width:290px;\n           background:#111a2e; border:1px solid #334155; border-radius:10px;\n           padding:12px 14px; box-shadow:0 8px 26px rgba(0,0,0,.5); }\n  #popup[hidden] { display:none; }\n  #popup-title { font-size:13px; font-weight:650; color:#f1f5f9; }\n  #popup-body { margin:4px 0 0; font-size:12px; color:#94a3b8; }\n</style>\n</head>\n<body>\n<header>\n  <h1>Northgate Works \u2014 site plan</h1>\n  <p>Click a room or a valve. Jump to <a href=\"#zone-north\">Zone North</a>.</p>\n</header>\n\n<svg id=\"plan\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 520 320\" width=\"520\" height=\"320\">\n  <rect id=\"bg\" x=\"0\" y=\"0\" width=\"520\" height=\"320\" fill=\"#0f172a\"/>\n  <g id=\"zone-north\" data-name=\"Zone North\">\n    <rect id=\"room-lab\" data-name=\"Lab\" class=\"room\" x=\"40\" y=\"48\" width=\"160\" height=\"88\" rx=\"6\" fill=\"#1d4ed8\"/>\n    <text id=\"label-lab\" x=\"56\" y=\"98\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Lab</text>\n  </g>\n  <g id=\"zone-south\" data-name=\"Zone South\">\n    <rect id=\"room-office\" data-name=\"Office\" class=\"room\" x=\"40\" y=\"192\" width=\"160\" height=\"88\" rx=\"6\" fill=\"#0e7490\"/>\n    <text id=\"label-office\" x=\"56\" y=\"242\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Office</text>\n    <rect id=\"room-store\" data-name=\"Store\" class=\"room\" x=\"224\" y=\"192\" width=\"120\" height=\"88\" rx=\"6\" fill=\"#7c3aed\"/>\n    <text id=\"label-store\" x=\"240\" y=\"242\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Store</text>\n    <rect id=\"room-plant\" data-name=\"Plant Room\" class=\"room\" x=\"368\" y=\"192\" width=\"112\" height=\"88\" rx=\"6\" fill=\"#b45309\"/>\n    <text id=\"label-plant\" x=\"384\" y=\"242\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Plant</text>\n  </g>\n  <path id=\"pipe-main\" d=\"M 120 136 L 120 164 L 424 164 L 424 192\"/>\n  <circle id=\"valve-a\" data-name=\"Valve A\" cx=\"224\" cy=\"164\" r=\"9\" fill=\"#38bdf8\"/>\n  <circle id=\"valve-b\" data-name=\"Valve B\" cx=\"352\" cy=\"164\" r=\"9\" fill=\"#38bdf8\"/>\n</svg>\n\n<div id=\"popup\" hidden>\n  <div id=\"popup-title\"></div>\n  <p id=\"popup-body\"></p>\n</div>\n\n<script>\n  function show(title, body) {\n    document.getElementById(\"popup-title\").textContent = title;\n    document.getElementById(\"popup-body\").textContent = body;\n    document.getElementById(\"popup\").hidden = false;\n  }\n  function hook(el, title, body) {\n    if (!el) { console.warn(\"site plan: element missing, popup dead\"); return; }\n    el.addEventListener(\"click\", function () { show(title, body); });\n  }\n\n  hook(document.getElementById(\"room-lab\"), \"Laboratory\", \"Bench 1-6. Fume cupboard serviced quarterly.\");\n  hook(document.querySelector(\"#room-office\"), \"Office\", \"12 desks, meeting room, comms cabinet B.\");\n  document.querySelectorAll(\"#room-store, #room-plant\").forEach(function (el) {\n    hook(el, el.getAttribute(\"data-name\"), \"Restricted access \u2014 key from the gatehouse.\");\n  });\n  hook(document.getElementById(\"valve-a\"), \"Valve A\", \"Isolates the north spur. Normally open.\");\n  hook(document.getElementById(\"valve-b\"), \"Valve B\", \"Isolates the plant feed. Normally closed.\");\n\n  document.querySelectorAll(\".room\").forEach(function (el) {\n    el.setAttribute(\"tabindex\", \"0\");\n  });\n</script>\n</body>\n</html>\n"
+    },
+    "code": "\"\"\"Source File\n\nReads the page or the artwork off disk. Leave Path blank and the node hands\non the Sample below instead, so the whole workflow runs the moment you open\nit \u2014 then point Path at your own file and everything downstream follows.\n\n`path` is passed on as well, because the preview needs a directory to\nresolve a page's stylesheets and scripts against.\n\"\"\"\nNODE = {\n    \"label\": \"Source File\",\n    \"category\": \"IO\",\n    \"inputs\": [],\n    \"outputs\": [(\"text\", \"string\"), (\"path\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"path\", \"type\": \"file_open\", \"label\": \"Path\", \"default\": \"\",\n     \"placeholder\": \"blank = use the sample below\"},\n    {\"name\": \"encoding\", \"type\": \"string\", \"label\": \"Encoding\",\n     \"default\": \"utf-8\"},\n    {\"name\": \"sample\", \"type\": \"text\", \"label\": \"Sample\",\n     \"default\": \"\", \"placeholder\": \"used only while Path is blank\"},\n]\n\n\ndef run(ctx):\n    from pathlib import Path\n\n    path = (ctx.params[\"path\"] or \"\").strip()\n    if not path:\n        sample = ctx.params[\"sample\"] or \"\"\n        if not sample.strip():\n            raise ValueError(\n                \"no Path set and the Sample is empty \u2014 choose a file, or \"\n                \"paste the markup into the Sample box\"\n            )\n        ctx.log(f\"no path set \u2014 using the sample ({len(sample):,} chars)\")\n        return {\"text\": sample, \"path\": \"\"}\n\n    file = Path(path).expanduser()\n    if not file.is_file():\n        raise FileNotFoundError(f\"no such file: {file}\")\n    text = file.read_text(encoding=(ctx.params[\"encoding\"] or \"utf-8\"),\n                          errors=\"replace\")\n    ctx.log(f\"read {len(text):,} chars from {file.name}\")\n    return {\"text\": text, \"path\": str(file.resolve())}\n",
+    "label": "Page HTML"
+   },
+   {
+    "id": "svg_src_new",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -1700,
+     -1080
+    ],
+    "params": {
+     "sample": "<svg id=\"plan\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 520 320\" width=\"520\" height=\"320\">\n  <rect id=\"rect1\" x=\"0\" y=\"0\" width=\"520\" height=\"320\" fill=\"#111827\"/>\n  <g id=\"g2\" data-name=\"Zone North\">\n    <rect id=\"rect3\" data-name=\"Lab\" x=\"44\" y=\"44\" width=\"160\" height=\"88\" rx=\"10\" fill=\"#2563eb\"/>\n    <text id=\"text4\" x=\"60\" y=\"94\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Lab</text>\n  </g>\n  <g id=\"g5\" data-name=\"Zone South\">\n    <rect id=\"rect6\" data-name=\"Office\" x=\"44\" y=\"190\" width=\"160\" height=\"88\" rx=\"10\" fill=\"#0891b2\"/>\n    <text id=\"text7\" x=\"60\" y=\"240\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Office</text>\n    <rect id=\"rect8\" data-name=\"Store\" x=\"228\" y=\"190\" width=\"120\" height=\"88\" rx=\"10\" fill=\"#8b5cf6\"/>\n    <text id=\"text9\" x=\"244\" y=\"240\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Store</text>\n    <rect id=\"rect10\" data-name=\"Server Room\" x=\"368\" y=\"190\" width=\"112\" height=\"88\" rx=\"10\" fill=\"#15803d\"/>\n    <text id=\"text11\" x=\"384\" y=\"240\" fill=\"#e2e8f0\" font-size=\"14\" font-family=\"sans-serif\">Servers</text>\n  </g>\n  <path id=\"path12\" d=\"M 120 136 L 120 164 L 424 164 L 424 192\"/>\n  <circle id=\"circle13\" data-name=\"Valve A\" cx=\"228\" cy=\"164\" r=\"9\" fill=\"#38bdf8\"/>\n  <circle id=\"circle14\" data-name=\"Valve B\" cx=\"356\" cy=\"164\" r=\"9\" fill=\"#38bdf8\"/>\n</svg>\n"
+    },
+    "code": "\"\"\"Source File\n\nReads the page or the artwork off disk. Leave Path blank and the node hands\non the Sample below instead, so the whole workflow runs the moment you open\nit \u2014 then point Path at your own file and everything downstream follows.\n\n`path` is passed on as well, because the preview needs a directory to\nresolve a page's stylesheets and scripts against.\n\"\"\"\nNODE = {\n    \"label\": \"Source File\",\n    \"category\": \"IO\",\n    \"inputs\": [],\n    \"outputs\": [(\"text\", \"string\"), (\"path\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"path\", \"type\": \"file_open\", \"label\": \"Path\", \"default\": \"\",\n     \"placeholder\": \"blank = use the sample below\"},\n    {\"name\": \"encoding\", \"type\": \"string\", \"label\": \"Encoding\",\n     \"default\": \"utf-8\"},\n    {\"name\": \"sample\", \"type\": \"text\", \"label\": \"Sample\",\n     \"default\": \"\", \"placeholder\": \"used only while Path is blank\"},\n]\n\n\ndef run(ctx):\n    from pathlib import Path\n\n    path = (ctx.params[\"path\"] or \"\").strip()\n    if not path:\n        sample = ctx.params[\"sample\"] or \"\"\n        if not sample.strip():\n            raise ValueError(\n                \"no Path set and the Sample is empty \u2014 choose a file, or \"\n                \"paste the markup into the Sample box\"\n            )\n        ctx.log(f\"no path set \u2014 using the sample ({len(sample):,} chars)\")\n        return {\"text\": sample, \"path\": \"\"}\n\n    file = Path(path).expanduser()\n    if not file.is_file():\n        raise FileNotFoundError(f\"no such file: {file}\")\n    text = file.read_text(encoding=(ctx.params[\"encoding\"] or \"utf-8\"),\n                          errors=\"replace\")\n    ctx.log(f\"read {len(text):,} chars from {file.name}\")\n    return {\"text\": text, \"path\": str(file.resolve())}\n",
+    "label": "New SVG"
+   },
+   {
+    "id": "svg_extract",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -1400,
+     -1300
+    ],
+    "params": {},
+    "code": "\"\"\"Extract SVG\n\nPulls the inline <svg>\u2026</svg> out of the page, so what gets compared is the\nartwork the popups are actually bound to \u2014 not a copy on disk that may have\ndrifted from it.\n\nIf the page links its artwork with <img> or <object> instead, skip this node\nand wire a second Source File node straight at the .svg.\n\nBlocks are counted by depth rather than taken as the text between the first\n<svg> and the first </svg>: an SVG may legally contain another, and stopping\nat the inner close would hand everything downstream a truncated fragment\nthat fails to parse a long way from the actual mistake.\n\"\"\"\nimport re\n\n# Attribute values can contain '>', so the tag scan steps over quoted runs\n# instead of taking everything up to the next angle bracket.\n_TAG = re.compile(r\"<(/?)svg\\b((?:\\\"[^\\\"]*\\\"|'[^']*'|[^>])*)>\", re.I | re.S)\n\n\ndef _blocks(page):\n    \"\"\"(start, end) of every top-level <svg> \u2026 </svg> in document order.\"\"\"\n    found, depth, start = [], 0, None\n    for match in _TAG.finditer(page):\n        if match.group(1):                                   # </svg>\n            depth = max(depth - 1, 0)\n            if depth == 0 and start is not None:\n                found.append((start, match.end()))\n                start = None\n        elif match.group(2).rstrip().endswith(\"/\"):          # <svg \u2026/>\n            if depth == 0:\n                found.append((match.start(), match.end()))\n        else:\n            if depth == 0:\n                start = match.start()\n            depth += 1\n    if start is not None:                                    # never closed\n        found.append((start, len(page)))\n    return found\n\n\nNODE = {\n    \"label\": \"Extract SVG\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"html\", \"string\")],\n    \"outputs\": [(\"svg\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"which\", \"type\": \"int\", \"label\": \"Which <svg> (1-based)\",\n     \"default\": 1, \"min\": 1, \"max\": 50},\n]\n\n\ndef run(ctx, html):\n    page = html or \"\"\n    blocks = [page[a:b] for a, b in _blocks(page)]\n    if not blocks:\n        raise ValueError(\n            \"no inline <svg> found in the page \u2014 if the artwork is linked \"\n            \"with <img> or <object>, point a Source File node at the .svg \"\n            \"file and wire that in instead of this node\"\n        )\n    which = int(ctx.params[\"which\"])\n    if which > len(blocks):\n        raise ValueError(\n            f\"the page has {len(blocks)} inline <svg> block(s), asked for #{which}\"\n        )\n    block = blocks[which - 1]\n    ctx.log(f\"extracted <svg> #{which} of {len(blocks)} \u2014 {len(block):,} chars\")\n    return {\"svg\": block}\n",
+    "label": "Old SVG (out of the page)"
+   },
+   {
+    "id": "svg_hooks",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -1400,
+     -1120
+    ],
+    "params": {},
+    "code": "\"\"\"HTML Hooks\n\nEvery id and class the page reaches into the artwork by \u2014 from script,\nstylesheet, and markup \u2014 so the question stops being \"what changed in the\nSVG\" (hundreds of rows) and becomes \"which of the handful of ids my popups\ndepend on no longer exist\".\n\nReferences found *inside* the inline <svg> are reported as `internal`: a\ngradient's own `url(#grad)`, a <use href=\"#sym\">. Those are the artwork's\nprivate plumbing, they come and go with it, and the retrofit rewrites them\nitself \u2014 they are not the page's grip on the drawing.\n\"\"\"\nimport re\n\nNODE = {\n    \"label\": \"HTML Hooks\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"html\", \"string\")],\n    \"outputs\": [(\"hooks\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"include_classes\", \"type\": \"bool\",\n     \"label\": \"Also track class hooks\", \"default\": True},\n]\n\n# (pattern, kind, which group holds the reference, is it a raw CSS selector)\n_PATTERNS = [\n    (r\"getElementById\\s*\\(\\s*['\\\"]([^'\\\"]+)['\\\"]\", \"script\", False),\n    (r\"\\.id\\s*===?\\s*['\\\"]([^'\\\"]+)['\\\"]\", \"script\", False),\n    (r\"getElementsByClassName\\s*\\(\\s*['\\\"]([^'\\\"]+)['\\\"]\", \"script-class\", False),\n    (r\"querySelector(?:All)?\\s*\\(\\s*['\\\"]([^'\\\"]+)['\\\"]\", \"script\", True),\n    (r\"\\$\\(\\s*['\\\"]([^'\\\"]+)['\\\"]\\s*\\)\", \"script\", True),\n    (r\"(?:xlink:)?href\\s*=\\s*['\\\"](#[\\w:.-]+)['\\\"]\", \"markup\", True),\n    (r\"\\b(?:data-target|aria-controls|data-for|for)\\s*=\\s*['\\\"](#?[\\w:.-]+)['\\\"]\",\n     \"markup\", True),\n    (r\"url\\(\\s*['\\\"]?(#[\\w:.-]+)['\\\"]?\\s*\\)\", \"style\", True),\n]\n\n# Stops at ':' so a stylesheet's `.room:hover` is a hook on `room`, and at\n# '[' so `#plan[data-x]` is a hook on `plan`.\n_SELECTOR = re.compile(r\"[#.]([A-Za-z_][\\w-]*)\")\n_STYLE_BLOCK = re.compile(r\"<style\\b[^>]*>(.*?)</style\\s*>\", re.S | re.I)\n# Depth-counted: a nested <svg> would otherwise close the range early and\n# leave the artwork's own plumbing looking like the page reaching into it.\n_SVG_TAG = re.compile(r\"<(/?)svg\\b((?:\\\"[^\\\"]*\\\"|'[^']*'|[^>])*)>\", re.I | re.S)\n\n\ndef _svg_ranges(page):\n    found, depth, start = [], 0, None\n    for match in _SVG_TAG.finditer(page):\n        if match.group(1):\n            depth = max(depth - 1, 0)\n            if depth == 0 and start is not None:\n                found.append((start, match.end()))\n                start = None\n        elif not match.group(2).rstrip().endswith(\"/\"):\n            if depth == 0:\n                start = match.start()\n            depth += 1\n    if start is not None:\n        found.append((start, len(page)))\n    return found\n\n\ndef _refs(text, is_selector, kind):\n    \"\"\"The (ref, kind) pairs one captured group contributes.\"\"\"\n    if not is_selector:\n        return [(text, \"id\" if not kind.endswith(\"-class\") else \"class\")]\n    out = []\n    for token in _SELECTOR.finditer(text):\n        out.append((token.group(1),\n                    \"class\" if token.group(0)[0] == \".\" else \"id\"))\n    return out\n\n\ndef run(ctx, html):\n    import pandas as pd\n\n    page = html or \"\"\n    include_classes = bool(ctx.params[\"include_classes\"])\n    inside = _svg_ranges(page)\n\n    def line_of(position):\n        return page.count(\"\\n\", 0, position) + 1\n\n    def internal(position):\n        return any(a <= position < b for a, b in inside)\n\n    seen = {}\n\n    def record(ref, target, where, position):\n        ref = ref.strip().lstrip(\"#\")\n        if not ref or (target == \"class\" and not include_classes):\n            return\n        key = (ref, target, where)\n        entry = seen.get(key)\n        if entry is None:\n            line = line_of(position)\n            snippet = page[max(0, position - 30):position + 50]\n            snippet = re.sub(r\"\\s+\", \" \", snippet).strip()\n            seen[key] = {\"ref\": ref, \"target\": target, \"where\": where,\n                         \"refs\": 1, \"line\": line, \"snippet\": snippet}\n        else:\n            entry[\"refs\"] += 1\n\n    for pattern, kind, is_selector in _PATTERNS:\n        for match in re.finditer(pattern, page, re.I):\n            captured = match.group(1)\n            where = \"internal\" if internal(match.start()) else kind.split(\"-\")[0]\n            for ref, target in _refs(captured, is_selector, kind):\n                record(ref, target, where, match.start())\n\n    # Stylesheet selectors are their own pass: a rule is #id { \u2026 }, with no\n    # surrounding call or attribute to anchor a pattern to.\n    for block in _STYLE_BLOCK.finditer(page):\n        body = re.sub(r\"/\\*.*?\\*/\", \" \", block.group(1), flags=re.S)\n        for rule in re.finditer(r\"([^{}]+)\\{\", body):\n            offset = block.start(1) + rule.start(1)\n            where = \"internal\" if internal(offset) else \"style\"\n            for token in _SELECTOR.finditer(rule.group(1)):\n                record(token.group(1),\n                       \"class\" if token.group(0)[0] == \".\" else \"id\",\n                       where, offset)\n\n    frame = pd.DataFrame(list(seen.values()), columns=[\n        \"ref\", \"target\", \"where\", \"refs\", \"line\", \"snippet\"])\n    if not frame.empty:\n        frame = (frame.sort_values([\"where\", \"target\", \"ref\"])\n                      .reset_index(drop=True))\n    external = int((frame[\"where\"] != \"internal\").sum()) if not frame.empty else 0\n    ctx.log(f\"{len(frame)} distinct hooks \u00b7 {external} reaching in from the page\")\n    return {\"hooks\": frame}\n",
+    "label": "HTML Hooks"
+   },
+   {
+    "id": "svg_goto_html",
+    "type": "flograph.util.goto",
+    "pos": [
+     -1400,
+     -960
+    ],
+    "params": {
+     "name": "Page HTML"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "svg_goto_path",
+    "type": "flograph.util.goto",
+    "pos": [
+     -1400,
+     -880
+    ],
+    "params": {
+     "name": "Page path"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "svg_goto_svg",
+    "type": "flograph.util.goto",
+    "pos": [
+     -1400,
+     -800
+    ],
+    "params": {
+     "name": "New SVG"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "svg_elem_old",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -1120,
+     -1300
+    ],
+    "params": {},
+    "code": "\"\"\"SVG Elements\n\nEvery element in an SVG, one row each, carrying the things a retrofit needs\nin order to recognise the same shape in a different export: its id, the name\nthe designer gave it (Illustrator writes `data-name`, Inkscape writes\n`inkscape:label`), its text, a fingerprint of its geometry, and where it\nlands once the parent transforms are applied.\n\nBounding boxes are deliberately approximate. They come from the element's\nown attributes, and for <path> from the raw numbers in `d` \u2014 control points\nincluded, so a curvy path measures a little large. That is plenty for\ntelling two elements apart; it is not a rendering engine, and nothing\ndownstream treats it as one.\n\nSVG lifted out of a real page is usually not well-formed XML: `Fish & Chips`\nin a label, `&nbsp;`, a `<br>` inside a foreignObject, `xlink:` used where\nonly the surrounding HTML declared it. None of that stops a browser, so it\nmust not stop this either. The text is repaired first, and anything still\nunparseable goes through an HTML parser instead \u2014 see `_repair` and\n`_lenient_tree`.\n\"\"\"\nimport hashlib\nimport re\nimport xml.etree.ElementTree as ET\nfrom html.entities import name2codepoint\nfrom html.parser import HTMLParser\n\n# Elements that describe the document rather than draw in it. <defs> is not\n# here: its contents (gradients, clip paths, markers) carry ids that the\n# artwork references by name, so a retrofit has to see them.\n_SKIP = {\"metadata\", \"style\", \"script\", \"title\", \"desc\"}\n\n_NUM = re.compile(r\"[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?\")\n_TRANSFORM = re.compile(r\"(matrix|translate|scale|rotate|skewX|skewY)\\s*\\(([^)]*)\\)\")\n_IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)\n\n# The HTML parser lowercases every name it sees, so both parsers put names\n# through here: whichever one ran, `linearGradient` and `viewBox` come out\n# spelled the same way and the two sides of a diff stay comparable.\n_CANON = {name.lower(): name for name in (\n    \"clipPath\", \"linearGradient\", \"radialGradient\", \"foreignObject\",\n    \"textPath\", \"animateMotion\", \"animateTransform\", \"feBlend\", \"feColorMatrix\",\n    \"feComponentTransfer\", \"feComposite\", \"feConvolveMatrix\", \"feDiffuseLighting\",\n    \"feDisplacementMap\", \"feDistantLight\", \"feDropShadow\", \"feFlood\", \"feFuncA\",\n    \"feFuncB\", \"feFuncG\", \"feFuncR\", \"feGaussianBlur\", \"feImage\", \"feMerge\",\n    \"feMergeNode\", \"feMorphology\", \"feOffset\", \"fePointLight\",\n    \"feSpecularLighting\", \"feSpotLight\", \"feTile\", \"feTurbulence\",\n    \"glyphRef\", \"solidColor\",\n)}\n_CANON_ATTR = {name.lower(): name for name in (\n    \"viewBox\", \"preserveAspectRatio\", \"gradientUnits\", \"gradientTransform\",\n    \"clipPathUnits\", \"patternUnits\", \"patternTransform\", \"markerWidth\",\n    \"markerHeight\", \"markerUnits\", \"refX\", \"refY\", \"startOffset\",\n    \"spreadMethod\", \"maskUnits\", \"maskContentUnits\", \"baseFrequency\",\n    \"stdDeviation\", \"textLength\", \"lengthAdjust\", \"pathLength\",\n)}\n\n_NAMESPACES = {\n    \"xlink\": \"http://www.w3.org/1999/xlink\",\n    \"inkscape\": \"http://www.inkscape.org/namespaces/inkscape\",\n    \"sodipodi\": \"http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd\",\n    \"svg\": \"http://www.w3.org/2000/svg\",\n    \"dc\": \"http://purl.org/dc/elements/1.1/\",\n    \"cc\": \"http://creativecommons.org/ns#\",\n    \"rdf\": \"http://www.w3.org/1999/02/22-rdf-syntax-ns#\",\n    \"serif\": \"http://www.serif.com/\",\n    \"figma\": \"http://www.figma.com/figma/ns\",\n    \"sketch\": \"http://www.bohemiancoding.com/sketch/ns\",\n}\n_XML_ENTITIES = {\"amp\", \"lt\", \"gt\", \"apos\", \"quot\"}\n_AMPERSAND = re.compile(r\"&(#\\d+;|#x[0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)?\")\n_PREFIX = re.compile(r\"<\\s*([A-Za-z][\\w.-]*):|\\s([A-Za-z][\\w.-]*):[\\w.-]+\\s*=\")\n_CONTROL = re.compile(r\"[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]\")\n_OPEN_TAG = re.compile(r\"<svg\\b(?:\\\"[^\\\"]*\\\"|'[^']*'|[^>])*>\", re.I | re.S)\n\n\ndef _canon_tag(name):\n    lowered = name.lower()\n    return _CANON.get(lowered, lowered)\n\n\ndef _repair(text):\n    \"\"\"The smallest set of edits that turns page-borne SVG into XML.\n\n    Every one of these is something a browser accepts and an XML parser\n    refuses, and none of them changes what the drawing means.\n    \"\"\"\n    text = _CONTROL.sub(\"\", text).lstrip(\"\ufeff\")\n\n    def entity(match):\n        tail = match.group(1)\n        if tail is None:                      # a bare & \u2014 the common one\n            return \"&amp;\"\n        if tail.startswith(\"#\"):\n            return match.group(0)\n        name = tail[:-1]\n        if name in _XML_ENTITIES:\n            return match.group(0)\n        codepoint = name2codepoint.get(name)  # &nbsp; and friends\n        return f\"&#{codepoint};\" if codepoint else \"&amp;\" + tail\n\n    text = _AMPERSAND.sub(entity, text)\n\n    # A prefix the surrounding document declared and the fragment did not.\n    opening = _OPEN_TAG.search(text)\n    if opening:\n        tag = opening.group(0)\n        missing = {p for group in _PREFIX.findall(text) for p in group if p}\n        declarations = \"\".join(\n            f' xmlns:{prefix}=\"{_NAMESPACES.get(prefix, f\"urn:flograph:ns:{prefix}\")}\"'\n            for prefix in sorted(missing)\n            if prefix != \"xml\" and f\"xmlns:{prefix}\" not in tag)\n        if declarations:\n            fixed = tag[:-1].rstrip(\"/\") + declarations + tag[-1:]\n            text = text[:opening.start()] + fixed + text[opening.end():]\n    return text\n\n\nclass _LenientTree(HTMLParser):\n    \"\"\"An ElementTree built by the HTML parser, for markup XML won't take.\n\n    Unclosed tags, valueless attributes, a <br> in a foreignObject: the\n    browser reads all of it, so the last resort is to read it the same way\n    rather than to give up on the file.\n    \"\"\"\n\n    def __init__(self):\n        super().__init__(convert_charrefs=True)\n        self.root = None\n        self._stack = []\n\n    def _attrs(self, attrs):\n        return {_CANON_ATTR.get(k.lower(), k.lower()): (v if v is not None else \"\")\n                for k, v in attrs}\n\n    def handle_starttag(self, tag, attrs):\n        element = ET.Element(_canon_tag(tag), self._attrs(attrs))\n        if self._stack:\n            self._stack[-1].append(element)\n        elif self.root is None:\n            self.root = element\n        self._stack.append(element)\n\n    def handle_startendtag(self, tag, attrs):\n        self.handle_starttag(tag, attrs)\n        self._stack.pop()\n\n    def handle_endtag(self, tag):\n        name = _canon_tag(tag)\n        for depth in range(len(self._stack) - 1, -1, -1):\n            if self._stack[depth].tag == name:\n                del self._stack[depth:]\n                return\n\n    def handle_data(self, data):\n        if not self._stack:\n            return\n        current = self._stack[-1]\n        if len(current):\n            last = current[-1]\n            last.tail = (last.tail or \"\") + data\n        else:\n            current.text = (current.text or \"\") + data\n\n\ndef _lenient_tree(text):\n    parser = _LenientTree()\n    parser.feed(text)\n    parser.close()\n    return parser.root\n\n\ndef _where(text, exc):\n    \"\"\"The offending line with a caret under it \u2014 an XML parser's line and\n    column are only useful next to what they point at.\"\"\"\n    position = getattr(exc, \"position\", None)\n    if not position:\n        return \"\"\n    line, column = position\n    lines = text.splitlines()\n    if not 1 <= line <= len(lines):\n        return \"\"\n    source = lines[line - 1]\n    start = max(0, column - 60)\n    return (f\"\\n\\n  line {line}: {source[start:column + 60]}\"\n            f\"\\n  {' ' * (len(f'line {line}: ') + column - start)}^\")\n\n\ndef _local(tag):\n    \"\"\"'{http://www.w3.org/2000/svg}rect' -> 'rect', in canonical spelling.\"\"\"\n    if not isinstance(tag, str):\n        return \"\"\n    return _canon_tag(tag.rsplit(\"}\", 1)[-1])\n\n\ndef _attr(el, *names):\n    \"\"\"First non-empty of `names`, ignoring any namespace on the attribute.\"\"\"\n    for name in names:\n        value = el.get(name)\n        if value:\n            return value.strip()\n    # Attribute names are not element names, so they get the plain strip\n    # rather than _local's canonical spelling.\n    plain = {k.rsplit(\"}\", 1)[-1].rsplit(\":\", 1)[-1]: v\n             for k, v in el.attrib.items()}\n    for name in names:\n        value = plain.get(name.rsplit(\":\", 1)[-1])\n        if value:\n            return value.strip()\n    return \"\"\n\n\ndef _numbers(text):\n    return [float(n) for n in _NUM.findall(text or \"\")]\n\n\ndef _multiply(outer, inner):\n    \"\"\"The matrix that applies `inner` first, then `outer`.\"\"\"\n    a1, b1, c1, d1, e1, f1 = outer\n    a2, b2, c2, d2, e2, f2 = inner\n    return (a1 * a2 + c1 * b2, b1 * a2 + d1 * b2,\n            a1 * c2 + c1 * d2, b1 * c2 + d1 * d2,\n            a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1)\n\n\ndef _matrix(text):\n    \"\"\"The combined matrix for one transform= attribute.\"\"\"\n    import math\n\n    result = _IDENTITY\n    for kind, args in _TRANSFORM.findall(text or \"\"):\n        n = _numbers(args)\n        if kind == \"matrix\" and len(n) >= 6:\n            step = tuple(n[:6])\n        elif kind == \"translate\" and n:\n            step = (1, 0, 0, 1, n[0], n[1] if len(n) > 1 else 0.0)\n        elif kind == \"scale\" and n:\n            step = (n[0], 0, 0, n[1] if len(n) > 1 else n[0], 0, 0)\n        elif kind == \"rotate\" and n:\n            rad = math.radians(n[0])\n            cos, sin = math.cos(rad), math.sin(rad)\n            step = (cos, sin, -sin, cos, 0, 0)\n            if len(n) >= 3:  # rotate about a point\n                step = _multiply((1, 0, 0, 1, n[1], n[2]), step)\n                step = _multiply(step, (1, 0, 0, 1, -n[1], -n[2]))\n        elif kind in (\"skewX\", \"skewY\") and n:\n            t = math.tan(math.radians(n[0]))\n            step = (1, t, 0, 1, 0, 0) if kind == \"skewY\" else (1, 0, t, 1, 0, 0)\n        else:\n            continue\n        result = _multiply(result, step)\n    return result\n\n\ndef _geometry(el, tag):\n    \"\"\"(local bbox, the string that fingerprints this shape).\"\"\"\n    get = el.get\n    if tag == \"rect\" or tag in (\"image\", \"svg\", \"foreignObject\", \"use\"):\n        x, y = _numbers(get(\"x\", \"0\")), _numbers(get(\"y\", \"0\"))\n        w, h = _numbers(get(\"width\", \"0\")), _numbers(get(\"height\", \"0\"))\n        x, y = (x[0] if x else 0.0), (y[0] if y else 0.0)\n        w, h = (w[0] if w else 0.0), (h[0] if h else 0.0)\n        if tag == \"svg\" and not (w and h):\n            box = _numbers(get(\"viewBox\", \"\"))\n            if len(box) >= 4:\n                x, y, w, h = box[:4]\n        key = f\"{x} {y} {w} {h}\"\n        if tag == \"use\":\n            key = _attr(el, \"href\", \"xlink:href\") or key\n        return (x, y, w, h), key\n    if tag in (\"circle\", \"ellipse\"):\n        n = _numbers(get(\"cx\", \"0\")), _numbers(get(\"cy\", \"0\"))\n        cx = n[0][0] if n[0] else 0.0\n        cy = n[1][0] if n[1] else 0.0\n        if tag == \"circle\":\n            r = _numbers(get(\"r\", \"0\"))\n            rx = ry = r[0] if r else 0.0\n        else:\n            a, b = _numbers(get(\"rx\", \"0\")), _numbers(get(\"ry\", \"0\"))\n            rx = a[0] if a else 0.0\n            ry = b[0] if b else 0.0\n        return (cx - rx, cy - ry, rx * 2, ry * 2), f\"{cx} {cy} {rx} {ry}\"\n    if tag == \"line\":\n        pts = [_numbers(get(k, \"0\")) for k in (\"x1\", \"y1\", \"x2\", \"y2\")]\n        x1, y1, x2, y2 = [p[0] if p else 0.0 for p in pts]\n        return ((min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)),\n                f\"{x1} {y1} {x2} {y2}\")\n    if tag in (\"path\", \"polygon\", \"polyline\"):\n        data = get(\"d\") or get(\"points\") or \"\"\n        n = _numbers(data)\n        xs, ys = n[0::2], n[1::2]\n        if xs and ys:\n            box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))\n        else:\n            box = (0.0, 0.0, 0.0, 0.0)\n        return box, re.sub(r\"[\\s,]+\", \" \", data).strip()\n    if tag in (\"text\", \"tspan\"):\n        n = _numbers(get(\"x\", \"0\")), _numbers(get(\"y\", \"0\"))\n        x = n[0][0] if n[0] else 0.0\n        y = n[1][0] if n[1] else 0.0\n        return (x, y, 0.0, 0.0), \"\"\n    return (0.0, 0.0, 0.0, 0.0), \"\"\n\n\ndef _apply(matrix, box):\n    \"\"\"The axis-aligned bounds of `box` once `matrix` has been applied.\"\"\"\n    a, b, c, d, e, f = matrix\n    x, y, w, h = box\n    corners = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]\n    xs = [a * px + c * py + e for px, py in corners]\n    ys = [b * px + d * py + f for px, py in corners]\n    return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)\n\n\ndef _name(el):\n    \"\"\"Whatever the design tool preserved of the layer name.\"\"\"\n    for child in el:\n        if _local(child.tag) == \"title\" and (child.text or \"\").strip():\n            return child.text.strip()\n    return _attr(el, \"data-name\", \"inkscape:label\", \"aria-label\", \"sodipodi:role\")\n\n\ndef _own_text(el):\n    parts = [(el.text or \"\").strip()]\n    for child in el:\n        if _local(child.tag) in (\"tspan\", \"textPath\"):\n            parts.append(\"\".join(child.itertext()).strip())\n        parts.append((child.tail or \"\").strip())\n    return re.sub(r\"\\s+\", \" \", \" \".join(p for p in parts if p)).strip()\n\n\nNODE = {\n    \"label\": \"SVG Elements\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"svg\", \"string\")],\n    \"outputs\": [(\"elements\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"skip_defs\", \"type\": \"bool\", \"label\": \"Skip <defs> contents\",\n     \"default\": False},\n]\n\n\ndef run(ctx, svg):\n    import pandas as pd\n\n    text = (svg or \"\").strip()\n    if not text:\n        raise ValueError(\"no SVG text on the input\")\n\n    repaired = _repair(text)\n    try:\n        root = ET.fromstring(repaired)\n        if repaired != text:\n            ctx.log(\"repaired the markup to make it well-formed XML\")\n    except ET.ParseError as exc:\n        # Not a failure worth reporting on its own: real pages carry markup\n        # no XML parser will take, and the browser reads it regardless.\n        root = _lenient_tree(text)\n        if root is None:\n            raise ValueError(\n                f\"could not parse the SVG, strictly or leniently ({exc}).\"\n                f\"{_where(repaired, exc)}\"\n            ) from None\n        ctx.log(f\"XML parsing failed ({exc}) \u2014 read it as HTML instead\")\n\n    skip_defs = bool(ctx.params[\"skip_defs\"])\n    rows = []\n\n    def walk(el, matrix, depth, parent_id, in_defs):\n        tag = _local(el.tag)\n        if tag in _SKIP:\n            return\n        here = _multiply(matrix, _matrix(el.get(\"transform\", \"\")))\n        if tag != \"defs\":\n            box, key = _geometry(el, tag)\n            x, y, w, h = _apply(here, box)\n            shape = \"\"\n            if key:\n                shape = hashlib.sha1(f\"{tag}|{key}\".encode()).hexdigest()[:12]\n            rows.append({\n                \"id\": (el.get(\"id\") or \"\").strip(),\n                \"tag\": tag,\n                \"name\": _name(el),\n                \"text\": _own_text(el) if tag in (\"text\", \"tspan\") else \"\",\n                \"cls\": (el.get(\"class\") or \"\").strip(),\n                \"x\": round(x, 2), \"y\": round(y, 2),\n                \"w\": round(w, 2), \"h\": round(h, 2),\n                \"cx\": round(x + w / 2, 2), \"cy\": round(y + h / 2, 2),\n                \"shape\": shape,\n                \"fill\": _attr(el, \"fill\") or \"\",\n                \"depth\": depth,\n                \"parent\": parent_id,\n                \"in_defs\": in_defs,\n                \"order\": len(rows),\n            })\n        if tag == \"defs\" and skip_defs:\n            return\n        for child in el:\n            walk(child, here, depth + 1, (el.get(\"id\") or \"\").strip(),\n                 in_defs or tag == \"defs\")\n\n    walk(root, _IDENTITY, 0, \"\", False)\n    frame = pd.DataFrame(rows, columns=[\n        \"id\", \"tag\", \"name\", \"text\", \"cls\", \"x\", \"y\", \"w\", \"h\", \"cx\", \"cy\",\n        \"shape\", \"fill\", \"depth\", \"parent\", \"in_defs\", \"order\",\n    ])\n    with_ids = int((frame[\"id\"] != \"\").sum())\n    named = int((frame[\"name\"] != \"\").sum())\n    ctx.log(f\"{len(frame)} elements \u00b7 {with_ids} with an id \u00b7 {named} named\")\n    return {\"elements\": frame}\n",
+    "label": "Elements \u00b7 old"
+   },
+   {
+    "id": "svg_elem_new",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -1120,
+     -1120
+    ],
+    "params": {},
+    "code": "\"\"\"SVG Elements\n\nEvery element in an SVG, one row each, carrying the things a retrofit needs\nin order to recognise the same shape in a different export: its id, the name\nthe designer gave it (Illustrator writes `data-name`, Inkscape writes\n`inkscape:label`), its text, a fingerprint of its geometry, and where it\nlands once the parent transforms are applied.\n\nBounding boxes are deliberately approximate. They come from the element's\nown attributes, and for <path> from the raw numbers in `d` \u2014 control points\nincluded, so a curvy path measures a little large. That is plenty for\ntelling two elements apart; it is not a rendering engine, and nothing\ndownstream treats it as one.\n\nSVG lifted out of a real page is usually not well-formed XML: `Fish & Chips`\nin a label, `&nbsp;`, a `<br>` inside a foreignObject, `xlink:` used where\nonly the surrounding HTML declared it. None of that stops a browser, so it\nmust not stop this either. The text is repaired first, and anything still\nunparseable goes through an HTML parser instead \u2014 see `_repair` and\n`_lenient_tree`.\n\"\"\"\nimport hashlib\nimport re\nimport xml.etree.ElementTree as ET\nfrom html.entities import name2codepoint\nfrom html.parser import HTMLParser\n\n# Elements that describe the document rather than draw in it. <defs> is not\n# here: its contents (gradients, clip paths, markers) carry ids that the\n# artwork references by name, so a retrofit has to see them.\n_SKIP = {\"metadata\", \"style\", \"script\", \"title\", \"desc\"}\n\n_NUM = re.compile(r\"[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?\")\n_TRANSFORM = re.compile(r\"(matrix|translate|scale|rotate|skewX|skewY)\\s*\\(([^)]*)\\)\")\n_IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)\n\n# The HTML parser lowercases every name it sees, so both parsers put names\n# through here: whichever one ran, `linearGradient` and `viewBox` come out\n# spelled the same way and the two sides of a diff stay comparable.\n_CANON = {name.lower(): name for name in (\n    \"clipPath\", \"linearGradient\", \"radialGradient\", \"foreignObject\",\n    \"textPath\", \"animateMotion\", \"animateTransform\", \"feBlend\", \"feColorMatrix\",\n    \"feComponentTransfer\", \"feComposite\", \"feConvolveMatrix\", \"feDiffuseLighting\",\n    \"feDisplacementMap\", \"feDistantLight\", \"feDropShadow\", \"feFlood\", \"feFuncA\",\n    \"feFuncB\", \"feFuncG\", \"feFuncR\", \"feGaussianBlur\", \"feImage\", \"feMerge\",\n    \"feMergeNode\", \"feMorphology\", \"feOffset\", \"fePointLight\",\n    \"feSpecularLighting\", \"feSpotLight\", \"feTile\", \"feTurbulence\",\n    \"glyphRef\", \"solidColor\",\n)}\n_CANON_ATTR = {name.lower(): name for name in (\n    \"viewBox\", \"preserveAspectRatio\", \"gradientUnits\", \"gradientTransform\",\n    \"clipPathUnits\", \"patternUnits\", \"patternTransform\", \"markerWidth\",\n    \"markerHeight\", \"markerUnits\", \"refX\", \"refY\", \"startOffset\",\n    \"spreadMethod\", \"maskUnits\", \"maskContentUnits\", \"baseFrequency\",\n    \"stdDeviation\", \"textLength\", \"lengthAdjust\", \"pathLength\",\n)}\n\n_NAMESPACES = {\n    \"xlink\": \"http://www.w3.org/1999/xlink\",\n    \"inkscape\": \"http://www.inkscape.org/namespaces/inkscape\",\n    \"sodipodi\": \"http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd\",\n    \"svg\": \"http://www.w3.org/2000/svg\",\n    \"dc\": \"http://purl.org/dc/elements/1.1/\",\n    \"cc\": \"http://creativecommons.org/ns#\",\n    \"rdf\": \"http://www.w3.org/1999/02/22-rdf-syntax-ns#\",\n    \"serif\": \"http://www.serif.com/\",\n    \"figma\": \"http://www.figma.com/figma/ns\",\n    \"sketch\": \"http://www.bohemiancoding.com/sketch/ns\",\n}\n_XML_ENTITIES = {\"amp\", \"lt\", \"gt\", \"apos\", \"quot\"}\n_AMPERSAND = re.compile(r\"&(#\\d+;|#x[0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)?\")\n_PREFIX = re.compile(r\"<\\s*([A-Za-z][\\w.-]*):|\\s([A-Za-z][\\w.-]*):[\\w.-]+\\s*=\")\n_CONTROL = re.compile(r\"[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]\")\n_OPEN_TAG = re.compile(r\"<svg\\b(?:\\\"[^\\\"]*\\\"|'[^']*'|[^>])*>\", re.I | re.S)\n\n\ndef _canon_tag(name):\n    lowered = name.lower()\n    return _CANON.get(lowered, lowered)\n\n\ndef _repair(text):\n    \"\"\"The smallest set of edits that turns page-borne SVG into XML.\n\n    Every one of these is something a browser accepts and an XML parser\n    refuses, and none of them changes what the drawing means.\n    \"\"\"\n    text = _CONTROL.sub(\"\", text).lstrip(\"\ufeff\")\n\n    def entity(match):\n        tail = match.group(1)\n        if tail is None:                      # a bare & \u2014 the common one\n            return \"&amp;\"\n        if tail.startswith(\"#\"):\n            return match.group(0)\n        name = tail[:-1]\n        if name in _XML_ENTITIES:\n            return match.group(0)\n        codepoint = name2codepoint.get(name)  # &nbsp; and friends\n        return f\"&#{codepoint};\" if codepoint else \"&amp;\" + tail\n\n    text = _AMPERSAND.sub(entity, text)\n\n    # A prefix the surrounding document declared and the fragment did not.\n    opening = _OPEN_TAG.search(text)\n    if opening:\n        tag = opening.group(0)\n        missing = {p for group in _PREFIX.findall(text) for p in group if p}\n        declarations = \"\".join(\n            f' xmlns:{prefix}=\"{_NAMESPACES.get(prefix, f\"urn:flograph:ns:{prefix}\")}\"'\n            for prefix in sorted(missing)\n            if prefix != \"xml\" and f\"xmlns:{prefix}\" not in tag)\n        if declarations:\n            fixed = tag[:-1].rstrip(\"/\") + declarations + tag[-1:]\n            text = text[:opening.start()] + fixed + text[opening.end():]\n    return text\n\n\nclass _LenientTree(HTMLParser):\n    \"\"\"An ElementTree built by the HTML parser, for markup XML won't take.\n\n    Unclosed tags, valueless attributes, a <br> in a foreignObject: the\n    browser reads all of it, so the last resort is to read it the same way\n    rather than to give up on the file.\n    \"\"\"\n\n    def __init__(self):\n        super().__init__(convert_charrefs=True)\n        self.root = None\n        self._stack = []\n\n    def _attrs(self, attrs):\n        return {_CANON_ATTR.get(k.lower(), k.lower()): (v if v is not None else \"\")\n                for k, v in attrs}\n\n    def handle_starttag(self, tag, attrs):\n        element = ET.Element(_canon_tag(tag), self._attrs(attrs))\n        if self._stack:\n            self._stack[-1].append(element)\n        elif self.root is None:\n            self.root = element\n        self._stack.append(element)\n\n    def handle_startendtag(self, tag, attrs):\n        self.handle_starttag(tag, attrs)\n        self._stack.pop()\n\n    def handle_endtag(self, tag):\n        name = _canon_tag(tag)\n        for depth in range(len(self._stack) - 1, -1, -1):\n            if self._stack[depth].tag == name:\n                del self._stack[depth:]\n                return\n\n    def handle_data(self, data):\n        if not self._stack:\n            return\n        current = self._stack[-1]\n        if len(current):\n            last = current[-1]\n            last.tail = (last.tail or \"\") + data\n        else:\n            current.text = (current.text or \"\") + data\n\n\ndef _lenient_tree(text):\n    parser = _LenientTree()\n    parser.feed(text)\n    parser.close()\n    return parser.root\n\n\ndef _where(text, exc):\n    \"\"\"The offending line with a caret under it \u2014 an XML parser's line and\n    column are only useful next to what they point at.\"\"\"\n    position = getattr(exc, \"position\", None)\n    if not position:\n        return \"\"\n    line, column = position\n    lines = text.splitlines()\n    if not 1 <= line <= len(lines):\n        return \"\"\n    source = lines[line - 1]\n    start = max(0, column - 60)\n    return (f\"\\n\\n  line {line}: {source[start:column + 60]}\"\n            f\"\\n  {' ' * (len(f'line {line}: ') + column - start)}^\")\n\n\ndef _local(tag):\n    \"\"\"'{http://www.w3.org/2000/svg}rect' -> 'rect', in canonical spelling.\"\"\"\n    if not isinstance(tag, str):\n        return \"\"\n    return _canon_tag(tag.rsplit(\"}\", 1)[-1])\n\n\ndef _attr(el, *names):\n    \"\"\"First non-empty of `names`, ignoring any namespace on the attribute.\"\"\"\n    for name in names:\n        value = el.get(name)\n        if value:\n            return value.strip()\n    # Attribute names are not element names, so they get the plain strip\n    # rather than _local's canonical spelling.\n    plain = {k.rsplit(\"}\", 1)[-1].rsplit(\":\", 1)[-1]: v\n             for k, v in el.attrib.items()}\n    for name in names:\n        value = plain.get(name.rsplit(\":\", 1)[-1])\n        if value:\n            return value.strip()\n    return \"\"\n\n\ndef _numbers(text):\n    return [float(n) for n in _NUM.findall(text or \"\")]\n\n\ndef _multiply(outer, inner):\n    \"\"\"The matrix that applies `inner` first, then `outer`.\"\"\"\n    a1, b1, c1, d1, e1, f1 = outer\n    a2, b2, c2, d2, e2, f2 = inner\n    return (a1 * a2 + c1 * b2, b1 * a2 + d1 * b2,\n            a1 * c2 + c1 * d2, b1 * c2 + d1 * d2,\n            a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1)\n\n\ndef _matrix(text):\n    \"\"\"The combined matrix for one transform= attribute.\"\"\"\n    import math\n\n    result = _IDENTITY\n    for kind, args in _TRANSFORM.findall(text or \"\"):\n        n = _numbers(args)\n        if kind == \"matrix\" and len(n) >= 6:\n            step = tuple(n[:6])\n        elif kind == \"translate\" and n:\n            step = (1, 0, 0, 1, n[0], n[1] if len(n) > 1 else 0.0)\n        elif kind == \"scale\" and n:\n            step = (n[0], 0, 0, n[1] if len(n) > 1 else n[0], 0, 0)\n        elif kind == \"rotate\" and n:\n            rad = math.radians(n[0])\n            cos, sin = math.cos(rad), math.sin(rad)\n            step = (cos, sin, -sin, cos, 0, 0)\n            if len(n) >= 3:  # rotate about a point\n                step = _multiply((1, 0, 0, 1, n[1], n[2]), step)\n                step = _multiply(step, (1, 0, 0, 1, -n[1], -n[2]))\n        elif kind in (\"skewX\", \"skewY\") and n:\n            t = math.tan(math.radians(n[0]))\n            step = (1, t, 0, 1, 0, 0) if kind == \"skewY\" else (1, 0, t, 1, 0, 0)\n        else:\n            continue\n        result = _multiply(result, step)\n    return result\n\n\ndef _geometry(el, tag):\n    \"\"\"(local bbox, the string that fingerprints this shape).\"\"\"\n    get = el.get\n    if tag == \"rect\" or tag in (\"image\", \"svg\", \"foreignObject\", \"use\"):\n        x, y = _numbers(get(\"x\", \"0\")), _numbers(get(\"y\", \"0\"))\n        w, h = _numbers(get(\"width\", \"0\")), _numbers(get(\"height\", \"0\"))\n        x, y = (x[0] if x else 0.0), (y[0] if y else 0.0)\n        w, h = (w[0] if w else 0.0), (h[0] if h else 0.0)\n        if tag == \"svg\" and not (w and h):\n            box = _numbers(get(\"viewBox\", \"\"))\n            if len(box) >= 4:\n                x, y, w, h = box[:4]\n        key = f\"{x} {y} {w} {h}\"\n        if tag == \"use\":\n            key = _attr(el, \"href\", \"xlink:href\") or key\n        return (x, y, w, h), key\n    if tag in (\"circle\", \"ellipse\"):\n        n = _numbers(get(\"cx\", \"0\")), _numbers(get(\"cy\", \"0\"))\n        cx = n[0][0] if n[0] else 0.0\n        cy = n[1][0] if n[1] else 0.0\n        if tag == \"circle\":\n            r = _numbers(get(\"r\", \"0\"))\n            rx = ry = r[0] if r else 0.0\n        else:\n            a, b = _numbers(get(\"rx\", \"0\")), _numbers(get(\"ry\", \"0\"))\n            rx = a[0] if a else 0.0\n            ry = b[0] if b else 0.0\n        return (cx - rx, cy - ry, rx * 2, ry * 2), f\"{cx} {cy} {rx} {ry}\"\n    if tag == \"line\":\n        pts = [_numbers(get(k, \"0\")) for k in (\"x1\", \"y1\", \"x2\", \"y2\")]\n        x1, y1, x2, y2 = [p[0] if p else 0.0 for p in pts]\n        return ((min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)),\n                f\"{x1} {y1} {x2} {y2}\")\n    if tag in (\"path\", \"polygon\", \"polyline\"):\n        data = get(\"d\") or get(\"points\") or \"\"\n        n = _numbers(data)\n        xs, ys = n[0::2], n[1::2]\n        if xs and ys:\n            box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))\n        else:\n            box = (0.0, 0.0, 0.0, 0.0)\n        return box, re.sub(r\"[\\s,]+\", \" \", data).strip()\n    if tag in (\"text\", \"tspan\"):\n        n = _numbers(get(\"x\", \"0\")), _numbers(get(\"y\", \"0\"))\n        x = n[0][0] if n[0] else 0.0\n        y = n[1][0] if n[1] else 0.0\n        return (x, y, 0.0, 0.0), \"\"\n    return (0.0, 0.0, 0.0, 0.0), \"\"\n\n\ndef _apply(matrix, box):\n    \"\"\"The axis-aligned bounds of `box` once `matrix` has been applied.\"\"\"\n    a, b, c, d, e, f = matrix\n    x, y, w, h = box\n    corners = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]\n    xs = [a * px + c * py + e for px, py in corners]\n    ys = [b * px + d * py + f for px, py in corners]\n    return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)\n\n\ndef _name(el):\n    \"\"\"Whatever the design tool preserved of the layer name.\"\"\"\n    for child in el:\n        if _local(child.tag) == \"title\" and (child.text or \"\").strip():\n            return child.text.strip()\n    return _attr(el, \"data-name\", \"inkscape:label\", \"aria-label\", \"sodipodi:role\")\n\n\ndef _own_text(el):\n    parts = [(el.text or \"\").strip()]\n    for child in el:\n        if _local(child.tag) in (\"tspan\", \"textPath\"):\n            parts.append(\"\".join(child.itertext()).strip())\n        parts.append((child.tail or \"\").strip())\n    return re.sub(r\"\\s+\", \" \", \" \".join(p for p in parts if p)).strip()\n\n\nNODE = {\n    \"label\": \"SVG Elements\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"svg\", \"string\")],\n    \"outputs\": [(\"elements\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"skip_defs\", \"type\": \"bool\", \"label\": \"Skip <defs> contents\",\n     \"default\": False},\n]\n\n\ndef run(ctx, svg):\n    import pandas as pd\n\n    text = (svg or \"\").strip()\n    if not text:\n        raise ValueError(\"no SVG text on the input\")\n\n    repaired = _repair(text)\n    try:\n        root = ET.fromstring(repaired)\n        if repaired != text:\n            ctx.log(\"repaired the markup to make it well-formed XML\")\n    except ET.ParseError as exc:\n        # Not a failure worth reporting on its own: real pages carry markup\n        # no XML parser will take, and the browser reads it regardless.\n        root = _lenient_tree(text)\n        if root is None:\n            raise ValueError(\n                f\"could not parse the SVG, strictly or leniently ({exc}).\"\n                f\"{_where(repaired, exc)}\"\n            ) from None\n        ctx.log(f\"XML parsing failed ({exc}) \u2014 read it as HTML instead\")\n\n    skip_defs = bool(ctx.params[\"skip_defs\"])\n    rows = []\n\n    def walk(el, matrix, depth, parent_id, in_defs):\n        tag = _local(el.tag)\n        if tag in _SKIP:\n            return\n        here = _multiply(matrix, _matrix(el.get(\"transform\", \"\")))\n        if tag != \"defs\":\n            box, key = _geometry(el, tag)\n            x, y, w, h = _apply(here, box)\n            shape = \"\"\n            if key:\n                shape = hashlib.sha1(f\"{tag}|{key}\".encode()).hexdigest()[:12]\n            rows.append({\n                \"id\": (el.get(\"id\") or \"\").strip(),\n                \"tag\": tag,\n                \"name\": _name(el),\n                \"text\": _own_text(el) if tag in (\"text\", \"tspan\") else \"\",\n                \"cls\": (el.get(\"class\") or \"\").strip(),\n                \"x\": round(x, 2), \"y\": round(y, 2),\n                \"w\": round(w, 2), \"h\": round(h, 2),\n                \"cx\": round(x + w / 2, 2), \"cy\": round(y + h / 2, 2),\n                \"shape\": shape,\n                \"fill\": _attr(el, \"fill\") or \"\",\n                \"depth\": depth,\n                \"parent\": parent_id,\n                \"in_defs\": in_defs,\n                \"order\": len(rows),\n            })\n        if tag == \"defs\" and skip_defs:\n            return\n        for child in el:\n            walk(child, here, depth + 1, (el.get(\"id\") or \"\").strip(),\n                 in_defs or tag == \"defs\")\n\n    walk(root, _IDENTITY, 0, \"\", False)\n    frame = pd.DataFrame(rows, columns=[\n        \"id\", \"tag\", \"name\", \"text\", \"cls\", \"x\", \"y\", \"w\", \"h\", \"cx\", \"cy\",\n        \"shape\", \"fill\", \"depth\", \"parent\", \"in_defs\", \"order\",\n    ])\n    with_ids = int((frame[\"id\"] != \"\").sum())\n    named = int((frame[\"name\"] != \"\").sum())\n    ctx.log(f\"{len(frame)} elements \u00b7 {with_ids} with an id \u00b7 {named} named\")\n    return {\"elements\": frame}\n",
+    "label": "Elements \u00b7 new"
+   },
+   {
+    "id": "svg_diff",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -860,
+     -1300
+    ],
+    "params": {},
+    "code": "\"\"\"SVG Diff\n\nMatches the old artwork's elements to the new export's, so a page whose\npopups are bound to the old ids can be told exactly what it lost.\n\nThe cascade runs best signal first, and each new element can only be claimed\nonce:\n\n  id        the designer kept the id \u2014 nothing to do\n  name      data-name / inkscape:label survived the export. This is usually\n            the one that carries a re-export: tools mangle ids and preserve\n            layer names.\n  shape     identical geometry fingerprint (same `d`, same box), and it has\n            not moved far\n  text      same tag, same words \u2014 for labels and callouts\n  geometry  same tag, centre within tolerance, similar size\n\nA name mismatch vetoes the two weakest passes: if both sides carry a name\nand the names disagree, they are not the same element however well the\nshapes line up. Without that, a room deleted and a different room drawn in\nits place matches perfectly, and the retrofit moves the old popup onto the\nwrong thing \u2014 quietly, which is the worst way to be wrong.\n\"\"\"\nimport re\n\nNODE = {\n    \"label\": \"SVG Diff\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"old\", \"dataframe\"), (\"new\", \"dataframe\")],\n    \"outputs\": [(\"matches\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"tolerance\", \"type\": \"float\", \"label\": \"Position tolerance (px)\",\n     \"default\": 8.0, \"min\": 0.0, \"max\": 500.0},\n    {\"name\": \"size_tolerance\", \"type\": \"float\", \"label\": \"Size tolerance (%)\",\n     \"default\": 25.0, \"min\": 0.0, \"max\": 100.0},\n    {\"name\": \"ids_only\", \"type\": \"bool\",\n     \"label\": \"Only report elements carrying an id\", \"default\": True},\n    {\"name\": \"trust_auto_ids\", \"type\": \"bool\",\n     \"label\": \"Trust matching auto-generated ids\", \"default\": False},\n    {\"name\": \"auto_id_pattern\", \"type\": \"string\", \"label\": \"Auto-id pattern\",\n     \"default\": r\"^(?:path|rect|circle|ellipse|line|polyline|polygon|text|tspan|g|use|image|layer)[-_ ]?\\d+$\"},\n]\n\n_CONFIDENCE = {\"id\": 1.0, \"name\": 0.95, \"shape\": 0.9, \"text\": 0.85}\n_SEVERITY = {\"missing\": 0, \"renamed\": 1, \"added\": 2, \"kept\": 3}\n\n\ndef _norm(text):\n    return re.sub(r\"\\s+\", \" \", str(text or \"\")).strip().casefold()\n\n\ndef _conflict(a, b):\n    \"\"\"True when both sides are named and the names disagree.\"\"\"\n    left, right = _norm(a.get(\"name\")), _norm(b.get(\"name\"))\n    return bool(left) and bool(right) and left != right\n\n\ndef _distance(a, b):\n    return abs(a[\"cx\"] - b[\"cx\"]) + abs(a[\"cy\"] - b[\"cy\"])\n\n\ndef run(ctx, old, new):\n    import pandas as pd\n\n    tolerance = float(ctx.params[\"tolerance\"])\n    size_tolerance = float(ctx.params[\"size_tolerance\"]) / 100.0\n    ids_only = bool(ctx.params[\"ids_only\"])\n    auto_id = re.compile(ctx.params[\"auto_id_pattern\"] or r\"(?!)\", re.I)\n    trust_auto = bool(ctx.params[\"trust_auto_ids\"])\n\n    olds = old.to_dict(\"records\")\n    news = new.to_dict(\"records\")\n    taken = set()\n    found = {}\n\n    def pair(key_of, method, extra=None):\n        \"\"\"One pass of the cascade: key both sides, take the nearest free\n        candidate that clears `extra`.\"\"\"\n        buckets = {}\n        for j, row in enumerate(news):\n            if j in taken:\n                continue\n            key = key_of(row)\n            if key:\n                buckets.setdefault(key, []).append(j)\n        for i, row in enumerate(olds):\n            if i in found:\n                continue\n            candidates = buckets.get(key_of(row) or None)\n            if not candidates:\n                continue\n            free = [j for j in candidates\n                    if j not in taken and (extra is None or extra(row, news[j]))]\n            if not free:\n                continue\n            best = min(free, key=lambda j: _distance(row, news[j]))\n            taken.add(best)\n            found[i] = (best, method)\n\n    def id_key(row):\n        value = str(row.get(\"id\") or \"\").strip()\n        if not value or (not trust_auto and auto_id.match(value)):\n            return \"\"\n        return \"id:\" + value\n\n    def near(row, other, factor=4):\n        return _distance(row, other) <= max(tolerance * factor, 1.0)\n\n    pair(id_key, \"id\")\n    pair(lambda r: \"name:\" + _norm(r.get(\"name\")) if _norm(r.get(\"name\")) else \"\",\n         \"name\")\n    pair(lambda r: f\"shape:{r.get('tag')}:{r.get('shape')}\" if r.get(\"shape\") else \"\",\n         \"shape\",\n         lambda a, b: near(a, b) and not _conflict(a, b))\n    pair(lambda r: f\"text:{r.get('tag')}:{_norm(r.get('text'))}\" if _norm(r.get(\"text\")) else \"\",\n         \"text\",\n         lambda a, b: not _conflict(a, b))\n\n    # Last pass: nothing identifies these but where they sit. Bucketed by tag\n    # so a circle never becomes a rect, then nearest-first over the whole\n    # remaining field rather than pass-by-pass, so two neighbours cannot be\n    # swapped by document order alone.\n    remaining_old = [i for i in range(len(olds)) if i not in found]\n    pairs = []\n    for i in remaining_old:\n        a = olds[i]\n        for j, b in enumerate(news):\n            if j in taken or a[\"tag\"] != b[\"tag\"] or _conflict(a, b):\n                continue\n            distance = _distance(a, b)\n            if distance > tolerance:\n                continue\n            big = max(a[\"w\"] * a[\"h\"], b[\"w\"] * b[\"h\"])\n            small = min(a[\"w\"] * a[\"h\"], b[\"w\"] * b[\"h\"])\n            if big > 0 and small / big < (1.0 - size_tolerance) ** 2:\n                continue\n            pairs.append((distance, i, j))\n    for distance, i, j in sorted(pairs):\n        if i in found or j in taken:\n            continue\n        taken.add(j)\n        found[i] = (j, \"geometry\")\n\n    rows = []\n    for i, a in enumerate(olds):\n        old_id = str(a.get(\"id\") or \"\").strip()\n        if ids_only and not old_id:\n            continue\n        hit = found.get(i)\n        if hit is None:\n            rows.append({\n                \"status\": \"missing\", \"old_id\": old_id, \"new_id\": \"\",\n                \"name\": a.get(\"name\") or \"\", \"tag\": a.get(\"tag\"),\n                \"match\": \"\", \"confidence\": 0.0, \"dx\": 0.0, \"dy\": 0.0,\n            })\n            continue\n        j, method = hit\n        b = news[j]\n        new_id = str(b.get(\"id\") or \"\").strip()\n        if method == \"geometry\":\n            span = max(tolerance, 1.0)\n            confidence = round(0.55 + 0.2 * (1.0 - min(_distance(a, b) / span, 1.0)), 2)\n        else:\n            confidence = _CONFIDENCE[method]\n        rows.append({\n            \"status\": \"kept\" if old_id and old_id == new_id else \"renamed\",\n            \"old_id\": old_id, \"new_id\": new_id,\n            \"name\": a.get(\"name\") or b.get(\"name\") or \"\",\n            \"tag\": a.get(\"tag\"), \"match\": method, \"confidence\": confidence,\n            \"dx\": round(b[\"cx\"] - a[\"cx\"], 2), \"dy\": round(b[\"cy\"] - a[\"cy\"], 2),\n        })\n\n    for j, b in enumerate(news):\n        if j in taken:\n            continue\n        new_id = str(b.get(\"id\") or \"\").strip()\n        if ids_only and not new_id and not b.get(\"name\"):\n            continue\n        rows.append({\n            \"status\": \"added\", \"old_id\": \"\", \"new_id\": new_id,\n            \"name\": b.get(\"name\") or \"\", \"tag\": b.get(\"tag\"),\n            \"match\": \"\", \"confidence\": 0.0, \"dx\": 0.0, \"dy\": 0.0,\n        })\n\n    frame = pd.DataFrame(rows, columns=[\n        \"status\", \"old_id\", \"new_id\", \"name\", \"tag\", \"match\", \"confidence\",\n        \"dx\", \"dy\",\n    ])\n    if not frame.empty:\n        frame[\"_rank\"] = frame[\"status\"].map(_SEVERITY).fillna(9)\n        frame = (frame.sort_values([\"_rank\", \"confidence\", \"old_id\"],\n                                   ascending=[True, True, True])\n                      .drop(columns=\"_rank\").reset_index(drop=True))\n\n    counts = frame[\"status\"].value_counts().to_dict() if not frame.empty else {}\n    ctx.log(\" \u00b7 \".join(f\"{n} {status}\" for status, n in sorted(counts.items()))\n            or \"nothing to compare\")\n    return {\"matches\": frame}\n",
+    "label": "SVG Diff"
+   },
+   {
+    "id": "svg_impact",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -860,
+     -1120
+    ],
+    "params": {},
+    "code": "\"\"\"Retrofit Impact\n\nPuts the page's hooks next to the diff and says, hook by hook, what the new\nexport does to it:\n\n  safe        the id survived unchanged\n  auto-fix    the element is still there under a new id, confidently enough\n              to hand the old id back to it\n  review      it was matched on position alone, or below the confidence\n              floor \u2014 worth a human look before it ships\n  BREAKS      the element is gone. This hook has nothing left to hold, and\n              the popup bound to it will do nothing.\n  not in SVG  the hook points at something outside the artwork \u2014 a <div>,\n              the popup panel itself. Nothing to do, and it should not be\n              counted as damage.\n\nA class hook is a different question from an id hook \u2014 nothing is renamed,\nthe class is either still on an element or it is not \u2014 so it is answered by\nlooking straight at the new artwork. Wire the new element list in and class\nhooks get a real verdict; leave it out and they are flagged for a human.\n\"\"\"\nNODE = {\n    \"label\": \"Retrofit Impact\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"matches\", \"dataframe\"), (\"hooks\", \"dataframe\"),\n               (\"new_elements\", \"dataframe\", {\"optional\": True})],\n    \"outputs\": [(\"impact\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"min_confidence\", \"type\": \"float\",\n     \"label\": \"Confidence floor for auto-fix\", \"default\": 0.8,\n     \"min\": 0.0, \"max\": 1.0},\n    {\"name\": \"include_internal\", \"type\": \"bool\",\n     \"label\": \"Include the artwork's internal references\", \"default\": False},\n]\n\n_ORDER = {\"BREAKS\": 0, \"review\": 1, \"auto-fix\": 2, \"safe\": 3, \"not in SVG\": 4}\n\n\ndef run(ctx, matches, hooks, new_elements=None):\n    import pandas as pd\n\n    floor = float(ctx.params[\"min_confidence\"])\n    include_internal = bool(ctx.params[\"include_internal\"])\n\n    by_old = {}\n    for row in matches.to_dict(\"records\"):\n        if row[\"old_id\"]:\n            by_old[str(row[\"old_id\"])] = row\n\n    surviving = None\n    if new_elements is not None and \"cls\" in new_elements.columns:\n        surviving = set()\n        for value in new_elements[\"cls\"]:\n            surviving.update(str(value or \"\").split())\n\n    rows = []\n    for hook in hooks.to_dict(\"records\"):\n        if hook[\"where\"] == \"internal\" and not include_internal:\n            continue\n        ref, target = str(hook[\"ref\"]), hook[\"target\"]\n        if target == \"class\":\n            # Nothing is renamed here: the class is either still on an\n            # element of the new artwork or it is not.\n            if surviving is None:\n                verdict, note = \"review\", \"wire the new elements in to check this\"\n            elif ref in surviving:\n                verdict, note = \"safe\", \"still carried by the new artwork\"\n            else:\n                verdict, note = \"BREAKS\", \"no element in the new artwork has this class\"\n            rows.append({\n                \"verdict\": verdict, \"ref\": ref, \"kind\": \"class\",\n                \"used_by\": hook[\"where\"], \"refs\": int(hook[\"refs\"]),\n                \"new_id\": \"\", \"match\": \"class\", \"confidence\": 0.0,\n                \"line\": int(hook[\"line\"]), \"note\": note,\n            })\n            continue\n        match = by_old.get(ref)\n        if match is None:\n            verdict, note, new_id, method, confidence = (\n                \"not in SVG\", \"not an element of the old artwork\", \"\", \"\", 0.0)\n        elif match[\"status\"] == \"missing\":\n            verdict, note = \"BREAKS\", \"no counterpart in the new artwork\"\n            new_id, method, confidence = \"\", \"\", 0.0\n        elif match[\"status\"] == \"kept\":\n            verdict, note = \"safe\", \"id unchanged\"\n            new_id, method, confidence = match[\"new_id\"], match[\"match\"], match[\"confidence\"]\n        else:\n            new_id, method = match[\"new_id\"], match[\"match\"]\n            confidence = float(match[\"confidence\"])\n            if confidence >= floor:\n                verdict, note = \"auto-fix\", f\"matched on {method}\"\n            else:\n                verdict, note = \"review\", f\"matched on {method} only\"\n        rows.append({\n            \"verdict\": verdict, \"ref\": ref, \"kind\": \"id\",\n            \"used_by\": hook[\"where\"], \"refs\": int(hook[\"refs\"]),\n            \"new_id\": new_id, \"match\": method, \"confidence\": confidence,\n            \"line\": int(hook[\"line\"]), \"note\": note,\n        })\n\n    frame = pd.DataFrame(rows, columns=[\n        \"verdict\", \"ref\", \"kind\", \"used_by\", \"refs\", \"new_id\", \"match\",\n        \"confidence\", \"line\", \"note\"])\n    if not frame.empty:\n        # One row per reference, not one per place it is referenced: a hook\n        # used from both script and stylesheet is one thing to fix.\n        frame = (frame.groupby([\"ref\", \"kind\"], as_index=False)\n                      .agg(verdict=(\"verdict\", lambda s: min(s, key=lambda v: _ORDER.get(v, 9))),\n                           used_by=(\"used_by\", lambda s: \", \".join(sorted(set(s)))),\n                           refs=(\"refs\", \"sum\"),\n                           new_id=(\"new_id\", \"first\"),\n                           match=(\"match\", \"first\"),\n                           confidence=(\"confidence\", \"max\"),\n                           line=(\"line\", \"min\"),\n                           note=(\"note\", \"first\")))\n        frame[\"_rank\"] = frame[\"verdict\"].map(_ORDER).fillna(9)\n        frame = (frame.sort_values([\"_rank\", \"ref\"])\n                      .drop(columns=\"_rank\")\n                      .reset_index(drop=True)[[\n                          \"verdict\", \"ref\", \"kind\", \"used_by\", \"refs\",\n                          \"new_id\", \"match\", \"confidence\", \"line\", \"note\"]])\n\n    breaks = int((frame[\"verdict\"] == \"BREAKS\").sum()) if not frame.empty else 0\n    fixes = int((frame[\"verdict\"] == \"auto-fix\").sum()) if not frame.empty else 0\n    ctx.log(f\"{len(frame)} hooks \u00b7 {fixes} can be restored automatically \u00b7 \"\n            f\"{breaks} would break\")\n    return {\"impact\": frame}\n",
+    "label": "Retrofit Impact"
+   },
+   {
+    "id": "svg_retrofit",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -580,
+     -1300
+    ],
+    "params": {},
+    "code": "\"\"\"SVG Retrofit\n\nHands the old ids back to the new artwork, so the page that was written\nagainst them keeps working and never has to be touched.\n\nTwo things it is careful about:\n\n  Collisions. An id is only restored if nothing else in the new file is\n  already using it, and the whole map is applied in a single pass \u2014 rename\n  A to B and B to C separately and the first rename walks straight into the\n  second.\n\n  Internal references. Renaming a gradient without rewriting the `url(#\u2026)`\n  that points at it produces a file that parses perfectly and renders\n  wrong, so references are rewritten alongside the ids they name.\n\nWhat it will not do is invent an id for an element that has none \u2014 locating\nthat element in the raw markup means counting tags through comments and\nCDATA, and being one out means putting the popup on the wrong shape. Those\nare listed as `manual` instead; re-exporting with ids enabled is the fix.\n\"\"\"\nimport re\n\nNODE = {\n    \"label\": \"SVG Retrofit\",\n    \"category\": \"IO\",\n    \"inputs\": [(\"svg\", \"string\"), (\"matches\", \"dataframe\"),\n               (\"hooks\", \"dataframe\", {\"optional\": True})],\n    \"outputs\": [(\"svg\", \"string\"), (\"applied\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"min_confidence\", \"type\": \"float\", \"label\": \"Confidence floor\",\n     \"default\": 0.8, \"min\": 0.0, \"max\": 1.0},\n    {\"name\": \"only_hooked\", \"type\": \"bool\",\n     \"label\": \"Only ids the page actually uses\", \"default\": True},\n    {\"name\": \"write_path\", \"type\": \"file_save\", \"label\": \"Write to\",\n     \"default\": \"\", \"placeholder\": \"blank = don't write a file\"},\n]\n\n_ID_ATTR = re.compile(r\"\"\"(\\bid\\s*=\\s*)(['\"])(.*?)\\2\"\"\")\n_REFERENCE = re.compile(\n    r\"\"\"(url\\(\\s*['\"]?\\#|(?:xlink:)?href\\s*=\\s*['\"]\\#)([\\w:.-]+)\"\"\")\n\n\ndef run(ctx, svg, matches, hooks=None):\n    import pandas as pd\n    from pathlib import Path\n\n    text = svg or \"\"\n    if not text.strip():\n        raise ValueError(\"no SVG text on the input\")\n    floor = float(ctx.params[\"min_confidence\"])\n    only_hooked = bool(ctx.params[\"only_hooked\"])\n\n    wanted = None\n    if only_hooked and hooks is not None and not hooks.empty:\n        wanted = {str(r[\"ref\"]) for r in hooks.to_dict(\"records\")\n                  if r[\"target\"] == \"id\" and r[\"where\"] != \"internal\"}\n        ctx.log(f\"restricted to the {len(wanted)} id(s) the page reaches for\")\n    elif only_hooked:\n        ctx.log(\"no hooks wired in \u2014 restoring every confident match instead\")\n\n    existing = {m.group(3) for m in _ID_ATTR.finditer(text)}\n    rename = {}          # id in the new file -> id to restore\n    report = []\n\n    for row in matches.to_dict(\"records\"):\n        if row[\"status\"] != \"renamed\" or not row[\"old_id\"]:\n            continue\n        old_id, new_id = str(row[\"old_id\"]), str(row[\"new_id\"])\n        confidence = float(row[\"confidence\"])\n        entry = {\"old_id\": old_id, \"new_id\": new_id, \"name\": row[\"name\"],\n                 \"tag\": row[\"tag\"], \"match\": row[\"match\"],\n                 \"confidence\": confidence, \"action\": \"\", \"why\": \"\"}\n        if wanted is not None and old_id not in wanted:\n            entry[\"action\"], entry[\"why\"] = \"skipped\", \"the page never uses this id\"\n        elif confidence < floor:\n            entry[\"action\"] = \"skipped\"\n            entry[\"why\"] = f\"confidence {confidence:.2f} is below the floor\"\n        elif not new_id:\n            entry[\"action\"] = \"manual\"\n            entry[\"why\"] = \"the matched element carries no id to rename\"\n        elif old_id in existing and old_id not in rename.values():\n            entry[\"action\"] = \"skipped\"\n            entry[\"why\"] = \"the new file already uses that id for something else\"\n        elif old_id in rename.values():\n            entry[\"action\"] = \"skipped\"\n            entry[\"why\"] = \"another element was already given that id\"\n        else:\n            rename[new_id] = old_id\n            entry[\"action\"] = \"restored\"\n            entry[\"why\"] = f\"matched on {row['match']}\"\n        report.append(entry)\n\n    # One pass over the whole document, ids and the references that name\n    # them together, so no rename can land on the result of another.\n    def swap_id(match):\n        prefix, quote, value = match.groups()\n        return f\"{prefix}{quote}{rename.get(value, value)}{quote}\"\n\n    def swap_reference(match):\n        prefix, value = match.groups()\n        return prefix + rename.get(value, value)\n\n    out = _ID_ATTR.sub(swap_id, text)\n    references = len(_REFERENCE.findall(out))\n    out = _REFERENCE.sub(swap_reference, out)\n\n    applied = pd.DataFrame(report, columns=[\n        \"action\", \"old_id\", \"new_id\", \"name\", \"tag\", \"match\", \"confidence\", \"why\"])\n    if not applied.empty:\n        applied = (applied.sort_values([\"action\", \"old_id\"])\n                          .reset_index(drop=True))\n\n    destination = (ctx.params[\"write_path\"] or \"\").strip()\n    if destination:\n        path = Path(destination).expanduser()\n        path.parent.mkdir(parents=True, exist_ok=True)\n        path.write_text(out, encoding=\"utf-8\")\n        ctx.log(f\"wrote {len(out):,} chars to {path}\")\n\n    ctx.log(f\"{len(rename)} id(s) restored \u00b7 {len(report) - len(rename)} left alone \"\n            f\"\u00b7 {references} internal reference(s) checked\")\n    return {\"svg\": out, \"applied\": applied}\n",
+    "label": "SVG Retrofit"
+   },
+   {
+    "id": "svg_from_svg",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     -580,
+     -1180
+    ],
+    "params": {
+     "source": "svg_goto_svg"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "svg_page_orig",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -300,
+     -1060
+    ],
+    "params": {
+     "banner": "Before \u00b7 original artwork",
+     "banner_color": "#0284c7"
+    },
+    "code": "\"\"\"Prepare Page\n\nMakes a page previewable, and \u2014 when an SVG is wired in \u2014 swaps the new\nartwork into it so you can see the retrofit working on the real page rather\nthan on a table describing it.\n\nWith no SVG connected it passes the page through untouched, which is how the\nsame node renders the *before* view.\n\nThe preview renders from a temp file, so the page needs telling where its\nown folder is or `styles.css` and `app.js` resolve against the wrong\ndirectory and quietly never load \u2014 a page that looks nearly right and does\nnothing at all. A <base> tag pointing at the real folder is the whole fix,\nand it is the *only* thing done here: pulling the assets inline instead\nloses `defer` on a script tag, which moves the script from after the\ndocument to before it, so every `getElementById` in it returns null and no\nhandler is ever bound. The page still looks fine. Nothing works.\n\nRoot-absolute URLs \u2014 `/assets/app.js`, written for a site served from a web\nroot \u2014 have no directory to be relative to and <base> cannot rescue them, so\nthose are rewritten to the page's folder when the file is actually there.\n\n**Path is not optional in practice.** With no path there is no folder, no\nbase, and no external asset will load. The node says so rather than\nproducing a dead page in silence.\n\"\"\"\nimport re\n\nNODE = {\n    \"label\": \"Prepare Page\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"html\", \"string\"), (\"svg\", \"string\", {\"optional\": True}),\n               (\"path\", \"string\", {\"optional\": True})],\n    \"outputs\": [(\"html\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"which\", \"type\": \"int\", \"label\": \"Which <svg> (1-based)\",\n     \"default\": 1, \"min\": 1, \"max\": 50},\n    {\"name\": \"fix_absolute_urls\", \"type\": \"bool\",\n     \"label\": \"Repoint /root-absolute asset URLs at the page's folder\",\n     \"default\": True},\n    {\"name\": \"banner\", \"type\": \"string\", \"label\": \"Corner banner\",\n     \"default\": \"\", \"placeholder\": \"e.g. Before \u2014 original artwork\"},\n    {\"name\": \"banner_color\", \"type\": \"string\", \"label\": \"Banner colour\",\n     \"default\": \"#0ea5e9\"},\n]\n\n# Depth-counted rather than non-greedy, so a nested <svg> cannot make the\n# swap replace half the artwork and leave the rest of it behind.\n_TAG = re.compile(r\"<(/?)svg\\b((?:\\\"[^\\\"]*\\\"|'[^']*'|[^>])*)>\", re.I | re.S)\n_ROOT_URL = re.compile(\n    r\"\"\"\\b(src|href)\\s*=\\s*(['\"])/(?!/)([^'\"]*)\\2\"\"\", re.I)\n_ROOT_CSS_URL = re.compile(r\"\"\"\\burl\\(\\s*(['\"]?)/(?!/)([^'\")]*)\\1\\s*\\)\"\"\", re.I)\n_BODY = re.compile(r\"<body\\b[^>]*>\", re.I)\n_HEAD = re.compile(r\"<head\\b[^>]*>\", re.I)\n_HTML = re.compile(r\"<html\\b[^>]*>\", re.I)\n_ASSET = re.compile(\n    r\"\"\"<(link|script|img)\\b[^>]*\\b(?:src|href)\\s*=\\s*['\"]([^'\"]+)['\"]\"\"\", re.I)\n\n\ndef _relative(url):\n    \"\"\"A URL that needs a folder to be found from.\"\"\"\n    return not re.match(r\"^(?:[a-z][\\w+.-]*:)?//|^data:|^#|^[a-z][\\w+.-]*:\",\n                        url or \"\", re.I)\n\n\ndef _blocks(page):\n    \"\"\"(start, end) of every top-level <svg> \u2026 </svg> in document order.\"\"\"\n    found, depth, start = [], 0, None\n    for match in _TAG.finditer(page):\n        if match.group(1):\n            depth = max(depth - 1, 0)\n            if depth == 0 and start is not None:\n                found.append((start, match.end()))\n                start = None\n        elif match.group(2).rstrip().endswith(\"/\"):\n            if depth == 0:\n                found.append((match.start(), match.end()))\n        else:\n            if depth == 0:\n                start = match.start()\n            depth += 1\n    if start is not None:\n        found.append((start, len(page)))\n    return found\n\n\ndef run(ctx, html, svg=None, path=None):\n    from pathlib import Path\n\n    page = html or \"\"\n    if not page.strip():\n        raise ValueError(\"no HTML on the input\")\n\n    if svg:\n        blocks = _blocks(page)\n        which = int(ctx.params[\"which\"])\n        if not blocks:\n            raise ValueError(\"no inline <svg> in the page to replace\")\n        if which > len(blocks):\n            raise ValueError(f\"the page has {len(blocks)} <svg> block(s), \"\n                             f\"asked for #{which}\")\n        start, end = blocks[which - 1]\n        page = page[:start] + svg + page[end:]\n        ctx.log(f\"swapped in {len(svg):,} chars of artwork\")\n\n    base = Path(path).parent if path else None\n    if base is None:\n        # Only a problem if the page actually reaches outside itself \u2014 a\n        # self-contained page with its style and script inline needs nothing.\n        outside = [url for _tag, url in _ASSET.findall(page) if _relative(url)]\n        if outside:\n            ctx.log(\n                f\"WARNING: no page path, and this page loads {len(outside)} \"\n                f\"external file(s) \u2014 {', '.join(sorted(set(outside))[:3])}\"\n                f\"{' \u2026' if len(set(outside)) > 3 else ''}. None of them can be \"\n                f\"found from here, so the preview will render unstyled and \"\n                f\"nothing on it will respond. Set Path on the Source File node.\"\n            )\n    else:\n        if bool(ctx.params[\"fix_absolute_urls\"]):\n            repointed = 0\n\n            def repoint(url):\n                \"\"\"A '/assets/app.js' that exists under the page's folder.\"\"\"\n                candidate = (base / url.lstrip(\"/\")).resolve()\n                return candidate if candidate.is_file() else None\n\n            def attribute(match):\n                nonlocal repointed\n                name, quote, rest = match.groups()\n                target = repoint(rest)\n                if target is None:\n                    return match.group(0)\n                repointed += 1\n                return f'{name}={quote}{target.as_uri()}{quote}'\n\n            def css_url(match):\n                nonlocal repointed\n                quote, rest = match.groups()\n                target = repoint(rest)\n                if target is None:\n                    return match.group(0)\n                repointed += 1\n                return f'url({quote}{target.as_uri()}{quote})'\n\n            page = _ROOT_URL.sub(attribute, page)\n            page = _ROOT_CSS_URL.sub(css_url, page)\n            if repointed:\n                ctx.log(f\"repointed {repointed} root-absolute URL(s) at {base}\")\n\n        # Before everything, so it governs every relative URL on the page \u2014\n        # and only if the page has not set one of its own.\n        if not re.search(r\"<base\\b\", page, re.I):\n            tag = f'<base href=\"{base.as_uri()}/\">'\n            anchor = _HEAD.search(page) or _HTML.search(page)\n            page = ((page[:anchor.end()] + tag + page[anchor.end():])\n                    if anchor else tag + page)\n            ctx.log(f\"assets resolve against {base}\")\n\n    banner = (ctx.params[\"banner\"] or \"\").strip()\n    if banner:\n        colour = (ctx.params[\"banner_color\"] or \"#0ea5e9\").strip()\n        ribbon = (\n            f'<div style=\"position:fixed;top:10px;right:10px;z-index:99999;'\n            f'font:600 11px/1 ui-sans-serif,system-ui,sans-serif;'\n            f'letter-spacing:.08em;text-transform:uppercase;color:#fff;'\n            f'background:{colour};padding:7px 11px;border-radius:999px;'\n            f'box-shadow:0 2px 10px rgba(0,0,0,.35);pointer-events:none;\">'\n            f'{banner}</div>'\n        )\n        body = _BODY.search(page)\n        page = (page[:body.end()] + ribbon + page[body.end():]) if body else ribbon + page\n\n    return {\"html\": page}\n",
+    "label": "Page \u00b7 original"
+   },
+   {
+    "id": "svg_page_raw",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -300,
+     -520
+    ],
+    "params": {
+     "banner": "New SVG, no retrofit",
+     "banner_color": "#dc2626"
+    },
+    "code": "\"\"\"Prepare Page\n\nMakes a page previewable, and \u2014 when an SVG is wired in \u2014 swaps the new\nartwork into it so you can see the retrofit working on the real page rather\nthan on a table describing it.\n\nWith no SVG connected it passes the page through untouched, which is how the\nsame node renders the *before* view.\n\nThe preview renders from a temp file, so the page needs telling where its\nown folder is or `styles.css` and `app.js` resolve against the wrong\ndirectory and quietly never load \u2014 a page that looks nearly right and does\nnothing at all. A <base> tag pointing at the real folder is the whole fix,\nand it is the *only* thing done here: pulling the assets inline instead\nloses `defer` on a script tag, which moves the script from after the\ndocument to before it, so every `getElementById` in it returns null and no\nhandler is ever bound. The page still looks fine. Nothing works.\n\nRoot-absolute URLs \u2014 `/assets/app.js`, written for a site served from a web\nroot \u2014 have no directory to be relative to and <base> cannot rescue them, so\nthose are rewritten to the page's folder when the file is actually there.\n\n**Path is not optional in practice.** With no path there is no folder, no\nbase, and no external asset will load. The node says so rather than\nproducing a dead page in silence.\n\"\"\"\nimport re\n\nNODE = {\n    \"label\": \"Prepare Page\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"html\", \"string\"), (\"svg\", \"string\", {\"optional\": True}),\n               (\"path\", \"string\", {\"optional\": True})],\n    \"outputs\": [(\"html\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"which\", \"type\": \"int\", \"label\": \"Which <svg> (1-based)\",\n     \"default\": 1, \"min\": 1, \"max\": 50},\n    {\"name\": \"fix_absolute_urls\", \"type\": \"bool\",\n     \"label\": \"Repoint /root-absolute asset URLs at the page's folder\",\n     \"default\": True},\n    {\"name\": \"banner\", \"type\": \"string\", \"label\": \"Corner banner\",\n     \"default\": \"\", \"placeholder\": \"e.g. Before \u2014 original artwork\"},\n    {\"name\": \"banner_color\", \"type\": \"string\", \"label\": \"Banner colour\",\n     \"default\": \"#0ea5e9\"},\n]\n\n# Depth-counted rather than non-greedy, so a nested <svg> cannot make the\n# swap replace half the artwork and leave the rest of it behind.\n_TAG = re.compile(r\"<(/?)svg\\b((?:\\\"[^\\\"]*\\\"|'[^']*'|[^>])*)>\", re.I | re.S)\n_ROOT_URL = re.compile(\n    r\"\"\"\\b(src|href)\\s*=\\s*(['\"])/(?!/)([^'\"]*)\\2\"\"\", re.I)\n_ROOT_CSS_URL = re.compile(r\"\"\"\\burl\\(\\s*(['\"]?)/(?!/)([^'\")]*)\\1\\s*\\)\"\"\", re.I)\n_BODY = re.compile(r\"<body\\b[^>]*>\", re.I)\n_HEAD = re.compile(r\"<head\\b[^>]*>\", re.I)\n_HTML = re.compile(r\"<html\\b[^>]*>\", re.I)\n_ASSET = re.compile(\n    r\"\"\"<(link|script|img)\\b[^>]*\\b(?:src|href)\\s*=\\s*['\"]([^'\"]+)['\"]\"\"\", re.I)\n\n\ndef _relative(url):\n    \"\"\"A URL that needs a folder to be found from.\"\"\"\n    return not re.match(r\"^(?:[a-z][\\w+.-]*:)?//|^data:|^#|^[a-z][\\w+.-]*:\",\n                        url or \"\", re.I)\n\n\ndef _blocks(page):\n    \"\"\"(start, end) of every top-level <svg> \u2026 </svg> in document order.\"\"\"\n    found, depth, start = [], 0, None\n    for match in _TAG.finditer(page):\n        if match.group(1):\n            depth = max(depth - 1, 0)\n            if depth == 0 and start is not None:\n                found.append((start, match.end()))\n                start = None\n        elif match.group(2).rstrip().endswith(\"/\"):\n            if depth == 0:\n                found.append((match.start(), match.end()))\n        else:\n            if depth == 0:\n                start = match.start()\n            depth += 1\n    if start is not None:\n        found.append((start, len(page)))\n    return found\n\n\ndef run(ctx, html, svg=None, path=None):\n    from pathlib import Path\n\n    page = html or \"\"\n    if not page.strip():\n        raise ValueError(\"no HTML on the input\")\n\n    if svg:\n        blocks = _blocks(page)\n        which = int(ctx.params[\"which\"])\n        if not blocks:\n            raise ValueError(\"no inline <svg> in the page to replace\")\n        if which > len(blocks):\n            raise ValueError(f\"the page has {len(blocks)} <svg> block(s), \"\n                             f\"asked for #{which}\")\n        start, end = blocks[which - 1]\n        page = page[:start] + svg + page[end:]\n        ctx.log(f\"swapped in {len(svg):,} chars of artwork\")\n\n    base = Path(path).parent if path else None\n    if base is None:\n        # Only a problem if the page actually reaches outside itself \u2014 a\n        # self-contained page with its style and script inline needs nothing.\n        outside = [url for _tag, url in _ASSET.findall(page) if _relative(url)]\n        if outside:\n            ctx.log(\n                f\"WARNING: no page path, and this page loads {len(outside)} \"\n                f\"external file(s) \u2014 {', '.join(sorted(set(outside))[:3])}\"\n                f\"{' \u2026' if len(set(outside)) > 3 else ''}. None of them can be \"\n                f\"found from here, so the preview will render unstyled and \"\n                f\"nothing on it will respond. Set Path on the Source File node.\"\n            )\n    else:\n        if bool(ctx.params[\"fix_absolute_urls\"]):\n            repointed = 0\n\n            def repoint(url):\n                \"\"\"A '/assets/app.js' that exists under the page's folder.\"\"\"\n                candidate = (base / url.lstrip(\"/\")).resolve()\n                return candidate if candidate.is_file() else None\n\n            def attribute(match):\n                nonlocal repointed\n                name, quote, rest = match.groups()\n                target = repoint(rest)\n                if target is None:\n                    return match.group(0)\n                repointed += 1\n                return f'{name}={quote}{target.as_uri()}{quote}'\n\n            def css_url(match):\n                nonlocal repointed\n                quote, rest = match.groups()\n                target = repoint(rest)\n                if target is None:\n                    return match.group(0)\n                repointed += 1\n                return f'url({quote}{target.as_uri()}{quote})'\n\n            page = _ROOT_URL.sub(attribute, page)\n            page = _ROOT_CSS_URL.sub(css_url, page)\n            if repointed:\n                ctx.log(f\"repointed {repointed} root-absolute URL(s) at {base}\")\n\n        # Before everything, so it governs every relative URL on the page \u2014\n        # and only if the page has not set one of its own.\n        if not re.search(r\"<base\\b\", page, re.I):\n            tag = f'<base href=\"{base.as_uri()}/\">'\n            anchor = _HEAD.search(page) or _HTML.search(page)\n            page = ((page[:anchor.end()] + tag + page[anchor.end():])\n                    if anchor else tag + page)\n            ctx.log(f\"assets resolve against {base}\")\n\n    banner = (ctx.params[\"banner\"] or \"\").strip()\n    if banner:\n        colour = (ctx.params[\"banner_color\"] or \"#0ea5e9\").strip()\n        ribbon = (\n            f'<div style=\"position:fixed;top:10px;right:10px;z-index:99999;'\n            f'font:600 11px/1 ui-sans-serif,system-ui,sans-serif;'\n            f'letter-spacing:.08em;text-transform:uppercase;color:#fff;'\n            f'background:{colour};padding:7px 11px;border-radius:999px;'\n            f'box-shadow:0 2px 10px rgba(0,0,0,.35);pointer-events:none;\">'\n            f'{banner}</div>'\n        )\n        body = _BODY.search(page)\n        page = (page[:body.end()] + ribbon + page[body.end():]) if body else ribbon + page\n\n    return {\"html\": page}\n",
+    "label": "Page \u00b7 new SVG dropped straight in"
+   },
+   {
+    "id": "svg_page_fixed",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     -300,
+     20
+    ],
+    "params": {
+     "banner": "After \u00b7 ids restored",
+     "banner_color": "#16a34a"
+    },
+    "code": "\"\"\"Prepare Page\n\nMakes a page previewable, and \u2014 when an SVG is wired in \u2014 swaps the new\nartwork into it so you can see the retrofit working on the real page rather\nthan on a table describing it.\n\nWith no SVG connected it passes the page through untouched, which is how the\nsame node renders the *before* view.\n\nThe preview renders from a temp file, so the page needs telling where its\nown folder is or `styles.css` and `app.js` resolve against the wrong\ndirectory and quietly never load \u2014 a page that looks nearly right and does\nnothing at all. A <base> tag pointing at the real folder is the whole fix,\nand it is the *only* thing done here: pulling the assets inline instead\nloses `defer` on a script tag, which moves the script from after the\ndocument to before it, so every `getElementById` in it returns null and no\nhandler is ever bound. The page still looks fine. Nothing works.\n\nRoot-absolute URLs \u2014 `/assets/app.js`, written for a site served from a web\nroot \u2014 have no directory to be relative to and <base> cannot rescue them, so\nthose are rewritten to the page's folder when the file is actually there.\n\n**Path is not optional in practice.** With no path there is no folder, no\nbase, and no external asset will load. The node says so rather than\nproducing a dead page in silence.\n\"\"\"\nimport re\n\nNODE = {\n    \"label\": \"Prepare Page\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"html\", \"string\"), (\"svg\", \"string\", {\"optional\": True}),\n               (\"path\", \"string\", {\"optional\": True})],\n    \"outputs\": [(\"html\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"which\", \"type\": \"int\", \"label\": \"Which <svg> (1-based)\",\n     \"default\": 1, \"min\": 1, \"max\": 50},\n    {\"name\": \"fix_absolute_urls\", \"type\": \"bool\",\n     \"label\": \"Repoint /root-absolute asset URLs at the page's folder\",\n     \"default\": True},\n    {\"name\": \"banner\", \"type\": \"string\", \"label\": \"Corner banner\",\n     \"default\": \"\", \"placeholder\": \"e.g. Before \u2014 original artwork\"},\n    {\"name\": \"banner_color\", \"type\": \"string\", \"label\": \"Banner colour\",\n     \"default\": \"#0ea5e9\"},\n]\n\n# Depth-counted rather than non-greedy, so a nested <svg> cannot make the\n# swap replace half the artwork and leave the rest of it behind.\n_TAG = re.compile(r\"<(/?)svg\\b((?:\\\"[^\\\"]*\\\"|'[^']*'|[^>])*)>\", re.I | re.S)\n_ROOT_URL = re.compile(\n    r\"\"\"\\b(src|href)\\s*=\\s*(['\"])/(?!/)([^'\"]*)\\2\"\"\", re.I)\n_ROOT_CSS_URL = re.compile(r\"\"\"\\burl\\(\\s*(['\"]?)/(?!/)([^'\")]*)\\1\\s*\\)\"\"\", re.I)\n_BODY = re.compile(r\"<body\\b[^>]*>\", re.I)\n_HEAD = re.compile(r\"<head\\b[^>]*>\", re.I)\n_HTML = re.compile(r\"<html\\b[^>]*>\", re.I)\n_ASSET = re.compile(\n    r\"\"\"<(link|script|img)\\b[^>]*\\b(?:src|href)\\s*=\\s*['\"]([^'\"]+)['\"]\"\"\", re.I)\n\n\ndef _relative(url):\n    \"\"\"A URL that needs a folder to be found from.\"\"\"\n    return not re.match(r\"^(?:[a-z][\\w+.-]*:)?//|^data:|^#|^[a-z][\\w+.-]*:\",\n                        url or \"\", re.I)\n\n\ndef _blocks(page):\n    \"\"\"(start, end) of every top-level <svg> \u2026 </svg> in document order.\"\"\"\n    found, depth, start = [], 0, None\n    for match in _TAG.finditer(page):\n        if match.group(1):\n            depth = max(depth - 1, 0)\n            if depth == 0 and start is not None:\n                found.append((start, match.end()))\n                start = None\n        elif match.group(2).rstrip().endswith(\"/\"):\n            if depth == 0:\n                found.append((match.start(), match.end()))\n        else:\n            if depth == 0:\n                start = match.start()\n            depth += 1\n    if start is not None:\n        found.append((start, len(page)))\n    return found\n\n\ndef run(ctx, html, svg=None, path=None):\n    from pathlib import Path\n\n    page = html or \"\"\n    if not page.strip():\n        raise ValueError(\"no HTML on the input\")\n\n    if svg:\n        blocks = _blocks(page)\n        which = int(ctx.params[\"which\"])\n        if not blocks:\n            raise ValueError(\"no inline <svg> in the page to replace\")\n        if which > len(blocks):\n            raise ValueError(f\"the page has {len(blocks)} <svg> block(s), \"\n                             f\"asked for #{which}\")\n        start, end = blocks[which - 1]\n        page = page[:start] + svg + page[end:]\n        ctx.log(f\"swapped in {len(svg):,} chars of artwork\")\n\n    base = Path(path).parent if path else None\n    if base is None:\n        # Only a problem if the page actually reaches outside itself \u2014 a\n        # self-contained page with its style and script inline needs nothing.\n        outside = [url for _tag, url in _ASSET.findall(page) if _relative(url)]\n        if outside:\n            ctx.log(\n                f\"WARNING: no page path, and this page loads {len(outside)} \"\n                f\"external file(s) \u2014 {', '.join(sorted(set(outside))[:3])}\"\n                f\"{' \u2026' if len(set(outside)) > 3 else ''}. None of them can be \"\n                f\"found from here, so the preview will render unstyled and \"\n                f\"nothing on it will respond. Set Path on the Source File node.\"\n            )\n    else:\n        if bool(ctx.params[\"fix_absolute_urls\"]):\n            repointed = 0\n\n            def repoint(url):\n                \"\"\"A '/assets/app.js' that exists under the page's folder.\"\"\"\n                candidate = (base / url.lstrip(\"/\")).resolve()\n                return candidate if candidate.is_file() else None\n\n            def attribute(match):\n                nonlocal repointed\n                name, quote, rest = match.groups()\n                target = repoint(rest)\n                if target is None:\n                    return match.group(0)\n                repointed += 1\n                return f'{name}={quote}{target.as_uri()}{quote}'\n\n            def css_url(match):\n                nonlocal repointed\n                quote, rest = match.groups()\n                target = repoint(rest)\n                if target is None:\n                    return match.group(0)\n                repointed += 1\n                return f'url({quote}{target.as_uri()}{quote})'\n\n            page = _ROOT_URL.sub(attribute, page)\n            page = _ROOT_CSS_URL.sub(css_url, page)\n            if repointed:\n                ctx.log(f\"repointed {repointed} root-absolute URL(s) at {base}\")\n\n        # Before everything, so it governs every relative URL on the page \u2014\n        # and only if the page has not set one of its own.\n        if not re.search(r\"<base\\b\", page, re.I):\n            tag = f'<base href=\"{base.as_uri()}/\">'\n            anchor = _HEAD.search(page) or _HTML.search(page)\n            page = ((page[:anchor.end()] + tag + page[anchor.end():])\n                    if anchor else tag + page)\n            ctx.log(f\"assets resolve against {base}\")\n\n    banner = (ctx.params[\"banner\"] or \"\").strip()\n    if banner:\n        colour = (ctx.params[\"banner_color\"] or \"#0ea5e9\").strip()\n        ribbon = (\n            f'<div style=\"position:fixed;top:10px;right:10px;z-index:99999;'\n            f'font:600 11px/1 ui-sans-serif,system-ui,sans-serif;'\n            f'letter-spacing:.08em;text-transform:uppercase;color:#fff;'\n            f'background:{colour};padding:7px 11px;border-radius:999px;'\n            f'box-shadow:0 2px 10px rgba(0,0,0,.35);pointer-events:none;\">'\n            f'{banner}</div>'\n        )\n        body = _BODY.search(page)\n        page = (page[:body.end()] + ribbon + page[body.end():]) if body else ribbon + page\n\n    return {\"html\": page}\n",
+    "label": "Page \u00b7 retrofitted"
+   },
+   {
+    "id": "svg_from_html",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     -460,
+     -1300
+    ],
+    "params": {
+     "source": "svg_goto_html"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "svg_from_path",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     -460,
+     -1220
+    ],
+    "params": {
+     "source": "svg_goto_path"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "svg_prev_orig",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     60,
+     -1060
+    ],
+    "params": {
+     "width": 620,
+     "height": 440
+    },
+    "code": "\"\"\"Page Preview\n\nRenders a page \u2014 the real one, scripts and all \u2014 inside the canvas card, so\n\"do the popups still work\" is a question you answer by clicking them rather\nthan by reading a table.\n\nTwo of these side by side, one fed the original page and one fed the\nretrofitted page, is the whole point of the workflow.\n\"\"\"\nNODE = {\n    \"label\": \"Page Preview\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [(\"html\", \"string\")],\n    \"outputs\": [(\"view\", \"object\")],\n}\nPARAMS = [\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 560, \"min\": 260, \"max\": 1600},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 420, \"min\": 200, \"max\": 2000},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400},\n]\n\n\ndef run(ctx, html):\n    ctx.log(f\"rendering {len(html or ''):,} chars\")\n    return {\"view\": html or \"<p>nothing to show</p>\"}\n",
+    "label": "Original page"
+   },
+   {
+    "id": "svg_prev_raw",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     60,
+     -520
+    ],
+    "params": {
+     "width": 620,
+     "height": 440
+    },
+    "code": "\"\"\"Page Preview\n\nRenders a page \u2014 the real one, scripts and all \u2014 inside the canvas card, so\n\"do the popups still work\" is a question you answer by clicking them rather\nthan by reading a table.\n\nTwo of these side by side, one fed the original page and one fed the\nretrofitted page, is the whole point of the workflow.\n\"\"\"\nNODE = {\n    \"label\": \"Page Preview\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [(\"html\", \"string\")],\n    \"outputs\": [(\"view\", \"object\")],\n}\nPARAMS = [\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 560, \"min\": 260, \"max\": 1600},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 420, \"min\": 200, \"max\": 2000},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400},\n]\n\n\ndef run(ctx, html):\n    ctx.log(f\"rendering {len(html or ''):,} chars\")\n    return {\"view\": html or \"<p>nothing to show</p>\"}\n",
+    "label": "Straight swap \u2014 hooks broken"
+   },
+   {
+    "id": "svg_prev_fixed",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     60,
+     20
+    ],
+    "params": {
+     "width": 620,
+     "height": 440
+    },
+    "code": "\"\"\"Page Preview\n\nRenders a page \u2014 the real one, scripts and all \u2014 inside the canvas card, so\n\"do the popups still work\" is a question you answer by clicking them rather\nthan by reading a table.\n\nTwo of these side by side, one fed the original page and one fed the\nretrofitted page, is the whole point of the workflow.\n\"\"\"\nNODE = {\n    \"label\": \"Page Preview\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [(\"html\", \"string\")],\n    \"outputs\": [(\"view\", \"object\")],\n}\nPARAMS = [\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 560, \"min\": 260, \"max\": 1600},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 420, \"min\": 200, \"max\": 2000},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400},\n]\n\n\ndef run(ctx, html):\n    ctx.log(f\"rendering {len(html or ''):,} chars\")\n    return {\"view\": html or \"<p>nothing to show</p>\"}\n",
+    "label": "After the retrofit"
+   },
+   {
+    "id": "svg_report",
+    "type": "flograph.scripting.python_script",
+    "pos": [
+     60,
+     -1700
+    ],
+    "params": {
+     "width": 660,
+     "height": 560
+    },
+    "code": "\"\"\"Retrofit Report\n\nThe verdict, as a page: how many of the page's hooks survive the new export,\nwhich ones can be handed their old id back, and which ones have nothing left\nto hold.\n\nOrdered worst first on purpose. The interesting rows are the handful that\nbreak, and they are the ones a long table buries.\n\"\"\"\nfrom html import escape\n\nNODE = {\n    \"label\": \"Retrofit Report\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [(\"impact\", \"dataframe\"), (\"matches\", \"dataframe\"),\n               (\"applied\", \"dataframe\", {\"optional\": True})],\n    \"outputs\": [(\"view\", \"object\")],\n}\nPARAMS = [\n    {\"name\": \"title\", \"type\": \"string\", \"label\": \"Title\",\n     \"default\": \"SVG retrofit report\"},\n    {\"name\": \"subtitle\", \"type\": \"string\", \"label\": \"Subtitle\", \"default\": \"\"},\n    {\"name\": \"show_safe\", \"type\": \"bool\", \"label\": \"List the safe hooks too\",\n     \"default\": True},\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 560, \"min\": 260, \"max\": 1600},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 460, \"min\": 200, \"max\": 2000},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400},\n]\n\n_VERDICT = {\n    \"BREAKS\": (\"#b91c1c\", \"#fee2e2\"),\n    \"review\": (\"#92400e\", \"#fef3c7\"),\n    \"auto-fix\": (\"#047857\", \"#d1fae5\"),\n    \"safe\": (\"#1d4ed8\", \"#dbeafe\"),\n    \"not in SVG\": (\"#475569\", \"#e2e8f0\"),\n}\n_STATUS = {\n    \"missing\": (\"#b91c1c\", \"#fee2e2\"),\n    \"renamed\": (\"#92400e\", \"#fef3c7\"),\n    \"added\": (\"#6d28d9\", \"#ede9fe\"),\n    \"kept\": (\"#1d4ed8\", \"#dbeafe\"),\n}\n\n_CSS = \"\"\"\n:root { color-scheme: light dark; }\n* { box-sizing: border-box; }\nbody { margin:0; padding:20px; background:#f8fafc; color:#0f172a;\n       font:14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif; }\nh1 { font-size:17px; margin:0; letter-spacing:-.01em; }\nh2 { font-size:12px; margin:26px 0 9px; text-transform:uppercase;\n     letter-spacing:.09em; color:#64748b; font-weight:600; }\np.sub { margin:4px 0 0; color:#64748b; font-size:13px; }\n/* flex-basis 0 rather than a width: five of these have to survive a card\n   narrow enough to sit next to three page previews. */\n.chips { display:flex; gap:8px; margin-top:16px; }\n.chip { flex:1 1 0; min-width:0; background:#fff; border:1px solid #e2e8f0;\n        border-radius:10px; padding:10px 11px; }\n.chip .n { font-size:22px; font-weight:650; letter-spacing:-.02em;\n           font-variant-numeric:tabular-nums; }\n.chip .k { font-size:11px; color:#64748b; margin-top:1px; }\n.wrap { overflow-x:auto; border:1px solid #e2e8f0; border-radius:10px;\n        background:#fff; }\ntable { border-collapse:collapse; width:100%; font-size:13px; }\nth { text-align:left; font-size:11px; letter-spacing:.05em; color:#64748b;\n     font-weight:600; text-transform:uppercase; padding:9px 12px;\n     border-bottom:1px solid #e2e8f0; white-space:nowrap; }\ntd { padding:8px 12px; border-bottom:1px solid #f1f5f9; vertical-align:top; }\ntr:last-child td { border-bottom:0; }\ncode { font:12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;\n       background:#f1f5f9; padding:1px 5px; border-radius:4px;\n       white-space:nowrap; }\n.pill { display:inline-block; font-size:11px; font-weight:650; padding:2px 8px;\n        border-radius:999px; white-space:nowrap; }\n.muted { color:#94a3b8; }\n.bar { height:6px; border-radius:999px; background:#e2e8f0; overflow:hidden;\n       min-width:70px; }\n.bar span { display:block; height:100%; }\n.empty { padding:16px; color:#64748b; background:#fff; border:1px dashed #cbd5e1;\n         border-radius:10px; font-size:13px; }\n@media (prefers-color-scheme: dark) {\n  body { background:#0b1220; color:#e2e8f0; }\n  .chip, .wrap, table { background:#111a2e; border-color:#1e293b; }\n  .chip { border-color:#1e293b; }\n  th { color:#94a3b8; border-bottom-color:#1e293b; }\n  td { border-bottom-color:#172033; }\n  code { background:#1e293b; color:#e2e8f0; }\n  .empty { background:#111a2e; border-color:#334155; color:#94a3b8; }\n  .bar { background:#1e293b; }\n}\n\"\"\"\n\n\ndef _pill(text, palette):\n    fg, bg = palette.get(text, (\"#475569\", \"#e2e8f0\"))\n    return f'<span class=\"pill\" style=\"color:{fg};background:{bg}\">{escape(str(text))}</span>'\n\n\ndef _confidence(value):\n    try:\n        value = float(value)\n    except (TypeError, ValueError):\n        return '<span class=\"muted\">\u2014</span>'\n    if value <= 0:\n        return '<span class=\"muted\">\u2014</span>'\n    hue = \"#047857\" if value >= 0.9 else \"#92400e\" if value >= 0.8 else \"#b91c1c\"\n    return _bar(value, hue)\n\n\ndef _bar(fraction, colour):\n    return (f'<div class=\"bar\"><span style=\"width:{max(fraction, 0.02) * 100:.0f}%;'\n            f'background:{colour}\"></span></div>')\n\n\ndef run(ctx, impact, matches, applied=None):\n    params = ctx.params\n    verdicts = (impact[\"verdict\"].value_counts().to_dict()\n                if not impact.empty else {})\n    statuses = (matches[\"status\"].value_counts().to_dict()\n                if not matches.empty else {})\n    breaks = verdicts.get(\"BREAKS\", 0)\n\n    out = [\"<style>\", _CSS, \"</style>\"]\n    out.append(f\"<h1>{escape(params['title'] or 'SVG retrofit report')}</h1>\")\n    subtitle = params[\"subtitle\"] or (\n        f\"{breaks} hook{'' if breaks == 1 else 's'} would break on the new \"\n        f\"artwork\" if breaks else \"every hook the page uses survives the new artwork\")\n    out.append(f'<p class=\"sub\">{escape(subtitle)}</p>')\n\n    out.append('<div class=\"chips\">')\n    for label, key, colour in [\n        (\"hooks in page\", None, \"#0f172a\"),\n        (\"safe\", \"safe\", \"#1d4ed8\"),\n        (\"auto-fix\", \"auto-fix\", \"#047857\"),\n        (\"review\", \"review\", \"#92400e\"),\n        (\"breaks\", \"BREAKS\", \"#b91c1c\"),\n    ]:\n        n = len(impact) if key is None else verdicts.get(key, 0)\n        out.append(f'<div class=\"chip\"><div class=\"n\" style=\"color:{colour}\">{n}</div>'\n                   f'<div class=\"k\">{label}</div></div>')\n    out.append(\"</div>\")\n\n    out.append(\"<h2>Hooks, worst first</h2>\")\n    rows = impact if params[\"show_safe\"] else impact[impact[\"verdict\"] != \"safe\"]\n    if rows.empty:\n        out.append('<div class=\"empty\">No hooks found \u2014 the page does not '\n                   'reach into the artwork by id.</div>')\n    else:\n        out.append('<div class=\"wrap\"><table><thead><tr>'\n                   \"<th>verdict</th><th>reference</th><th>used by</th>\"\n                   \"<th>new id</th><th>matched on</th><th>confidence</th>\"\n                   \"<th>note</th></tr></thead><tbody>\")\n        for row in rows.to_dict(\"records\"):\n            new_id = (f\"<code>{escape(str(row['new_id']))}</code>\"\n                      if row[\"new_id\"] else '<span class=\"muted\">\u2014</span>')\n            marker = \".\" if row[\"kind\"] == \"class\" else \"#\"\n            out.append(\n                \"<tr>\"\n                f\"<td>{_pill(row['verdict'], _VERDICT)}</td>\"\n                f\"<td><code>{marker}{escape(str(row['ref']))}</code></td>\"\n                f\"<td class=\\\"muted\\\">{escape(str(row['used_by']))} \u00b7 \"\n                f\"{int(row['refs'])}\u00d7</td>\"\n                f\"<td>{new_id}</td>\"\n                f\"<td class=\\\"muted\\\">{escape(str(row['match'] or '\u2014'))}</td>\"\n                f\"<td>{_confidence(row['confidence'])}</td>\"\n                f\"<td class=\\\"muted\\\">{escape(str(row['note']))}</td>\"\n                \"</tr>\")\n        out.append(\"</tbody></table></div>\")\n\n    out.append(\"<h2>Every element, by outcome</h2>\")\n    total = sum(statuses.values()) or 1\n    out.append('<div class=\"wrap\"><table><tbody>')\n    for status in (\"missing\", \"renamed\", \"kept\", \"added\"):\n        n = statuses.get(status, 0)\n        out.append(\n            f\"<tr><td style=\\\"width:1%\\\">{_pill(status, _STATUS)}</td>\"\n            f'<td style=\"width:1%;font-variant-numeric:tabular-nums\">{n}</td>'\n            f'<td>{_bar(n / total, _STATUS[status][0]) if n else \"\"}</td></tr>')\n    out.append(\"</tbody></table></div>\")\n\n    if applied is not None and not applied.empty:\n        restored = applied[applied[\"action\"] == \"restored\"]\n        out.append(f\"<h2>Ids handed back ({len(restored)})</h2>\")\n        if restored.empty:\n            out.append('<div class=\"empty\">Nothing was renamed \u2014 either the '\n                       'confidence floor is too high, or the page uses none '\n                       'of the ids that changed.</div>')\n        else:\n            out.append('<div class=\"wrap\"><table><thead><tr><th>in the new file</th>'\n                       \"<th></th><th>restored to</th><th>name</th>\"\n                       \"<th>matched on</th></tr></thead><tbody>\")\n            for row in restored.to_dict(\"records\"):\n                out.append(\n                    f\"<tr><td><code>{escape(str(row['new_id']))}</code></td>\"\n                    '<td class=\"muted\">\u2192</td>'\n                    f\"<td><code>{escape(str(row['old_id']))}</code></td>\"\n                    f\"<td>{escape(str(row['name'] or ''))}</td>\"\n                    f\"<td class=\\\"muted\\\">{escape(str(row['match']))}</td></tr>\")\n            out.append(\"</tbody></table></div>\")\n\n    ctx.log(f\"{len(impact)} hooks \u00b7 {breaks} breaking\")\n    return {\"view\": \"\\n\".join(out)}\n",
+    "label": "Retrofit Report"
+   },
+   {
+    "id": "svg_table",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     780,
+     -1700
+    ],
+    "params": {
+     "width": 640,
+     "height": 440
+    },
+    "code": null,
+    "label": "Element-by-element diff"
+   }
+  ],
+  "connections": [
+   {
+    "id": "svgc00",
+    "src": [
+     "svg_src_page",
+     "text"
+    ],
+    "dst": [
+     "svg_extract",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc01",
+    "src": [
+     "svg_src_page",
+     "text"
+    ],
+    "dst": [
+     "svg_hooks",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc02",
+    "src": [
+     "svg_src_page",
+     "text"
+    ],
+    "dst": [
+     "svg_goto_html",
+     "value"
+    ]
+   },
+   {
+    "id": "svgc03",
+    "src": [
+     "svg_src_page",
+     "path"
+    ],
+    "dst": [
+     "svg_goto_path",
+     "value"
+    ]
+   },
+   {
+    "id": "svgc04",
+    "src": [
+     "svg_src_new",
+     "text"
+    ],
+    "dst": [
+     "svg_goto_svg",
+     "value"
+    ]
+   },
+   {
+    "id": "svgc05",
+    "src": [
+     "svg_extract",
+     "svg"
+    ],
+    "dst": [
+     "svg_elem_old",
+     "svg"
+    ]
+   },
+   {
+    "id": "svgc06",
+    "src": [
+     "svg_src_new",
+     "text"
+    ],
+    "dst": [
+     "svg_elem_new",
+     "svg"
+    ]
+   },
+   {
+    "id": "svgc07",
+    "src": [
+     "svg_elem_old",
+     "elements"
+    ],
+    "dst": [
+     "svg_diff",
+     "old"
+    ]
+   },
+   {
+    "id": "svgc08",
+    "src": [
+     "svg_elem_new",
+     "elements"
+    ],
+    "dst": [
+     "svg_diff",
+     "new"
+    ]
+   },
+   {
+    "id": "svgc09",
+    "src": [
+     "svg_diff",
+     "matches"
+    ],
+    "dst": [
+     "svg_impact",
+     "matches"
+    ]
+   },
+   {
+    "id": "svgc10",
+    "src": [
+     "svg_hooks",
+     "hooks"
+    ],
+    "dst": [
+     "svg_impact",
+     "hooks"
+    ]
+   },
+   {
+    "id": "svgc11",
+    "src": [
+     "svg_elem_new",
+     "elements"
+    ],
+    "dst": [
+     "svg_impact",
+     "new_elements"
+    ]
+   },
+   {
+    "id": "svgc12",
+    "src": [
+     "svg_from_svg",
+     "value"
+    ],
+    "dst": [
+     "svg_retrofit",
+     "svg"
+    ]
+   },
+   {
+    "id": "svgc13",
+    "src": [
+     "svg_diff",
+     "matches"
+    ],
+    "dst": [
+     "svg_retrofit",
+     "matches"
+    ]
+   },
+   {
+    "id": "svgc14",
+    "src": [
+     "svg_hooks",
+     "hooks"
+    ],
+    "dst": [
+     "svg_retrofit",
+     "hooks"
+    ]
+   },
+   {
+    "id": "svgc15",
+    "src": [
+     "svg_from_html",
+     "value"
+    ],
+    "dst": [
+     "svg_page_orig",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc16",
+    "src": [
+     "svg_from_path",
+     "value"
+    ],
+    "dst": [
+     "svg_page_orig",
+     "path"
+    ]
+   },
+   {
+    "id": "svgc17",
+    "src": [
+     "svg_from_html",
+     "value"
+    ],
+    "dst": [
+     "svg_page_raw",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc18",
+    "src": [
+     "svg_from_path",
+     "value"
+    ],
+    "dst": [
+     "svg_page_raw",
+     "path"
+    ]
+   },
+   {
+    "id": "svgc19",
+    "src": [
+     "svg_from_svg",
+     "value"
+    ],
+    "dst": [
+     "svg_page_raw",
+     "svg"
+    ]
+   },
+   {
+    "id": "svgc20",
+    "src": [
+     "svg_from_html",
+     "value"
+    ],
+    "dst": [
+     "svg_page_fixed",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc21",
+    "src": [
+     "svg_from_path",
+     "value"
+    ],
+    "dst": [
+     "svg_page_fixed",
+     "path"
+    ]
+   },
+   {
+    "id": "svgc22",
+    "src": [
+     "svg_retrofit",
+     "svg"
+    ],
+    "dst": [
+     "svg_page_fixed",
+     "svg"
+    ]
+   },
+   {
+    "id": "svgc23",
+    "src": [
+     "svg_page_orig",
+     "html"
+    ],
+    "dst": [
+     "svg_prev_orig",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc24",
+    "src": [
+     "svg_page_raw",
+     "html"
+    ],
+    "dst": [
+     "svg_prev_raw",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc25",
+    "src": [
+     "svg_page_fixed",
+     "html"
+    ],
+    "dst": [
+     "svg_prev_fixed",
+     "html"
+    ]
+   },
+   {
+    "id": "svgc26",
+    "src": [
+     "svg_impact",
+     "impact"
+    ],
+    "dst": [
+     "svg_report",
+     "impact"
+    ]
+   },
+   {
+    "id": "svgc27",
+    "src": [
+     "svg_diff",
+     "matches"
+    ],
+    "dst": [
+     "svg_report",
+     "matches"
+    ]
+   },
+   {
+    "id": "svgc28",
+    "src": [
+     "svg_retrofit",
+     "applied"
+    ],
+    "dst": [
+     "svg_report",
+     "applied"
+    ]
+   },
+   {
+    "id": "svgc29",
+    "src": [
+     "svg_diff",
+     "matches"
+    ],
+    "dst": [
+     "svg_table",
+     "table"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "svg_f1",
+    "title": "1 \u00b7 The page, and the artwork replacing it",
+    "rect": [
+     -1728,
+     -1348,
+     526,
+     602
+    ],
+    "color": "#2f4858"
+   },
+   {
+    "id": "svg_f2",
+    "title": "2 \u00b7 Inventory",
+    "rect": [
+     -1148,
+     -1348,
+     226,
+     310
+    ],
+    "color": "#33415c"
+   },
+   {
+    "id": "svg_f3",
+    "title": "3 \u00b7 What changed, and what depends on it",
+    "rect": [
+     -888,
+     -1348,
+     226,
+     350
+    ],
+    "color": "#3b3355"
+   },
+   {
+    "id": "svg_f4",
+    "title": "4 \u00b7 Hand the old ids back",
+    "rect": [
+     -608,
+     -1348,
+     506,
+     1490
+    ],
+    "color": "#2d4a3e"
+   },
+   {
+    "id": "svg_f5",
+    "title": "5 \u00b7 Look at the page, not at a table",
+    "rect": [
+     32,
+     -1748,
+     1416,
+     2236
+    ],
+    "color": "#4a3a2d"
+   }
+  ],
+  "pages": [
+   {
+    "id": "svg_page_dash",
+    "title": "Before / After",
+    "kind": "dashboard",
+    "body": "",
+    "color": "#16a34a",
+    "maximized_tile": null,
+    "tiles": [
+     {
+      "id": "svg_t_report",
+      "node": "svg_report",
+      "port": "view",
+      "rect": [
+       -740,
+       -400,
+       700,
+       900
+      ]
+     },
+     {
+      "id": "svg_t_orig",
+      "node": "svg_prev_orig",
+      "port": "view",
+      "rect": [
+       -20,
+       -400,
+       620,
+       440
+      ]
+     },
+     {
+      "id": "svg_t_raw",
+      "node": "svg_prev_raw",
+      "port": "view",
+      "rect": [
+       620,
+       -400,
+       620,
+       440
+      ]
+     },
+     {
+      "id": "svg_t_fixed",
+      "node": "svg_prev_fixed",
+      "port": "view",
+      "rect": [
+       -20,
+       60,
+       620,
+       440
+      ]
+     },
+     {
+      "id": "svg_t_table",
+      "node": "svg_table",
+      "port": "table",
+      "rect": [
+       620,
+       60,
+       620,
+       440
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -69,10 +69,11 @@ python main.py project.flograph         # open a project from a checkout
 python -m flograph.engine.headless project.flograph   # run it with no GUI
 ```
 
-**File > Open Example** ships nine worked projects — filter-and-visualise, an
+**File > Open Example** ships ten worked projects — filter-and-visualise, an
 aggregate dashboard, a custom-script chart, join/group-by comparison, an
 interactive slicer dashboard, a scripted pipeline in a frame, a retail ops
-command centre, and two geo/folium maps. They're the fastest way in.
+command centre, two geo/folium maps, and an SVG retrofit workbench that diffs
+a redrawn SVG against the page already wired to it. They're the fastest way in.
 
 ---
 
