@@ -538,12 +538,49 @@ class TestEditableTableTile:
         add_page(window)
         node, item = self.add_table(window)
         before = item._sheet_model.rowCount()
-        buttons = item._sheet_toolbar.findChildren(QToolButton)
-        next(b for b in buttons if b.text() == "+Row").click()
+        action = next(a for a in item._sheet_view.toolbar.actions()
+                      if a.text() == "+ Row below")
+        action.trigger()
 
         assert item._sheet_model.rowCount() == before + 1
         import json
         assert len(json.loads(node.params["data"])["rows"]) == before + 1
+
+    def test_the_tile_has_the_pop_out_editor_s_tools(self, window):
+        """A dashboard page is where data gets typed in, so the tile carries
+        the same chrome as the pop-out rather than five buttons."""
+        add_page(window)
+        _node, item = self.add_table(window)
+        labels = {a.text() for a in item._sheet_view.toolbar.actions()}
+        assert {"+ Row above", "+ Row below", "+ Column", "Fill down",
+                "Sort ↑", "Copy w/ Headers"} <= labels
+        assert item._sheet_view.formula_bar is not None
+
+    def test_the_formula_bar_shows_the_source_not_the_value(self, window):
+        add_page(window)
+        _node, item = self.add_table(window)
+        model = item._sheet_model
+        model.setData(model.index(0, 0), "2")
+        model.setData(model.index(0, 1), "=A1*3")
+        view = item._sheet_view.view
+        view.setCurrentIndex(model.index(0, 1))
+        assert model.index(0, 1).data(Qt.DisplayRole) == "6"
+        assert item._sheet_view.formula_bar.edit.text() == "=A1*3"
+        assert item._sheet_view.formula_bar.cell_label.text() == "B1"
+
+    def test_typing_in_the_formula_bar_commits_through_the_undo_stack(
+            self, window):
+        add_page(window)
+        node, item = self.add_table(window)
+        bar = item._sheet_view.formula_bar
+        item._sheet_view.view.setCurrentIndex(item._sheet_model.index(0, 0))
+        bar.edit.setText("=1+1")
+        bar.commit()
+
+        import json
+        assert json.loads(node.params["data"])["rows"][0][0] == "=1+1"
+        window.undo_stack.undo()
+        assert json.loads(node.params["data"])["rows"][0][0] != "=1+1"
 
     def test_a_linked_table_shows_the_merged_upstream_sheet(self, window):
         """Linked mode on the canvas refreshes input-owned columns on every
@@ -610,6 +647,80 @@ class TestEditableTableTile:
         window._dashboard_pages["p1"].scene.toggle_fullscreen("t1")
         assert item.is_fullscreen
         assert window.graph.pages["p1"].maximized_tile == "t1"
+
+    def test_maximizing_a_sheet_uses_a_native_overlay(self, window):
+        """A grid inside a QGraphicsProxyWidget cannot scroll by blitting,
+        so a maximized spreadsheet is laid over the viewport as a real
+        widget instead — bound to the tile's own model, so both views show
+        the same cells with nothing syncing them."""
+        add_page(window)
+        _node, item = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen("t1")
+
+        overlay = page.view.fullscreen_overlay
+        assert overlay is not None
+        assert overlay.content.model() is item._sheet_model
+        assert not item.isVisible()          # the scene copy stands down
+        # and the toolbar came with it
+        assert any(a.text() == "Fill down"
+                   for a in overlay.content.toolbar.actions())
+
+        page.scene.exit_fullscreen()
+        assert page.view.fullscreen_overlay is None
+        assert item.isVisible()
+        assert not item.is_fullscreen
+
+    def test_an_edit_in_the_overlay_reaches_the_node(self, window):
+        add_page(window)
+        node, item = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen("t1")
+        overlay = page.view.fullscreen_overlay
+
+        model = overlay.content.model()
+        model.setData(model.index(0, 0), "typed here")
+
+        import json
+        assert json.loads(node.params["data"])["rows"][0][0] == "typed here"
+        # the tile's own grid is looking at the same model, so it agrees
+        assert item._sheet_model.cell_source(0, 0) == "typed here"
+
+    def test_a_tile_with_nothing_to_show_maximizes_in_the_scene(self, window):
+        """The overlay needs a model to bind to. A table tile whose node has
+        not run has none, so it falls back to the in-scene path rather than
+        maximizing an empty widget — and must still restore cleanly."""
+        add_page(window)
+        node = add_show_table(window)
+        item = add_tile(window, node)
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen(item.tile.id)
+
+        assert page.view.fullscreen_overlay is None
+        assert item.is_fullscreen
+        assert item.isVisible()
+
+        page.scene.exit_fullscreen()
+        assert not item.is_fullscreen
+
+    def test_a_populated_data_table_maximizes_into_the_overlay(self, window):
+        """Once there is a frame to scroll, the read-only table tile takes
+        the native path too — same PandasModel, second view."""
+        add_page(window)
+        node = add_show_table(window)
+        item = add_tile(window, node)
+        df = pd.DataFrame({"a": range(50), "b": range(50)})
+        window.engine.cache.set(node.id, {"table": df}, 0.01)
+        window.engine.node_succeeded.emit(node.id)
+
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen(item.tile.id)
+        overlay = page.view.fullscreen_overlay
+        assert overlay is not None
+        assert overlay.content.model() is item._table_view.model()
+
+        page.scene.exit_fullscreen()
+        assert page.view.fullscreen_overlay is None
 
 
 class TestPersistence:

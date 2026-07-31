@@ -54,19 +54,6 @@ MISSING_NODE = ("The node behind this tile was deleted.\n"
                 "Select the tile and press Delete to remove it.")
 
 
-def _grid_stylesheet() -> str:
-    """Table styling shared by the read-only viewer and the editable grid,
-    matching the cards on the modeling canvas."""
-    return (f"QTableView {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
-            f" gridline-color: {theme.NODE_BORDER.name()};"
-            f" font-size: 8.5pt; }}"
-            f"QHeaderView::section {{ background: {theme.NODE_HEADER.name()};"
-            f" color: {theme.NODE_SUBTEXT.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()};"
-            f" padding: 2px; }}")
-
-
 def default_tile_port(node) -> Optional[str]:
     """The output port a tile of this node renders — its first declared output
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
@@ -139,9 +126,8 @@ class TileItem(QGraphicsObject):
         self._figure_view = None
         self._plotly_widget = None
         self._table_view = None
-        self._sheet_view = None     # SpreadsheetView (Table node tiles)
+        self._sheet_view = None     # SheetWorkbench (Table node tiles)
         self._sheet_model = None    # SheetModel (Table node tiles)
-        self._sheet_toolbar: Optional[QWidget] = None
         self._slicer_widget: Optional[SlicerListWidget] = None
         self._slicer_toolbar: Optional[SlicerToolbar] = None
         self._control_widget = None  # ControlWidget (input control tiles)
@@ -225,6 +211,17 @@ class TileItem(QGraphicsObject):
         self.refresh_render_ratio()
         self.update()
 
+    def set_fullscreen_overlaid(self) -> None:
+        """Maximized, but drawn by a native overlay rather than by this item
+        (see DashboardView). The tile keeps its stored geometry — there is
+        nothing to pin, because nothing is looking at it — but it is still
+        the maximized tile, and `is_fullscreen` has to say so."""
+        self._fullscreen = True
+        self.apply_stacking()
+        self._move_suppressed = False
+        self._dragging = False
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+
     def clear_fullscreen(self) -> None:
         """Drop back to the geometry the model holds."""
         if not self._fullscreen:
@@ -239,6 +236,55 @@ class TileItem(QGraphicsObject):
         scene = self.scene()
         if scene is not None and self.can_fullscreen():
             scene.toggle_fullscreen(self.tile.id)
+
+    def fullscreen_widget(self) -> Optional[QWidget]:
+        """A native widget for the view to lay over the page, or None to be
+        maximized inside the scene the old way.
+
+        Why a second widget rather than moving this tile's own: a widget
+        inside a QGraphicsProxyWidget cannot scroll by blitting, so every
+        notch re-renders the whole grid. Measured on a 1440p page that was
+        26 ms a scroll against 2.4 ms for the same grid as a plain widget,
+        and the gap grows with the window — which is the wrong direction for
+        a page whose job is data entry. Qt models are made to carry several
+        views, so the new one binds to the *same* model as the tile: type in
+        either and both show it, with no syncing code in between.
+
+        Only the scrolling kinds bother. A KPI is painted, a figure has its
+        own resolution handling in the proxy, and a Plotly view is a web
+        engine that does not enjoy being re-parented — those keep today's
+        behaviour, which for them is already fine.
+        """
+        kind = self._kind()
+        if kind == "sheet" and self._sheet_model is not None:
+            from ..spreadsheet import SheetWorkbench
+            workbench = SheetWorkbench(self._sheet_model)
+            workbench.view.verticalHeader().setFixedWidth(28)
+            return workbench
+        if kind == "table" and self._table_view is not None:
+            model = self._table_view.model()
+            if model is None:
+                return None
+            view = DataTableView()
+            theme.style_scroll_area(view, theme.grid_stylesheet())
+            view.setSortingEnabled(True)
+            view.setModel(model)
+            return view
+        if kind == "report" and self._report_view is not None:
+            from PySide6.QtWidgets import QTextBrowser
+            view = QTextBrowser()
+            view.setOpenExternalLinks(True)
+            view.setStyleSheet(
+                f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
+                f" color: {theme.NODE_TEXT.name()}; border: none;"
+                f" padding: 12px; }}")
+            view.setDocument(self._report_view.document().clone(view))
+            return view
+        return None
+
+    def fullscreen_title(self) -> str:
+        node = self._node()
+        return node.label if node is not None else "Tile"
 
     # -------------------------------------------------------------- content
 
@@ -304,7 +350,7 @@ class TileItem(QGraphicsObject):
             self._plotly_widget = widget
         elif kind == "table":
             widget = DataTableView()
-            widget.setStyleSheet(_grid_stylesheet())
+            theme.style_scroll_area(widget, theme.grid_stylesheet())
             widget.setSortingEnabled(True)
             self._table_view = widget
         elif kind == "report":
@@ -376,48 +422,30 @@ class TileItem(QGraphicsObject):
     # ------------------------------------------------------- editable sheet
 
     def _build_sheet_widget(self) -> QWidget:
-        """The Table node's own spreadsheet, live on the dashboard: the same
-        SpreadsheetView the canvas card uses, so formulas, column types,
-        Excel paste and the header menus all come along. Edits commit
-        through the undo stack exactly like edits on the card."""
-        from ..spreadsheet import SheetModel, SpreadsheetView
+        """The Table node's own spreadsheet, live on the dashboard, with the
+        full editing chrome the pop-out editor has: toolbar, formula bar,
+        header menus, formulas, column types and Excel paste.
 
-        toolbar = QWidget()
-        row = QHBoxLayout(toolbar)
-        row.setContentsMargins(0, 0, 0, 2)
-        row.setSpacing(3)
+        Dashboard pages are where data actually gets typed in, so the five
+        buttons this used to have were the wrong tool — a sheet you can only
+        add rows to is a sheet you cannot audit. Edits commit through the
+        app's undo stack exactly as they do on the card, so one Ctrl+Z on
+        the page undoes one cell.
+        """
+        from ..spreadsheet import SheetModel, SheetWorkbench
 
-        grid = SpreadsheetView()
-        # parent the model to the view so C++ destruction stays ordered
-        model = SheetModel(self._sheet_source(), parent=grid)
-        grid.setModel(model)
-        grid.verticalHeader().setFixedWidth(28)
-        grid.setStyleSheet(_grid_stylesheet())
+        # the model is parented to the workbench so C++ destruction stays
+        # ordered, and is held here so a maximized page can put a second
+        # view on the very same model (see fullscreen_widget)
+        model = SheetModel(self._sheet_source())
+        workbench = SheetWorkbench(model)
+        model.setParent(workbench)
+        workbench.view.verticalHeader().setFixedWidth(28)
         model.sheet_edited.connect(self._commit_sheet_data)
 
-        for text, tip, slot in (
-                ("+Row", "Add a row at the bottom",
-                 lambda: model.insert_rows_at(model.rowCount())),
-                ("-Row", "Remove the last row",
-                 lambda: model.remove_rows_at([model.rowCount() - 1])),
-                ("+Col", "Add a column at the right",
-                 lambda: model.insert_columns_at(model.columnCount())),
-                ("-Col", "Remove the last column",
-                 lambda: model.remove_columns_at([model.columnCount() - 1])),
-                ("Fit", "Auto-size columns to their content",
-                 lambda: grid.autosize_columns())):
-            button = QToolButton(text=text)
-            button.setToolTip(tip)
-            button.setAutoRaise(True)
-            button.clicked.connect(slot)
-            row.addWidget(button)
-        row.addStretch(1)
-
-        self._host_layout.addWidget(toolbar)
-        self._sheet_toolbar = toolbar
-        self._sheet_view = grid
+        self._sheet_view = workbench
         self._sheet_model = model
-        return grid
+        return workbench
 
     def _render_report(self) -> None:
         """Draw a Report card's markdown with its wired inputs placed into
@@ -600,8 +628,6 @@ class TileItem(QGraphicsObject):
             # for: the grid is live from the moment the tile is placed
             self._placeholder.hide()
             self._sheet_model.set_sheet(self._sheet_source())
-            if self._sheet_toolbar is not None:
-                self._sheet_toolbar.show()
             widget.show()
         elif kind == "table":
             import sys
@@ -651,6 +677,9 @@ class TileItem(QGraphicsObject):
             # through _sheet_source so a linked table redraws its merge and
             # not the handful of columns the node stores.
             self._sheet_model.set_sheet(self._sheet_source())
+            # an undo that replaced the sheet leaves the formula bar showing
+            # the source it had before, which would be a lie about the cell
+            self._sheet_view.sync()
         elif kind == "report" and self._report_view is not None:
             # the text is the param that just changed — but re-render
             # through the same path, so its embeds stay in step too
