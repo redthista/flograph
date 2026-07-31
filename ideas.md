@@ -137,3 +137,8 @@ F1. add a setting and on by default when dragging around a canvas with middle mo
 G1. a setting to enable draging the canvas by holding right click.
 G2. when zoomed out and we have the low lod version of the nodes showing, can we layer the names of the nodes ontop? 
 G3. Show images on the canvas, dragged in or node with property, the usual enable disable etc. theres been a few cases where ive used an image in plotly charts, so to be able to add my own img input and then plug it in is good.
+
+
+## not sorted: 
+- chart per value  - need scale option like with the other nodes.
+- 
