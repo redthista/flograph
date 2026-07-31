@@ -134,6 +134,21 @@ class RunHistory:
         """Newest first — the order a run picker wants to offer them in."""
         return list(reversed(self._runs))
 
+    def last_wall_time(self, node_id: str) -> Optional[float]:
+        """How long this node took the last time it ran to completion.
+
+        For telling someone watching a run roughly how long the step in
+        front of them should take. Only successful runs count — a node that
+        failed or was cancelled stopped early, so its time says nothing
+        about how long the work takes. None when it has never finished this
+        session, which is the honest answer on a first run.
+        """
+        for record in reversed(self._runs):
+            for node in record.nodes:
+                if node.node_id == node_id and node.outcome == "ok":
+                    return node.wall_time
+        return None
+
     def __len__(self) -> int:
         return len(self._runs)
 

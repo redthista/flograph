@@ -14,7 +14,8 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDockWidget, QFileDialog,
     QInputDialog, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QProgressDialog, QStackedWidget, QTextEdit,
+    QMessageBox, QPlainTextEdit, QProgressBar, QProgressDialog,
+    QStackedWidget, QTextEdit,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -53,8 +54,16 @@ from .editor.editor_dock import EditorPanel
 from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
 from .properties.params_panel import ParamsPanel
-from .resource_monitor import ResourceMonitorWidget
+from .resource_monitor import ResourceMonitorWidget, format_seconds
 from flograph.engine.runstats import HISTORY_LIMIT
+
+# How often the run status line re-reads the clock. The interesting cases —
+# a slow node, a stuck one — send no events at all, so the line has to be
+# driven by something other than the run itself.
+RUN_TICK_MS = 500
+# Silence longer than this earns a mention. A node reporting progress or
+# writing to the log is never called quiet, however slow it is.
+QUIET_NODE_AFTER_S = 10.0
 
 from .stats_window import StatsWindow
 from .settings_dialog import SettingsDialog
@@ -138,6 +147,24 @@ class MainWindow(QMainWindow):
         self._pending_wire = None
         self._palette_popup.chosen.connect(self._add_node_from_palette)
 
+        # Run status: what is running, how far in, how long it has been, and
+        # whether it has gone quiet. Driven by a tick rather than only by
+        # events, because the interesting cases — a slow node, a stuck one —
+        # are exactly the ones that send nothing.
+        self._run_index = 0
+        self._run_total = 0
+        self._run_fraction = 0.0
+        self._run_node_label = ""
+        self._run_node_started = 0.0
+        self._run_last_output = 0.0
+        # Whether the running node has said anything at all yet — a node that
+        # has never spoken gets different wording from one that fell silent.
+        self._run_had_output = False
+        self._run_prior: Optional[float] = None
+        self._run_tick = QTimer(self)
+        self._run_tick.setInterval(RUN_TICK_MS)
+        self._run_tick.timeout.connect(self._update_run_status)
+
         # Coalesces a burst of param edits into one report re-render — see
         # _refresh_report_cards. Before _wire_engine, which connects to it.
         self._report_refresh = QTimer(self)
@@ -161,6 +188,15 @@ class MainWindow(QMainWindow):
             lambda: self._active_canvas_view().set_zoom(1.0))
         self.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         self.statusBar().addPermanentWidget(self._zoom_indicator)
+        # Progress across the plan, shown only while a run is on. Narrow and
+        # text-free: the status line beside it already says what is running,
+        # and this only has to answer "how much is left".
+        self._run_bar = QProgressBar(self)
+        self._run_bar.setRange(0, 100)
+        self._run_bar.setTextVisible(False)
+        self._run_bar.setFixedWidth(110)
+        self._run_bar.hide()
+        self.statusBar().addPermanentWidget(self._run_bar)
         self._update_title()
         # captured before any saved layout is applied, so "reset window
         # layout" has a real default to go back to rather than a guess
@@ -171,9 +207,6 @@ class MainWindow(QMainWindow):
         self.resource_monitor.clicked.connect(self._show_stats)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self._apply_stats_settings()
-        # What the running node's percentage gets appended to, so a progress
-        # tick redraws the line without re-deriving the label and counter.
-        self._run_status_prefix = "Running…"
         self.statusBar().showMessage("Ready")
 
     def _canvas_pages(self) -> list:
@@ -657,6 +690,91 @@ class MainWindow(QMainWindow):
         # the value as it was one keystroke ago.
         self.params_panel.flush_pending()
 
+    # ----------------------------------------------------------- run status
+
+    def _run_begin(self) -> None:
+        """A run started. Stands until the first node claims the floor,
+        which is a moment away — the plan is already built by now."""
+        self._run_index = 0
+        self._run_total = 0
+        self._run_fraction = 0.0
+        self._run_node_label = ""
+        self._run_node_started = time.monotonic()
+        self._run_last_output = time.monotonic()
+        self._run_had_output = False
+        self._run_prior = None
+        self._run_bar.setValue(0)
+        self._run_bar.show()
+        self._run_tick.start()
+        self.statusBar().showMessage("Running…")
+
+    def _run_node_begin(self, node_id: str, label: str,
+                        index: int, total: int) -> None:
+        self._run_node_label = label
+        self._run_index = index
+        self._run_total = total
+        self._run_fraction = 0.0
+        self._run_node_started = time.monotonic()
+        self._run_last_output = self._run_node_started
+        self._run_had_output = False
+        # What it cost last time it finished, if it has this session. Turns
+        # "this is taking a while" into "this is taking longer than usual".
+        self._run_prior = self.engine.history.last_wall_time(node_id)
+        self._update_run_status()
+
+    def _run_end(self) -> None:
+        self._run_tick.stop()
+        self._run_bar.hide()
+        self._run_node_label = ""
+
+    def _update_run_status(self) -> None:
+        """Compose the one line that says what the run is doing.
+
+        Serial execution — one NodeRunnable in flight — is what lets a
+        single line name a node without ambiguity.
+        """
+        if not self._run_node_label:
+            return
+        elapsed = time.monotonic() - self._run_node_started
+        parts = [f"Running {self._run_node_label}"]
+        if self._run_total:
+            parts.append(f"node {self._run_index} of {self._run_total}")
+        if self._run_fraction:
+            parts.append(f"{self._run_fraction:.0%}")
+        # Only once it has been going long enough to be worth timing —
+        # a stopwatch on a step that takes 200ms is noise.
+        if elapsed >= 1.0:
+            timing = format_seconds(elapsed)
+            if self._run_prior:
+                timing += f" (usually {format_seconds(self._run_prior)})"
+            parts.append(timing)
+        quiet = time.monotonic() - self._run_last_output
+        if quiet >= QUIET_NODE_AFTER_S:
+            # issues.md #4: a node that hangs looks exactly like a node that
+            # is merely slow. Saying it has gone silent, and that Cancel
+            # exists, is the difference between the two.
+            if not self._run_had_output:
+                # never said anything, so the elapsed time above already is
+                # the silence — printing the same number twice reads badly
+                parts.append("no output yet — Cancel to stop it")
+            else:
+                parts.append(f"quiet for {format_seconds(quiet)} — "
+                             f"Cancel to stop it")
+        self.statusBar().showMessage("  ·  ".join(parts))
+        self._run_bar.setValue(int(100 * self._run_completion()))
+
+    def _run_completion(self) -> float:
+        """How far through the plan the run is, 0..1.
+
+        Nodes already finished, plus however far the current one says it
+        is. The total is the plan as built, so a run that prunes a failed
+        branch can finish ahead of the bar rather than behind it.
+        """
+        if not self._run_total:
+            return 0.0
+        done = max(0, self._run_index - 1) + self._run_fraction
+        return min(1.0, done / self._run_total)
+
     # --------------------------------------------------------------- wiring
 
     def _wire_engine(self) -> None:
@@ -666,27 +784,30 @@ class MainWindow(QMainWindow):
             self.action_cancel.setEnabled(True)
             self.action_run.setEnabled(False)
             self.action_run_selected.setEnabled(False)
-            # Stands until the first node claims the floor, which is a
-            # moment away — the plan is already built by the time this fires.
-            self._run_status_prefix = "Running…"
-            self.statusBar().showMessage(self._run_status_prefix)
+            self._run_begin()
 
         def on_node_started(node_id: str, index: int, total: int) -> None:
             node = self.graph.nodes.get(node_id)
             label = node.label if node is not None else node_id
-            # Serial execution — one NodeRunnable in flight — is what lets a
-            # single line name the node without ambiguity.
-            self._run_status_prefix = f"Running {label} — node {index} of {total}"
-            self.statusBar().showMessage(self._run_status_prefix)
+            self._run_node_begin(node_id, label, index, total)
 
         def on_node_progress(node_id: str, fraction: float) -> None:
-            self.statusBar().showMessage(
-                f"{self._run_status_prefix} · {fraction:.0%}")
+            self._run_fraction = fraction
+            self._run_last_output = time.monotonic()
+            self._run_had_output = True
+            self._update_run_status()
+
+        def on_node_logged(node_id: str, line: str, stream: str) -> None:
+            # A node writing to the log is alive even if it reports no
+            # fraction, so it should not be called quiet — see _run_status.
+            self._run_last_output = time.monotonic()
+            self._run_had_output = True
 
         def on_finished(ok: bool) -> None:
             self.action_cancel.setEnabled(False)
             self.action_run.setEnabled(True)
             self.action_run_selected.setEnabled(True)
+            self._run_end()
             message = "Run finished" if ok else "Run finished with errors"
             # Only pins the graph has moved on from get a mention. A frozen
             # source node — which is most of them — never appears here, so
@@ -705,6 +826,7 @@ class MainWindow(QMainWindow):
         engine.run_started.connect(on_started)
         engine.node_started.connect(on_node_started)
         engine.node_progress.connect(on_node_progress)
+        engine.node_log.connect(on_node_logged)
         engine.run_finished.connect(on_finished)
         engine.node_failed.connect(self._on_node_failed)
         engine.node_succeeded.connect(self.editor_panel.on_node_succeeded)
