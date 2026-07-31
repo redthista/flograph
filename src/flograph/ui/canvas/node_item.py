@@ -301,6 +301,13 @@ class PortItem(QGraphicsItem):
         self.spec = spec
         self._hover = False
         self._drag_tint: Optional[bool] = None  # None / valid / invalid
+        # Filled or hollow. Held on the item rather than asked of the graph
+        # in paint(): a pin is repainted on every pan, zoom and node update,
+        # and there are four of these per node, so a model query here is
+        # thousands of calls a frame for an answer that only changes when a
+        # wire or a Goto/From link does. The scene refreshes it there.
+        # Outputs never consult it — an output pin always draws filled.
+        self._connected = False
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.LeftButton)
         # card-type nodes (figure/table/kpi/slicer) draw no port name text —
@@ -314,6 +321,17 @@ class PortItem(QGraphicsItem):
     def set_drag_tint(self, valid: Optional[bool]) -> None:
         if valid != self._drag_tint:
             self._drag_tint = valid
+            self.update()
+
+    def refresh_connected(self) -> None:
+        """Re-read whether anything feeds this pin. Called wherever the edge
+        set moves — a wire made or broken, a Goto/From link re-derived, a
+        node's ports rebuilt — never from paint()."""
+        scene = self.scene()
+        connected = (scene.is_port_connected(self.node_id, self.spec)
+                     if scene is not None else False)
+        if connected != self._connected:
+            self._connected = connected
             self.update()
 
     def _label_shown(self) -> bool:
@@ -379,9 +397,7 @@ class PortItem(QGraphicsItem):
         elif self._drag_tint is False:
             color = theme.WIRE_INVALID
         painter.setPen(QPen(theme.NODE_BORDER, 1.2))
-        scene = self.scene()
-        connected = scene.is_port_connected(self.node_id, self.spec) if scene else False
-        if connected or self.spec.direction.value == "output":
+        if self._connected or self.spec.direction.value == "output":
             painter.setBrush(QBrush(color))
         else:
             painter.setBrush(QBrush(theme.NODE_BODY))
@@ -1591,6 +1607,12 @@ class NodeItem(QGraphicsObject):
                          metrics.elidedText(self._link_card_text(), Qt.ElideRight,
                                             int(text_rect.width())))
 
+    def refresh_port_connections(self) -> None:
+        """Re-read every input pin's filled/hollow state. Inputs only —
+        an output always draws filled, so it never asks."""
+        for port in self.input_ports.values():
+            port.refresh_connected()
+
     def rebuild_ports(self) -> None:
         """(Re)create port items from the current spec — called at build time
         and again whenever the node's code changes its ports."""
@@ -1610,6 +1632,7 @@ class NodeItem(QGraphicsObject):
                 continue
             self.output_ports[spec.name] = PortItem(self, spec)
         self._layout_ports()
+        self.refresh_port_connections()
         self.update()
 
     def _port_x(self) -> tuple[float, float]:
