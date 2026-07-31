@@ -166,7 +166,7 @@ class DashboardView(ZoomPanGraphicsView):
             # the area the scene would have filled
             self._fs_overlay = FullscreenOverlay(
                 item.fullscreen_title(), content,
-                self._restore_from_overlay, self.viewport())
+                self._restore_from_overlay, self)
             item.set_fullscreen_overlaid()
             item.setVisible(False)
         self._layout_fullscreen()
@@ -222,11 +222,31 @@ class DashboardView(ZoomPanGraphicsView):
             return
         overlay = self._live_overlay()
         if overlay is not None:
-            overlay.setGeometry(self.viewport().rect())
+            # the viewport's geometry, in the view's coordinates -- the
+            # overlay is the viewport's sibling, not its child (see
+            # enter_fullscreen), so this is what lines the two up
+            overlay.setGeometry(self.viewport().geometry())
+            overlay.raise_()
             return
         rect = self.mapToScene(self.viewport().rect()).boundingRect()
         rect.adjust(FS_MARGIN, FS_MARGIN, -FS_MARGIN, -FS_MARGIN)
         self._fs_tile.set_fullscreen_rect(rect)
+
+    def setViewport(self, widget) -> None:
+        """Swapping the viewport (the GPU-viewport setting does this to
+        every canvas view, including at startup) installs a brand new widget
+        on top of everything else. A maximized tile's overlay is a sibling of
+        the viewport, so it survives the swap but ends up *behind* it --
+        exactly the problem the minimap solves with a raise_() of its own.
+
+        This is also why the overlay is not a child of the viewport, which is
+        the obvious place for it: setViewport deletes the old viewport and
+        every child it had, so a project saved with a tile maximized reopened
+        onto a blank page -- the tile hidden behind an overlay that had been
+        destroyed on the way in.
+        """
+        super().setViewport(widget)
+        self._layout_fullscreen()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

@@ -721,6 +721,57 @@ class TestEditableTableTile:
         view.resizeEvent(QResizeEvent(QSize(900, 600), QSize(1000, 700)))
         view.exit_fullscreen()               # this raised too, unreported
 
+    def test_swapping_the_viewport_does_not_take_the_overlay_with_it(
+            self, window):
+        """setViewport installs a brand new viewport widget and deletes the
+        old one with every child it had. The overlay is therefore a *sibling*
+        of the viewport, like the minimap — and has to be raised back over
+        the replacement, or it is alive but hidden behind it."""
+        from PySide6.QtWidgets import QWidget
+        add_page(window)
+        _node, _tile = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen("t1")
+        overlay = page.view.fullscreen_overlay
+        assert overlay is not None
+
+        page.view.setViewport(QWidget())      # what the GPU setting does
+
+        assert page.view.fullscreen_overlay is overlay   # survived
+        assert overlay.parent() is page.view             # not the viewport
+        assert overlay.geometry() == page.view.viewport().geometry()
+
+    def test_reopening_a_project_with_a_maximized_table(self, window, tmp_path):
+        """The regression that broke existing dashboards: a project saved
+        with a Table tile maximized reopened onto a blank page. The tile is
+        hidden while an overlay stands in for it, and the overlay was being
+        destroyed on the way in by the startup viewport swap — so the page
+        showed neither."""
+        add_page(window)
+        node, _tile = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        window._on_current_page_changed("p1")
+        page.scene.toggle_fullscreen("t1")
+        assert window.graph.pages["p1"].maximized_tile == "t1"
+        model = page.scene.tile_items["t1"]._sheet_model
+        model.setData(model.index(0, 0), "saved value")
+
+        path = str(tmp_path / "board.flograph")
+        window._project_path = path
+        assert window._save()
+        assert window.open_path(path, confirm=False)
+        window._on_current_page_changed("p1")
+
+        reopened = window._dashboard_pages["p1"]
+        assert window.graph.pages["p1"].maximized_tile == "t1"
+        overlay = reopened.view.fullscreen_overlay
+        assert overlay is not None, "reopened onto a blank page"
+        assert overlay.content.model().cell_source(0, 0) == "saved value"
+        # and the page can be got back
+        reopened.scene.exit_fullscreen()
+        assert reopened.view.fullscreen_overlay is None
+        assert reopened.scene.tile_items["t1"].isVisible()
+
     def test_deleting_a_maximized_page_leaves_nothing_behind(self, window):
         from flograph.ui.commands import RemovePageCommand
         add_page(window)
