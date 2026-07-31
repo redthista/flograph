@@ -103,6 +103,7 @@ class NodeGraphScene(QGraphicsScene):
             self._on_ports_collapsed_changed)
         events.color_changed.connect(self._on_color_changed)
         events.links_changed.connect(self._refresh_link_cards)
+        events.links_changed.connect(self._refresh_port_connections)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
@@ -152,7 +153,7 @@ class NodeGraphScene(QGraphicsScene):
         item = ConnectionItem(conn, src, dst)
         self.addItem(item)
         self.connection_items[conn.id] = item
-        dst.update()  # input pin becomes filled
+        dst.refresh_connected()  # input pin becomes filled
         dst_node_item = self.node_items.get(conn.dst_node)
         if dst_node_item is not None and dst_node_item.table:
             dst_node_item.refresh_table_link()
@@ -165,7 +166,9 @@ class NodeGraphScene(QGraphicsScene):
         if dst_item is not None:
             port = dst_item.input_ports.get(conn.dst_port)
             if port is not None:
-                port.update()
+                # not necessarily hollow now: a Goto/From link can still be
+                # feeding this port after the drawn wire goes
+                port.refresh_connected()
             if dst_item.table:
                 dst_item.refresh_table_link()
 
@@ -199,6 +202,14 @@ class NodeGraphScene(QGraphicsScene):
     def _refresh_link_cards(self) -> None:
         for item in self.node_items.values():
             item.refresh_link_card()
+
+    def _refresh_port_connections(self) -> None:
+        """A derived Goto/From link feeds a port no drawn wire reaches, so
+        every input pin is re-read when the link set moves. Rare enough to
+        be blunt about — the alternative is working out which Froms changed,
+        for an answer that is one dictionary lookup per pin."""
+        for item in self.node_items.values():
+            item.refresh_port_connections()
 
     def _highlight_link_partners(self) -> None:
         selected = {item.node.id for item in self.selected_node_items()}
