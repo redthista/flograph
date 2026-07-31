@@ -25,8 +25,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+import shiboken6 as shiboken
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QPalette
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -54,7 +55,19 @@ class FullscreenOverlay(QWidget):
                  parent=None) -> None:
         super().__init__(parent)
         self._on_restore = on_restore
+        # A plain QWidget subclass paints no background of its own, and
+        # setting a stylesheet does *not* change that unless the widget is
+        # told to honour it — a stylesheet without WA_StyledBackground is
+        # silently ignored for the background and also suppresses the
+        # autoFillBackground path, leaving the widget fully transparent.
+        # That is what showed the canvas straight through the title bar and
+        # the toolbar. Palette first, so the fill stands on its own, and the
+        # attribute so the stylesheet is honoured too.
+        palette = self.palette()
+        palette.setColor(QPalette.Window, theme.NODE_BODY)
+        self.setPalette(palette)
         self.setAutoFillBackground(True)
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
             f"FullscreenOverlay {{ background: {theme.NODE_BODY.name()}; }}")
 
@@ -108,8 +121,27 @@ class DashboardView(ZoomPanGraphicsView):
 
     @property
     def fullscreen_overlay(self) -> Optional[FullscreenOverlay]:
-        """The native overlay, when this tile's kind uses one."""
-        return self._fs_overlay
+        """The native overlay, when this tile's kind uses one and it is
+        still alive."""
+        return self._live_overlay()
+
+    def _live_overlay(self) -> Optional[FullscreenOverlay]:
+        """The overlay, or None once Qt has destroyed it underneath us.
+
+        The overlay is a child of the viewport, so anything that tears the
+        page down — deleting the page, closing the project — deletes it
+        through C++ without going through exit_fullscreen. The Python
+        wrapper survives that and looks perfectly ordinary; touching it
+        raises "Internal C++ object already deleted", and since the next
+        thing to touch it is resizeEvent, that lands as an unhandled error
+        in the middle of removing a page. Ask whether the object is still
+        there rather than assuming, and forget it once it is not.
+        """
+        overlay = self._fs_overlay
+        if overlay is not None and not shiboken.isValid(overlay):
+            self._fs_overlay = None
+            return None
+        return overlay
 
     def enter_fullscreen(self, item: TileItem) -> None:
         if not item.can_fullscreen():
@@ -155,7 +187,7 @@ class DashboardView(ZoomPanGraphicsView):
 
     def exit_fullscreen(self) -> None:
         item, self._fs_tile = self._fs_tile, None
-        overlay, self._fs_overlay = self._fs_overlay, None
+        overlay, self._fs_overlay = self._live_overlay(), None
         if overlay is not None:
             overlay.hide()
             overlay.setParent(None)
@@ -188,8 +220,9 @@ class DashboardView(ZoomPanGraphicsView):
         resize after, which is what makes the chart grow with the window."""
         if self._fs_tile is None:
             return
-        if self._fs_overlay is not None:
-            self._fs_overlay.setGeometry(self.viewport().rect())
+        overlay = self._live_overlay()
+        if overlay is not None:
+            overlay.setGeometry(self.viewport().rect())
             return
         rect = self.mapToScene(self.viewport().rect()).boundingRect()
         rect.adjust(FS_MARGIN, FS_MARGIN, -FS_MARGIN, -FS_MARGIN)
