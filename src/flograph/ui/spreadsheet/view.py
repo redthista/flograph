@@ -30,6 +30,11 @@ _APP = "flograph"
 AUTOSIZE_SETTING = "table_node/autosize_columns"
 DATE_FORMATS_SETTING = "table_node/date_formats"
 
+# How long after the last change the automatic column fit runs. Short enough
+# to feel immediate when you stop typing, long enough that a burst of edits
+# (a paste, holding a key, fill-down) pays for one fit rather than one each.
+AUTOFIT_IDLE_MS = 120
+
 
 def autosize_default_enabled() -> bool:
     """Settings > Table Node: fit columns to content automatically."""
@@ -97,6 +102,13 @@ class SpreadsheetView(QTableView):
         self._width_commit_timer.setInterval(300)
         self._width_commit_timer.timeout.connect(self._persist_pending_widths)
         header.sectionResized.connect(self._on_section_resized)
+
+        # See _maybe_autofit: the automatic fit coalesces instead of running
+        # once per edited cell.
+        self._autofit_timer = QTimer(self)
+        self._autofit_timer.setSingleShot(True)
+        self._autofit_timer.setInterval(AUTOFIT_IDLE_MS)
+        self._autofit_timer.timeout.connect(self._run_autofit)
 
     def setModel(self, model) -> None:
         old = self.sheet_model()
@@ -329,7 +341,21 @@ class SpreadsheetView(QTableView):
             self._applying_widths = False
 
     def _maybe_autofit(self, *_args) -> None:
+        """Re-fit after a change — but once the typing stops, not per cell.
+
+        A single edit re-evaluates the whole sheet, so the model reports the
+        whole grid as changed; fitting every column in response means reading
+        every row of every column. Measured on a 300x12 sheet that was 53 ms
+        of the 63 ms a keystroke cost, and it grows with the sheet — exactly
+        the wrong shape for a table people type into. Coalescing loses
+        nothing: the fit is a display convenience, and the settled result is
+        identical.
+        """
         if autosize_default_enabled():
+            self._autofit_timer.start()
+
+    def _run_autofit(self) -> None:
+        if autosize_default_enabled() and self.sheet_model() is not None:
             self.autosize_columns(persist=False)
 
     def _on_section_resized(self, col: int, _old: int, new: int) -> None:

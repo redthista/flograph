@@ -2,8 +2,8 @@
 place where core's hex strings become QColors."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import QApplication
 
 from flograph.core import WIRE_COLORS, PortType
@@ -140,3 +140,71 @@ def apply_theme(app: QApplication) -> None:
         QTabBar::tab:selected { background: #33363e; }
         QStatusBar { background: #202226; }
     """)
+
+
+class _BackgroundFiller(QObject):
+    """Paints a scroll area's background just before the widget paints it.
+
+    Exists so that WA_OpaquePaintEvent can stay switched on -- see
+    style_scroll_area for why that matters. The filter runs ahead of the
+    widget's own paint handler and returns False, so everything is drawn on
+    top of the fill exactly as before; the only difference is that no pixel
+    is left untouched, which is the promise the attribute makes.
+    """
+
+    def __init__(self, area, color: QColor) -> None:
+        super().__init__(area)
+        self._color = QColor(color)
+        viewport = area.viewport()
+        viewport.installEventFilter(self)
+        viewport.setAttribute(Qt.WA_OpaquePaintEvent, True)
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.Paint:
+            painter = QPainter(obj)
+            painter.fillRect(event.rect(), self._color)
+            painter.end()
+        return False
+
+
+def grid_stylesheet() -> str:
+    """The dark table look shared by canvas cards, dashboard tiles and the
+    dashboard's maximized pages — one definition so a grid reads the same
+    wherever it appears. Apply it with style_scroll_area, not setStyleSheet.
+    """
+    return (f"QTableView {{ background: {NODE_BODY.name()};"
+            f" color: {NODE_TEXT.name()}; border: none;"
+            f" gridline-color: {NODE_BORDER.name()}; font-size: 8.5pt; }}"
+            f"QHeaderView::section {{ background: {NODE_HEADER.name()};"
+            f" color: {NODE_SUBTEXT.name()};"
+            f" border: 1px solid {NODE_BORDER.name()}; padding: 2px; }}")
+
+
+def style_scroll_area(area, stylesheet: str, background: QColor = None) -> None:
+    """Style a table/list without costing it its scroll-blitting.
+
+    A QAbstractScrollArea carrying a stylesheet has QStyleSheetStyle take
+    over its viewport background, and Qt then clears WA_OpaquePaintEvent --
+    at which point QWidget::scroll() can no longer shift the pixels it
+    already has, so every notch of the wheel re-renders the whole visible
+    area instead of the one row that came into view. Measured on a 300-row
+    grid: 2,268 cells redrawn per scroll against 168, 8.3 ms against 1.0 ms.
+    The cost grows with the widget, so a maximized dashboard page suffered
+    worst -- and a maximized page is where data actually gets typed in.
+
+    Setting the attribute back on alone is not enough: the area past the
+    last column then paints as black, because the attribute is a promise the
+    widget fills every pixel and a stylesheet-styled table does not. So the
+    fill is supplied here, by an event filter, and the promise is kept.
+
+    The palette route (QPalette::Base, ::Mid for grid lines) looks like the
+    tidier answer and is not: with the app palette applied it neither
+    reaches the viewport nor drives the grid line colour, so the grid comes
+    out the wrong colour with no lines at all.
+    """
+    area.setStyleSheet(stylesheet)
+    existing = getattr(area, "_flograph_bg_filler", None)
+    if existing is not None:
+        existing.setParent(None)
+    area._flograph_bg_filler = _BackgroundFiller(
+        area, background if background is not None else NODE_BODY)

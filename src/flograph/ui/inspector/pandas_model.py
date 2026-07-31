@@ -17,6 +17,32 @@ FLOAT_PRECISION = 6
 
 _NAN_COLOR = QColor("#6b7280")
 
+# Bound once at import, and compared as ints. Resolving `Qt.DisplayRole`
+# through PySide6's enum metaclass costs ~1.9us on this build, and Qt asks
+# data() for seven roles per visible cell on every repaint — which made the
+# role cascade, rather than pandas or the painting, the bulk of what a table
+# card cost to scroll. See ui/spreadsheet/model.py for the measurement.
+_DISPLAY = int(Qt.DisplayRole)
+_EDIT = int(Qt.EditRole)
+_FOREGROUND = int(Qt.ForegroundRole)
+_FONT = int(Qt.FontRole)
+_ALIGNMENT = int(Qt.TextAlignmentRole)
+_TOOLTIP = int(Qt.ToolTipRole)
+_HORIZONTAL = Qt.Horizontal
+_ALIGN_NUMBER = int(Qt.AlignRight | Qt.AlignVCenter)
+# the roles that need the cell's value at all; anything else can answer
+# without touching the frame
+_VALUE_ROLES = frozenset({_DISPLAY, _EDIT, _FOREGROUND, _FONT, _ALIGNMENT})
+
+
+def _italic() -> QFont:
+    font = QFont()
+    font.setItalic(True)
+    return font
+
+
+_MISSING_FONT = _italic()
+
 
 def _is_missing(value: Any) -> bool:
     try:
@@ -65,16 +91,19 @@ class PandasModel(QAbstractTableModel):
     # -------------------------------------------------------------- data
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
-        if not index.isValid():
+        role = int(role)
+        # Bail before touching the frame: Qt asks for roles this model has
+        # no opinion on, and `iat` is a real pandas lookup, not a free one.
+        if role not in _VALUE_ROLES or not index.isValid():
             return None
         value = self._df.iat[index.row(), index.column()]
-        if role == Qt.DisplayRole:
+        if role == _DISPLAY:
             if _is_missing(value):
                 return "NaN"
             if isinstance(value, float):
                 return f"{value:.{FLOAT_PRECISION}g}"
             return str(value)
-        if role == Qt.EditRole:
+        if role == _EDIT:
             # What a copy puts on the clipboard. DisplayRole is rounded to
             # six significant figures for reading, and pasting *that* into
             # Excel would quietly lose precision from every float in the
@@ -89,23 +118,22 @@ class PandasModel(QAbstractTableModel):
                 # shortest string that round-trips, so nothing is lost.
                 return repr(float(value))
             return str(value)
-        if role == Qt.ForegroundRole and _is_missing(value):
+        if role == _FOREGROUND and _is_missing(value):
             return _NAN_COLOR
-        if role == Qt.FontRole and _is_missing(value):
-            font = QFont()
-            font.setItalic(True)
-            return font
-        if role == Qt.TextAlignmentRole:
+        if role == _FONT and _is_missing(value):
+            return _MISSING_FONT
+        if role == _ALIGNMENT:
             if isinstance(value, (int, float)) and not isinstance(value, bool):
-                return int(Qt.AlignRight | Qt.AlignVCenter)
+                return _ALIGN_NUMBER
         return None
 
     def headerData(self, section: int, orientation: Qt.Orientation,
                    role: int = Qt.DisplayRole):
-        if role == Qt.DisplayRole:
-            if orientation == Qt.Horizontal:
+        role = int(role)
+        if role == _DISPLAY:
+            if orientation == _HORIZONTAL:
                 return str(self._df.columns[section])
             return str(self._df.index[section])
-        if role == Qt.ToolTipRole and orientation == Qt.Horizontal:
+        if role == _TOOLTIP and orientation == _HORIZONTAL:
             return f"dtype: {self._df.dtypes.iloc[section]}"
         return None

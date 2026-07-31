@@ -947,13 +947,7 @@ class NodeItem(QGraphicsObject):
         model = SheetModel(self.node.params.get("data"), parent=grid)
         grid.setModel(model)
         grid.verticalHeader().setFixedWidth(28)
-        grid.setStyleSheet(
-            f"QTableView {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
-            f" gridline-color: {theme.NODE_BORDER.name()}; font-size: 8.5pt; }}"
-            f"QHeaderView::section {{ background: {theme.NODE_HEADER.name()};"
-            f" color: {theme.NODE_SUBTEXT.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()}; padding: 2px; }}")
+        theme.style_scroll_area(grid, theme.grid_stylesheet())
         layout.addWidget(grid)
 
         add_row.clicked.connect(self._table_add_row)
@@ -1290,13 +1284,7 @@ class NodeItem(QGraphicsObject):
         self._table_viewer_placeholder = placeholder
 
         view = DataTableView()
-        view.setStyleSheet(
-            f"QTableView {{ background: {theme.NODE_BODY.name()};"
-            f" color: {theme.NODE_TEXT.name()}; border: none;"
-            f" gridline-color: {theme.NODE_BORDER.name()}; font-size: 8.5pt; }}"
-            f"QHeaderView::section {{ background: {theme.NODE_HEADER.name()};"
-            f" color: {theme.NODE_SUBTEXT.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()}; padding: 2px; }}")
+        theme.style_scroll_area(view, theme.grid_stylesheet())
         view.setSortingEnabled(True)
         view.hide()
         layout.addWidget(view, 1)
