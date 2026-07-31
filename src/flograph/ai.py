@@ -47,7 +47,8 @@ Each node is a single Python file with this exact contract:
 
 Rules:
 - Treat inputs as read-only. A pandas input is already a copy-on-write
-  shallow copy, so writing to it is safe; copy other types before mutating.
+  shallow copy and a list or dict is already rebuilt one level deep, so
+  writing to those is safe; a numpy input is read-only, so copy it first.
 - Heavy imports (pandas, etc.) go inside run(), never at module top level.
 - Raise plain exceptions with actionable messages on bad input.
 - Reply with ONLY the complete updated Python source for the node script —

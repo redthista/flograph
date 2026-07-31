@@ -26,6 +26,24 @@ class NodeError:
         return self.exc_type == "NodeCancelled"
 
 
+def readonly_input_hint(exc: BaseException) -> Optional[str]:
+    """The "you're writing to an input" line for the error numpy raises when
+    a node writes through the read-only view it was handed, or None.
+
+    numpy has no copy-on-write, so an array input is guarded by refusing the
+    write rather than by duplicating the array (scheduler._read_only_view).
+    Refusing is correct but its own message never mentions why the array is
+    read-only, which makes it look like a bug in the app rather than the
+    thing it is actually reporting.
+    """
+    if not isinstance(exc, ValueError) or "read-only" not in str(exc):
+        return None
+    return ("Node inputs are read-only — an array input is shared with the "
+            "node upstream, and writing to it would rewrite that node's "
+            "cached output and any other branch reading from it. Take a copy "
+            "first: arr = arr.copy().")
+
+
 def build_node_error(node_id: str, source: str, exc: BaseException) -> NodeError:
     """Extract the node-script line and a readable traceback from an exception
     raised inside a node's run()."""
@@ -48,7 +66,7 @@ def build_node_error(node_id: str, source: str, exc: BaseException) -> NodeError
     # "No module named 'plotly'" is accurate and useless on its own — say
     # where to get it, since the app can install packages itself
     message = f"{type(exc).__name__}: {exc}"
-    hint = missing_module_hint(exc)
+    hint = missing_module_hint(exc) or readonly_input_hint(exc)
     if hint:
         message = f"{message} — {hint}"
         parts.append("")
