@@ -671,6 +671,79 @@ class TestEditableTableTile:
         assert item.isVisible()
         assert not item.is_fullscreen
 
+    def test_the_overlay_chrome_paints_its_own_background(
+            self, window, shown_page, qtbot):
+        """Reported against rc11: the canvas showed straight through the
+        title bar and the toolbar. A plain QWidget subclass paints no
+        background, and a stylesheet does not give it one unless
+        WA_StyledBackground says so — it only suppresses the autofill that
+        would otherwise have covered it."""
+        from flograph.ui import theme
+        add_page(window)
+        _node, _tile = self.add_table(window)
+        page = shown_page("p1")
+        page.scene.toggle_fullscreen("t1")
+        qtbot.wait(50)
+
+        overlay = page.view.fullscreen_overlay
+        assert overlay is not None
+        rect = overlay.geometry()
+        image = page.view.grab().toImage()   # the page, overlay on top of it
+        want = theme.NODE_BODY.name()
+        # the title-bar strip, and the empty stretch of the toolbar row
+        assert image.pixelColor(rect.x() + rect.width() // 2,
+                                rect.y() + 12).name() == want
+        assert image.pixelColor(rect.x() + rect.width() - 30,
+                                rect.y() + 42).name() == want
+
+    def test_the_overlay_dying_with_its_page_is_not_a_crash(self, window):
+        """Reported against rc11: deleting a page while a tile was maximized
+        raised "Internal C++ object already deleted" out of resizeEvent. The
+        overlay hangs off the viewport, so tearing the page down destroys it
+        through C++ without going through exit_fullscreen, leaving a Python
+        wrapper that looks fine until something touches it."""
+        import shiboken6
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QResizeEvent
+
+        add_page(window)
+        _node, _tile = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen("t1")
+        view = page.view
+        overlay = view.fullscreen_overlay
+        assert overlay is not None
+
+        shiboken6.delete(overlay)            # what the page teardown does
+        assert view._fs_overlay is not None  # the wrapper is still here
+        assert view.fullscreen_overlay is None   # ...but it reports honestly
+
+        view.resizeEvent(QResizeEvent(QSize(900, 600), QSize(1000, 700)))
+        view.exit_fullscreen()               # this raised too, unreported
+
+    def test_deleting_a_maximized_page_leaves_nothing_behind(self, window):
+        from flograph.ui.commands import RemovePageCommand
+        add_page(window)
+        _node, _tile = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        page.scene.toggle_fullscreen("t1")
+        assert page.view.fullscreen_overlay is not None
+
+        window.undo_stack.push(RemovePageCommand(window.graph, "p1"))
+        assert "p1" not in window.graph.pages
+
+    def test_switching_away_from_a_maximized_page_and_back(self, window):
+        add_page(window)
+        _node, _tile = self.add_table(window)
+        page = window._dashboard_pages["p1"]
+        window._on_current_page_changed("p1")
+        page.scene.toggle_fullscreen("t1")
+        assert page.view.fullscreen_overlay is not None
+
+        window._on_current_page_changed(None)     # back to the model canvas
+        window._on_current_page_changed("p1")     # and return
+        assert page.view.fullscreen_overlay is not None
+
     def test_an_edit_in_the_overlay_reaches_the_node(self, window):
         add_page(window)
         node, item = self.add_table(window)
