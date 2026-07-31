@@ -328,8 +328,10 @@ class NodeGraphScene(QGraphicsScene):
     def is_port_connected(self, node_id: str, spec: PortSpec) -> bool:
         if spec.direction.value == "input":
             return self.graph.input_connection(node_id, spec.name) is not None
-        return any(c.src_node == node_id and c.src_port == spec.name
-                   for c in self.graph.connections.values())
+        # out_connections is indexed; scanning every wire in the graph here
+        # made this quadratic in graph size for the output case alone
+        return any(c.src_port == spec.name
+                   for c in self.graph.out_connections(node_id))
 
     def selected_node_items(self) -> list[NodeItem]:
         return [i for i in self.selectedItems() if isinstance(i, NodeItem)]

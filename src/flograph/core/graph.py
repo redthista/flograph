@@ -6,6 +6,7 @@ QUndoCommands that call these methods; the scene and engine react to
 from __future__ import annotations
 
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
@@ -28,6 +29,21 @@ class Connection:
     src_port: str
     dst_node: str
     dst_port: str
+
+
+@dataclass(frozen=True)
+class _EdgeIndex:
+    """Three views of the same edge set, so the topology reads below are
+    dictionary lookups rather than scans of every wire in the graph.
+
+    Built by `Graph._edges()`; every field keeps the iteration order of
+    `_iter_edges` — wires first, then derived links — because callers rely
+    on it (`input_connection` returns the first match, and a real wire has
+    to win over a link on the same port).
+    """
+    by_input: dict[tuple[str, str], Connection]
+    into: dict[str, list[Connection]]
+    out_of: dict[str, list[Connection]]
 
 
 @dataclass
@@ -89,6 +105,12 @@ class Graph:
         self.frames: dict[str, Frame] = {}
         self.pages: dict[str, Page] = {}
         self.events = GraphEvents()
+        # Lookup tables over the edge set, rebuilt on demand rather than
+        # patched at each mutation: there are only three places edges change
+        # and hundreds that read them, so a whole rebuild costs nothing
+        # amortised and cannot drift out of step with the dicts above the way
+        # an incrementally-maintained index can. None means "stale".
+        self._edge_index: Optional[_EdgeIndex] = None
 
     # ---------------------------------------------------------------- nodes
 
@@ -279,6 +301,7 @@ class Graph:
             if resolved.get(key) != self.links.get(key)
         }
         self.links = resolved
+        self._invalidate_edges()
         self.events.links_changed.emit()
         for node_id in sorted(moved):
             if node_id in self.nodes:
@@ -325,6 +348,9 @@ class Graph:
             dst_node=dst_node, dst_port=dst_port,
         )
         self.connections[conn.id] = conn
+        # before the emit and before mark_dirty: both walk the topology and
+        # must see the edge that was just made
+        self._invalidate_edges()
         self.events.connected.emit(conn)
         self.mark_dirty(dst_node)
         # links are only accepted when they don't close a loop, so the real
@@ -339,6 +365,7 @@ class Graph:
         conn = self.connections.pop(conn_id, None)
         if conn is None:
             raise GraphError(f"no connection with id {conn_id!r}")
+        self._invalidate_edges()
         self.events.disconnected.emit(conn)
         if conn.dst_node in self.nodes:
             self.mark_dirty(conn.dst_node)
@@ -351,19 +378,44 @@ class Graph:
         it. Persistence and wire-drawing read `self.connections` instead."""
         return (*self.connections.values(), *self.links.values())
 
+    def _invalidate_edges(self) -> None:
+        """Call after any change to `connections` or `links`. Cheap enough to
+        call freely; the rebuild is deferred to the next read."""
+        self._edge_index = None
+
+    def _edges(self) -> _EdgeIndex:
+        index = self._edge_index
+        if index is None:
+            by_input: dict[tuple[str, str], Connection] = {}
+            into: dict[str, list[Connection]] = {}
+            out_of: dict[str, list[Connection]] = {}
+            for conn in self._iter_edges():
+                # setdefault, not assignment: first edge on a port wins, which
+                # is what the old `next(...)` scan did and is what keeps a real
+                # wire ahead of a link claiming the same input
+                by_input.setdefault((conn.dst_node, conn.dst_port), conn)
+                into.setdefault(conn.dst_node, []).append(conn)
+                out_of.setdefault(conn.src_node, []).append(conn)
+            index = self._edge_index = _EdgeIndex(by_input, into, out_of)
+        return index
+
     def input_connection(self, node_id: str, port: str,
                          include_links: bool = True) -> Optional[Connection]:
-        edges = self._iter_edges() if include_links else self.connections.values()
-        return next(
-            (c for c in edges if c.dst_node == node_id and c.dst_port == port),
-            None,
-        )
+        if not include_links:
+            # Only `connect` asks this, to find a wire it may displace — a
+            # link is not the user's to drop. Not worth its own index.
+            return next(
+                (c for c in self.connections.values()
+                 if c.dst_node == node_id and c.dst_port == port),
+                None,
+            )
+        return self._edges().by_input.get((node_id, port))
 
     def in_connections(self, node_id: str) -> list[Connection]:
-        return [c for c in self._iter_edges() if c.dst_node == node_id]
+        return list(self._edges().into.get(node_id, ()))
 
     def out_connections(self, node_id: str) -> list[Connection]:
-        return [c for c in self._iter_edges() if c.src_node == node_id]
+        return list(self._edges().out_of.get(node_id, ()))
 
     def _connections_of(self, node_id: str) -> list[Connection]:
         return [c for c in self.connections.values()
@@ -385,10 +437,10 @@ class Graph:
     # ------------------------------------------------------------- topology
 
     def successors(self, node_id: str) -> set[str]:
-        return {c.dst_node for c in self._iter_edges() if c.src_node == node_id}
+        return {c.dst_node for c in self._edges().out_of.get(node_id, ())}
 
     def predecessors(self, node_id: str) -> set[str]:
-        return {c.src_node for c in self._iter_edges() if c.dst_node == node_id}
+        return {c.src_node for c in self._edges().into.get(node_id, ())}
 
     def would_cycle(self, src_node: str, dst_node: str) -> bool:
         """Would a wire src_node -> dst_node close a cycle? True iff src_node
@@ -426,16 +478,20 @@ class Graph:
             n for n in self.nodes if n in set(subset)
         ]
         id_set = set(ids)
+        # Insertion rank up front: the tie-break below used ids.index, a
+        # linear search per successor, which made a topological sort of a
+        # large graph quadratic on its own.
+        rank = {node_id: i for i, node_id in enumerate(ids)}
         indegree = {
             n: sum(1 for p in self.predecessors(n) if p in id_set) for n in ids
         }
-        queue = [n for n in ids if indegree[n] == 0]
+        queue = deque(n for n in ids if indegree[n] == 0)
         order: list[str] = []
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             order.append(current)
             in_subset = [n for n in self.successors(current) if n in id_set]
-            for nxt in sorted(in_subset, key=ids.index):
+            for nxt in sorted(in_subset, key=rank.__getitem__):
                 indegree[nxt] -= 1
                 if indegree[nxt] == 0:
                     queue.append(nxt)
