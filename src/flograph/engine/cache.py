@@ -72,8 +72,25 @@ class OutputCache:
         counted.
         """
         return sum(entry.memory_bytes for entry in self._entries.values()
-                   if entry.alias_of is None
-                   or entry.alias_of not in self._entries)
+                   if self._counts_toward_total(entry))
+
+    def _counts_toward_total(self, entry: CacheEntry) -> bool:
+        return (entry.alias_of is None
+                or entry.alias_of not in self._entries)
+
+    def heaviest(self, limit: int = 3) -> list[tuple[str, int]]:
+        """The nodes holding the most memory, largest first.
+
+        For telling someone whose machine is filling up *which* steps to
+        freeze or drop, rather than only that something is. Counted the same
+        way as total_bytes, so a value shared down a link chain is credited
+        once, to the entry that is really holding it.
+        """
+        sized = [(node_id, entry.memory_bytes)
+                 for node_id, entry in self._entries.items()
+                 if self._counts_toward_total(entry) and entry.memory_bytes]
+        sized.sort(key=lambda pair: pair[1], reverse=True)
+        return sized[:limit]
 
     def evict(self, node_id: str) -> None:
         self._entries.pop(node_id, None)
