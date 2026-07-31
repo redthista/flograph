@@ -34,7 +34,7 @@ def template_path(name: str):
 
 
 class TestBundledExamples:
-    def test_exactly_nine_templates_bundled(self):
+    def test_every_template_is_bundled(self):
         root = importlib.resources.files("flograph.templates")
         names = sorted(e.name for e in root.iterdir() if e.name.endswith(".flograph"))
         assert names == [
@@ -47,11 +47,12 @@ class TestBundledExamples:
             "07_retail_ops_command_center.flograph",
             "08_geo_population_map.flograph",
             "09_folium_map.flograph",
+            "10_svg_retrofit_workbench.flograph",
         ]
 
-    def test_examples_menu_lists_all_nine(self, window):
+    def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 9
+        assert len(window._examples_menu.actions()) == 10
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -62,6 +63,7 @@ class TestBundledExamples:
         "06_script_pipeline_frame.flograph",
         "07_retail_ops_command_center.flograph",
         "08_geo_population_map.flograph",
+        "10_svg_retrofit_workbench.flograph",
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))
