@@ -46,6 +46,34 @@ class TestSheetModel:
         assert model.index(0, 1).data(Qt.BackgroundRole) is None
         assert "whole number" in model.index(0, 0).data(Qt.ToolTipRole)
 
+    def test_roles_answer_the_same_as_plain_ints(self, qtbot):
+        """data() compares int(role) against ints rather than against
+        Qt.DisplayRole and friends, because resolving those enum attributes
+        costs ~1.9us each and Qt asks for seven roles per visible cell. The
+        answers must not depend on which form the role arrives in."""
+        model = make_model(types=["integer", "auto"], rows=[["3.7", "=1/0"]])
+        for row, col in ((0, 0), (0, 1)):
+            index = model.index(row, col)
+            for role in (Qt.DisplayRole, Qt.EditRole, Qt.ToolTipRole,
+                         Qt.ForegroundRole, Qt.BackgroundRole,
+                         Qt.TextAlignmentRole, Qt.CheckStateRole,
+                         Qt.DecorationRole):
+                assert model.data(index, role) == model.data(index, int(role))
+        assert model.headerData(0, Qt.Horizontal, Qt.DisplayRole) == \
+            model.headerData(0, Qt.Horizontal, int(Qt.DisplayRole))
+        assert model.headerData(0, Qt.Vertical, int(Qt.DisplayRole)) == 1
+
+    def test_a_bool_column_is_still_checkable(self, qtbot):
+        """flags() returns pre-built flag combinations now; the checkable
+        bit still has to be added per cell, and only for bool columns."""
+        model = make_model(types=["bool", "auto"], rows=[["TRUE", "x"]])
+        assert model.flags(model.index(0, 0)) & Qt.ItemIsUserCheckable
+        assert not model.flags(model.index(0, 1)) & Qt.ItemIsUserCheckable
+        assert model.flags(model.index(0, 1)) & Qt.ItemIsEditable
+        assert model.index(0, 0).data(Qt.CheckStateRole) == Qt.Checked
+        model.set_read_only(True)
+        assert not model.flags(model.index(0, 1)) & Qt.ItemIsEditable
+
     def test_bool_column_uses_checkboxes(self, qtbot):
         model = make_model(types=["bool", "auto"], rows=[["TRUE", ""]])
         index = model.index(0, 0)
@@ -361,6 +389,38 @@ class TestSpreadsheetView:
         view.autosize_columns()
         assert view.model().sheet.columns[0].width == view.columnWidth(0)
 
+    def test_typing_does_not_refit_every_keystroke(self, view, qtbot,
+                                                   monkeypatch):
+        """The fit reads every row of every column, and a single edit marks
+        the whole grid changed — so doing it inline made each character cost
+        the whole sheet. It has to wait for the typing to stop."""
+        from flograph.ui.spreadsheet import view as view_module
+        monkeypatch.setattr(view_module, "autosize_default_enabled",
+                            lambda: True)
+        fits = []
+        # on the instance, not the class: other views from earlier tests are
+        # still alive and their own timers would land in the count
+        monkeypatch.setattr(view, "autosize_columns",
+                            lambda *a, **k: fits.append(1))
+        model = view.model()
+        for text in ("a very wide value indeed", "wider still", "and again"):
+            model.setData(model.index(0, 0), text)
+        assert fits == []                       # nothing yet
+        qtbot.wait(view_module.AUTOFIT_IDLE_MS + 80)
+        assert len(fits) == 1                   # one fit for the burst
+
+    def test_the_settled_fit_still_widens_the_column(self, view, qtbot,
+                                                    monkeypatch):
+        """Coalescing must not lose the fit — only defer it."""
+        from flograph.ui.spreadsheet import view as view_module
+        monkeypatch.setattr(view_module, "autosize_default_enabled",
+                            lambda: True)
+        view.setColumnWidth(0, 40)
+        view.model().setData(view.model().index(0, 0),
+                             "a much longer cell value here")
+        qtbot.wait(view_module.AUTOFIT_IDLE_MS + 80)
+        assert view.columnWidth(0) > 40
+
     def test_autosize_default_setting_overrides_stored_widths(self, qtbot, monkeypatch):
         from flograph.ui.spreadsheet import view as view_module
         monkeypatch.setattr(view_module, "autosize_default_enabled",
@@ -543,21 +603,22 @@ class TestSheetEditorDialog:
         dialog = SheetEditorDialog(model.sheet_dict(), title="t")
         qtbot.addWidget(dialog)
         dialog.view.setCurrentIndex(dialog.model.index(0, 1))
-        assert dialog._cell_label.text() == "B1"
-        assert dialog._formula_edit.text() == "=A1*3"
+        assert dialog._formula_bar.cell_label.text() == "B1"
+        assert dialog._formula_bar.edit.text() == "=A1*3"
 
     def test_fx_button_shows_formula_reference(self, qtbot):
         dialog = SheetEditorDialog(sheet_to_json(make_model().sheet), title="t")
         qtbot.addWidget(dialog)
-        dialog._show_formula_reference()
-        reference = dialog._reference_dialog
+        bar = dialog._formula_bar
+        bar.show_reference()
+        reference = bar._reference
         assert reference is not None and reference.isVisible()
         browser = reference.layout().itemAt(0).widget()
         assert "SUM(A1:A10)" in browser.toPlainText()
         assert "IF(condition" in browser.toPlainText()
         # second click reuses the same window
-        dialog._show_formula_reference()
-        assert dialog._reference_dialog is reference
+        bar.show_reference()
+        assert bar._reference is reference
 
     def test_enter_while_editing_commits_cell_not_ok_button(self, qtbot):
         from PySide6.QtTest import QTest
