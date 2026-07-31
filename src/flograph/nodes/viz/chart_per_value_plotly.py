@@ -158,8 +158,9 @@ def run(ctx, table):
 
     plot = getattr(px, kind)
     figures = []
-    for value, group in groups:
+    for index, (value, group) in enumerate(groups):
         ctx.check_cancelled()
+        ctx.progress(index / len(groups))
         kwargs = {"y": y if len(y) > 1 else y[0],
                   "title": f"{split_by}: {value}"}
         if x:

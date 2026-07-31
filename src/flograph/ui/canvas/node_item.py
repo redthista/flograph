@@ -2015,14 +2015,34 @@ class NodeItem(QGraphicsObject):
         painter.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, label)
 
         led_color = QColor(theme.status_color(self.node.status))
-        if self.node.status == NodeStatus.RUNNING:
+        running = self.node.status == NodeStatus.RUNNING
+        # A node that reports a fraction gets a ring that fills; one that
+        # never calls ctx.progress() keeps the pulse. Indeterminate and
+        # determinate are the honest distinction, and the LED is already a
+        # circle — a progress bar here would be new chrome to reconcile with
+        # the chevron, the temp-edit dot and every collapsed card.
+        fraction = self.node.progress if running else 0.0
+        if running and not fraction:
             led_color.setAlphaF(0.35 + 0.65 * self._pulse)
         painter.setPen(QPen(theme.NODE_BORDER, 1))
         painter.setBrush(QBrush(led_color))
         led_center_x = width - 13
-        painter.drawEllipse(
-            QRectF(led_center_x - LED_RADIUS, HEADER_H / 2 - LED_RADIUS,
-                   2 * LED_RADIUS, 2 * LED_RADIUS))
+        led_rect = QRectF(led_center_x - LED_RADIUS, HEADER_H / 2 - LED_RADIUS,
+                          2 * LED_RADIUS, 2 * LED_RADIUS)
+        if fraction:
+            track = QColor(led_color)
+            track.setAlphaF(0.25)
+            painter.setBrush(QBrush(track))
+            painter.drawEllipse(led_rect)
+            # Qt angles are sixteenths of a degree, zero at 3 o'clock and
+            # rising anticlockwise, so filling clockwise from noon is a
+            # negative span starting at 90.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(led_color))
+            painter.drawPie(led_rect, 90 * 16, -int(fraction * 360 * 16))
+            painter.setPen(QPen(theme.NODE_BORDER, 1))
+            painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(led_rect)
         if self.node.dirty and self.node.status == NodeStatus.DONE:
             # stale: hollow out the green LED
             painter.setBrush(QBrush(self._header_color()))
@@ -2516,11 +2536,23 @@ class NodeItem(QGraphicsObject):
     # -------------------------------------------------------------- updates
 
     def on_status_changed(self) -> None:
-        if self.node.status == NodeStatus.RUNNING:
+        if self.node.status == NodeStatus.RUNNING and not self.node.progress:
             self._start_pulse()
         else:
             self._stop_pulse()
         self._refresh_tooltip()
+        self.update()
+
+    def on_progress_changed(self) -> None:
+        """The pulse and the ring are alternatives, not layers: a node that
+        has started reporting a fraction has no use for an animation running
+        at frame rate behind it, and one that drops back to none should not
+        be left sitting on a dead LED."""
+        if self.node.status == NodeStatus.RUNNING:
+            if self.node.progress:
+                self._stop_pulse()
+            else:
+                self._start_pulse()
         self.update()
 
     def _refresh_tooltip(self) -> None:

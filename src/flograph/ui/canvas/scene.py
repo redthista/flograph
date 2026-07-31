@@ -90,6 +90,7 @@ class NodeGraphScene(QGraphicsScene):
         events.code_changed.connect(self._on_code_changed)
         events.param_changed.connect(self._on_param_changed)
         events.status_changed.connect(self._on_status_changed)
+        events.progress_changed.connect(self._on_progress_changed)
         events.dirty_changed.connect(self._on_dirty_changed)
         events.label_changed.connect(self._on_label_changed)
         events.description_changed.connect(self._on_description_changed)
@@ -214,6 +215,14 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.on_status_changed()  # also refreshes the tooltip
+
+    def _on_progress_changed(self, node_id: str, fraction: float) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            # No dearer than the pulse animation this replaces, which already
+            # repaints the whole item continuously while a node runs — and the
+            # RunContext has thinned these out long before they arrive here.
+            item.on_progress_changed()
 
     def _on_dirty_changed(self, node_id: str, dirty: bool) -> None:
         item = self.node_items.get(node_id)

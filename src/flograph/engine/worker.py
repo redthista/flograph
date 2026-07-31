@@ -25,6 +25,7 @@ class WorkerSignals(QObject):
     finished = Signal(str, object, float)  # node_id, outputs: dict, wall_time
     failed = Signal(str, object)           # node_id, NodeError
     logged = Signal(str, str, str)         # node_id, line, stream
+    progressed = Signal(str, float)        # node_id, fraction 0..1
 
 
 class _LineWriter(io.TextIOBase):
@@ -82,6 +83,7 @@ class NodeRunnable(QRunnable):
                 params=self.params,
                 token=self.token,
                 log=self.signals.logged.emit,
+                progress=self.signals.progressed.emit,
             )
             import contextlib
             started = time.perf_counter()

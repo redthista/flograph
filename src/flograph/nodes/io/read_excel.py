@@ -80,8 +80,7 @@ def run(ctx):
         sheet_arg = sheet
 
     kwargs = {"header": 0 if p.get("header", True) else None}
-    if p.get("engine", "auto") != "auto":
-        kwargs["engine"] = p["engine"]
+    engine = None if p.get("engine", "auto") == "auto" else p["engine"]
     if p.get("skiprows", 0):
         kwargs["skiprows"] = int(p["skiprows"])
     if p.get("nrows", 0):
@@ -108,15 +107,28 @@ def run(ctx):
     if p.get("thousands", ""):
         kwargs["thousands"] = p["thousands"]
 
-    loaded = pd.read_excel(path, sheet_name=sheet_arg, **kwargs)
-    if isinstance(loaded, dict):
-        for name, frame in loaded.items():
-            frame.insert(0, "sheet", name)
-        table = pd.concat(loaded.values(), ignore_index=True)
+    if sheet_arg is None:
+        # Every sheet. pandas would take them all in one read_excel call, but
+        # then the whole wait is one opaque step — and this is the parameter
+        # people point at a fat workbook. Reading them one at a time costs the
+        # same (the workbook is opened once either way, measured within noise)
+        # and leaves somewhere to report from.
+        with pd.ExcelFile(path, engine=engine) as workbook:
+            names = list(workbook.sheet_names)
+            if not names:
+                raise ValueError(f"no sheets in {path}")
+            frames = []
+            for index, name in enumerate(names):
+                ctx.check_cancelled()
+                ctx.progress(index / len(names))
+                frame = workbook.parse(name, **kwargs)
+                frame.insert(0, "sheet", name)
+                frames.append(frame)
+        table = pd.concat(frames, ignore_index=True)
         ctx.log(f"loaded {len(table)} rows x {len(table.columns)} columns "
-                f"from {len(loaded)} sheet(s): {', '.join(loaded)}")
+                f"from {len(names)} sheet(s): {', '.join(names)}")
     else:
-        table = loaded
+        table = pd.read_excel(path, sheet_name=sheet_arg, engine=engine, **kwargs)
         ctx.log(f"loaded {len(table)} rows x {len(table.columns)} columns "
                 f"from sheet {sheet!r}")
     return table
