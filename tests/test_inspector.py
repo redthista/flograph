@@ -45,6 +45,37 @@ class TestPandasModel:
         assert "int" in model.headerData(0, Qt.Horizontal, Qt.ToolTipRole) \
             or "float" in model.headerData(0, Qt.Horizontal, Qt.ToolTipRole)
 
+    def test_roles_answer_the_same_as_plain_ints(self, qtbot):
+        """data() compares int(role) against ints and returns early for the
+        roles it has no opinion on — which also keeps it from doing a pandas
+        `iat` lookup per unhandled role. Neither may change the answers."""
+        df = pd.DataFrame({"x": [1.5, np.nan], "s": ["hi", "yo"]})
+        model = PandasModel(df)
+        for row in (0, 1):
+            for col in (0, 1):
+                index = model.index(row, col)
+                for role in (Qt.DisplayRole, Qt.EditRole, Qt.ForegroundRole,
+                             Qt.FontRole, Qt.TextAlignmentRole,
+                             Qt.BackgroundRole, Qt.ToolTipRole,
+                             Qt.DecorationRole):
+                    assert model.data(index, role) == \
+                        model.data(index, int(role))
+        # the early-out roles genuinely answer nothing
+        assert model.data(model.index(0, 0), Qt.BackgroundRole) is None
+        assert model.data(model.index(0, 0), Qt.DecorationRole) is None
+        # ...and an invalid index is still safe
+        assert model.data(QModelIndex(), Qt.DisplayRole) is None
+
+    def test_missing_values_stay_italic_and_grey(self, qtbot):
+        """The italic font is built once at import now rather than per
+        call — it must still only apply to the missing cells."""
+        df = pd.DataFrame({"x": [1.5, np.nan]})
+        model = PandasModel(df)
+        assert model.data(model.index(1, 0), Qt.FontRole).italic()
+        assert model.data(model.index(0, 0), Qt.FontRole) is None
+        assert model.data(model.index(1, 0), Qt.ForegroundRole) is not None
+        assert model.data(model.index(0, 0), Qt.ForegroundRole) is None
+
 
 class TestInspector:
     def _run(self, qtbot, engine):
