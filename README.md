@@ -91,7 +91,10 @@ Group By node is a file you can open and change.
 topological walk of the *dirty* subgraph on a background thread, so re-runs
 only recompute what actually changed. Outputs are cached per node. Status
 LEDs read at a glance: grey idle, yellow queued, pulsing blue running, green
-done, red error. Cancellation is cooperative (`ctx.check_cancelled()`).
+done, red error — and a node that reports `ctx.progress(0..1)` from its loop
+fills that LED as a ring instead of pulsing, with the percentage beside the
+node's name in the status bar. Cancellation is cooperative
+(`ctx.check_cancelled()`).
 
 **Inspect everything.** Click any node or wire to see the data on it — a
 paged table view for DataFrames (millions of rows are fine), matplotlib
@@ -250,6 +253,7 @@ PARAMS = [
 def run(ctx, table):
     ctx.log(f"scaling by {ctx.params['factor']}")
     ctx.check_cancelled()          # cooperative cancellation
+    ctx.progress(0.5)              # 0..1 through a long loop; throttled
     return {"result": table * ctx.params["factor"]}
 ```
 

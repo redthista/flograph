@@ -38,8 +38,10 @@ PARAMS = [
 # run() is called with each input port as a keyword argument (unconnected
 # optional inputs arrive as None) and returns a dict keyed by output port
 # name. Treat inputs as read-only — outputs are cached and shared by
-# reference. A pandas input arrives as a copy-on-write shallow copy, so
-# writing to it is safe and free; copy anything else before mutating it.
+# reference. A pandas input arrives as a copy-on-write shallow copy and a
+# list or dict is rebuilt one level deep, so writing to those is safe and
+# free; a numpy input arrives read-only, so copy it first, and reaching
+# through an input to change what is inside it still reaches upstream.
 # Create figures with
 # matplotlib.figure.Figure(), never pyplot.
 #
@@ -53,7 +55,10 @@ PARAMS = [
 # ctx is the run context:
 #   ctx.params            current param values (dict)
 #   ctx.log(msg)          write to the log console
-#   ctx.progress(0.5)     report progress from long loops
+#   ctx.progress(0.5)     0..1 through this node's own work; fills the ring
+#                         in its status LED and shows in the status bar. Call
+#                         it as often as you like — it is throttled for you.
+#                         A node that never calls it just pulses instead.
 #   ctx.check_cancelled() raise if the user hit cancel
 def run(ctx, table):
     source = ctx.params["source"].strip()

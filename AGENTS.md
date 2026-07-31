@@ -45,6 +45,14 @@ Every node script must define:
 - Optional `PARAMS` list of dicts with `name`, `type`, `default`, etc.
 - `def run(ctx, **inputs) -> dict`: returns dict keyed by output port names
 
+`ctx` is the whole node-facing API and is deliberately small: `ctx.params`,
+`ctx.log(msg)`, `ctx.check_cancelled()`, `ctx.progress(0..1)`, `ctx.node_id`.
+It carries no handle on the graph, the cache or Qt. Since iteration lives in
+a node's own `run()`, a loop should call `check_cancelled()` and `progress()`
+each pass — the first keeps Stop working, the second fills the ring in the
+node's status LED. `progress()` is throttled inside `RunContext`, so call it
+as often as is convenient.
+
 Port types: `any, dataframe, series, number, string, bool, object, figure`.
 
 Optional `NODE["card"]` gives a node a rich canvas card / dashboard tile

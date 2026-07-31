@@ -463,7 +463,20 @@ class Graph:
         node = self.node(node_id)
         node.status = status
         node.status_message = message
+        # Leaving RUNNING — finished, failed, cancelled, re-queued — retires
+        # whatever fraction the node last reported. Clearing it in the one
+        # place every status change goes through beats resetting it at each
+        # of the scheduler's exits and missing one.
+        if status is not NodeStatus.RUNNING and node.progress:
+            node.progress = 0.0
+            self.events.progress_changed.emit(node_id, 0.0)
         self.events.status_changed.emit(node_id, status, message)
+
+    def set_progress(self, node_id: str, fraction: float) -> None:
+        """How far through its work the running node says it is (0..1)."""
+        node = self.node(node_id)
+        node.progress = max(0.0, min(1.0, float(fraction)))
+        self.events.progress_changed.emit(node_id, node.progress)
 
     # --------------------------------------------------------------- frames
 

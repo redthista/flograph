@@ -30,7 +30,12 @@ def run(ctx, table):
     total_rows = len(table)
     rows: list[dict] = []
 
-    for col in col_list:
+    for index, col in enumerate(col_list):
+        # nunique() alone is a full pass per column, so a wide frame spends
+        # real time in here — long enough to be worth both reporting and
+        # being able to stop.
+        ctx.check_cancelled()
+        ctx.progress(index / len(col_list))
         series = table[col]
         dtype_name = str(series.dtype)
         non_null = int(series.count())

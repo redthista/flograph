@@ -65,8 +65,8 @@ class NodeInstance:
 
     `spec` is the *effective* spec: the registry's shared spec normally, or a
     re-parsed one when the user forked the code (`code_override` set — that is
-    also the serialization signal). `status`/`status_message` are runtime-only
-    and never serialized; every node loads dirty.
+    also the serialization signal). `status`/`status_message`/`progress` are
+    runtime-only and never serialized; every node loads dirty.
     """
     id: str
     spec: NodeSpec
@@ -120,6 +120,13 @@ class NodeInstance:
     z: Optional[int] = None
     status: NodeStatus = NodeStatus.IDLE
     status_message: str = ""
+    # How far through its own work the running node says it is, 0..1, from
+    # ctx.progress(). Runtime-only like status, and only meaningful while
+    # RUNNING: Graph.set_status zeroes it on the way to any other status, so
+    # a finished or cancelled node can never leave a stale fraction behind.
+    # 0.0 means "no fraction reported" — the node shows an indeterminate
+    # pulse rather than an empty ring.
+    progress: float = 0.0
     dirty: bool = True
     _temp_edit: bool = False  # transient — unsaved edits in editor panel
 

@@ -195,6 +195,12 @@ class ExecutionEngine(QObject):
     node_log = Signal(str, str, str)       # node_id, line, stream
     node_failed = Signal(str, object)      # node_id, NodeError
     node_succeeded = Signal(str)           # node_id
+    # node_id, 1-based position in the plan, plan size. The size is the plan
+    # as built: _prune_downstream can shorten it mid-run, so a run may stop
+    # short of its own total. An upper bound is still worth showing — the
+    # alternative is a counter that walks backwards.
+    node_started = Signal(str, int, int)
+    node_progress = Signal(str, float)     # node_id, fraction 0..1
     run_recorded = Signal(object)          # RunRecord — a finished run's cost
 
     def __init__(self, graph: Graph, parent: Optional[QObject] = None) -> None:
@@ -209,6 +215,11 @@ class ExecutionEngine(QObject):
         self.pool = QThreadPool.globalInstance()
 
         self._plan: list[str] = []
+        # Size of the plan as built and how many nodes have been started from
+        # it, for "node 3 of 12". _plan itself is consumed by popping, so it
+        # cannot answer either on its own.
+        self._plan_total = 0
+        self._plan_done = 0
         self._current: Optional[str] = None
         # id(shallow copy handed to the running node) -> (src_node, src_port),
         # so a pass-through node returning its input is still recognised as
@@ -254,6 +265,8 @@ class ExecutionEngine(QObject):
             return
         self._token = CancellationToken()
         self._plan = build_plan(self.graph, targets, self.cache)
+        self._plan_total = len(self._plan)
+        self._plan_done = 0
         self._had_failure = False
         if not self._plan:
             return
@@ -350,10 +363,13 @@ class ExecutionEngine(QObject):
         signals.finished.connect(self._on_node_finished)
         signals.failed.connect(self._on_node_failed)
         signals.logged.connect(self.node_log)
+        signals.progressed.connect(self._on_node_progress)
 
         self._current = node_id
         self._open_node_run(node_id)
         self.graph.set_status(node_id, NodeStatus.RUNNING)
+        self._plan_done += 1
+        self.node_started.emit(node_id, self._plan_done, self._plan_total)
         self.pool.start(NodeRunnable(
             node_id=node_id,
             source=node.source,
@@ -365,6 +381,21 @@ class ExecutionEngine(QObject):
         ))
 
     # ------------------------------------------- worker results (GUI thread)
+
+    def _on_node_progress(self, node_id: str, fraction: float) -> None:
+        """A ctx.progress() call, already throttled by the RunContext.
+
+        Onto the model for the canvas — every scene watches the graph's
+        events, so a node on a page nobody is looking at costs nothing — and
+        out as a signal for the status bar, which wants the run's view of it
+        rather than one node's.
+        """
+        # Cancel clears the floor before the pool thread notices; anything
+        # still in flight from the outgoing node is no longer worth drawing.
+        if node_id != self._current or node_id not in self.graph.nodes:
+            return
+        self.graph.set_progress(node_id, fraction)
+        self.node_progress.emit(node_id, fraction)
 
     def _alias_source(self, node_id: str, outputs: dict) -> tuple:
         """`(source_node, source_port)` if this node merely re-served a value

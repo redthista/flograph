@@ -19,6 +19,9 @@ A node is a Python module-shaped text that declares:
 
 `ctx` is the engine's RunContext: ctx.params, ctx.log(msg),
 ctx.check_cancelled(), ctx.progress(fraction), ctx.node_id.
+`ctx.progress(0..1)` is how a loop says where it has got to: it fills the
+ring in the node's status LED and the status bar line. Calls are throttled,
+so report as often as is convenient.
 
 Rules:
 - Treat inputs as read-only (outputs are cached and shared by reference).

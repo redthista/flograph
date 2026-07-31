@@ -164,6 +164,9 @@ class MainWindow(QMainWindow):
         self.resource_monitor.clicked.connect(self._show_stats)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self._apply_stats_settings()
+        # What the running node's percentage gets appended to, so a progress
+        # tick redraws the line without re-deriving the label and counter.
+        self._run_status_prefix = "Running…"
         self.statusBar().showMessage("Ready")
 
     def _canvas_pages(self) -> list:
@@ -648,7 +651,22 @@ class MainWindow(QMainWindow):
             self.action_cancel.setEnabled(True)
             self.action_run.setEnabled(False)
             self.action_run_selected.setEnabled(False)
-            self.statusBar().showMessage("Running…")
+            # Stands until the first node claims the floor, which is a
+            # moment away — the plan is already built by the time this fires.
+            self._run_status_prefix = "Running…"
+            self.statusBar().showMessage(self._run_status_prefix)
+
+        def on_node_started(node_id: str, index: int, total: int) -> None:
+            node = self.graph.nodes.get(node_id)
+            label = node.label if node is not None else node_id
+            # Serial execution — one NodeRunnable in flight — is what lets a
+            # single line name the node without ambiguity.
+            self._run_status_prefix = f"Running {label} — node {index} of {total}"
+            self.statusBar().showMessage(self._run_status_prefix)
+
+        def on_node_progress(node_id: str, fraction: float) -> None:
+            self.statusBar().showMessage(
+                f"{self._run_status_prefix} · {fraction:.0%}")
 
         def on_finished(ok: bool) -> None:
             self.action_cancel.setEnabled(False)
@@ -670,6 +688,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(message, 5000 if not stale else 15000)
 
         engine.run_started.connect(on_started)
+        engine.node_started.connect(on_node_started)
+        engine.node_progress.connect(on_node_progress)
         engine.run_finished.connect(on_finished)
         engine.node_failed.connect(self._on_node_failed)
         engine.node_succeeded.connect(self.editor_panel.on_node_succeeded)

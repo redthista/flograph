@@ -168,8 +168,9 @@ def run(ctx, table):
             limits = (low - pad, high + pad)
 
     figures = []
-    for value, group in groups:
+    for index, (value, group) in enumerate(groups):
         ctx.check_cancelled()
+        ctx.progress(index / len(groups))
         figure = Figure(figsize=(7, 3.2), layout="tight")
         axes = figure.add_subplot()
         if kind == "bar":

@@ -34,6 +34,7 @@ class FakeContext:
         self.params = params or {}
         self.node_id = node_id
         self.logs: list[str] = []
+        self.fractions: list[float] = []
 
     def log(self, msg: str) -> None:
         self.logs.append(str(msg))
@@ -42,7 +43,9 @@ class FakeContext:
         pass
 
     def progress(self, fraction: float) -> None:
-        pass
+        # Unthrottled, unlike the real RunContext: a node test wants every
+        # call it made, not the subset a GUI would have been shown.
+        self.fractions.append(float(fraction))
 
 
 PASSTHROUGH = """
