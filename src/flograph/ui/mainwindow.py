@@ -205,6 +205,7 @@ class MainWindow(QMainWindow):
         self._on_current_page_changed(self.page_bar.current_page_id())
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
         self.resource_monitor.clicked.connect(self._show_stats)
+        self.resource_monitor.pressure_changed.connect(self._on_memory_pressure)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self._apply_stats_settings()
         self.statusBar().showMessage("Ready")
@@ -689,6 +690,17 @@ class MainWindow(QMainWindow):
         # typing pauses, so hitting F5 mid-word would otherwise run against
         # the value as it was one keystroke ago.
         self.params_panel.flush_pending()
+
+    def _on_memory_pressure(self, message: str) -> None:
+        """Said once, when the project becomes the reason memory is tight.
+
+        Not while a run is on: the status line is busy saying what is
+        running, and that is the more useful thing at that moment. The amber
+        bar and its tooltip carry it until the run ends.
+        """
+        if self.engine.active:
+            return
+        self.statusBar().showMessage(message, 15000)
 
     # ----------------------------------------------------------- run status
 

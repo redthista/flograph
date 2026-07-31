@@ -31,6 +31,26 @@ from . import theme
 REFRESH_MS = 2000
 BAR_W, BAR_H = 108, 9
 _LABEL_STYLE = "color: #9ca3af; font-size: 8pt; padding: 0 4px;"
+_WARN_LABEL_STYLE = "color: #eab308; font-size: 8pt; padding: 0 4px;"
+
+# When to say the project is the reason the machine is filling up. Both have
+# to hold: a machine at 90% is not this flow's fault if the flow is holding
+# 200 MB, and a flow holding 12 GB on a 128 GB box is not a problem yet.
+# Nothing is ever evicted on the strength of this -- the cache invariant is
+# "a node is clean iff its outputs are cached", so dropping an entry behind
+# the user's back marks the node dirty and it silently re-runs later. Saying
+# so and leaving the choice with them is the honest half of that trade.
+SYSTEM_PRESSURE = 0.85   # fraction of system memory in use
+CACHE_SHARE = 0.10       # fraction of system memory held as cached outputs
+# How far back below those lines it has to fall before the warning clears.
+# Memory in use wanders by a percentage point or two from moment to moment,
+# so a bare threshold flickers the bar and re-announces itself every couple
+# of seconds while hovering. Warn late, stop warning later.
+PRESSURE_RELIEF = 0.05
+CACHE_RELIEF = 0.02
+# The same amber as the stale-pin and unsaved-edit markers on the canvas —
+# one colour meaning "worth a look, nothing is broken" across the app.
+WARN_COLOR = "#eab308"
 
 
 def format_bytes(n: float) -> str:
@@ -39,6 +59,25 @@ def format_bytes(n: float) -> str:
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1024
     return f"{n:.1f} GB"
+
+
+def memory_pressure(cache: int, used: int, total: int,
+                    already_warning: bool = False) -> bool:
+    """Is this project the reason the machine is running out?
+
+    Both halves matter. A machine at 90% is not this flow's doing if the
+    flow holds 200 MB, and a flow holding 12 GB of a 128 GB box has not
+    caused a problem yet. Warning on either alone would cry wolf.
+
+    `already_warning` lowers both lines, so a reading that wanders across
+    the threshold — which is what memory in use does — does not toggle the
+    bar and re-announce itself every couple of seconds.
+    """
+    if total <= 0:
+        return False
+    system_line = SYSTEM_PRESSURE - (PRESSURE_RELIEF if already_warning else 0.0)
+    cache_line = CACHE_SHARE - (CACHE_RELIEF if already_warning else 0.0)
+    return used / total >= system_line and cache / total >= cache_line
 
 
 def format_seconds(s: float) -> str:
@@ -68,6 +107,7 @@ class MemoryBar(QWidget):
         self.process_bytes = 0
         self.used_bytes = 0
         self.total_bytes = 1
+        self.warning = False
 
     def set_values(self, cache: int, process: int, used: int, total: int) -> None:
         self.cache_bytes = max(0, cache)
@@ -75,6 +115,14 @@ class MemoryBar(QWidget):
         self.used_bytes = max(0, used)
         self.total_bytes = max(1, total)
         self.update()
+
+    def set_warning(self, warning: bool) -> None:
+        """Amber the cached-outputs segment — the part the user can act on —
+        rather than the whole bar, which would read as "the machine is full"
+        when the point is "and this project is why"."""
+        if warning != self.warning:
+            self.warning = warning
+            self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -99,9 +147,10 @@ class MemoryBar(QWidget):
             return self.width() * value / self.total_bytes
 
         painter.setClipRect(rect)
+        cache_color = WARN_COLOR if self.warning else theme.MEM_CACHE
         for value, color in ((used, theme.MEM_OTHER),
                              (process, theme.MEM_APP),
-                             (cache, theme.MEM_CACHE)):
+                             (cache, cache_color)):
             width = px(value)
             if width <= 0:
                 continue
@@ -117,12 +166,17 @@ class ResourceMonitorWidget(QWidget):
     the selected node's."""
 
     clicked = Signal()
+    # Emitted once when the project becomes the reason memory is tight, not
+    # on every refresh — a status bar line that reappears every two seconds
+    # is nagging, and nagging gets ignored.
+    pressure_changed = Signal(str)
 
     def __init__(self, engine: ExecutionEngine, parent=None) -> None:
         super().__init__(parent)
         self._engine = engine
         self._node_id: Optional[str] = None
         self._sampler = ProcessSampler()
+        self._warned = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 8, 0)
@@ -163,20 +217,57 @@ class ResourceMonitorWidget(QWidget):
         vm = psutil.virtual_memory()
         cache = self._engine.cache.total_bytes()
         process = self._sampler.rss()
+        under_pressure = memory_pressure(cache, vm.used, vm.total,
+                                         already_warning=self._warned)
         self.bar.set_values(cache, process, vm.used, vm.total)
+        self.bar.set_warning(under_pressure)
         self._mem_label.setText(
             f"{format_bytes(vm.used)} / {format_bytes(vm.total)}")
+        self._mem_label.setStyleSheet(
+            _WARN_LABEL_STYLE if under_pressure else _LABEL_STYLE)
 
         cached_nodes = sum(
             1 for nid in self._engine.graph.nodes if self._engine.cache.has(nid))
-        self.setToolTip(
-            f"Cached outputs\t{format_bytes(cache)}  ({cached_nodes} nodes)\n"
-            f"flograph process\t{format_bytes(process)}\n"
-            f"System\t\t{format_bytes(vm.used)} / {format_bytes(vm.total)}"
-            f"  ({vm.percent:.0f}%)\n\nClick for full statistics")
+        tip = (f"Cached outputs\t{format_bytes(cache)}  ({cached_nodes} nodes)\n"
+               f"flograph process\t{format_bytes(process)}\n"
+               f"System\t\t{format_bytes(vm.used)} / {format_bytes(vm.total)}"
+               f"  ({vm.percent:.0f}%)")
+        if under_pressure:
+            tip += "\n\n" + self._pressure_detail(cache, vm.total)
+        self.setToolTip(tip + "\n\nClick for full statistics")
+
+        if under_pressure != self._warned:
+            self._warned = under_pressure
+            if under_pressure:
+                self.pressure_changed.emit(self._pressure_summary(cache, vm.total))
 
         self._run_label.setText(self._run_text())
         self._node_label.setText(self._node_text())
+
+    def _heaviest(self, limit: int = 3) -> list[tuple[str, str]]:
+        """(label, size) for the nodes holding the most, largest first."""
+        graph = self._engine.graph
+        out = []
+        for node_id, size in self._engine.cache.heaviest(limit):
+            node = graph.nodes.get(node_id)
+            out.append((node.label if node else node_id, format_bytes(size)))
+        return out
+
+    def _pressure_summary(self, cache: int, total: int) -> str:
+        """One line for the status bar — what is held, and what to do."""
+        heaviest = self._heaviest(1)
+        worst = (f", the largest being {heaviest[0][0]} at {heaviest[0][1]}"
+                 if heaviest else "")
+        return (f"Memory is tight — cached outputs are "
+                f"{format_bytes(cache)} of {format_bytes(total)}{worst}. "
+                f"Freeze what you still need, or Reset Caches to release it.")
+
+    def _pressure_detail(self, cache: int, total: int) -> str:
+        # tab-aligned to match the three rows above it in the tooltip
+        lines = ["Memory is tight. Holding the most:"]
+        lines += [f"  {label}\t{size}" for label, size in self._heaviest(3)]
+        lines.append("Freeze what you still need, or Reset Caches to release.")
+        return "\n".join(lines)
 
     def _run_text(self) -> str:
         record = self._engine.history.latest
