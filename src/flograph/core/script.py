@@ -22,9 +22,13 @@ ctx.check_cancelled(), ctx.progress(fraction), ctx.node_id.
 
 Rules:
 - Treat inputs as read-only (outputs are cached and shared by reference).
-  A pandas input is handed over as a copy-on-write shallow copy, so writing
-  to one costs nothing and cannot reach the node upstream; for anything else
-  — a list, a dict, a numpy array — read-only is still yours to honour.
+  The engine guards what it can guard for free: a pandas input arrives as a
+  copy-on-write shallow copy, and a list, dict, set or bytearray is rebuilt
+  one level deep, so appending to a list or writing a column lands on your
+  copy and cannot reach the node upstream. A numpy input arrives read-only
+  and raises if you write to it — take `arr.copy()` first. Reaching *through*
+  an input (`rows[0]["x"] = 1`) and anything else that gets passed along, a
+  figure or a connection, are still yours to honour.
 - Unconnected optional inputs arrive as None.
 - Heavy imports belong inside run(), top-level code should only declare.
   This is not just about speed: the script is *executed* to read NODE and

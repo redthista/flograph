@@ -261,10 +261,14 @@ list.
 
 Rules that matter:
 
-- **Treat inputs as read-only** — outputs are cached by reference. A pandas
-  input arrives as a copy-on-write shallow copy, so writing to it is free and
-  stays local to your node; a list, dict or numpy array is shared as it is,
-  so copy that yourself before changing it.
+- **Treat inputs as read-only** — outputs are cached by reference, so a write
+  that escapes your node rewrites what every other branch reads. The engine
+  guards what it can guard for free: a pandas input arrives as a
+  copy-on-write shallow copy, and a list, dict, set or bytearray is rebuilt
+  one level deep, so appending to a list or assigning a column stays local to
+  your node. A numpy array arrives read-only and raises if you write to it —
+  `arr = arr.copy()` first. Reaching *through* an input (`rows[0]["x"] = 1`),
+  and anything else you pass between nodes, remain yours to copy.
 - **Heavy imports go inside `run()`.** Node scripts are executed to be read,
   so a top-level import runs at library-load time.
 - **matplotlib: the OO API only** (`matplotlib.figure.Figure()`), never

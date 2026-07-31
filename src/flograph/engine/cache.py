@@ -1,11 +1,12 @@
 """Per-node output cache.
 
 Values are held by reference (nodes must treat inputs as read-only — see the
-node contract; pandas values are additionally handed downstream as
-copy-on-write shallow copies, so a node writing to its input cannot reach
-back into the entry cached here — see scheduler._read_only_view). Invariant
-maintained by the engine: a node is clean iff its outputs are cached;
-dirtying a node evicts its entry.
+node contract). What is handed downstream is guarded wherever that is free:
+pandas values as copy-on-write shallow copies, containers rebuilt one level
+deep, numpy arrays as read-only views, so a node writing to its input cannot
+reach back into the entry cached here — see scheduler._read_only_view.
+Invariant maintained by the engine: a node is clean iff its outputs are
+cached; dirtying a node evicts its entry.
 
 Some nodes hand their input straight back — Goto, From, Reroute — so several
 entries can end up serving one and the same object. Those entries record an

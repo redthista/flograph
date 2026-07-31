@@ -34,7 +34,7 @@ flograph
 - **`flograph/core/` is Qt-free.** No PySide6, no pandas, no matplotlib at top level. Enforced by poison test.
 - **QUndoCommands are the sole writers to the graph.** UI items react to graph events; never mutate the graph directly from a click handler.
 - **Nodes are text scripts, never imported.** They live under `src/flograph/nodes/<category>/` and are parsed by `flograph.core.script.parse_spec()`.
-- **Nodes treat inputs as read-only** — outputs are cached by reference. Pandas inputs are handed over as copy-on-write shallow copies by `scheduler._read_only_view`, so writing to one cannot reach the entry cached upstream; other types are shared as-is and the contract is the only guard.
+- **Nodes treat inputs as read-only** — outputs are cached by reference. `scheduler._read_only_view` enforces what it can enforce for free: pandas inputs become copy-on-write shallow copies, list/dict/set/bytearray are rebuilt one level deep (items are not copied — pandas items inside are guarded, everything else is not), numpy arrays become read-only views that raise on write (`errors.readonly_input_hint` explains the error). Writing *through* an input, and any other type, are the contract's job.
 - **Heavy imports go inside `run()`, not top-level** — top-level code executes at registry load for every node.
 - **matplotlib: OO API only** (`matplotlib.figure.Figure()`), never `pyplot`. Not thread-safe from the worker.
 
