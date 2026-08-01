@@ -149,7 +149,7 @@ class TestPageTabs:
         assert layout.itemAt(0).widget() is window.page_bar
         assert layout.itemAt(1).widget() is window._dock_host
         assert window.log_dock in window._dock_host.tabifiedDockWidgets(
-            window.inspector_dock)
+            window.properties_dock)
 
     def test_set_page_bar_position_moves_it_and_preserves_tab_groups(self, window):
         window.set_page_bar_position("bottom")
@@ -170,11 +170,10 @@ class TestPageTabs:
         assert layout.itemAt(0).widget() is window._dock_host
         assert layout.itemAt(1).widget() is window.page_bar
 
-        # switching around never disturbed the pre-existing tab groups
-        assert window.log_dock in window._dock_host.tabifiedDockWidgets(
-            window.inspector_dock)
-        assert window.editor_dock in window._dock_host.tabifiedDockWidgets(
-            window.properties_dock)
+        # switching around never disturbed the pre-existing tab group
+        group = window._dock_host.tabifiedDockWidgets(window.properties_dock)
+        assert window.editor_dock in group
+        assert window.log_dock in group
 
     def test_page_bar_position_persists_to_settings(self, window):
         window.set_page_bar_position("bottom")

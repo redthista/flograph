@@ -16,8 +16,9 @@ import platform
 from PySide6.QtCore import QSize, Qt, qVersion
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QSpinBox, QStackedWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QKeySequenceEdit, QLineEdit, QMessageBox, QPushButton, QSpinBox,
+    QStackedWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget,
 )
 
 from .canvas import grid
@@ -161,6 +162,8 @@ class SettingsDialog(QDialog):
     def __init__(self, window, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
+        # the shortcuts page reads back from the registry on a reset
+        self._window = window
         # Wide enough that the grid never opens with a horizontal scrollbar.
         # The nav takes a fixed 180, the Setting column 250, and the value
         # column has to clear the widest control's own size hint or the view
@@ -199,6 +202,7 @@ class SettingsDialog(QDialog):
         pages = {
             "General": self._build_general_page(window),
             "Canvas": self._build_canvas_page(window),
+            "Keyboard Shortcuts": self._build_shortcuts_page(window),
             "Statistics": self._build_stats_page(window),
             "Table Node": self._build_table_node_page(),
             "About": self._build_about_page(),
@@ -630,6 +634,100 @@ class SettingsDialog(QDialog):
                  "your project.")
 
         return page
+
+    def _build_shortcuts_page(self, window) -> QWidget:
+        """One row per command: what it does, and the key that does it.
+
+        Live-apply like every other page -- a captured key takes effect on
+        the action immediately, with no Save step. The exception is a clash:
+        two actions on one key makes Qt fire neither, so a duplicate is
+        refused and said so, rather than quietly breaking both commands.
+        """
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        rows = SettingsGrid()
+        layout.addWidget(rows, 1)
+
+        note = QLabel()
+        note.setObjectName("shortcut_conflict_note")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #c0392b;")
+        note.hide()
+        layout.addWidget(note)
+
+        self._shortcut_editors: dict[str, QKeySequenceEdit] = {}
+        registry = window.shortcuts
+
+        for group in registry.groups():
+            rows.add_group(group)
+            for entry in registry.entries():
+                if entry.group != group:
+                    continue
+                rows.add(entry.label, self._shortcut_row(registry, entry, note),
+                         f"Keyboard shortcut for {entry.label}. Click the "
+                         f"field and press the keys you want. Clear it to "
+                         f"leave the command available from the menu only.")
+
+        rows.add_group("All shortcuts")
+        reset_all = QPushButton("Restore defaults")
+        reset_all.setObjectName("shortcuts_reset_all_button")
+        reset_all.clicked.connect(registry.reset_all)
+        rows.add("Put every shortcut back", reset_all,
+                 "Discards every rebind on this page and returns each "
+                 "command to the key it shipped with.")
+
+        # the registry is the source of truth: a reset (here or from Reset
+        # Settings) has to pull the fields back into line with it
+        registry.changed.connect(self._sync_shortcut_editors)
+        return page
+
+    def _shortcut_row(self, registry, entry, note) -> QWidget:
+        """A capture field plus its own reset, side by side in one cell."""
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+
+        edit = QKeySequenceEdit(entry.binding())
+        edit.setObjectName(f"shortcut_edit_{entry.key}")
+        # one chord, not a Qt-style multi-step sequence: every shortcut in
+        # the app is a single combination, and capturing four of them by
+        # accident is a confusing way to lose a binding
+        edit.setMaximumSequenceLength(1)
+        self._shortcut_editors[entry.key] = edit
+
+        revert = QToolButton()
+        revert.setObjectName(f"shortcut_reset_{entry.key}")
+        revert.setText("↺")
+        revert.setAutoRaise(True)
+        revert.setToolTip("Back to the default key")
+        revert.clicked.connect(lambda _=False, key=entry.key: registry.reset(key))
+
+        def commit(key=entry.key, field=edit) -> None:
+            clash = registry.set_binding(key, field.keySequence())
+            if clash is None:
+                note.hide()
+                return
+            note.setText(
+                f"{field.keySequence().toString()} is already {clash}'s "
+                f"shortcut. Change that one first, or pick another key.")
+            note.show()
+            # put the field back: leaving the refused key sitting in it
+            # would read as though it had been accepted
+            field.setKeySequence(registry.entry(key).binding())
+
+        edit.editingFinished.connect(commit)
+
+        row.addWidget(edit, 1)
+        row.addWidget(revert)
+        return holder
+
+    def _sync_shortcut_editors(self) -> None:
+        registry = self._window.shortcuts
+        for key, edit in self._shortcut_editors.items():
+            entry = registry.entry(key)
+            if entry is not None:
+                edit.setKeySequence(entry.binding())
 
     @staticmethod
     def _build_table_node_page() -> QWidget:
