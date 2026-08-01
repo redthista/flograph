@@ -1,0 +1,809 @@
+{
+  "flograph_version": "0.1.8",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "gt_note_title",
+        "type": "flograph.util.note",
+        "pos": [
+          -1780,
+          -1640
+        ],
+        "params": {
+          "text": "# Goto & From: the invisible wire\n\n**Four tables, three branches \u2014 and the canvas stays readable because links carry the data across it.**\n\nEvery branch needs the same prep, but nothing redraws it and no wires cross the page:\n\n- **Sources & prep** builds two shared products \u2014 *Orders with revenue* (cleaned orders plus a revenue column) and *Enriched orders* (those same orders joined to their customer segment) \u2014 and hands them, plus *Products* and *Regional targets*, to **Goto** nodes that name them.\n- **Regional performance**, **Product mix** and **Data quality** reach back for what they need with **From** nodes. A From is a Goto's destination end; the run treats a link exactly like a wire, so edit the sources and all three branches re-run.\n\nPress **F5**, then open the **Report** page. To see what this saves you, imagine every From drawn as a wire \u2014 the canvas becomes a crosshatch.",
+          "width": 620
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_note_links",
+        "type": "flograph.util.note",
+        "pos": [
+          480,
+          -1640
+        ],
+        "params": {
+          "text": "**Links, not wires**\n\nEach From here reads the Goto named on its card \u2014 *Enriched orders*, *Regional targets*, *Orders with revenue*, *Products*. Rename a Goto and its Froms follow; two Froms may read the same Goto. Select a Goto to see which Froms it feeds.",
+          "width": 380
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_orders",
+        "type": "flograph.io.table",
+        "pos": [
+          -1720,
+          -860
+        ],
+        "params": {
+          "data": "{\"columns\": [\"order_id\", \"date\", \"region\", \"customer_id\", \"product_id\", \"units\", \"unit_price\"], \"rows\": [[1001, \"Mon\", \"North\", 1, 101, 2, 1200], [1002, \"Mon\", \"North\", 2, 103, 3, 350], [1003, \"Mon\", \"East\", 1, 105, 1, 220], [1004, \"Tue\", \"East\", 3, 101, 1, 1200], [1005, \"Tue\", \"South\", 4, 104, 2, 450], [1006, \"Tue\", \"South\", 2, 106, 4, 90], [1007, \"Wed\", \"West\", 5, 102, 2, 800], [1008, \"Wed\", \"West\", 3, 107, 5, 150], [1009, \"Thu\", \"North\", 4, 108, 6, 40], [1010, \"Fri\", \"North\", 5, 105, 3, 220], [1011, \"Sat\", \"North\", 1, 106, 0, 90]]}",
+          "width": 360,
+          "height": 220
+        },
+        "code": null,
+        "label": "Orders"
+      },
+      {
+        "id": "gt_customers",
+        "type": "flograph.io.table",
+        "pos": [
+          -1720,
+          -610
+        ],
+        "params": {
+          "data": "{\"columns\": [\"customer_id\", \"name\", \"segment\"], \"rows\": [[1, \"Acme Co\", \"Enterprise\"], [2, \"Globex\", \"SMB\"], [3, \"Initech\", \"Enterprise\"], [4, \"Umbrella\", \"SMB\"], [5, \"Soylent\", \"Consumer\"]]}",
+          "width": 300,
+          "height": 160
+        },
+        "code": null,
+        "label": "Customers"
+      },
+      {
+        "id": "gt_products",
+        "type": "flograph.io.table",
+        "pos": [
+          -1720,
+          -360
+        ],
+        "params": {
+          "data": "{\"columns\": [\"product_id\", \"product\", \"category\"], \"rows\": [[101, \"Laptop\", \"Electronics\"], [102, \"Phone\", \"Electronics\"], [103, \"Monitor\", \"Electronics\"], [104, \"Desk\", \"Furniture\"], [105, \"Chair\", \"Furniture\"], [106, \"Lamp\", \"Furniture\"], [107, \"Headset\", \"Accessories\"], [108, \"Cable Kit\", \"Accessories\"]]}",
+          "width": 300,
+          "height": 160
+        },
+        "code": null,
+        "label": "Products"
+      },
+      {
+        "id": "gt_targets",
+        "type": "flograph.io.table",
+        "pos": [
+          -1720,
+          -110
+        ],
+        "params": {
+          "data": "{\"columns\": [\"region\", \"target\"], \"rows\": [[\"North\", 4000], [\"South\", 1000], [\"East\", 1500], [\"West\", 3000]]}",
+          "width": 280,
+          "height": 140
+        },
+        "code": null,
+        "label": "Targets"
+      },
+      {
+        "id": "gt_clean",
+        "type": "flograph.transform.filter_rows",
+        "pos": [
+          -1260,
+          -860
+        ],
+        "params": {
+          "query": "units > 0"
+        },
+        "code": null,
+        "label": "Drop zero-unit lines"
+      },
+      {
+        "id": "gt_revenue",
+        "type": "flograph.transform.expression",
+        "pos": [
+          -1260,
+          -720
+        ],
+        "params": {
+          "expressions": "revenue = units * unit_price"
+        },
+        "code": null,
+        "label": "Add revenue"
+      },
+      {
+        "id": "gt_enrich",
+        "type": "flograph.transform.join",
+        "pos": [
+          -1260,
+          -580
+        ],
+        "params": {
+          "on": "customer_id",
+          "how": "left"
+        },
+        "code": null,
+        "label": "Attach customer segment"
+      },
+      {
+        "id": "gt_goto_clean",
+        "type": "flograph.util.goto",
+        "pos": [
+          -980,
+          -860
+        ],
+        "params": {
+          "name": "Orders with revenue"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_goto_enriched",
+        "type": "flograph.util.goto",
+        "pos": [
+          -980,
+          -720
+        ],
+        "params": {
+          "name": "Enriched orders"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_goto_products",
+        "type": "flograph.util.goto",
+        "pos": [
+          -980,
+          -580
+        ],
+        "params": {
+          "name": "Products"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_goto_targets",
+        "type": "flograph.util.goto",
+        "pos": [
+          -980,
+          -440
+        ],
+        "params": {
+          "name": "Regional targets"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_from_enriched",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          -520,
+          -860
+        ],
+        "params": {
+          "source": "gt_goto_enriched"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_from_targets",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          -520,
+          -740
+        ],
+        "params": {
+          "source": "gt_goto_targets"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_region_group",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          -300,
+          -860
+        ],
+        "params": {
+          "by": "region",
+          "agg": "sum",
+          "values": "revenue,units"
+        },
+        "code": null,
+        "label": "Region rollup"
+      },
+      {
+        "id": "gt_region_join",
+        "type": "flograph.transform.join",
+        "pos": [
+          -300,
+          -680
+        ],
+        "params": {
+          "on": "region",
+          "how": "left"
+        },
+        "code": null,
+        "label": "Compare to target"
+      },
+      {
+        "id": "gt_attainment",
+        "type": "flograph.transform.expression",
+        "pos": [
+          -300,
+          -500
+        ],
+        "params": {
+          "expressions": "attainment = revenue / target"
+        },
+        "code": null,
+        "label": "Attainment"
+      },
+      {
+        "id": "gt_kpi_rev",
+        "type": "flograph.viz.card",
+        "pos": [
+          20,
+          -860
+        ],
+        "params": {
+          "column": "revenue",
+          "aggregation": "Sum",
+          "label": "Total revenue",
+          "format": ",.0f",
+          "width": 220,
+          "height": 120
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_kpi_attain",
+        "type": "flograph.viz.card",
+        "pos": [
+          20,
+          -710
+        ],
+        "params": {
+          "column": "attainment",
+          "aggregation": "Average",
+          "label": "Avg attainment",
+          "format": ".0%",
+          "width": 220,
+          "height": 120
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_region_bar",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          20,
+          -560
+        ],
+        "params": {
+          "kind": "bar",
+          "barmode": "group",
+          "x": "region",
+          "y": "revenue",
+          "title": "Revenue by region",
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_region_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          20,
+          -210
+        ],
+        "params": {
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Region vs target"
+      },
+      {
+        "id": "gt_from_clean_p",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          -520,
+          220
+        ],
+        "params": {
+          "source": "gt_goto_clean"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_from_products",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          -520,
+          340
+        ],
+        "params": {
+          "source": "gt_goto_products"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_cat_join",
+        "type": "flograph.transform.join",
+        "pos": [
+          -300,
+          220
+        ],
+        "params": {
+          "on": "product_id",
+          "how": "left"
+        },
+        "code": null,
+        "label": "Add product details"
+      },
+      {
+        "id": "gt_cat_group",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          -300,
+          400
+        ],
+        "params": {
+          "by": "category",
+          "agg": "sum",
+          "values": "units,revenue"
+        },
+        "code": null,
+        "label": "Category rollup"
+      },
+      {
+        "id": "gt_cat_chart",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          -300,
+          580
+        ],
+        "params": {
+          "kind": "bar",
+          "barmode": "group",
+          "x": "category",
+          "y": "revenue",
+          "title": "Revenue by category",
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_from_clean_dq",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          220,
+          220
+        ],
+        "params": {
+          "source": "gt_goto_clean"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gt_stats",
+        "type": "flograph.transform.statistics",
+        "pos": [
+          460,
+          220
+        ],
+        "params": {},
+        "code": null,
+        "label": "Describe columns"
+      },
+      {
+        "id": "gt_stats_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          460,
+          340
+        ],
+        "params": {
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Column stats"
+      }
+    ],
+    "connections": [
+      {
+        "id": "gtc01",
+        "src": [
+          "gt_orders",
+          "table"
+        ],
+        "dst": [
+          "gt_clean",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc02",
+        "src": [
+          "gt_clean",
+          "filtered"
+        ],
+        "dst": [
+          "gt_revenue",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc03",
+        "src": [
+          "gt_revenue",
+          "table"
+        ],
+        "dst": [
+          "gt_enrich",
+          "left"
+        ]
+      },
+      {
+        "id": "gtc04",
+        "src": [
+          "gt_customers",
+          "table"
+        ],
+        "dst": [
+          "gt_enrich",
+          "right"
+        ]
+      },
+      {
+        "id": "gtc05",
+        "src": [
+          "gt_revenue",
+          "table"
+        ],
+        "dst": [
+          "gt_goto_clean",
+          "value"
+        ]
+      },
+      {
+        "id": "gtc06",
+        "src": [
+          "gt_enrich",
+          "joined"
+        ],
+        "dst": [
+          "gt_goto_enriched",
+          "value"
+        ]
+      },
+      {
+        "id": "gtc07",
+        "src": [
+          "gt_products",
+          "table"
+        ],
+        "dst": [
+          "gt_goto_products",
+          "value"
+        ]
+      },
+      {
+        "id": "gtc08",
+        "src": [
+          "gt_targets",
+          "table"
+        ],
+        "dst": [
+          "gt_goto_targets",
+          "value"
+        ]
+      },
+      {
+        "id": "gtc09",
+        "src": [
+          "gt_from_enriched",
+          "value"
+        ],
+        "dst": [
+          "gt_region_group",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc10",
+        "src": [
+          "gt_region_group",
+          "aggregated"
+        ],
+        "dst": [
+          "gt_region_join",
+          "left"
+        ]
+      },
+      {
+        "id": "gtc11",
+        "src": [
+          "gt_from_targets",
+          "value"
+        ],
+        "dst": [
+          "gt_region_join",
+          "right"
+        ]
+      },
+      {
+        "id": "gtc12",
+        "src": [
+          "gt_region_join",
+          "joined"
+        ],
+        "dst": [
+          "gt_attainment",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc13",
+        "src": [
+          "gt_attainment",
+          "table"
+        ],
+        "dst": [
+          "gt_kpi_rev",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc14",
+        "src": [
+          "gt_attainment",
+          "table"
+        ],
+        "dst": [
+          "gt_kpi_attain",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc15",
+        "src": [
+          "gt_attainment",
+          "table"
+        ],
+        "dst": [
+          "gt_region_bar",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc16",
+        "src": [
+          "gt_attainment",
+          "table"
+        ],
+        "dst": [
+          "gt_region_table",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc17",
+        "src": [
+          "gt_from_clean_p",
+          "value"
+        ],
+        "dst": [
+          "gt_cat_join",
+          "left"
+        ]
+      },
+      {
+        "id": "gtc18",
+        "src": [
+          "gt_from_products",
+          "value"
+        ],
+        "dst": [
+          "gt_cat_join",
+          "right"
+        ]
+      },
+      {
+        "id": "gtc19",
+        "src": [
+          "gt_cat_join",
+          "joined"
+        ],
+        "dst": [
+          "gt_cat_group",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc20",
+        "src": [
+          "gt_cat_group",
+          "aggregated"
+        ],
+        "dst": [
+          "gt_cat_chart",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc21",
+        "src": [
+          "gt_from_clean_dq",
+          "value"
+        ],
+        "dst": [
+          "gt_stats",
+          "table"
+        ]
+      },
+      {
+        "id": "gtc22",
+        "src": [
+          "gt_stats",
+          "stats"
+        ],
+        "dst": [
+          "gt_stats_table",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "gt_f1",
+        "title": "1 \u00b7 Sources & prep",
+        "rect": [
+          -1748,
+          -888,
+          976,
+          966
+        ],
+        "color": "#2f4858"
+      },
+      {
+        "id": "gt_f2",
+        "title": "2 \u00b7 Regional performance",
+        "rect": [
+          -548,
+          -888,
+          1016,
+          1026
+        ],
+        "color": "#2d4a3e"
+      },
+      {
+        "id": "gt_f3",
+        "title": "3 \u00b7 Product mix",
+        "rect": [
+          -548,
+          192,
+          696,
+          736
+        ],
+        "color": "#3b3355"
+      },
+      {
+        "id": "gt_f4",
+        "title": "4 \u00b7 Data quality",
+        "rect": [
+          192,
+          192,
+          716,
+          496
+        ],
+        "color": "#4a3a2d"
+      }
+    ],
+    "pages": [
+      {
+        "id": "gt_page_report",
+        "title": "Report",
+        "kind": "dashboard",
+        "body": "",
+        "color": "#16a34a",
+        "maximized_tile": null,
+        "tiles": [
+          {
+            "id": "gt_t_bar",
+            "node": "gt_region_bar",
+            "port": "figure",
+            "rect": [
+              -760,
+              -420,
+              480,
+              360
+            ]
+          },
+          {
+            "id": "gt_t_kpi_rev",
+            "node": "gt_kpi_rev",
+            "port": "value",
+            "rect": [
+              -260,
+              -420,
+              220,
+              120
+            ]
+          },
+          {
+            "id": "gt_t_kpi_attain",
+            "node": "gt_kpi_attain",
+            "port": "value",
+            "rect": [
+              -260,
+              -280,
+              220,
+              120
+            ]
+          },
+          {
+            "id": "gt_t_cat",
+            "node": "gt_cat_chart",
+            "port": "figure",
+            "rect": [
+              -760,
+              -40,
+              480,
+              360
+            ]
+          },
+          {
+            "id": "gt_t_regtable",
+            "node": "gt_region_table",
+            "port": "table",
+            "rect": [
+              -260,
+              -140,
+              420,
+              320
+            ]
+          },
+          {
+            "id": "gt_t_stats",
+            "node": "gt_stats_table",
+            "port": "table",
+            "rect": [
+              -260,
+              200,
+              420,
+              320
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

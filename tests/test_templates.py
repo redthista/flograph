@@ -48,11 +48,12 @@ class TestBundledExamples:
             "08_geo_population_map.flograph",
             "09_folium_map.flograph",
             "10_svg_retrofit_workbench.flograph",
+            "11_goto_from_workflow.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 10
+        assert len(window._examples_menu.actions()) == 11
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -64,6 +65,7 @@ class TestBundledExamples:
         "07_retail_ops_command_center.flograph",
         "08_geo_population_map.flograph",
         "10_svg_retrofit_workbench.flograph",
+        "11_goto_from_workflow.flograph",
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))
@@ -253,3 +255,56 @@ class TestBundledExamples:
         html = to_html(folium_map)
         assert "leaflet" in html.lower()
         assert "trust" not in html.lower()
+
+    def test_goto_from_workflow_links_carry_the_data(self, qtbot, window):
+        window._open_example(template_path("11_goto_from_workflow.flograph"))
+        graph = window.graph
+
+        # the branches are fed entirely by links: the only real wires live
+        # inside Sources & prep and the branch internals, so nothing crosses
+        # the page. Four gotos resolve to five From reads (two share one link).
+        assert len(graph.connections) == 22
+        assert set(graph.links) == {
+            "link:gt_from_enriched", "link:gt_from_targets",
+            "link:gt_from_clean_p", "link:gt_from_products",
+            "link:gt_from_clean_dq"}
+        assert graph.links["link:gt_from_clean_p"].src_node == "gt_goto_clean"
+        assert graph.links["link:gt_from_clean_dq"].src_node == "gt_goto_clean"
+        assert graph.links["link:gt_from_enriched"].src_node == "gt_goto_enriched"
+        assert not any(n.spec.broken for n in graph.nodes.values())
+
+        ok = wait_run(qtbot, window.engine)
+        assert ok
+        cache = window.engine.cache
+        for node in graph.nodes.values():
+            assert node.status == NodeStatus.DONE, node.status_message
+
+        # every From emitted the value its Goto received
+        froms = [n for n in graph.nodes.values()
+                 if n.spec.type_id == "flograph.util.goto_from"]
+        assert len(froms) == 5
+        for f in froms:
+            assert cache.outputs_for(f.id)["value"] is not None
+
+        # the shared prep reached every branch
+        enriched = cache.outputs_for("gt_enrich")["joined"]
+        assert len(enriched) == 10  # 11 orders, the zero-unit line filtered out
+        assert {"revenue", "segment"} <= set(enriched.columns)
+
+        region = cache.outputs_for("gt_region_group")["aggregated"]
+        by_region = dict(zip(region["region"], region["revenue"]))
+        assert by_region == {"North": 4350, "South": 1260, "East": 1420,
+                             "West": 2350}
+        assert int(region["revenue"].sum()) == 9380
+
+        category = cache.outputs_for("gt_cat_group")["aggregated"]
+        by_cat = dict(zip(category["category"], category["revenue"]))
+        assert by_cat == {"Electronics": 6250, "Furniture": 2140,
+                          "Accessories": 990}
+
+        assert cache.outputs_for("gt_kpi_rev")["value"] == 9380
+        assert round(cache.outputs_for("gt_kpi_attain")["value"], 4) == 1.0194
+
+        assert len(graph.pages) == 1
+        page = next(iter(graph.pages.values()))
+        assert len(page.tiles) == 6
