@@ -20,7 +20,6 @@ from flograph.core.node import NodeStatus
 
 from .. import theme
 from ..data_table import DataTableView
-from ..icons import spec_icon
 from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .stacking import NODE_Z, z_for
@@ -2029,12 +2028,6 @@ class NodeItem(QGraphicsObject):
         if toggle is not None:
             self._paint_collapse_toggle(painter, toggle)
         left = 10.0 if toggle is None else toggle.right() + 5
-        # small category/card glyph at the label's left edge
-        spec = self.node.spec
-        if not spec.broken and not self.link_card:
-            spec_icon(spec).paint(painter, QRect(
-                round(left), round(HEADER_H / 2 - 7), 14, 14))
-            left += 18
         label_rect = QRectF(left, 0, width - left - 20, HEADER_H)
         label_text = f"⚠ {self.node.label}" if self.broken else self.node.label
         label = painter.fontMetrics().elidedText(

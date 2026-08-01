@@ -3,16 +3,15 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
-    QFrame, QLineEdit, QListWidget, QListWidgetItem, QMenu, QToolButton,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from flograph.core import NodeRegistry, NodeSpec
 from flograph.ui.favorites import Favorites
-from flograph.ui.icons import spec_icon
 
 STAR = "★"
 FAVORITE_SECTION = "Favorites"
@@ -71,9 +70,7 @@ class NodePalettePopup(QFrame):
             if self._predicate is not None and not self._predicate(spec):
                 continue
             prefix = STAR if favorites.contains(spec.type_id) else ""
-            item = QListWidgetItem(
-                spec_icon(spec),
-                f"{prefix} {spec.label}    ({spec.category})")
+            item = QListWidgetItem(f"{prefix} {spec.label}    ({spec.category})")
             item.setData(Qt.UserRole, spec.type_id)
             self._list.addItem(item)
         if self._list.count():
@@ -122,8 +119,7 @@ class LibraryTree(QTreeWidget):
         self._favorites_only = False
         self._last_query = ""
         self.setHeaderHidden(True)
-        # Compact rows: small glyphs, uniform height, no room to grow.
-        self.setIconSize(QSize(14, 14))
+        # Compact rows: uniform height, no room to grow.
         self.setUniformRowHeights(True)
         self.setDragEnabled(True)
         self.itemActivated.connect(self._on_activated)
@@ -186,7 +182,6 @@ class LibraryTree(QTreeWidget):
         starred = favorite and self._favorites.contains(spec.type_id)
         label = f"{STAR} {spec.label}" if starred else spec.label
         child = QTreeWidgetItem([label])
-        child.setIcon(0, spec_icon(spec))
         child.setData(0, Qt.UserRole, spec.type_id)
         child.setToolTip(0, spec.doc or spec.type_id)
         return child
@@ -290,9 +285,9 @@ class LibraryPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         bar = QWidget(self)
-        bar_layout = QVBoxLayout(bar)
+        bar_layout = QHBoxLayout(bar)
         bar_layout.setContentsMargins(0, 0, 0, 0)
-        bar_layout.setSpacing(2)
+        bar_layout.setSpacing(4)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search nodes…")
         self.favs_only = QToolButton()
@@ -300,7 +295,7 @@ class LibraryPanel(QWidget):
         self.favs_only.setCheckable(True)
         self.favs_only.setToolTip("Show favorites only")
         self.favs_only.setMaximumWidth(22)
-        bar_layout.addWidget(self.search)
+        bar_layout.addWidget(self.search, 1)
         bar_layout.addWidget(self.favs_only, 0, Qt.AlignRight)
         self.tree = LibraryTree(registry, favorites)
         layout.addWidget(bar)

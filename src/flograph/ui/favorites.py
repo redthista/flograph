@@ -21,7 +21,9 @@ class Favorites(QObject):
         super().__init__(parent)
         self._settings = settings
         raw = settings.value(_SETTINGS_KEY, [])
-        if isinstance(raw, str):  # guard against a malformed stored value
+        if raw is None:  # an empty list round-trips as @Invalid() -> None
+            raw = []
+        elif isinstance(raw, str):  # guard against a malformed stored value
             raw = [raw]
         self._ids = list(dict.fromkeys(raw))
 
