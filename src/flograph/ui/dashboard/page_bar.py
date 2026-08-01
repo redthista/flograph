@@ -57,6 +57,7 @@ class PageTabBar(QTabBar):
     reorder_pages_requested = Signal(list)     # page_ids in their new order
     recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
     current_page_changed = Signal(object)      # page_id, or None for Model
+    model_tab_double_clicked = Signal()        # collapse/restore every panel
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -101,6 +102,12 @@ class PageTabBar(QTabBar):
 
     def _is_page(self, index: int) -> bool:
         return 0 <= index < self.count() and self.tabData(index) not in (None, _PLUS)
+
+    def _is_model(self, index: int) -> bool:
+        """The modeling canvas's own tab. tabData is None for it -- but also
+        for a miss (tabAt returns -1), so the range check is what tells a
+        click on the Model tab from a click on the empty strip beside it."""
+        return 0 <= index < self.count() and self.tabData(index) is None
 
     def current_page_id(self) -> Optional[str]:
         data = self.tabData(self.currentIndex())
@@ -300,6 +307,13 @@ class PageTabBar(QTabBar):
 
     def mouseDoubleClickEvent(self, event) -> None:
         index = self.tabAt(event.position().toPoint())
+        # the Model tab has no title to rename, so its double-click is free
+        # for the thing the canvas underneath it wants: all panels out of
+        # the way, and back again
+        if self._is_model(index):
+            self.model_tab_double_clicked.emit()
+            event.accept()
+            return
         if not self._is_page(index):
             super().mouseDoubleClickEvent(event)
             return

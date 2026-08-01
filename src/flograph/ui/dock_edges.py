@@ -5,7 +5,8 @@ docks, doing two jobs. Its arrow points outward while that edge is open
 (click to collapse it) and inward once it is empty (click to bring it
 back) -- the same two-way toggle, and the same reasoning, as
 DashboardPage's visuals-panel button: the control has to live outside the
-thing it hides. Dragging the strip anywhere else resizes that edge, which
+thing it hides. Double-clicking the strip does the same as its arrow, for
+a target you don't have to aim at. Dragging it resizes that edge, which
 is why Qt's own dock separators are styled to nothing: the strip replaces
 them rather than sitting a few pixels away from them, and the grip dots
 down its middle are what says so.
@@ -259,6 +260,23 @@ class EdgeStrip(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         self._drag = None
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        """Double-clicking anywhere on the strip does what the arrow does.
+
+        The arrow is a 12px target; the strip it sits on runs the whole
+        edge, so this gives the same gesture a target you don't have to aim
+        for. Harmless next to the drag: a resize needs the mouse to move,
+        and a double-click that hasn't moved leaves the size alone.
+        """
+        if event.button() != Qt.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        # the press that opened this double-click armed a drag; drop it, or
+        # the next stray move would resize from a stale origin
+        self._drag = None
+        self.toggle()
+        event.accept()
 
 
 def install(canvas: QWidget, host: QMainWindow,

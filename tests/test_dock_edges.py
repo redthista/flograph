@@ -146,6 +146,122 @@ class TestEdgeStrips:
         assert strip.is_collapsed() is True
 
 
+class TestDoubleClick:
+    """Double-clicking the strip is the arrow's gesture with a target the
+    width of the whole edge instead of 12px."""
+
+    def _double_click(self, app, strip):
+        point = QPoint(5, 60)
+        globally = strip.mapToGlobal(point)
+        for kind, buttons in ((QEvent.MouseButtonPress, Qt.LeftButton),
+                              (QEvent.MouseButtonRelease, Qt.NoButton),
+                              (QEvent.MouseButtonDblClick, Qt.LeftButton)):
+            app.sendEvent(strip, QMouseEvent(
+                kind, point, globally, Qt.LeftButton, buttons, Qt.NoModifier))
+        app.processEvents()
+
+    def test_it_collapses_the_edge(self, window):
+        app = QApplication.instance()
+        strip = window._edge_strips["right"]
+
+        self._double_click(app, strip)
+
+        assert strip.is_collapsed() is True
+        assert all(dock.isHidden() for dock in _right_docks(window))
+
+    def test_it_brings_the_edge_back(self, window):
+        app = QApplication.instance()
+        strip = window._edge_strips["right"]
+
+        self._double_click(app, strip)
+        self._double_click(app, strip)
+
+        assert strip.is_collapsed() is False
+        assert all(not dock.isHidden() for dock in _right_docks(window))
+
+    def test_a_right_click_is_not_a_collapse(self, window):
+        app = QApplication.instance()
+        strip = window._edge_strips["right"]
+        point = QPoint(5, 60)
+        app.sendEvent(strip, QMouseEvent(
+            QEvent.MouseButtonDblClick, point, strip.mapToGlobal(point),
+            Qt.RightButton, Qt.RightButton, Qt.NoModifier))
+        app.processEvents()
+
+        assert strip.is_collapsed() is False
+
+    def test_it_leaves_no_drag_armed_behind_it(self, window):
+        """The press that opens a double-click arms a resize; left set, the
+        next stray move would drag the edge from a stale origin."""
+        app = QApplication.instance()
+        strip = window._edge_strips["right"]
+
+        self._double_click(app, strip)
+
+        assert strip._drag is None
+
+
+class TestModelTabDoubleClick:
+    """Double-clicking the Model tab is Ctrl+Shift+H by mouse. A page tab's
+    double-click renames it, but the Model tab has no title to rename, so
+    the gesture was going spare."""
+
+    def _double_click_tab(self, app, bar, index):
+        point = bar.tabRect(index).center()
+        globally = bar.mapToGlobal(point)
+        for kind, buttons in ((QEvent.MouseButtonPress, Qt.LeftButton),
+                              (QEvent.MouseButtonRelease, Qt.NoButton),
+                              (QEvent.MouseButtonDblClick, Qt.LeftButton)):
+            app.sendEvent(bar, QMouseEvent(
+                kind, point, globally, Qt.LeftButton, buttons, Qt.NoModifier))
+        app.processEvents()
+
+    def test_it_hides_and_restores_every_panel(self, window):
+        app = QApplication.instance()
+        bar = window.page_bar
+        model = bar._model_index()
+
+        self._double_click_tab(app, bar, model)
+        assert window.all_panels_hidden() is True
+
+        self._double_click_tab(app, bar, model)
+        assert window.all_panels_hidden() is False
+
+    def test_the_signal_reaches_the_window(self, window):
+        window.page_bar.model_tab_double_clicked.emit()
+        assert window.all_panels_hidden() is True
+
+    def test_a_page_tab_still_renames(self, window, monkeypatch):
+        """The new Model-tab branch sits in the same handler as rename, so
+        pin that a real page tab still gets the rename dialog."""
+        from flograph.ui.dashboard import page_bar as bar_mod
+        monkeypatch.setattr(bar_mod.QInputDialog, "getText",
+                            staticmethod(lambda *a, **k: ("Renamed", True)))
+        bar = window.page_bar
+        page = mod.Page(id="p1", title="Dash", kind="dashboard")
+        window.graph.add_page(page)
+        index = bar._index_of_page(page.id)
+
+        renamed = []
+        bar.rename_page_requested.connect(
+            lambda pid, title: renamed.append((pid, title)))
+        # the collapse signal itself, not dock visibility: adding a page
+        # switches to it, which hides every model dock legitimately
+        toggled = []
+        bar.model_tab_double_clicked.connect(lambda: toggled.append(True))
+        self._double_click_tab(QApplication.instance(), bar, index)
+
+        assert renamed == [(page.id, "Renamed")]
+        assert toggled == []
+
+    def test_a_miss_beside_the_tabs_does_nothing(self, window):
+        """tabAt() returns -1 off the end of the strip, and tabData(-1) is
+        also None -- so an unguarded 'is it the Model tab?' would fire on
+        empty space."""
+        assert window.page_bar._is_model(-1) is False
+        assert window.page_bar._is_model(window.page_bar.count() + 5) is False
+
+
 class TestEdgeMembership:
     """Which docks a strip owns is asked of the dock host each time, not
     fixed at build time -- restoreState() and dragging both move panels

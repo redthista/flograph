@@ -1175,6 +1175,7 @@ class MainWindow(QMainWindow):
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
+        self.page_bar.model_tab_double_clicked.connect(self.toggle_all_panels)
 
     def _on_page_added(self, page: Page) -> None:
         if page.kind == "report":
