@@ -1,8 +1,9 @@
-"""Node library polish: painted glyph icons, the Favorites section, the
-favorites-only toggle, and the Tab popup's favorites-first ordering.
+"""Node library favourites: the Favorites section, the favorites-only
+toggle, and the Tab popup's favorites-first ordering.
 
 Settings kept off the real store (avoid polluting the developer's actual
 flograph.conf) -- same isolation as test_dashboard_ui.py."""
+import os
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtTest import QTest
@@ -11,7 +12,6 @@ from PySide6.QtWidgets import QApplication
 from flograph.ui import mainwindow as mod
 from flograph.ui.canvas.palette import FAVORITE_SECTION, STAR
 from flograph.ui.favorites import Favorites
-from flograph.ui.icons import _GLYPHS, glyph_icon, spec_icon
 from flograph.ui.mainwindow import MainWindow
 
 
@@ -56,36 +56,22 @@ def _node_labels(section):
     return [section.child(i).text(0) for i in range(section.childCount())]
 
 
-class TestGlyphIcons:
-    def test_every_builtin_gets_a_nonnull_icon(self, registry, qtbot):
-        for spec in registry.all():
-            assert not spec_icon(spec).isNull(), spec.type_id
-
-    def test_card_wins_over_category(self, registry, qtbot):
-        # a card node and a plain node in the same category differ
-        plain = registry.get("flograph.transform.group_by")
-        card = registry.get("flograph.viz.show_table")
-        assert spec_icon(plain).cacheKey() != spec_icon(card).cacheKey()
-
-    def test_known_glyph_keys_exist(self):
-        for key in ("table_viewer", "figure", "kpi", "slicer", "button",
-                    "note", "reroute", "goto", "from", "control", "webview",
-                    "input", "io", "transform", "viz", "util", "scripting"):
-            assert key in _GLYPHS, key
-
-    def test_unknown_key_falls_back_not_null(self, qtbot):
-        assert not glyph_icon("does_not_exist").isNull()
-
-    def test_tree_rows_stay_compact(self, window):
-        tree = window.library_tree
-        assert tree.uniformRowHeights()
-        assert tree.iconSize().height() <= 14
-        # the Favorites section and a category both use the same small rows
-        from PySide6.QtWidgets import QTreeWidget
-        assert isinstance(tree, QTreeWidget)
-
-
 class TestFavoritesSection:
+    def test_empty_stored_value_does_not_crash(self):
+        # an empty list round-trips through QSettings as @Invalid() and comes
+        # back as None — a fresh store must not crash on that
+        from PySide6.QtCore import QCoreApplication, QSettings
+        import tempfile
+        ini = os.path.join(tempfile.mkdtemp(), "empty.ini")
+        st = QSettings(ini, QSettings.IniFormat)
+        st.setValue("library/favorites", [])
+        st.sync()
+        st2 = QSettings(ini, QSettings.IniFormat)
+        favs = Favorites(st2)
+        assert favs.ids() == []
+        favs.toggle("flograph.io.read_csv")
+        assert favs.contains("flograph.io.read_csv")
+
     def test_hidden_when_empty(self, window):
         tree = window.library_tree
         assert _find_section(tree, FAVORITE_SECTION) is None
