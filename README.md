@@ -202,6 +202,14 @@ a chart tile can't do.
 
 ## Node library
 
+The library dock shows every node type in its category, each with a small
+painted glyph (the shape of the node's card where it has one, its category
+otherwise). Right-click any node to **Add to Favorites** (or `Ctrl+Shift+F`
+on a selected row) and it is pinned in a **★ Favorites** section at the top;
+the same star puts favorites first in the `Tab` search popup. The star
+button next to the search box narrows the whole tree to favorites only.
+Favorites persist per-machine in settings.
+
 **Input** — Slider, Number, Text, Date, Toggle, Choice.
 
 **IO** — Read/Write CSV, Excel, Parquet, JSON (incl. JSONL) and SQLite

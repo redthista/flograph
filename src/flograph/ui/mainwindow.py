@@ -45,6 +45,7 @@ from .canvas.node_item import (
     DEFAULT_LOD_THRESHOLD, PREVIEW_TOGGLABLE_KINDS, card_kind,
 )
 from .canvas.palette import LibraryPanel, NodePalettePopup
+from .favorites import Favorites
 from .dashboard import (
     DashboardPage, PageTabBar, default_tile_port, default_tile_size,
     is_tile_able,
@@ -100,6 +101,7 @@ class MainWindow(QMainWindow):
         # the scene predates the engine, so it gets the cache handed to it
         self.scene.output_cache = self.engine.cache
         self.settings = QSettings("flograph", "flograph")
+        self.favorites = Favorites(self.settings, parent=self)
         self._project_path: Optional[str] = None
         self._cache_load_signals: Optional[CacheLoadSignals] = None
         # set False to close without the unsaved-changes prompt (tests, scripts)
@@ -142,7 +144,7 @@ class MainWindow(QMainWindow):
         self.visuals_visible = self.settings.value(
             "dashboard/visuals_visible", False, type=bool)
 
-        self._palette_popup = NodePalettePopup(registry, self)
+        self._palette_popup = NodePalettePopup(registry, self.favorites, self)
         self._palette_scene_pos = QPointF()
         self._pending_wire = None
         self._palette_popup.chosen.connect(self._add_node_from_palette)
@@ -236,7 +238,7 @@ class MainWindow(QMainWindow):
 
     def _build_docks(self) -> None:
         host = self._dock_host
-        self.library_panel = LibraryPanel(self.registry)
+        self.library_panel = LibraryPanel(self.registry, self.favorites)
         # a floor, not just a fresh-install default: restoreState() below
         # can only shrink a dock down to its widget's minimum, so this also
         # rescues anyone whose saved layout already pinned it thin.
