@@ -2154,14 +2154,22 @@ class NodeItem(QGraphicsObject):
             return
 
         text = self._kpi_text()
-        # size to fit: capped by height, shrunk for long values (~0.62 em
-        # average glyph width), never below a readable floor
+        # size to fit: capped by height, with a rough width estimate to start
+        # (~0.62 em average glyph width), then the real advance is measured and
+        # the font shrunk until the value fits — bold digits and commas run
+        # wider than the estimate, and that was clipping at the sides
         size = min(avail.height() * 0.62,
                    avail.width() / (0.62 * max(1, len(text))))
         font = painter.font()
         font.setBold(True)
         font.setPointSizeF(max(9.0, size))
         painter.setFont(font)
+        advance = painter.fontMetrics().horizontalAdvance(text)
+        while advance > avail.width() and font.pointSizeF() > 9.0:
+            font.setPointSizeF(
+                max(9.0, font.pointSizeF() * avail.width() * 0.99 / advance))
+            painter.setFont(font)
+            advance = painter.fontMetrics().horizontalAdvance(text)
         painter.setPen(QPen(theme.NODE_TEXT))
         painter.drawText(avail, Qt.AlignCenter, text)
 

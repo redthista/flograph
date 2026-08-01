@@ -816,6 +816,12 @@ class TileItem(QGraphicsObject):
         font.setBold(True)
         font.setPointSizeF(max(9.0, size))
         painter.setFont(font)
+        advance = painter.fontMetrics().horizontalAdvance(text)
+        while advance > avail.width() and font.pointSizeF() > 9.0:
+            font.setPointSizeF(
+                max(9.0, font.pointSizeF() * avail.width() * 0.99 / advance))
+            painter.setFont(font)
+            advance = painter.fontMetrics().horizontalAdvance(text)
         painter.setPen(QPen(theme.NODE_TEXT))
         painter.drawText(avail, Qt.AlignCenter, text)
 
