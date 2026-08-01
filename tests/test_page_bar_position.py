@@ -85,14 +85,17 @@ class TestPageBarPositionOnMainWindow:
     def test_switching_repeatedly_never_disturbs_the_other_dock_tab_groups(
             self, window):
         """The whole reason this isn't a QDockWidget: splitDockWidget()
-        against inspector_dock/properties_dock (each tabified with a
-        partner) breaks on a second application. Round-tripping through
-        every position covers that regression directly."""
+        against properties_dock (tabified with Code and Log) breaks on a
+        second application. Round-tripping through every position covers
+        that regression directly."""
         for position in ("top", "bottom", "top", "bottom"):
             window.set_page_bar_position(position)
-        host = window._dock_host
-        assert window.log_dock in host.tabifiedDockWidgets(window.inspector_dock)
-        assert window.editor_dock in host.tabifiedDockWidgets(window.properties_dock)
+        group = window._dock_host.tabifiedDockWidgets(window.properties_dock)
+        assert window.editor_dock in group
+        assert window.log_dock in group
+        # the inspector is deliberately on its own at the bottom
+        assert window._dock_host.tabifiedDockWidgets(
+            window.inspector_dock) == []
 
     def test_reads_persisted_position_on_construction(
             self, qtbot, registry, window):

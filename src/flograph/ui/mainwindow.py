@@ -50,6 +50,8 @@ from .dashboard import (
     DashboardPage, PageTabBar, default_tile_port, default_tile_size,
     is_tile_able,
 )
+from . import dock_edges
+from .shortcuts import ShortcutRegistry
 from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
 from .editor.save_user_node_dialog import SaveUserNodeDialog
@@ -97,10 +99,18 @@ class MainWindow(QMainWindow):
         self._dock_host.setCentralWidget(self._canvas_stack)
         self._dashboard_pages: dict[str, DashboardPage] = {}
         self._restoring_pages = False
+        # which page the docks were last arranged for; None is the model
+        # canvas. Tracked so a page switch can tell "leaving the model page"
+        # from "already on a dashboard page", which look identical by dock
+        # visibility alone once every panel is collapsed.
+        self._current_page_id = None
         self.engine = ExecutionEngine(self.graph, parent=self)
         # the scene predates the engine, so it gets the cache handed to it
         self.scene.output_cache = self.engine.cache
         self.settings = QSettings("flograph", "flograph")
+        # built before _build_actions(): every action registers itself as
+        # it is created, and a saved rebind has to be in force from then on
+        self.shortcuts = ShortcutRegistry(self.settings, self)
         self.favorites = Favorites(self.settings, parent=self)
         self._project_path: Optional[str] = None
         self._cache_load_signals: Optional[CacheLoadSignals] = None
@@ -204,6 +214,10 @@ class MainWindow(QMainWindow):
         # layout" has a real default to go back to rather than a guess
         self._default_dock_state = self._dock_host.saveState()
         self._restore_window_state()
+        # restoreState() carries dock visibility, so a dock closed last
+        # session comes back closed -- and its reveal arrow with it
+        self._docks_open_on_model_page = [
+            dock for dock in self._model_docks if not dock.isHidden()]
         self._on_current_page_changed(self.page_bar.current_page_id())
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
         self.resource_monitor.clicked.connect(self._show_stats)
@@ -237,7 +251,18 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- docks
 
     def _build_docks(self) -> None:
+        """Plain QDockWidgets: drag, float, tab and close all come from Qt.
+
+        Collapsing is closing (dock.setVisible(False)), not shrinking -- a
+        tabified dock cannot be shrunk narrower than its own tab bar, which
+        is what made an earlier custom-rail attempt bottom out at a ~26px
+        strip of rotated labels. Closed is 0px and needs no custom layout
+        code at all. dock_edges' strips are the per-edge collapse control;
+        a dock's own X still closes just that one panel.
+        """
         host = self._dock_host
+
+        # -------------------------------------------------------- library
         self.library_panel = LibraryPanel(self.registry, self.favorites)
         # a floor, not just a fresh-install default: restoreState() below
         # can only shrink a dock down to its widget's minimum, so this also
@@ -256,6 +281,9 @@ class MainWindow(QMainWindow):
         self.library_tree.delete_user_node_requested.connect(
             self._delete_user_node)
 
+        # ----------------------------------------------- properties/code/log
+        # one tab group: all three answer "what is this node doing", and the
+        # right-hand column is the only place tall enough for a code editor
         self.params_panel = ParamsPanel(self.graph, self.undo_stack,
                                         cache=self.engine.cache)
         self.properties_dock = QDockWidget("Properties", host)
@@ -270,24 +298,45 @@ class MainWindow(QMainWindow):
         self.editor_dock.setObjectName("dock_editor")
         self.editor_dock.setWidget(self.editor_panel)
         host.addDockWidget(Qt.RightDockWidgetArea, self.editor_dock)
-        host.tabifyDockWidget(self.properties_dock, self.editor_dock)
-        self.properties_dock.raise_()
-        host.resizeDocks([self.properties_dock], [420], Qt.Horizontal)
-
-        self.inspector_panel = InspectorPanel(self.graph, self.engine)
-        self.inspector_dock = QDockWidget("Inspector", host)
-        self.inspector_dock.setObjectName("dock_inspector")
-        self.inspector_dock.setWidget(self.inspector_panel)
-        host.addDockWidget(Qt.BottomDockWidgetArea, self.inspector_dock)
 
         self.log_console = LogConsole(self.graph, self.engine)
         self.log_dock = QDockWidget("Log", host)
         self.log_dock.setObjectName("dock_log")
         self.log_dock.setWidget(self.log_console)
-        host.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
-        host.tabifyDockWidget(self.inspector_dock, self.log_dock)
-        self.inspector_dock.raise_()
+        host.addDockWidget(Qt.RightDockWidgetArea, self.log_dock)
+
+        host.tabifyDockWidget(self.properties_dock, self.editor_dock)
+        host.tabifyDockWidget(self.editor_dock, self.log_dock)
+        self.properties_dock.raise_()
+        host.resizeDocks([self.properties_dock], [420], Qt.Horizontal)
+
+        # ------------------------------------------------------ inspector
+        # on its own at the bottom: it is a wide, table-shaped panel, so it
+        # wants the window's full width rather than a 420px column
+        self.inspector_panel = InspectorPanel(self.graph, self.engine)
+        self.inspector_dock = QDockWidget("Inspector", host)
+        self.inspector_dock.setObjectName("dock_inspector")
+        self.inspector_dock.setWidget(self.inspector_panel)
+        host.addDockWidget(Qt.BottomDockWidgetArea, self.inspector_dock)
         host.resizeDocks([self.inspector_dock], [260], Qt.Vertical)
+
+        # every dock that belongs to the model canvas alone, in the order a
+        # reset should put them back
+        self._model_docks = [
+            self.library_dock, self.properties_dock, self.editor_dock,
+            self.log_dock, self.inspector_dock,
+        ]
+        # which of them to restore on the way back from a dashboard page --
+        # switching pages must not reopen what someone deliberately closed
+        self._docks_open_on_model_page = list(self._model_docks)
+
+        # the edge strips go inside the dock ring, so takeCentralWidget()
+        # first: setCentralWidget() deletes whatever it replaces, and the
+        # canvas stack is about to be a child of the replacement
+        host.takeCentralWidget()
+        container, self._edge_strips = dock_edges.install(
+            self._canvas_stack, host, self._model_docks)
+        host.setCentralWidget(container)
 
         self._apply_page_bar_position(self.page_bar_position)
 
@@ -342,11 +391,18 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
+        # the group each act() below lands in on the Keyboard Shortcuts page;
+        # rebound as the sections go by, so no call has to name its own
+        section = {"name": "File"}
+
         def act(text: str, shortcut, slot, menu_only: bool = True) -> QAction:
             action = QAction(text, self)
             if shortcut is not None:
                 action.setShortcut(QKeySequence(shortcut))
             action.triggered.connect(slot)
+            # registering applies any saved rebind, so it has to happen
+            # before the action is ever reachable from a menu
+            self.shortcuts.register(action, section["name"])
             return action
 
         # --- file
@@ -357,6 +413,7 @@ class MainWindow(QMainWindow):
                                   self._save_as)
         self.action_quit = act("&Quit", QKeySequence.Quit, self.close)
 
+        section["name"] = "Edit"
         # --- edit (focus-aware so the code editor keeps its own undo/copy)
         self.action_undo = act("Undo", QKeySequence.Undo,
                                lambda: self._smart_edit("undo", self.undo_stack.undo))
@@ -385,6 +442,7 @@ class MainWindow(QMainWindow):
         self.action_dist_v = act("Distribute Vertically", None,
                                  lambda: self._align("dist_v"))
 
+        section["name"] = "Run"
         # --- run
         self.action_run = act("Run All", Qt.Key_F5, self._run_all)
         self.action_run_selected = act("Run Selected", Qt.Key_F6,
@@ -393,6 +451,7 @@ class MainWindow(QMainWindow):
         self.action_cancel.setEnabled(False)
         self.action_reset_caches = act("Reset Caches", None, self._reset_caches)
 
+        section["name"] = "Tools"
         # --- tools
         self.action_settings = act("&Settings…", QKeySequence("Ctrl+,"),
                                    self._show_settings)
@@ -447,7 +506,16 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.action_packages)
         tools_menu.addAction(self.action_ai_settings)
 
+        section["name"] = "View"
         view_menu = self.menuBar().addMenu("&View")
+        self.action_toggle_panels = act(
+            "Hide All Panels", QKeySequence("Ctrl+Shift+H"),
+            self.toggle_all_panels)
+        view_menu.addAction(self.action_toggle_panels)
+        # the label has to say which way the toggle goes, and the panels can
+        # be collapsed from their own edge arrows without this ever firing
+        view_menu.aboutToShow.connect(self._sync_toggle_panels_action)
+        view_menu.addSeparator()
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
 
@@ -1205,11 +1273,25 @@ class MainWindow(QMainWindow):
         # dashboard/report pages have no node selection to configure, so free
         # up the screen by hiding the model-only docks
         is_model_page = page_id is None
-        self.library_dock.setVisible(is_model_page)
-        self.properties_dock.setVisible(is_model_page)
-        self.editor_dock.setVisible(is_model_page)
-        self.inspector_dock.setVisible(is_model_page)
-        self.log_dock.setVisible(is_model_page)
+        was_model_page = self._current_page_id is None
+        if is_model_page:
+            # only what was open before, so a round trip through a dashboard
+            # page doesn't reopen a dock someone deliberately closed
+            for dock in self._model_docks:
+                dock.setVisible(dock in self._docks_open_on_model_page)
+        else:
+            # snapshot only when actually leaving the model page: between two
+            # dashboard pages everything is already hidden, and "all hidden"
+            # is also what Hide All Panels leaves behind, so dock visibility
+            # can't tell the two apart on its own
+            if was_model_page:
+                self._docks_open_on_model_page = [
+                    dock for dock in self._model_docks if not dock.isHidden()]
+            for dock in self._model_docks:
+                dock.setVisible(False)
+        self._current_page_id = page_id
+        for strip in self._edge_strips.values():
+            strip.set_enabled(is_model_page)
         self._refresh_zoom_indicator()
         if self._project_path and not self._restoring_pages:
             self.settings.setValue(f"active_page/{self._project_path}",
@@ -1334,13 +1416,21 @@ class MainWindow(QMainWindow):
         if node is not None and card_kind(node) in ("note", "button"):
             # notes and buttons are edited through their params, not their code
             self.params_panel.set_node(node_id)
-            self.properties_dock.show()
-            self.properties_dock.raise_()
+            self._reveal_dock(self.properties_dock)
             return
         self.editor_panel.set_node(node_id)
-        self.editor_dock.show()
-        self.editor_dock.raise_()
+        self._reveal_dock(self.editor_dock)
         self.editor_panel.editor.setFocus()
+
+    def _reveal_dock(self, dock: QDockWidget) -> None:
+        """Open `dock` and bring it to the front of its tab group. show()
+        alone isn't enough for a dock the user closed: it also has to be put
+        back in the set a dashboard round trip restores, or the next page
+        switch would close it again."""
+        dock.show()
+        dock.raise_()
+        if dock not in self._docks_open_on_model_page:
+            self._docks_open_on_model_page.append(dock)
 
     def _rename_node(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -2038,18 +2128,55 @@ class MainWindow(QMainWindow):
         self.settings.setValue("window_geometry", self.saveGeometry())
         self.settings.setValue("dock_state", self._dock_host.saveState())
 
+    def _live_edge_strips(self) -> list:
+        """Strips with something on their edge. One whose docks have all been
+        dragged elsewhere has nothing to collapse and would otherwise make
+        'are they all hidden?' unanswerable."""
+        return [strip for strip in self._edge_strips.values() if strip.docks()]
+
+    def all_panels_hidden(self) -> bool:
+        strips = self._live_edge_strips()
+        return bool(strips) and all(strip.is_collapsed() for strip in strips)
+
+    def toggle_all_panels(self) -> None:
+        """Ctrl+Shift+H: clear every panel off the canvas at once, and put
+        them back the same way. Each edge remembers its own pre-collapse
+        set, so a panel closed by its own X before this stays closed."""
+        # a dashboard page has already hidden the model docks on purpose;
+        # expanding here would drag them onto a page they don't belong to.
+        # _current_page_id, not the page bar: this asks which page the docks
+        # are currently arranged for, which is what that field tracks.
+        if self._current_page_id is not None:
+            return
+        strips = self._live_edge_strips()
+        if not strips:
+            return
+        hiding = not self.all_panels_hidden()
+        for strip in strips:
+            strip.collapse() if hiding else strip.expand()
+        self._sync_toggle_panels_action()
+        self.statusBar().showMessage(
+            "Panels hidden — Ctrl+Shift+H to bring them back." if hiding
+            else "Panels restored.", 4000)
+
+    def _sync_toggle_panels_action(self) -> None:
+        self.action_toggle_panels.setText(
+            "Show All Panels" if self.all_panels_hidden()
+            else "Hide All Panels")
+
     def reset_window_layout(self) -> None:
         """Put the docks back where a fresh install has them. Geometry is
         left alone deliberately — someone whose panels have gone missing
         wants them back, not their window resized out from under them."""
         self.settings.remove("dock_state")
         self._dock_host.restoreState(self._default_dock_state)
-        for dock in (self.library_dock, self.properties_dock, self.editor_dock,
-                     self.inspector_dock, self.log_dock):
+        # restoreState() carries the default (all-open) visibility, but say it
+        # outright: this is the "my panels have gone missing" button, so every
+        # dock comes back whatever state it was left in
+        for dock in self._model_docks:
             dock.show()
-        # the Inspector/Log pair is tabbed; restoreState leaves whichever was
-        # last raised on top, which after a reset should be the default
-        self.inspector_dock.raise_()
+        self._docks_open_on_model_page = list(self._model_docks)
+        self.properties_dock.raise_()
         self.statusBar().showMessage("Window layout reset.", 4000)
 
     def reset_settings(self) -> None:
@@ -2058,6 +2185,9 @@ class MainWindow(QMainWindow):
         files and per-project state go too — this is the "start over" button,
         not a per-page reset."""
         self.settings.clear()
+        # clear() drops the stored rebinds but leaves them applied to the
+        # live actions, so the keys would keep working until a restart
+        self.shortcuts.reset_all()
         self.set_page_bar_position("top")
         self.set_stats_bar_enabled(True)
         self.set_stats_sampling_enabled(True)
