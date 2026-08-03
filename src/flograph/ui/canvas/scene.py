@@ -53,6 +53,11 @@ class NodeGraphScene(QGraphicsScene):
         # before its wire is cut (see _push_orphan_snapshots); None simply
         # means no snapshot, which is what a scene without an engine wants.
         self.output_cache = None
+        # Nodes with a re-run queued but not yet started, injected by the
+        # main window from the engine (see set_requested_nodes). Cards fade
+        # their output previews from it, so a scene without an engine simply
+        # never fades anything.
+        self.requested_nodes: frozenset = frozenset()
         self.node_items: dict[str, NodeItem] = {}
         self.connection_items: dict[str, ConnectionItem] = {}
         self.frame_items: dict[str, FrameItem] = {}
@@ -226,6 +231,19 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.on_status_changed()  # also refreshes the tooltip
+
+    def set_requested_nodes(self, node_ids) -> None:
+        """Which nodes have a re-run queued. Only the cards whose answer
+        changes are touched — on a large flow a queued run covers most of
+        the graph, and every card repainting for it is the wrong cost to pay
+        for a fade."""
+        new = frozenset(node_ids)
+        changed = new ^ self.requested_nodes
+        self.requested_nodes = new
+        for node_id in changed:
+            item = self.node_items.get(node_id)
+            if item is not None:
+                item.refresh_updating()
 
     def _on_progress_changed(self, node_id: str, fraction: float) -> None:
         item = self.node_items.get(node_id)

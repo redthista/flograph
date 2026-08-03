@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
-from flograph.core import Tile
+from flograph.core import NodeStatus, Tile
 
 from .. import theme
 from ..data_table import DataTableView
@@ -731,6 +731,35 @@ class TileItem(QGraphicsObject):
         widget = self._content_widget()
         return widget is not None and not widget.isHidden()
 
+    def _is_updating(self) -> bool:
+        """Is the stale thing on screen already being replaced?
+
+        A dashboard is read while it is being driven, so "this number is out
+        of date" and "this number is on its way" are different answers and
+        the second one is the one that says to wait. The node is being
+        recomputed if it is in a running plan, or if a reactive re-run has
+        been asked for and hasn't started — which on a big flow is most of
+        the wait, since the request sits behind whatever is already running.
+        """
+        node = self._node()
+        if node is None:
+            return False
+        return (node.status in (NodeStatus.QUEUED, NodeStatus.RUNNING)
+                or self._engine.is_requested(node.id))
+
+    def refresh_freshness(self) -> None:
+        """Re-read staleness and dim the content while it is being replaced.
+
+        The dim is the honest part: a chart that is merely labelled STALE
+        still reads as a chart, and on a flow that takes half a minute the
+        old numbers get read as the new ones. Fading it says don't trust
+        this yet, without throwing away what is there — blanking it would
+        lose the comparison the user is usually mid-way through making.
+        """
+        dim = self._is_stale() and self._is_updating()
+        self._proxy.setOpacity(0.45 if dim else 1.0)
+        self.update()
+
     def _title(self) -> str:
         node = self._node()
         return node.label if node is not None else "(deleted node)"
@@ -757,18 +786,25 @@ class TileItem(QGraphicsObject):
         font.setPointSizeF(9.0)
         painter.setFont(font)
         stale = self._is_stale()
-        stale_w = 44.0 if stale else 0.0
+        updating = stale and self._is_updating()
+        # "UPDATING" is the longer word and needs the wider reservation
+        stale_w = (62.0 if updating else 44.0) if stale else 0.0
         glyph_w = FS_BTN + 8.0 if self.can_fullscreen() else 0.0
         painter.drawText(QRectF(10, 0, w - 20 - stale_w - glyph_w, TITLE_H),
                          Qt.AlignVCenter | Qt.AlignLeft, self._title())
         if stale:
-            painter.setPen(QPen(QColor("#eab308")))
+            # amber for "you changed something and nothing is coming", the
+            # calmer blue for "it is being recomputed" — one is a prompt to
+            # act, the other a reason not to
+            painter.setPen(QPen(QColor("#60a5fa") if updating
+                                else QColor("#eab308")))
             small = painter.font()
             small.setPointSizeF(7.5)
             painter.setFont(small)
             painter.drawText(
                 QRectF(0, 0, w - 10 - glyph_w, TITLE_H),
-                Qt.AlignVCenter | Qt.AlignRight, "STALE")
+                Qt.AlignVCenter | Qt.AlignRight,
+                "UPDATING" if updating else "STALE")
         if self.can_fullscreen():
             self._paint_fullscreen_glyph(painter)
 
@@ -779,7 +815,11 @@ class TileItem(QGraphicsObject):
                              QPointF(hr.right() - 2, hr.bottom() - i))
 
         if self._kind() == "kpi" and self._kpi_has_value:
+            # a KPI is painted rather than widget-backed, so it fades here
+            # instead of through the proxy's opacity
+            painter.setOpacity(0.45 if updating else 1.0)
             self._paint_kpi_value(painter)
+            painter.setOpacity(1.0)
 
     def _paint_fullscreen_glyph(self, painter: QPainter) -> None:
         """Four corner brackets, like a video player's fullscreen toggle:

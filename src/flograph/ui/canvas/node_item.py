@@ -523,6 +523,9 @@ class NodeItem(QGraphicsObject):
         self._slicer_placeholder: QLabel | None = None
         self._control_widget = None  # ControlWidget (control cards only)
         self._control_proxy: QGraphicsProxyWidget | None = None
+        # Output preview faded while a re-run for this node is queued or in
+        # flight — see set_updating; the main window is the sole writer.
+        self._updating = False
         self.setFlags(
             QGraphicsItem.ItemIsSelectable
             | QGraphicsItem.ItemSendsGeometryChanges
@@ -1139,6 +1142,7 @@ class NodeItem(QGraphicsObject):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(host)
         self._figure_proxy = proxy
+        proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_figure_proxy()
 
     def _dialog_parent_widget(self) -> Optional[QWidget]:
@@ -1184,6 +1188,7 @@ class NodeItem(QGraphicsObject):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(widget)
         self._figure_proxy = proxy  # reuses the figure card's resize plumbing
+        proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_figure_proxy()
 
     def relayout_figures(self) -> None:
@@ -1231,6 +1236,7 @@ class NodeItem(QGraphicsObject):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(view)
         self._report_proxy = proxy
+        proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_report_proxy()
         self.refresh_report()
 
@@ -1293,6 +1299,7 @@ class NodeItem(QGraphicsObject):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(host)
         self._table_viewer_proxy = proxy
+        proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_table_viewer_proxy()
 
     def set_table_data(self, table) -> None:
@@ -1818,6 +1825,49 @@ class NodeItem(QGraphicsObject):
         self._refresh_tooltip()
         self.update()
 
+    def refresh_updating(self) -> None:
+        """Re-decide whether this card's output is being recomputed: it is
+        if the node is in a running plan, or if a reactive re-run covering
+        it is queued behind whatever is running now."""
+        scene = self.scene()
+        requested = getattr(scene, "requested_nodes", frozenset())
+        self.set_updating(
+            self.node.status in (NodeStatus.QUEUED, NodeStatus.RUNNING)
+            or self.node.id in requested)
+
+    def set_updating(self, updating: bool) -> None:
+        """Fade this card's *output* preview while it is being recomputed.
+
+        The status LED already says a node is queued or running, which is
+        enough when the card is a box with a label on it. A card carrying a
+        chart, a rendered report or a table of numbers is different: the
+        content reads as current whatever the LED beside it is doing, and on
+        a flow slow enough to notice, those are the numbers being read.
+        Fading them says wait without taking them away — the previous run is
+        usually what the new one is being compared against.
+
+        Only output previews fade. A Table card's grid, a slicer and a
+        control are things being typed into, and dimming the user's own
+        input while the flow catches up would be backwards. The main window
+        drives this: the engine knows which nodes are queued, the card
+        doesn't need to.
+        """
+        updating = bool(updating)
+        if updating == self._updating:
+            return
+        self._updating = updating
+        proxy = self._output_preview_proxy()
+        if proxy is not None:
+            proxy.setOpacity(0.45 if updating else 1.0)
+        if self.kpi_card:   # painted, not proxied — see _paint_kpi
+            self.update()
+
+    def _output_preview_proxy(self):
+        """The proxy showing computed output, or None for a card whose
+        widget is an input (a Table's grid, a slicer, a control)."""
+        return self._figure_proxy or self._report_proxy \
+            or self._table_viewer_proxy
+
     def set_frozen(self, frozen: bool, stale: bool = False) -> None:
         """Show the pause glyph, ambered when the pin has been overtaken."""
         self.pin_stale = bool(frozen and stale)
@@ -2154,6 +2204,7 @@ class NodeItem(QGraphicsObject):
             return
 
         text = self._kpi_text()
+        painter.setOpacity(0.45 if self._updating else 1.0)
         # size to fit: capped by height, with a rough width estimate to start
         # (~0.62 em average glyph width), then the real advance is measured and
         # the font shrunk until the value fits — bold digits and commas run
@@ -2172,6 +2223,7 @@ class NodeItem(QGraphicsObject):
             advance = painter.fontMetrics().horizontalAdvance(text)
         painter.setPen(QPen(theme.NODE_TEXT))
         painter.drawText(avail, Qt.AlignCenter, text)
+        painter.setOpacity(1.0)
 
         painter.setPen(QPen(theme.NODE_SUBTEXT))
         font = painter.font()
@@ -2575,6 +2627,7 @@ class NodeItem(QGraphicsObject):
             self._start_pulse()
         else:
             self._stop_pulse()
+        self.refresh_updating()
         self._refresh_tooltip()
         self.update()
 

@@ -635,3 +635,66 @@ def run(ctx, a, b):
         port = next(iter(item.input_ports.values()))
         from flograph.ui.canvas.node_item import HEADER_H
         assert port.pos().y() == HEADER_H / 2
+
+
+class TestOutputPreviewFadesWhileRecomputing:
+    """A chart or a data table on a card reads as current whatever the
+    status LED beside it is doing, which on a slow flow means the previous
+    run's numbers get read as this one's."""
+
+    def table_viewer(self, window):
+        node = window.registry.instantiate("flograph.viz.show_table")
+        window.graph.add_node(node)
+        return node, window.scene.node_items[node.id]
+
+    def test_a_queued_rerun_fades_the_preview(self, window):
+        node, item = self.table_viewer(window)
+        assert item._table_viewer_proxy.opacity() == 1.0
+
+        window.engine.request_run([node.id])
+        assert item._table_viewer_proxy.opacity() < 1.0
+
+    def test_the_fade_lifts_when_the_run_lands(self, qtbot, window):
+        node, item = self.table_viewer(window)
+        window.engine.request_run([node.id])
+        with qtbot.waitSignal(window.engine.run_finished, timeout=5000):
+            pass
+        assert item._table_viewer_proxy.opacity() == 1.0
+
+    def test_a_running_node_fades_the_preview(self, window):
+        from flograph.core import NodeStatus
+        node, item = self.table_viewer(window)
+        window.graph.set_status(node.id, NodeStatus.RUNNING)
+        assert item._table_viewer_proxy.opacity() < 1.0
+
+        window.graph.set_status(node.id, NodeStatus.DONE)
+        assert item._table_viewer_proxy.opacity() == 1.0
+
+    def test_a_table_cards_grid_is_never_faded(self, window):
+        """It is what the user types into, not what a run produces."""
+        node = window.registry.instantiate("flograph.io.table")
+        window.graph.add_node(node)
+        item = window.scene.node_items[node.id]
+        window.engine.request_run([node.id])
+        assert item._table_proxy.opacity() == 1.0
+
+    def test_only_the_cards_whose_answer_changed_are_touched(self, window):
+        """A queued run covers most of a large graph; repainting every card
+        for it is the wrong cost to pay for a fade."""
+        nodes = []
+        for _ in range(3):
+            node = window.registry.instantiate("flograph.viz.show_table")
+            window.graph.add_node(node)
+            nodes.append(node)
+        touched = []
+        for node in nodes:
+            item = window.scene.node_items[node.id]
+            item.refresh_updating = (
+                lambda nid=node.id: touched.append(nid))
+
+        window.scene.set_requested_nodes({nodes[0].id, nodes[1].id})
+        assert set(touched) == {nodes[0].id, nodes[1].id}
+
+        touched.clear()
+        window.scene.set_requested_nodes({nodes[1].id})   # only one moved
+        assert touched == [nodes[0].id]

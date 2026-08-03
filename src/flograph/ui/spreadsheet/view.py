@@ -125,6 +125,41 @@ class SpreadsheetView(QTableView):
         model = self.model()
         return model if isinstance(model, SheetModel) else None
 
+    def dataChanged(self, top_left, bottom_right, roles=()) -> None:
+        """Refresh the changed cells, but leave the one being typed into
+        alone.
+
+        QTableView answers a change by re-reading the model into whatever
+        editor is open over it. That is right for a change the user just
+        made and wrong for one arriving from elsewhere — a linked run
+        landing, an undo — which would swap half-typed text out from under
+        them. The edited cell is hidden behind its editor and needs no
+        repaint, so hand Qt the changed area with that one cell cut out of
+        it: up to four rectangles, none of them containing the editor.
+        """
+        model = self.model()
+        current = self.currentIndex()
+        editing = (current
+                   if (model is not None and current.isValid()
+                       and self.state() == QAbstractItemView.EditingState
+                       and top_left.row() <= current.row() <= bottom_right.row()
+                       and top_left.column() <= current.column()
+                       <= bottom_right.column())
+                   else None)
+        if editing is None:
+            super().dataChanged(top_left, bottom_right, roles)
+            return
+        row, col = editing.row(), editing.column()
+        top, left = top_left.row(), top_left.column()
+        bottom, right = bottom_right.row(), bottom_right.column()
+        for r0, c0, r1, c1 in ((top, left, row - 1, right),
+                               (row + 1, left, bottom, right),
+                               (row, left, row, col - 1),
+                               (row, col + 1, row, right)):
+            if r0 <= r1 and c0 <= c1:
+                super().dataChanged(model.index(r0, c0),
+                                    model.index(r1, c1), roles)
+
     # ---------------------------------------------------------- selection
 
     def _selection_rect(self) -> Optional[tuple[int, int, int, int]]:
