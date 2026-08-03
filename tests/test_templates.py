@@ -291,13 +291,16 @@ class TestBundledExamples:
             assert f'id="{element_id}"' in fixed
         assert "room-plant" not in fixed
         assert re.search(r'<path id="room-lab" class="cls-2 room"', fixed)
-        # untouched: the page never mentions these
-        assert 'id="bg"' not in fixed and 'id="zone-south"' not in fixed
+        # ids the page never mentions are restored too — a name nothing asks
+        # for costs nothing, and refusing to write one is how this ends up
+        # doing nothing at all on a page whose wiring cannot be seen
+        assert 'id="bg"' in fixed and 'id="zone-south"' in fixed
 
         applied = cache.outputs_for("svg_retrofit")["applied"]
         assert list(applied[applied["action"] == "added"]["old_id"]) == [
-            "pipe-main", "room-lab", "room-office", "room-store",
-            "valve-a", "valve-b", "zone-north"]
+            "bg", "label-lab", "label-office", "label-store", "pipe-main",
+            "room-lab", "room-office", "room-store", "valve-a", "valve-b",
+            "zone-north", "zone-south"]
 
         impact = cache.outputs_for("svg_impact")["impact"]
         verdicts = dict(zip(impact["ref"], impact["verdict"]))
@@ -779,6 +782,43 @@ class TestSvgRetrofitSeesIdsThePageOnlyQuotes:
                                  hooks=hooks, new_elements=new)
         assert '<path id="G1.1"' in result["svg"]
         assert '<path id="G2.1"' in result["svg"]
-        # G3.1 is in the drawing but nothing on the page asks for it
-        assert 'id="G3.1"' not in result["svg"]
+        # G3.1 is in the drawing and nothing on the page asks for it — it is
+        # written anyway, an id nothing uses costing nothing
+        assert '<path id="G3.1"' in result["svg"]
         assert not any("nothing was written" in m for m in said)
+        assert "2 of the 2 id(s) the page asks for now exist in the artwork" \
+            in said
+
+    def test_the_restriction_is_still_there_for_those_who_want_it(self):
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+                   '<path class="cls-3" d="M170,10h60v20h-60Z"/></svg>')
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        matches = self.call("svg_diff", old=elements, new=new)[0]["matches"]
+        hooks = self.call("svg_hooks", html=self.page(),
+                          elements=elements)[0]["hooks"]
+        result, _ = self.call("svg_retrofit", {"only_hooked": True},
+                              svg=new_svg, matches=matches, hooks=hooks,
+                              new_elements=new)
+        assert '<path id="G1.1"' in result["svg"]
+        assert 'id="G3.1"' not in result["svg"]
+
+    def test_a_class_the_page_does_not_style_is_left_off(self):
+        # the asymmetry: an id is a name, a class is a style. Putting back a
+        # `fil51` the old stylesheet still has a rule for changes the drawing.
+        art = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<rect class="fil51" id="G1.1" x="10" y="10" '
+               'width="60" height="20"/></svg>')
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<path class="cls-1" d="M10,10h60v20h-60Z"/></svg>')
+        elements = self.call("svg_elem_old", svg=art)[0]["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        matches = self.call("svg_diff", old=elements, new=new)[0]["matches"]
+        page = ('<html><body>' + art + '<script>var r = {"G1.1": 1};</script>'
+                "</body></html>")
+        hooks = self.call("svg_hooks", html=page, elements=elements)[0]["hooks"]
+        result, _ = self.call("svg_retrofit", svg=new_svg, matches=matches,
+                              hooks=hooks, new_elements=new)
+        assert '<path id="G1.1"' in result["svg"]
+        assert "fil51" not in result["svg"]
