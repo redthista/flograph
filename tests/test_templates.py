@@ -1122,3 +1122,43 @@ class TestSvgRetrofitGivesALayerItsIdBack:
         found = self.call("svg_diff", old=old, new=new)[0]["matches"]
         assert found[found["old_id"] == "Layer_1"].iloc[0]["status"] == "missing"
         assert found[found["old_id"] == "G1.1"].iloc[0]["status"] == "unnamed"
+
+
+class TestSvgDiffSaysWhenNothingLinesUp:
+    """From a real run: a Source File whose path was not set yet read its
+    built-in sample, so a 1,087-element drawing was compared against a
+    16-element toy. Nothing failed. The fit landed 1 of 1087, 172 elements
+    came back missing, and every number after that was nonsense wearing the
+    shape of an answer."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+
+    def drawing(self, count, size=20):
+        return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4000 4000">'
+                + "".join(f'<rect id="G{n}" x="{n * 30}" y="{n * 7}" '
+                          f'width="{size + n % 5}" height="{size}"/>'
+                          for n in range(count)) + "</svg>")
+
+    def test_the_wrong_file_entirely_is_called_out(self):
+        old = self.call("svg_elem_old", svg=self.drawing(200))[0]["elements"]
+        new = self.call("svg_elem_new",
+                        svg=self.drawing(4, size=3))[0]["elements"]
+        _, said = self.call("svg_diff", old=old, new=new)
+        complaint = next(m for m in said if "almost nothing" in m)
+        assert "do not look like two versions of one drawing" in complaint
+        assert "built-in sample" in complaint
+
+    def test_a_drawing_that_does_line_up_is_not_nagged(self):
+        old = self.call("svg_elem_old", svg=self.drawing(200))[0]["elements"]
+        new = self.call("svg_elem_new", svg=self.drawing(200))[0]["elements"]
+        _, said = self.call("svg_diff", old=old, new=new)
+        assert not any("almost nothing" in message for message in said)
+
+    def test_two_tiny_files_are_not_nagged_either(self):
+        # under a score of elements there is nothing to be confident about
+        old = self.call("svg_elem_old", svg=self.drawing(4))[0]["elements"]
+        new = self.call("svg_elem_new",
+                        svg=self.drawing(2, size=3))[0]["elements"]
+        _, said = self.call("svg_diff", old=old, new=new)
+        assert not any("almost nothing" in message for message in said)
