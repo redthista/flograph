@@ -936,3 +936,33 @@ class TestSvgRetrofitCarriesBehaviourAcross:
         said = self.retrofit(old=old, new=new)[1]
         assert any("check that the old SVG being read is the one the page "
                    "really used" in message for message in said)
+
+
+class TestSvgRetrofitNoticesTheSameDrawingTwice:
+    """The easy mistake: point the page input at the file this flow last
+    wrote, and it retrofits the new artwork onto itself. Every number in
+    that run looks healthy and nothing whatever is handed back."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+
+    ART = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+           + "".join(f'<rect id="G{n}.1" x="{n * 30}" y="10" '
+                     f'width="20" height="{10 + n}"/>' for n in range(1, 8))
+           + "</svg>")
+
+    def test_it_says_so_when_both_sides_are_the_same_file(self):
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        _, said = self.call("svg_diff", old=elements, new=elements)
+        assert any("look like the same drawing" in message for message in said)
+        assert any("not a page this flow has written" in message
+                   for message in said)
+
+    def test_a_real_re_export_is_not_accused_of_it(self):
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   + "".join(f'<path class="cls-{n}" d="M{n * 30},10h20v{10 + n}'
+                             f'h-20Z"/>' for n in range(1, 8)) + "</svg>")
+        old = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        _, said = self.call("svg_diff", old=old, new=new)
+        assert not any("same drawing" in message for message in said)
