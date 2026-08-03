@@ -614,3 +614,171 @@ class TestSvgRetrofitAlignsCoordinateSpaces:
         new = self.call("svg_elem_new", svg=new_svg)["elements"]
         matches = self.call("svg_diff", old=old, new=new)["matches"]
         assert set(matches[matches["old_id"] != ""]["status"]) == {"missing"}
+
+
+class TestSvgRetrofitFitsWhatTheElementsAgreeOn:
+    """Also from the real site: fitting the two files by their outer bounds
+    put 11 of 1087 elements onto an element of the new artwork. The bounds
+    only correspond when both files' outermost edges are the same drawing,
+    and an export that adds a frame — or drops one — moves them."""
+
+    SCALE, DX, DY = 34.589, 14.93, 21.31
+
+    # (x, y, w, h) in the new file's units
+    ROOMS = [(70.76, 161.06, 56.0, 22.63), (67.93, 200.0, 120.0, 40.0),
+             (30.0, 60.0, 45.0, 18.0), (150.0, 90.0, 45.0, 18.0),
+             (220.0, 40.0, 80.0, 25.0), (100.0, 250.0, 60.0, 12.0)]
+
+    def node(self, name):
+        import json
+        graph = json.loads(
+            template_path("10_svg_retrofit_workbench.flograph").read_text()
+        )["graph"]
+        code = next(n["code"] for n in graph["nodes"] if n["id"] == name)
+        namespace = {}
+        exec(compile(code, f"<{name}>", "exec"), namespace)
+        return namespace
+
+    def call(self, name, _over=None, **inputs):
+        said = []
+
+        class Ctx:
+            def __init__(self, params):
+                self.params = params
+
+            def log(self, message):
+                said.append(message)
+
+        namespace = self.node(name)
+        params = {p["name"]: p.get("default") for p in namespace["PARAMS"]}
+        params.update(_over or {})
+        result = namespace["run"](Ctx(params), **inputs)
+        return result, said
+
+    def files(self, frame=True):
+        old = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9000 12000">']
+        new = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">']
+        for n, (x, y, w, h) in enumerate(self.ROOMS, start=1):
+            s, dx, dy = self.SCALE, self.DX, self.DY
+            old.append(f'<rect class="fil5{n}" id="G{n}.1" '
+                       f'x="{(x + dx) * s:.2f}" y="{(y + dy) * s:.2f}" '
+                       f'width="{w * s:.2f}" height="{h * s:.2f}"/>')
+            new.append(f'<path class="cls-4{n}" '
+                       f'd="M{x},{y}h{w}v{h}h-{w}Z"/>')
+        if frame:
+            # The whole point: a border the old file never had. It is the
+            # outermost thing in the new one, so it decides the outer-bounds
+            # fit all by itself.
+            new.append('<path class="cls-frame" d="M0,0h400v300h-400Z"/>')
+        return "".join(old) + "</svg>", "".join(new) + "</svg>"
+
+    def elements(self, old_svg, new_svg):
+        return (self.call("svg_elem_old", svg=old_svg)[0]["elements"],
+                self.call("svg_elem_new", svg=new_svg)[0]["elements"])
+
+    def test_a_frame_on_one_side_does_not_wreck_the_alignment(self):
+        old, new = self.elements(*self.files(frame=True))
+        matches, said = self.call("svg_diff", old=old, new=new)
+        matches = matches["matches"]
+        assert "".join(said).count("what most elements agree on") == 1
+
+        found = matches[matches["old_id"] != ""].set_index("old_id")
+        assert set(found["status"]) == {"unnamed"}, "every room should be paired"
+        assert len(found) == len(self.ROOMS)
+
+    def test_the_scale_it_finds_is_the_real_one(self):
+        old, new = self.elements(*self.files(frame=True))
+        _, said = self.call("svg_diff", old=old, new=new)
+        line = next(m for m in said if "scale" in m)
+        assert f"{1 / self.SCALE:.4g}" in line
+        assert f"{-self.DX:+.4g}" in line and f"{-self.DY:+.4g}" in line
+
+    def test_it_beats_the_outer_bounds_and_says_so(self):
+        old, new = self.elements(*self.files(frame=True))
+        _, said = self.call("svg_diff", old=old, new=new)
+        beaten = next(m for m in said if "would have landed" in m)
+        assert "the outer bounds" in beaten
+        assert int(beaten.rsplit("landed ", 1)[1].rstrip(")")) < len(self.ROOMS)
+        landed = next(m for m in said if "now land on an element" in m)
+        assert landed.startswith(f"{len(self.ROOMS)} of")
+
+    def test_the_outer_bounds_still_win_when_they_are_right(self):
+        # no frame: both files bound the same drawing, and the cheap fit is
+        # the correct one — it must not be discarded for being cheap
+        old, new = self.elements(*self.files(frame=False))
+        matches, _ = self.call("svg_diff", old=old, new=new)
+        found = matches["matches"]
+        assert len(found[found["status"] == "unnamed"]) == len(self.ROOMS)
+
+
+class TestSvgRetrofitSeesIdsThePageOnlyQuotes:
+    """The reason a real page looked as if it touched 3 ids out of 173: its
+    popups are bound by one delegated handler that looks `event.target.id`
+    up in a table of its own, so the ids appear in the page as nothing but
+    quoted strings."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+
+    ART = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+           '<rect class="fil51" id="G1.1" x="10" y="10" width="60" height="20"/>'
+           '<rect class="fil52" id="G2.1" x="90" y="10" width="60" height="20"/>'
+           '<rect class="fil53" id="G3.1" x="170" y="10" width="60" height="20"/>'
+           "</svg>")
+    WIRING = ('<script src="/lib/popups.js"></script>'
+              '<script>var rooms = {"G1.1": {t: "Lab"}, "G2.1": {t: "Store"}};'
+              'plan.addEventListener("click", function (e) {'
+              '  var room = rooms[e.target.id]; if (room) show(room); });'
+              "</script>")
+
+    def page(self):
+        return "<html><body>" + self.ART + self.WIRING + "</body></html>"
+
+    def test_without_the_artwork_the_page_looks_untouched(self):
+        hooks, _ = self.call("svg_hooks", html=self.page())
+        outside = hooks["hooks"]
+        outside = outside[(outside["where"] != "internal")
+                          & (outside["target"] == "id")]
+        assert list(outside["ref"]) == []
+
+    def test_knowing_the_artwork_finds_the_ids_it_quotes(self):
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        hooks, said = self.call("svg_hooks", html=self.page(),
+                                elements=elements)
+        found = hooks["hooks"]
+        found = found[(found["where"] != "internal") & (found["target"] == "id")]
+        assert sorted(found["ref"]) == ["G1.1", "G2.1"]
+        assert set(found["where"]) == {"script"}
+        assert "2 of the 3 ids in the old artwork are named by the page" in said
+
+    def test_the_artworks_own_ids_are_not_the_page_using_them(self):
+        # every id appears quoted inside the inline <svg> as id="G1.1"; that
+        # is the drawing, not the page reaching into it
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        page = "<html><body>" + self.ART + "</body></html>"
+        hooks, _ = self.call("svg_hooks", html=page, elements=elements)
+        found = hooks["hooks"]
+        assert list(found[found["where"] != "internal"]["ref"]) == []
+
+    def test_it_names_the_scripts_it_cannot_see_into(self):
+        _, said = self.call("svg_hooks", html=self.page())
+        assert any("popups.js" in message and "external script" in message
+                   for message in said)
+
+    def test_the_retrofit_then_has_something_to_restore(self):
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+                   '<path class="cls-2" d="M90,10h60v20h-60Z"/>'
+                   '<path class="cls-3" d="M170,10h60v20h-60Z"/></svg>')
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        matches = self.call("svg_diff", old=elements, new=new)[0]["matches"]
+        hooks = self.call("svg_hooks", html=self.page(),
+                          elements=elements)[0]["hooks"]
+        result, said = self.call("svg_retrofit", svg=new_svg, matches=matches,
+                                 hooks=hooks, new_elements=new)
+        assert '<path id="G1.1"' in result["svg"]
+        assert '<path id="G2.1"' in result["svg"]
+        # G3.1 is in the drawing but nothing on the page asks for it
+        assert 'id="G3.1"' not in result["svg"]
+        assert not any("nothing was written" in m for m in said)
