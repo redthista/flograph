@@ -774,7 +774,8 @@ class TestSvgRetrofitSeesIdsThePageOnlyQuotes:
 
     def test_it_names_the_scripts_it_cannot_see_into(self):
         _, said = self.call("svg_hooks", html=self.page())
-        assert any("popups.js" in message and "external script" in message
+        assert any("popups.js" in message and "could not be read" in message
+                   and "wire the page's Path in" in message
                    for message in said)
 
     def test_the_retrofit_then_has_something_to_restore(self):
@@ -966,3 +967,158 @@ class TestSvgRetrofitNoticesTheSameDrawingTwice:
         new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
         _, said = self.call("svg_diff", old=old, new=new)
         assert not any("same drawing" in message for message in said)
+
+
+class TestSvgRetrofitReadsTheScriptsThePageLoads:
+    """From a real site: 173 ids in the artwork, 2 named by the page, and
+    five .js files doing all the work. From the HTML alone the page looks as
+    if it barely touches its own drawing."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+
+    ART = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+           '<rect class="fil51" id="G1.1" x="10" y="10" width="60" height="20"/>'
+           '<rect class="fil51" id="G2.1" x="90" y="10" width="60" height="20"/>'
+           '<rect class="fil52" id="G3.1" x="170" y="10" width="60" height="20"/>'
+           "</svg>")
+    PAGE = ('<html><body>' + ART
+            + '<script src="js/phases.js"></script>'
+            + '<script src="/assets/steps.js"></script>'
+            + '<script src="https://cdn.example.com/bootstrap.js"></script>'
+            + '<script src="missing.js"></script></body></html>')
+
+    def site(self, tmp_path):
+        (tmp_path / "js").mkdir()
+        (tmp_path / "js" / "phases.js").write_text(
+            'var phases = {"G1.1": "Design", "G2.1": "Build"};\n'
+            'document.getElementById("G1.1").classList.add("on");\n')
+        (tmp_path / "assets").mkdir()
+        (tmp_path / "assets" / "steps.js").write_text(
+            'document.querySelectorAll(".fil51").forEach(hook);\n')
+        page = tmp_path / "overview.html"
+        page.write_text(self.PAGE)
+        return page
+
+    def test_the_page_alone_looks_almost_untouched(self, tmp_path):
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        hooks = self.call("svg_hooks", html=self.PAGE,
+                          elements=elements)[0]["hooks"]
+        outside = hooks[hooks["where"] != "internal"]
+        assert list(outside["ref"]) == []
+
+    def test_reading_them_finds_what_the_page_never_says(self, tmp_path):
+        page = self.site(tmp_path)
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        found, said = self.call("svg_hooks", html=self.PAGE,
+                                elements=elements, path=str(page))
+        hooks = found["hooks"]
+        outside = hooks[hooks["where"] != "internal"]
+        ids = sorted(outside[outside["target"] == "id"]["ref"])
+        classes = sorted(set(outside[outside["target"] == "class"]["ref"]))
+        assert ids == ["G1.1", "G2.1"]
+        assert "fil51" in classes
+        # the file that wants it is named, so the report can say which
+        assert set(outside["where"]) == {"phases.js", "steps.js"}
+        assert any("read 2 script(s)" in message for message in said)
+
+    def test_a_cdn_is_not_ours_to_read_and_a_missing_file_is_named(self, tmp_path):
+        page = self.site(tmp_path)
+        _, said = self.call("svg_hooks", html=self.PAGE, path=str(page))
+        complaint = next(m for m in said if "could not be read" in m)
+        assert "missing.js" in complaint
+        assert "bootstrap.js" not in complaint      # a CDN, never expected here
+
+    def test_the_classes_it_finds_are_then_restored(self, tmp_path):
+        page = self.site(tmp_path)
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+                   '<path class="cls-2" d="M90,10h60v20h-60Z"/>'
+                   '<path class="cls-3" d="M170,10h60v20h-60Z"/></svg>')
+        elements = self.call("svg_elem_old", svg=self.ART)[0]["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        matches = self.call("svg_diff", old=elements, new=new)[0]["matches"]
+        hooks = self.call("svg_hooks", html=self.PAGE, elements=elements,
+                          path=str(page))[0]["hooks"]
+        fixed = self.call("svg_retrofit", svg=new_svg, matches=matches,
+                          hooks=hooks, new_elements=new)[0]["svg"]
+        # steps.js selects .fil51, so that class has to come back
+        assert fixed.count("fil51") == 2
+        assert "fil52" not in fixed          # nothing selects it
+
+
+class TestSvgRetrofitGivesALayerItsIdBack:
+    """Both ids a real page named turned out to be <g> layers, and groups
+    were the one thing the matcher would not pair — so a drawing whose every
+    shape matched still lost the handle the page scopes its handlers to."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+
+    def files(self, wrap=False):
+        old = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<g id="New_x0020_Boxes">'
+               '<rect id="G1.1" x="10" y="10" width="60" height="20"/>'
+               '<rect id="G2.1" x="90" y="10" width="140" height="20"/>'
+               "</g></svg>")
+        inner = ('<g>'
+                 '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+                 '<path class="cls-2" d="M90,10h140v20h-140Z"/>'
+                 "</g>")
+        new = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               + (f"<g>{inner}</g>" if wrap else inner) + "</svg>")
+        return old, new
+
+    def matches(self, wrap=False):
+        old_svg, new_svg = self.files(wrap)
+        old = self.call("svg_elem_old", svg=old_svg)[0]["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        return self.call("svg_diff", old=old, new=new)[0]["matches"], new_svg, new
+
+    def test_the_layer_id_comes_back(self):
+        found, new_svg, new = self.matches()
+        row = found[found["old_id"] == "New_x0020_Boxes"].iloc[0]
+        assert row["status"] == "unnamed" and row["match"] == "layer"
+        fixed = self.call("svg_retrofit", svg=new_svg, matches=found,
+                          new_elements=new)[0]["svg"]
+        assert '<g id="New_x0020_Boxes">' in fixed
+
+    def test_it_picks_the_group_that_actually_holds_them(self):
+        # a wrapper around the real layer holds the same shapes and more —
+        # the tightest group that holds them is the counterpart
+        found, new_svg, new = self.matches(wrap=True)
+        row = found[found["old_id"] == "New_x0020_Boxes"].iloc[0]
+        assert row["match"] == "layer"
+        fixed = self.call("svg_retrofit", svg=new_svg, matches=found,
+                          new_elements=new)[0]["svg"]
+        # the inner one, not the wrapper
+        assert fixed.startswith('<svg xmlns="http://www.w3.org/2000/svg" '
+                                'viewBox="0 0 400 300"><g><g '
+                                'id="New_x0020_Boxes">')
+
+    def test_a_group_holding_nothing_that_matched_is_left_alone(self):
+        old_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<g id="New_x0020_Boxes">'
+                   '<rect id="G1.1" x="10" y="10" width="60" height="20"/>'
+                   "</g></svg>")
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<g><path d="M300,250h9v9h-9Z"/></g></svg>')
+        old = self.call("svg_elem_old", svg=old_svg)[0]["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        found = self.call("svg_diff", old=old, new=new)[0]["matches"]
+        row = found[found["old_id"] == "New_x0020_Boxes"].iloc[0]
+        assert row["status"] == "missing"
+
+    def test_a_group_is_never_matched_on_position_alone(self):
+        # every <g> has a 0x0 box, so the geometry pass used to pair any two
+        # of them perfectly — a match that means nothing
+        old_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<g id="Layer_1"/><rect id="G1.1" x="10" y="10" '
+                   'width="60" height="20"/></svg>')
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                   '<g/><path d="M10,10h60v20h-60Z"/></svg>')
+        old = self.call("svg_elem_old", svg=old_svg)[0]["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        found = self.call("svg_diff", old=old, new=new)[0]["matches"]
+        assert found[found["old_id"] == "Layer_1"].iloc[0]["status"] == "missing"
+        assert found[found["old_id"] == "G1.1"].iloc[0]["status"] == "unnamed"
