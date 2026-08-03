@@ -920,6 +920,10 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
         engine.node_succeeded.connect(self._on_control_node_succeeded)
         engine.node_succeeded.connect(self._on_browser_node_succeeded)
+        # cards fade their output previews while a re-run for them is queued;
+        # the engine owns that set, the scene paints from a copy of it
+        engine.request_changed.connect(
+            lambda: self.scene.set_requested_nodes(engine.requested_nodes))
         # every run: a report card's content lives upstream of it, so the
         # cards that changed are not the ones that ran
         engine.run_finished.connect(lambda *_: self._refresh_report_cards())
@@ -1529,33 +1533,35 @@ class MainWindow(QMainWindow):
 
     def _on_slicer_changed(self, node_id: str) -> None:
         """A Slicer's ticks changed: re-run it and the visuals that follow.
-        The SetParamCommand already dirtied the subgraph; if a run is in
-        flight this is a no-op and the affected nodes just stay stale."""
+        The SetParamCommand already dirtied the subgraph; request_run
+        coalesces a burst of ticks into one run and holds the request until
+        any run already in flight is done."""
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "slicer":
             return
-        self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
+        self.engine.request_run([node_id, *self.graph.downstream(node_id)])
 
     def _on_control_changed(self, node_id: str) -> None:
         """A slider moved, a date was picked, a box was typed into: re-run
         that control and everything it feeds, so the charts answer straight
         away. Same contract as a Slicer tick — the SetParamCommand already
-        dirtied the subgraph, and a run already in flight makes this a
-        no-op."""
+        dirtied the subgraph, and request_run turns a drag's worth of values
+        into one run of the final one."""
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "control":
             return
-        self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
+        self.engine.request_run([node_id, *self.graph.downstream(node_id)])
 
     def _on_dashboard_sheet_edited(self, node_id: str) -> None:
         """A cell changed in a Table tile: re-run it and everything it feeds,
         so the charts and KPIs on the page follow the number that was just
         typed. Same deal as a Slicer — the SetParamCommand already dirtied
-        the subgraph, and a run already in flight makes this a no-op."""
+        the subgraph, and request_run means typing across a row is one run
+        of the finished row rather than a queue of obsolete ones."""
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "grid":
             return
-        self.engine.run_targets([node_id, *self.graph.downstream(node_id)])
+        self.engine.request_run([node_id, *self.graph.downstream(node_id)])
 
     def _named_node_ids(self, text: str) -> list[str]:
         wanted = {line.strip().lower() for line in text.splitlines()

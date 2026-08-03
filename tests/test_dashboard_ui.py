@@ -514,24 +514,40 @@ class TestEditableTableTile:
     def test_editing_reruns_the_node_and_what_it_feeds(self, window):
         """Typing a number and then hunting for the Run button would defeat
         the point of a dashboard -- an edit runs the subgraph, like a
-        slicer's tick does."""
+        slicer's tick does. It goes through request_run, so a row's worth of
+        typing is one run rather than one per cell."""
         add_page(window)
         node, item = self.add_table(window)
-        ran = []
-        window.engine.run_targets = lambda targets: ran.append(list(targets))
+        asked = []
+        window.engine.request_run = lambda targets: asked.append(list(targets))
 
         item._sheet_model.setData(self.cell(item, 0, 0), "7", Qt.EditRole)
-        assert ran and ran[0][0] == node.id
+        assert asked and asked[0][0] == node.id
+
+    def test_a_burst_of_edits_is_one_run(self, qtbot, window):
+        add_page(window)
+        _node, item = self.add_table(window)
+        runs = []
+        window.engine.run_started.connect(lambda: runs.append(1))
+
+        for row, value in enumerate(("7", "8")):
+            item._sheet_model.setData(self.cell(item, row, 0), value,
+                                      Qt.EditRole)
+        assert runs == []                      # nothing has started yet
+        with qtbot.waitSignal(window.engine.run_finished, timeout=5000):
+            pass
+        assert len(runs) == 1
+        assert not window.engine.pending_request
 
     def test_no_rerun_when_the_edit_changes_nothing(self, window):
         add_page(window)
         _node, item = self.add_table(window)
-        ran = []
-        window.engine.run_targets = lambda targets: ran.append(list(targets))
+        asked = []
+        window.engine.request_run = lambda targets: asked.append(list(targets))
 
         # setting a cell to what it already holds
         item._sheet_model.setData(self.cell(item, 0, 0), "", Qt.EditRole)
-        assert ran == []
+        assert asked == []
 
     def test_toolbar_adds_a_row(self, window):
         add_page(window)
@@ -1241,3 +1257,84 @@ class TestTileFullscreen:
         view = self.shown_view(window, qtbot)
         view.enter_fullscreen(item)
         assert view.fullscreen_tile is None
+
+
+class TestStaleVersusUpdating:
+    """A tile showing an old number and a tile whose new number is on its
+    way look the same unless something says otherwise -- and on a flow slow
+    enough to notice, the old numbers get read as the new ones."""
+
+    def shown_tile(self, window):
+        node = add_show_table(window)
+        item = add_tile(window, node)
+        df = pd.DataFrame({"a": [1, 2]})
+        window.engine.cache.set(node.id, {"table": df}, 0.01)
+        window.graph.mark_clean(node.id)
+        window.engine.node_succeeded.emit(node.id)
+        return node, item
+
+    def test_dirty_with_nothing_coming_reads_stale_and_stays_legible(
+            self, window):
+        add_page(window)
+        node, item = self.shown_tile(window)
+        window.graph.mark_dirty(node.id)
+
+        assert item._is_stale()
+        assert not item._is_updating()
+        # nothing is going to change it, so there is no reason to fade it
+        assert item._proxy.opacity() == 1.0
+
+    def test_a_queued_rerun_reads_updating_and_fades(self, window):
+        add_page(window)
+        node, item = self.shown_tile(window)
+        window.graph.mark_dirty(node.id)
+        window.engine.request_run([node.id])
+
+        assert item._is_updating()
+        assert item._proxy.opacity() < 1.0
+
+    def test_a_running_node_reads_updating(self, window):
+        from flograph.core import NodeStatus
+        add_page(window)
+        node, item = self.shown_tile(window)
+        window.graph.mark_dirty(node.id)
+        window.graph.set_status(node.id, NodeStatus.RUNNING)
+
+        assert item._is_updating()
+        assert item._proxy.opacity() < 1.0
+
+    def test_the_fade_lifts_when_the_run_lands(self, qtbot, window):
+        add_page(window)
+        node, item = self.shown_tile(window)
+        window.graph.mark_dirty(node.id)
+        window.engine.request_run([node.id])
+        assert item._proxy.opacity() < 1.0
+
+        with qtbot.waitSignal(window.engine.run_finished, timeout=5000):
+            pass
+        assert not item._is_stale()
+        assert item._proxy.opacity() == 1.0
+
+    def test_cancelling_puts_it_back_to_plain_stale(self, window):
+        """Cancel drops the queued run, so the tile stops promising one."""
+        add_page(window)
+        node, item = self.shown_tile(window)
+        window.graph.mark_dirty(node.id)
+        window.engine.request_run([node.id])
+        assert item._is_updating()
+
+        window.engine.clear_request()
+        assert item._is_stale() and not item._is_updating()
+        assert item._proxy.opacity() == 1.0
+
+    def test_a_table_tile_is_never_faded(self, window):
+        """You type into it -- fading your own input while the flow catches
+        up would be backwards."""
+        add_page(window)
+        node = window.registry.instantiate("flograph.io.table", pos=(0, 0))
+        window.graph.add_node(node)
+        item = add_tile(window, node)
+        window.engine.request_run([node.id])
+
+        assert not item._is_stale()
+        assert item._proxy.opacity() == 1.0

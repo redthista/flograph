@@ -668,3 +668,89 @@ class TestSheetEditorDialog:
         dialog.model.setData(dialog.model.index(0, 0), "x")
         dialog._apply()
         assert seen and seen[0]["rows"][0][0] == "x"
+
+
+class TestExternalSyncKeepsYourPlace:
+    """A linked table gets a set_sheet every time its run finishes — which on
+    a slow flow lands long after the edit that caused it, wherever the user
+    has got to by then."""
+
+    def sheet(self, rows):
+        return {"version": 2,
+                "columns": [{"name": "A", "type": "auto"},
+                            {"name": "B", "type": "auto"}],
+                "rows": rows}
+
+    def test_refreshed_values_keep_the_selection_and_scroll(self, qtbot):
+        model = make_model(rows=[[str(n), ""] for n in range(60)])
+        view = SpreadsheetView()
+        qtbot.addWidget(view)
+        view.setModel(model)
+        view.resize(300, 200)
+        view.show()
+        view.setCurrentIndex(model.index(40, 1))
+        view.scrollTo(model.index(40, 1))
+        offset = view.verticalScrollBar().value()
+        assert offset > 0
+
+        resets = []
+        model.modelReset.connect(lambda: resets.append(1))
+        model.set_sheet(self.sheet([[str(n * 2), ""] for n in range(60)]))
+
+        assert resets == []                            # no reset, no upheaval
+        assert model.index(3, 0).data(Qt.DisplayRole) == "6"   # values did land
+        assert view.currentIndex().row() == 40
+        assert view.verticalScrollBar().value() == offset
+
+    def test_layout_change_still_resets(self, qtbot):
+        """A different shape can't be swapped in under the view."""
+        model = make_model(rows=[["1", ""], ["2", ""]])
+        resets = []
+        model.modelReset.connect(lambda: resets.append(1))
+        model.set_sheet(self.sheet([["1", ""], ["2", ""], ["3", ""]]))
+        assert resets == [1]
+        assert model.rowCount() == 3
+
+    def test_renamed_column_still_resets(self, qtbot):
+        model = make_model(rows=[["1", ""]])
+        resets = []
+        model.modelReset.connect(lambda: resets.append(1))
+        model.set_sheet({"version": 2,
+                         "columns": [{"name": "Renamed", "type": "auto"},
+                                     {"name": "B", "type": "auto"}],
+                         "rows": [["1", ""]]})
+        assert resets == [1]
+
+    def test_a_landing_run_does_not_overwrite_the_cell_being_typed(self, qtbot):
+        model = make_model(rows=[["1", "2"], ["3", "4"]])
+        view = SpreadsheetView()
+        qtbot.addWidget(view)
+        view.setModel(model)
+        view.show()
+        view.setCurrentIndex(model.index(1, 1))
+        view.edit(model.index(1, 1))
+        editor = view.indexWidget(model.index(1, 1)) or view.focusWidget()
+        editor.setText("half-typed")
+
+        model.set_sheet(self.sheet([["10", "20"], ["30", "40"]]))
+
+        assert editor.text() == "half-typed"           # not re-seeded as "40"
+        assert model.index(0, 0).data(Qt.DisplayRole) == "10"
+
+    def test_an_untouched_cell_is_still_refreshed_under_an_open_editor(
+            self, qtbot):
+        """The cut-out is one cell wide: everything around it still updates."""
+        model = make_model(rows=[["1", "2"], ["3", "4"]])
+        view = SpreadsheetView()
+        qtbot.addWidget(view)
+        view.setModel(model)
+        view.show()
+        view.setCurrentIndex(model.index(0, 0))
+        view.edit(model.index(0, 0))
+
+        changed = []
+        view.model().dataChanged.connect(
+            lambda tl, br, roles=None: changed.append((tl.row(), br.row())))
+        model.set_sheet(self.sheet([["1", "20"], ["30", "40"]]))
+        assert changed                                  # the view was told
+        assert model.index(1, 1).data(Qt.DisplayRole) == "40"

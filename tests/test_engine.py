@@ -233,3 +233,84 @@ def test_run_to_ignores_unrelated(qtbot, diamond):
     assert ok
     assert set(ran) == {a.id, b.id}
     assert c.status == NodeStatus.IDLE and c.dirty
+
+
+# ------------------------------------------------- coalesced reactive re-runs
+
+
+def test_request_run_coalesces_a_burst_into_one_run(qtbot, diamond):
+    """Typing across a row asks for a run per cell; only one should happen,
+    and it should be the one that covers everything asked for."""
+    graph, (a, b, c, d) = diamond
+    engine, ran = make_engine(graph)
+    runs: list[int] = []
+    engine.run_started.connect(lambda: runs.append(1))
+
+    def burst():
+        engine.request_run([b.id])
+        engine.request_run([b.id])
+        engine.request_run([c.id])
+
+    ok = wait_run(qtbot, engine, burst)
+    assert ok
+    assert len(runs) == 1
+    assert set(ran) == {a.id, b.id, c.id}   # both targets, a shared once
+
+
+def test_request_run_made_during_a_run_still_happens(qtbot):
+    """The old behaviour dropped these on the floor: run_targets is a no-op
+    while a run is in flight, so an edit made during one left the graph
+    dirty with nothing scheduled to clean it."""
+    graph = Graph()
+    slow = graph.add_node(NodeInstance.create(parse_spec("""
+NODE = {"label": "Slow", "category": "Test",
+        "inputs": [], "outputs": [("value", "any")]}
+def run(ctx):
+    import time
+    time.sleep(0.3)
+    ctx.log("ran")
+    return 1
+""", "test.slow")))
+    other = graph.add_node(tagged_node("other"))
+    engine, ran = make_engine(graph)
+
+    def start_and_edit():
+        engine.run_to(slow.id)
+        assert engine.active
+        engine.request_run([other.id])   # arrives while that run is in flight
+        assert engine.pending_request
+
+    ok = wait_run(qtbot, engine, start_and_edit)
+    assert ok
+    assert engine.pending_request        # survived the run it arrived under
+    assert other.dirty and ran == [slow.id]
+
+    with qtbot.waitSignal(engine.run_finished, timeout=5000):
+        pass                             # the queued request gets its own run
+    assert not other.dirty
+    assert ran == [slow.id, other.id]
+    assert not engine.pending_request
+
+
+def test_cancel_drops_a_queued_request(qtbot):
+    graph = Graph()
+    slow = graph.add_node(NodeInstance.create(parse_spec("""
+NODE = {"label": "Slow", "category": "Test",
+        "inputs": [], "outputs": [("value", "any")]}
+def run(ctx):
+    import time
+    for _ in range(2000):
+        time.sleep(0.005)
+        ctx.check_cancelled()
+    return 1
+""", "test.slow")))
+    other = graph.add_node(tagged_node("other"))
+
+    engine, ran = make_engine(graph)
+    QTimer.singleShot(100, lambda: engine.request_run([other.id]))
+    QTimer.singleShot(200, engine.cancel)
+    wait_run(qtbot, engine, lambda: engine.run_to(slow.id))
+    assert not engine.pending_request
+    qtbot.wait(500)
+    assert ran == []            # the queued request went with the cancel
+    assert other.dirty

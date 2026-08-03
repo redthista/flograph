@@ -56,6 +56,7 @@ class DashboardScene(QGraphicsScene):
             (events.node_added, self._on_node_presence_changed),
             (events.node_removed, self._on_node_presence_changed),
             (events.dirty_changed, self._on_dirty_changed),
+            (events.status_changed, self._on_status_changed),
             (events.label_changed, self._on_label_changed),
             (events.param_changed, self._on_param_changed),
             (events.restacked, self._on_restacked),
@@ -64,6 +65,7 @@ class DashboardScene(QGraphicsScene):
             event.connect(callback)
         engine.node_succeeded.connect(self._on_node_ran)
         engine.node_failed.connect(self._on_node_ran)
+        engine.request_changed.connect(self._on_request_changed)
 
         page = graph.pages.get(page_id)
         if page is not None:
@@ -78,6 +80,7 @@ class DashboardScene(QGraphicsScene):
         self._event_subs = []
         self.engine.node_succeeded.disconnect(self._on_node_ran)
         self.engine.node_failed.disconnect(self._on_node_ran)
+        self.engine.request_changed.disconnect(self._on_request_changed)
 
     # ------------------------------------------------------- event mirrors
 
@@ -132,7 +135,19 @@ class DashboardScene(QGraphicsScene):
 
     def _on_dirty_changed(self, node_id: str, dirty: bool) -> None:
         for item in self._tiles_for(node_id):
-            item.update()
+            item.refresh_freshness()
+
+    def _on_status_changed(self, node_id: str, status, message: str) -> None:
+        """Queued, running, done: what the tile paints its UPDATING badge
+        and its fade from, so it has to hear about every hop."""
+        for item in self._tiles_for(node_id):
+            item.refresh_freshness()
+
+    def _on_request_changed(self) -> None:
+        """A re-run was queued or dequeued. Which nodes it covers is the
+        engine's to answer, so every tile re-asks rather than being told."""
+        for item in self.tile_items.values():
+            item.refresh_freshness()
 
     def _on_label_changed(self, node_id: str) -> None:
         for item in self._tiles_for(node_id):

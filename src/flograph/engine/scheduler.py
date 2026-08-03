@@ -24,6 +24,11 @@ from .runstats import (SAMPLE_MS, NodeRun, ProcessSampler, RunHistory,
 from .worker import NodeRunnable, WorkerSignals
 
 
+# How long after the last reactive edit its re-run starts. Long enough that a
+# burst — typing across a row, dragging a slider — pays for one run instead of
+# one per commit, short enough that it still reads as the flow answering.
+REACTIVE_DELAY_MS = 300
+
 # Values a node cannot change in place at all, so there is nothing to guard.
 _IMMUTABLE = frozenset({str, bytes, int, float, bool, complex, type(None),
                         frozenset})
@@ -202,6 +207,9 @@ class ExecutionEngine(QObject):
     node_started = Signal(str, int, int)
     node_progress = Signal(str, float)     # node_id, fraction 0..1
     run_recorded = Signal(object)          # RunRecord — a finished run's cost
+    # The set of nodes with a reactive re-run queued has changed. Views paint
+    # from it (see request_run / is_requested), so it has to say when it moves.
+    request_changed = Signal()
 
     def __init__(self, graph: Graph, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -245,6 +253,15 @@ class ExecutionEngine(QObject):
         self._sample_timer.setInterval(SAMPLE_MS)
         self._sample_timer.timeout.connect(self._sample)
 
+        # Reactive re-runs (a typed cell, a dragged slider, a slicer tick)
+        # collect here rather than each calling run_targets. Insertion-ordered
+        # so a plan built from them is reproducible. See request_run.
+        self._requested: dict[str, None] = {}
+        self._request_timer = QTimer(self)
+        self._request_timer.setSingleShot(True)
+        self._request_timer.setInterval(REACTIVE_DELAY_MS)
+        self._request_timer.timeout.connect(self._fire_request)
+
         graph.events.dirty_changed.connect(self._on_dirty_changed)
         graph.events.node_removed.connect(self.cache.evict)
 
@@ -277,11 +294,76 @@ class ExecutionEngine(QObject):
         self.run_started.emit()
         self._dispatch()
 
+    def request_run(self, targets: Iterable[str]) -> None:
+        """Ask for these nodes to run soon, coalescing with anything else
+        that has been asked for meanwhile.
+
+        The reactive counterpart to run_targets, for the edits a user makes
+        continuously — cells, sliders, slicer ticks — and it differs in two
+        ways that only show up on a flow big enough to take a while.
+
+        It waits for the editing to settle, so typing across a row costs one
+        run rather than one per cell. And it never drops a request:
+        run_targets is a no-op while a run is in flight, which for a reactive
+        caller meant the edits made *during* a run silently never ran at all.
+        The graph stayed dirty, the visuals stayed stale, and nothing said
+        so. A request made under a running run survives it and fires when it
+        finishes.
+        """
+        before = len(self._requested)
+        self._requested.update(dict.fromkeys(targets))
+        if self._requested:
+            self._request_timer.start()
+        if len(self._requested) != before:
+            self.request_changed.emit()
+
+    @property
+    def pending_request(self) -> bool:
+        """True while a reactive re-run is waiting for its turn — either for
+        the editing to settle or for the run in flight to finish."""
+        return bool(self._requested)
+
+    def is_requested(self, node_id: str) -> bool:
+        """Is this node covered by a reactive re-run that hasn't started yet?
+
+        What a card or tile needs to tell "you changed something and nothing
+        is coming" from "hold on, this is being recomputed" — the second is
+        worth waiting for and the first is not, and while the request sits in
+        the queue the node's own status cannot tell them apart."""
+        return node_id in self._requested
+
+    @property
+    def requested_nodes(self) -> frozenset:
+        """Every node a queued re-run covers, for a view that would rather
+        hold the set than ask node by node."""
+        return frozenset(self._requested)
+
+    def clear_request(self) -> None:
+        """Forget any pending reactive re-run."""
+        self._request_timer.stop()
+        if self._requested:
+            self._requested.clear()
+            self.request_changed.emit()
+
+    def _fire_request(self) -> None:
+        if self._active:
+            return          # _finish re-arms the timer for us
+        targets = [nid for nid in self._requested if nid in self.graph.nodes]
+        self._requested.clear()
+        if targets:
+            # the plan takes over from here: its nodes go QUEUED, which is
+            # what the views paint from once a run is actually under way
+            self.run_targets(targets)
+        self.request_changed.emit()
+
     def cancel(self) -> None:
         """Cooperative cancel: unstarted nodes leave the plan immediately; the
         running node stops at its next ctx.check_cancelled()."""
         if not self._active or self._token is None:
             return
+        # "stop" means stop: a queued reactive re-run would otherwise start
+        # the moment this one gets out of the way.
+        self.clear_request()
         self._token.cancel()
         if self._record is not None:
             self._record.cancelled = True
@@ -467,6 +549,9 @@ class ExecutionEngine(QObject):
         self._token = None
         self._close_record()
         self.run_finished.emit(not self._had_failure)
+        if self._requested:
+            # an edit landed while that run was in flight; now it gets its run
+            self._request_timer.start()
 
     # ----------------------------------------------------------- recording
 

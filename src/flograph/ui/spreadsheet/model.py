@@ -105,18 +105,53 @@ class SheetModel(QAbstractTableModel):
         return ""
 
     def set_sheet(self, sheet) -> None:
-        """Sync in externally-changed data (param change, undo/redo)."""
+        """Sync in externally-changed data (param change, undo/redo, the
+        refresh at the end of a linked run).
+
+        When the grid keeps its layout, the new values go in as a data
+        change rather than a model reset. A reset drops the selection, the
+        scroll position and any cell being typed into — bearable for an undo
+        the user just asked for, but a linked table also gets one of these
+        every time a run finishes, which on a slow flow arrives long after
+        the edit that caused it and throws the user out of wherever they had
+        moved on to.
+        """
         parsed = parse_sheet(sheet)
         if sheet_to_dict(parsed) == sheet_to_dict(self._sheet):
             return
+        in_place = self._same_layout(parsed)
         self._syncing = True
         try:
-            self.beginResetModel()
+            if not in_place:
+                self.beginResetModel()
             self._sheet = parsed
             self._result = evaluate_sheet(self._sheet)
-            self.endResetModel()
+            if in_place:
+                self.dataChanged.emit(
+                    self.index(0, 0),
+                    self.index(self._sheet.n_rows - 1,
+                               self._sheet.n_cols - 1))
+            else:
+                self.endResetModel()
         finally:
             self._syncing = False
+
+    def _same_layout(self, other: Sheet) -> bool:
+        """Can `other` replace the current sheet without a model reset?
+
+        Only when the shape holds and every column keeps its name, type and
+        stored width. Width is in there because the view applies stored
+        widths on reset and nowhere else, so a change to one has to go the
+        long way round; a linked refresh carries the widths through the
+        merge unchanged, which is the case this fast path exists for.
+        """
+        if (other.n_rows != self._sheet.n_rows
+                or other.n_cols != self._sheet.n_cols
+                or not other.n_rows or not other.n_cols):
+            return False
+        return all(new.name == old.name and new.type == old.type
+                   and new.width == old.width
+                   for new, old in zip(other.columns, self._sheet.columns))
 
     # ------------------------------------------------------ Qt model API
 
