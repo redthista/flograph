@@ -503,3 +503,114 @@ class TestSvgRetrofitMappingIsEditable:
         verdicts = dict(zip(impact["ref"], impact["verdict"]))
         assert verdicts["room-plant"] == "auto-fix"
         assert "BREAKS" not in set(impact["verdict"])
+
+
+class TestSvgRetrofitAlignsCoordinateSpaces:
+    """Reported from a real site: the old artwork was a CorelDRAW export
+    measured in thousands, the new one an Illustrator export measured in
+    hundreds — the same drawing 34.589x apart. Every geometric pass failed
+    and every element came back `missing`, which reads like "it was redrawn"
+    and is nothing of the kind."""
+
+    SCALE, DX, DY = 34.589, 14.93, 21.31
+
+    # the two elements as they appeared in the browser's inspector
+    OLD_RECT = ('x="2866.06" y="6308.09" width="1936.97" height="782.76" '
+                'rx="98.02" ry="98.02"')
+    NEW_PATH = ("M70.76,161.06h50.34c1.56,0,2.83,1.28,2.83,2.83v16.97c0,1.56"
+                "-1.28,2.83-2.83,2.83h-50.34c-1.56,0-2.83-1.28-2.83-2.83v"
+                "-16.97c0-1.56,1.28-2.83,2.83-2.83")
+
+    def node(self, name):
+        import json
+        graph = json.loads(
+            template_path("10_svg_retrofit_workbench.flograph").read_text()
+        )["graph"]
+        code = next(n["code"] for n in graph["nodes"] if n["id"] == name)
+        namespace = {}
+        exec(compile(code, f"<{name}>", "exec"), namespace)
+        return namespace
+
+    def call(self, name, _over=None, **inputs):
+        class Ctx:
+            def __init__(self, params):
+                self.params = params
+
+            def log(self, message):
+                pass
+
+        namespace = self.node(name)
+        params = {p["name"]: p.get("default") for p in namespace["PARAMS"]}
+        params.update(_over or {})
+        return namespace["run"](Ctx(params), **inputs)
+
+    def files(self):
+        def big(x, y, w, h):
+            s, dx, dy = self.SCALE, self.DX, self.DY
+            return (f'x="{(x + dx) * s:.2f}" y="{(y + dy) * s:.2f}" '
+                    f'width="{w * s:.2f}" height="{h * s:.2f}"')
+
+        old = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9000 12000">'
+               f'<rect class="fil51" id="G1.1" {self.OLD_RECT}/>'
+               f'<rect class="fil52" id="G2.1" {big(67.93, 200, 120, 40)}/>'
+               f'<circle class="fil9" id="V1" cx="{(300 + self.DX) * self.SCALE:.2f}"'
+               f' cy="{(180 + self.DY) * self.SCALE:.2f}"'
+               f' r="{9 * self.SCALE:.2f}"/>'
+               "</svg>")
+        new = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               f'<path class="cls-49" d="{self.NEW_PATH}"/>'
+               '<path class="cls-50" d="M67.93,200h120v40h-120Z"/>'
+               '<circle class="cls-9" cx="300" cy="180" r="9"/>'
+               "</svg>")
+        return old, new
+
+    def test_without_alignment_nothing_matches_at_all(self):
+        old_svg, new_svg = self.files()
+        old = self.call("svg_elem_old", svg=old_svg)["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)["elements"]
+        matches = self.call("svg_diff", {"align": False},
+                            old=old, new=new)["matches"]
+        assert set(matches[matches["old_id"] != ""]["status"]) == {"missing"}
+
+    def test_aligning_the_spaces_recovers_every_id(self):
+        old_svg, new_svg = self.files()
+        old = self.call("svg_elem_old", svg=old_svg)["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)["elements"]
+
+        # the old rect really is the new path, 34.589x apart
+        rect = old[old["id"] == "G1.1"].iloc[0]
+        path = new[new["tag"] == "path"].iloc[0]
+        assert round(rect.w / path.w, 2) == round(rect.h / path.h, 2) == 34.59
+
+        matches = self.call("svg_diff", old=old, new=new)["matches"]
+        by_old = matches.set_index("old_id")
+        for element_id in ("G1.1", "G2.1", "V1"):
+            assert by_old.loc[element_id, "status"] == "unnamed"
+            assert by_old.loc[element_id, "match"] == "box"
+            assert by_old.loc[element_id, "confidence"] >= 0.8   # auto-applies
+
+        page = ("<html><body>" + old_svg + "<script>"
+                'document.getElementById("G1.1");'
+                'document.getElementById("G2.1");'
+                'document.getElementById("V1");'
+                "</script></body></html>")
+        hooks = self.call("svg_hooks", html=page)["hooks"]
+        result = self.call("svg_retrofit", svg=new_svg, matches=matches,
+                           hooks=hooks, new_elements=new)
+        assert set(result["applied"]["action"]) == {"added"}
+        assert f'<path id="G1.1" class="cls-49" d="{self.NEW_PATH}"' in result["svg"]
+        assert '<circle id="V1" class="cls-9"' in result["svg"]
+
+    def test_an_alignment_that_explains_nothing_is_not_applied(self):
+        # two drawings with no correspondence: fitting them together would
+        # scale one onto the other and match nothing, so it must not happen
+        old_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+                   '<rect id="a" x="0" y="0" width="10" height="10"/>'
+                   '<rect id="b" x="80" y="80" width="20" height="5"/></svg>')
+        new_svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+                   '<circle cx="50" cy="50" r="7"/>'
+                   '<path d="M10,90h3v3h-3Z"/></svg>')
+        old = self.call("svg_elem_old", svg=old_svg)["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)["elements"]
+        matches = self.call("svg_diff", old=old, new=new)["matches"]
+        assert set(matches[matches["old_id"] != ""]["status"]) == {"missing"}

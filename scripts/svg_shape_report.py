@@ -428,8 +428,10 @@ def report(page_text, old_text, new_text, tokens, say):
         say(f"  new vs old    scale {sx:.3f} x {sy:.3f} · "
             f"offset {new_box[0] - old_box[0]:+g},{new_box[1] - old_box[1]:+g}")
         if abs(sx - 1) > 0.02 or abs(sy - 1) > 0.02:
-            say("  ^^ the two are not drawn at the same scale, so no box or "
-                "position match can succeed until that is reconciled")
+            say("  ^^ the two are not drawn at the same scale. Nothing can be "
+                "matched on geometry until that is reconciled — which is what")
+            say("     SVG Diff's 'Align the two coordinate spaces first' does; "
+                "check its log line says it fitted them.")
 
     for label, rows in (("old artwork", old), ("new artwork", new)):
         say("")
