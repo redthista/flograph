@@ -1,5 +1,6 @@
 """Bundled example workflows: File > Open Example loads and runs cleanly."""
 import importlib.resources
+import re
 
 import pytest
 
@@ -256,6 +257,54 @@ class TestBundledExamples:
         assert "leaflet" in html.lower()
         assert "trust" not in html.lower()
 
+    def test_svg_retrofit_rebinds_a_page_whose_rects_became_paths(
+            self, qtbot, window):
+        window._open_example(template_path("10_svg_retrofit_workbench.flograph"))
+        wait_run(qtbot, window.engine)
+        cache = window.engine.cache
+
+        # the re-export drew every room as an anonymous <path> …
+        elements = cache.outputs_for("svg_elem_new")["elements"]
+        rooms = elements[elements["tag"] == "path"]
+        assert len(rooms) == 5 and (rooms["id"] == "").all()
+        # … and the path parser still measures one as the box the <rect> was,
+        # which the old read-every-number-in-d approach could not (the corner
+        # arcs' radii and flags are not coordinates)
+        lab = rooms[rooms["cls"] == "cls-2"].iloc[0]
+        assert [lab.x, lab.y, lab.w, lab.h] == [40, 48, 160, 88]
+
+        matches = cache.outputs_for("svg_diff")["matches"]
+        by_old = matches.set_index("old_id")
+        assert by_old.loc["room-lab", "status"] == "unnamed"   # id dropped
+        assert by_old.loc["room-lab", "tag"] == "rect"
+        assert by_old.loc["room-lab", "new_tag"] == "path"     # redrawn
+        assert by_old.loc["room-lab", "match"] == "box"
+        assert by_old.loc["pipe-main", "match"] == "box"       # same d, rewritten
+        assert by_old.loc["valve-a", "match"] == "name"
+        assert by_old.loc["room-plant", "status"] == "missing"  # genuinely gone
+
+        # every id the page reaches for is back on the right element, bar the
+        # room that no longer exists — and the class the export dropped too
+        fixed = cache.outputs_for("svg_retrofit")["svg"]
+        for element_id in ("room-lab", "room-office", "room-store", "valve-a",
+                           "valve-b", "pipe-main", "zone-north"):
+            assert f'id="{element_id}"' in fixed
+        assert "room-plant" not in fixed
+        assert re.search(r'<path id="room-lab" class="cls-2 room"', fixed)
+        # untouched: the page never mentions these
+        assert 'id="bg"' not in fixed and 'id="zone-south"' not in fixed
+
+        applied = cache.outputs_for("svg_retrofit")["applied"]
+        assert list(applied[applied["action"] == "added"]["old_id"]) == [
+            "pipe-main", "room-lab", "room-office", "room-store",
+            "valve-a", "valve-b", "zone-north"]
+
+        impact = cache.outputs_for("svg_impact")["impact"]
+        verdicts = dict(zip(impact["ref"], impact["verdict"]))
+        assert verdicts["room-plant"] == "BREAKS"
+        assert verdicts["room"] == "auto-fix"      # the .room class, put back
+        assert set(impact["verdict"]) == {"BREAKS", "auto-fix", "not in SVG"}
+
     def test_goto_from_workflow_links_carry_the_data(self, qtbot, window):
         window._open_example(template_path("11_goto_from_workflow.flograph"))
         graph = window.graph
@@ -308,3 +357,149 @@ class TestBundledExamples:
         assert len(graph.pages) == 1
         page = next(iter(graph.pages.values()))
         assert len(page.tiles) == 6
+
+
+class TestSvgRetrofitRefusesToGuess:
+    """The retrofit writes ids onto anonymous elements, which is only safe
+    while it can say *which* element — so the interesting cases are the ones
+    where it must decline."""
+
+    @staticmethod
+    def node(name):
+        import json
+        graph = json.loads(
+            template_path("10_svg_retrofit_workbench.flograph").read_text()
+        )["graph"]
+        code = next(n["code"] for n in graph["nodes"] if n["id"] == name)
+        namespace = {}
+        exec(compile(code, f"<{name}>", "exec"), namespace)
+        return namespace
+
+    @classmethod
+    def retrofit(cls, old_svg, new_svg, **overrides):
+        class Ctx:
+            def __init__(self, params):
+                self.params = params
+
+            def log(self, message):
+                pass
+
+        def call(name, **inputs):
+            namespace = cls.node(name)
+            params = {p["name"]: p.get("default") for p in namespace["PARAMS"]}
+            params.update(overrides.get(name, {}))
+            return namespace["run"](Ctx(params), **inputs)
+
+        old = call("svg_elem_old", svg=old_svg)["elements"]
+        new = call("svg_elem_new", svg=new_svg)["elements"]
+        matches = call("svg_diff", old=old, new=new)["matches"]
+        result = call("svg_retrofit", svg=new_svg, matches=matches,
+                      new_elements=new)
+        return matches, result["svg"], result["applied"]
+
+    OLD = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">'
+           '<rect id="a" x="10" y="10" width="50" height="50"/>'
+           '<rect id="b" x="100" y="10" width="50" height="50"/>'
+           "</svg>")
+
+    def test_two_identical_anonymous_paths_are_left_alone(self):
+        twins = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">'
+                 '<path d="M10,10h50v50h-50Z"/>'
+                 '<path d="M10,10h50v50h-50Z"/>'
+                 "</svg>")
+        _matches, fixed, applied = self.retrofit(self.OLD, twins)
+        assert "id=" not in fixed
+        assert set(applied["action"]) == {"manual"}
+        assert "would be a guess" in applied.iloc[0]["why"]
+
+    def test_a_transform_is_enough_to_tell_them_apart(self):
+        placed = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">'
+                  '<path d="M10,10h50v50h-50Z"/>'
+                  '<path transform="translate(90 0)" d="M10,10h50v50h-50Z"/>'
+                  "</svg>")
+        _matches, fixed, applied = self.retrofit(self.OLD, placed)
+        assert '<path id="a" d="M10,10h50v50h-50Z"/>' in fixed
+        assert '<path id="b" transform="translate(90 0)"' in fixed
+        assert set(applied["action"]) == {"added"}
+
+    def test_angle_brackets_in_a_script_do_not_shift_the_scan(self):
+        scripted = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">'
+            '<script>if (a<b && c>d) { mk("<rect x=\'1\'/>"); }</script>'
+            '<!-- <rect x="9" y="9" width="1" height="1"/> -->'
+            '<path d="M10,10h50v50h-50Z"/>'
+            '<path transform="translate(90 0)" d="M10,10h50v50h-50Z"/>'
+            "</svg>")
+        _matches, fixed, applied = self.retrofit(self.OLD, scripted)
+        assert '<path id="a" d=' in fixed and '<path id="b" transform=' in fixed
+        assert "id=" not in fixed.split("</script>")[0]
+
+    def test_matching_across_element_types_can_be_switched_off(self):
+        placed = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">'
+                  '<path d="M10,10h50v50h-50Z"/>'
+                  '<path transform="translate(90 0)" d="M10,10h50v50h-50Z"/>'
+                  "</svg>")
+        matches, fixed, applied = self.retrofit(
+            self.OLD, placed, svg_diff={"cross_tag": False})
+        assert set(matches[matches["old_id"] != ""]["status"]) == {"missing"}
+        assert "id=" not in fixed
+        assert applied.empty
+
+
+class TestSvgRetrofitMappingIsEditable:
+    """The mapping table is the escape hatch: when the automatic match is
+    wrong, or never found, you type the id in and it wins."""
+
+    def open(self, qtbot, window):
+        window._open_example(template_path("10_svg_retrofit_workbench.flograph"))
+        wait_run(qtbot, window.engine)
+        return window.engine.cache
+
+    def test_the_plan_lists_new_elements_beside_what_they_matched(
+            self, qtbot, window):
+        cache = self.open(qtbot, window)
+        plan = cache.outputs_for("svg_plan")["plan"]
+        assert list(plan["ref"]) == list(range(len(plan)))   # document order
+        room = plan[plan["id_wanted"] == "room-lab"].iloc[0]
+        assert room["element"].startswith("path")            # the new element
+        assert room["at"] == "40,48 160×88"
+        assert room["was"] == "rect #room-lab · Lab"          # the old one
+        assert room["outcome"] == "write the id on"
+        # nothing typed in yet, so the mapping passes the diff straight on
+        assert (cache.outputs_for("svg_apply")["matches"]["match"] != "manual").all()
+
+    def test_a_typed_id_beats_the_automatic_match(self, qtbot, window):
+        import json
+
+        cache = self.open(qtbot, window)
+        plan = cache.outputs_for("svg_plan")["plan"]
+        # the demolished plant room has no counterpart — but the new artwork
+        # has a Server Room where the operator says it belongs
+        server = plan[plan["element"].str.contains("Server Room")].iloc[0]
+        rows = [[""] for _ in range(len(plan))]
+        rows[int(server.name)] = ["room-plant"]
+        window.graph.set_param("svg_map", "data", json.dumps({
+            "version": 2,
+            "columns": [{"name": "set_id", "type": "text"}],
+            "rows": rows,
+        }))
+        wait_run(qtbot, window.engine)
+        cache = window.engine.cache
+
+        matches = cache.outputs_for("svg_apply")["matches"]
+        plant = matches[matches["old_id"] == "room-plant"].iloc[0]
+        assert plant["status"] == "unnamed" and plant["match"] == "manual"
+        assert plant["confidence"] == 1.0
+        assert int(plant["new_ref"]) == int(server["ref"])
+
+        # …and the retrofit writes it onto that element, not another
+        fixed = cache.outputs_for("svg_retrofit")["svg"]
+        assert 'id="room-plant"' in fixed
+        assert fixed.count('id="room-plant"') == 1
+        assert re.search(r'<path id="room-plant"[^>]*data-name="Server Room"',
+                         fixed)
+        # the hook that was breaking is now answered
+        impact = cache.outputs_for("svg_impact")["impact"]
+        verdicts = dict(zip(impact["ref"], impact["verdict"]))
+        assert verdicts["room-plant"] == "auto-fix"
+        assert "BREAKS" not in set(impact["verdict"])
