@@ -295,6 +295,15 @@ class TestBundledExamples:
         # for costs nothing, and refusing to write one is how this ends up
         # doing nothing at all on a page whose wiring cannot be seen
         assert 'id="bg"' in fixed and 'id="zone-south"' in fixed
+        # the office's popup is a Bootstrap modal, opened by attributes on the
+        # shape rather than by its id — nothing in the page mentions them, so
+        # the old artwork is the only place they exist
+        office = re.search(r'<path[^>]*id="room-office"[^>]*>', fixed).group(0)
+        assert 'data-bs-toggle="modal"' in office
+        assert 'data-bs-target="#office-detail"' in office
+        assert 'title="Office — 12 desks"' in office
+        # …and not the fill, which belongs to the new drawing
+        assert "#0e7490" not in office
 
         applied = cache.outputs_for("svg_retrofit")["applied"]
         assert list(applied[applied["action"] == "added"]["old_id"]) == [
@@ -822,3 +831,108 @@ class TestSvgRetrofitSeesIdsThePageOnlyQuotes:
                               hooks=hooks, new_elements=new)
         assert '<path id="G1.1"' in result["svg"]
         assert "fil51" not in result["svg"]
+
+
+class TestSvgRetrofitCarriesBehaviourAcross:
+    """Reported from a real site, and the reason restoring every id still
+    left the page dead: the popups are Bootstrap modals, and a modal is not
+    opened by an id. It is opened by attributes sitting on the shape —
+
+        data-bs-toggle="modal" data-bs-target="#phasegates"
+        data-placement="left" title="Phase Gate Summaries"
+
+    — which the re-export dropped along with the id. Nothing in the page
+    mentions them, so nothing but the old artwork knows they existed."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+
+    OLD = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+           '<rect class="fil51" id="G1.1" x="10" y="10" width="60" height="20" '
+           'data-bs-toggle="modal" data-bs-target="#phasegates" '
+           'data-toggle="tooltip" data-placement="left" '
+           'title="phase Gate Summaries" style="cursor: pointer;"/>'
+           '<rect class="fil52" id="G2.1" x="90" y="10" width="60" height="20" '
+           'fill="#0e7490"/>'
+           "</svg>")
+    NEW = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+           '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+           '<path class="cls-2" d="M90,10h60v20h-60Z" fill="#0e7490"/></svg>')
+
+    def retrofit(self, _over=None, old=None, new=None):
+        old_svg, new_svg = old or self.OLD, new or self.NEW
+        olds = self.call("svg_elem_old", svg=old_svg)[0]["elements"]
+        news = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        matches = self.call("svg_diff", old=olds, new=news)[0]["matches"]
+        return self.call("svg_retrofit", _over, svg=new_svg, matches=matches,
+                         new_elements=news)
+
+    def test_the_element_list_carries_what_makes_an_element_interactive(self):
+        olds = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
+        import json
+        carried = json.loads(olds[olds["id"] == "G1.1"].iloc[0]["behaviour"])
+        assert carried == {"data-bs-toggle": "modal",
+                           "data-bs-target": "#phasegates",
+                           "data-toggle": "tooltip",
+                           "data-placement": "left",
+                           "title": "phase Gate Summaries"}
+        # presentation is not behaviour: the new drawing is the drawing
+        assert "style" not in carried and "fill" not in carried
+        # and the plain element carries nothing at all
+        assert olds[olds["id"] == "G2.1"].iloc[0]["behaviour"] == ""
+
+    def test_the_modal_attributes_land_on_the_path_that_replaced_the_rect(self):
+        result, said = self.retrofit()
+        fixed = result["svg"]
+        assert 'data-bs-toggle="modal"' in fixed
+        assert 'data-bs-target="#phasegates"' in fixed
+        assert 'title="phase Gate Summaries"' in fixed
+        # on the right element, and only that one
+        at = fixed.index("<path")
+        first = fixed[at:fixed.index("<path", at + 1)]
+        assert 'id="G1.1"' in first and "data-bs-toggle" in first
+        assert fixed.count("data-bs-toggle") == 1
+        assert any("given back the attributes that make them interactive"
+                   in message for message in said)
+
+    def test_the_new_export_wins_where_it_already_says_something(self):
+        # an attribute the new file has is the new file's business
+        new = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<path class="cls-1" d="M10,10h60v20h-60Z" title="Redrawn"/>'
+               '<path class="cls-2" d="M90,10h60v20h-60Z"/></svg>')
+        fixed = self.retrofit(new=new)[0]["svg"]
+        assert 'title="Redrawn"' in fixed
+        assert "phase Gate Summaries" not in fixed
+        assert 'data-bs-toggle="modal"' in fixed      # this one it lacked
+
+    def test_it_is_reported_and_can_be_turned_off(self):
+        applied = self.retrofit()[0]["applied"]
+        row = applied[applied["old_id"] == "G1.1"].iloc[0]
+        assert set(row["attributes"].split()) == {
+            "data-bs-toggle", "data-bs-target", "data-toggle",
+            "data-placement", "title"}
+
+        off, said = self.retrofit({"restore_behaviour": False})
+        assert "data-bs-toggle" not in off["svg"]
+        assert 'id="G1.1"' in off["svg"]              # the id still comes back
+        assert not any("given back the attributes" in m for m in said)
+
+    def test_a_quoted_value_cannot_break_out_of_the_attribute(self):
+        old = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<rect id="G1.1" x="10" y="10" width="60" height="20" '
+               "title='Fish &amp; Chips &lt;b&gt;\"quoted\"' /></svg>")
+        new = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<path class="cls-1" d="M10,10h60v20h-60Z"/></svg>')
+        fixed = self.retrofit(old=old, new=new)[0]["svg"]
+        assert '&amp;' in fixed and "&lt;b&gt;" in fixed and "&quot;" in fixed
+        # still one tag, not two
+        assert fixed.count("<path") == 1 and fixed.count("/>") == 1
+
+    def test_the_log_says_so_when_the_old_artwork_has_none_of_this(self):
+        old = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<rect id="G1.1" x="10" y="10" width="60" height="20"/></svg>')
+        new = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<path class="cls-1" d="M10,10h60v20h-60Z"/></svg>')
+        said = self.retrofit(old=old, new=new)[1]
+        assert any("check that the old SVG being read is the one the page "
+                   "really used" in message for message in said)
