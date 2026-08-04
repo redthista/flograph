@@ -1162,3 +1162,105 @@ class TestSvgDiffSaysWhenNothingLinesUp:
                         svg=self.drawing(2, size=3))[0]["elements"]
         _, said = self.call("svg_diff", old=old, new=new)
         assert not any("almost nothing" in message for message in said)
+
+
+class TestSvgRetrofitServesTheSelectorTheScriptActuallyUses:
+    """The wiring from the real site, which settled several wrong theories:
+
+        document.querySelectorAll('#New_x0020_Boxes rect, '
+                                  '#New_x0020_Boxes path, '
+                                  '#Text rect, #Text path')
+            .forEach(el => { if (el.id != '') setupTooltip(el); })
+
+    It takes <path> as readily as <rect>, so the flattening was never the
+    problem. It needs two things: the layer ids to exist, and the shapes
+    inside them to carry ids. Lose the layer and the list comes back empty —
+    no error, no console, every shape id restored perfectly and not one of
+    them reached."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+
+    SELECTOR = ("#New_x0020_Boxes rect, #New_x0020_Boxes path, "
+                "#Text rect, #Text path")
+    OLD = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+           '<g id="New_x0020_Boxes">'
+           '<rect id="G1.1" x="10" y="10" width="60" height="20"/>'
+           '<rect id="G2.1" x="90" y="10" width="140" height="20"/>'
+           '</g><g id="Text">'
+           '<text id="T1" x="12" y="24">Design</text>'
+           "</g></svg>")
+    # re-exported: layers renamed and wrapped, boxes flattened to paths
+    NEW = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+           '<g id="Layer_1"><g data-name="boxes">'
+           '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+           '<path class="cls-2" d="M90,10h140v20h-140Z"/>'
+           '</g><g data-name="labels">'
+           '<text class="cls-3" x="12" y="24">Design</text>'
+           "</g></g></svg>")
+
+    def page(self):
+        return ("<html><body>" + self.OLD + "<script>"
+                f"document.querySelectorAll('{self.SELECTOR}')"
+                ".forEach(function (el) { if (el.id != '') setup(el); });"
+                "</script></body></html>")
+
+    def run_flow(self):
+        old = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
+        new = self.call("svg_elem_new", svg=self.NEW)[0]["elements"]
+        matches, said = self.call("svg_diff", old=old, new=new)
+        hooks = self.call("svg_hooks", html=self.page(), elements=old)[0]["hooks"]
+        fixed = self.call("svg_retrofit", svg=self.NEW,
+                          matches=matches["matches"], hooks=hooks,
+                          new_elements=new)
+        return matches["matches"], hooks, fixed[0]["svg"], said
+
+    def test_the_selector_is_read_as_two_layer_ids_and_no_type(self):
+        _, hooks, _, _ = self.run_flow()
+        outside = hooks[hooks["where"] != "internal"]
+        assert sorted(set(outside[outside["target"] == "id"]["ref"])) == [
+            "New_x0020_Boxes", "Text"]
+        # a comma is an or: needing rect *or* path is not needing either
+        assert list(outside[outside["target"] == "tag"]["ref"]) == []
+
+    def test_both_layers_get_their_ids_back_on_the_right_groups(self):
+        matches, _, fixed, _ = self.run_flow()
+        by_old = matches.set_index("old_id")
+        assert by_old.loc["New_x0020_Boxes", "match"] == "layer"
+        assert by_old.loc["Text", "match"] == "layer"
+        # the inner groups that hold the shapes, not the Layer_1 wrapper
+        assert '<g id="New_x0020_Boxes" data-name="boxes">' in fixed
+        assert '<g id="Text" data-name="labels">' in fixed
+        assert '<g id="Layer_1">' in fixed          # untouched
+
+    def test_the_shapes_inside_them_are_reachable(self):
+        _, _, fixed, _ = self.run_flow()
+        import re as _re
+        # what the selector would collect: ids under each layer
+        for layer in ("New_x0020_Boxes", "Text"):
+            block = fixed[fixed.index(f'id="{layer}"'):]
+            block = block[:block.index("</g>")]
+            assert _re.search(r'<(?:path|text)[^>]*\bid="[^"]+"', block), layer
+
+    def test_a_layer_with_nowhere_to_go_is_reported_not_swallowed(self):
+        # the export flattened the layers away entirely
+        flat = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+                '<path class="cls-2" d="M90,10h140v20h-140Z"/></svg>')
+        old = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
+        new = self.call("svg_elem_new", svg=flat)[0]["elements"]
+        _, said = self.call("svg_diff", old=old, new=new)
+        complaint = next(m for m in said if "New_x0020_Boxes" in m)
+        assert "flattened the layers away" in complaint
+        assert "will match nothing at all" in complaint
+        assert "key the id onto a group by hand" in complaint
+
+    def test_such_a_layer_can_be_keyed_in_by_hand(self):
+        # which needs the groups on the mapping table in the first place
+        old = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
+        new = self.call("svg_elem_new", svg=self.NEW)[0]["elements"]
+        matches = self.call("svg_diff", old=old, new=new)[0]["matches"]
+        plan = self.call("svg_plan", new=new, matches=matches)[0]["plan"]
+        groups = plan[plan["element"].str.startswith("g")]
+        assert len(groups) >= 3, "every layer must be keyable by hand"
+        assert "g · a layer" in set(plan["element"])
