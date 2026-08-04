@@ -1205,6 +1205,14 @@ class TestSvgRetrofitServesTheSelectorTheScriptActuallyUses:
                 ".forEach(function (el) { if (el.id != '') setup(el); });"
                 "</script></body></html>")
 
+    def matched(self, svg, selector):
+        """What the page's query returns, run the way the browser runs it."""
+        retrofit = self.node("svg_retrofit")
+        tree = retrofit["_Nest"]()
+        tree.feed(svg)
+        tree.close()
+        return retrofit["_selected"](tree.nodes, retrofit["_steps"](selector))
+
     def run_flow(self):
         old = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
         new = self.call("svg_elem_new", svg=self.NEW)[0]["elements"]
@@ -1242,15 +1250,45 @@ class TestSvgRetrofitServesTheSelectorTheScriptActuallyUses:
             block = block[:block.index("</g>")]
             assert _re.search(r'<(?:path|text)[^>]*\bid="[^"]+"', block), layer
 
-    def test_a_layer_with_nowhere_to_go_is_reported_not_swallowed(self):
-        # the export flattened the layers away entirely
-        flat = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
-                '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
-                '<path class="cls-2" d="M90,10h140v20h-140Z"/></svg>')
+    # the export flattened the layers away entirely: no <g> anywhere, so
+    # there is nothing for a layer id to land on and nothing to key it onto
+    # by hand either
+    FLAT = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+            '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+            '<path class="cls-2" d="M90,10h140v20h-140Z"/>'
+            '<text class="cls-3" x="12" y="24">Design</text></svg>')
+
+    def flat_diff(self):
         old = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
-        new = self.call("svg_elem_new", svg=flat)[0]["elements"]
-        _, said = self.call("svg_diff", old=old, new=new)
-        complaint = next(m for m in said if "New_x0020_Boxes" in m)
+        new = self.call("svg_elem_new", svg=self.FLAT)[0]["elements"]
+        matches, said = self.call("svg_diff", old=old, new=new)
+        return old, new, matches["matches"], said
+
+    def test_a_flattened_layer_is_scoped_to_what_holds_its_contents(self):
+        # an empty result is the one outcome with nothing to recommend it:
+        # the drawing itself holds everything the layer held, so the id
+        # goes there and the page's selector reaches the shapes again
+        _, _, matches, said = self.flat_diff()
+        assert matches.set_index("old_id").loc[
+            "New_x0020_Boxes", "match"] == "layer"
+        note = next(m for m in said if "New_x0020_Boxes" in m)
+        assert "had no group of its own left" in note
+        assert "reaches wider than the layer did" in note
+
+    def test_the_id_lands_on_the_drawing_and_the_selector_works(self):
+        _, new, matches, _ = self.flat_diff()
+        fixed = self.call("svg_retrofit", svg=self.FLAT, matches=matches,
+                          new_elements=new)[0]["svg"]
+        assert 'id="New_x0020_Boxes"' in fixed
+        assert fixed.index('id="New_x0020_Boxes"') < fixed.index("<path")
+        # which is the whole point: the query returns the shapes again
+        assert self.matched(fixed, "#New_x0020_Boxes path")
+
+    def test_a_layer_with_nowhere_left_to_go_is_reported_not_swallowed(self):
+        # the drawing can only carry one layer's id, so the second is still
+        # homeless — and says so rather than going quiet
+        _, _, _, said = self.flat_diff()
+        complaint = next(m for m in said if "#Text has no counterpart" in m)
         assert "flattened the layers away" in complaint
         assert "will match nothing at all" in complaint
         assert "key the id onto a group by hand" in complaint
@@ -1264,3 +1302,116 @@ class TestSvgRetrofitServesTheSelectorTheScriptActuallyUses:
         groups = plan[plan["element"].str.startswith("g")]
         assert len(groups) >= 3, "every layer must be keyable by hand"
         assert "g · a layer" in set(plan["element"])
+
+
+class TestSvgRetrofitRunsTheQueryInsteadOfCountingItsParts:
+    """The gap every run of this flow fell into.
+
+    `#Boxes rect, #Boxes path` is not a hook on an id. It is a hook on an
+    id, a nesting and an element type at once, and it returns an empty list
+    the moment any one of the three is missing. Broken into parts, every
+    part can be reported present — ids restored, classes restored, elements
+    matched — while the query the page actually runs returns nothing: no
+    error, no console, no popups, and a report of unbroken good news.
+
+    So the query is run, whole, against the artwork this flow just wrote."""
+
+    node = TestSvgRetrofitFitsWhatTheElementsAgreeOn.node
+    call = TestSvgRetrofitFitsWhatTheElementsAgreeOn.call
+    SELECTOR = TestSvgRetrofitServesTheSelectorTheScriptActuallyUses.SELECTOR
+    OLD = TestSvgRetrofitServesTheSelectorTheScriptActuallyUses.OLD
+    NEW = TestSvgRetrofitServesTheSelectorTheScriptActuallyUses.NEW
+    page = TestSvgRetrofitServesTheSelectorTheScriptActuallyUses.page
+
+    # the same drawing with the layers dissolved on *both* sides, so there
+    # is no layer to match and none to miss: every shape id is restored
+    # perfectly and the page's query still comes back empty
+    LAYERLESS = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                 '<rect id="G1.1" x="10" y="10" width="60" height="20"/>'
+                 '<rect id="G2.1" x="90" y="10" width="140" height="20"/>'
+                 "</svg>")
+    REDRAWN = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+               '<path class="cls-1" d="M10,10h60v20h-60Z"/>'
+               '<path class="cls-2" d="M90,10h140v20h-140Z"/></svg>')
+
+    def retrofit(self, old_svg, new_svg):
+        old = self.call("svg_elem_old", svg=old_svg)[0]["elements"]
+        new = self.call("svg_elem_new", svg=new_svg)[0]["elements"]
+        matches = self.call("svg_diff", old=old, new=new)[0]["matches"]
+        hooks = self.call("svg_hooks", html=self.page(), elements=old)[0]["hooks"]
+        return self.call("svg_retrofit", svg=new_svg, matches=matches,
+                         hooks=hooks, new_elements=new)
+
+    def test_the_query_is_carried_through_whole_not_only_its_parts(self):
+        old = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
+        hooks = self.call("svg_hooks", html=self.page(), elements=old)[0]["hooks"]
+        assert list(hooks[hooks["target"] == "selector"]["ref"]) == [self.SELECTOR]
+        # and taking it apart still happens, for everything else that reads it
+        assert "New_x0020_Boxes" in set(hooks[hooks["target"] == "id"]["ref"])
+
+    def test_a_bare_id_is_not_carried_through_being_already_answered(self):
+        page = ("<html><body><script>document.querySelector('#panel');"
+                "document.querySelectorAll('rect');</script></body></html>")
+        hooks = self.call("svg_hooks", html=page)[0]["hooks"]
+        assert list(hooks[hooks["target"] == "selector"]["ref"]) == []
+
+    def test_it_says_what_the_query_returns_and_how_many_can_be_wired(self):
+        _, said = self.retrofit(self.OLD, self.NEW)
+        line = next(m for m in said if self.SELECTOR in m and "matches" in m)
+        assert "matches 2 elements" in line or "matches 2 element(s)" in line
+        # the count that decides it: the page skips the ones without an id
+        assert "2 of them with an id" in line
+
+    def test_ids_all_restored_and_the_query_dead_is_no_longer_silent(self):
+        outputs, said = self.retrofit(self.LAYERLESS, self.REDRAWN)
+        fixed = outputs["svg"]
+        # every id the artwork had is back, and the old report stopped here
+        assert 'id="G1.1"' in fixed and 'id="G2.1"' in fixed
+        dead = next(m for m in said if "matches NOTHING" in m)
+        assert self.SELECTOR in dead
+        assert "whatever it wires up is dead" in dead
+
+    def test_it_names_the_step_that_empties_the_query(self):
+        _, said = self.retrofit(self.LAYERLESS, self.REDRAWN)
+        why = next(m for m in said if "nothing in the artwork matches" in m)
+        assert "`#New_x0020_Boxes`" in why
+
+    def test_a_layer_that_survives_is_blamed_at_the_right_step(self):
+        # the id is there; what is missing is anything of that type inside it
+        kept = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">'
+                '<g id="New_x0020_Boxes"><circle cx="5" cy="5" r="2"/></g>'
+                "</svg>")
+        old = self.call("svg_elem_old", svg=self.OLD)[0]["elements"]
+        hooks = self.call("svg_hooks", html=self.page(), elements=old)[0]["hooks"]
+        import pandas as pd
+        empty = pd.DataFrame(columns=["status", "old_id", "new_id", "name",
+                                      "tag", "new_tag", "match", "confidence",
+                                      "cls", "behaviour", "new_ref", "manual"])
+        _, said = self.call("svg_retrofit", svg=kept, matches=empty, hooks=hooks)
+        why = next(m for m in said if "but nothing inside it is" in m)
+        assert "`#New_x0020_Boxes` matches 1 element" in why
+        assert "`rect`" in why or "`path`" in why
+
+    def test_the_rest_of_the_page_is_not_blamed_on_the_artwork(self):
+        # a query about the page's own furniture is none of this file's
+        # business, and reporting it dead would send someone hunting in the
+        # wrong file
+        page = ("<html><body><script>"
+                "document.querySelectorAll('#accordion .card-header');"
+                "</script></body></html>")
+        hooks = self.call("svg_hooks", html=page)[0]["hooks"]
+        assert list(hooks[hooks["target"] == "selector"]["ref"])
+        import pandas as pd
+        empty = pd.DataFrame(columns=["status", "old_id", "new_id", "name",
+                                      "tag", "new_tag", "match", "confidence",
+                                      "cls", "behaviour", "new_ref", "manual"])
+        _, said = self.call("svg_retrofit", svg=self.NEW, matches=empty,
+                            hooks=hooks)
+        assert not [m for m in said if "accordion" in m]
+
+    def test_a_selector_it_cannot_read_is_admitted_to_rather_than_guessed(self):
+        retrofit = self.node("svg_retrofit")
+        assert retrofit["_steps"]("rect:hover") is None
+        assert retrofit["_steps"]("rect + path") is None
+        # and the ones it does read, it reads properly
+        assert retrofit["_steps"]('g[data-name="boxes"] > rect') is not None
