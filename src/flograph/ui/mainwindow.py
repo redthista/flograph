@@ -411,6 +411,8 @@ class MainWindow(QMainWindow):
         self.action_save = act("&Save", QKeySequence.Save, self._save)
         self.action_save_as = act("Save &As…", QKeySequence("Ctrl+Shift+S"),
                                   self._save_as)
+        self.action_desktop_shortcut = act(
+            "Create &Desktop Shortcut…", None, self._create_desktop_shortcut)
         self.action_quit = act("&Quit", QKeySequence.Quit, self.close)
 
         section["name"] = "Edit"
@@ -476,6 +478,8 @@ class MainWindow(QMainWindow):
         self._recent_menu = file_menu.addMenu("Open &Recent")
         self._rebuild_recent_menu()
         self._build_examples_menu(file_menu)
+        file_menu.addSeparator()
+        file_menu.addAction(self.action_desktop_shortcut)
         file_menu.addSeparator()
         file_menu.addAction(self.action_quit)
 
@@ -1487,6 +1491,10 @@ class MainWindow(QMainWindow):
             self._packages_dialog = dialog
         dialog.show()
         dialog.raise_()
+
+    def _create_desktop_shortcut(self) -> None:
+        from .desktop_shortcut import ShortcutDialog
+        ShortcutDialog(self, self._project_path).exec()
 
     def _show_ai_settings(self) -> None:
         from .ai_settings_dialog import AiSettingsDialog
