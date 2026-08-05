@@ -69,6 +69,15 @@ python main.py project.flograph         # open a project from a checkout
 python -m flograph.engine.headless project.flograph   # run it with no GUI
 ```
 
+**File > Create Desktop Shortcut…** writes a desktop shortcut that starts
+flograph the same way it's running right now — a `.lnk` on Windows, a
+`.desktop` entry on Linux, a `.command` script on macOS. It names this
+environment's interpreter by absolute path (so nothing depends on what
+`python` means to the desktop) and the entry point you're actually on: the
+one-file bundle's own `.py` if that's how you started, otherwise
+`-m flograph`. If a project is open it can be baked into the shortcut, so
+double-clicking opens flograph with that flow loaded.
+
 **File > Open Example** ships eleven worked projects — filter-and-visualise, an
 aggregate dashboard, a custom-script chart, join/group-by comparison, an
 interactive slicer dashboard, a scripted pipeline in a frame, a retail ops
