@@ -141,4 +141,5 @@ G3. Show images on the canvas, dragged in or node with property, the usual enabl
 
 ## not sorted: 
 - chart per value  - need scale option like with the other nodes.
-- 
+- user forms, a simple form with submit buttons, one node? and retrieval? make work with dataframes sql anything else thats helpful. 
+- tables - allow 
