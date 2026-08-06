@@ -561,6 +561,22 @@ class TestShapes:
         widget._box.setPlainText("two\nlines")
         assert widget._read() == "two\nlines"
 
+    def test_multiline_box_fills_the_card(self, qtbot):
+        """The box should swallow every pixel the card gains, so dragging the
+        node taller grows the box, not dead space below it."""
+        widget = build_control("text")
+        qtbot.addWidget(widget)
+        widget.show()
+        widget.sync({"value": "", "multiline": True})
+        widget.resize(260, 120)
+        qtbot.waitExposed(widget)
+        small = widget._box.height()
+        widget.resize(260, 300)
+        qtbot.wait(1)
+        large = widget._box.height()
+        # the box grew with the card — not pinned to a hint or half the room
+        assert large > small + 100
+
     def test_date_shows_today_when_nothing_is_stored(self, qtbot):
         widget = build_control("date")
         qtbot.addWidget(widget)

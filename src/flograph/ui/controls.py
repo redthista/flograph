@@ -201,7 +201,9 @@ class ControlWidget(QWidget):
         layout.addWidget(self._caption)
         self._layout = layout
         self._build()
-        layout.addStretch(1)
+        # the trailing stretch pins a short control to the top of its card.
+        # A shape that wants to fill the card (multiline text) zeroes it.
+        self._tail_stretch = layout.addStretch(1)
 
     # ---------------------------------------------------------- for subclasses
 
@@ -782,10 +784,18 @@ class TextControl(ControlWidget):
         QPlainTextEdit.focusOutEvent(self._box, event)
         self._commit()
 
+    def _set_tail_stretch(self, stretch: int) -> None:
+        """How much of the card's free space the base class's trailing
+        stretch takes. Multiline fills the whole card; single-line keeps the
+        edit pinned to the top with the slack below it. The tail is always
+        the last item in the layout — the base adds it after _build()."""
+        self._layout.setStretch(self._layout.count() - 1, stretch)
+
     def _apply(self, params: dict) -> None:
         multiline = bool(params.get("multiline", False))
         self._edit.setVisible(not multiline)
         self._box.setVisible(multiline)
+        self._set_tail_stretch(0 if multiline else 1)
         placeholder = str(
             self._wired("placeholder", params.get("placeholder", "")) or "")
         self._edit.setPlaceholderText(placeholder)
