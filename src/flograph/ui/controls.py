@@ -51,6 +51,16 @@ from . import theme
 
 ISO_FORMAT = "yyyy-MM-dd"
 
+# QLineEdit defaults to a 32767-character cap and enforces it *silently* —
+# setText and paste both truncate with no signal, no exception and no visible
+# sign. That is fine for a name or a separator, and quietly destructive for
+# any field a whole value can be pasted into: a base64-encoded image (an
+# Image node's source, or a Text control feeding one) runs to hundreds of
+# thousands of characters, and a truncated one still starts with valid PNG
+# or GIF magic, so it half-renders instead of failing. Anywhere a user can
+# paste an arbitrary value, lift the cap.
+UNCAPPED_TEXT = 2_000_000_000  # ~INT_MAX; QLineEdit allocates nothing up front
+
 # Ticked colour for a Toggle's box — the theme has no accent of its own, and
 # the wire colour for a bool port is a warning red, wrong for "on".
 CHECK_ON = QColor("#3b82f6")
@@ -770,6 +780,7 @@ class TextControl(ControlWidget):
     def _build(self) -> None:
         self._edit = QLineEdit()
         self._edit.setObjectName("control_text")
+        self._edit.setMaxLength(UNCAPPED_TEXT)  # a Text node may carry base64
         # editingFinished, not textEdited: one undo step per edit, not one
         # per keystroke, and no re-run of the whole flow per character
         self._edit.editingFinished.connect(self._commit)
