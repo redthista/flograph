@@ -55,6 +55,8 @@ class ReportPage(QWidget):
         self._undo_stack = undo_stack
         self._loading = False
         self.problems: list[str] = []
+        #: drives animated images in the preview; rebuilt on every render
+        self._animator = None
 
         self.editor = QPlainTextEdit()
         self.editor.setObjectName("report_source")
@@ -132,6 +134,7 @@ class ReportPage(QWidget):
         self._engine.node_succeeded.disconnect(self._on_node_ran)
         self._engine.node_failed.disconnect(self._on_node_ran)
         self._timer.stop()
+        self._stop_animations()
 
     # ------------------------------------------------------------- the body
 
@@ -192,11 +195,43 @@ class ReportPage(QWidget):
         position = self.preview.verticalScrollBar().value()
         rendered = render_report(page.body, self._graph, self._engine.cache)
         self.problems = rendered.problems
+        # Before the old document goes: a running QMovie writing frames into
+        # a deleted document is a crash, not a stale picture.
+        self._stop_animations()
         self.preview.setDocument(rendered.document)
+        self._start_animations(rendered)
         # a re-render on every keystroke that jumped to the top would make
         # the preview useless while writing past the first screenful
         self.preview.verticalScrollBar().setValue(position)
         self._status.setText(self._problem_text())
+
+    def _stop_animations(self) -> None:
+        if self._animator is not None:
+            self._animator.dispose()
+            self._animator = None
+
+    def _start_animations(self, rendered) -> None:
+        """Play any animated images the render found. Paper can't animate,
+        so this only ever runs for the on-screen preview."""
+        if not rendered.animations:
+            return
+        from .animate import ReportAnimator
+        self._animator = ReportAnimator(
+            rendered.document, rendered.animations, rendered.image_widths,
+            on_frame=self.preview.viewport().update, parent=self)
+        self._animator.set_playing(self.isVisible())
+
+    def showEvent(self, event) -> None:
+        """Switching to this tab resumes its animations, and away pauses
+        them — a report nobody is looking at should cost nothing."""
+        super().showEvent(event)
+        if self._animator is not None:
+            self._animator.set_playing(True)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        if self._animator is not None:
+            self._animator.set_playing(False)
 
     def _problem_text(self) -> str:
         if not self.problems:
