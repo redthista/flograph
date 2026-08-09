@@ -92,6 +92,15 @@ class Page:
     # laid out. May dangle (the tile was deleted) exactly like Tile.node_id
     # does — the UI ignores an id it can't resolve.
     maximized_tile: Optional[str] = None
+    # Presentation mode. False = edit: a dashboard shows its visuals panel
+    # and its tiles move and resize; a report shows its markdown source
+    # beside the preview. True = view: the chrome for *arranging* the page
+    # goes away and what is left is the page itself. Contents stay live
+    # either way — a slicer still filters, a table still takes typing — so
+    # this locks the layout, it does not make the page read-only.
+    # Saved with the project, so a page handed over in view mode opens that
+    # way for whoever opens it next.
+    view_mode: bool = False
 
 
 class Graph:
@@ -611,6 +620,15 @@ class Graph:
         page = self.page(page_id)
         page.body = body or ""
         self.events.page_body_changed.emit(page)
+        return page
+
+    def set_page_view_mode(self, page_id: str, view_mode: bool) -> Page:
+        """Switch a page between edit and view mode. Separate from
+        update_page for the same reason as set_page_color: False has to mean
+        "edit mode", not "leave unchanged"."""
+        page = self.page(page_id)
+        page.view_mode = bool(view_mode)
+        self.events.page_changed.emit(page)
         return page
 
     def set_page_maximized_tile(self, page_id: str,

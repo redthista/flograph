@@ -43,6 +43,9 @@ class DashboardScene(QGraphicsScene):
         from ..canvas.grid import DEFAULT_STEP
         self.snap_enabled = True
         self.grid_step = DEFAULT_STEP
+        # Layout locked (view mode). Read by tiles built later, so a tile
+        # added to a view-mode page arrives locked rather than movable.
+        self.view_mode = False
 
         self.setSceneRect(QRectF(-SCENE_EXTENT, -SCENE_EXTENT,
                                  2 * SCENE_EXTENT, 2 * SCENE_EXTENT))
@@ -90,6 +93,10 @@ class DashboardScene(QGraphicsScene):
         item = TileItem(tile, self.graph, self.engine)
         self.addItem(item)
         self.tile_items[tile.id] = item
+        if self.view_mode:
+            # undoing a delete on a view-mode page must bring the tile back
+            # locked, not as the one movable thing on a locked page
+            item.set_layout_locked(True)
         if any(getattr(view, "fullscreen_tile", None) is not None
                for view in self.views()):
             # a tile added (or undeleted) while another is maximized must not
@@ -167,6 +174,16 @@ class DashboardScene(QGraphicsScene):
 
     def selected_tile_items(self) -> list[TileItem]:
         return [i for i in self.selectedItems() if isinstance(i, TileItem)]
+
+    def set_view_mode(self, view_mode: bool) -> None:
+        """Lock or unlock every tile's furniture. Contents are untouched —
+        see DashboardPage.set_view_mode for why that distinction is the
+        whole point."""
+        self.view_mode = bool(view_mode)
+        if self.view_mode:
+            self.clearSelection()   # a selection outline is editing chrome
+        for item in self.tile_items.values():
+            item.set_layout_locked(self.view_mode)
 
     def refresh_render_ratios(self) -> None:
         for item in self.tile_items.values():

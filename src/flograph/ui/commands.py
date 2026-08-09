@@ -613,6 +613,26 @@ class SetPageMaximizedTileCommand(QUndoCommand):
         self._graph.set_page_maximized_tile(self._page_id, self._old)
 
 
+class SetPageViewModeCommand(QUndoCommand):
+    """Switch a page between edit and view mode. Saved with the project, so
+    like maximizing a tile it goes through the undo stack rather than being
+    written behind it."""
+
+    def __init__(self, graph: Graph, page_id: str, view_mode: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("view mode" if view_mode else "edit mode", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).view_mode
+        self._new = bool(view_mode)
+
+    def redo(self) -> None:
+        self._graph.set_page_view_mode(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_view_mode(self._page_id, self._old)
+
+
 class ReorderPagesCommand(QUndoCommand):
     def __init__(self, graph: Graph, order: list[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -663,6 +683,7 @@ class DuplicatePageCommand(QUndoCommand):
             color=src.color,
             # the copy opens looking like the original, remapped to its tiles
             maximized_tile=id_map.get(src.maximized_tile),
+            view_mode=src.view_mode,
         )
         self._graph.add_page(self._new_page)
 

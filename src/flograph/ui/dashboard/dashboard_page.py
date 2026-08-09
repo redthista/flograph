@@ -53,6 +53,8 @@ class DashboardPage(QWidget):
         # given, so reopening the panel restores it rather than a sliver
         self._splitter.setSizes([180, 1000])
         self._visuals_visible = True
+        self._view_mode = False
+        self._fullscreen = False
 
         # always-visible strip so the panel can be brought back once
         # hidden -- the toggle itself must live outside what it hides
@@ -80,8 +82,10 @@ class DashboardPage(QWidget):
         # a dashboard is for looking at, so the page opens as canvas and the
         # visuals panel is asked for -- silently, since nothing has changed yet
         self.set_visuals_visible(visuals_visible, notify=False)
+        page = graph.pages.get(page_id)
+        self.set_view_mode(page.view_mode if page is not None else False)
         # last, so a page saved with a tile maximized opens that way and the
-        # chrome it hides is not put back by the line above
+        # chrome it hides is not put back by the lines above
         self.scene.sync_fullscreen()
 
     # ----------------------------------------------------------- fullscreen
@@ -94,12 +98,46 @@ class DashboardPage(QWidget):
         user asking for the panel, so it must leave _visuals_visible alone
         and stay off visuals_visibility_changed, which would otherwise make
         fullscreen rewrite the start state new pages open with."""
-        self._side.setVisible(self._visuals_visible and not active)
-        self._toggle_strip.setVisible(not active)
+        self._fullscreen = bool(active)
+        self._apply_chrome()
+
+    def _apply_chrome(self) -> None:
+        """One place decides whether the editing chrome shows, because two
+        independent things hide it — view mode and a maximized tile — and
+        whichever ran last used to win. Reopening a project with a tile
+        maximized put the toggle strip back over it.
+        """
+        hidden = self._view_mode or self._fullscreen
+        self._side.setVisible(self._visuals_visible and not hidden)
+        self._toggle_strip.setVisible(not hidden)
+
+    # ----------------------------------------------------------- view mode
+
+    def set_view_mode(self, view_mode: bool) -> None:
+        """View mode is the page without the tools for arranging it: the
+        visuals panel and its toggle strip go, and tiles stop moving and
+        resizing.
+
+        What it deliberately does *not* do is make the page read-only. A
+        dashboard exists to be driven — slicers ticked, sliders dragged,
+        cells typed into, buttons pressed — so every tile's contents stay
+        exactly as live as they were. This locks the furniture, not the
+        controls.
+        """
+        self._view_mode = bool(view_mode)
+        self._apply_chrome()
+        self.scene.set_view_mode(self._view_mode)
+        self.view.set_view_mode(self._view_mode)
+
+    def view_mode(self) -> bool:
+        return self._view_mode
 
     def set_visuals_visible(self, visible: bool, notify: bool = True) -> None:
+        """The user's preference for the panel. Kept even while view mode or
+        a maximized tile is hiding it, so leaving either puts back what they
+        actually had rather than a default."""
         self._visuals_visible = visible
-        self._side.setVisible(visible)
+        self._apply_chrome()
         self._toggle_btn.setArrowType(
             Qt.ArrowType.LeftArrow if visible else Qt.ArrowType.RightArrow)
         self._toggle_btn.setToolTip(

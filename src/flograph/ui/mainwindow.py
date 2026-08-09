@@ -1200,6 +1200,7 @@ class MainWindow(QMainWindow):
         self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
         self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
+        self.page_bar.set_view_mode_requested.connect(self._set_page_view_mode)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
         self.page_bar.model_tab_double_clicked.connect(self.toggle_all_panels)
@@ -1230,6 +1231,7 @@ class MainWindow(QMainWindow):
         from .report import ReportPage
         widget = ReportPage(self.graph, self.engine, self.undo_stack, page.id)
         widget.export_requested.connect(self._export_report_pdf)
+        widget.view_mode_requested.connect(self._set_page_view_mode)
         # kept in the same dict as dashboards: everything the window does
         # with a page — switching, removing, disposing — is the same for
         # both, and only the two places that need the difference ask
@@ -1283,6 +1285,21 @@ class MainWindow(QMainWindow):
     def _on_page_changed(self, page: Page) -> None:
         self.page_bar.set_page_title(page.id, page.title)
         self.page_bar.set_page_color(page.id, page.color)
+        self.page_bar.set_page_view_mode(page.id, page.view_mode)
+        # the model is the source of truth for the mode, so undo/redo and a
+        # project load drive the widget through here rather than separately
+        widget = self._dashboard_pages.get(page.id)
+        if widget is not None and hasattr(widget, "set_view_mode") \
+                and widget.view_mode() != page.view_mode:
+            widget.set_view_mode(page.view_mode)
+
+    def _set_page_view_mode(self, page_id: str, view_mode: bool) -> None:
+        page = self.graph.pages.get(page_id)
+        if page is None or page.view_mode == bool(view_mode):
+            return
+        from .commands import SetPageViewModeCommand
+        self.undo_stack.push(
+            SetPageViewModeCommand(self.graph, page_id, bool(view_mode)))
 
     def _set_visuals_visible(self, visible: bool) -> None:
         """Remember the toggle as the start state for pages made later. Pages
