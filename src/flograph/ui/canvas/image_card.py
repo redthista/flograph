@@ -19,21 +19,29 @@ behaves like a canvas full of ordinary nodes:
    nothing, so playback stops whenever the card isn't really visible — see
    `set_playing`, driven from the item's LOD/preview state.
 
+A source is a path, a `data:` URI or a base64 blob; `flograph.core.images`
+decides which, so the picture on the canvas and the bytes the node emits can
+never disagree. Sources that aren't files are decoded once, on assignment,
+and held as bytes — Qt reads them through a QBuffer exactly as it would a
+file.
+
 Formats come from whatever Qt image plugins are installed (PNG, JPEG, GIF,
 WebP, BMP, ICO, TIFF, PPM, XPM, ... ) plus SVG, which is rendered as vectors
 rather than decoded, so it stays sharp at every zoom.
 """
 from __future__ import annotations
 
-import os
+import hashlib
 from typing import Callable, Optional
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, QSize, Qt
 from PySide6.QtGui import QImageReader, QMovie, QPainter, QPixmap
 
+from flograph.core.images import resolve_source
+
 # Ceiling on the decoded buffer for one card, in pixels (~16 MB at RGBA).
-# Only "Actual size" and a hard-zoomed-in "Fill" can push past a card-sized
-# target; without a cap, "Actual size" on a 100-megapixel scan would try to
+# Only "Original size" and a hard-zoomed-in "Fill" can push past a card-sized
+# target; without a cap, "Original size" on a 100-megapixel scan would try to
 # allocate 400 MB the moment the node is dropped.
 MAX_DECODE_PIXELS = 4_000_000
 
@@ -47,11 +55,15 @@ FIT_MODES = ("Fit", "Fill", "Stretch", "Original size")
 DEFAULT_FIT = "Fit"
 SCALE_MIN, SCALE_MAX = 0.1, 4.0
 
+SVG_MIME = "image/svg+xml"
+
 # Extensions Qt renders as vectors instead of decoding to a raster.
 _SVG_EXTENSIONS = (".svg", ".svgz")
 
 
 def is_svg(path: str) -> bool:
+    """Whether a *filename* names an SVG. Sources without a filename are
+    identified by their sniffed mime type instead — see CardImage."""
     return path.lower().endswith(_SVG_EXTENSIONS)
 
 
@@ -99,7 +111,11 @@ class CardImage:
 
     def __init__(self, on_frame: Callable[[], None]) -> None:
         self._on_frame = on_frame
-        self._path = ""
+        self._source = ""          # the raw string, as given
+        self._path = ""            # set only when the source is a real file
+        self._data: Optional[bytes] = None  # set only when it is not
+        self._key = ""             # identifies the artwork in the decode cache
+        self._is_svg = False
         self._fit = DEFAULT_FIT
         self._scale = 1.0
         self._animate = True
@@ -107,6 +123,8 @@ class CardImage:
         self._natural = QSize()
         self._pixmap: Optional[QPixmap] = None
         self._movie: Optional[QMovie] = None
+        self._movie_buffer: Optional[QBuffer] = None
+        self._movie_bytes: Optional[QByteArray] = None
         self._svg = None  # QSvgRenderer, kept as vectors
         self._decoded_key: tuple = ()
         self._ratio = 1.0
@@ -114,32 +132,60 @@ class CardImage:
 
     # ------------------------------------------------------------- source
 
-    def set_source(self, path: str, fit: str, animate: bool,
+    def set_source(self, source: str, fit: str, animate: bool,
                    scale: float = 1.0) -> None:
-        """Point the card at a file. Cheap and idempotent: re-decoding is
-        deferred to the next paint, and skipped entirely if nothing that
-        affects the pixels actually changed."""
-        path = os.path.expanduser(str(path or "").strip())
+        """Point the card at a path, a `data:` URI or a base64 blob.
+
+        Cheap and idempotent: an unchanged source does nothing at all, and
+        re-decoding is deferred to the next paint. Resolving happens here
+        rather than in paint() so a multi-megabyte base64 string is decoded
+        once when it is set, not once per frame.
+        """
+        source = str(source or "").strip()
         scale = min(SCALE_MAX, max(SCALE_MIN, scale))
-        if (path == self._path and fit == self._fit
+        if (source == self._source and fit == self._fit
                 and animate == self._animate and scale == self._scale):
             return
-        if path != self._path:
+        if source != self._source:
             self._release()
-            self._path = path
-            self._natural = QSize()
-            self.error = ""
+            self._source = source
+            self._resolve()
         self._fit = fit if fit in FIT_MODES else DEFAULT_FIT
         self._animate = animate
         self._scale = scale
         self._decoded_key = ()  # force a re-decode at the next paint
 
-    def reload(self) -> None:
-        """Forget everything decoded and read the file again."""
-        self._release()
+    def _resolve(self) -> None:
+        """Work out what the current source string actually points at."""
+        self._path = ""
+        self._data = None
         self._natural = QSize()
-        self._decoded_key = ()
+        self._is_svg = False
         self.error = ""
+        self._key = ""
+        if not self._source:
+            return
+        try:
+            data, mime, path = resolve_source(self._source)
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            self.error = str(exc)
+            return
+        self._is_svg = (mime == SVG_MIME)
+        if path:
+            # Keep reading from the file: Qt can decode it scaled straight off
+            # disk, so holding the bytes as well would double the cost for
+            # nothing.
+            self._path = path
+            self._key = f"file:{path}"
+        else:
+            self._data = data
+            self._key = "blob:" + hashlib.sha256(data).hexdigest()[:16]
+
+    def reload(self) -> None:
+        """Forget everything decoded and read the source again."""
+        self._release()
+        self._resolve()
+        self._decoded_key = ()
 
     def _release(self) -> None:
         if self._movie is not None:
@@ -149,28 +195,58 @@ class CardImage:
             except (RuntimeError, TypeError):
                 pass
             self._movie = None
+        # Outlive the movie they fed, never the other way round.
+        self._movie_buffer = None
+        self._movie_bytes = None
         self._pixmap = None
         self._svg = None
 
     # ------------------------------------------------------------ metadata
 
+    def _open_buffer(self) -> Optional[QBuffer]:
+        """A read-only QBuffer over the held bytes, or None if there are none.
+
+        The QByteArray is parented to the buffer so that returning the buffer
+        alone keeps its storage alive — passing a temporary QByteArray to
+        QBuffer is a segfault, not an exception.
+        """
+        if self._data is None:
+            return None
+        store = QByteArray(self._data)
+        buffer = QBuffer()
+        buffer.setData(store)
+        buffer.open(QIODevice.ReadOnly)
+        return buffer
+
+    def _reader(self) -> Optional[QImageReader]:
+        """A QImageReader over the current source, file or bytes."""
+        if self._path:
+            return QImageReader(self._path)
+        buffer = self._open_buffer()
+        if buffer is None:
+            return None
+        reader = QImageReader(buffer)
+        # The reader borrows the device, so pin the buffer to its lifetime.
+        reader._flograph_buffer = buffer
+        return reader
+
     def natural_size(self) -> QSize:
         """Source dimensions, read from the header without decoding pixels."""
-        if not self._natural.isEmpty() or not self._path:
+        if not self._natural.isEmpty() or not self.has_content():
             return self._natural
-        if not os.path.isfile(self._path):
-            self.error = "file not found"
-            return self._natural
-        if is_svg(self._path):
+        if self._is_svg:
             from PySide6.QtSvg import QSvgRenderer
-            renderer = QSvgRenderer(self._path)
+            renderer = (QSvgRenderer(self._path) if self._path
+                        else QSvgRenderer(QByteArray(self._data)))
             if renderer.isValid():
                 self._natural = renderer.defaultSize()
                 self._svg = renderer
             else:
                 self.error = "not a readable SVG"
             return self._natural
-        reader = QImageReader(self._path)
+        reader = self._reader()
+        if reader is None:
+            return self._natural
         size = reader.size()  # header only — no pixels decoded
         if size.isValid() and not size.isEmpty():
             self._natural = size
@@ -179,13 +255,15 @@ class CardImage:
         return self._natural
 
     def is_animated(self) -> bool:
-        if not self._path or is_svg(self._path):
+        if not self.has_content() or self._is_svg:
             return False
-        reader = QImageReader(self._path)
+        reader = self._reader()
+        if reader is None:
+            return False
         return reader.supportsAnimation() and reader.imageCount() > 1
 
     def has_content(self) -> bool:
-        return bool(self._path) and not self.error
+        return bool(self._path or self._data) and not self.error
 
     # ------------------------------------------------------------ playback
 
@@ -221,7 +299,7 @@ class CardImage:
         logical = target_size(natural, box, self._fit, self._scale)
         wanted = _budgeted(QSize(max(1, round(logical.width() * ratio)),
                                  max(1, round(logical.height() * ratio))))
-        key = (self._path, self._fit, self._scale, self._animate,
+        key = (self._key, self._fit, self._scale, self._animate,
                wanted.width(), wanted.height())
         if key == self._decoded_key:
             return
@@ -231,8 +309,8 @@ class CardImage:
         self._ratio = (wanted.width() / logical.width()
                        if logical.width() else 1.0)
 
-        if self._svg is not None:
-            return  # vectors: nothing to decode, painted straight from the renderer
+        if self._is_svg:
+            return  # vectors: nothing to decode, painted from the renderer
 
         if self._animate and self.is_animated():
             self._decode_movie(wanted)
@@ -241,7 +319,9 @@ class CardImage:
 
     def _decode_still(self, wanted: QSize) -> None:
         self._release()
-        reader = QImageReader(self._path)
+        reader = self._reader()
+        if reader is None:
+            return
         reader.setAutoTransform(True)  # honour EXIF orientation on phone photos
         if wanted != reader.size():
             reader.setScaledSize(wanted)  # scales during decode, not after
@@ -256,7 +336,16 @@ class CardImage:
     def _decode_movie(self, wanted: QSize) -> None:
         was_frame = self._movie.currentFrameNumber() if self._movie else 0
         self._release()
-        movie = QMovie(self._path)
+        if self._path:
+            movie = QMovie(self._path)
+        else:
+            # Both the buffer and its storage must outlive the movie, which
+            # reads from them for as long as it plays.
+            self._movie_bytes = QByteArray(self._data)
+            self._movie_buffer = QBuffer()
+            self._movie_buffer.setData(self._movie_bytes)
+            self._movie_buffer.open(QIODevice.ReadOnly)
+            movie = QMovie(self._movie_buffer)
         if not movie.isValid():
             self.error = "unreadable animation"
             return
@@ -280,7 +369,7 @@ class CardImage:
         box = QSize(max(1, int(rect.width())), max(1, int(rect.height())))
         self._ensure(box, ratio)
 
-        if self._svg is not None:
+        if self._is_svg and self._svg is not None:
             natural = self.natural_size()
             size = target_size(natural, box, self._fit, self._scale)
             painter.save()
@@ -301,7 +390,7 @@ class CardImage:
         width = pixmap.width() / self._ratio
         height = pixmap.height() / self._ratio
         painter.save()
-        painter.setClipRect(rect)
+        painter.setClipRect(rect, Qt.IntersectClip)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.drawPixmap(self._centred(rect, width, height), pixmap,
                            QRectF(pixmap.rect()))
