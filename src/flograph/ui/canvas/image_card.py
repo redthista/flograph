@@ -67,6 +67,22 @@ def is_svg(path: str) -> bool:
     return path.lower().endswith(_SVG_EXTENSIONS)
 
 
+def image_source(node, payload=None) -> str:
+    """What an Image node's card or tile should draw.
+
+    Normally the node's own param, so a dropped or pasted picture shows up
+    without the graph being run at all. `payload` is the node's cached
+    output when there is one: a *wired* source only exists once the node has
+    run, so it wins while it lasts. Shared by the canvas card and the
+    dashboard tile so the same node cannot show two different pictures.
+    """
+    if isinstance(payload, dict):
+        wired = payload.get("source")
+        if wired:
+            return str(wired)
+    return str(node.params.get("path", "") or "")
+
+
 def target_size(natural: QSize, box: QSize, fit: str,
                 scale: float = 1.0) -> QSize:
     """The size the artwork should occupy in a `box`-sized content area."""
