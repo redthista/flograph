@@ -33,7 +33,7 @@ from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid",
-    "control", "report"})
+    "control", "report", "image"})
 
 
 def is_tile_able(node) -> bool:
@@ -58,7 +58,7 @@ def default_tile_port(node) -> Optional[str]:
     """The output port a tile of this node renders — its first declared output
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
     if card_kind(node) in ("webview", "figure", "table_viewer", "kpi", "grid",
-                          "report"):
+                          "report", "image"):
         return node.spec.outputs[0].name if node.spec.outputs else None
     # action buttons have no ports; slicer tiles show upstream options, not
     # their own (already filtered) output; a control tile is the input itself
@@ -82,6 +82,11 @@ def default_tile_size(node) -> tuple[float, float]:
         # a column of prose plus a chart or two — taller than wide, like
         # the page it stands in for
         return (480.0, 420.0)
+    if kind == "image":
+        # the Image node's own card size, plus the tile's title bar, so a
+        # picture arrives on the page shaped the way it was on the canvas
+        return (float(node.params.get("width", 320) or 320),
+                float(node.params.get("height", 240) or 240) + TITLE_H)
     if kind == "control":
         from ..controls import control_size
         width, height = control_size(node.spec.control or "")
@@ -136,6 +141,9 @@ class TileItem(QGraphicsObject):
         self._generic_child: Optional[QWidget] = None
         self._kpi_value: object = None  # kpi tiles paint, they hold no widget
         self._kpi_has_value = False
+        # image tiles paint too — see _card_image; built on first use so a
+        # dashboard opened on another page decodes nothing
+        self._image = None
 
         self._build_host()
         self.apply_stacking()
@@ -306,6 +314,7 @@ class TileItem(QGraphicsObject):
             "kpi": "kpi",
             "slicer": "slicer",
             "control": "control",
+            "image": "image",
         }.get(card_kind(node), "generic")
 
     def _build_host(self) -> None:
@@ -556,6 +565,22 @@ class TileItem(QGraphicsObject):
             self.update()
             return
 
+        if kind == "image":
+            # Painted, not widget-backed, exactly like the canvas card — and
+            # like it, drawn from the node's own source, so a picture is on
+            # the page whether or not the flow has been run.
+            self._sync_image()
+            image = self._card_image()
+            if image.has_content():
+                self._proxy.hide()
+            else:
+                self._proxy.show()
+                self._placeholder.setText(
+                    image.error or "Set an image on this node to show it here.")
+                self._placeholder.show()
+            self.update()
+            return
+
         self._proxy.show()
         widget = self._ensure_content_widget(kind)
 
@@ -661,6 +686,71 @@ class TileItem(QGraphicsObject):
                 widget.show()
         self.update()
 
+    # ---------------------------------------------------------- image tile
+
+    def _card_image(self):
+        """The tile's artwork, built on first use. Same CardImage the canvas
+        card uses, so both decode at display size, pause animations when
+        nothing can see them, and agree on what a source string means."""
+        from ..canvas.image_card import CardImage
+        if self._image is None:
+            self._image = CardImage(self.update)
+        return self._image
+
+    def _sync_image(self) -> None:
+        """Re-point the artwork at the node's current source and settings."""
+        node = self._node()
+        if node is None:
+            return
+        from ..canvas.image_card import image_source
+        entry = self._engine.cache.get(self.tile.node_id)
+        payload = (entry.outputs.get(self.tile.port)
+                   if entry is not None and self.tile.port else None)
+        image = self._card_image()
+        image.set_source(
+            image_source(node, payload),
+            str(node.params.get("fit", "Fit") or "Fit"),
+            bool(node.params.get("animate", True)),
+            self._image_scale(node),
+        )
+        image.set_playing(self.isVisible())
+
+    @staticmethod
+    def _image_scale(node) -> float:
+        try:
+            pct = float(node.params.get("scale", 100) or 100)
+        except (TypeError, ValueError):
+            pct = 100.0
+        return min(400.0, max(25.0, pct)) / 100.0
+
+    def _paint_image(self, painter: QPainter) -> None:
+        w, h = self._size
+        rect = QRectF(2, TITLE_H, w - 4, max(0.0, h - TITLE_H - 2))
+        if rect.isEmpty():
+            return
+        image = self._card_image()
+        if not image.has_content():
+            return
+        painter.save()
+        # keep the picture inside the tile's rounded outline
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(0, 0, w, h), 6, 6)
+        painter.setClipPath(clip)
+        image.paint(painter, rect, self._image_render_ratio())
+        painter.restore()
+
+    def _image_render_ratio(self) -> float:
+        """Device pixels per logical pixel, so a tile inspected close up (or
+        maximized) decodes sharp rather than being upscaled."""
+        ratio = 1.0
+        scene = self.scene()
+        views = scene.views() if scene is not None else []
+        if views:
+            view = views[0]
+            ratio *= (view.viewport().devicePixelRatioF() or 1.0)
+            ratio *= view.transform().m11()
+        return min(4.0, max(1.0, ratio))
+
     def on_param_changed(self) -> None:
         """Params drive the painted caption/format of kpi tiles, the cells of
         Table node tiles and the tick states of slicer tiles (properties
@@ -671,6 +761,10 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if kind == "kpi":
             self.update()
+        elif kind == "image":
+            # the picture *is* a param, so picking a different file (or
+            # changing fit/scale) has to redraw without a run
+            self.refresh_content()
         elif kind == "sheet" and self._sheet_model is not None:
             # set_sheet no-ops when nothing changed, so the edit that caused
             # this doesn't reset the grid under the user's cursor. Goes
@@ -723,8 +817,10 @@ class TileItem(QGraphicsObject):
         # a Table node tile shows the cells the user is typing, and a
         # control tile shows the value being set — both are input, not a
         # rendered output, so "STALE" would be wrong on either
+        # an image tile draws the node's own source, not a computed output,
+        # so a dirty node does not make the picture out of date either
         if node is None or not node.dirty \
-                or self._kind() in ("button", "sheet", "control"):
+                or self._kind() in ("button", "sheet", "control", "image"):
             return False
         if self._kind() == "kpi":  # painted, not widget-backed
             return self._kpi_has_value
@@ -820,6 +916,8 @@ class TileItem(QGraphicsObject):
             painter.setOpacity(0.45 if updating else 1.0)
             self._paint_kpi_value(painter)
             painter.setOpacity(1.0)
+        elif self._kind() == "image":
+            self._paint_image(painter)
 
     def _paint_fullscreen_glyph(self, painter: QPainter) -> None:
         """Four corner brackets, like a video player's fullscreen toggle:
@@ -967,6 +1065,11 @@ class TileItem(QGraphicsObject):
             step = grid_step(self.scene())
             x, y = snap_point(value.x(), value.y(), step)
             return QPointF(x, y)
+        if change == QGraphicsItem.ItemVisibleHasChanged \
+                and self._image is not None:
+            # maximizing one tile hides the rest — an animation nobody can
+            # see should not be spending frames
+            self._image.set_playing(bool(value))
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:

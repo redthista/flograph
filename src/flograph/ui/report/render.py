@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from typing import Optional
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QImage, QTextDocument
@@ -119,6 +120,42 @@ def _as_image(value, scale: float = 1.0) -> "QImage | None":
             value.set_dpi(original)
     except Exception:
         return None
+
+
+def _as_payload_image(value) -> "QImage | None":
+    """An Image node's output rendered, or None for anything else.
+
+    Without this an `![[logo]]` embed reaches format_scalar and the reader
+    gets the payload dict printed as text. Accepts what an Image node emits
+    (`bytes` + an image mime type), the `data_uri` field on its own — so
+    `![[logo|image]]` piped through a script still works — and a bare
+    `data:image/...` string, which would otherwise be inlined as markdown
+    and land on the page as a wall of base64.
+
+    Qt decodes PNG/JPEG/GIF/WebP/BMP/SVG from memory here; an animation
+    contributes its first frame, paper having no other option.
+    """
+    data = None
+    if isinstance(value, dict):
+        raw = value.get("bytes")
+        if isinstance(raw, (bytes, bytearray)) and \
+                str(value.get("mime", "")).startswith("image/"):
+            data = bytes(raw)
+        elif isinstance(value.get("data_uri"), str):
+            value = value["data_uri"]
+    if data is None and isinstance(value, str) \
+            and value[:11].lower().startswith("data:image/"):
+        from flograph.core.images import parse_data_uri
+        parsed = parse_data_uri(value)
+        if parsed is None:
+            return None
+        data = parsed[0]
+    if not data:
+        return None
+    image = QImage()
+    if not image.loadFromData(data) or image.isNull():
+        return None
+    return image
 
 
 # What a Plotly figure is drawn at when its layout does not say. Plotly's
@@ -393,9 +430,9 @@ class _Resolver:
         self.widths: list[int] = []
         self.problems: list[str] = []
 
-    def _token(self, image: QImage) -> str:
+    def _token(self, image: QImage, width: Optional[int] = None) -> str:
         self.images.append(image)
-        self.widths.append(self._image_width)
+        self.widths.append(self._image_width if width is None else width)
         return IMAGE_TOKEN.format(len(self.images) - 1)
 
     def render(self, embed) -> str:
@@ -537,6 +574,16 @@ class _Resolver:
         if plotly is not None:
             self.problems.append(f"“{ref}” could not be drawn")
             return plotly
+
+        # Before the string branch below: an Image node's `data_uri` is a
+        # string, and inlining that as markdown would print the base64.
+        picture = _as_payload_image(value)
+        if picture is not None:
+            # A chart is drawn to fill the column, but a picture has a real
+            # size of its own: a 120px logo stretched across the page would
+            # just be a blurry logo. Fill only if it has the pixels for it.
+            return self._token(
+                picture, min(self._image_width, max(1, picture.width())))
 
         # A plain string is inlined *as markdown*, which is what makes a
         # report writable by the flow: a node that returns prose, headings
