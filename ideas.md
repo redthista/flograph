@@ -143,4 +143,8 @@ G3. Image nodes on a dashboard page — the canvas card shipped in 0.1.9, but
 ## not sorted: 
 - chart per value  - need scale option like with the other nodes.
 - user forms, a simple form with submit buttons, one node? and retrieval? make work with dataframes sql anything else thats helpful. 
-- tables - allow 
+- table node, when selecting a column type bool, put checkbox into the column automatically. 
+- optional git integreation for commits for the workflows. every save is a commit, so full config control.
+- Node option - only run when called, by right click run or action button.
+- search on canvas for node names
+- on dashboard pages, sort viz pane items by node type, and then alpha, 
