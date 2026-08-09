@@ -183,25 +183,25 @@ class TestDashboardViewMode:
 # ----------------------------------------------------------------- reports
 
 class TestReportViewMode:
-    def test_view_mode_hides_the_editor(self, window):
+    def test_locking_hides_the_editor_and_the_whole_toolbar(self, window):
+        """Every control on that strip is for writing the report, so the
+        strip goes rather than being emptied."""
         page = add_page(window, "r1", kind="report")
         page.set_view_mode(True)
         assert page.editor.isHidden()
-        assert page._insert_btn.isHidden()
+        assert page._toolbar.isHidden()
 
-    def test_the_preview_and_export_stay(self, window):
-        """Reading a report is exactly when someone wants the PDF."""
+    def test_the_preview_stays(self, window):
         page = add_page(window, "r1", kind="report")
         page.set_view_mode(True)
         assert not page.preview.isHidden()
-        assert not page._export_btn.isHidden()
 
-    def test_edit_mode_brings_the_editor_back(self, window):
+    def test_unlocking_brings_the_editor_and_toolbar_back(self, window):
         page = add_page(window, "r1", kind="report")
         page.set_view_mode(True)
         page.set_view_mode(False)
         assert not page.editor.isHidden()
-        assert not page._insert_btn.isHidden()
+        assert not page._toolbar.isHidden()
 
     def test_the_toggle_asks_the_window_rather_than_acting(self, window,
                                                            qtbot):
@@ -233,5 +233,44 @@ class TestWindowWiring:
     def test_setting_the_same_mode_adds_no_undo_step(self, window):
         add_page(window)
         before = window.undo_stack.count()
-        window._set_page_view_mode("p1", False)   # already in edit mode
+        window._set_page_view_mode("p1", False)   # already unlocked
         assert window.undo_stack.count() == before
+
+
+# --------------------------------------------------------- the tab's menu
+
+class TestPageTabMenu:
+    """The menu is built in _show_context_menu, which blocks on exec(). These
+    drive the pieces it reads and emits rather than opening it."""
+
+    def test_one_checkable_lock_entry_reflects_the_page(self, window):
+        add_page(window)
+        assert window.page_bar.page_view_mode("p1") is False
+        window._set_page_view_mode("p1", True)
+        assert window.page_bar.page_view_mode("p1") is True
+
+    def test_the_bar_knows_a_page_s_kind(self, window):
+        """Export PDF is offered on a locked *report*, so the menu has to
+        know which pages are reports."""
+        add_page(window, "p1", kind="dashboard")
+        add_page(window, "r1", kind="report")
+        assert window.page_bar._kinds["p1"] == "dashboard"
+        assert window.page_bar._kinds["r1"] == "report"
+
+    def test_export_from_the_menu_reaches_the_window(self, window,
+                                                     monkeypatch):
+        add_page(window, "r1", kind="report")
+        window._set_page_view_mode("r1", True)
+        called = []
+        monkeypatch.setattr(window, "_export_report_pdf", called.append)
+        # no connect here: the window wires this in its constructor, and
+        # that wiring is the thing under test
+        window.page_bar.export_page_requested.emit("r1")
+        assert called == ["r1"]
+
+    def test_removing_a_page_forgets_its_menu_state(self, window):
+        add_page(window, "r1", kind="report")
+        window._set_page_view_mode("r1", True)
+        window.page_bar.remove_page_tab("r1")
+        assert "r1" not in window.page_bar._kinds
+        assert "r1" not in window.page_bar._view_modes

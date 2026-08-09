@@ -86,7 +86,10 @@ class ReportPage(QWidget):
         self._status = QLabel("")
         self._status.setStyleSheet("color: #b45309;")
 
-        toolbar = QHBoxLayout()
+        # A widget, not a bare layout, so locked mode can hide the strip
+        # whole — a layout has no visibility of its own.
+        self._toolbar = QWidget()
+        toolbar = QHBoxLayout(self._toolbar)
         toolbar.setContentsMargins(6, 4, 6, 0)
         toolbar.addWidget(self._insert_btn)
         toolbar.addWidget(self._status, 1)
@@ -102,7 +105,7 @@ class ReportPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(toolbar)
+        layout.addWidget(self._toolbar)
         layout.addWidget(splitter, 1)
 
         self._timer = QTimer(self)
@@ -115,6 +118,7 @@ class ReportPage(QWidget):
         # would sooner or later disagree about whether it is hidden.
         self._mode_btn = QToolButton()
         self._mode_btn.setAutoRaise(True)
+        self._mode_btn.setText("🔒")
         self._mode_btn.clicked.connect(
             lambda: self.view_mode_requested.emit(
                 self.page_id, not self._view_mode))
@@ -143,19 +147,23 @@ class ReportPage(QWidget):
     # ------------------------------------------------------------- the mode
 
     def set_view_mode(self, view_mode: bool) -> None:
-        """View mode is the rendered report on its own: the markdown source
-        and the insert-embed button are for *writing* it, and neither is any
-        use to someone reading. Export stays — reading is exactly when
-        somebody wants the PDF."""
+        """Locked mode is the rendered report and nothing else.
+
+        The whole toolbar goes, not just the editor: every control on it —
+        insert an embed, collapse the editor, the unresolved-embed warning —
+        is for *writing* the report, and a strip of writing tools above a
+        finished document is exactly the chrome locking is meant to remove.
+
+        That leaves no visible way back, which is deliberate rather than an
+        oversight: unlocking lives on the page tab's right-click menu, and
+        so does Export PDF while locked, so the one surface that is always
+        reachable carries both.
+        """
         self._view_mode = bool(view_mode)
         self.editor.setVisible(not self._view_mode)
-        self._insert_btn.setVisible(not self._view_mode)
-        self._mode_btn.setArrowType(
-            Qt.ArrowType.RightArrow if self._view_mode
-            else Qt.ArrowType.LeftArrow)
+        self._toolbar.setVisible(not self._view_mode)
         self._mode_btn.setToolTip(
-            "Show the editor (edit mode)" if self._view_mode
-            else "Hide the editor (view mode)")
+            "Lock the page — hide the editor and this toolbar")
 
     def view_mode(self) -> bool:
         return self._view_mode
