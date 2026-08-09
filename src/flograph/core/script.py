@@ -93,7 +93,7 @@ def missing_module_hint(exc: BaseException) -> "str | None":
 CARD_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer",
     "button", "note", "grid", "reroute", "goto", "from", "control",
-    "report",
+    "report", "image",
 })
 
 # Widget shapes for NODE["card"] == "control": input controls whose value the

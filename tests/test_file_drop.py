@@ -29,6 +29,12 @@ class TestResolveDroppedFile:
         assert resolve_dropped_file("/x/data.XLSX") == ("flograph.io.read_excel", "path")
         assert resolve_dropped_file("/x/data.parquet") == ("flograph.io.read_parquet", "path")
 
+    def test_image_extensions_make_image_nodes(self):
+        for name in ("shot.png", "photo.JPG", "loop.gif", "logo.svg",
+                     "icon.webp"):
+            assert resolve_dropped_file(f"/x/{name}") == (
+                "flograph.viz.image", "path")
+
     def test_unknown_extension(self):
         assert resolve_dropped_file("/x/data.txt") is None
 
@@ -55,7 +61,7 @@ class TestAddReaderNodesForFiles:
         assert len(window.graph.nodes) == 0
 
     def test_unsupported_file_is_ignored(self, window):
-        window._add_reader_nodes_for_files(["/fake/image.png"], QPointF(0, 0))
+        window._add_reader_nodes_for_files(["/fake/notes.txt"], QPointF(0, 0))
         assert len(window.graph.nodes) == 0
 
 
@@ -74,7 +80,7 @@ class TestViewDragDrop:
         assert event.isAccepted()
 
     def test_drag_enter_rejects_unsupported_file(self, window):
-        mime = self._mime_with_urls("/fake/image.png")
+        mime = self._mime_with_urls("/fake/notes.txt")
         event = QDragEnterEvent(
             window.view.viewport().rect().center(), Qt.CopyAction, mime,
             Qt.LeftButton, Qt.NoModifier)

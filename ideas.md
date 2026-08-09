@@ -136,7 +136,8 @@ F1. add a setting and on by default when dragging around a canvas with middle mo
 ## G. UX/UI
 G1. a setting to enable draging the canvas by holding right click.
 G2. when zoomed out and we have the low lod version of the nodes showing, can we layer the names of the nodes ontop? 
-G3. Show images on the canvas, dragged in or node with property, the usual enable disable etc. theres been a few cases where ive used an image in plotly charts, so to be able to add my own img input and then plug it in is good.
+G3. Image nodes on a dashboard page — the canvas card shipped in 0.1.9, but
+"image" is not in TILE_ABLE_KINDS yet, so a logo can't be put on a dashboard.
 
 
 ## not sorted: 
