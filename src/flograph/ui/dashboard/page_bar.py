@@ -56,7 +56,8 @@ class PageTabBar(QTabBar):
     duplicate_page_requested = Signal(str)     # page_id to duplicate
     reorder_pages_requested = Signal(list)     # page_ids in their new order
     recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
-    set_view_mode_requested = Signal(str, bool)   # page_id, view_mode
+    set_view_mode_requested = Signal(str, bool)   # page_id, locked
+    export_page_requested = Signal(str)           # page_id (locked reports)
     current_page_changed = Signal(object)      # page_id, or None for Model
     model_tab_double_clicked = Signal()        # collapse/restore every panel
 
@@ -75,9 +76,14 @@ class PageTabBar(QTabBar):
         self._drag_locked = False   # press landed on a tab that can't move
         self._reorder_pending = False
         self._colors: dict[str, str] = {}   # page_id -> "#rrggbb"
-        # page_id -> in view mode. Mirrored here only so the context menu can
-        # show which mode a page is in; the model stays the source of truth.
+        # page_id -> locked. Mirrored here only so the context menu can show
+        # which mode a page is in; the model stays the source of truth.
+        # (Called view_mode in the model — "Locked" is what it says on the
+        # menu, since that is what it does to the page.)
         self._view_modes: dict[str, bool] = {}
+        # page_id -> "dashboard" | "report"; only the menu needs it, to offer
+        # Export PDF on a locked report
+        self._kinds: dict[str, str] = {}
         self.currentChanged.connect(self._on_current_changed)
         self.tabMoved.connect(self._on_tab_moved)
 
@@ -126,6 +132,7 @@ class PageTabBar(QTabBar):
         self._syncing = False
         self.set_page_color(page.id, page.color)
         self.set_page_view_mode(page.id, page.view_mode)
+        self._kinds[page.id] = page.kind
 
     def set_page_view_mode(self, page_id: str, view_mode: bool) -> None:
         """Told by the window whenever the model changes, so the context
@@ -152,6 +159,7 @@ class PageTabBar(QTabBar):
         was_current = index == self.currentIndex()
         self._colors.pop(page_id, None)
         self._view_modes.pop(page_id, None)
+        self._kinds.pop(page_id, None)
         self._syncing = True
         self.removeTab(index)
         if was_current or self.currentIndex() >= self._plus_index():
@@ -278,21 +286,30 @@ class PageTabBar(QTabBar):
         app.installEventFilter(_guard)
         try:
             menu = QMenu(self)
-            # Mode first: it is the one that changes what the page *is*,
-            # and the reason most people open this menu twice.
-            in_view = self._view_modes.get(page_id, False)
-            edit_action = QAction("Edit mode", self)
-            view_action = QAction("View mode", self)
-            for action, wanted in ((edit_action, False), (view_action, True)):
-                action.setCheckable(True)
-                action.setChecked(in_view == wanted)
-                action.triggered.connect(
-                    lambda _checked=False, w=wanted:
-                    self.set_view_mode_requested.emit(page_id, w))
-                menu.addAction(action)
-            view_action.setToolTip(
-                "Hide the editing chrome and lock the layout — the contents "
-                "stay live")
+            menu.setToolTipsVisible(True)   # off by default in QMenu
+            # One tick, not a pair of mutually exclusive ones: the page is
+            # either locked or it isn't, and a checkbox says that in half
+            # the space two radio-ish entries took.
+            locked = self._view_modes.get(page_id, False)
+            lock_action = QAction("Locked", self)
+            lock_action.setCheckable(True)
+            lock_action.setChecked(locked)
+            lock_action.setToolTip(
+                "Lock the elements on this page in place. They can still be "
+                "used — slicers, tables, buttons and charts all keep "
+                "working — they just can't be moved, resized or rearranged.")
+            # triggered, not toggled: toggled also fires for setChecked above
+            lock_action.triggered.connect(
+                lambda checked: self.set_view_mode_requested.emit(
+                    page_id, bool(checked)))
+            menu.addAction(lock_action)
+            # A locked report has no toolbar left to export from, so the one
+            # surface that is always reachable carries it instead.
+            if locked and self._kinds.get(page_id) == "report":
+                export_action = QAction("Export PDF…", self)
+                export_action.triggered.connect(
+                    lambda: self.export_page_requested.emit(page_id))
+                menu.addAction(export_action)
             menu.addSeparator()
             rename_action = QAction("Rename", self)
             dup_action = QAction("Duplicate", self)

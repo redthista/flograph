@@ -1201,6 +1201,7 @@ class MainWindow(QMainWindow):
         self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
         self.page_bar.set_view_mode_requested.connect(self._set_page_view_mode)
+        self.page_bar.export_page_requested.connect(self._export_report_pdf)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
         self.page_bar.model_tab_double_clicked.connect(self.toggle_all_panels)
