@@ -25,9 +25,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QImage, QTextDocument
+from PySide6.QtGui import QImage, QImageReader, QTextDocument
 
-from flograph.core.report import (IMAGE_TOKEN, format_scalar,
+from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL, format_scalar,
                                   frame_to_markdown, inline_markdown,
                                   missing_embed, replace_embeds, unrun_embed)
 
@@ -59,6 +59,13 @@ class RenderedReport:
     #: embed refs that resolved to nothing — the page shows them inline, and
     #: the export warns rather than quietly shipping a report full of holes
     problems: list[str] = field(default_factory=list)
+    #: image index -> the encoded bytes of an animation, for whoever is
+    #: showing this on screen to play (see ui/report/animate.py). Empty when
+    #: rendering for print, paper having no way to animate.
+    animations: dict = field(default_factory=dict)
+    #: image index -> the width it is drawn at, so a frame can be decoded at
+    #: the size it will actually appear
+    image_widths: dict = field(default_factory=dict)
 
 
 #: Space between charts in a multi-column stack, in points.
@@ -156,6 +163,43 @@ def _as_payload_image(value) -> "QImage | None":
     if not image.loadFromData(data) or image.isNull():
         return None
     return image
+
+
+def _payload_bytes(value) -> "bytes | None":
+    """The encoded image behind whatever `_as_payload_image` just accepted."""
+    if isinstance(value, dict):
+        raw = value.get("bytes")
+        if isinstance(raw, (bytes, bytearray)) and \
+                str(value.get("mime", "")).startswith("image/"):
+            return bytes(raw)
+        value = value.get("data_uri")
+    if isinstance(value, str) and value[:11].lower().startswith("data:image/"):
+        from flograph.core.images import parse_data_uri
+        parsed = parse_data_uri(value)
+        if parsed is not None:
+            return parsed[0]
+    return None
+
+
+def _animation_bytes(value) -> "bytes | None":
+    """The encoded image, but only if it actually moves.
+
+    A single-frame GIF is a picture, not an animation, and giving one a
+    QMovie would cost a timer for nothing — so the frame count decides,
+    not the format.
+    """
+    data = _payload_bytes(value)
+    if not data:
+        return None
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    store = QByteArray(data)
+    buffer = QBuffer()
+    buffer.setData(store)
+    buffer.open(QIODevice.ReadOnly)
+    reader = QImageReader(buffer)
+    if reader.supportsAnimation() and reader.imageCount() > 1:
+        return data
+    return None
 
 
 # What a Plotly figure is drawn at when its layout does not say. Plotly's
@@ -429,6 +473,9 @@ class _Resolver:
         # multi-column grid renders its cells narrower than the page
         self.widths: list[int] = []
         self.problems: list[str] = []
+        # image index -> encoded bytes, for the ones that move. Never
+        # collected for print: a PDF gets the poster frame and nothing else.
+        self.animations: dict[int, bytes] = {}
 
     def _token(self, image: QImage, width: Optional[int] = None) -> str:
         self.images.append(image)
@@ -582,8 +629,15 @@ class _Resolver:
             # A chart is drawn to fill the column, but a picture has a real
             # size of its own: a 120px logo stretched across the page would
             # just be a blurry logo. Fill only if it has the pixels for it.
-            return self._token(
-                picture, min(self._image_width, max(1, picture.width())))
+            width = min(self._image_width, max(1, picture.width()))
+            token = self._token(picture, width)
+            # On screen an animation can actually move; on paper it can't, so
+            # print gets the poster frame that is already in `picture`.
+            if not self._for_print:
+                moving = _animation_bytes(value)
+                if moving is not None:
+                    self.animations[len(self.images) - 1] = moving
+            return token
 
         # A plain string is inlined *as markdown*, which is what makes a
         # report writable by the flow: a node that returns prose, headings
@@ -678,6 +732,9 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     document.setDefaultStyleSheet(REPORT_CSS)
     for index, image in enumerate(resolver.images):
         document.addResource(QTextDocument.ImageResource,
-                             QUrl(f"embed:{index}"), image)
+                             QUrl(IMAGE_TOKEN_URL.format(index)), image)
     document.setHtml(html)
-    return RenderedReport(document=document, problems=resolver.problems)
+    return RenderedReport(
+        document=document, problems=resolver.problems,
+        animations=resolver.animations,
+        image_widths={i: w for i, w in enumerate(resolver.widths)})

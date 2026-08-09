@@ -34,6 +34,11 @@ EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*(?:\|\s*([^\]|]+?)\s*)?\]\]")
 # markdown construct will mangle and no user will type by accident.
 IMAGE_TOKEN = "@@flograph-embed-{}@@"
 
+# The URL that token's <img> ends up pointing at, and that the image is
+# registered under as a document resource. Shared so the renderer that
+# writes it and the animator that swaps frames behind it cannot drift.
+IMAGE_TOKEN_URL = "embed:{}"
+
 
 @dataclass(frozen=True)
 class Embed:

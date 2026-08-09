@@ -522,6 +522,7 @@ class NodeItem(QGraphicsObject):
         self._figure_placeholder: QLabel | None = None
         self._plotly_widget = None  # shared PlotlyView, see _build_plotly_widget
         self._report_view = None      # QTextBrowser (report cards only)
+        self._report_animator = None  # plays animated images inside it
         self._report_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_view: "DataTableView | None" = None
         self._table_viewer_proxy: QGraphicsProxyWidget | None = None
@@ -1290,6 +1291,9 @@ class NodeItem(QGraphicsObject):
         rendered = render_card(body, scene.graph, cache, self.node.id,
                                width=int(self.width) - 44) \
             if scene is not None else None
+        # before the old document goes: a QMovie still writing frames into a
+        # deleted document is a crash, not a stale picture
+        self._stop_report_animations()
         if rendered is None:
             self._report_view.setMarkdown(body)
             return
@@ -1300,6 +1304,22 @@ class NodeItem(QGraphicsObject):
             document.defaultStyleSheet()
             + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
         self._report_view.setDocument(document)
+        if rendered.animations:
+            from ..report.animate import ReportAnimator
+            self._report_animator = ReportAnimator(
+                document, rendered.animations, rendered.image_widths,
+                on_frame=self._report_view.viewport().update)
+            self._report_animator.set_playing(self._report_should_animate())
+
+    def _stop_report_animations(self) -> None:
+        if self._report_animator is not None:
+            self._report_animator.dispose()
+            self._report_animator = None
+
+    def _report_should_animate(self) -> bool:
+        """Same two switches as an image card: flattened by LOD or with its
+        preview turned off means nobody is looking at it."""
+        return not self._flat and self.node.canvas_preview_enabled
 
     # --------------------------------------------------------- table viewer
 
@@ -1947,6 +1967,9 @@ class NodeItem(QGraphicsObject):
         # worth spending frames on.
         if self._image is not None:
             self._image.set_playing(self._image_should_play())
+        # a report card's animated embeds answer to the same two switches
+        if self._report_animator is not None:
+            self._report_animator.set_playing(self._report_should_animate())
 
     def set_lod(self, flat: bool) -> None:
         """Called by the scene whenever the decision changes (zoom crossing
