@@ -529,7 +529,7 @@ class NodeItem(QGraphicsObject):
         self._kpi_value: object = None
         self._kpi_has_value = False
         self._image: "CardImage | None" = None  # built lazily, see _card_image
-        self._image_run_path: Optional[str] = None  # see _image_path
+        self._image_run_source: Optional[str] = None  # see _image_source
         self._slicer_list: SlicerListWidget | None = None
         self._slicer_toolbar: SlicerToolbar | None = None
         self._slicer_proxy: QGraphicsProxyWidget | None = None
@@ -737,8 +737,8 @@ class NodeItem(QGraphicsObject):
             self.width = min(IMAGE_MAX_W, max(
                 IMAGE_MIN_W, float(self.node.params.get("width", 320))))
             # Picking a file by hand overrides whatever the last run resolved;
-            # the next run puts a wired path back if there still is one.
-            self._image_run_path = None
+            # the next run puts a wired source back if there still is one.
+            self._image_run_source = None
             self._sync_card_image()
             self._ports_follow_width()
             self.update()
@@ -1393,29 +1393,30 @@ class NodeItem(QGraphicsObject):
         if self._image is None:
             return
         self._image.set_source(
-            self._image_path(),
+            self._image_source(),
             str(self.node.params.get("fit", "Fit") or "Fit"),
             bool(self.node.params.get("animate", True)),
             self._card_scale(),
         )
         self._image.set_playing(self._image_should_play())
 
-    def _image_path(self) -> str:
-        """The file the card should draw.
+    def _image_source(self) -> str:
+        """What the card should draw — a path, a data: URI or base64.
 
         Normally the node's own param, so a dropped or pasted image shows up
         without the graph ever being run. But the node also takes a *wired*
-        path, and that one only exists once the node has run — so a resolved
-        path reported by the engine wins while it lasts.
+        source, and that one only exists once the node has run — so a source
+        reported by the engine wins while it lasts.
         """
-        return self._image_run_path or str(self.node.params.get("path", "") or "")
+        return self._image_run_source or str(
+            self.node.params.get("path", "") or "")
 
-    def set_image_result(self, path: Optional[str]) -> None:
-        """Show the file this node's last run actually resolved to."""
-        path = str(path or "") or None
-        if path == self._image_run_path:
+    def set_image_result(self, source: Optional[str]) -> None:
+        """Show what this node's last run actually resolved."""
+        source = str(source or "") or None
+        if source == self._image_run_source:
             return
-        self._image_run_path = path
+        self._image_run_source = source
         self._sync_card_image()
         self.update()
 

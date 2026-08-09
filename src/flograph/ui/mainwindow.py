@@ -1101,9 +1101,9 @@ class MainWindow(QMainWindow):
             "though a run will refresh the input's columns again", 5000)
 
     def _on_image_node_succeeded(self, node_id: str) -> None:
-        """Show what the run actually loaded. Only matters when the path came
-        in on the wire — a path set in the node's own params is already on the
-        card, drawn without any run at all."""
+        """Show what the run actually loaded. Only matters when the source
+        came in on the wire — one set in the node's own params is already on
+        the card, drawn without any run at all."""
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "image":
             return
@@ -1113,8 +1113,10 @@ class MainWindow(QMainWindow):
         entry = self.engine.cache.get(node_id)
         port = node.spec.outputs[0].name if node.spec.outputs else "image"
         payload = entry.outputs.get(port) if entry else None
-        path = payload.get("path") if isinstance(payload, dict) else None
-        item.set_image_result(path)
+        # "source" is what the card can re-resolve: a path, a data: URI or a
+        # base64 blob. "path" is None whenever the image never was a file.
+        source = payload.get("source") if isinstance(payload, dict) else None
+        item.set_image_result(source)
 
     def _on_kpi_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)

@@ -119,7 +119,8 @@ class TestImageNodeSpec:
         spec = registry.get(IMAGE_TYPE)
         assert spec.card == "image"
         assert [p.name for p in spec.outputs] == ["image"]
-        # the optional input is what lets an upstream node choose the file
+        # the optional input is what lets an upstream node supply the picture
+        assert spec.inputs[0].name == "source"
         assert spec.inputs[0].optional
 
     def test_declares_the_params_the_card_reads(self, registry):
@@ -157,19 +158,42 @@ class TestImageNodeRun:
         out = self._run(registry, fake_ctx, {"path": svg_file})["image"]
         assert out["mime"] == "image/svg+xml"
 
-    def test_wired_path_beats_the_param(self, registry, fake_ctx, png_file,
-                                        svg_file):
+    def test_wired_source_beats_the_param(self, registry, fake_ctx, png_file,
+                                          svg_file):
         out = self._run(registry, fake_ctx, {"path": svg_file},
-                        path=png_file)["image"]
+                        source=png_file)["image"]
         assert out["path"] == png_file
 
-    def test_no_path_is_a_helpful_error(self, registry, fake_ctx):
-        with pytest.raises(ValueError, match="no image selected"):
+    def test_no_source_is_a_helpful_error(self, registry, fake_ctx):
+        with pytest.raises(ValueError, match="no image given"):
             self._run(registry, fake_ctx, {"path": ""})
 
     def test_missing_file_is_a_helpful_error(self, registry, fake_ctx):
         with pytest.raises(FileNotFoundError, match="not found"):
             self._run(registry, fake_ctx, {"path": "/nope/absent.png"})
+
+    def test_accepts_bare_base64(self, registry, fake_ctx, png_file):
+        import base64 as b64
+        raw = open(png_file, "rb").read()
+        out = self._run(registry, fake_ctx,
+                        {"path": b64.b64encode(raw).decode()})["image"]
+        assert out["bytes"] == raw
+        assert out["mime"] == "image/png"
+        assert out["path"] is None   # it never was a file
+
+    def test_accepts_a_data_uri(self, registry, fake_ctx, png_file):
+        import base64 as b64
+        raw = open(png_file, "rb").read()
+        uri = f"data:image/png;base64,{b64.b64encode(raw).decode()}"
+        out = self._run(registry, fake_ctx, {"path": uri})["image"]
+        assert out["bytes"] == raw
+        assert out["path"] is None
+
+    def test_echoes_the_source_back_for_the_card(self, registry, fake_ctx,
+                                                 png_file):
+        out = self._run(registry, fake_ctx, {"path": ""},
+                        source=png_file)["image"]
+        assert out["source"] == png_file
 
 
 # ------------------------------------------------------------------- sizing
@@ -341,12 +365,12 @@ class TestImageCardPainting:
         item = _make_item(registry, path=png_file)
         assert item._image is None
 
-    def test_a_wired_path_reaches_the_card(self, registry, png_file, svg_file):
-        """With nothing in the param, the card can only learn the file from
+    def test_a_wired_source_reaches_the_card(self, registry, png_file):
+        """With nothing in the param, the card can only learn the source from
         the run — that is the whole point of set_image_result."""
         item = _make_item(registry, path="", width=300, height=240)
         item.set_image_result(png_file)
-        assert item._image_path() == png_file
+        assert item._image_source() == png_file
         assert _has_colour(_render(item), "#3366cc")
 
     def test_picking_a_file_by_hand_overrides_the_last_run(self, registry,
@@ -355,7 +379,41 @@ class TestImageCardPainting:
         item.set_image_result(png_file)
         item.node.params["path"] = svg_file
         item.on_params_changed()
-        assert item._image_path() == svg_file
+        assert item._image_source() == svg_file
+
+    def test_card_draws_a_base64_param(self, registry, png_file):
+        """Base64 in the param renders exactly like a file would."""
+        import base64 as b64
+        blob = b64.b64encode(open(png_file, "rb").read()).decode()
+        item = _make_item(registry, path=blob, width=300, height=240)
+        assert _has_colour(_render(item), "#3366cc")
+
+    def test_card_draws_a_data_uri(self, registry, png_file):
+        import base64 as b64
+        blob = b64.b64encode(open(png_file, "rb").read()).decode()
+        item = _make_item(registry, path=f"data:image/png;base64,{blob}",
+                          width=300, height=240)
+        assert _has_colour(_render(item), "#3366cc")
+
+    def test_card_animates_a_base64_gif(self, registry):
+        """The bytes path has to keep its QBuffer alive for as long as the
+        movie reads from it — getting that wrong is a segfault, not a test
+        failure, so this exercises it deliberately."""
+        import base64 as b64
+        item = _make_item(registry, path=b64.b64encode(ANIMATED_GIF).decode(),
+                          width=200, height=200)
+        _render(item)
+        image = item._card_image()
+        if not image.is_animated():
+            pytest.skip("no GIF plugin")
+        assert image._movie is not None
+        image.set_playing(True)
+        image.set_playing(False)
+
+    def test_rubbish_source_paints_an_error_not_a_crash(self, registry):
+        item = _make_item(registry, path="not a file and not base64!!")
+        _render(item)
+        assert item._card_image().error
 
 
 # ------------------------------------------------------------ clipboard paste
