@@ -4,6 +4,8 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | Images on the canvas | A new **Viz > Image** node shows a picture on the canvas — PNG, JPEG, **animated GIF and WebP**, SVG, BMP, ICO, TIFF and the rest of what Qt reads, with no extra packages to install. Three ways to get one in: **drag an image file** from the file manager onto the canvas and it becomes an Image node; **copy a picture to the clipboard and press Ctrl+V** (your OS screenshot key already puts one there, so that is the whole of "screen grab", and it works the same on Windows and Linux); or drop the node and pick a file. The card draws straight from the file, so the picture is there without running anything. **Fit / Fill / Stretch / Original size** plus a **Scale %** decide how it sits in the card, and "Card background" off drops the slab behind a cut-out PNG. Running the node emits the image on its `image` port with a ready-made `data_uri`, so it can go straight into a Plotly figure, an HTML view or a report. |
+| Performance | Image cards stay cheap | Pictures are scaled **while being decoded**, so a 6000x4000 photo on a small card costs a card-sized buffer rather than a 96 MB one, and the result is cached until the card actually changes size. Nothing is decoded until a card is first painted, so opening a project full of images zoomed out reads no pixels at all. Animations run only while they can be seen — zoom out past the detail threshold, or switch a card's preview off, and they pause instead of quietly burning frames. There is no embedded widget behind an image card, so unlike chart and web cards they cost roughly what a plain node costs. |
 
 ## 0.1.8
 

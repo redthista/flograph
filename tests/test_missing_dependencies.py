@@ -267,6 +267,7 @@ def test_no_builtin_imports_a_third_party_package_at_top_level():
                             else (node.module or ""))
                     if name.split(".")[0] not in ("json", "uuid", "math",
                                                   "datetime", "re", "os",
-                                                  "sys", "textwrap"):
+                                                  "sys", "textwrap",
+                                                  "base64"):
                         offenders.append(f"{pkg.name}/{entry.name}: {name}")
     assert offenders == []

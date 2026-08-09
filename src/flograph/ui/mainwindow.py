@@ -42,7 +42,7 @@ from .canvas.file_drop import resolve_dropped_file
 from .canvas import grid
 from .canvas.stacking import add_layer_menu
 from .canvas.node_item import (
-    DEFAULT_LOD_THRESHOLD, PREVIEW_TOGGLABLE_KINDS, card_kind,
+    DEFAULT_LOD_THRESHOLD, IMAGE_TYPE, PREVIEW_TOGGLABLE_KINDS, card_kind,
 )
 from .canvas.palette import LibraryPanel, NodePalettePopup
 from .favorites import Favorites
@@ -921,6 +921,7 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_table_viewer_node_succeeded)
         engine.node_succeeded.connect(self._on_grid_node_succeeded)
         engine.node_succeeded.connect(self._on_kpi_node_succeeded)
+        engine.node_succeeded.connect(self._on_image_node_succeeded)
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
         engine.node_succeeded.connect(self._on_control_node_succeeded)
         engine.node_succeeded.connect(self._on_browser_node_succeeded)
@@ -1098,6 +1099,22 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "Input copied into the table — the cells are yours to edit now, "
             "though a run will refresh the input's columns again", 5000)
+
+    def _on_image_node_succeeded(self, node_id: str) -> None:
+        """Show what the run actually loaded. Only matters when the path came
+        in on the wire — a path set in the node's own params is already on the
+        card, drawn without any run at all."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or card_kind(node) != "image":
+            return
+        item = self.scene.node_items.get(node_id)
+        if item is None:
+            return
+        entry = self.engine.cache.get(node_id)
+        port = node.spec.outputs[0].name if node.spec.outputs else "image"
+        payload = entry.outputs.get(port) if entry else None
+        path = payload.get("path") if isinstance(payload, dict) else None
+        item.set_image_result(path)
 
     def _on_kpi_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -1815,11 +1832,14 @@ class MainWindow(QMainWindow):
         if self._clipboard_payload() is not None:
             menu.addSeparator()
             paste_action = menu.addAction("Paste")
+        elif self._clipboard_has_image():
+            menu.addSeparator()
+            paste_action = menu.addAction("Paste Image")
         chosen = menu.exec(global_pos)
         if chosen is frame_action:
             self._add_frame_at(scene_pos)
         elif paste_action is not None and chosen is paste_action:
-            self._paste()
+            self._paste(scene_pos)  # land it where the menu was opened
         elif chosen is not None and chosen.data():
             self._add_node_at(chosen.data(), scene_pos)
 
@@ -2278,10 +2298,51 @@ class MainWindow(QMainWindow):
             return None
         return payload
 
-    def _paste(self) -> None:
+    def _clipboard_has_image(self) -> bool:
+        return QApplication.clipboard().mimeData().hasImage()
+
+    def _paste_clipboard_image(self, scene_pos: Optional[QPointF] = None
+                               ) -> bool:
+        """Clipboard picture -> an Image node on the canvas.
+
+        This is also the whole of "screen grab": every OS screenshot key
+        already puts its result on the clipboard, so there is nothing for
+        flograph to capture itself.
+        """
+        from .image_paste import save_clipboard_image
+        try:
+            path = save_clipboard_image(QApplication.clipboard().mimeData())
+        except OSError as exc:
+            self.statusBar().showMessage(f"Could not save the image: {exc}",
+                                         8000)
+            return False
+        if path is None:
+            return False
+        if scene_pos is None:
+            scene_pos = self.view.mapToScene(
+                self.view.viewport().rect().center())
+        node = self.registry.instantiate(
+            IMAGE_TYPE, pos=(scene_pos.x(), scene_pos.y()))
+        self.undo_stack.beginMacro("paste image")
+        self.undo_stack.push(AddNodeCommand(self.graph, node))
+        self.undo_stack.push(
+            SetParamCommand(self.graph, node.id, "path", path))
+        self.undo_stack.endMacro()
+        self.scene.clearSelection()
+        item = self.scene.node_items.get(node.id)
+        if item is not None:
+            item.setSelected(True)
+        self.statusBar().showMessage("Pasted image from the clipboard", 4000)
+        return True
+
+    def _paste(self, scene_pos: Optional[QPointF] = None) -> None:
         payload = self._clipboard_payload()
         if payload is not None:
             self._insert_payload(payload)
+            return
+        # Only once nothing of ours is on the clipboard, so copying nodes and
+        # then pasting never turns into an unexpected picture.
+        self._paste_clipboard_image(scene_pos)
 
     def _duplicate(self) -> None:
         grid = self._focused_spreadsheet()

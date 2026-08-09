@@ -97,6 +97,10 @@ SLICER_TYPE = "flograph.viz.slicer"
 SLICER_MIN_W, SLICER_MAX_W = 140.0, 600.0
 SLICER_MIN_H, SLICER_MAX_H = 120.0, 2000.0
 
+IMAGE_TYPE = "flograph.viz.image"
+IMAGE_MIN_W, IMAGE_MAX_W = 60.0, 2400.0
+IMAGE_MIN_H, IMAGE_MAX_H = 60.0, 2400.0
+
 # Input controls (slider, toggle, date, ...). One card path for every shape:
 # the widget comes from ui.controls, keyed on the node's NODE["control"].
 CONTROL_MIN_W, CONTROL_MAX_W = 120.0, 800.0
@@ -117,6 +121,7 @@ _LEGACY_CARD_BY_TYPE_ID = {
     "flograph.viz.table_spec": "table_viewer",
     KPI_TYPE: "kpi",
     SLICER_TYPE: "slicer",
+    IMAGE_TYPE: "image",
 }
 
 
@@ -448,6 +453,9 @@ class NodeItem(QGraphicsObject):
         self.table_viewer = kind == "table_viewer"
         self.report_card = kind == "report"
         self.kpi_card = kind == "kpi"
+        # painted straight onto the item like the KPI card, no proxy widget —
+        # see ui.canvas.image_card for why that matters
+        self.image_card = kind == "image"
         self.slicer = kind == "slicer"
         self.control = kind == "control"
         # Goto/From: the two ends of a link the canvas doesn't draw
@@ -480,6 +488,9 @@ class NodeItem(QGraphicsObject):
         elif self.kpi_card:
             self.width = min(KPI_MAX_W, max(
                 KPI_MIN_W, float(node.params.get("width", 220))))
+        elif self.image_card:
+            self.width = min(IMAGE_MAX_W, max(
+                IMAGE_MIN_W, float(node.params.get("width", 320))))
         elif self.slicer:
             self.width = min(SLICER_MAX_W, max(
                 SLICER_MIN_W, float(node.params.get("width", 200))))
@@ -517,6 +528,8 @@ class NodeItem(QGraphicsObject):
         self._table_viewer_placeholder: QLabel | None = None
         self._kpi_value: object = None
         self._kpi_has_value = False
+        self._image: "CardImage | None" = None  # built lazily, see _card_image
+        self._image_run_path: Optional[str] = None  # see _image_path
         self._slicer_list: SlicerListWidget | None = None
         self._slicer_toolbar: SlicerToolbar | None = None
         self._slicer_proxy: QGraphicsProxyWidget | None = None
@@ -623,6 +636,11 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             fixed = float(self.node.params.get("height", 120) or 120)
             return min(KPI_MAX_H, max(KPI_MIN_H, fixed))
+        if self.image_card:
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", 240) or 240)
+            return min(IMAGE_MAX_H, max(IMAGE_MIN_H, fixed))
         if self.slicer:
             if self._live_height is not None:
                 return self._live_height
@@ -709,6 +727,19 @@ class NodeItem(QGraphicsObject):
             self.prepareGeometryChange()
             self.width = min(KPI_MAX_W, max(
                 KPI_MIN_W, float(self.node.params.get("width", 220))))
+            self._ports_follow_width()
+            self.update()
+            return
+        if self.image_card:
+            # the file path *is* a param, so picking a different image is a
+            # param edit — the card redraws without the graph being run
+            self.prepareGeometryChange()
+            self.width = min(IMAGE_MAX_W, max(
+                IMAGE_MIN_W, float(self.node.params.get("width", 320))))
+            # Picking a file by hand overrides whatever the last run resolved;
+            # the next run puts a wired path back if there still is one.
+            self._image_run_path = None
+            self._sync_card_image()
             self._ports_follow_width()
             self.update()
             return
@@ -1121,6 +1152,10 @@ class NodeItem(QGraphicsObject):
         changes and (debounced, via the scene) after the view zoom settles."""
         if self._figure_view is not None and not self.plotly_card:
             self._figure_view.set_render_ratio(self._figure_render_ratio())
+        if self._image is not None and not self._flat:
+            # An image re-decodes at the new zoom on its next paint; asking
+            # for one here is what makes zooming in sharpen the picture.
+            self.update()
 
     def _build_figure_widget(self) -> None:
         from ..inspector.figure_view import FigureView
@@ -1337,6 +1372,121 @@ class NodeItem(QGraphicsObject):
 
     def _kpi_label(self) -> str:
         return kpi_caption(self.node.params)
+
+    # ----------------------------------------------------------- image card
+
+    def _card_image(self) -> "CardImage":
+        """The card's artwork, built on first use.
+
+        Lazy rather than built in __init__ because loading is driven by
+        paint(): a project full of image nodes that opens zoomed out (so
+        every card is flattened by LOD) never decodes a single pixel.
+        """
+        from .image_card import CardImage
+        if self._image is None:
+            self._image = CardImage(self.update)
+            self._sync_card_image()
+        return self._image
+
+    def _sync_card_image(self) -> None:
+        """Re-point the artwork at whatever the node's params now say."""
+        if self._image is None:
+            return
+        self._image.set_source(
+            self._image_path(),
+            str(self.node.params.get("fit", "Fit") or "Fit"),
+            bool(self.node.params.get("animate", True)),
+            self._card_scale(),
+        )
+        self._image.set_playing(self._image_should_play())
+
+    def _image_path(self) -> str:
+        """The file the card should draw.
+
+        Normally the node's own param, so a dropped or pasted image shows up
+        without the graph ever being run. But the node also takes a *wired*
+        path, and that one only exists once the node has run — so a resolved
+        path reported by the engine wins while it lasts.
+        """
+        return self._image_run_path or str(self.node.params.get("path", "") or "")
+
+    def set_image_result(self, path: Optional[str]) -> None:
+        """Show the file this node's last run actually resolved to."""
+        path = str(path or "") or None
+        if path == self._image_run_path:
+            return
+        self._image_run_path = path
+        self._sync_card_image()
+        self.update()
+
+    def _image_should_play(self) -> bool:
+        """Animate only when the card is genuinely being looked at — not
+        flattened by LOD, not preview-disabled, not on a hidden tab."""
+        return (not self._flat
+                and self.node.canvas_preview_enabled
+                and self.isVisible())
+
+    def refresh_card_image(self) -> None:
+        """Re-read the file from disk (a re-run may have rewritten it)."""
+        if self._image is not None:
+            self._image.reload()
+            self._sync_card_image()
+            self.update()
+
+    def _paint_image(self, painter: QPainter) -> None:
+        """The image card: chrome, then the artwork painted straight in."""
+        if self.node.params.get("background", True):
+            self._paint_widget_card(painter)
+        else:
+            # "Card background" off: just the header and the selection
+            # outline, so a cut-out PNG sits on the canvas without a slab
+            # of card behind it.
+            self._paint_header(painter, self.width)
+            if self.isSelected():
+                painter.setPen(QPen(theme.SELECTION_OUTLINE, 2.0))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRoundedRect(
+                    QRectF(0, 0, self.width, self.body_height), 7, 7)
+
+        rect = QRectF(2, HEADER_H, self.width - 4,
+                      max(0.0, self.body_height - HEADER_H - 2))
+        if rect.isEmpty():
+            return
+        image = self._card_image()
+        painter.save()
+        # Keep a Fill/Stretch/Original-size picture inside the card's rounded
+        # outline instead of squaring off its bottom corners.
+        rounded = QPainterPath()
+        rounded.addRoundedRect(QRectF(0, 0, self.width, self.body_height), 7, 7)
+        painter.setClipPath(rounded)
+        painter.setOpacity(0.45 if self._updating else 1.0)
+        image.paint(painter, rect, self._image_render_ratio())
+        painter.restore()
+
+        if image.has_content() and not image.error:
+            return
+        painter.setPen(QPen(theme.NODE_SUBTEXT))
+        font = painter.font()
+        font.setBold(False)
+        font.setPointSizeF(8.5)
+        painter.setFont(font)
+        painter.drawText(
+            rect, Qt.AlignCenter | Qt.TextWordWrap,
+            image.error or "Drop an image file here, paste one from the\n"
+                           "clipboard, or pick a file in the properties panel.")
+
+    def _image_render_ratio(self) -> float:
+        """Device pixels per logical pixel for the artwork: screen DPR times
+        canvas zoom, so a card inspected close up decodes sharp rather than
+        being upscaled from a card-sized buffer."""
+        ratio = 1.0
+        scene = self.scene()
+        views = scene.views() if scene is not None else []
+        if views:
+            view = views[0]
+            ratio *= (view.viewport().devicePixelRatioF() or 1.0)
+            ratio *= view.transform().m11()
+        return min(4.0, max(1.0, ratio))
 
     # --------------------------------------------------------------- slicer
 
@@ -1680,8 +1830,8 @@ class NodeItem(QGraphicsObject):
         than in labelled rows. Only these can outgrow their node — an
         ordinary node's height is derived from its port count."""
         return bool(self.table or self.figure_card or self.table_viewer
-                    or self.kpi_card or self.slicer or self.control
-                    or self.report_card)
+                    or self.kpi_card or self.image_card or self.slicer
+                    or self.control or self.report_card)
 
     def collapsible(self) -> bool:
         """Whether offering to collapse this node's ports means anything.
@@ -1791,6 +1941,11 @@ class NodeItem(QGraphicsObject):
                       self._control_proxy, self._report_proxy):
             if proxy is not None:
                 proxy.setVisible(visible)
+        # The image card has no proxy to hide, but the same two switches say
+        # whether anyone can see it — which is exactly when an animation is
+        # worth spending frames on.
+        if self._image is not None:
+            self._image.set_playing(self._image_should_play())
 
     def set_lod(self, flat: bool) -> None:
         """Called by the scene whenever the decision changes (zoom crossing
@@ -1992,6 +2147,9 @@ class NodeItem(QGraphicsObject):
             return
         if self.kpi_card:
             self._paint_kpi(painter)
+            return
+        if self.image_card:
+            self._paint_image(painter)
             return
         rect = QRectF(0, 0, self.width, self.body_height)
 
@@ -2316,6 +2474,8 @@ class NodeItem(QGraphicsObject):
             return REPORT_MIN_W, REPORT_MAX_W, REPORT_MIN_H, REPORT_MAX_H
         if self.kpi_card:
             return KPI_MIN_W, KPI_MAX_W, KPI_MIN_H, KPI_MAX_H
+        if self.image_card:
+            return IMAGE_MIN_W, IMAGE_MAX_W, IMAGE_MIN_H, IMAGE_MAX_H
         if self.slicer:
             return SLICER_MIN_W, SLICER_MAX_W, SLICER_MIN_H, SLICER_MAX_H
         if self.control:
@@ -2339,7 +2499,8 @@ class NodeItem(QGraphicsObject):
         if self.button:
             return bool(self._button_edit)
         card = bool(self.note or self.table or self.figure_card
-                    or self.table_viewer or self.kpi_card or self.slicer
+                    or self.table_viewer or self.kpi_card or self.image_card
+                    or self.slicer
                     or self.control or self.report_card)
         return card and all(self.node.spec.param(name) is not None
                             for name in ("width", "height"))
