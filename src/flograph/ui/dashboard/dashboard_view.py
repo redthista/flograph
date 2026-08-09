@@ -199,6 +199,13 @@ class DashboardView(ZoomPanGraphicsView):
         item, self._fs_tile = self._fs_tile, None
         overlay, self._fs_overlay = self._live_overlay(), None
         if overlay is not None:
+            # A maximized widget may be running something — an animated
+            # report is the case in point — and deleteLater leaves it doing
+            # so until the event loop comes round. Ask it to stop first;
+            # widgets with nothing to wind down don't define this.
+            dispose = getattr(overlay.content, "dispose", None)
+            if callable(dispose):
+                dispose()
             overlay.hide()
             overlay.setParent(None)
             overlay.deleteLater()
