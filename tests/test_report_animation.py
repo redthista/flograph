@@ -194,3 +194,126 @@ class TestReportPageAnimates:
         assert page._animator is not first   # replaced, not stacked
         page.dispose()
         assert page._animator is None
+
+
+class TestReportTileAnimates:
+    """A Report card put on a dashboard page.
+
+    This was the one place a report's gif stayed on its first frame: the
+    tile rendered the same document the canvas card and the report page do,
+    but never built an animator for it. Maximizing made it worse — the
+    maximized copy is a *clone* of the document, so even an animator on the
+    tile could not have driven it.
+    """
+
+    @pytest.fixture
+    def board(self, qtbot, tmp_path, monkeypatch):
+        from PySide6.QtCore import QSettings
+        from flograph.core import NodeRegistry, Page, Tile
+        from flograph.ui import mainwindow as mod
+        from flograph.ui.canvas.node_item import IMAGE_TYPE
+        from flograph.ui.commands import AddPageCommand, AddTileCommand
+        from flograph.ui.mainwindow import MainWindow
+
+        ini = str(tmp_path / "s.ini")
+        monkeypatch.setattr(
+            mod, "QSettings",
+            lambda *a, **k: QSettings(ini, QSettings.IniFormat))
+        registry = NodeRegistry()
+        registry.load_builtins()
+        window = MainWindow(registry)
+        window.confirm_close = False
+        qtbot.addWidget(window)
+
+        image = registry.instantiate(IMAGE_TYPE, pos=(0, 0))
+        window.graph.add_node(image)
+        card = registry.instantiate("flograph.viz.report_card", pos=(400, 0))
+        card.params["text"] = "![[a]]"
+        window.graph.add_node(card)
+        window.graph.connect(image.id, "image", card.id, "a")
+        window.engine.cache.set(
+            image.id, {"image": _payload(ANIMATED_GIF, "image/gif")}, 0.01)
+
+        window.undo_stack.push(
+            AddPageCommand(window.graph, Page(id="p1", title="B")))
+        window.undo_stack.push(AddTileCommand(
+            window.graph, "p1", Tile(id="t1", node_id=card.id, port="text")))
+        page = window._dashboard_pages["p1"]
+        yield window, page, page.scene.tile_items["t1"]
+        # qtbot deletes the window from the C++ side, which takes the tile's
+        # browser with it while the movies are still running. dispose() is
+        # idempotent, so tests that already disposed are fine.
+        for item in list(page.scene.tile_items.values()):
+            item.dispose()
+
+    def test_the_tile_builds_an_animator(self, board):
+        _window, _page, tile = board
+        assert tile._report_animator is not None
+        assert tile._report_animator.has_animations()
+
+    def test_re_rendering_replaces_it_rather_than_stacking(self, board):
+        _window, _page, tile = board
+        first = tile._report_animator
+        tile.refresh_content()
+        assert tile._report_animator is not first
+        assert first._movies == []          # the old one was disposed
+
+    def test_a_still_image_gets_no_animator(self, board):
+        window, _page, tile = board
+        node = next(n for n in window.graph.nodes.values()
+                    if n.type_id.endswith(".image"))
+        window.engine.cache.set(
+            node.id, {"image": _payload(_still_png(), "image/png")}, 0.01)
+        tile.refresh_content()
+        assert tile._report_animator is None
+
+    def test_maximizing_gives_the_copy_its_own_animator(self, board):
+        """The overlay shows a clone of the document, and the tile's
+        animator writes into the original — so the clone needs its own or
+        it sits on whichever frame it was cloned mid-loop."""
+        _window, page, tile = board
+        page.scene.toggle_fullscreen("t1")
+        overlay = page.view.fullscreen_overlay
+        assert overlay is not None
+        assert overlay.content._animator is not None
+        assert overlay.content._animator.has_animations()
+        # ...and it is not the tile's, which writes into a different document
+        assert overlay.content._animator is not tile._report_animator
+
+    def test_the_hidden_tile_stops_spending_frames_while_maximized(self, board):
+        from PySide6.QtGui import QMovie
+        _window, page, tile = board
+        page.scene.toggle_fullscreen("t1")
+        assert not any(m.state() == QMovie.Running
+                       for m in tile._report_animator._movies)
+
+    def test_restoring_disposes_the_copy_and_resumes_the_tile(self, board):
+        _window, page, tile = board
+        page.scene.toggle_fullscreen("t1")
+        content = page.view.fullscreen_overlay.content
+        page.scene.exit_fullscreen()
+        # disposed *before* the widget is deleted: a movie still writing
+        # into a deleted document is a crash, not a stale picture
+        assert content._animator is None
+        assert tile._report_animator is not None
+
+    def test_a_page_nobody_is_looking_at_costs_nothing(self, board):
+        from PySide6.QtGui import QMovie
+        _window, page, tile = board
+        page.scene.set_animations_playing(False)
+        assert not any(m.state() == QMovie.Running
+                       for m in tile._report_animator._movies)
+        page.scene.set_animations_playing(True)
+        assert all(m.state() == QMovie.Running
+                   for m in tile._report_animator._movies)
+
+    def test_removing_the_tile_stops_its_movies(self, board):
+        from flograph.ui.commands import RemoveTileCommand
+        window, _page, tile = board
+        window.undo_stack.push(RemoveTileCommand(window.graph, "p1", "t1"))
+        assert tile._report_animator is None
+
+    def test_closing_the_page_stops_its_movies(self, board):
+        _window, page, tile = board
+        page.dispose()
+        assert tile._report_animator is None

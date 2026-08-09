@@ -121,12 +121,24 @@ class ReportAnimator(QObject):
         return movie
 
     def _on_movie_frame(self, movie: QMovie, url: QUrl, position: int) -> None:
-        self._document.addResource(QTextDocument.ImageResource, url,
-                                   movie.currentPixmap().toImage())
-        # one character, not the document: see the module docstring
-        self._document.markContentsDirty(position, 1)
-        if self._on_frame is not None:
-            self._on_frame()
+        if self._document is None:
+            return
+        try:
+            self._document.addResource(QTextDocument.ImageResource, url,
+                                       movie.currentPixmap().toImage())
+            # one character, not the document: see the module docstring
+            self._document.markContentsDirty(position, 1)
+            if self._on_frame is not None:
+                self._on_frame()
+        except RuntimeError:
+            # The document, or the widget showing it, was deleted from the
+            # C++ side without anyone calling dispose() — a parent widget
+            # going away takes its children with it, and nothing warns the
+            # movies still pointed at them. Every dispose() call site is
+            # still correct and still required; this is the backstop, so
+            # such a teardown ends the animation instead of raising into
+            # the event loop 25 times a second.
+            self.dispose()
 
     def has_animations(self) -> bool:
         return bool(self._movies)

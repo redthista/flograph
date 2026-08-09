@@ -14,7 +14,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout, QLabel,
-    QTableView, QToolButton, QVBoxLayout, QWidget,
+    QTableView, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import NodeStatus, Tile
@@ -39,6 +39,40 @@ TILE_ABLE_KINDS = frozenset({
 def is_tile_able(node) -> bool:
     """Whether a node can be placed on a dashboard page as a tile."""
     return card_kind(node) in TILE_ABLE_KINDS
+
+class MaximizedReport(QTextBrowser):
+    """A report tile blown up to fill the page.
+
+    It exists as its own class only to own the animator driving its cloned
+    document: the view throws this widget away when the tile is restored,
+    and the movies have to be stopped *before* the document they write into
+    goes with it. `dispose()` is the contract DashboardView calls on the way
+    out; hiding — switching pages, say — just pauses.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._animator = None
+
+    def set_animator(self, animator) -> None:
+        self._animator = animator
+        animator.set_playing(not self.isHidden())
+
+    def dispose(self) -> None:
+        if self._animator is not None:
+            self._animator.dispose()
+            self._animator = None
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._animator is not None:
+            self._animator.set_playing(True)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        if self._animator is not None:
+            self._animator.set_playing(False)
+
 
 TITLE_H = 24.0
 HANDLE = 14.0
@@ -137,6 +171,11 @@ class TileItem(QGraphicsObject):
         self._slicer_toolbar: Optional[SlicerToolbar] = None
         self._control_widget = None  # ControlWidget (input control tiles)
         self._report_view = None     # QTextBrowser (report card tiles)
+        # plays animated images inside a report tile, and the render they
+        # came from — a maximized copy needs the same frames (see
+        # fullscreen_widget). Both are replaced on every re-render.
+        self._report_animator = None
+        self._report_rendered = None
         self._generic_host: Optional[QWidget] = None
         self._generic_child: Optional[QWidget] = None
         self._kpi_value: object = None  # kpi tiles paint, they hold no widget
@@ -282,14 +321,24 @@ class TileItem(QGraphicsObject):
             view.setModel(model)
             return view
         if kind == "report" and self._report_view is not None:
-            from PySide6.QtWidgets import QTextBrowser
-            view = QTextBrowser()
+            view = MaximizedReport()
             view.setOpenExternalLinks(True)
             view.setStyleSheet(
                 f"QTextBrowser {{ background: {theme.NODE_BODY.name()};"
                 f" color: {theme.NODE_TEXT.name()}; border: none;"
                 f" padding: 12px; }}")
-            view.setDocument(self._report_view.document().clone(view))
+            clone = self._report_view.document().clone(view)
+            view.setDocument(clone)
+            # A clone is a *different* document, so the tile's animator —
+            # which writes frames into the original — cannot drive it, and
+            # a maximized gif would sit on whichever frame it was cloned
+            # mid-loop. The copy gets its own, over the same frames.
+            rendered = self._report_rendered
+            if rendered is not None and rendered.animations:
+                from ..report.animate import ReportAnimator
+                view.set_animator(ReportAnimator(
+                    clone, rendered.animations, rendered.image_widths,
+                    on_frame=view.viewport().update, parent=view))
             return view
         return None
 
@@ -474,7 +523,58 @@ class TileItem(QGraphicsObject):
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()
             + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
+        # before the old document goes: a QMovie still writing frames into a
+        # deleted document is a crash, not a stale picture
+        self._stop_report_animations()
         self._report_view.setDocument(document)
+        self._report_rendered = rendered
+        self._start_report_animations(rendered, self._report_view)
+
+    def _start_report_animations(self, rendered, view) -> None:
+        """Play any animated images the report embeds.
+
+        A report tile is the same rendered document the canvas card and the
+        report page show, so it animates on the same terms — the alternative
+        was a gif that moved everywhere except on the dashboard, which is the
+        one place a report is put up to be watched.
+        """
+        if not rendered.animations:
+            return
+        from ..report.animate import ReportAnimator
+        self._report_animator = ReportAnimator(
+            rendered.document, rendered.animations, rendered.image_widths,
+            on_frame=view.viewport().update)
+        self._report_animator.set_playing(self.isVisible())
+
+    def _stop_report_animations(self) -> None:
+        if self._report_animator is not None:
+            self._report_animator.dispose()
+            self._report_animator = None
+
+    def set_animations_playing(self, playing: bool) -> None:
+        """Pause everything moving on this tile because the *page* is not
+        being shown.
+
+        Item visibility cannot answer this on its own: a tile on a dashboard
+        tab nobody has open is still a perfectly visible item in its own
+        scene. So the page tells the tiles, and the tile still defers to its
+        own visibility — a tile hidden by another one being maximized stays
+        paused either way.
+        """
+        playing = bool(playing) and self.isVisible()
+        if self._image is not None:
+            self._image.set_playing(playing)
+        if self._report_animator is not None:
+            self._report_animator.set_playing(playing)
+
+    def dispose(self) -> None:
+        """Called when the tile is removed from the page. Only has to stop
+        the things that keep running on a timer — a QMovie still delivering
+        frames to a deleted document or item is a crash, not a stale
+        picture. Everything else goes with the item."""
+        self._stop_report_animations()
+        if self._image is not None:
+            self._image.set_playing(False)
 
     def _sheet_source(self) -> object:
         """What the grid should show: the merged result of a linked run
@@ -1102,11 +1202,14 @@ class TileItem(QGraphicsObject):
             step = grid_step(self.scene())
             x, y = snap_point(value.x(), value.y(), step)
             return QPointF(x, y)
-        if change == QGraphicsItem.ItemVisibleHasChanged \
-                and self._image is not None:
+        if change == QGraphicsItem.ItemVisibleHasChanged:
             # maximizing one tile hides the rest — an animation nobody can
-            # see should not be spending frames
-            self._image.set_playing(bool(value))
+            # see should not be spending frames. A report tile is hidden by
+            # its own maximize too, which hands its document to an overlay.
+            if self._image is not None:
+                self._image.set_playing(bool(value))
+            if self._report_animator is not None:
+                self._report_animator.set_playing(bool(value))
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:

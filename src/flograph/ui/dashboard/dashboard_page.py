@@ -145,6 +145,17 @@ class DashboardPage(QWidget):
         if notify:
             self.visuals_visibility_changed.emit(visible)
 
+    def showEvent(self, event) -> None:
+        """Switching to this tab resumes its animated tiles, and away pauses
+        them — a dashboard nobody is looking at should cost nothing. The
+        same bargain the report preview makes."""
+        super().showEvent(event)
+        self.scene.set_animations_playing(True)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self.scene.set_animations_playing(False)
+
     def dispose(self) -> None:
         self.scene.dispose()
         self.visuals.dispose()

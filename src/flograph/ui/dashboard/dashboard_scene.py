@@ -84,6 +84,8 @@ class DashboardScene(QGraphicsScene):
         self.engine.node_succeeded.disconnect(self._on_node_ran)
         self.engine.node_failed.disconnect(self._on_node_ran)
         self.engine.request_changed.disconnect(self._on_request_changed)
+        for item in self.tile_items.values():
+            item.dispose()
 
     # ------------------------------------------------------- event mirrors
 
@@ -114,7 +116,16 @@ class DashboardScene(QGraphicsScene):
             # graph outside a command — sync_fullscreen ignores an id with no
             # tile, and undoing the delete resolves it again
             self.sync_fullscreen()
+            # stop anything still running before the item's widgets go: a
+            # QMovie writing into a deleted document is a crash
+            item.dispose()
             self.removeItem(item)
+
+    def set_animations_playing(self, playing: bool) -> None:
+        """The page holding this scene was shown or hidden — an animation
+        on a tab nobody has open should not be spending frames."""
+        for item in self.tile_items.values():
+            item.set_animations_playing(playing)
 
     def _on_page_changed(self, page) -> None:
         if page.id == self.page_id:
