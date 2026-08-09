@@ -416,6 +416,64 @@ class TestImageCardPainting:
         assert item._card_image().error
 
 
+class TestBigValuesSurviveTheEditors:
+    """QLineEdit silently truncates at 32767 characters by default, and a
+    base64 image is far longer than that. A truncated PNG/GIF still carries
+    valid magic bytes, so it half-renders rather than erroring — the failure
+    is invisible right up until an animation won't play.
+    """
+
+    BIG = "A" * 200_000
+
+    def _param_editor(self, qtbot, registry, type_id, param):
+        from PySide6.QtWidgets import QLineEdit
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.ui.properties.params_panel import ParamsPanel
+        graph = Graph()
+        node = graph.add_node(registry.instantiate(type_id, pos=(0, 0)))
+        panel = ParamsPanel(graph, QUndoStack())
+        qtbot.addWidget(panel)
+        panel.set_node(node.id)
+        spec = next(p for p in node.spec.params if p.name == param)
+        widget, _setter = panel._make_widget(spec, "")
+        qtbot.addWidget(widget)  # the host owns the edit; keep it alive
+        edits = (widget.findChildren(QLineEdit)
+                 if not isinstance(widget, QLineEdit) else [widget])
+        assert edits, f"no line edit built for {type_id}.{param}"
+        return widget, edits[0]
+
+    def test_image_file_param_is_not_capped(self, qtbot, registry):
+        _host, edit = self._param_editor(qtbot, registry, IMAGE_TYPE, "path")
+        edit.setText(self.BIG)
+        assert len(edit.text()) == len(self.BIG)
+
+    def test_text_control_is_not_capped(self, qtbot):
+        from flograph.ui.controls import TextControl
+        control = TextControl()
+        qtbot.addWidget(control)
+        control._edit.setText(self.BIG)
+        assert len(control._edit.text()) == len(self.BIG)
+
+    def test_a_full_animated_gif_survives_as_base64(self, registry, gif_file,
+                                                     qtbot):
+        """End to end: the bytes a real GIF encodes to must come back out of
+        the editor intact and still animate."""
+        import base64 as b64
+        blob = b64.b64encode(open(gif_file, "rb").read()).decode()
+        _host, edit = self._param_editor(qtbot, registry, IMAGE_TYPE, "path")
+        edit.setText(blob)
+        assert edit.text() == blob
+
+        item = _make_item(registry, path=edit.text(), width=200, height=200)
+        _render(item)
+        image = item._card_image()
+        assert not image.error
+        assert image.is_animated()
+        assert image._movie is not None
+        assert image._movie.frameCount() == 2
+
+
 # ------------------------------------------------------------ clipboard paste
 
 class TestClipboardImageBytes:

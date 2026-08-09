@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from flograph.core import Graph, ParamSpec
 
 from ..canvas.node_item import card_kind
+from ..controls import UNCAPPED_TEXT
 from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
 
 # How long typing has to pause before a text param reaches the graph. Long
@@ -245,6 +246,9 @@ class ParamsPanel(QWidget):
             row = QHBoxLayout(host)
             row.setContentsMargins(0, 0, 0, 0)
             edit = QLineEdit(str(value or ""))
+            # An Image node's "file" may be a whole base64-encoded picture,
+            # which the default cap would silently cut to 32767 characters.
+            edit.setMaxLength(UNCAPPED_TEXT)
             browse = QToolButton()
             browse.setText("…")
 
@@ -297,6 +301,7 @@ class ParamsPanel(QWidget):
 
         # string / anything else -> line edit
         edit = QLineEdit(str(value or ""))
+        edit.setMaxLength(UNCAPPED_TEXT)  # never silently truncate a value
         if spec.placeholder:
             edit.setPlaceholderText(spec.placeholder)
         edit.textEdited.connect(lambda v: self._commit_typed(name, v))
@@ -343,6 +348,7 @@ class ParamsPanel(QWidget):
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         edit = QLineEdit(str(value or ""))
+        edit.setMaxLength(UNCAPPED_TEXT)  # a wide table's column list is long
         if spec.placeholder:
             edit.setPlaceholderText(spec.placeholder)
         edit.textEdited.connect(lambda v: self._commit_typed(name, v))
