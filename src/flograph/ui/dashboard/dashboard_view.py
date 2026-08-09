@@ -109,9 +109,19 @@ class DashboardView(ZoomPanGraphicsView):
     def __init__(self, scene: DashboardScene, parent=None) -> None:
         super().__init__(scene, parent)
         self.setAcceptDrops(True)
+        self._view_mode = False
         self._fs_tile: Optional[TileItem] = None
         self._fs_restore: Optional[tuple] = None  # (transform, scene centre)
         self._fs_overlay: Optional[FullscreenOverlay] = None
+
+    # ----------------------------------------------------------- view mode
+
+    def set_view_mode(self, view_mode: bool) -> None:
+        """In view mode the page stops accepting new tiles. Panning and
+        zooming stay — moving *around* a dashboard is reading it, not
+        editing it."""
+        self._view_mode = bool(view_mode)
+        self.setAcceptDrops(not self._view_mode)
 
     # --------------------------------------------------------- fullscreen
 

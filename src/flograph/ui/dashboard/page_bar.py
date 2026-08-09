@@ -56,6 +56,7 @@ class PageTabBar(QTabBar):
     duplicate_page_requested = Signal(str)     # page_id to duplicate
     reorder_pages_requested = Signal(list)     # page_ids in their new order
     recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
+    set_view_mode_requested = Signal(str, bool)   # page_id, view_mode
     current_page_changed = Signal(object)      # page_id, or None for Model
     model_tab_double_clicked = Signal()        # collapse/restore every panel
 
@@ -74,6 +75,9 @@ class PageTabBar(QTabBar):
         self._drag_locked = False   # press landed on a tab that can't move
         self._reorder_pending = False
         self._colors: dict[str, str] = {}   # page_id -> "#rrggbb"
+        # page_id -> in view mode. Mirrored here only so the context menu can
+        # show which mode a page is in; the model stays the source of truth.
+        self._view_modes: dict[str, bool] = {}
         self.currentChanged.connect(self._on_current_changed)
         self.tabMoved.connect(self._on_tab_moved)
 
@@ -121,6 +125,15 @@ class PageTabBar(QTabBar):
         self.setTabData(index, page.id)
         self._syncing = False
         self.set_page_color(page.id, page.color)
+        self.set_page_view_mode(page.id, page.view_mode)
+
+    def set_page_view_mode(self, page_id: str, view_mode: bool) -> None:
+        """Told by the window whenever the model changes, so the context
+        menu's tick matches the page it was opened on."""
+        self._view_modes[page_id] = bool(view_mode)
+
+    def page_view_mode(self, page_id: str) -> bool:
+        return self._view_modes.get(page_id, False)
 
     def set_page_color(self, page_id: str, color: Optional[str]) -> None:
         if color:
@@ -138,6 +151,7 @@ class PageTabBar(QTabBar):
             return
         was_current = index == self.currentIndex()
         self._colors.pop(page_id, None)
+        self._view_modes.pop(page_id, None)
         self._syncing = True
         self.removeTab(index)
         if was_current or self.currentIndex() >= self._plus_index():
@@ -264,6 +278,22 @@ class PageTabBar(QTabBar):
         app.installEventFilter(_guard)
         try:
             menu = QMenu(self)
+            # Mode first: it is the one that changes what the page *is*,
+            # and the reason most people open this menu twice.
+            in_view = self._view_modes.get(page_id, False)
+            edit_action = QAction("Edit mode", self)
+            view_action = QAction("View mode", self)
+            for action, wanted in ((edit_action, False), (view_action, True)):
+                action.setCheckable(True)
+                action.setChecked(in_view == wanted)
+                action.triggered.connect(
+                    lambda _checked=False, w=wanted:
+                    self.set_view_mode_requested.emit(page_id, w))
+                menu.addAction(action)
+            view_action.setToolTip(
+                "Hide the editing chrome and lock the layout — the contents "
+                "stay live")
+            menu.addSeparator()
             rename_action = QAction("Rename", self)
             dup_action = QAction("Duplicate", self)
             color_action = QAction("Change colour…", self)

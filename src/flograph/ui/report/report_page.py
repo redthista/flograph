@@ -45,6 +45,8 @@ Use **Export PDF…** when it reads the way you want.
 class ReportPage(QWidget):
     #: the user asked to export — the window owns the file dialog
     export_requested = Signal(str)   # page_id
+    #: the editor-collapse toggle was clicked; the window owns the undo stack
+    view_mode_requested = Signal(str, bool)   # page_id, view_mode
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -57,6 +59,7 @@ class ReportPage(QWidget):
         self.problems: list[str] = []
         #: drives animated images in the preview; rebuilt on every render
         self._animator = None
+        self._view_mode = False
 
         self.editor = QPlainTextEdit()
         self.editor.setObjectName("report_source")
@@ -107,6 +110,16 @@ class ReportPage(QWidget):
         self._timer.setInterval(PREVIEW_DELAY_MS)
         self._timer.timeout.connect(self.refresh_preview)
 
+        # The editor-collapse toggle *is* the view-mode switch rather than a
+        # second, separate setting: two controls that both hide the editor
+        # would sooner or later disagree about whether it is hidden.
+        self._mode_btn = QToolButton()
+        self._mode_btn.setAutoRaise(True)
+        self._mode_btn.clicked.connect(
+            lambda: self.view_mode_requested.emit(
+                self.page_id, not self._view_mode))
+        toolbar.insertWidget(0, self._mode_btn)
+
         self.editor.textChanged.connect(self._on_text_changed)
 
         self._event_subs = [
@@ -124,6 +137,28 @@ class ReportPage(QWidget):
         engine.node_failed.connect(self._on_node_ran)
 
         self._load_from_model()
+        page = self._page()
+        self.set_view_mode(page.view_mode if page is not None else False)
+
+    # ------------------------------------------------------------- the mode
+
+    def set_view_mode(self, view_mode: bool) -> None:
+        """View mode is the rendered report on its own: the markdown source
+        and the insert-embed button are for *writing* it, and neither is any
+        use to someone reading. Export stays — reading is exactly when
+        somebody wants the PDF."""
+        self._view_mode = bool(view_mode)
+        self.editor.setVisible(not self._view_mode)
+        self._insert_btn.setVisible(not self._view_mode)
+        self._mode_btn.setArrowType(
+            Qt.ArrowType.RightArrow if self._view_mode
+            else Qt.ArrowType.LeftArrow)
+        self._mode_btn.setToolTip(
+            "Show the editor (edit mode)" if self._view_mode
+            else "Hide the editor (view mode)")
+
+    def view_mode(self) -> bool:
+        return self._view_mode
 
     def dispose(self) -> None:
         """Mandatory on page removal: core events hold strong refs and would

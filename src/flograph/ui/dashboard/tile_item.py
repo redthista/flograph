@@ -144,6 +144,9 @@ class TileItem(QGraphicsObject):
         # image tiles paint too — see _card_image; built on first use so a
         # dashboard opened on another page decodes nothing
         self._image = None
+        # view mode: the tile can't be moved, resized or selected, but every
+        # widget inside it still works. See set_layout_locked.
+        self._layout_locked = False
 
         self._build_host()
         self.apply_stacking()
@@ -686,6 +689,34 @@ class TileItem(QGraphicsObject):
                 widget.show()
         self.update()
 
+    # ----------------------------------------------------------- view mode
+
+    def set_layout_locked(self, locked: bool) -> None:
+        """Stop this tile being moved, resized or selected — and nothing else.
+
+        The contents are a proxied widget and are untouched on purpose: a
+        dashboard in view mode is still meant to be *driven*, so slicers,
+        sliders, spreadsheets, web views and buttons all keep working. What
+        goes away is the furniture — the drag, the resize grip, the
+        selection outline — because on a page being read those are only
+        ways to break the layout by accident.
+        """
+        self._layout_locked = bool(locked)
+        # exactly the flags __init__ sets, put back on unlock — every tile
+        # kind is movable on a dashboard, buttons included (their press
+        # handler is what makes a click fire rather than drag)
+        self.setFlag(QGraphicsItem.ItemIsMovable, not self._layout_locked)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, not self._layout_locked)
+        if self._layout_locked:
+            self.setSelected(False)
+            self._resizing = False
+            self._dragging = False
+            self.unsetCursor()
+        self.update()
+
+    def layout_locked(self) -> bool:
+        return self._layout_locked
+
     # ---------------------------------------------------------- image tile
 
     def _card_image(self):
@@ -904,11 +935,14 @@ class TileItem(QGraphicsObject):
         if self.can_fullscreen():
             self._paint_fullscreen_glyph(painter)
 
-        painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
-        hr = self._handle_rect()
-        for i in (4.0, 8.0, 12.0):
-            painter.drawLine(QPointF(hr.right() - i, hr.bottom() - 2),
-                             QPointF(hr.right() - 2, hr.bottom() - i))
+        if not self._layout_locked:
+            # the grip is an invitation to resize; on a locked page it would
+            # be an invitation to nothing
+            painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
+            hr = self._handle_rect()
+            for i in (4.0, 8.0, 12.0):
+                painter.drawLine(QPointF(hr.right() - i, hr.bottom() - 2),
+                                 QPointF(hr.right() - 2, hr.bottom() - i))
 
         if self._kind() == "kpi" and self._kpi_has_value:
             # a KPI is painted rather than widget-backed, so it fades here
@@ -1005,7 +1039,10 @@ class TileItem(QGraphicsObject):
         """Which resize edge/corner (if any) a point grabs: "right", "bottom",
         "corner", or None. Buttons are fixed-size and never resize; a
         maximized tile is sized by the viewport, not by dragging."""
-        if self._kind() == "button" or self._fullscreen:
+        # One choke point for both the resize press and the hover cursor, so
+        # a locked tile neither resizes nor pretends it could.
+        if self._kind() == "button" or self._fullscreen \
+                or self._layout_locked:
             return None
         w, h = self._size
         near_right = w - EDGE_MARGIN <= pos.x() <= w + EDGE_MARGIN
@@ -1103,7 +1140,8 @@ class TileItem(QGraphicsObject):
             self._resize_edge = edge
             event.accept()
             return
-        if event.button() == Qt.LeftButton and not self._fullscreen:
+        if event.button() == Qt.LeftButton and not self._fullscreen \
+                and not self._layout_locked:
             # Only the title bar starts a move; a press on the body just
             # selects. Buttons have no title bar, so they drag whole-body.
             if self._kind() != "button" and event.pos().y() >= TITLE_H:

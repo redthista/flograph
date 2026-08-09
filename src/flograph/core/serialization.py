@@ -94,6 +94,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "body": p.body,
                     "color": p.color,
                     "maximized_tile": p.maximized_tile,
+                    "view_mode": p.view_mode,
                     "tiles": [
                         {
                             "id": t.id,
@@ -212,6 +213,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             color=entry.get("color"),
             # absent in files written before dashboards could maximize a tile
             maximized_tile=entry.get("maximized_tile"),
+            # absent in files written before view mode existed — they were
+            # all being edited, so that is the right default
+            view_mode=bool(entry.get("view_mode", False)),
         ))
         # tiles referencing missing nodes load as-is: the dashboard shows a
         # placeholder for them, mirroring the _broken_spec philosophy
