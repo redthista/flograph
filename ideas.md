@@ -151,7 +151,26 @@ F1. add a setting and on by default when dragging around a canvas with middle mo
 
 ## G. UX/UI
 G1. a setting to enable draging the canvas by holding right click.
-G2. when zoomed out and we have the low lod version of the nodes showing, can we layer the names of the nodes ontop? 
+G2. when zoomed out and we have the low lod version of the nodes showing, can we layer the names of the nodes ontop?
+
+  Looked at 2026-08-11 and it is *not* the small job it reads as, so it is
+  worth writing down before someone (me) picks it up expecting twenty
+  minutes. `NodeItem._paint_flat` is deliberately "one fill, no
+  path/gradient/text — the per-node cost that dominates when many nodes are
+  visible at once". Text is precisely what it exists to avoid, so drawing a
+  label in it walks back the optimisation that closed issue #2.
+
+  Nor does drawing it normally help: flattening starts below lod 0.35, and
+  a 9pt label at 0.3 is under 3px tall — there, but unreadable. To answer
+  the actual question ("which node is that?") the labels have to be drawn
+  at a *constant screen size*, ignoring zoom, like labels on a map. That
+  brings the two real problems with it: the text cost comes back at exactly
+  the zoom level where there are most nodes on screen, and at any distance
+  the labels overlap each other into mush, so it needs a decluttering rule
+  (draw the biggest/selected/hovered ones, drop the rest) to be any use.
+
+  Both are decidable, but they need eyes on a real canvas, not a guess.
+  Worth pairing with F1, which is the same trade-off from the other side.
 
 
 ## not sorted: 
