@@ -26,6 +26,7 @@ from typing import Any, Callable, Iterable
 from .datatypes import PortType
 from .graph import Connection, Frame, Graph, GraphError, Page, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
+from .page_setup import PageSetup
 from .ports import PortDirection, PortSpec
 from .registry import NodeRegistry
 from .script import NodeScriptError, parse_spec
@@ -95,6 +96,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "color": p.color,
                     "maximized_tile": p.maximized_tile,
                     "view_mode": p.view_mode,
+                    # only what the user changed — see PageSetup.to_dict
+                    "setup": p.setup.to_dict(),
                     "tiles": [
                         {
                             "id": t.id,
@@ -216,6 +219,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent in files written before view mode existed — they were
             # all being edited, so that is the right default
             view_mode=bool(entry.get("view_mode", False)),
+            # absent in files written before page setup existed, and absent
+            # in any page left at the defaults — both mean "the defaults"
+            setup=PageSetup.from_dict(entry.get("setup")),
         ))
         # tiles referencing missing nodes load as-is: the dashboard shows a
         # placeholder for them, mirroring the _broken_spec philosophy

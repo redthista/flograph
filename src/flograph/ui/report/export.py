@@ -1,18 +1,30 @@
-"""Printing a rendered report to PDF.
+"""Printing a rendered report to PDF: the page, the cover, the furniture.
 
 QPdfWriter rather than the web engine: the preview is already a
 QTextDocument, and printing that same document is what makes the PDF match
 what was on screen. It is also synchronous, which means an export either
 worked or raised by the time the call returns — no callback to lose.
+
+The document is painted page by page rather than handed to
+`QTextDocument.print_`, because print_ owns the whole sheet and leaves no
+room in the margins for anything else. Running headers and footers *are*
+that room, so the page loop has to be here. What print_ does invisibly and
+is easy to lose in the transcription is called out below — the black text
+colour especially.
+
+Geometry comes from core.page_setup, which is deliberately not expressed in
+Qt's vocabulary; the conversion happens here and nowhere else.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QMarginsF
-from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter
+from typing import Optional
 
-# Generous enough that a printer's unprintable edge can't clip the text, and
-# close to what a word processor would default to.
-MARGIN_MM = 15.0
+from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt
+from PySide6.QtGui import (QFont, QPageLayout, QPageSize, QPainter, QPalette,
+                           QPdfWriter, QTextDocument)
+
+from flograph.core.page_setup import (BAND_FONT_SIZE, BAND_HEIGHT, PAGE_SIZES,
+                                      PageSetup, expand, today)
 
 # 72, i.e. one device unit per point — NOT a quality setting.
 #
@@ -29,39 +41,217 @@ MARGIN_MM = 15.0
 # resampled to this resolution.
 RESOLUTION = 72
 
+#: Kept for the one caller that predates page setup and for anything that
+#: wants the old default without constructing a PageSetup.
+MARGIN_MM = PageSetup().margin_top
 
-def page_layout(landscape: bool = False,
-                page_size: QPageSize.PageSizeId = QPageSize.A4) -> QPageLayout:
+#: Point sizes on the cover. Big, then smaller, then quiet — the whole
+#: design of a cover page is that hierarchy and nothing else.
+COVER_TITLE_PT = 26.0
+COVER_SUBTITLE_PT = 14.0
+COVER_DATE_PT = 11.0
+
+#: Where the title sits down the page, as a fraction of the printable
+#: height. Slightly above centre, which is where a title looks centred.
+COVER_TITLE_AT = 0.38
+
+
+def _page_size(setup: PageSetup) -> QPageSize:
+    """The sheet, portrait — orientation is QPageLayout's job.
+
+    A named QPageSize where the name is one Qt knows, so the PDF reports
+    itself as A4 rather than as an anonymous 595x842 box, and a custom size
+    built from millimetres otherwise.
+    """
+    standard = {
+        "A3": QPageSize.A3, "A4": QPageSize.A4, "A5": QPageSize.A5,
+        "Letter": QPageSize.Letter, "Legal": QPageSize.Legal,
+        "Tabloid": QPageSize.Tabloid,
+    }.get(setup.size)
+    if standard is not None:
+        return QPageSize(standard)
+    width, height = PAGE_SIZES.get(setup.size, PAGE_SIZES["A4"])
+    return QPageSize(QSizeF(width, height), QPageSize.Millimeter)
+
+
+def page_layout(setup: Optional[PageSetup] = None,
+                landscape: Optional[bool] = None) -> QPageLayout:
+    """`setup` as a Qt page layout.
+
+    `landscape` overrides the setup's own orientation; it is what the
+    pre-page-setup callers passed and it stays because "print this one
+    sideways" is a reasonable thing to ask without editing the page.
+    """
+    setup = setup or PageSetup()
+    sideways = setup.landscape if landscape is None else bool(landscape)
     return QPageLayout(
-        QPageSize(page_size),
-        QPageLayout.Landscape if landscape else QPageLayout.Portrait,
-        QMarginsF(MARGIN_MM, MARGIN_MM, MARGIN_MM, MARGIN_MM),
+        _page_size(setup),
+        QPageLayout.Landscape if sideways else QPageLayout.Portrait,
+        # QMarginsF is left, top, right, bottom — not the CSS order
+        QMarginsF(setup.margin_left, setup.margin_top,
+                  setup.margin_right, setup.margin_bottom),
         QPageLayout.Millimeter)
 
 
-def export_pdf(document, path: str, title: str = "",
-               landscape: bool = False) -> str:
+def body_rect(printable: QRectF, setup: PageSetup) -> QRectF:
+    """The printable area with the header and footer bands taken out.
+
+    A band is only subtracted when it has something in it, so a report with
+    no running elements gets the whole page — which is what makes the
+    defaults print exactly as they did before any of this existed.
+    """
+    top = BAND_HEIGHT if setup.has_header() else 0.0
+    bottom = BAND_HEIGHT if setup.has_footer() else 0.0
+    return QRectF(printable.left(), printable.top() + top,
+                  printable.width(),
+                  max(1.0, printable.height() - top - bottom))
+
+
+def _draw_band(painter: QPainter, rect: QRectF, fields: tuple,
+               page: int, pages: int, title: str, date: str) -> None:
+    """One running header or footer: left, centre and right in one line."""
+    left, center, right = (expand(f, page, pages, title, date)
+                           for f in fields)
+    if not any((left, center, right)):
+        return
+    font = QFont(painter.font())
+    font.setPointSizeF(BAND_FONT_SIZE)
+    painter.save()
+    painter.setFont(font)
+    painter.setPen(Qt.black)
+    for text, align in ((left, Qt.AlignLeft), (center, Qt.AlignHCenter),
+                        (right, Qt.AlignRight)):
+        if text:
+            painter.drawText(rect, int(align | Qt.AlignVCenter), text)
+    painter.restore()
+
+
+def _draw_cover(painter: QPainter, printable: QRectF, setup: PageSetup,
+                title: str, date: str) -> None:
+    """The cover: a title, an optional line under it, an optional date.
+
+    Not part of the markdown, on purpose — a cover written into the body
+    would have to be deleted to turn the cover off, and would be the first
+    thing every embed-resolution error pointed at.
+    """
+    painter.save()
+    painter.setPen(Qt.black)
+    y = printable.top() + printable.height() * COVER_TITLE_AT
+
+    font = QFont(painter.font())
+    font.setPointSizeF(COVER_TITLE_PT)
+    font.setBold(True)
+    painter.setFont(font)
+    heading = expand(setup.cover_title, 0, 0, title, date) or title
+    box = QRectF(printable.left(), y, printable.width(), COVER_TITLE_PT * 2.2)
+    painter.drawText(box, int(Qt.AlignHCenter | Qt.AlignTop), heading)
+    y += COVER_TITLE_PT * 2.2
+
+    if setup.cover_subtitle:
+        font = QFont(painter.font())
+        font.setPointSizeF(COVER_SUBTITLE_PT)
+        font.setBold(False)
+        painter.setFont(font)
+        box = QRectF(printable.left(), y, printable.width(),
+                     COVER_SUBTITLE_PT * 2.2)
+        painter.drawText(
+            box, int(Qt.AlignHCenter | Qt.AlignTop),
+            expand(setup.cover_subtitle, 0, 0, title, date))
+        y += COVER_SUBTITLE_PT * 2.2
+
+    if setup.cover_date:
+        font = QFont(painter.font())
+        font.setPointSizeF(COVER_DATE_PT)
+        font.setBold(False)
+        painter.setFont(font)
+        box = QRectF(printable.left(), y + COVER_DATE_PT, printable.width(),
+                     COVER_DATE_PT * 2.2)
+        painter.drawText(box, int(Qt.AlignHCenter | Qt.AlignTop), date)
+    painter.restore()
+
+
+def export_pdf(document: QTextDocument, path: str, title: str = "",
+               landscape: Optional[bool] = None,
+               setup: Optional[PageSetup] = None) -> str:
     """Write `document` to `path` as a PDF and return the path.
 
-    The document is laid out to the printable rect first: a QTextDocument
+    The document is laid out to the *body* rect first: a QTextDocument
     keeps whatever text width it was last given, so printing one sized for
     an on-screen preview would otherwise reflow at the wrong measure and
-    push tables off the page. Setting the *page* size (not just the width)
-    is also what gives Qt something to paginate against.
+    push tables off the page. Setting the page size is also what gives Qt
+    something to paginate against — `pageCount()` is meaningless until it
+    knows how tall a page is.
 
     A clone is printed so the live preview isn't re-flowed underneath the
     user by the act of exporting.
     """
-    from PySide6.QtCore import QSizeF
-
+    setup = setup or PageSetup()
     writer = QPdfWriter(path)
     writer.setResolution(RESOLUTION)
-    writer.setPageLayout(page_layout(landscape))
+    writer.setPageLayout(page_layout(setup, landscape))
     if title:
         writer.setTitle(title)
 
-    printable = writer.pageLayout().paintRectPixels(RESOLUTION)
+    # Origin at (0, 0), *not* at the margin: a QPdfWriter's painter already
+    # starts at the top-left of the printable area, so a rect positioned at
+    # the margins would apply them a second time — content shifted down and
+    # right by exactly one margin, and clipped off the far edges.
+    printable = QRectF(
+        0.0, 0.0,
+        writer.pageLayout().paintRectPixels(RESOLUTION).width(),
+        writer.pageLayout().paintRectPixels(RESOLUTION).height())
+    body = body_rect(printable, setup)
     copy = document.clone()
-    copy.setPageSize(QSizeF(printable.size()))
-    copy.print_(writer)
+    copy.setPageSize(QSizeF(body.width(), body.height()))
+
+    date = today()
+    layout = copy.documentLayout()
+
+    from PySide6.QtGui import QAbstractTextDocumentLayout
+    context = QAbstractTextDocumentLayout.PaintContext()
+    # What QTextDocument.print_ does and a hand-rolled page loop forgets:
+    # without it the text is drawn in the *application palette's* text
+    # colour, so exporting from a dark theme writes a near-white report
+    # onto a white sheet.
+    context.palette.setColor(QPalette.Text, Qt.black)
+
+    painter = QPainter()
+    if not painter.begin(writer):
+        raise OSError(f"could not open {path} for writing")
+    try:
+        pages = max(1, copy.pageCount())
+        if setup.cover:
+            _draw_cover(painter, printable, setup, title, date)
+            writer.newPage()
+        for index in range(pages):
+            if index:
+                writer.newPage()
+            number = setup.first_page_number + index
+            painter.save()
+            # Clip before translating: the clip is taken in the coordinates
+            # in force when it is set, and these are the page's. Without it
+            # a tall image on the last page bleeds down into the footer.
+            painter.setClipRect(body)
+            painter.translate(body.left(),
+                              body.top() - index * body.height())
+            context.clip = QRectF(0, index * body.height(),
+                                  body.width(), body.height())
+            layout.draw(painter, context)
+            painter.restore()
+
+            if index == 0 and not setup.bands_on_first_page:
+                continue
+            if setup.has_header():
+                _draw_band(painter,
+                           QRectF(printable.left(), printable.top(),
+                                  printable.width(), BAND_HEIGHT),
+                           setup.header_fields(), number, pages, title, date)
+            if setup.has_footer():
+                _draw_band(painter,
+                           QRectF(printable.left(),
+                                  printable.bottom() - BAND_HEIGHT,
+                                  printable.width(), BAND_HEIGHT),
+                           setup.footer_fields(), number, pages, title, date)
+    finally:
+        painter.end()
     return path

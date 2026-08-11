@@ -47,6 +47,8 @@ class ReportPage(QWidget):
     export_requested = Signal(str)   # page_id
     #: the editor-collapse toggle was clicked; the window owns the undo stack
     view_mode_requested = Signal(str, bool)   # page_id, view_mode
+    #: Page Setup… was clicked; the window owns the dialog and the undo stack
+    page_setup_requested = Signal(str)   # page_id
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -80,6 +82,13 @@ class ReportPage(QWidget):
         self._insert_btn.setToolTip(
             "Insert an ![[embed]] for a node that has produced something")
         self._insert_btn.clicked.connect(self._show_insert_menu)
+        self._setup_btn = QToolButton()
+        self._setup_btn.setText("Page Setup…")
+        self._setup_btn.setToolTip(
+            "Paper size, orientation, margins, a cover page, and running "
+            "headers and footers")
+        self._setup_btn.clicked.connect(
+            lambda: self.page_setup_requested.emit(self.page_id))
         self._export_btn = QPushButton("Export PDF…")
         self._export_btn.clicked.connect(
             lambda: self.export_requested.emit(self.page_id))
@@ -93,6 +102,7 @@ class ReportPage(QWidget):
         toolbar.setContentsMargins(6, 4, 6, 0)
         toolbar.addWidget(self._insert_btn)
         toolbar.addWidget(self._status, 1)
+        toolbar.addWidget(self._setup_btn)
         toolbar.addWidget(self._export_btn)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -134,6 +144,11 @@ class ReportPage(QWidget):
             # and node_succeeded never fires; without this the page would
             # keep showing the old arrangement.
             (graph.events.param_changed, self._on_param_changed),
+            # Page setup arrives on page_changed, and it decides how wide
+            # the body is — which is the width every embedded chart is
+            # rasterised at. Without this the preview would keep the
+            # proportions of the paper size the page used to be.
+            (graph.events.page_changed, self._on_page_changed),
         ]
         for event, callback in self._event_subs:
             event.connect(callback)
@@ -229,6 +244,11 @@ class ReportPage(QWidget):
         """Any node's param changed — it may be one this report embeds."""
         self._timer.start()
 
+    def _on_page_changed(self, page) -> None:
+        """This page's own settings changed — page setup, most of all."""
+        if page.id == self.page_id:
+            self._timer.start()
+
     # ---------------------------------------------------------- the preview
 
     def refresh_preview(self) -> None:
@@ -236,7 +256,12 @@ class ReportPage(QWidget):
         if page is None:
             return
         position = self.preview.verticalScrollBar().value()
-        rendered = render_report(page.body, self._graph, self._engine.cache)
+        # page_break_rule: the preview is one continuous scroll, so a forced
+        # break has no boundary to land on and would be invisible. A rule is
+        # drawn in its place, which is the only feedback that the marker was
+        # recognised at all.
+        rendered = render_report(page.body, self._graph, self._engine.cache,
+                                 setup=page.setup, page_break_rule=True)
         self.problems = rendered.problems
         # Before the old document goes: a running QMovie writing frames into
         # a deleted document is a crash, not a stale picture.
@@ -333,9 +358,19 @@ class ReportPage(QWidget):
 
         `for_print` rasterises the charts to PRINT_DPI — same layout, same
         text, same page breaks, just enough pixels that a chart doesn't read
-        as fuzzy on paper.
+        as fuzzy on paper. It also drops the preview's page-break rules: on
+        paper the break is the break, and a line drawn at the bottom of the
+        previous page would be a leftover from a preview trick.
         """
         page = self._page()
         return render_report(page.body if page else "", self._graph,
                              self._engine.cache,
-                             image_scale=2.0 if for_print else 1.0)
+                             image_scale=2.0 if for_print else 1.0,
+                             setup=page.setup if page else None,
+                             page_break_rule=not for_print)
+
+    def page_setup(self):
+        """The page's geometry — what the window hands to export_pdf."""
+        page = self._page()
+        from flograph.core.page_setup import PageSetup
+        return page.setup if page is not None else PageSetup()

@@ -20,6 +20,7 @@ what you see really is what you get.
 """
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
@@ -27,9 +28,11 @@ from typing import Optional
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QImage, QImageReader, QTextDocument
 
-from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL, format_scalar,
+from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
+                                  PAGEBREAK_TOKEN, format_scalar,
                                   frame_to_markdown, inline_markdown,
-                                  missing_embed, replace_embeds, unrun_embed)
+                                  mark_page_breaks, missing_embed,
+                                  replace_embeds, unrun_embed)
 
 # Default rendered width of an embedded figure, in points: the printable
 # width of A4 portrait at the margins export.py uses (210mm - 2x15mm).
@@ -66,6 +69,11 @@ class RenderedReport:
     #: image index -> the width it is drawn at, so a frame can be decoded at
     #: the size it will actually appear
     image_widths: dict = field(default_factory=dict)
+    #: the embedded images themselves, in token order. The document holds
+    #: them as resources under an "embed:N" URL, which is meaningless to
+    #: anything outside this process — a report written out as HTML has to
+    #: inline them instead, and this is what it inlines. See html.py.
+    images: list = field(default_factory=list)
 
 
 #: Space between charts in a multi-column stack, in points.
@@ -682,38 +690,64 @@ def params_by_wired_input(graph, node_id: str):
     return lookup
 
 
-def render_report(body: str, graph, cache,
-                  image_scale: float = 1.0) -> RenderedReport:
+def render_report(body: str, graph, cache, image_scale: float = 1.0,
+                  setup=None, page_break_rule: bool = False) -> RenderedReport:
     """A report *page*: embeds name nodes by label.
 
     Naming a report *card* renders that card's contents onto the page —
     charts, tables and all — rather than reproducing its source markdown.
+
+    `setup` is the page's PageSetup, and the only thing taken from it here
+    is the body width: charts are raster by the time they reach the
+    document, so the width they are drawn at has to be decided now, from
+    the paper they are going onto. None keeps the A4 default.
     """
-    return render_body(body, by_label(graph, cache), image_scale=image_scale,
+    width = setup.body_width_points() if setup is not None else FIGURE_WIDTH
+    return render_body(body, by_label(graph, cache), image_width=width,
+                       image_scale=image_scale,
                        params=params_by_label(graph),
-                       nested=nested_by_label(graph, cache))
+                       nested=nested_by_label(graph, cache),
+                       page_break_rule=page_break_rule)
 
 
 def render_card(body: str, graph, cache, node_id: str,
-                width: "int | None" = None) -> RenderedReport:
+                width: "int | None" = None,
+                image_scale: float = 1.0,
+                page_break_rule: bool = False) -> RenderedReport:
     """A report *card*: embeds name the node's own wired inputs.
 
     `width` is the card's usable width — charts are raster by the time they
     get here and Qt's rich text has no percentage sizing, so a figure drawn
     at the page width would simply hang off the edge of a narrow card.
+
+    `image_scale` is for the card's own Export PDF: on the canvas a card is
+    drawn at screen resolution, and printing that would put a visibly soft
+    chart on paper.
     """
     return render_body(body, by_wired_input(graph, cache, node_id),
                        image_width=width or FIGURE_WIDTH,
+                       image_scale=image_scale,
                        params=params_by_wired_input(graph, node_id),
-                       nested=nested_by_wired_input(graph, cache, node_id))
+                       nested=nested_by_wired_input(graph, cache, node_id),
+                       page_break_rule=page_break_rule)
 
 
 def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 image_scale: float = 1.0, params=None,
-                nested=None) -> RenderedReport:
-    """Lay a report body out as a document ready to show or print."""
+                nested=None, page_break_rule: bool = False) -> RenderedReport:
+    """Lay a report body out as a document ready to show or print.
+
+    `page_break_rule` is for the on-screen preview, which is one
+    continuous scroll and so has no page boundary for a forced break to
+    land on. It draws the break as a visible rule instead, which is the
+    only way the writer can see that the marker took effect at all; the
+    printed document gets a real break and no rule.
+    """
     resolver = _Resolver(lookup, image_scale, image_width, params, nested)
-    resolved = replace_embeds(body, resolver.render)
+    # After the embeds, not before: a node that returns markdown can then
+    # force a break of its own, which is how a per-region section built in
+    # a Python Script node gets to start each region on a fresh page.
+    resolved = mark_page_breaks(replace_embeds(body, resolver.render))
 
     staged = QTextDocument()
     staged.setMarkdown(resolved)
@@ -722,6 +756,8 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
         html = html.replace(
             IMAGE_TOKEN.format(index),
             f'<img src="embed:{index}" width="{max(80, width)}" />')
+    if page_break_rule:
+        html = _PAGEBREAK_P_RE.sub("<hr />", html)
 
     document = QTextDocument()
     # Qt insets rich text by 4px a side by default. An image sized to the
@@ -734,7 +770,74 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
         document.addResource(QTextDocument.ImageResource,
                              QUrl(IMAGE_TOKEN_URL.format(index)), image)
     document.setHtml(html)
+    apply_page_breaks(document)
     return RenderedReport(
         document=document, problems=resolver.problems,
         animations=resolver.animations,
-        image_widths={i: w for i, w in enumerate(resolver.widths)})
+        image_widths={i: w for i, w in enumerate(resolver.widths)},
+        images=list(resolver.images))
+
+
+#: The whole paragraph Qt wraps a lone page-break token in. Matched as a
+#: unit because what replaces it is a different *block*, not different text
+#: inside one — an empty <p> left behind would print as a blank line.
+_PAGEBREAK_P_RE = re.compile(
+    r"<p[^>]*>\s*" + re.escape(PAGEBREAK_TOKEN) + r"\s*</p>",
+    re.IGNORECASE)
+
+
+def apply_page_breaks(document: QTextDocument) -> int:
+    """Turn every page-break token in `document` into a real break.
+
+    Done on the finished document rather than in the HTML because a page
+    break is a property of a *block* (QTextBlockFormat.PageBreak_AlwaysBefore),
+    and the property has to end up on the block that starts the new page —
+    not on the marker, which is then deleted so it costs no blank line.
+
+    Returns how many breaks were applied, which is what makes it testable
+    without printing anything.
+    """
+    from PySide6.QtGui import QTextBlockFormat, QTextCursor
+
+    positions = []
+    block = document.begin()
+    while block.isValid():
+        if block.text().strip() == PAGEBREAK_TOKEN:
+            positions.append(block.position())
+        block = block.next()
+
+    # Back to front: every deletion shifts the positions after it, and none
+    # of the positions before it.
+    #
+    # Delete first, format second, and in that order for a reason. Removing
+    # a block's paragraph separator *merges* it with the block below, and
+    # the merged block keeps the upper block's format — so a policy set on
+    # the following block before the marker was deleted would be thrown
+    # away by the deletion that was meant to tidy up after it.
+    applied = 0
+    for position in reversed(positions):
+        cursor = QTextCursor(document)
+        cursor.setPosition(position)
+        cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
+        if cursor.hasSelection():
+            cursor.removeSelectedText()
+            block = document.findBlock(position)
+            # A break *before the first block* asks for a page break before
+            # page one, which is a blank sheet and nothing else. The marker
+            # is still consumed — it just has nothing to do.
+            if block.isValid() and block.position() > 0:
+                fmt = QTextBlockFormat(block.blockFormat())
+                fmt.setPageBreakPolicy(
+                    QTextBlockFormat.PageBreak_AlwaysBefore)
+                QTextCursor(block).setBlockFormat(fmt)
+                applied += 1
+        else:
+            # Nothing follows: a break here would only produce a blank
+            # page. The marker still goes, taking the separator above it so
+            # it leaves no empty paragraph behind.
+            cursor.movePosition(QTextCursor.EndOfBlock,
+                                QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+            if position > 0:
+                cursor.deletePreviousChar()
+    return applied

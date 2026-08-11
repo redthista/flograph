@@ -15,6 +15,7 @@ from .datatypes import can_connect
 from .events import GraphEvents
 from .layers import next_z, order_of
 from .node import NodeInstance, NodeStatus, NodeSpec
+from .page_setup import PageSetup
 from .ports import PortDirection
 
 
@@ -101,6 +102,11 @@ class Page:
     # Saved with the project, so a page handed over in view mode opens that
     # way for whoever opens it next.
     view_mode: bool = False
+    # Report pages: how the document sits on the page — size, orientation,
+    # margins, cover, running headers and footers. A dashboard ignores it.
+    # Its defaults reproduce what reports did before it existed, so a page
+    # nobody has set up behaves exactly as before.
+    setup: PageSetup = field(default_factory=PageSetup)
 
 
 class Graph:
@@ -628,6 +634,19 @@ class Graph:
         "edit mode", not "leave unchanged"."""
         page = self.page(page_id)
         page.view_mode = bool(view_mode)
+        self.events.page_changed.emit(page)
+        return page
+
+    def set_page_setup(self, page_id: str, setup: PageSetup) -> Page:
+        """Replace a report page's page geometry.
+
+        A copy is stored, not the object handed in: the dialog edits a
+        working copy and the undo stack holds the before and after states,
+        and all three sharing one mutable dataclass would make an undo a
+        no-op.
+        """
+        page = self.page(page_id)
+        page.setup = setup.copy() if setup is not None else PageSetup()
         self.events.page_changed.emit(page)
         return page
 
