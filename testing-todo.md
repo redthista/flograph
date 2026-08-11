@@ -9,6 +9,79 @@ nobody reads.
 
 ---
 
+## Page setup, cover, headers/footers, page breaks (A1–A3) — NEW
+
+Built on branch `worktree-report-page-setup`. Automated tests cover the
+geometry, the persistence and the wiring (72 of them); what they cannot
+check is whether the *result looks right on paper*, which is all of the
+below. Export a PDF and open it — don't judge any of this from the
+preview, which is deliberately not paginated.
+
+### The dialog
+
+- [ ] **Page Setup…** on the report toolbar opens on the **Page** tab.
+- [ ] Change size to **A3**, orientation to **Landscape** → the number at
+      the bottom right ("Text area … mm") moves, and the **preview's
+      charts get wider** without exporting anything.
+- [ ] Set **Left** margin to 40mm → charts narrow, and the text column
+      with them.
+- [ ] **Restore Defaults** → back to A4 / portrait / 15mm.
+- [ ] **Cancel** after changing things → the page is untouched.
+- [ ] **Ctrl+Z** after OK → the whole setup reverts in one step.
+- [ ] Save, close, reopen → the setup is still there.
+- [ ] A page you never opened the dialog on still exports exactly as it
+      did before — this is the one that matters for old projects.
+
+### On paper
+
+- [ ] Export at **A4**, then at **A5**, then **Landscape** → the sheet is
+      the size you asked for and the content sits inside the margins.
+- [ ] Tick **Cover**, give it a subtitle → one extra page at the front,
+      title centred, and the **body still starts at page 1** in the footer.
+- [ ] Header `{title}` left, `{date}` right; footer `Page {page} of
+      {pages}` centre → all three appear, on every page, and **{pages} is
+      right** (it should not count the cover).
+- [ ] Untick **Show on the first page** → page one is clean, the rest keep
+      the furniture.
+- [ ] Set **Number the first page** to 5 → the footer starts at 5.
+- [ ] Type an unknown field like `{chapter}` → it prints as written rather
+      than vanishing (that's deliberate — a typo should be visible).
+
+### Page breaks
+
+- [ ] `\pagebreak` on its own line → **a rule appears in the preview**, and
+      the exported PDF starts a new page there.
+- [ ] `\newpage` and `<!-- pagebreak -->` do the same thing.
+- [ ] A break as the **very first** line, and as the **very last** line →
+      neither produces a blank page.
+- [ ] The word "pagebreak" *inside a sentence* is left alone.
+- [ ] A Python Script node returning markdown that contains `\newpage`,
+      embedded with `![[...]]` → the break still works.
+
+### The thing most likely to disappoint
+
+- [ ] A **long report with several charts**: check where the pages break.
+      A chart that straddles a boundary is **known and not fixed** — Qt
+      cannot express `page-break-inside: avoid`, it is chunk B's job, and
+      `\pagebreak` is the manual workaround until then. Worth knowing how
+      often it actually bites before deciding how urgent B is.
+
+## Report cards: Export PDF / Open in Browser (A9) — NEW
+
+- [ ] Right-click a **Report card** → both entries are on the menu.
+- [ ] **Export PDF…** on a *narrow* card → the PDF is full-width A4, not a
+      narrow column down the middle.
+- [ ] **Open in Browser** → a browser tab with the charts in it. Save the
+      page, or move the file somewhere else, and **the charts are still
+      there** (they're inlined, not linked).
+- [ ] Put an **animated GIF** in the card → it **moves in the browser**,
+      and is a still frame in the PDF.
+- [ ] A card with an embed that resolves to nothing → the PDF still
+      exports, with a warning listing what didn't resolve.
+- [ ] Both entries appear only on **Report** cards, not on other nodes.
+
+---
+
 ## Report pages — what's left (idea #1, pass 1)
 
 Committed as `871dc45`. The rest of that section is signed off; these are

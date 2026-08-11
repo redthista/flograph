@@ -16,17 +16,16 @@ Pass 1 shipped: the report page kind, `![[node]]` and `![[node|port]]`
 embeds for figures / tables / scalars / markdown strings, a live preview,
 and PDF export. Plotly figures render without kaleido as of 0.1.8.
 
-**A1. Page setup.** Size, orientation, margins, and a cover page.
+A1 (page setup), A2 (running headers and footers) and A3 (forced page
+breaks) shipped in 0.1.9 as one job, which is what they always were — all
+three are page geometry and all three wanted the same settings surface.
+That surface is `core/page_setup.py`, kept Qt-free and *not* expressed in
+Qt's vocabulary, so chunk B reads the same dataclass instead of inventing a
+second one; `page_css()` is already there and already tested.
 
-**A2. Running headers and footers.** Page numbers, title, date.
-
-**A3. Pagination control.** Page breaks you can force, and keeping a chart
-off a page boundary. Qt's weakest spot — see chunk B.
-
-A1–A3 are really one job: all three are page geometry, all three have to be
-understood by both the preview and the PDF writer, and all three want the
-same settings surface. Doing them separately means building that surface
-three times.
+What is left of A3 is the half Qt cannot do: **keeping a chart off a page
+boundary** (`page-break-inside: avoid`). It is not a Qt job at all — it
+belongs to chunk B and is listed there.
 
 **A4. Per-embed sizing and alignment** — `![[chart|width=50%]]`. The embed
 parser already splits on `|` for the port name, so the syntax has room.
@@ -42,12 +41,12 @@ embed one yet.
 
 **A8. docx export?**
 
-**A9. Export PDF / Open in Browser from a report *card's* context menu**
-(was 21). A report *page* has toolbar buttons for this; a card has no
-equivalent. `ui/browser.py` already does the "get HTML in front of the
-user" half, so this is mostly wiring.
+A4–A8 are small and independent — pick any subset in any order.
 
-A4–A9 are small and independent — pick any subset in any order.
+A9 (Export PDF / Open in Browser from a report *card's* context menu)
+shipped in 0.1.9. It left behind `ui/report/html.py`, which writes a
+rendered report as one self-contained HTML file with its pictures inlined
+as data URIs — the asset-handling half of chunk B, done.
 
 ---
 
@@ -77,9 +76,26 @@ get. Today the preview and the PDF are literally the same QTextDocument, so
 they cannot disagree. With a browser round trip the preview becomes an
 approximation, and "open in browser" becomes the real preview.
 
+This is also where **keeping a chart off a page boundary** lives — the
+half of A3 Qt has no answer for. In CSS it is one declaration
+(`page-break-inside: avoid`); in Qt it is not expressible at all.
+
 Groundwork already done: the HTML coercion lives in `core/html.py`
 (Qt-free), and `ui/browser.py` writes a named page to a session temp dir
-and hands it to the desktop. Both are tested.
+and hands it to the desktop. Both are tested. Two more pieces landed with
+0.1.9, which shrinks this chunk again:
+
+- `core/page_setup.py` — the geometry, Qt-free, with `page_css()` already
+  emitting the `@page` rule. The settings surface does not need designing
+  a second time; the template just has to read it.
+- `ui/report/html.py` — a rendered report written out as one
+  self-contained HTML file, charts inlined as data URIs (animations kept
+  as the GIF/WebP they arrived as, so they still move). That is the asset
+  handling this chunk listed as a task.
+
+What is genuinely left is the *template*: Jinja, a stylesheet the user can
+replace, `@media print`, running elements with counters, and keeping Plotly
+interactive rather than snapshotting it.
 
 One of the original arguments has since evaporated: "and it needs no
 kaleido" was true when this was written, but 0.1.8 snapshots Plotly through

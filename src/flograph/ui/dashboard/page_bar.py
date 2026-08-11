@@ -58,6 +58,7 @@ class PageTabBar(QTabBar):
     recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
     set_view_mode_requested = Signal(str, bool)   # page_id, locked
     export_page_requested = Signal(str)           # page_id (locked reports)
+    page_setup_requested = Signal(str)            # page_id (locked reports)
     current_page_changed = Signal(object)      # page_id, or None for Model
     model_tab_double_clicked = Signal()        # collapse/restore every panel
 
@@ -304,8 +305,14 @@ class PageTabBar(QTabBar):
                     page_id, bool(checked)))
             menu.addAction(lock_action)
             # A locked report has no toolbar left to export from, so the one
-            # surface that is always reachable carries it instead.
+            # surface that is always reachable carries it instead — and the
+            # same goes for the setup behind the export, since changing the
+            # paper is exactly what someone does on the way to printing.
             if locked and self._kinds.get(page_id) == "report":
+                setup_action = QAction("Page Setup…", self)
+                setup_action.triggered.connect(
+                    lambda: self.page_setup_requested.emit(page_id))
+                menu.addAction(setup_action)
                 export_action = QAction("Export PDF…", self)
                 export_action.triggered.connect(
                     lambda: self.export_page_requested.emit(page_id))

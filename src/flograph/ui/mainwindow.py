@@ -1202,6 +1202,7 @@ class MainWindow(QMainWindow):
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
         self.page_bar.set_view_mode_requested.connect(self._set_page_view_mode)
         self.page_bar.export_page_requested.connect(self._export_report_pdf)
+        self.page_bar.page_setup_requested.connect(self._edit_page_setup)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
         self.page_bar.model_tab_double_clicked.connect(self.toggle_all_panels)
@@ -1233,12 +1234,104 @@ class MainWindow(QMainWindow):
         widget = ReportPage(self.graph, self.engine, self.undo_stack, page.id)
         widget.export_requested.connect(self._export_report_pdf)
         widget.view_mode_requested.connect(self._set_page_view_mode)
+        widget.page_setup_requested.connect(self._edit_page_setup)
         # kept in the same dict as dashboards: everything the window does
         # with a page — switching, removing, disposing — is the same for
         # both, and only the two places that need the difference ask
         self._dashboard_pages[page.id] = widget
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)
+
+    # ------------------------------------------------- a report card's own
+    #
+    # A report card is a report that never became a page: same markdown,
+    # same embeds, same renderer — but it lives on the canvas, so it has no
+    # toolbar to carry Export PDF or Open in Browser. These put both on the
+    # one surface it does have, its right-click menu.
+
+    def _render_report_card(self, node_id: str, for_print: bool):
+        """A report card rendered at page width rather than card width.
+
+        Card width is a canvas layout choice — how much room the node takes
+        up next to its neighbours — and has nothing to do with the paper it
+        is being printed onto. Rendering at the page's own body width is
+        what stops a narrow card exporting a narrow column of text down the
+        middle of an A4 sheet.
+        """
+        from flograph.core.page_setup import PageSetup
+        from .report import render_card
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return None
+        body = str(node.params.get("text", "") or "")
+        return render_card(body, self.graph, self.engine.cache, node_id,
+                           width=PageSetup().body_width_points(),
+                           image_scale=2.0 if for_print else 1.0)
+
+    def _export_report_card_pdf(self, node_id: str) -> None:
+        node = self.graph.nodes.get(node_id)
+        rendered = self._render_report_card(node_id, for_print=True)
+        if node is None or rendered is None:
+            return
+        folder = (Path(self._project_path).parent if self._project_path
+                  else Path.home())
+        safe = "".join(c for c in node.label
+                       if c.isalnum() or c in " -_").strip() or "report"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export report as PDF", str(folder / f"{safe}.pdf"),
+            "PDF documents (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        from .report import export_pdf
+        try:
+            export_pdf(rendered.document, path, title=node.label)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        if rendered.problems:
+            QMessageBox.warning(
+                self, "Exported with problems",
+                f"Exported to {path}, but some embeds didn't resolve:\n\n• "
+                + "\n• ".join(dict.fromkeys(rendered.problems)))
+        else:
+            self.statusBar().showMessage(f"Exported {path}", 6000)
+
+    def _open_report_card_in_browser(self, node_id: str) -> None:
+        """The card as one self-contained HTML file, handed to the desktop.
+
+        Deliberately the same session temp directory and the same stable
+        per-node path as a webview node's Open in Browser, so a tab left
+        open on a report card behaves like every other tab this app opens.
+        """
+        from .browser import open_html, status_message
+        from .report import report_html
+        node = self.graph.nodes.get(node_id)
+        rendered = self._render_report_card(node_id, for_print=False)
+        if node is None or rendered is None:
+            return
+        path = open_html(report_html(rendered, node.label), node.label,
+                         token=node.id[:8])
+        self.statusBar().showMessage(status_message(node, path), 8000)
+
+    def _edit_page_setup(self, page_id: str) -> None:
+        """Page Setup… for a report page — from its toolbar, or from the tab
+        menu when the page is locked and has no toolbar left."""
+        page = self.graph.pages.get(page_id)
+        if page is None or page.kind != "report":
+            return
+        from PySide6.QtWidgets import QDialog
+
+        from .commands import SetPageSetupCommand
+        from .report import PageSetupDialog
+        dialog = PageSetupDialog(page.setup, page.title, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        setup = dialog.result_setup()
+        if setup == page.setup:
+            return   # nothing to record, and an undo step that did nothing
+        self.undo_stack.push(SetPageSetupCommand(self.graph, page_id, setup))
 
     def _export_report_pdf(self, page_id: str) -> None:
         page = self.graph.pages.get(page_id)
@@ -1261,7 +1354,8 @@ class MainWindow(QMainWindow):
         from .report import export_pdf
         rendered = widget.rendered(for_print=True)
         try:
-            export_pdf(rendered.document, path, title=page.title)
+            export_pdf(rendered.document, path, title=page.title,
+                       setup=page.setup)
         except OSError as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
             return
@@ -1950,6 +2044,16 @@ class MainWindow(QMainWindow):
         browser_action = None
         if self._can_open_in_browser(node_id):
             browser_action = menu.addAction("Open in Browser")
+        # A report *card* has no page, so it has no toolbar, so until these
+        # two it had no way of reaching anyone not looking at the canvas.
+        # Same two things a report page offers, from the one surface a card
+        # has. Offered whether or not the node has run: unlike a webview
+        # node, a report card's text is worth exporting on its own, and an
+        # unresolved embed says so in the document rather than failing.
+        report_export_action = report_browser_action = None
+        if card_kind(node) == "report":
+            report_export_action = menu.addAction("Export PDF…")
+            report_browser_action = menu.addAction("Open in Browser")
         connected_actions: list = []
         from flograph.core.links import (is_from, is_goto, link_label,
                                          linked_from_nodes, linked_goto_node)
@@ -2040,6 +2144,12 @@ class MainWindow(QMainWindow):
             self._import_input_into_table(node_id)
         elif browser_action is not None and chosen is browser_action:
             self._open_in_browser(node_id)
+        elif (report_export_action is not None
+                and chosen is report_export_action):
+            self._export_report_card_pdf(node_id)
+        elif (report_browser_action is not None
+                and chosen is report_browser_action):
+            self._open_report_card_in_browser(node_id)
         elif chosen is labels_action:
             self._toggle_port_labels(node_id, not showing)
         elif collapse_action is not None and chosen is collapse_action:

@@ -633,6 +633,29 @@ class SetPageViewModeCommand(QUndoCommand):
         self._graph.set_page_view_mode(self._page_id, self._old)
 
 
+class SetPageSetupCommand(QUndoCommand):
+    """Replace a report page's page geometry.
+
+    Both states are copied out of the model rather than referenced: the
+    setup is a mutable dataclass, and an undo that handed back the same
+    object the dialog had been editing would restore nothing.
+    """
+
+    def __init__(self, graph: Graph, page_id: str, setup,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("page setup", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).setup.copy()
+        self._new = setup.copy()
+
+    def redo(self) -> None:
+        self._graph.set_page_setup(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_setup(self._page_id, self._old)
+
+
 class ReorderPagesCommand(QUndoCommand):
     def __init__(self, graph: Graph, order: list[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -684,6 +707,9 @@ class DuplicatePageCommand(QUndoCommand):
             # the copy opens looking like the original, remapped to its tiles
             maximized_tile=id_map.get(src.maximized_tile),
             view_mode=src.view_mode,
+            # copied, not shared: two pages pointing at one mutable setup
+            # would mean editing either one changed both
+            setup=src.setup.copy(),
         )
         self._graph.add_page(self._new_page)
 

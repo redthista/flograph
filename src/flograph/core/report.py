@@ -39,6 +39,33 @@ IMAGE_TOKEN = "@@flograph-embed-{}@@"
 # writes it and the animator that swaps frames behind it cannot drift.
 IMAGE_TOKEN_URL = "embed:{}"
 
+# A forced page break, written on a line of its own. Three spellings
+# because there is no CommonMark one: `\pagebreak` and `\newpage` are what
+# anyone who has met LaTeX or pandoc will try first, and the HTML comment
+# is what someone who has met neither will guess — and it has the virtue of
+# being invisible in any other markdown renderer.
+PAGEBREAK_RE = re.compile(
+    r"^[ \t]*(?:\\pagebreak|\\newpage|<!--[ \t]*(?:page ?break|new ?page)"
+    r"[ \t]*-->)[ \t]*$",
+    re.MULTILINE | re.IGNORECASE)
+
+# Carried through the markdown pass the same way images are, and for the
+# same reason: what it has to become is a *block property*, which markdown
+# has no syntax for at all. See ui/report/render.py.
+PAGEBREAK_TOKEN = "@@flograph-pagebreak@@"
+
+
+def mark_page_breaks(text: str) -> str:
+    """Swap every forced-break line for its token.
+
+    Surrounded by blank lines so the token is always a paragraph of its
+    own: written tight against the paragraph above it, markdown would fold
+    it into that paragraph and the break would silently do nothing.
+    """
+    if not text:
+        return ""
+    return PAGEBREAK_RE.sub("\n\n" + PAGEBREAK_TOKEN + "\n\n", text)
+
 
 @dataclass(frozen=True)
 class Embed:
