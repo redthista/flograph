@@ -94,6 +94,76 @@ PAGEBREAK_RE = re.compile(
 PAGEBREAK_TOKEN = "@@flograph-pagebreak@@"
 
 
+# A columns block:
+#
+#     ```columns 2 1
+#     Text down the left.
+#     ---
+#     ![[Chart]]
+#     ```
+#
+# A fenced block rather than anything inline, for three reasons: a column
+# holds *blocks* (headings, paragraphs, an embed) so it needs somewhere
+# multi-line to live; the info string is somewhere to put the widths; and
+# any other markdown renderer shows it as a code block rather than as
+# mangled prose, which is the polite way to not be understood.
+COLUMNS_RE = re.compile(
+    r"^```[ \t]*columns[ \t]*([^\n]*)\n(.*?)\n?^```[ \t]*$",
+    re.MULTILINE | re.DOTALL)
+
+#: What separates one column from the next, on a line of its own. It is
+#: consumed before any markdown is parsed, so it never reaches the reader
+#: as a thematic break or a setext heading.
+COLUMN_SPLIT_RE = re.compile(r"^---[ \t]*$", re.MULTILINE)
+
+
+def parse_weights(spec: str, count: int) -> list:
+    """The info string as one relative width per column.
+
+    `2 1` is two-thirds and one-third; `60% 40%` is the same idea written
+    the other way, and the % is decoration. Anything unparseable, or the
+    wrong number of them, falls back to equal columns — a report with a
+    typo in a width should still show its content.
+    """
+    parts = (spec or "").replace(",", " ").split()
+    weights = []
+    for part in parts:
+        try:
+            weights.append(max(0.01, float(part.rstrip("%"))))
+        except ValueError:
+            return [1.0] * count
+    if len(weights) != count:
+        return [1.0] * count
+    return weights
+
+
+def split_columns(block: str) -> list:
+    """The body of a columns block, split into its columns."""
+    return [part.strip("\n") for part in COLUMN_SPLIT_RE.split(block)]
+
+
+def replace_columns(text: str, render) -> str:
+    """Every columns block replaced by `render(columns, weights)`.
+
+    Runs *before* embeds are resolved, so that an embed inside a column can
+    be rendered knowing how wide its column is — a chart drawn at the full
+    page width and then squeezed into a third of it would be unreadable.
+    """
+    def substitute(match: re.Match) -> str:
+        columns = split_columns(match.group(2))
+        if len(columns) < 2:
+            # One column is not a layout. Returning the content unwrapped
+            # keeps it visible rather than swallowing it into a table of
+            # one cell, which would look like nothing happened but subtly
+            # change the width everything inside was drawn at.
+            return columns[0] if columns else ""
+        return "\n\n" + render(columns,
+                               parse_weights(match.group(1),
+                                             len(columns))) + "\n\n"
+
+    return COLUMNS_RE.sub(substitute, text or "")
+
+
 def mark_page_breaks(text: str) -> str:
     """Swap every forced-break line for its token.
 

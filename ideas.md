@@ -47,14 +47,22 @@ already done is that it makes charts silently different sizes on different
 pages, which is worse than a gap unless it is asked for. So: opt-in per
 embed, `![[chart|fit]]`, not a global.
 
-**A11. Columns — text on the left, chart on the right.** Markdown has no
-columns, but the renderer already lays a *list* of charts out on a grid by
-emitting a small HTML table (`_Resolver.render_list`), and Qt's rich text
-understands those, so the machinery exists. What is missing is a way to say
-it in the body. Wants a syntax decision first — a fenced block (` ```columns `)
-reads better than anything inline, and has somewhere to put widths.
-Worth doing after B, where CSS grid does it properly and the Qt side would
-be the fallback rather than the design.
+**A11. Columns** shipped in 0.1.9 — a fenced ` ```columns ` block, `---`
+between the columns, relative widths in the info string. It became a
+one-row table, the same device `render_list` already used for chart grids.
+The fence won over anything inline because a column holds *blocks*, the
+info string is somewhere to put widths, and another markdown renderer
+shows it as a code block rather than as mangled prose.
+
+Breaking across pages turned out to be free: a columns block taller than
+the page flows onto the next one with both columns continuing, because Qt
+does split a table row across a page boundary. (Assumed otherwise while
+writing this up; checked, and it was wrong.)
+
+Left for chunk B: columns that *balance* — Qt fills each cell
+independently, so two columns of unequal content end level at the top and
+ragged at the bottom, which is what you want for text-beside-a-chart and
+not what you want for two columns of prose.
 
 **A5. A Report Text node**, so prose can be templated from data without
 hand-writing a Python Script node each time.

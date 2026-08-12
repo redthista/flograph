@@ -203,14 +203,23 @@ class TestReportViewMode:
         assert not page.editor.isHidden()
         assert not page._toolbar.isHidden()
 
-    def test_the_toggle_asks_the_window_rather_than_acting(self, window,
-                                                           qtbot):
-        """One concept, not two: the collapse toggle goes through the same
-        undoable page setting the tab menu does."""
+    def test_the_report_toolbar_carries_no_lock(self, window):
+        """It used to, which put the control that *removes the toolbar* on
+        the toolbar — usable exactly once, with the way back on the tab menu
+        regardless. One door in, the same door out."""
         page = add_page(window, "r1", kind="report")
-        with qtbot.waitSignal(page.view_mode_requested, timeout=1000) as blocker:
-            page._mode_btn.click()
-        assert blocker.args == ["r1", True]
+        assert not hasattr(page, "_mode_btn")
+
+    def test_the_tab_menu_still_locks_it(self, window, qtbot):
+        """The one surface locking lives on, and the only one that is still
+        there once the page is locked."""
+        page = add_page(window, "r1", kind="report")
+        window.page_bar.set_view_mode_requested.emit("r1", True)
+        assert window.graph.page("r1").view_mode is True
+        assert page.view_mode() is True
+        window.undo_stack.undo()
+        assert window.graph.page("r1").view_mode is False
+        assert page.view_mode() is False
 
 
 # ------------------------------------------------------------ window wiring
