@@ -5,7 +5,7 @@ Settings kept off the real store (avoid polluting the developer's actual
 flograph.conf) -- see test_lod_settings.py's fixture of the same name."""
 import pandas as pd
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -445,6 +445,109 @@ class TestVisualsList:
 
         mime = visuals.mimeData([visuals.item(0)])
         assert bytes(mime.data(TILE_NODE_MIME)).decode() == shown.id
+
+    def add_visual(self, window, type_id, label):
+        node = window.registry.instantiate(type_id, pos=(0, 0))
+        node.label_override = label
+        window.graph.add_node(node)
+        return node
+
+    def test_sorted_by_kind_then_name_not_creation_order(self, window):
+        add_page(window)
+        for type_id, label in [("flograph.viz.show_table", "Zebra table"),
+                               ("flograph.viz.card", "alpha kpi"),
+                               ("flograph.viz.show_plot", "Beta chart"),
+                               ("flograph.viz.show_table", "apple table"),
+                               ("flograph.viz.show_plot", "aardvark chart")]:
+            self.add_visual(window, type_id, label)
+
+        visuals = window._dashboard_pages["p1"].visuals
+        labels = [visuals.item(i).text() for i in range(visuals.count())]
+        # charts, then tables, then the KPI; alphabetical (case-blind) inside
+        assert [text.split(" ", 1)[1] for text in labels] == [
+            "aardvark chart", "Beta chart", "apple table", "Zebra table",
+            "alpha kpi"]
+
+    def test_rename_re_sorts_the_list(self, window):
+        add_page(window)
+        first = self.add_visual(window, "flograph.viz.show_table", "aaa")
+        self.add_visual(window, "flograph.viz.show_table", "bbb")
+        visuals = window._dashboard_pages["p1"].visuals
+
+        window.graph.set_label(first.id, "zzz")
+        labels = [visuals.item(i).text() for i in range(visuals.count())]
+        assert [text.split(" ", 1)[1] for text in labels] == ["bbb", "zzz"]
+
+
+class TestVisualPreview:
+    """Hovering a row in the visuals list shows what dropping it produces.
+
+    The preview is a real TileItem rendered offscreen, so these assert on
+    the picture existing and on the fallbacks — a preview must never raise
+    or hang the list it is decorating."""
+
+    def hover(self, visuals, row):
+        visuals._on_item_entered(visuals.item(row))
+        visuals._show_preview()
+        return visuals._popup
+
+    def test_hover_shows_a_picture_of_the_tile(self, window, monkeypatch):
+        add_page(window)
+        node = add_show_table(window)
+        window.engine.cache.set(
+            node.id, {"table": pd.DataFrame({"a": [1, 2]})}, 0.01)
+        visuals = window._dashboard_pages["p1"].visuals
+        monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
+
+        popup = self.hover(visuals, 0)
+        assert popup is not None and not popup._label.pixmap().isNull()
+        # scaled down to the preview box, never up
+        assert popup._label.pixmap().width() <= 300
+        visuals._hide_preview()
+        assert not popup.isVisible()
+
+    def test_unrun_node_previews_its_run_prompt(self, window, monkeypatch):
+        add_page(window)
+        add_show_table(window)              # never run: no cache entry
+        visuals = window._dashboard_pages["p1"].visuals
+        monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
+
+        popup = self.hover(visuals, 0)
+        # still a picture — of the tile saying it needs a run
+        assert not popup._label.pixmap().isNull()
+
+    def test_webview_falls_back_to_a_message(self, window, monkeypatch):
+        add_page(window)
+        window.graph.add_node(
+            window.registry.instantiate("flograph.viz.show_plotly", pos=(0, 0)))
+        visuals = window._dashboard_pages["p1"].visuals
+        monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
+
+        popup = self.hover(visuals, 0)
+        assert popup._label.pixmap().isNull()
+        assert "drag it onto the page" in popup._label.text()
+
+    def test_preview_waits_for_the_cursor_to_settle(self, window):
+        add_page(window)
+        add_show_table(window)
+        visuals = window._dashboard_pages["p1"].visuals
+
+        visuals._on_item_entered(visuals.item(0))
+        assert visuals._hover_timer.isActive()
+        assert visuals._popup is None      # nothing built yet
+        visuals.leaveEvent(QEvent(QEvent.Leave))
+        assert not visuals._hover_timer.isActive()
+
+    def test_deleted_node_previews_nothing(self, window):
+        add_page(window)
+        node = add_show_table(window)
+        visuals = window._dashboard_pages["p1"].visuals
+        item = visuals.item(0)
+        visuals._on_item_entered(item)
+        window.graph.remove_node(node.id)   # rebuilds the list under the row
+
+        visuals._show_preview()             # must not raise
+        assert visuals._popup is None
 
 
 class TestEditableTableTile:
