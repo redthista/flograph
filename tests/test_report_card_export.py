@@ -102,6 +102,60 @@ class TestSelfContainedHtml:
         assert report_html(render_body("Text", lambda r, p: (None, "", "")))
 
 
+class TestItLooksLikeTheReport:
+    """The first complaint about Save HTML was that it didn't look like the
+    PDF — it was Qt's own HTML at whatever width the window happened to be.
+    A page style is the cheap half of fixing that; chunk B owns the rest."""
+
+    def plain(self):
+        return render_body("# Title\n\nProse.\n",
+                           lambda r, p: (None, "", ""))
+
+    def test_without_a_setup_nothing_is_imposed(self):
+        assert "@page" not in report_html(self.plain(), "R")
+
+    def test_a_setup_puts_it_on_the_same_paper(self):
+        html = report_html(self.plain(), "R", setup=PageSetup(size="A4"))
+        assert "@page" in html
+        assert "size: 210mm 297mm;" in html
+
+    def test_the_body_measures_the_text_column(self):
+        setup = PageSetup(margin_left=40.0, margin_right=40.0)
+        html = report_html(self.plain(), "R", setup=setup)
+        assert f"max-width: {setup.body_mm()[0]:g}mm" in html
+
+    def test_printing_from_the_browser_keeps_a_chart_whole(self):
+        """The one thing this export can do that Qt cannot — the other half
+        of A3, which is why it is worth having two targets at all."""
+        html = report_html(self.plain(), "R", setup=PageSetup())
+        assert "break-inside: avoid" in html
+
+    def test_the_style_sits_after_qt_s_own(self):
+        """Qt's toHtml writes a stylesheet of its own, so ours has to come
+        later in the head to win on a tie — and still be inside the head."""
+        html = report_html(self.plain(), "R", setup=PageSetup())
+        assert html.index("<style") < html.index("@page") < html.index("</head>")
+
+
+class TestAutoRefresh:
+
+    def plain(self):
+        return render_body("Text", lambda r, p: (None, "", ""))
+
+    def test_off_by_default(self):
+        assert "http-equiv" not in report_html(self.plain(), "R")
+
+    def test_on_for_the_throwaway_copy(self):
+        html = report_html(self.plain(), "R", auto_refresh=True)
+        assert 'http-equiv="refresh"' in html
+
+    def test_it_remembers_where_you_had_scrolled(self):
+        """A reload every two seconds that jumped to the top would be worse
+        than not reloading at all."""
+        html = report_html(self.plain(), "R", auto_refresh=True)
+        assert "sessionStorage" in html and "scrollTo" in html
+
+
 class TestRenderingACard:
 
     @pytest.fixture

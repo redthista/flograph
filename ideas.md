@@ -27,8 +27,34 @@ What is left of A3 is the half Qt cannot do: **keeping a chart off a page
 boundary** (`page-break-inside: avoid`). It is not a Qt job at all — it
 belongs to chunk B and is listed there.
 
-**A4. Per-embed sizing and alignment** — `![[chart|width=50%]]`. The embed
-parser already splits on `|` for the port name, so the syntax has room.
+**A4. Per-embed sizing** shipped in 0.1.9 — `![[chart|width=50%]]` and
+`width=280`. Alignment did not: centring an image means setting the
+*block's* alignment after the document is built, which is a different job
+from sizing and was not worth half-doing. Still open, and small.
+
+**A10. Shrink a chart into the space left on the page.** The question that
+produced A4: a heading, a paragraph and a chart, where the chart doesn't
+fit in what's left and so starts a new page, leaving a gap. `width=` is the
+manual answer; the automatic one is to notice the overflow and scale that
+one image down.
+
+Sketch, if it gets picked up: after `setHtml`, for each image block use
+`documentLayout().blockBoundingRect()` to find its `y`, work out
+`remaining = body_height - (y % body_height)`, and if the image is taller
+than that but shorter than a whole page, scale it to fit and lay out again
+(twice at most — it converges or it doesn't). The reason it is *not*
+already done is that it makes charts silently different sizes on different
+pages, which is worse than a gap unless it is asked for. So: opt-in per
+embed, `![[chart|fit]]`, not a global.
+
+**A11. Columns — text on the left, chart on the right.** Markdown has no
+columns, but the renderer already lays a *list* of charts out on a grid by
+emitting a small HTML table (`_Resolver.render_list`), and Qt's rich text
+understands those, so the machinery exists. What is missing is a way to say
+it in the body. Wants a syntax decision first — a fenced block (` ```columns `)
+reads better than anything inline, and has somewhere to put widths.
+Worth doing after B, where CSS grid does it properly and the Qt side would
+be the fallback rather than the design.
 
 **A5. A Report Text node**, so prose can be templated from data without
 hand-writing a Python Script node each time.
@@ -96,6 +122,22 @@ and hands it to the desktop. Both are tested. Two more pieces landed with
 What is genuinely left is the *template*: Jinja, a stylesheet the user can
 replace, `@media print`, running elements with counters, and keeping Plotly
 interactive rather than snapshotting it.
+
+**B1. A preview that can show either target.** Asked for on 2026-08-12,
+after the first look at Save HTML: the HTML doesn't look like the PDF, so
+the preview is only telling the truth about one of them. The shape is a
+target dropdown on the report toolbar — *Pages* (today's paged preview,
+what the PDF will be) and *Web* (a QWebEngineView of the exported HTML,
+what a browser will be). The app already embeds Chromium (the Plotly
+snapshotter uses it), so the view itself is cheap; what it needs is B's
+template to exist, or it is a preview of a page nobody would ship.
+
+0.1.9 narrowed the gap in the meantime rather than closing it: the exported
+HTML now carries the page's own `@page` size and margins and measures its
+body to the same text column, so it is at least the same shape and prints
+sensibly from the browser. It is still one continuous page, not a stack of
+sheets, and it always will be — that difference is the point of having two
+targets.
 
 One of the original arguments has since evaporated: "and it needs no
 kaleido" was true when this was written, but 0.1.8 snapshots Plotly through

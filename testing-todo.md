@@ -9,6 +9,49 @@ nobody reads.
 
 ---
 
+## Round 3 — from the second test pass — NEW
+
+### Sizing a chart so it fits the page
+
+The answer to "the chart went onto a new page and left a gap".
+
+- [ ] `![[Chart|width=50%]]` → half the text column. Try 60–70% on the
+      heading + paragraph + chart case that raised it, and check the chart
+      now lands on the same page.
+- [ ] `![[Chart|width=280]]` → an absolute size in points.
+- [ ] `![[Chart|port|width=60%]]` → a port *and* a width together.
+- [ ] A width applies to **one** embed: the next chart is full width again.
+- [ ] `![[Chart|widht=50%]]` and `![[Chart|width=wide]]` → both **named in
+      the warning strip**, not silently ignored.
+- [ ] A width on a node that emits a **list** of charts sizes all of them.
+
+### Pages left-to-right
+
+- [ ] **▦** on the toolbar → pages wrap across the pane. Ctrl+wheel out and
+      more fit per row; the cover is the first sheet.
+- [ ] Toggle off → back to one column, and one column stays one column
+      however wide the pane is.
+
+### HTML vs PDF
+
+- [ ] **Save HTML…** → the file now opens at the page's own width with the
+      same margins, rather than filling the browser window.
+- [ ] **Print from the browser** → right paper size, and a chart is not
+      split across a page break.
+- [ ] It is still *not* page-for-page identical to the PDF, and won't be —
+      one is a stack of sheets, the other one continuous page. Worth
+      confirming the difference now reads as deliberate rather than broken.
+      If it doesn't, that's idea B1 (a target dropdown, Pages vs Web).
+
+### Auto-refresh
+
+- [ ] **Open in Browser** on a Report card, leave the tab visible, edit the
+      card's text → the tab updates on its own within a couple of seconds.
+- [ ] Scroll down first — your place should survive the reload.
+- [ ] A file saved with **Save HTML…** must **not** reload itself.
+
+---
+
 ## Round 2 — from the first test pass — NEW
 
 ### The preview is paper now
