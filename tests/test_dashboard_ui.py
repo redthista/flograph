@@ -452,7 +452,7 @@ class TestVisualsList:
         window.graph.add_node(node)
         return node
 
-    def test_sorted_by_kind_then_name_not_creation_order(self, window):
+    def test_sorted_by_name_alone_not_by_kind_or_creation_order(self, window):
         add_page(window)
         for type_id, label in [("flograph.viz.show_table", "Zebra table"),
                                ("flograph.viz.card", "alpha kpi"),
@@ -463,10 +463,10 @@ class TestVisualsList:
 
         visuals = window._dashboard_pages["p1"].visuals
         labels = [visuals.item(i).text() for i in range(visuals.count())]
-        # charts, then tables, then the KPI; alphabetical (case-blind) inside
+        # one flat case-blind run: the kinds interleave, which is the point
         assert [text.split(" ", 1)[1] for text in labels] == [
-            "aardvark chart", "Beta chart", "apple table", "Zebra table",
-            "alpha kpi"]
+            "aardvark chart", "alpha kpi", "apple table", "Beta chart",
+            "Zebra table"]
 
     def test_rename_re_sorts_the_list(self, window):
         add_page(window)
@@ -1445,6 +1445,67 @@ class TestTileFullscreen:
         view = self.shown_view(window, qtbot)
         view.enter_fullscreen(item)
         assert view.fullscreen_tile is None
+
+
+class TestPresentationChrome:
+    """A maximized tile gets the screen, not just the page.
+
+    Maximizing already cleared the page — the visuals panel steps aside —
+    but the window kept its menu bar, toolbar, page tabs and status bar, so
+    a chart shown to a room was framed by the tools used to build it. The
+    window is never shown here (see the module's other fixtures for why),
+    so these read isHidden(), which is the "explicitly turned off" flag
+    rather than "on screen right now"."""
+
+    def chrome(self, window):
+        return (window.menuBar(), window.toolbar, window.page_bar,
+                window.statusBar())
+
+    def maximized(self, window):
+        add_page(window)
+        node = window.registry.instantiate("flograph.viz.show_table",
+                                           pos=(0, 0))
+        window.graph.add_node(node)
+        add_tile(window, node)
+        window._on_current_page_changed("p1")
+        return window._dashboard_pages["p1"]
+
+    def test_maximizing_hides_every_piece_of_window_chrome(self, window):
+        page = self.maximized(window)
+        assert not any(w.isHidden() for w in self.chrome(window))
+
+        page.scene.toggle_fullscreen("t1")
+        assert all(w.isHidden() for w in self.chrome(window))
+
+    def test_restoring_puts_it_all_back(self, window):
+        page = self.maximized(window)
+        page.scene.toggle_fullscreen("t1")
+        page.scene.exit_fullscreen()
+        assert not any(w.isHidden() for w in self.chrome(window))
+
+    def test_chrome_the_user_had_off_stays_off(self, window):
+        # restoring is not the same as turning everything on
+        page = self.maximized(window)
+        window.statusBar().setVisible(False)
+        page.scene.toggle_fullscreen("t1")
+        page.scene.exit_fullscreen()
+        assert window.statusBar().isHidden()
+        assert not window.menuBar().isHidden()
+
+    def test_leaving_the_page_gives_the_chrome_back(self, window):
+        # the tile stays maximized in the model — but you are not looking at
+        # it any more, so the window must stop presenting
+        page = self.maximized(window)
+        page.scene.toggle_fullscreen("t1")
+
+        window._on_current_page_changed(None)
+        assert not any(w.isHidden() for w in self.chrome(window))
+        window._on_current_page_changed("p1")
+        assert all(w.isHidden() for w in self.chrome(window))
+
+    def test_a_plain_page_leaves_the_window_alone(self, window):
+        self.maximized(window)
+        assert not any(w.isHidden() for w in self.chrome(window))
 
 
 class TestStaleVersusUpdating:
