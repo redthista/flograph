@@ -29,7 +29,9 @@ class DashboardPage(QWidget):
         self.scene = DashboardScene(graph, engine, undo_stack, page_id,
                                     parent=self)
         self.view = DashboardView(self.scene)
-        self.visuals = VisualsList(graph)
+        # the engine is what the visuals list builds its hover previews from
+        # — a preview is a real tile, and a tile shows cached output
+        self.visuals = VisualsList(graph, engine)
 
         self._side = QWidget()
         side_layout = QVBoxLayout(self._side)
