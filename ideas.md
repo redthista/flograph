@@ -186,15 +186,6 @@ switched off (right-click a viz node), and zoom-out LOD flattening.
 
 ---
 
-## E. Charts  (was 27)
-
-**E1. Explicit Y bounds on the chart-per-value nodes.** Partly overtaken:
-the "shared scale picks the tallest column rather than the tallest stack"
-bug is fixed in both nodes — `_stacks()` bounds a stacked chart by the row
-totals, so charts no longer grow past the sheet. What is still missing is a
-manual override: `min_y` / `max_y` params to pin the axis to a chosen range
-instead of a derived one.
-
 ## F. Optomisation
 F1. add a setting and on by default when dragging around a canvas with middle mouse button and the fps drops below 60, then automatically change the nodes to the low lod versions, to avoid the slow down. 
 
@@ -229,5 +220,4 @@ G2. when zoomed out and we have the low lod version of the nodes showing, can we
 - table node, when selecting a column type bool, put checkbox into the column automatically. 
 - optional git integreation for commits for the workflows. every save is a commit, so full config control.
 - Node option - only run when called, by right click run or action button.
-- when full screening on a dashbaord page can we make sure it fills the whole screen like the table node does? 
 - 

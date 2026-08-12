@@ -38,18 +38,18 @@ _KIND_GLYPHS = {
     "button": "▶",
 }
 
-#: Kinds in the order they are listed, charts first and the furniture last.
-#: The list is grouped by kind and alphabetical inside each group: a flow
-#: with thirty visuals is read by looking for the *sort* of thing wanted
-#: first, and creation order — what this used to be — is the one ordering
-#: nobody can search by.
-_KIND_ORDER = ("figure", "webview", "table_viewer", "grid", "kpi", "image",
-               "report", "slicer", "control", "button")
+def _sort_key(node) -> tuple:
+    """One flat alphabetical run, case-blind.
 
-
-def _sort_key(node, kind: str) -> tuple:
-    rank = _KIND_ORDER.index(kind) if kind in _KIND_ORDER else len(_KIND_ORDER)
-    return (rank, node.label.casefold(), node.id)
+    This was briefly grouped by kind — charts, then tables, then the
+    furniture — on the theory that a long list is read by looking for the
+    *sort* of thing wanted. In use it isn't: you know the name of the
+    visual you are placing, and grouping means knowing which group it falls
+    in before you can find it. The glyph still says what each row is, which
+    is the part of grouping that was actually earning its keep. The node id
+    breaks ties so two visuals sharing a name hold a stable order.
+    """
+    return (node.label.casefold(), node.id)
 
 
 class VisualsList(QListWidget):
@@ -105,11 +105,10 @@ class VisualsList(QListWidget):
         from .tile_item import is_tile_able
         self._hide_preview()
         self.clear()
-        entries = [(node, card_kind(node)) for node in self._graph.nodes.values()
-                   if is_tile_able(node)]
-        for node, kind in sorted(entries,
-                                 key=lambda pair: _sort_key(*pair)):
-            glyph = _KIND_GLYPHS.get(kind, "")
+        nodes = [node for node in self._graph.nodes.values()
+                 if is_tile_able(node)]
+        for node in sorted(nodes, key=_sort_key):
+            glyph = _KIND_GLYPHS.get(card_kind(node), "")
             item = QListWidgetItem(f"{glyph} {node.label}".strip())
             item.setData(Qt.UserRole, node.id)
             item.setToolTip("Drag onto the page to place this visual")

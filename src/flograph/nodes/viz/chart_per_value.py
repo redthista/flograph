@@ -23,6 +23,15 @@ this node used to show only the last y column. **group** stands them side
 by side, **stack** piles them up, and **overlay** is the old draw-on-top
 behaviour, which is still useful with an alpha or a single series.
 
+**Same Y scale** bounds every chart by the whole table, so the panels can
+be compared by eye. **Min Y / Max Y** override that with a number of your
+own: leave one blank to pin only the other end, and leave both blank —
+which is the default — for the derived scale. A pinned bound is used
+exactly as typed, with none of the 5% headroom a derived one gets, so Min
+Y 0 puts the axis on zero. They work with Same Y scale off too: there each
+chart is still scaled to its own rows, but the end you pinned stays put.
+Typing a Min above the Max flips the axis, which is occasionally the point.
+
 **Fill** is the plain choice: all of them **down** the page, or all of them
 **across** it. With Columns and Rows both at 0 that is exactly what you
 get — one column, or one row that scrolls sideways.
@@ -64,6 +73,12 @@ PARAMS = [
      "default": "", "placeholder": "comma separated; empty = all numeric"},
     {"name": "shared_scale", "type": "bool", "label": "Same Y scale",
      "default": True},
+    # Strings, not floats: blank has to mean "not pinned", and a spin box
+    # has no way to say that. See core.chart_scale.
+    {"name": "min_y", "type": "string", "label": "Min Y", "default": "",
+     "placeholder": "(from the data)"},
+    {"name": "max_y", "type": "string", "label": "Max Y", "default": "",
+     "placeholder": "(from the data)"},
     {"name": "max_charts", "type": "int", "label": "Max charts",
      "default": 40, "min": 1, "max": 500},
     # Layout of the stack, read by every host that shows it (canvas card,
@@ -129,6 +144,8 @@ def run(ctx, table):
 
     from matplotlib.figure import Figure   # OO API only — never pyplot
 
+    from flograph.core.chart_scale import as_bound, data_extent, y_limits
+
     split_by = (ctx.params.get("split_by") or "").strip()
     if not split_by:
         raise ValueError("set 'Split by' to the column to make one chart per")
@@ -151,21 +168,23 @@ def run(ctx, table):
                 f"{limit}. Raise 'Max charts' or filter upstream.")
         groups = groups[:limit]
 
+    min_y = as_bound(ctx.params.get("min_y"))
+    max_y = as_bound(ctx.params.get("max_y"))
+    pinned = min_y is not None or max_y is not None
+    stacked = kind == "bar" and barmode == "stack"
+    # a histogram's Y is a count the figure works out for itself, so there
+    # is no column extent to derive — but both ends pinned by hand still
+    # bounds it, and that is the only way to make counts comparable
+    scalable = kind != "hist"
+    shared = bool(ctx.params.get("shared_scale", True)) and scalable
+
     # one scale across every chart, so the panels can be compared by eye —
     # which is usually the entire reason for splitting a chart up
     limits = None
-    if ctx.params.get("shared_scale", True) and kind != "hist":
-        values = table[y].apply(lambda s: s.astype("float64"), axis=0)
-        if kind == "bar" and barmode == "stack":
-            # a stacked bar reaches the row's total, not its tallest
-            # column — bounding by the column max would crop every bar
-            low = float(values.clip(upper=0).sum(axis=1).min())
-            high = float(values.clip(lower=0).sum(axis=1).max())
-        else:
-            low, high = float(values.min().min()), float(values.max().max())
-        if low == low and high == high:      # not NaN
-            pad = (high - low) * 0.05 or 1.0
-            limits = (low - pad, high + pad)
+    if not scalable:
+        limits = y_limits(None, min_y, max_y)
+    elif shared:
+        limits = y_limits(data_extent(table, y, stacked), min_y, max_y)
 
     figures = []
     for index, (value, group) in enumerate(groups):
@@ -186,6 +205,11 @@ def run(ctx, table):
                 else:
                     axes.plot(group[x] if x else group.index, group[column],
                               label=str(column))
+        if scalable and not shared and pinned:
+            # each chart keeps its own scale, but the pinned end holds —
+            # measured on this group's rows, since there is no shared
+            # extent to take the free end from
+            limits = y_limits(data_extent(group, y, stacked), min_y, max_y)
         if limits is not None:
             axes.set_ylim(*limits)
         axes.set_title(f"{split_by}: {value}")
