@@ -324,13 +324,16 @@ class TestLayoutIsNotData:
 
     def test_the_layout_params_are_declared_cosmetic(self, env):
         _graph, node = env
-        for name in ("columns", "rows", "direction"):
+        # "scale" too, unlike the single-chart nodes: zooming the card is
+        # presentation, and this node's run can be slow
+        for name in ("columns", "rows", "direction", "scale"):
             assert node.spec.param(name).cosmetic, name
 
     def test_changing_them_leaves_the_node_clean(self, env):
         graph, node = env
         graph.set_param(node.id, "columns", 3)
         graph.set_param(node.id, "direction", "across")
+        graph.set_param(node.id, "scale", 50)
         assert not node.dirty
 
     def test_a_real_setting_still_dirties_it(self, env):
@@ -352,6 +355,48 @@ class TestLayoutIsNotData:
         _graph, node = env
         assert not node.spec.param("split_by").cosmetic
         assert not node.spec.param("width").cosmetic
+
+
+class TestScaleZoomsTheStack:
+    """Scale % on the stack nodes does what it does on the single-chart
+    ones: zooms the card's contents, so a smaller setting fits more of the
+    stack on the same card. Width and Height size the card; this doesn't."""
+
+    @pytest.fixture
+    def env(self, qtbot):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph, NodeRegistry
+        from flograph.ui.canvas import NodeGraphScene
+        registry = NodeRegistry()
+        registry.load_builtins()
+        graph = Graph()
+        stack = QUndoStack()
+        scene = NodeGraphScene(graph, stack, registry=registry)
+        yield graph, scene, registry
+        stack.clear()
+
+    def test_it_zooms_the_embedded_stack(self, env):
+        graph, scene, registry = env
+        node = graph.add_node(
+            registry.instantiate("flograph.viz.chart_per_value"))
+        proxy = scene.node_items[node.id]._figure_proxy
+        assert proxy.scale() == 1.0
+
+        graph.set_param(node.id, "scale", 50)
+        rect = scene.node_items[node.id]._figure_proxy_rect()
+        assert proxy.scale() == 0.5
+        # half scale hands the stack twice the logical room, which is what
+        # puts more charts on the card rather than shrinking the card
+        assert proxy.size().width() == pytest.approx(rect.width() / 0.5)
+
+        graph.set_param(node.id, "scale", 9999)   # clamped to 400%
+        assert proxy.scale() == 4.0
+
+    def test_the_plotly_twin_declares_it_too(self, env):
+        _graph, _scene, registry = env
+        spec = registry.get("flograph.viz.chart_per_value_plotly")
+        assert spec.param("scale").cosmetic
+        assert spec.default_params()["scale"] == 100
 
 
 class TestPlotlyCannotSpillIntoItsNeighbour:

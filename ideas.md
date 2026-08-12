@@ -215,7 +215,6 @@ G2. when zoomed out and we have the low lod version of the nodes showing, can we
 
 
 ## not sorted: 
-- chart per value  - need scale option like with the other nodes.
 - user forms, a simple form with submit buttons, one node? and retrieval? make work with dataframes sql anything else thats helpful. 
 - table node, when selecting a column type bool, put checkbox into the column automatically. 
 - optional git integreation for commits for the workflows. every save is a commit, so full config control.
