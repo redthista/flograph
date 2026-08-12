@@ -96,6 +96,17 @@ class ReportPage(QWidget):
             "headers and footers")
         self._setup_btn.clicked.connect(
             lambda: self.page_setup_requested.emit(self.page_id))
+        # A view option, not a page setting: it changes how the pages are
+        # arranged on screen and nothing about what prints, so it belongs on
+        # the toolbar rather than in Page Setup.
+        self._flow_btn = QToolButton()
+        self._flow_btn.setCheckable(True)
+        self._flow_btn.setText("▦")
+        self._flow_btn.setToolTip(
+            "Lay the pages out left-to-right instead of in one column — "
+            "the contact sheet, for seeing where everything falls at once")
+        self._flow_btn.toggled.connect(self.preview.set_flow)
+
         self._help_btn = QToolButton()
         self._help_btn.setText("?")
         self._help_btn.setToolTip("What you can write in a report")
@@ -119,6 +130,7 @@ class ReportPage(QWidget):
         toolbar = QHBoxLayout(self._toolbar)
         toolbar.setContentsMargins(6, 4, 6, 0)
         toolbar.addWidget(self._insert_btn)
+        toolbar.addWidget(self._flow_btn)
         toolbar.addWidget(self._help_btn)
         toolbar.addWidget(self._status, 1)
         toolbar.addWidget(self._setup_btn)

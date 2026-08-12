@@ -30,7 +30,19 @@ produced, name it:</p>
     <td>that node's output, wherever it is on the canvas</td></tr>
 <tr><td><code>![[Summary|table]]</code></td>
     <td>a particular output <b>port</b> of it</td></tr>
+<tr><td><code>![[Chart|width=50%]]</code></td>
+    <td>half the width of the text column</td></tr>
+<tr><td><code>![[Chart|width=280]]</code></td>
+    <td>280 points wide, whatever the paper</td></tr>
+<tr><td><code>![[Chart|figure|width=60%]]</code></td>
+    <td>a port <i>and</i> a width</td></tr>
 </table>
+<p><b>Width is the answer to "the chart went onto the next page".</b> A
+chart is placed at its full size, so one that will not fit in what is left
+of the page starts a new one and leaves a gap. Sizing it down to
+<code>60%</code> or so fits it under the heading it belongs with. (Making a
+chart shrink itself into the space left is not something Qt's layout can
+do — it is on the list, via the HTML export.)</p>
 <p>Use <b>Insert embed &#9662;</b> to pick from the nodes that have
 actually produced something — it also avoids typos in a label.</p>
 <p>What an embed becomes depends on what arrives: a <b>chart</b> is placed
@@ -68,11 +80,23 @@ preview shows the real pages, so what you see is what prints.</p>
 "Page 3 of 11". An unknown field is left on the page as written, so a typo
 shows rather than disappearing.</p>
 
+<h3>Reading the preview</h3>
+<p>The preview shows the real pages. <b>Ctrl+wheel</b> zooms; plain wheel
+scrolls. The <b>&#9646;&#9646;</b> button lays the pages out left-to-right
+and wrapping instead of in one column — the contact sheet, for seeing where
+everything falls at once.</p>
+
 <h3>Getting it out</h3>
 <p><b>Export PDF&#8230;</b> prints exactly the pages in the preview.
 <b>Save HTML&#8230;</b> writes one self-contained file with the pictures
 inside it, so it travels as a single attachment and still works when
 moved.</p>
+<p>The two are not the same document. The PDF is the preview, page for
+page. The HTML is one continuous page set to the same paper size and
+margins, which a browser then repaginates when <i>it</i> prints — and it
+can do one thing the PDF cannot, which is avoid splitting a chart across a
+page break. Use the PDF when the pages matter and the HTML when the
+screen does.</p>
 <p>Both are also on a <b>Report card's</b> right-click menu on the canvas,
 along with <b>Open in Browser</b>.</p>
 

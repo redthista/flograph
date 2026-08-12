@@ -21,11 +21,50 @@ into pixels belongs to the UI (see ui/report/render.py).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-# ![[Label]] or ![[Label|port]] — the label runs to a "|" or "]]", so it may
-# contain spaces and punctuation, which node labels routinely do.
-EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*(?:\|\s*([^\]|]+?)\s*)?\]\]")
+# ![[Label]], ![[Label|port]], ![[Label|width=50%]], ![[Label|port|width=50%]]
+#
+# The label runs to a "|" or "]]", so it may contain spaces and punctuation,
+# which node labels routinely do. Everything after it is a list of
+# "|"-separated segments, sorted out by `parse_options` — a segment with an
+# "=" in it is an option, and a bare one is the port name. That rule is what
+# lets the port stay optional without a placeholder: `![[c|width=50%]]` is
+# unambiguous because "width=50%" cannot be a port.
+EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*((?:\|[^\]|]*)*)\]\]")
+
+#: Options an embed understands. Deliberately a closed set: a typo'd option
+#: is worth reporting, and silently ignoring `widht=50%` would leave someone
+#: staring at an unchanged chart.
+EMBED_OPTIONS = ("width",)
+
+
+def parse_options(rest: str) -> "tuple[str, dict, list]":
+    """Split the "|"-separated tail of an embed.
+
+    Returns (port, options, unknown) — the port name, the options that were
+    recognised, and any segments that were not, which the renderer reports
+    rather than swallowing.
+    """
+    port = ""
+    options: dict = {}
+    unknown: list = []
+    for segment in (rest or "").split("|"):
+        segment = segment.strip()
+        if not segment:
+            continue
+        if "=" in segment:
+            key, _, value = segment.partition("=")
+            key = key.strip().lower()
+            if key in EMBED_OPTIONS:
+                options[key] = value.strip()
+            else:
+                unknown.append(segment)
+        elif not port:
+            port = segment
+        else:
+            unknown.append(segment)
+    return port, options, unknown
 
 # What a resolved image becomes in the markdown before it is rendered. Qt's
 # markdown reader silently drops image syntax, so images are carried through
@@ -75,15 +114,22 @@ class Embed:
     raw: str                  # the full "![[...]]" text
     start: int
     end: int
+    #: recognised per-embed options, e.g. {"width": "50%"}
+    options: dict = field(default_factory=dict)
+    #: segments that were neither a port nor a known option
+    unknown: tuple = ()
+
+
+def _embed_at(match: re.Match) -> Embed:
+    port, options, unknown = parse_options(match.group(2))
+    return Embed(ref=match.group(1), port=port, raw=match.group(0),
+                 start=match.start(), end=match.end(), options=options,
+                 unknown=tuple(unknown))
 
 
 def find_embeds(text: str) -> list[Embed]:
     """Every embed in the body, in the order they appear."""
-    return [
-        Embed(ref=match.group(1), port=(match.group(2) or "").strip(),
-              raw=match.group(0), start=match.start(), end=match.end())
-        for match in EMBED_RE.finditer(text or "")
-    ]
+    return [_embed_at(match) for match in EMBED_RE.finditer(text or "")]
 
 
 def replace_embeds(text: str, render) -> str:
@@ -94,9 +140,7 @@ def replace_embeds(text: str, render) -> str:
     otherwise fold a table or heading into the paragraph above it.
     """
     def substitute(match: re.Match) -> str:
-        embed = Embed(ref=match.group(1), port=(match.group(2) or "").strip(),
-                      raw=match.group(0), start=match.start(), end=match.end())
-        replacement = render(embed)
+        replacement = render(_embed_at(match))
         if replacement and "\n" in replacement.strip():
             return f"\n\n{replacement.strip()}\n\n"
         return replacement

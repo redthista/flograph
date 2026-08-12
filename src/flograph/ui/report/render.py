@@ -491,6 +491,12 @@ class _Resolver:
         return IMAGE_TOKEN.format(len(self.images) - 1)
 
     def render(self, embed) -> str:
+        for segment in getattr(embed, "unknown", ()):
+            # Reported rather than ignored: "widht=50%" silently doing
+            # nothing leaves someone staring at an unchanged chart, which is
+            # the worst way to find out a name was wrong.
+            self.problems.append(
+                f"“{embed.ref}”: don't know what “{segment}” means")
         nested = self._nested(embed.ref, embed.port) if self._nested else None
         if nested is not None:
             return self._render_nested(embed.ref, *nested)
@@ -501,7 +507,36 @@ class _Resolver:
         # the grid settings belong to the node that produced the list, so
         # its charts are arranged the same on paper as on its own card
         self._grid = self._grid_for(embed)
-        return self.render_value(value, embed.ref)
+        # A per-embed width is applied for the duration of this embed only,
+        # so `![[a|width=50%]]` narrows that one chart and leaves the next
+        # at the page width.
+        was, self._image_width = self._image_width, self._width_for(embed)
+        try:
+            return self.render_value(value, embed.ref)
+        finally:
+            self._image_width = was
+
+    def _width_for(self, embed) -> int:
+        """`width=50%` of the page's text column, or `width=280` in points.
+
+        The percentage is of the *available* width rather than of the
+        image's natural size: "half the page" is what someone means by 50%
+        when they are trying to fit a chart beside a heading, and it is the
+        only reading that gives the same result for two different charts.
+        """
+        raw = (embed.options or {}).get("width", "").strip()
+        if not raw:
+            return self._image_width
+        try:
+            if raw.endswith("%"):
+                fraction = float(raw[:-1]) / 100.0
+                return max(40, int(self._image_width * fraction))
+            return max(40, int(float(raw.removesuffix("pt").strip())))
+        except ValueError:
+            self.problems.append(
+                f"“{embed.ref}”: “{raw}” is not a width — try 50% or 280")
+            return self._image_width
+
 
     #: How many report cards deep an embed may go. Wires are acyclic, so
     #: this can't actually run away — it is a guard against a graph state

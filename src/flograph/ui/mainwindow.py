@@ -1306,7 +1306,8 @@ class MainWindow(QMainWindow):
                                    "HTML documents (*.html)")
         if path is None:
             return
-        self._write_html(rendered, path, node.label)
+        from flograph.core.page_setup import PageSetup
+        self._write_html(rendered, path, node.label, setup=PageSetup())
 
     def _open_report_card_in_browser(self, node_id: str) -> None:
         """The card as one self-contained HTML file, handed to the desktop.
@@ -1316,12 +1317,11 @@ class MainWindow(QMainWindow):
         open on a report card behaves like every other tab this app opens.
         """
         from .browser import open_html, remember, status_message
-        from .report import report_html
         node = self.graph.nodes.get(node_id)
         rendered = self._render_report_card(node_id, for_print=False)
         if node is None or rendered is None:
             return
-        path = open_html(report_html(rendered, node.label), node.label,
+        path = open_html(self._card_html(rendered, node), node.label,
                          token=node.id[:8])
         # Registered, so editing the card afterwards rewrites this file and
         # the open tab shows the new version on a refresh — without it the
@@ -1339,13 +1339,25 @@ class MainWindow(QMainWindow):
         for both.
         """
         from .browser import is_open, rewrite
-        from .report import report_html
         for node_id, node in self.graph.nodes.items():
             if not is_open(node_id) or card_kind(node) != "report":
                 continue
             rendered = self._render_report_card(node_id, for_print=False)
             if rendered is not None:
-                rewrite(node_id, report_html(rendered, node.label))
+                rewrite(node_id, self._card_html(rendered, node))
+
+    def _card_html(self, rendered, node) -> str:
+        """The HTML behind a card's browser tab.
+
+        Auto-refreshing, unlike the copy Save HTML writes: this one lives in
+        a temp dir for as long as the app does, and the whole reason to have
+        it open is to watch the report change. A file someone asked to keep
+        must not reload itself in their face.
+        """
+        from flograph.core.page_setup import PageSetup
+        from .report import report_html
+        return report_html(rendered, node.label, setup=PageSetup(),
+                           auto_refresh=True)
 
     def _edit_page_setup(self, page_id: str) -> None:
         """Page Setup… for a report page — from its toolbar, or from the tab
@@ -1397,11 +1409,12 @@ class MainWindow(QMainWindow):
             return None
         return path if path.lower().endswith(suffix) else path + suffix
 
-    def _write_html(self, rendered, path: str, title: str) -> None:
+    def _write_html(self, rendered, path: str, title: str,
+                    setup=None) -> None:
         """Shared by the page's Save HTML and the card's."""
         from .report import report_html
         try:
-            Path(path).write_text(report_html(rendered, title),
+            Path(path).write_text(report_html(rendered, title, setup=setup),
                                   encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
@@ -1429,7 +1442,8 @@ class MainWindow(QMainWindow):
                                    "HTML documents (*.html)")
         if path is None:
             return
-        self._write_html(widget.rendered(for_print=True), path, page.title)
+        self._write_html(widget.rendered(for_print=True), path, page.title,
+                         setup=page.setup)
 
     def _export_report_pdf(self, page_id: str) -> None:
         page = self.graph.pages.get(page_id)

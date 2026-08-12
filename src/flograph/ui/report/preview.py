@@ -74,6 +74,8 @@ class PagedPreview(QAbstractScrollArea):
         #: would leave the text too small to proofread — this is what pays
         #: for showing real pages.
         self._user_scale: Optional[float] = None
+        #: sheets left-to-right and wrapping, rather than in one column
+        self._flow = False
         self.viewport().setAutoFillBackground(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
@@ -133,21 +135,56 @@ class PagedPreview(QAbstractScrollArea):
         self._relayout()
         self.viewport().update()
 
+    def columns(self) -> int:
+        """How many sheets fit across the pane, at the current scale.
+
+        1 in single-column mode whatever the room, because "one page at a
+        time, as big as it goes" is a different way of reading and not
+        something the window width should take away.
+        """
+        if not self._flow:
+            return 1
+        width = self._sheet_size().width() * self._scale
+        room = self.viewport().width() - 2 * MARGIN_PX + GAP_PX
+        return max(1, int(room // (width + GAP_PX)))
+
+    def flow(self) -> bool:
+        return self._flow
+
+    def set_flow(self, flow: bool) -> None:
+        """Lay the sheets out left-to-right and wrapping, rather than in one
+        column — the contact sheet view, for seeing where everything falls
+        at once."""
+        self._flow = bool(flow)
+        # Fitting the *width* to one sheet makes no sense once several sit
+        # side by side, so a flowed view starts from whatever zoom is in
+        # force and stays there until told otherwise.
+        if self._flow and self._user_scale is None:
+            self._user_scale = self._scale
+        self._relayout()
+        self.viewport().update()
+
+    def _rows(self) -> int:
+        columns = self.columns()
+        return (self.sheet_count() + columns - 1) // columns
+
     def _relayout(self) -> None:
         """Size the scrollbars to the stack of sheets."""
         self._scale = (self._fit_scale() if self._user_scale is None
                        else self._user_scale)
         sheet = self._sheet_size()
         height = int(sheet.height() * self._scale)
-        total = (MARGIN_PX * 2 + self.sheet_count() * height
-                 + max(0, self.sheet_count() - 1) * GAP_PX)
+        rows = self._rows()
+        total = (MARGIN_PX * 2 + rows * height + max(0, rows - 1) * GAP_PX)
         bar = self.verticalScrollBar()
         bar.setPageStep(max(1, self.viewport().height()))
         bar.setSingleStep(max(1, self.viewport().height() // 12))
         bar.setRange(0, max(0, total - self.viewport().height()))
         # Only ever needed when zoomed in past the pane; fit-to-width never
         # produces one, which is why the policy is AsNeeded.
-        width = int(sheet.width() * self._scale) + 2 * MARGIN_PX
+        columns = self.columns()
+        width = (int(sheet.width() * self._scale) * columns
+                 + max(0, columns - 1) * GAP_PX + 2 * MARGIN_PX)
         side = self.horizontalScrollBar()
         side.setPageStep(max(1, self.viewport().width()))
         side.setSingleStep(max(1, self.viewport().width() // 12))
@@ -174,9 +211,13 @@ class PagedPreview(QAbstractScrollArea):
         sheet = self._sheet_size()
         width = sheet.width() * self._scale
         height = sheet.height() * self._scale
-        x = (max(MARGIN_PX, (self.viewport().width() - width) / 2.0)
+        columns = self.columns()
+        column, row = index % columns, index // columns
+        block = columns * width + max(0, columns - 1) * GAP_PX
+        left = max(MARGIN_PX, (self.viewport().width() - block) / 2.0)
+        x = (left + column * (width + GAP_PX)
              - self.horizontalScrollBar().value())
-        y = (MARGIN_PX + index * (height + GAP_PX)
+        y = (MARGIN_PX + row * (height + GAP_PX)
              - self.verticalScrollBar().value())
         return QRectF(x, y, width, height)
 

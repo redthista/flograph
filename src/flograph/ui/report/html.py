@@ -66,12 +66,55 @@ def _image_uri(image) -> "str | None":
         buffer.close()
 
 
-def report_html(rendered, title: str = "") -> str:
+def page_style(setup) -> str:
+    """CSS that puts the report on the paper it was set up for.
+
+    Not the Jinja/CSS export from ideas.md chunk B — that one owns the
+    layout and can do running headers, counters and interactive Plotly.
+    This is the cheap half: the same page size and margins, and a body
+    that measures the same as the PDF's text column, so a chart sized for
+    the page is the same fraction of the width in both. Without it the
+    HTML was a browser-default wall of text at whatever width the window
+    happened to be, which is why it read as a different document.
+
+    `@page` also makes the browser's own Print produce the right paper,
+    which is the one thing this export can offer that the PDF cannot: a
+    page break that avoids splitting a chart (`break-inside: avoid`), the
+    half of A3 Qt has no answer for.
+    """
+    from flograph.core.page_setup import page_css
+    width, _height = setup.body_mm()
+    return f"""
+{page_css(setup)}
+body {{
+  margin: 0 auto;
+  padding: 24px 16px;
+  max-width: {width:g}mm;
+  background: #ffffff;
+  color: #111111;
+}}
+img {{ max-width: 100%; height: auto; }}
+table {{ border-collapse: collapse; }}
+@media print {{
+  body {{ padding: 0; max-width: none; }}
+  /* What the Qt export cannot express: keep a chart whole. */
+  img, table, pre, blockquote {{ break-inside: avoid; page-break-inside: avoid; }}
+  h1, h2, h3 {{ break-after: avoid; page-break-after: avoid; }}
+}}
+"""
+
+
+def report_html(rendered, title: str = "", setup=None,
+                auto_refresh: bool = False) -> str:
     """`rendered` as a standalone HTML document.
 
     An animation is written out as the file it arrived as, so a GIF that
     moves on the canvas moves in the browser too — the QImage beside it is
     only ever the poster frame, which is all paper can take.
+
+    `setup` puts it on the same paper as the PDF (see page_style); without
+    one the page is Qt's own HTML at whatever width the window is.
+    `auto_refresh` is for the throwaway copy behind Open in Browser only.
     """
     html = rendered.document.toHtml()
     for index, image in enumerate(rendered.images):
@@ -81,7 +124,47 @@ def report_html(rendered, title: str = "") -> str:
         if uri is None:
             continue
         html = html.replace(_SRC.format(f"embed:{index}"), _SRC.format(uri))
+    if setup is not None:
+        html = _styled(html, page_style(setup))
+    if auto_refresh:
+        html = _styled(html, "", head_extra=_AUTO_REFRESH)
     return _titled(html, title)
+
+
+#: Injected only into the throwaway copy behind Open in Browser, never into
+#: a file someone asked to keep. A meta refresh rather than anything
+#: cleverer because a file:// page cannot fetch its own directory to poll
+#: for changes — Chrome blocks it — so this is the one mechanism that works
+#: with no server and no permissions. The script is what stops a reload
+#: throwing away where you had scrolled to.
+_AUTO_REFRESH = """
+<meta http-equiv="refresh" content="2">
+<script>
+  addEventListener('beforeunload', function () {
+    sessionStorage.setItem('flograph-scroll', String(window.scrollY));
+  });
+  addEventListener('load', function () {
+    var at = sessionStorage.getItem('flograph-scroll');
+    if (at) { window.scrollTo(0, parseInt(at, 10)); }
+  });
+</script>
+"""
+
+
+def _styled(html: str, css: str, head_extra: str = "") -> str:
+    """Add a stylesheet (and anything else) to the document's head.
+
+    Appended *after* Qt's own <style>, so these rules win on a tie —
+    QTextDocument.toHtml writes a stylesheet of its own and this has to sit
+    on top of it rather than under it.
+    """
+    block = (f"<style>{css}</style>" if css else "") + head_extra
+    if not block:
+        return html
+    if re.search(r"</head>", html, re.IGNORECASE):
+        return re.sub(r"</head>", block + "</head>", html, count=1,
+                      flags=re.IGNORECASE)
+    return block + html
 
 
 def _titled(html: str, title: str) -> str:

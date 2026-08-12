@@ -139,6 +139,70 @@ class TestZoom:
         assert preview.horizontalScrollBar().maximum() > 0
 
 
+class TestFlowLayout:
+    """Sheets left-to-right and wrapping — the contact sheet, for seeing
+    where everything falls at once."""
+
+    def test_one_column_by_default(self, preview):
+        preview.set_report(render_body(long_body(), nothing).document,
+                           PageSetup())
+        assert not preview.flow()
+        assert preview.columns() == 1
+
+    def test_flowing_uses_the_width(self, preview, qapp):
+        preview.show()
+        qapp.processEvents()
+        preview.set_report(render_body(long_body(), nothing).document,
+                           PageSetup())
+        preview.set_zoom(0.2)          # small sheets, so several fit
+        preview.set_flow(True)
+        assert preview.columns() > 1
+        preview.hide()
+
+    def test_single_column_stays_single_however_wide(self, preview, qapp):
+        """One page at a time, as big as it goes, is a way of reading — the
+        window being wide should not take it away."""
+        preview.show()
+        qapp.processEvents()
+        preview.set_report(render_body(long_body(), nothing).document,
+                           PageSetup())
+        preview.set_zoom(0.2)
+        assert preview.columns() == 1
+        preview.hide()
+
+    def test_flowing_is_fewer_rows_to_scroll(self, preview, qapp):
+        preview.show()
+        qapp.processEvents()
+        preview.set_report(render_body(long_body(20), nothing).document,
+                           PageSetup())
+        preview.set_zoom(0.2)
+        tall = preview.verticalScrollBar().maximum()
+        preview.set_flow(True)
+        assert preview.verticalScrollBar().maximum() < tall
+        preview.hide()
+
+    def test_sheets_do_not_overlap(self, preview, qapp):
+        preview.show()
+        qapp.processEvents()
+        preview.set_report(render_body(long_body(6), nothing).document,
+                           PageSetup())
+        preview.set_zoom(0.2)
+        preview.set_flow(True)
+        rects = [preview._sheet_rect(i)
+                 for i in range(preview.sheet_count())]
+        for i, first in enumerate(rects):
+            for second in rects[i + 1:]:
+                assert not first.intersects(second)
+
+    def test_it_paints_flowed(self, preview, qapp):
+        from PySide6.QtGui import QPixmap
+        preview.set_report(render_body(long_body(6), nothing).document,
+                           PageSetup(cover=True))
+        preview.set_zoom(0.2)
+        preview.set_flow(True)
+        preview.render(QPixmap(preview.size()))   # must not raise
+
+
 class TestOnTheReportPage:
 
     @pytest.fixture
@@ -201,3 +265,11 @@ class TestOnTheReportPage:
         with qtbot.waitSignal(widget.export_html_requested) as blocker:
             widget._html_btn.click()
         assert blocker.args == ["p1"]
+
+    def test_the_toolbar_toggles_the_flow(self, page):
+        widget, _graph = page
+        assert not widget.preview.flow()
+        widget._flow_btn.setChecked(True)
+        assert widget.preview.flow()
+        widget._flow_btn.setChecked(False)
+        assert not widget.preview.flow()
