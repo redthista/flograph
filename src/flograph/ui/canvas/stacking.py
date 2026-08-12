@@ -13,6 +13,10 @@ share the constants without an import cycle through the scene.
 # 1000 apart, so a canvas would need a thousand frames (or a thousand nodes)
 # before one band could reach into the next.
 FRAME_Z = -2000.0
+# The dashed line an opted-in Goto/From pair draws. Below the wires on
+# purpose: it is an aid to reading the canvas, not part of its wiring, and
+# where one crosses a real wire the wire is the thing that must stay legible.
+LINK_LINE_Z = -1500.0
 WIRE_Z = -1000.0
 NODE_Z = 0.0
 

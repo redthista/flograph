@@ -20,6 +20,12 @@ NODE = {
 PARAMS = [
     {"name": "name", "type": "string", "default": "",
      "label": "Link name", "placeholder": "e.g. Cleaned sales"},
+    # Off by default: the whole point of a link is the wire it saves. Turned
+    # on (here or from the card's right-click menu) the canvas draws a dashed
+    # line to every From reading this Goto, for when following one matters
+    # more than the clean canvas.
+    {"name": "show_lines", "type": "bool", "default": False,
+     "label": "Show link lines"},
 ]
 
 

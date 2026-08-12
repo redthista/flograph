@@ -19,6 +19,11 @@ NODE = {
 PARAMS = [
     {"name": "source", "type": "node_ref", "ref_kind": "goto",
      "default": "", "label": "Goto"},
+    # See goto.py: off by default, and either end of a link can ask for the
+    # line — turning it on here draws this From's own line back to its Goto
+    # without lighting up every other From reading the same one.
+    {"name": "show_lines", "type": "bool", "default": False,
+     "label": "Show link line"},
 ]
 
 

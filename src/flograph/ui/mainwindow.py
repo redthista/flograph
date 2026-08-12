@@ -2159,8 +2159,9 @@ class MainWindow(QMainWindow):
             report_html_action = menu.addAction("Save HTML…")
             report_browser_action = menu.addAction("Open in Browser")
         connected_actions: list = []
-        from flograph.core.links import (is_from, is_goto, link_label,
-                                         linked_from_nodes, linked_goto_node)
+        from flograph.core.links import (is_from, is_goto, is_link_node,
+                                         link_label, linked_from_nodes,
+                                         linked_goto_node)
         if is_goto(node):
             # every From here shares one link name (the Goto's), so it's
             # useless for telling them apart — the node's own label is the
@@ -2190,6 +2191,18 @@ class MainWindow(QMainWindow):
             for target in targets:
                 connected_actions.append(
                     (submenu.addAction(target_text(target)), target.id))
+        # Draw this link after all. A Goto speaks for every From reading it,
+        # a From only for its own line — so the wording is singular on one
+        # end and plural on the other, and the label says what clicking will
+        # do rather than what is currently true.
+        lines_action = None
+        showing_lines = False
+        if is_link_node(node):
+            from .canvas.link_line import SHOW_LINES_PARAM
+            showing_lines = bool(node.params.get(SHOW_LINES_PARAM, False))
+            noun = "Link Lines" if is_goto(node) else "Link Line"
+            lines_action = menu.addAction(
+                f"{'Hide' if showing_lines else 'Show'} {noun}")
         # per-node override of Settings > Canvas > Show port names; the label
         # says what clicking will do, so it reads off whatever is showing now
         from .canvas.node_item import port_labels_on
@@ -2256,6 +2269,13 @@ class MainWindow(QMainWindow):
         elif (report_browser_action is not None
                 and chosen is report_browser_action):
             self._open_report_card_in_browser(node_id)
+        elif lines_action is not None and chosen is lines_action:
+            from .canvas.link_line import SHOW_LINES_PARAM
+            # merge=False: one Ctrl+Z puts the line back, rather than the
+            # toggle folding into whatever param edit came before it
+            self.undo_stack.push(SetParamCommand(
+                self.graph, node_id, SHOW_LINES_PARAM, not showing_lines,
+                merge=False))
         elif chosen is labels_action:
             self._toggle_port_labels(node_id, not showing)
         elif collapse_action is not None and chosen is collapse_action:
