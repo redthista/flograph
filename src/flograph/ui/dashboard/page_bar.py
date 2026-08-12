@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal, QTimer
-from PySide6.QtGui import QAction, QColor, QContextMenuEvent
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QInputDialog, QMenu, QStyle, QStyleOptionTab,
+    QColorDialog, QInputDialog, QMenu, QStyle, QStyleOptionTab,
     QStylePainter, QTabBar,
 )
 
@@ -23,8 +23,6 @@ from flograph.core import Page
 
 from .. import theme
 
-_DELAY = 500
-_menu_timer: Optional[QTimer] = None
 
 # Tab tinting: the colour is never painted flat, it is laid over the themed
 # tab so anything the colour picker returns comes out muted rather than
@@ -38,15 +36,6 @@ _menu_timer: Optional[QTimer] = None
 # three kinds of tab are told apart by data alone — which survives reordering,
 # unlike an index.
 _PLUS = "\x00plus"
-
-
-class _MenuGuard(QObject):
-    def eventFilter(self, obj, event):
-        if isinstance(event, QContextMenuEvent):
-            return True
-        return super().eventFilter(obj, event)
-
-_guard = _MenuGuard()
 
 
 class PageTabBar(QTabBar):
@@ -282,74 +271,90 @@ class PageTabBar(QTabBar):
         if chosen in choices:
             self.add_page_requested.emit(choices[chosen])
 
+    def contextMenuEvent(self, event) -> None:
+        """Swallow the context-menu event that follows our own right-click.
+
+        The tab menu opens on *press*, so the tab never becomes current
+        (relying on tabBarClicked and reselecting flickers). The platform
+        then sends a context-menu event on release, which without this
+        would open a second menu on top of the one already showing.
+
+        This used to be done by installing an event filter on the
+        *QApplication* for half a second after every tab menu. That filter
+        saw every event in the process — including the hover and mouse-move
+        floods inside the Plotly card's embedded Chromium, each of which had
+        to be handed to Python — which made dragging a chart sluggish and
+        then segfaulted inside PySide's wrapper bookkeeping. Accepting the
+        event on the one widget it is delivered to does the same job, with
+        no timer, no global state and nothing to leak.
+        """
+        event.accept()
+
     def _show_context_menu(self, index: int, page_id: str, global_pos) -> None:
-        global _menu_timer
-        app = QApplication.instance()
-        app.installEventFilter(_guard)
-        try:
-            menu = QMenu(self)
-            menu.setToolTipsVisible(True)   # off by default in QMenu
-            # One tick, not a pair of mutually exclusive ones: the page is
-            # either locked or it isn't, and a checkbox says that in half
-            # the space two radio-ish entries took.
-            locked = self._view_modes.get(page_id, False)
-            lock_action = QAction("Locked", self)
-            lock_action.setCheckable(True)
-            lock_action.setChecked(locked)
-            lock_action.setToolTip(
-                "Lock the elements on this page in place. They can still be "
-                "used — slicers, tables, buttons and charts all keep "
-                "working — they just can't be moved, resized or rearranged.")
-            # triggered, not toggled: toggled also fires for setChecked above
-            lock_action.triggered.connect(
-                lambda checked: self.set_view_mode_requested.emit(
-                    page_id, bool(checked)))
-            menu.addAction(lock_action)
-            # A locked report has no toolbar left to export from, so the one
-            # surface that is always reachable carries it instead — and the
-            # same goes for the setup behind the export, since changing the
-            # paper is exactly what someone does on the way to printing.
-            if locked and self._kinds.get(page_id) == "report":
-                setup_action = QAction("Page Setup…", self)
-                setup_action.triggered.connect(
-                    lambda: self.page_setup_requested.emit(page_id))
-                menu.addAction(setup_action)
-                export_action = QAction("Export PDF…", self)
-                export_action.triggered.connect(
-                    lambda: self.export_page_requested.emit(page_id))
-                menu.addAction(export_action)
-                html_action = QAction("Save HTML…", self)
-                html_action.triggered.connect(
-                    lambda: self.export_html_requested.emit(page_id))
-                menu.addAction(html_action)
-            menu.addSeparator()
-            rename_action = QAction("Rename", self)
-            dup_action = QAction("Duplicate", self)
-            color_action = QAction("Change colour…", self)
-            reset_color_action = (QAction("Reset colour", self)
-                                  if page_id in self._colors else None)
-            del_action = QAction("Delete", self)
-            rename_action.triggered.connect(
-                lambda: self._prompt_rename(index, page_id))
-            dup_action.triggered.connect(lambda: self.duplicate_page_requested.emit(page_id))
-            color_action.triggered.connect(lambda: self._prompt_color(page_id))
-            del_action.triggered.connect(lambda: self.delete_page_requested.emit(page_id))
-            menu.addAction(rename_action)
-            menu.addAction(dup_action)
-            menu.addAction(color_action)
-            if reset_color_action is not None:
-                reset_color_action.triggered.connect(
-                    lambda: self.recolor_page_requested.emit(page_id, None))
-                menu.addAction(reset_color_action)
-            menu.addAction(del_action)
-            menu.exec(global_pos)
-        finally:
-            if _menu_timer is not None:
-                _menu_timer.stop()
-            _menu_timer = QTimer(self)
-            _menu_timer.setSingleShot(True)
-            _menu_timer.timeout.connect(lambda: app.removeEventFilter(_guard))
-            _menu_timer.start(_DELAY)
+        self._context_menu(index, page_id).exec(global_pos)
+
+    def _context_menu(self, index: int, page_id: str) -> QMenu:
+        """Build the tab's menu without showing it.
+
+        Separate from showing it so what is on the menu can be asserted
+        without an exec() that would block the suite forever.
+        """
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)   # off by default in QMenu
+        # One tick, not a pair of mutually exclusive ones: the page is
+        # either locked or it isn't, and a checkbox says that in half
+        # the space two radio-ish entries took.
+        locked = self._view_modes.get(page_id, False)
+        lock_action = QAction("Locked", self)
+        lock_action.setCheckable(True)
+        lock_action.setChecked(locked)
+        lock_action.setToolTip(
+            "Lock the elements on this page in place. They can still be "
+            "used — slicers, tables, buttons and charts all keep "
+            "working — they just can't be moved, resized or rearranged.")
+        # triggered, not toggled: toggled also fires for setChecked above
+        lock_action.triggered.connect(
+            lambda checked: self.set_view_mode_requested.emit(
+                page_id, bool(checked)))
+        menu.addAction(lock_action)
+        # A locked report has no toolbar left to export from, so the one
+        # surface that is always reachable carries it instead — and the
+        # same goes for the setup behind the export, since changing the
+        # paper is exactly what someone does on the way to printing.
+        if locked and self._kinds.get(page_id) == "report":
+            setup_action = QAction("Page Setup…", self)
+            setup_action.triggered.connect(
+                lambda: self.page_setup_requested.emit(page_id))
+            menu.addAction(setup_action)
+            export_action = QAction("Export PDF…", self)
+            export_action.triggered.connect(
+                lambda: self.export_page_requested.emit(page_id))
+            menu.addAction(export_action)
+            html_action = QAction("Save HTML…", self)
+            html_action.triggered.connect(
+                lambda: self.export_html_requested.emit(page_id))
+            menu.addAction(html_action)
+        menu.addSeparator()
+        rename_action = QAction("Rename", self)
+        dup_action = QAction("Duplicate", self)
+        color_action = QAction("Change colour…", self)
+        reset_color_action = (QAction("Reset colour", self)
+                              if page_id in self._colors else None)
+        del_action = QAction("Delete", self)
+        rename_action.triggered.connect(
+            lambda: self._prompt_rename(index, page_id))
+        dup_action.triggered.connect(lambda: self.duplicate_page_requested.emit(page_id))
+        color_action.triggered.connect(lambda: self._prompt_color(page_id))
+        del_action.triggered.connect(lambda: self.delete_page_requested.emit(page_id))
+        menu.addAction(rename_action)
+        menu.addAction(dup_action)
+        menu.addAction(color_action)
+        if reset_color_action is not None:
+            reset_color_action.triggered.connect(
+                lambda: self.recolor_page_requested.emit(page_id, None))
+            menu.addAction(reset_color_action)
+        menu.addAction(del_action)
+        return menu
 
     def _prompt_color(self, page_id: str) -> None:
         current = QColor(self._colors.get(page_id) or theme.NODE_HEADER)

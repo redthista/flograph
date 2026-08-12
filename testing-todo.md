@@ -9,6 +9,31 @@ nobody reads.
 
 ---
 
+## The crash, fixed — please try to reproduce it — NEW
+
+The CTD on 2026-08-12: lock a page, then drag a Plotly chart, sluggish
+first and then gone. Root cause was the tab menu installing an event
+filter on the *whole application*; see issues.md #7. The mechanism is
+gone, but the only proof that matters is yours.
+
+- [ ] Right-click a page tab → **Locked**. Then drag/zoom/pan a **Plotly
+      chart**. Repeat several times, quickly. It should stay up, and it
+      should not feel sluggish while you do it.
+- [ ] Same with the chart **maximized** on a dashboard.
+- [ ] Right-click a tab, **dismiss the menu with Escape**, then drag the
+      chart. (The old filter was installed whether or not you picked
+      anything.)
+- [ ] Open and close a project, then use a tab menu and a chart. (The old
+      cleanup timer died with the page bar, leaving the filter installed
+      for the session — this is the path that made it worst.)
+- [ ] Right-clicking a page tab still opens **one** menu, not two, and
+      right-clicking does not switch to that tab.
+- [ ] Everything on that menu still works: Locked, Rename, Duplicate,
+      Change colour, Delete, and on a locked report Page Setup / Export
+      PDF / Save HTML.
+
+---
+
 ## Round 4 — columns, and one fewer lock — NEW
 
 ### Columns
