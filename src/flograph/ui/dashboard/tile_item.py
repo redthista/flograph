@@ -220,8 +220,10 @@ class TileItem(QGraphicsObject):
 
     def _content_rect(self) -> QRectF:
         w, h = self._size
-        return QRectF(1, TITLE_H, w - 2,
-                      max(0.0, h - TITLE_H - HANDLE / 2 - 1))
+        # the strip along the bottom is room for the resize grip, which a
+        # maximized tile doesn't draw — there, the content runs to the edge
+        foot = 1.0 if self._fullscreen else HANDLE / 2 + 1
+        return QRectF(1, TITLE_H, w - 2, max(0.0, h - TITLE_H - foot))
 
     def _layout_proxy(self) -> None:
         self._proxy.setGeometry(self._content_rect())
@@ -1001,11 +1003,16 @@ class TileItem(QGraphicsObject):
         painter.setBrush(QBrush(theme.NODE_BODY))
         painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
                             else theme.NODE_BORDER, 1.5))
-        painter.drawRoundedRect(body, 6, 6)
+        # square while maximized: the tile is flush to the viewport there, so
+        # rounded corners would leave four notches of canvas showing at the
+        # edges of the screen — which is exactly what the native overlay (a
+        # plain rectangular widget) never does
+        radius = 0.0 if self._fullscreen else 6.0
+        painter.drawRoundedRect(body, radius, radius)
 
         painter.setBrush(QBrush(theme.NODE_HEADER))
         painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(QRectF(0, 0, w, TITLE_H), 6, 6)
+        painter.drawRoundedRect(QRectF(0, 0, w, TITLE_H), radius, radius)
 
         painter.setPen(QPen(theme.NODE_TEXT))
         font = painter.font()
@@ -1035,9 +1042,11 @@ class TileItem(QGraphicsObject):
         if self.can_fullscreen():
             self._paint_fullscreen_glyph(painter)
 
-        if not self._layout_locked:
-            # the grip is an invitation to resize; on a locked page it would
-            # be an invitation to nothing
+        if not self._layout_locked and not self._fullscreen:
+            # the grip is an invitation to resize; on a locked page, and on a
+            # maximized tile sized by the viewport rather than by dragging
+            # (see _edge_at, which already refuses both), it would be an
+            # invitation to nothing
             painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
             hr = self._handle_rect()
             for i in (4.0, 8.0, 12.0):

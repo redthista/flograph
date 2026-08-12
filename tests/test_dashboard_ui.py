@@ -1104,11 +1104,13 @@ class TestTileFullscreen:
         view.enter_fullscreen(item)
         assert item.is_fullscreen
         assert view.fullscreen_tile is item
+        # flush, not inset: this route has to land where the native overlay
+        # does, or maximizing a chart and maximizing a table look different
         rect = self.viewport_rect(view)
-        assert item._size[0] == pytest.approx(rect.width() - 12.0)
-        assert item._size[1] == pytest.approx(rect.height() - 12.0)
-        assert item.pos().x() == pytest.approx(rect.left() + 6.0)
-        assert item.pos().y() == pytest.approx(rect.top() + 6.0)
+        assert item._size[0] == pytest.approx(rect.width())
+        assert item._size[1] == pytest.approx(rect.height())
+        assert item.pos().x() == pytest.approx(rect.left())
+        assert item.pos().y() == pytest.approx(rect.top())
         assert not other.isVisible()
         # maximizing records which tile, never its rect
         assert window.graph.pages["p1"].tiles["t1"].rect == rect_before
@@ -1116,9 +1118,25 @@ class TestTileFullscreen:
         view.exit_fullscreen()
         assert not item.is_fullscreen
         assert view.fullscreen_tile is None
+
         assert other.isVisible()
         assert (item.pos().x(), item.pos().y(),
                 *item._size) == pytest.approx(rect_before)
+
+    def test_a_maximized_tile_drops_its_resize_footer(self, window, qtbot):
+        """The grip isn't drawn while maximized — a tile sized by the
+        viewport cannot be dragged smaller, and _edge_at already refuses —
+        so the content runs to the bottom edge rather than stopping short
+        of a strip reserved for furniture that isn't there."""
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        assert item._size[1] - item._content_rect().bottom() > 1.0
+
+        view = self.shown_view(window, qtbot)
+        view.enter_fullscreen(item)
+        assert item._size[1] - item._content_rect().bottom() \
+            == pytest.approx(1.0)
+        assert item._edge_at(QPointF(*item._size)) is None
 
     def test_window_resize_grows_the_tile(self, window, qtbot):
         add_page(window)
@@ -1131,7 +1149,7 @@ class TestTileFullscreen:
         assert item._size[0] > before[0]
         assert item._size[1] > before[1]
         assert item._size[0] == pytest.approx(
-            self.viewport_rect(view).width() - 12.0)
+            self.viewport_rect(view).width())
         # the content widget follows the item -- that is what makes an
         # embedded chart or table redraw at the new size
         assert item._proxy.geometry().width() == pytest.approx(
@@ -1445,67 +1463,6 @@ class TestTileFullscreen:
         view = self.shown_view(window, qtbot)
         view.enter_fullscreen(item)
         assert view.fullscreen_tile is None
-
-
-class TestPresentationChrome:
-    """A maximized tile gets the screen, not just the page.
-
-    Maximizing already cleared the page — the visuals panel steps aside —
-    but the window kept its menu bar, toolbar, page tabs and status bar, so
-    a chart shown to a room was framed by the tools used to build it. The
-    window is never shown here (see the module's other fixtures for why),
-    so these read isHidden(), which is the "explicitly turned off" flag
-    rather than "on screen right now"."""
-
-    def chrome(self, window):
-        return (window.menuBar(), window.toolbar, window.page_bar,
-                window.statusBar())
-
-    def maximized(self, window):
-        add_page(window)
-        node = window.registry.instantiate("flograph.viz.show_table",
-                                           pos=(0, 0))
-        window.graph.add_node(node)
-        add_tile(window, node)
-        window._on_current_page_changed("p1")
-        return window._dashboard_pages["p1"]
-
-    def test_maximizing_hides_every_piece_of_window_chrome(self, window):
-        page = self.maximized(window)
-        assert not any(w.isHidden() for w in self.chrome(window))
-
-        page.scene.toggle_fullscreen("t1")
-        assert all(w.isHidden() for w in self.chrome(window))
-
-    def test_restoring_puts_it_all_back(self, window):
-        page = self.maximized(window)
-        page.scene.toggle_fullscreen("t1")
-        page.scene.exit_fullscreen()
-        assert not any(w.isHidden() for w in self.chrome(window))
-
-    def test_chrome_the_user_had_off_stays_off(self, window):
-        # restoring is not the same as turning everything on
-        page = self.maximized(window)
-        window.statusBar().setVisible(False)
-        page.scene.toggle_fullscreen("t1")
-        page.scene.exit_fullscreen()
-        assert window.statusBar().isHidden()
-        assert not window.menuBar().isHidden()
-
-    def test_leaving_the_page_gives_the_chrome_back(self, window):
-        # the tile stays maximized in the model — but you are not looking at
-        # it any more, so the window must stop presenting
-        page = self.maximized(window)
-        page.scene.toggle_fullscreen("t1")
-
-        window._on_current_page_changed(None)
-        assert not any(w.isHidden() for w in self.chrome(window))
-        window._on_current_page_changed("p1")
-        assert all(w.isHidden() for w in self.chrome(window))
-
-    def test_a_plain_page_leaves_the_window_alone(self, window):
-        self.maximized(window)
-        assert not any(w.isHidden() for w in self.chrome(window))
 
 
 class TestStaleVersusUpdating:

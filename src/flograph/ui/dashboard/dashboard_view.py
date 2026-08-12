@@ -38,7 +38,6 @@ from .dashboard_scene import DashboardScene
 from .tile_item import TileItem
 from .visuals_list import TILE_NODE_MIME
 
-FS_MARGIN = 6.0  # breathing room between a maximized tile and the viewport
 OVERLAY_TITLE_H = 28
 
 
@@ -245,9 +244,12 @@ class DashboardView(ZoomPanGraphicsView):
             overlay.setGeometry(self.viewport().geometry())
             overlay.raise_()
             return
-        rect = self.mapToScene(self.viewport().rect()).boundingRect()
-        rect.adjust(FS_MARGIN, FS_MARGIN, -FS_MARGIN, -FS_MARGIN)
-        self._fs_tile.set_fullscreen_rect(rect)
+        # flush to the viewport, with no breathing room: this route has to
+        # land in the same place the native overlay does (which takes the
+        # viewport's geometry exactly), or maximizing a chart and maximizing
+        # a table are visibly two different things
+        self._fs_tile.set_fullscreen_rect(
+            self.mapToScene(self.viewport().rect()).boundingRect())
 
     def setViewport(self, widget) -> None:
         """Swapping the viewport (the GPU-viewport setting does this to
