@@ -40,8 +40,16 @@ and as many rows as it takes; Rows 2 gives two down and as many columns.
 Set both for a fixed grid — if there are more charts than cells it grows
 along the fill direction rather than hiding any.
 
-All three are marked `"cosmetic": True`, so changing one re-arranges the
-charts without marking the node dirty.
+**Scale %** zooms the card's contents the way it does on the single-chart
+nodes: below 100 the charts are drawn smaller and more of the stack fits
+on the card, above 100 they are drawn larger and you scroll. Here it is
+the embedded browser's own zoom, so the charts stay crisp rather than
+being magnified. It changes how much you see, not how big the card is —
+Width and Height do that.
+
+Scale, Columns, Rows and Fill are all marked `"cosmetic": True`, so
+changing one re-arranges or re-zooms the charts without marking the node
+dirty.
 
 "Max charts" is a guard, not a preference: splitting on a high-cardinality
 column by accident would otherwise build thousands of figures and hang the
@@ -101,6 +109,11 @@ PARAMS = [
      "default": 460, "min": 260, "max": 1600},
     {"name": "height", "type": "int", "label": "Height",
      "default": 380, "min": 200, "max": 2000},
+    # Cosmetic here, unlike the single-chart nodes: zooming the card is
+    # presentation, and re-running a slow split to show it smaller would be
+    # as absurd as re-running it to show it in two columns.
+    {"name": "scale", "type": "int", "label": "Scale %",
+     "default": 100, "min": 25, "max": 400, "cosmetic": True},
 ]
 
 # Kinds where a y-range means nothing: the value axis is a count or a
