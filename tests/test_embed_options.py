@@ -3,7 +3,8 @@
 The question that produced it: a title, a paragraph and a chart, where the
 chart doesn't fit in what's left of the page and so starts a new one,
 leaving half a page empty. Sizing the chart is the answer Qt can actually
-give; making it *shrink itself* into the space left is chunk B's, via CSS.
+give; making it *shrink itself* into the space left needs CSS, and is
+shelved with the HTML export (ideas_archived.md item 8).
 
 The syntax had room because embeds already split on "|" for the port. A
 segment with an "=" in it is an option and a bare one is the port, which is
