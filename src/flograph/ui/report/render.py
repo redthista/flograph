@@ -32,7 +32,8 @@ from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
                                   PAGEBREAK_TOKEN, format_scalar,
                                   frame_to_markdown, inline_markdown,
                                   mark_page_breaks, missing_embed,
-                                  replace_embeds, unrun_embed)
+                                  replace_columns, replace_embeds,
+                                  unrun_embed)
 
 # Default rendered width of an embedded figure, in points: the printable
 # width of A4 portrait at the margins export.py uses (210mm - 2x15mm).
@@ -620,6 +621,46 @@ class _Resolver:
         out.append("</tbody></table>")
         return "".join(out)
 
+    def render_columns(self, columns: list, weights: list) -> str:
+        """A columns block as a one-row table.
+
+        The same device as a chart grid, and for the same reason: Qt's rich
+        text has no columns of its own, but it does understand a table, and
+        a table survives into the PDF and the exported HTML unchanged.
+
+        Each column's embeds are resolved *while its own width is in force*,
+        so a chart in a third of the page is drawn a third of the page wide
+        rather than drawn full width and then squeezed.
+        """
+        total = sum(weights) or 1.0
+        gap = GRID_GAP * (len(columns) - 1)
+        room = max(80, self._image_width - gap)
+        widths = [max(40, int(room * weight / total)) for weight in weights]
+
+        cells = []
+        for text, width in zip(columns, widths):
+            was, self._image_width = self._image_width, width
+            try:
+                cells.append(self._as_html(
+                    mark_page_breaks(replace_embeds(text, self.render))))
+            finally:
+                self._image_width = was
+
+        out = ['<table style="border:none;border-collapse:collapse"'
+               ' class="flograph-columns"><tbody><tr>']
+        for index, (cell, width) in enumerate(zip(cells, widths)):
+            pad = 0 if index == len(cells) - 1 else GRID_GAP
+            # Top and bottom padding, not just the gutter: a table has no
+            # margin of its own in Qt's rich text, so without it the
+            # paragraph above and the first line of a cell sit flush
+            # together and read as one block.
+            out.append(
+                f'<td width="{width}" style="border:none;'
+                f'padding:{GRID_GAP}px {pad}px {GRID_GAP}px 0;'
+                f'vertical-align:top">{cell}</td>')
+        out.append("</tr></tbody></table>")
+        return "".join(out)
+
     @staticmethod
     def _as_html(markdown: str) -> str:
         """A cell's content as HTML. Image tokens pass through untouched —
@@ -779,10 +820,13 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     printed document gets a real break and no rule.
     """
     resolver = _Resolver(lookup, image_scale, image_width, params, nested)
+    # Columns first, and they resolve their own embeds as they go: an embed
+    # inside a column has to be rendered knowing how wide that column is.
+    staged_body = replace_columns(body, resolver.render_columns)
     # After the embeds, not before: a node that returns markdown can then
     # force a break of its own, which is how a per-region section built in
     # a Python Script node gets to start each region on a fresh page.
-    resolved = mark_page_breaks(replace_embeds(body, resolver.render))
+    resolved = mark_page_breaks(replace_embeds(staged_body, resolver.render))
 
     staged = QTextDocument()
     staged.setMarkdown(resolved)

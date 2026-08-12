@@ -9,6 +9,46 @@ nobody reads.
 
 ---
 
+## Round 4 — columns, and one fewer lock — NEW
+
+### Columns
+
+    ```columns
+    ### North
+
+    Revenue rose 12% on the quarter.
+    ---
+    ![[Sales Chart]]
+    ```
+
+- [ ] Text left, chart right, side by side — and the chart is drawn *at
+      the column width*, not squeezed.
+- [ ] ` ```columns 2 1 ` → two thirds / one third. `60% 40%` the same.
+- [ ] Three columns. Four.
+- [ ] A per-embed `width=50%` **inside** a column → half of the column.
+- [ ] A chart *after* the block is full width again.
+- [ ] A block taller than a page → flows onto the next with both columns
+      continuing (Qt does split the row; worth confirming on a real one).
+- [ ] Export to **PDF** and **HTML** — columns survive both.
+- [ ] A normal ` ```python ` code block is still a code block, and a plain
+      `---` outside a columns block is still a horizontal rule.
+- [ ] A typo'd width (` ```columns wide narrow `) → equal columns, content
+      still shows.
+
+Known and deliberate: the two columns end level at the top and ragged at
+the bottom — Qt fills each independently. That's right for text-beside-a-
+chart and wrong for two columns of prose; balancing is chunk B's.
+
+### The lock button
+
+- [ ] The 🔒 is **gone** from the report toolbar.
+- [ ] Right-click the page tab → **Locked** still works, still undoable,
+      still saved with the project.
+- [ ] While locked, the tab menu still offers Page Setup, Export PDF and
+      Save HTML, and unticking Locked brings the toolbar back.
+
+---
+
 ## Round 3 — from the second test pass — NEW
 
 ### Sizing a chart so it fits the page

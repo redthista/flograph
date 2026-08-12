@@ -63,6 +63,25 @@ tables, and <code>---</code> for a rule. Written on one line, an embed
 renders <b>inline</b> in the sentence; on a line of its own it becomes a
 block.</p>
 
+<h3>Columns</h3>
+<p>Text on the left, a chart on the right — a fenced <code>columns</code>
+block, with <code>---</code> on its own line between the columns:</p>
+<pre>```columns
+### North
+
+Revenue rose 12% on the quarter.
+---
+![[Sales Chart]]
+```</pre>
+<p>Give the info string relative widths to split it unevenly —
+<code>```columns 2 1</code> is two thirds and one third, and
+<code>```columns 60% 40%</code> means the same thing. Any number of columns
+works. Each column holds ordinary markdown: headings, paragraphs, lists,
+embeds.</p>
+<p>A chart inside a column is drawn <b>at that column's width</b>, not
+drawn full size and squeezed, so it stays readable. A per-embed
+<code>width=</code> inside a column is a fraction of the column.</p>
+
 <h3>Page breaks</h3>
 <p>Start a new page with any of these, on a line of its own:</p>
 <p><code>\\pagebreak</code> &nbsp; <code>\\newpage</code> &nbsp;

@@ -46,8 +46,6 @@ Use **Export PDF…** when it reads the way you want.
 class ReportPage(QWidget):
     #: the user asked to export — the window owns the file dialog
     export_requested = Signal(str)   # page_id
-    #: the editor-collapse toggle was clicked; the window owns the undo stack
-    view_mode_requested = Signal(str, bool)   # page_id, view_mode
     #: Page Setup… was clicked; the window owns the dialog and the undo stack
     page_setup_requested = Signal(str)   # page_id
     #: Save as HTML… was clicked — the window owns the file dialog
@@ -155,17 +153,11 @@ class ReportPage(QWidget):
         self._timer.setInterval(PREVIEW_DELAY_MS)
         self._timer.timeout.connect(self.refresh_preview)
 
-        # The editor-collapse toggle *is* the view-mode switch rather than a
-        # second, separate setting: two controls that both hide the editor
-        # would sooner or later disagree about whether it is hidden.
-        self._mode_btn = QToolButton()
-        self._mode_btn.setAutoRaise(True)
-        self._mode_btn.setText("🔒")
-        self._mode_btn.clicked.connect(
-            lambda: self.view_mode_requested.emit(
-                self.page_id, not self._view_mode))
-        toolbar.insertWidget(0, self._mode_btn)
-
+        # Locking lives on the page tab's right-click menu and nowhere else.
+        # There used to be a 🔒 here as well, which put the control that
+        # *removes the toolbar* on the toolbar: it could only ever be used
+        # once, and getting back needed the tab menu anyway. One door in and
+        # the same door out.
         self.editor.textChanged.connect(self._on_text_changed)
 
         self._event_subs = [
@@ -197,20 +189,18 @@ class ReportPage(QWidget):
         """Locked mode is the rendered report and nothing else.
 
         The whole toolbar goes, not just the editor: every control on it —
-        insert an embed, collapse the editor, the unresolved-embed warning —
-        is for *writing* the report, and a strip of writing tools above a
-        finished document is exactly the chrome locking is meant to remove.
+        insert an embed, page setup, the unresolved-embed warning — is for
+        *writing* the report, and a strip of writing tools above a finished
+        document is exactly the chrome locking is meant to remove.
 
         That leaves no visible way back, which is deliberate rather than an
-        oversight: unlocking lives on the page tab's right-click menu, and
-        so does Export PDF while locked, so the one surface that is always
-        reachable carries both.
+        oversight: locking and unlocking both live on the page tab's
+        right-click menu, and so do Page Setup and the exports while locked,
+        so the one surface that is always reachable carries all of it.
         """
         self._view_mode = bool(view_mode)
         self.editor.setVisible(not self._view_mode)
         self._toolbar.setVisible(not self._view_mode)
-        self._mode_btn.setToolTip(
-            "Lock the page — hide the editor and this toolbar")
 
     def view_mode(self) -> bool:
         return self._view_mode

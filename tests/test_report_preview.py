@@ -257,7 +257,7 @@ class TestOnTheReportPage:
         from flograph.ui.report.help import reference_html
         text = reference_html()
         for needed in ("![[", "pagebreak", "{page}", "Page Setup",
-                       "Save HTML", "Locked"):
+                       "Save HTML", "Locked", "columns", "width=50%"):
             assert needed in text, needed
 
     def test_save_html_asks_the_window(self, page, qtbot):

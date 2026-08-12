@@ -1237,7 +1237,6 @@ class MainWindow(QMainWindow):
         from .report import ReportPage
         widget = ReportPage(self.graph, self.engine, self.undo_stack, page.id)
         widget.export_requested.connect(self._export_report_pdf)
-        widget.view_mode_requested.connect(self._set_page_view_mode)
         widget.page_setup_requested.connect(self._edit_page_setup)
         widget.export_html_requested.connect(self._export_report_html)
         # kept in the same dict as dashboards: everything the window does
