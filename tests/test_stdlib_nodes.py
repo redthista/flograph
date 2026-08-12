@@ -608,6 +608,38 @@ class TestIONodes:
         assert len(back) == len(table)
 
 
+class TestScaleIsPresentation:
+    """"Scale %" zooms a card's contents. No node's run() reads it, so a
+    change to it cannot alter what the node produced — and dirtying on it
+    would re-run the node, and everything downstream, to arrive at exactly
+    the figure/table/picture already cached.
+
+    Swept across the registry rather than listed node by node, so a node
+    that grows a Scale % later has to make the same decision deliberately.
+    """
+
+    def scaled_nodes(self, registry):
+        return [spec for spec in registry.all()
+                if spec.param("scale") is not None]
+
+    def test_there_are_some_to_check(self, registry):
+        # a rename of the param would otherwise turn this file green by
+        # checking nothing at all
+        assert len(self.scaled_nodes(registry)) >= 8
+
+    def test_every_scale_param_is_cosmetic(self, registry):
+        for spec in self.scaled_nodes(registry):
+            assert spec.param("scale").cosmetic, spec.type_id
+
+    def test_no_node_run_reads_it(self, registry):
+        # the justification for the flag, asserted rather than assumed: the
+        # param is declared in PARAMS and never consulted in the body
+        for spec in self.scaled_nodes(registry):
+            body = spec.source.split("def run(", 1)[-1]
+            assert '"scale"' not in body, spec.type_id
+            assert "'scale'" not in body, spec.type_id
+
+
 class TestVizNodes:
     def test_plot_line_defaults(self, registry, table):
         out = run_node(registry, "flograph.viz.show_plot", {}, table=table)

@@ -48,8 +48,10 @@ PARAMS = [
      "default": "", "placeholder": "file path, data: URI, or base64"},
     {"name": "fit", "type": "choice", "label": "Fit",
      "options": ["Fit", "Fill", "Stretch", "Original size"], "default": "Fit"},
+    # Cosmetic: run() never reads it — the zoom happens as the card decodes
+    # the picture, which it redraws on a param change without a run.
     {"name": "scale", "type": "int", "label": "Scale %",
-     "default": 100, "min": 25, "max": 400},
+     "default": 100, "min": 25, "max": 400, "cosmetic": True},
     {"name": "animate", "type": "bool", "label": "Animate", "default": True},
     {"name": "background", "type": "bool", "label": "Card background",
      "default": True},
