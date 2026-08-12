@@ -479,6 +479,38 @@ class TestVisualsList:
         assert [text.split(" ", 1)[1] for text in labels] == ["bbb", "zzz"]
 
 
+class TestVisualGlyphs:
+    """The kind marks in front of each row have to actually paint.
+
+    The emoji this list started with (📈 📊 🔢) are outside the BMP, and on
+    a machine whose UI font has no emoji coverage they drew nothing at all
+    — a row indented by an invisible character. QFontMetrics.inFont() is no
+    guard: it answers True for every one of them. Painting is the only
+    honest test."""
+
+    def test_every_glyph_is_bmp(self):
+        from flograph.ui.dashboard.visuals_list import _KIND_GLYPHS
+        for kind, glyph in _KIND_GLYPHS.items():
+            assert len(glyph) == 1, kind      # no surrogate pairs
+            assert ord(glyph) < 0x10000, f"{kind}: {glyph!r} needs an emoji font"
+
+    def test_every_glyph_paints_ink(self, qapp):
+        from PySide6.QtGui import QPainter, QPixmap
+        from flograph.ui.dashboard.visuals_list import _KIND_GLYPHS
+        for kind, glyph in _KIND_GLYPHS.items():
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(Qt.white)
+            painter = QPainter(pixmap)
+            painter.setFont(qapp.font())
+            painter.setPen(Qt.black)
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, glyph)
+            painter.end()
+            image = pixmap.toImage()
+            ink = sum(1 for x in range(32) for y in range(32)
+                      if image.pixel(x, y) != 0xFFFFFFFF)
+            assert ink > 0, f"{kind}: {glyph!r} painted nothing"
+
+
 class TestVisualPreview:
     """Hovering a row in the visuals list shows what dropping it produces.
 

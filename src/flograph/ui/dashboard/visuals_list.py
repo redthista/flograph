@@ -12,17 +12,30 @@ TILE_NODE_MIME = "application/x-flograph-tile-node"
 #: Where the hover preview sits relative to the row it belongs to.
 _OFFSET = QPoint(10, -6)
 
+#: The mark in front of each row, saying what sort of visual it is.
+#:
+#: Geometric shapes rather than emoji, and deliberately: the emoji this
+#: used to carry (📈 📊 🔢) live outside the Basic Multilingual Plane, and
+#: on a machine whose UI font has no emoji coverage they paint *nothing* —
+#: the rows came out indented by a space that wasn't there. Every glyph
+#: below is BMP and comes with the ordinary sans fonts. Qt is no help in
+#: spotting the difference: QFontMetrics.inFont() answers True for glyphs
+#: it then declines to draw, so a candidate has to be painted and its ink
+#: counted (see TestVisualGlyphs).
 _KIND_GLYPHS = {
-    "figure": "📈",
-    "webview": "📊",
+    "figure": "◔",
+    "webview": "◉",
     "table_viewer": "▦",
-    "grid": "▦",
-    "kpi": "🔢",
+    "grid": "▤",
+    "kpi": "∑",
+    "image": "▣",
+    "report": "☰",
     "slicer": "⑂",
+    # not another square: the tables, the sheet and the picture already
+    # carry those, and a fourth would be four marks nobody can tell apart
+    # at 9pt
+    "control": "⇵",
     "button": "▶",
-    "control": "🎛",
-    "report": "📄",
-    "image": "🖼",
 }
 
 #: Kinds in the order they are listed, charts first and the furniture last.
