@@ -1045,6 +1045,9 @@ class MainWindow(QMainWindow):
         for item in self.scene.node_items.values():
             if getattr(item, "report_card", False):
                 item.refresh_report()
+        # Same trigger, same coalescing: a card whose page is open in a
+        # browser has that page rewritten here too.
+        self._refresh_open_report_cards()
 
     def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -1203,6 +1206,7 @@ class MainWindow(QMainWindow):
         self.page_bar.set_view_mode_requested.connect(self._set_page_view_mode)
         self.page_bar.export_page_requested.connect(self._export_report_pdf)
         self.page_bar.page_setup_requested.connect(self._edit_page_setup)
+        self.page_bar.export_html_requested.connect(self._export_report_html)
         self.page_bar.current_page_changed.connect(
             self._on_current_page_changed)
         self.page_bar.model_tab_double_clicked.connect(self.toggle_all_panels)
@@ -1235,6 +1239,7 @@ class MainWindow(QMainWindow):
         widget.export_requested.connect(self._export_report_pdf)
         widget.view_mode_requested.connect(self._set_page_view_mode)
         widget.page_setup_requested.connect(self._edit_page_setup)
+        widget.export_html_requested.connect(self._export_report_html)
         # kept in the same dict as dashboards: everything the window does
         # with a page — switching, removing, disposing — is the same for
         # both, and only the two places that need the difference ask
@@ -1273,17 +1278,10 @@ class MainWindow(QMainWindow):
         rendered = self._render_report_card(node_id, for_print=True)
         if node is None or rendered is None:
             return
-        folder = (Path(self._project_path).parent if self._project_path
-                  else Path.home())
-        safe = "".join(c for c in node.label
-                       if c.isalnum() or c in " -_").strip() or "report"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export report as PDF", str(folder / f"{safe}.pdf"),
-            "PDF documents (*.pdf)")
-        if not path:
+        path = self._save_path_for(node.label, ".pdf", "Export report as PDF",
+                                   "PDF documents (*.pdf)")
+        if path is None:
             return
-        if not path.lower().endswith(".pdf"):
-            path += ".pdf"
         from .report import export_pdf
         try:
             export_pdf(rendered.document, path, title=node.label)
@@ -1298,6 +1296,18 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage(f"Exported {path}", 6000)
 
+    def _export_report_card_html(self, node_id: str) -> None:
+        node = self.graph.nodes.get(node_id)
+        rendered = self._render_report_card(node_id, for_print=True)
+        if node is None or rendered is None:
+            return
+        path = self._save_path_for(node.label, ".html",
+                                   "Save report as HTML",
+                                   "HTML documents (*.html)")
+        if path is None:
+            return
+        self._write_html(rendered, path, node.label)
+
     def _open_report_card_in_browser(self, node_id: str) -> None:
         """The card as one self-contained HTML file, handed to the desktop.
 
@@ -1305,7 +1315,7 @@ class MainWindow(QMainWindow):
         per-node path as a webview node's Open in Browser, so a tab left
         open on a report card behaves like every other tab this app opens.
         """
-        from .browser import open_html, status_message
+        from .browser import open_html, remember, status_message
         from .report import report_html
         node = self.graph.nodes.get(node_id)
         rendered = self._render_report_card(node_id, for_print=False)
@@ -1313,7 +1323,29 @@ class MainWindow(QMainWindow):
             return
         path = open_html(report_html(rendered, node.label), node.label,
                          token=node.id[:8])
+        # Registered, so editing the card afterwards rewrites this file and
+        # the open tab shows the new version on a refresh — without it the
+        # page was written once and quietly went stale.
+        remember(node_id, path)
         self.statusBar().showMessage(status_message(node, path), 8000)
+
+    def _refresh_open_report_cards(self) -> None:
+        """Keep an open browser tab level with the report cards on canvas.
+
+        A report card is not like a webview node: it re-renders when its
+        *text* changes, not only when it runs, so hooking this to
+        node_succeeded alone would miss every edit made to the prose. It
+        rides along with the canvas re-render instead, which already fires
+        for both.
+        """
+        from .browser import is_open, rewrite
+        from .report import report_html
+        for node_id, node in self.graph.nodes.items():
+            if not is_open(node_id) or card_kind(node) != "report":
+                continue
+            rendered = self._render_report_card(node_id, for_print=False)
+            if rendered is not None:
+                rewrite(node_id, report_html(rendered, node.label))
 
     def _edit_page_setup(self, page_id: str) -> None:
         """Page Setup… for a report page — from its toolbar, or from the tab
@@ -1326,31 +1358,88 @@ class MainWindow(QMainWindow):
         from .commands import SetPageSetupCommand
         from .report import PageSetupDialog
         dialog = PageSetupDialog(page.setup, page.title, self)
-        if dialog.exec() != QDialog.Accepted:
+
+        # Live preview: the page behind shows the paper being described
+        # while the dialog is open, and goes back to its own on any exit.
+        # Waiting for OK to find out what a margin did is the slow way to
+        # set a margin.
+        widget = self._dashboard_pages.get(page_id)
+        preview = getattr(widget, "preview_setup", None)
+        if callable(preview):
+            dialog.setup_changed.connect(preview)
+        try:
+            accepted = dialog.exec() == QDialog.Accepted
+        finally:
+            if callable(preview):
+                dialog.setup_changed.disconnect(preview)
+                preview(None)
+        if not accepted:
             return
         setup = dialog.result_setup()
         if setup == page.setup:
             return   # nothing to record, and an undo step that did nothing
         self.undo_stack.push(SetPageSetupCommand(self.graph, page_id, setup))
 
+    def _save_path_for(self, name: str, suffix: str, caption: str,
+                       filter_text: str) -> Optional[str]:
+        """Ask where to write an export of `name`.
+
+        Next to the project and named after the thing being exported — the
+        two things anyone exporting has just been looking at.
+        """
+        folder = (Path(self._project_path).parent if self._project_path
+                  else Path.home())
+        safe = "".join(c for c in name
+                       if c.isalnum() or c in " -_").strip() or "report"
+        path, _ = QFileDialog.getSaveFileName(
+            self, caption, str(folder / f"{safe}{suffix}"), filter_text)
+        if not path:
+            return None
+        return path if path.lower().endswith(suffix) else path + suffix
+
+    def _write_html(self, rendered, path: str, title: str) -> None:
+        """Shared by the page's Save HTML and the card's."""
+        from .report import report_html
+        try:
+            Path(path).write_text(report_html(rendered, title),
+                                  encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Save failed", str(exc))
+            return
+        if rendered.problems:
+            QMessageBox.warning(
+                self, "Saved with problems",
+                f"Saved to {path}, but some embeds didn't resolve:\n\n• "
+                + "\n• ".join(dict.fromkeys(rendered.problems)))
+        else:
+            self.statusBar().showMessage(f"Saved {path}", 6000)
+
+    def _export_report_html(self, page_id: str) -> None:
+        """The report as one self-contained HTML file.
+
+        Not the same thing as Open in Browser, which writes to a session
+        temp directory that is deleted on exit — this is the copy you keep,
+        mail, or put somewhere a colleague can open it.
+        """
+        page = self.graph.pages.get(page_id)
+        widget = self._dashboard_pages.get(page_id)
+        if page is None or widget is None:
+            return
+        path = self._save_path_for(page.title, ".html", "Save report as HTML",
+                                   "HTML documents (*.html)")
+        if path is None:
+            return
+        self._write_html(widget.rendered(for_print=True), path, page.title)
+
     def _export_report_pdf(self, page_id: str) -> None:
         page = self.graph.pages.get(page_id)
         widget = self._dashboard_pages.get(page_id)
         if page is None or widget is None:
             return
-        # next to the project, named after the page — the two things anyone
-        # exporting a report has just been looking at
-        folder = (Path(self._project_path).parent if self._project_path
-                  else Path.home())
-        safe = "".join(c for c in page.title
-                       if c.isalnum() or c in " -_").strip() or "report"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export report as PDF", str(folder / f"{safe}.pdf"),
-            "PDF documents (*.pdf)")
-        if not path:
+        path = self._save_path_for(page.title, ".pdf", "Export report as PDF",
+                                   "PDF documents (*.pdf)")
+        if path is None:
             return
-        if not path.lower().endswith(".pdf"):
-            path += ".pdf"
         from .report import export_pdf
         rendered = widget.rendered(for_print=True)
         try:
@@ -2051,8 +2140,10 @@ class MainWindow(QMainWindow):
         # node, a report card's text is worth exporting on its own, and an
         # unresolved embed says so in the document rather than failing.
         report_export_action = report_browser_action = None
+        report_html_action = None
         if card_kind(node) == "report":
             report_export_action = menu.addAction("Export PDF…")
+            report_html_action = menu.addAction("Save HTML…")
             report_browser_action = menu.addAction("Open in Browser")
         connected_actions: list = []
         from flograph.core.links import (is_from, is_goto, link_label,
@@ -2147,6 +2238,8 @@ class MainWindow(QMainWindow):
         elif (report_export_action is not None
                 and chosen is report_export_action):
             self._export_report_card_pdf(node_id)
+        elif report_html_action is not None and chosen is report_html_action:
+            self._export_report_card_html(node_id)
         elif (report_browser_action is not None
                 and chosen is report_browser_action):
             self._open_report_card_in_browser(node_id)

@@ -59,6 +59,7 @@ class PageTabBar(QTabBar):
     set_view_mode_requested = Signal(str, bool)   # page_id, locked
     export_page_requested = Signal(str)           # page_id (locked reports)
     page_setup_requested = Signal(str)            # page_id (locked reports)
+    export_html_requested = Signal(str)           # page_id (locked reports)
     current_page_changed = Signal(object)      # page_id, or None for Model
     model_tab_double_clicked = Signal()        # collapse/restore every panel
 
@@ -317,6 +318,10 @@ class PageTabBar(QTabBar):
                 export_action.triggered.connect(
                     lambda: self.export_page_requested.emit(page_id))
                 menu.addAction(export_action)
+                html_action = QAction("Save HTML…", self)
+                html_action.triggered.connect(
+                    lambda: self.export_html_requested.emit(page_id))
+                menu.addAction(html_action)
             menu.addSeparator()
             rename_action = QAction("Rename", self)
             dup_action = QAction("Duplicate", self)

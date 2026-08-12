@@ -15,12 +15,13 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton, QSplitter,
-    QTextBrowser, QToolButton, QVBoxLayout, QWidget,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph
 
 from ..commands import SetPageBodyCommand
+from .preview import PagedPreview
 from .render import render_report
 
 # How long typing has to pause before the preview re-renders. Re-rendering
@@ -49,6 +50,8 @@ class ReportPage(QWidget):
     view_mode_requested = Signal(str, bool)   # page_id, view_mode
     #: Page Setup… was clicked; the window owns the dialog and the undo stack
     page_setup_requested = Signal(str)   # page_id
+    #: Save as HTML… was clicked — the window owns the file dialog
+    export_html_requested = Signal(str)   # page_id
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -62,6 +65,9 @@ class ReportPage(QWidget):
         #: drives animated images in the preview; rebuilt on every render
         self._animator = None
         self._view_mode = False
+        #: a PageSetup the Page Setup dialog is trying out, or None for the
+        #: page's own — see preview_setup
+        self._setup_override = None
 
         self.editor = QPlainTextEdit()
         self.editor.setObjectName("report_source")
@@ -73,9 +79,10 @@ class ReportPage(QWidget):
         self.editor.setPlaceholderText(
             "Write the report in markdown, and ![[embed]] what the flow made…")
 
-        self.preview = QTextBrowser()
-        self.preview.setObjectName("report_preview")
-        self.preview.setOpenExternalLinks(True)
+        # Paper, not a scroll of rich text: everything page setup adds — the
+        # cover, the running header and footer, where a page actually ends —
+        # is invisible in a continuous view until the PDF comes out.
+        self.preview = PagedPreview()
 
         self._insert_btn = QToolButton()
         self._insert_btn.setText("Insert embed ▾")
@@ -89,6 +96,17 @@ class ReportPage(QWidget):
             "headers and footers")
         self._setup_btn.clicked.connect(
             lambda: self.page_setup_requested.emit(self.page_id))
+        self._help_btn = QToolButton()
+        self._help_btn.setText("?")
+        self._help_btn.setToolTip("What you can write in a report")
+        self._help_btn.clicked.connect(self.show_help)
+        self._html_btn = QToolButton()
+        self._html_btn.setText("Save HTML…")
+        self._html_btn.setToolTip(
+            "Save the report as one self-contained HTML file — pictures "
+            "included, so it travels as a single file")
+        self._html_btn.clicked.connect(
+            lambda: self.export_html_requested.emit(self.page_id))
         self._export_btn = QPushButton("Export PDF…")
         self._export_btn.clicked.connect(
             lambda: self.export_requested.emit(self.page_id))
@@ -101,8 +119,10 @@ class ReportPage(QWidget):
         toolbar = QHBoxLayout(self._toolbar)
         toolbar.setContentsMargins(6, 4, 6, 0)
         toolbar.addWidget(self._insert_btn)
+        toolbar.addWidget(self._help_btn)
         toolbar.addWidget(self._status, 1)
         toolbar.addWidget(self._setup_btn)
+        toolbar.addWidget(self._html_btn)
         toolbar.addWidget(self._export_btn)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -256,22 +276,33 @@ class ReportPage(QWidget):
         if page is None:
             return
         position = self.preview.verticalScrollBar().value()
-        # page_break_rule: the preview is one continuous scroll, so a forced
-        # break has no boundary to land on and would be invisible. A rule is
-        # drawn in its place, which is the only feedback that the marker was
-        # recognised at all.
+        setup = self._setup_override or page.setup
+        # No page_break_rule any more: the preview is paginated, so a forced
+        # break shows as the page actually ending — which is better feedback
+        # than a rule standing in for one, and it is what will print.
         rendered = render_report(page.body, self._graph, self._engine.cache,
-                                 setup=page.setup, page_break_rule=True)
+                                 setup=setup)
         self.problems = rendered.problems
         # Before the old document goes: a running QMovie writing frames into
         # a deleted document is a crash, not a stale picture.
         self._stop_animations()
-        self.preview.setDocument(rendered.document)
+        self.preview.set_report(rendered.document, setup, page.title)
         self._start_animations(rendered)
         # a re-render on every keystroke that jumped to the top would make
         # the preview useless while writing past the first screenful
         self.preview.verticalScrollBar().setValue(position)
         self._status.setText(self._problem_text())
+
+    def preview_setup(self, setup) -> None:
+        """Show the report on `setup`'s paper without committing it.
+
+        This is what makes Page Setup live: the dialog hands its
+        work-in-progress here on every change, so the paper resizes and the
+        header appears while the spin box is still being dragged. None puts
+        the page's own setup back — which is all Cancel has to do.
+        """
+        self._setup_override = setup
+        self.refresh_preview()
 
     def _stop_animations(self) -> None:
         if self._animator is not None:
@@ -368,6 +399,17 @@ class ReportPage(QWidget):
                              image_scale=2.0 if for_print else 1.0,
                              setup=page.setup if page else None,
                              page_break_rule=not for_print)
+
+    def show_help(self) -> None:
+        """The report reference. Kept on the page rather than the window so
+        it opens beside the report it is about, and reused rather than
+        re-created so clicking "?" twice raises the one that is open."""
+        from .help import ReportHelpDialog
+        if getattr(self, "_help_dialog", None) is None:
+            self._help_dialog = ReportHelpDialog(self)
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
 
     def page_setup(self):
         """The page's geometry — what the window hands to export_pdf."""
