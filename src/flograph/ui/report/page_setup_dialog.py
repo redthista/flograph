@@ -11,7 +11,7 @@ job, which is what keeps this a plain QDialog with no graph in it.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QGridLayout, QGroupBox, QLabel, QLineEdit, QSpinBox,
@@ -28,6 +28,11 @@ _FIELD_HELP = "Fields: " + ", ".join(f"{token} — {what}"
 
 
 class PageSetupDialog(QDialog):
+    #: Emitted on every change, with the setup as it currently stands, so
+    #: the page behind can show the paper being described. Waiting for OK
+    #: to find out what a margin did is the slow way to set a margin.
+    setup_changed = Signal(object)
+
     def __init__(self, setup: PageSetup, page_title: str = "",
                  parent=None) -> None:
         super().__init__(parent)
@@ -66,14 +71,14 @@ class PageSetupDialog(QDialog):
             self.size_box.addItem(name, name)
         index = self.size_box.findData(self._setup.size)
         self.size_box.setCurrentIndex(max(0, index))
-        self.size_box.currentIndexChanged.connect(self._refresh_summary)
+        self.size_box.currentIndexChanged.connect(self._changed)
         form.addRow("Size", self.size_box)
 
         self.orientation_box = QComboBox()
         self.orientation_box.addItem("Portrait", False)
         self.orientation_box.addItem("Landscape", True)
         self.orientation_box.setCurrentIndex(1 if self._setup.landscape else 0)
-        self.orientation_box.currentIndexChanged.connect(self._refresh_summary)
+        self.orientation_box.currentIndexChanged.connect(self._changed)
         form.addRow("Orientation", self.orientation_box)
 
         margins = QGroupBox("Margins (mm)")
@@ -87,7 +92,7 @@ class PageSetupDialog(QDialog):
             box.setDecimals(1)
             box.setSingleStep(1.0)
             box.setValue(float(getattr(self._setup, name)))
-            box.valueChanged.connect(self._refresh_summary)
+            box.valueChanged.connect(self._changed)
             self.margin_boxes[name] = box
             grid.addWidget(QLabel(label), column // 2, (column % 2) * 2)
             grid.addWidget(box, column // 2, (column % 2) * 2 + 1)
@@ -103,19 +108,23 @@ class PageSetupDialog(QDialog):
         self.cover_check = QCheckBox("Start with a cover page")
         self.cover_check.setChecked(self._setup.cover)
         self.cover_check.toggled.connect(self._cover_toggled)
+        self.cover_check.toggled.connect(self._changed)
         form.addRow(self.cover_check)
 
         self.cover_title_edit = QLineEdit(self._setup.cover_title)
         self.cover_title_edit.setPlaceholderText(
             self._page_title or "the page's own title")
+        self.cover_title_edit.textChanged.connect(self._changed)
         form.addRow("Title", self.cover_title_edit)
 
         self.cover_subtitle_edit = QLineEdit(self._setup.cover_subtitle)
         self.cover_subtitle_edit.setPlaceholderText("optional line beneath")
+        self.cover_subtitle_edit.textChanged.connect(self._changed)
         form.addRow("Subtitle", self.cover_subtitle_edit)
 
         self.cover_date_check = QCheckBox("Show today's date")
         self.cover_date_check.setChecked(self._setup.cover_date)
+        self.cover_date_check.toggled.connect(self._changed)
         form.addRow(self.cover_date_check)
 
         note = QLabel("The cover is a page of its own before the report, and "
@@ -147,6 +156,7 @@ class PageSetupDialog(QDialog):
                 name = f"{band}_{side}"
                 edit = QLineEdit(getattr(self._setup, name))
                 edit.setPlaceholderText(side.capitalize())
+                edit.textChanged.connect(self._changed)
                 self.band_edits[name] = edit
                 grid.addWidget(QLabel(side.capitalize()), 0, column)
                 grid.addWidget(edit, 1, column)
@@ -160,12 +170,14 @@ class PageSetupDialog(QDialog):
         self.first_page_check = QCheckBox(
             "Show the header and footer on the first page")
         self.first_page_check.setChecked(self._setup.bands_on_first_page)
+        self.first_page_check.toggled.connect(self._changed)
         layout.addWidget(self.first_page_check)
 
         row = QFormLayout()
         self.first_number_box = QSpinBox()
         self.first_number_box.setRange(0, 9999)
         self.first_number_box.setValue(int(self._setup.first_page_number))
+        self.first_number_box.valueChanged.connect(self._changed)
         row.addRow("Number the first page", self.first_number_box)
         layout.addLayout(row)
         layout.addStretch(1)
@@ -182,6 +194,17 @@ class PageSetupDialog(QDialog):
             self._summary_label.setAlignment(Qt.AlignRight)
             self._summary_label.setStyleSheet("color: palette(mid);")
         return self._summary_label
+
+    def _changed(self, *_args) -> None:
+        """Any control moved: update the readout and tell the page behind.
+
+        Every widget goes through here rather than only the ones that
+        affect geometry — a header appearing as you type it is the same
+        feedback as the paper resizing, and there is no reason to make one
+        live and the other not.
+        """
+        self._refresh_summary()
+        self.setup_changed.emit(self._read())
 
     def _refresh_summary(self) -> None:
         """The one number nobody can work out in their head: how wide the
@@ -228,7 +251,7 @@ class PageSetupDialog(QDialog):
             edit.setText(getattr(defaults, name))
         self.first_page_check.setChecked(defaults.bands_on_first_page)
         self.first_number_box.setValue(int(defaults.first_page_number))
-        self._refresh_summary()
+        self._changed()
 
     def result_setup(self) -> PageSetup:
         """What the dialog was left showing. Read after exec() returns

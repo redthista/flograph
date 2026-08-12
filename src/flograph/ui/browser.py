@@ -123,6 +123,37 @@ def refresh_node(node, entry) -> Optional[str]:
     return path
 
 
+def remember(node_id: str, path: str) -> None:
+    """Record a page opened by something that built its own HTML.
+
+    `open_node` does this for webview nodes, whose HTML comes from the
+    cache. A report card's does not — it is rendered from the card's text
+    and its wired inputs — so it hands the path back here instead, and
+    then gets the same "the tab keeps up" behaviour as everything else.
+    """
+    _open_pages[node_id] = path
+
+
+def rewrite(node_id: str, html: str) -> "str | None":
+    """Rewrite an already-opened page in place, silently.
+
+    Silent is the point: nothing is handed to the desktop, so a re-render
+    never steals focus or spawns a second tab — the tab the user already
+    has open just shows the new version when they refresh it.
+    """
+    path = _open_pages.get(node_id)
+    if path is None or not html:
+        return None
+    from pathlib import Path
+    try:
+        Path(path).write_text(html, encoding="utf-8")
+    except OSError:
+        # The temp dir went away, or the disk did. A stale tab is not worth
+        # interrupting an edit for.
+        return None
+    return path
+
+
 def is_open(node_id: str) -> bool:
     """Whether this node has a page a browser may still be showing."""
     return node_id in _open_pages

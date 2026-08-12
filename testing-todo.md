@@ -9,6 +9,43 @@ nobody reads.
 
 ---
 
+## Round 2 — from the first test pass — NEW
+
+### The preview is paper now
+
+- [ ] The preview shows **sheets** with gaps between them, cover included,
+      header/footer where they will print, page ending where it will end.
+- [ ] **Page Setup is live**: change size, drag a margin, type a footer →
+      the pages behind re-lay out *as you type*, no OK needed.
+- [ ] **Cancel** → the paper goes back to what the page had.
+- [ ] **Ctrl+wheel** over the preview zooms; plain wheel scrolls. Zoom
+      survives dragging the splitter (it stops fitting the width once you
+      have set one).
+- [ ] Narrow the editor/preview split right down — still readable via
+      Ctrl+wheel? This is the one thing paper costs us versus the old
+      reflowing view, so it is worth a judgement.
+
+### Save HTML and the ? button
+
+- [ ] **Save HTML…** on the toolbar → pick a location, open the file.
+      Charts are inside it: move the file elsewhere and they survive.
+- [ ] Same entry on a **Report card's** right-click menu, and on a
+      **locked** page's tab menu.
+- [ ] **?** on the toolbar → the reference opens, is **non-modal** (you can
+      keep typing behind it), and clicking ? again raises the same window
+      rather than opening a second.
+- [ ] Spot-check the reference against what the app actually does — it is
+      the thing people will trust instead of experimenting.
+
+### The browser refresh fix
+
+- [ ] Open a Report card in the browser, then **edit the card's text** on
+      the canvas → refresh the tab → the new text is there.
+- [ ] Same for a **re-run** that changes an embedded chart.
+- [ ] Two cards open in two tabs → each keeps its own page.
+
+---
+
 ## Page setup, cover, headers/footers, page breaks (A1–A3) — NEW
 
 Built on branch `worktree-report-page-setup`. Automated tests cover the

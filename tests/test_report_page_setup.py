@@ -417,12 +417,17 @@ class TestInTheWindow:
 
     def accept_with(self, monkeypatch, setup):
         """Stand in for the dialog, which cannot be exec()d in a test."""
+        from PySide6.QtCore import QObject, Signal
         from PySide6.QtWidgets import QDialog
         from flograph.ui import report as report_pkg
 
-        class Stub:
+        class Stub(QObject):
+            # a real signal, because the window connects the live-preview
+            # callback to it and disconnects on the way out
+            setup_changed = Signal(object)
+
             def __init__(self, *args, **kwargs):
-                pass
+                super().__init__()
 
             def exec(self):
                 return QDialog.Accepted

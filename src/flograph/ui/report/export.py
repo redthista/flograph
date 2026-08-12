@@ -23,8 +23,9 @@ from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt
 from PySide6.QtGui import (QFont, QPageLayout, QPageSize, QPainter, QPalette,
                            QPdfWriter, QTextDocument)
 
-from flograph.core.page_setup import (BAND_FONT_SIZE, BAND_HEIGHT, PAGE_SIZES,
-                                      PageSetup, expand, today)
+from flograph.core.page_setup import (BAND_FONT_SIZE, BAND_HEIGHT,
+                                      MM_PER_POINT, PAGE_SIZES, PageSetup,
+                                      expand, today)
 
 # 72, i.e. one device unit per point — NOT a quality setting.
 #
@@ -91,6 +92,34 @@ def page_layout(setup: Optional[PageSetup] = None,
         QMarginsF(setup.margin_left, setup.margin_top,
                   setup.margin_right, setup.margin_bottom),
         QPageLayout.Millimeter)
+
+
+def sheet_points(setup: PageSetup) -> QSizeF:
+    """The whole sheet in points, orientation applied.
+
+    The PDF writer never needs this — its painter starts inside the margins
+    — but a preview that draws paper has to draw the paper.
+    """
+    width, height = setup.page_mm()
+    return QSizeF(width / MM_PER_POINT, height / MM_PER_POINT)
+
+
+def printable_points(setup: PageSetup) -> QRectF:
+    """The printable area *positioned within the sheet*, in points.
+
+    The one place the two renderers legitimately differ: painting a PDF
+    starts at this rect's top-left, so export passes an equivalent rect at
+    the origin; painting a preview starts at the corner of the paper, so it
+    passes this one. Everything downstream takes the rect and asks no
+    questions.
+    """
+    sheet = sheet_points(setup)
+    left = setup.margin_left / MM_PER_POINT
+    top = setup.margin_top / MM_PER_POINT
+    return QRectF(
+        left, top,
+        max(1.0, sheet.width() - left - setup.margin_right / MM_PER_POINT),
+        max(1.0, sheet.height() - top - setup.margin_bottom / MM_PER_POINT))
 
 
 def body_rect(printable: QRectF, setup: PageSetup) -> QRectF:
@@ -170,6 +199,66 @@ def _draw_cover(painter: QPainter, printable: QRectF, setup: PageSetup,
     painter.restore()
 
 
+def paint_context():
+    """A paint context with black text.
+
+    What QTextDocument.print_ does and a hand-rolled page loop forgets:
+    without it the text is drawn in the *application palette's* text
+    colour, so a report exported — or previewed — under a dark theme is
+    near-white on a white sheet.
+    """
+    from PySide6.QtGui import QAbstractTextDocumentLayout
+    context = QAbstractTextDocumentLayout.PaintContext()
+    context.palette.setColor(QPalette.Text, Qt.black)
+    return context
+
+
+def paint_body(painter: QPainter, layout, context, body: QRectF,
+               index: int) -> None:
+    """One page's worth of the document, drawn into `body`.
+
+    Clip before translating: the clip is taken in the coordinates in force
+    when it is set, and those are the page's. Without it a tall image on
+    the last page bleeds down into the footer.
+    """
+    painter.save()
+    painter.setClipRect(body)
+    painter.translate(body.left(), body.top() - index * body.height())
+    context.clip = QRectF(0, index * body.height(),
+                          body.width(), body.height())
+    layout.draw(painter, context)
+    painter.restore()
+
+
+def paint_furniture(painter: QPainter, printable: QRectF, setup: PageSetup,
+                    number: int, pages: int, title: str, date: str) -> None:
+    """The running header and footer for one page."""
+    if setup.has_header():
+        _draw_band(painter,
+                   QRectF(printable.left(), printable.top(),
+                          printable.width(), BAND_HEIGHT),
+                   setup.header_fields(), number, pages, title, date)
+    if setup.has_footer():
+        _draw_band(painter,
+                   QRectF(printable.left(), printable.bottom() - BAND_HEIGHT,
+                          printable.width(), BAND_HEIGHT),
+                   setup.footer_fields(), number, pages, title, date)
+
+
+def paint_cover(painter: QPainter, printable: QRectF, setup: PageSetup,
+                title: str, date: str) -> None:
+    _draw_cover(painter, printable, setup, title, date)
+
+
+def page_count(document: QTextDocument, setup: PageSetup) -> int:
+    """How many *body* pages this document makes on this paper — a cover,
+    if there is one, is not one of them."""
+    body = body_rect(printable_points(setup), setup)
+    copy = document.clone()
+    copy.setPageSize(QSizeF(body.width(), body.height()))
+    return max(1, copy.pageCount())
+
+
 def export_pdf(document: QTextDocument, path: str, title: str = "",
                landscape: Optional[bool] = None,
                setup: Optional[PageSetup] = None) -> str:
@@ -206,14 +295,7 @@ def export_pdf(document: QTextDocument, path: str, title: str = "",
 
     date = today()
     layout = copy.documentLayout()
-
-    from PySide6.QtGui import QAbstractTextDocumentLayout
-    context = QAbstractTextDocumentLayout.PaintContext()
-    # What QTextDocument.print_ does and a hand-rolled page loop forgets:
-    # without it the text is drawn in the *application palette's* text
-    # colour, so exporting from a dark theme writes a near-white report
-    # onto a white sheet.
-    context.palette.setColor(QPalette.Text, Qt.black)
+    context = paint_context()
 
     painter = QPainter()
     if not painter.begin(writer):
@@ -221,37 +303,17 @@ def export_pdf(document: QTextDocument, path: str, title: str = "",
     try:
         pages = max(1, copy.pageCount())
         if setup.cover:
-            _draw_cover(painter, printable, setup, title, date)
+            paint_cover(painter, printable, setup, title, date)
             writer.newPage()
         for index in range(pages):
             if index:
                 writer.newPage()
-            number = setup.first_page_number + index
-            painter.save()
-            # Clip before translating: the clip is taken in the coordinates
-            # in force when it is set, and these are the page's. Without it
-            # a tall image on the last page bleeds down into the footer.
-            painter.setClipRect(body)
-            painter.translate(body.left(),
-                              body.top() - index * body.height())
-            context.clip = QRectF(0, index * body.height(),
-                                  body.width(), body.height())
-            layout.draw(painter, context)
-            painter.restore()
-
+            paint_body(painter, layout, context, body, index)
             if index == 0 and not setup.bands_on_first_page:
                 continue
-            if setup.has_header():
-                _draw_band(painter,
-                           QRectF(printable.left(), printable.top(),
-                                  printable.width(), BAND_HEIGHT),
-                           setup.header_fields(), number, pages, title, date)
-            if setup.has_footer():
-                _draw_band(painter,
-                           QRectF(printable.left(),
-                                  printable.bottom() - BAND_HEIGHT,
-                                  printable.width(), BAND_HEIGHT),
-                           setup.footer_fields(), number, pages, title, date)
+            paint_furniture(painter, printable, setup,
+                            setup.first_page_number + index, pages,
+                            title, date)
     finally:
         painter.end()
     return path
