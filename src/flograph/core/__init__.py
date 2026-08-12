@@ -12,6 +12,7 @@ from .params import ParamSpec
 from .ports import PortDirection, PortSpec
 from .registry import NodeRegistry, fuzzy_score
 from .script import NodeScriptError, compile_run, node_filename, parse_spec
+from .search import search_nodes
 from . import serialization
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "ParamSpec", "PortDirection", "PortSpec",
     "NodeRegistry", "fuzzy_score",
     "NodeScriptError", "compile_run", "node_filename", "parse_spec",
+    "search_nodes",
     "serialization",
 ]

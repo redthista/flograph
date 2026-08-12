@@ -433,6 +433,13 @@ class MainWindow(QMainWindow):
         self.action_select_all = act(
             "Select All", None,
             lambda: [i.setSelected(True) for i in self.scene.node_items.values()])
+        self.action_find_node = act("Find Node…", QKeySequence("Ctrl+F"),
+                                    self._find_node)
+        # scoped to the canvas, the same way the code editor scopes its own
+        # Ctrl+F: two window-wide Ctrl+Fs would be an ambiguous overload and
+        # neither would fire. Focus decides which find you get.
+        self.action_find_node.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+        self.view.addAction(self.action_find_node)
         self.action_add_frame = act("Add Frame", QKeySequence("Ctrl+G"),
                                     self._add_frame)
         self.action_align_left = act("Align Left", None,
@@ -492,6 +499,7 @@ class MainWindow(QMainWindow):
                        self.action_select_all):
             edit_menu.addAction(action)
         edit_menu.addSeparator()
+        edit_menu.addAction(self.action_find_node)
         edit_menu.addAction(self.action_add_frame)
         align_menu = edit_menu.addMenu("Align")
         for action in (self.action_align_left, self.action_align_top,
@@ -2302,16 +2310,23 @@ class MainWindow(QMainWindow):
             if target_id is not None:
                 self._go_to_node(target_id)
 
+    def _find_node(self) -> None:
+        """Edit > Find Node…, and Ctrl+F on the canvas.
+
+        Searching is a model-canvas act, so a dashboard or report page steps
+        aside for it: opening the bar over a hidden canvas would look like
+        the menu item doing nothing.
+        """
+        if self.page_bar.current_page_id() is not None:
+            self.page_bar.select_page(None)
+        self.view.open_search()
+
     def _go_to_node(self, node_id: str) -> None:
-        """Select a node and centre the model canvas on it — the Goto/From
+        """Select a node and bring the model canvas to it — the Goto/From
         'Go to Connected Node' menu jumps here without the user having to
-        hunt for it by eye across a big graph."""
-        item = self.scene.node_items.get(node_id)
-        if item is None:
-            return
-        self.scene.clearSelection()
-        item.setSelected(True)
-        self.view.centerOn(item)
+        hunt for it by eye across a big graph, and so does a hit in the
+        Find Node bar."""
+        self.view.go_to_node(node_id)
 
     def _toggle_port_labels(self, node_id: str, shown: bool) -> None:
         """Show/hide one node's port names.
