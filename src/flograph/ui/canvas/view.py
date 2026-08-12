@@ -28,13 +28,45 @@ class NodeGraphView(ZoomPanGraphicsView):
         self.minimap = Minimap(self)
         self.minimap.show()
 
+        from .node_search import NodeSearchBar
+        self.search_bar = NodeSearchBar(self)
+        self.search_bar.reveal_requested.connect(self.go_to_node)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.minimap.reposition()
+        self.search_bar.reposition()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.minimap.reposition()
+        self.search_bar.reposition()
+
+    # -------------------------------------------------------------- find/goto
+
+    def open_search(self) -> None:
+        """Ctrl+F, or Edit > Find Node…"""
+        self.search_bar.open_bar()
+
+    def go_to_node(self, node_id: str) -> bool:
+        """Select one node and bring the view to it.
+
+        Zoomed far out the centring alone lands on a flattened smudge (the
+        canvas drops node detail below its LOD threshold), so a jump from
+        further out than MIN_REVEAL_ZOOM zooms back in to something
+        readable. Closer in, the zoom is left alone — the user chose it.
+        """
+        from .node_search import MIN_REVEAL_ZOOM, REVEAL_ZOOM
+        scene: NodeGraphScene = self.scene()
+        item = scene.node_items.get(node_id)
+        if item is None:
+            return False
+        scene.clearSelection()
+        item.setSelected(True)
+        if self.zoom < MIN_REVEAL_ZOOM:
+            self.set_zoom(REVEAL_ZOOM)
+        self.centerOn(item)
+        return True
 
     # ------------------------------------------------------------ keyboard
 
