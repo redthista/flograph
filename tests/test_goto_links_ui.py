@@ -2,6 +2,7 @@
 From's Goto picker, partner highlighting, paste remapping, and the blocking
 message the scheduler shows for an unlinked From."""
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QMenu
 
@@ -233,6 +234,172 @@ class TestGoToConnectedNodeMenu:
         window._show_node_menu(node.id, QPoint(0, 0))
 
         assert not any(text.startswith("Go to") for text in seen)
+
+
+class TestLinkLines:
+    """Drawing a named link after all: off by default (the wire it saves is
+    the point of the node), on for one pair when following that pair is
+    what matters."""
+
+    def add_second_from(self, graph, registry, goto):
+        node = graph.add_node(registry.instantiate(FROM))
+        graph.set_param(node.id, "source", goto.id)
+        return node
+
+    def test_no_line_until_asked_for(self, env, registry):
+        graph, _, scene = env
+        add_pair(graph, registry)
+        assert len(graph.links) == 1
+        assert scene.link_line_items == {}
+
+    def test_the_goto_draws_a_line_to_every_from(self, env, registry):
+        graph, _, scene = env
+        goto, first = add_pair(graph, registry)
+        second = self.add_second_from(graph, registry, goto)
+
+        graph.set_param(goto.id, "show_lines", True)
+
+        ends = {line.dst_item.node.id for line in scene.link_line_items.values()}
+        assert ends == {first.id, second.id}
+        assert all(line.src_item.node.id == goto.id
+                   for line in scene.link_line_items.values())
+
+    def test_a_from_draws_only_its_own_line(self, env, registry):
+        graph, _, scene = env
+        goto, first = add_pair(graph, registry)
+        second = self.add_second_from(graph, registry, goto)
+
+        graph.set_param(second.id, "show_lines", True)
+
+        lines = list(scene.link_line_items.values())
+        assert len(lines) == 1
+        assert lines[0].dst_item.node.id == second.id
+
+    def test_turning_it_off_takes_the_line_away(self, env, registry):
+        graph, _, scene = env
+        goto, _ = add_pair(graph, registry)
+        graph.set_param(goto.id, "show_lines", True)
+        assert scene.link_line_items
+
+        graph.set_param(goto.id, "show_lines", False)
+        assert scene.link_line_items == {}
+
+    def test_the_line_follows_a_moved_card(self, env, registry):
+        graph, _, scene = env
+        goto, _ = add_pair(graph, registry)
+        graph.set_param(goto.id, "show_lines", True)
+        line = next(iter(scene.link_line_items.values()))
+        before = line.path().pointAtPercent(0.0)
+
+        scene.node_items[goto.id].setPos(400, 250)
+
+        after = line.path().pointAtPercent(0.0)
+        assert (after.x(), after.y()) != (before.x(), before.y())
+
+    def test_deleting_an_end_takes_the_line_with_it(self, env, registry):
+        graph, _, scene = env
+        goto, _ = add_pair(graph, registry)
+        graph.set_param(goto.id, "show_lines", True)
+
+        graph.remove_node(goto.id)
+
+        assert scene.link_line_items == {}
+
+    def test_a_line_that_cannot_be_grabbed(self, env, registry):
+        """It is an aid to reading the canvas, not a wire: nothing to
+        select, cut or drag off a port it doesn't have."""
+        from PySide6.QtWidgets import QGraphicsItem
+        graph, _, scene = env
+        goto, _ = add_pair(graph, registry)
+        graph.set_param(goto.id, "show_lines", True)
+        line = next(iter(scene.link_line_items.values()))
+
+        assert not line.flags() & QGraphicsItem.ItemIsSelectable
+        assert line.acceptedMouseButtons() == Qt.NoButton
+
+    def test_the_arrow_points_the_way_the_value_travels(self, env, registry):
+        """Qt's angleAtPercent measures counter-clockwise about a y-axis
+        pointing up while the scene's y grows down, and the first version of
+        this aimed the arrow confidently back at the Goto."""
+        graph, _, scene = env
+        goto, node = add_pair(graph, registry)
+        scene.node_items[goto.id].setPos(0, 0)
+        scene.node_items[node.id].setPos(300, 200)   # down and to the right
+        graph.set_param(goto.id, "show_lines", True)
+        line = next(iter(scene.link_line_items.values()))
+
+        path = line.path()
+        here = path.pointAtPercent(0.55)
+        travel = (path.pointAtPercent(0.57).x() - here.x(),
+                  path.pointAtPercent(0.57).y() - here.y())
+        arrow = line._arrow_head(path)
+        apex = arrow[0]
+        base = ((arrow[1].x() + arrow[2].x()) / 2,
+                (arrow[1].y() + arrow[2].y()) / 2)
+        forward = ((apex.x() - base[0]) * travel[0]
+                   + (apex.y() - base[1]) * travel[1])
+        assert forward > 0
+
+
+class TestLinkLineMenu:
+    @pytest.fixture
+    def window(self, qtbot, registry):
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def test_goto_offers_to_show_lines_and_the_pick_draws_them(
+            self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+        goto, _ = add_pair(window.graph, window.registry, name="Sales")
+        _pick_menu_action(monkeypatch, "Show Link Lines")
+
+        window._show_node_menu(goto.id, QPoint(0, 0))
+
+        assert window.graph.nodes[goto.id].params["show_lines"] is True
+        assert window.scene.link_line_items
+
+    def test_a_from_is_offered_the_singular(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+        _, node = add_pair(window.graph, window.registry, name="Sales")
+        seen = _menu_texts(monkeypatch)
+
+        window._show_node_menu(node.id, QPoint(0, 0))
+
+        assert "Show Link Line" in seen
+        assert "Show Link Lines" not in seen
+
+    def test_the_label_offers_the_way_back(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+        goto, _ = add_pair(window.graph, window.registry, name="Sales")
+        window.graph.set_param(goto.id, "show_lines", True)
+        seen = _menu_texts(monkeypatch)
+
+        window._show_node_menu(goto.id, QPoint(0, 0))
+
+        assert "Hide Link Lines" in seen
+
+    def test_showing_lines_is_one_undo_step(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+        goto, _ = add_pair(window.graph, window.registry, name="Sales")
+        _pick_menu_action(monkeypatch, "Show Link Lines")
+        window._show_node_menu(goto.id, QPoint(0, 0))
+
+        window.undo_stack.undo()
+
+        assert window.graph.nodes[goto.id].params["show_lines"] is False
+        assert window.scene.link_line_items == {}
+        window.undo_stack.clear()   # see flopy-testing-notes: teardown order
+
+    def test_an_ordinary_node_is_offered_nothing(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+        node = window.graph.add_node(window.registry.instantiate(CONST))
+        seen = _menu_texts(monkeypatch)
+
+        window._show_node_menu(node.id, QPoint(0, 0))
+
+        assert not any("Link Line" in text for text in seen)
 
 
 class TestGotoPicker:

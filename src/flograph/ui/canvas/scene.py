@@ -60,6 +60,9 @@ class NodeGraphScene(QGraphicsScene):
         self.requested_nodes: frozenset = frozenset()
         self.node_items: dict[str, NodeItem] = {}
         self.connection_items: dict[str, ConnectionItem] = {}
+        # Goto/From links that have asked to be drawn, keyed by link id. Not
+        # a wire and not in graph.connections — see canvas.link_line.
+        self.link_line_items: dict[str, "LinkLineItem"] = {}
         self.frame_items: dict[str, FrameItem] = {}
         self._zoom = 1.0  # last zoom pushed by the view, see set_lod
 
@@ -109,6 +112,7 @@ class NodeGraphScene(QGraphicsScene):
         events.color_changed.connect(self._on_color_changed)
         events.links_changed.connect(self._refresh_link_cards)
         events.links_changed.connect(self._refresh_port_connections)
+        events.links_changed.connect(self._refresh_link_lines)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
@@ -123,8 +127,10 @@ class NodeGraphScene(QGraphicsScene):
         for frame in graph.frames.values():
             self._on_frame_added(frame)
         self._refresh_link_cards()
+        self._refresh_link_lines()
         # Goto/From pairs have no wire to trace, so selecting one end glows
-        # the other -- the only on-canvas evidence that a link exists
+        # the other -- the only on-canvas evidence that a link exists, short
+        # of asking for the line itself (see _refresh_link_lines)
         self.selectionChanged.connect(self._highlight_link_partners)
 
     # ------------------------------------------------------- event mirrors
@@ -203,10 +209,52 @@ class NodeGraphScene(QGraphicsScene):
         if item is not None and item.link_card:
             # a Goto's name is shown on every From reading it, not just here
             self._refresh_link_cards()
+            # and the card just changed width, which is where a drawn line
+            # starts — so this is also how the show_lines toggle takes effect
+            self._refresh_link_lines()
 
     def _refresh_link_cards(self) -> None:
         for item in self.node_items.values():
             item.refresh_link_card()
+
+    def _refresh_link_lines(self) -> None:
+        """Draw the links whose ends asked for it, and only those.
+
+        Rebuilt against the whole link set rather than patched, for the same
+        reason the links themselves are (see core.links): a link is derived
+        state, and there is no event that means "this one link changed" —
+        adding a node, deleting one, repointing a From or ticking the toggle
+        all arrive as different events with the same answer. The set is tiny
+        (links a user has opted into drawing), so recomputing it is cheaper
+        than being clever about it.
+        """
+        from flograph.core.links import link_label
+        from .link_line import LinkLineItem, wants_lines
+        wanted: dict[str, tuple] = {}
+        for link_id, link in self.graph.links.items():
+            src = self.node_items.get(link.src_node)
+            dst = self.node_items.get(link.dst_node)
+            if src is None or dst is None:
+                continue
+            # either end may ask: a From draws its own line back without
+            # lighting up every other From reading the same Goto
+            if wants_lines(src.node) or wants_lines(dst.node):
+                wanted[link_id] = (src, dst)
+        for link_id in list(self.link_line_items):
+            item = self.link_line_items[link_id]
+            if link_id not in wanted or wanted[link_id] != (item.src_item,
+                                                            item.dst_item):
+                self.removeItem(self.link_line_items.pop(link_id))
+        for link_id, (src, dst) in wanted.items():
+            existing = self.link_line_items.get(link_id)
+            if existing is None:
+                existing = LinkLineItem(link_id, src, dst,
+                                        link_label(src.node))
+                self.addItem(existing)
+                self.link_line_items[link_id] = existing
+            else:
+                existing.setToolTip(f"Link: {link_label(src.node)}")
+            existing.update_path()
 
     def _refresh_port_connections(self) -> None:
         """A derived Goto/From link feeds a port no drawn wire reaches, so
@@ -372,6 +420,9 @@ class NodeGraphScene(QGraphicsScene):
         for ci in self.connection_items.values():
             if node_id in (ci.conn.src_node, ci.conn.dst_node):
                 ci.update_path()
+        for line in self.link_line_items.values():
+            if node_id in (line.src_item.node.id, line.dst_item.node.id):
+                line.update_path()
 
     def _flat_state(self) -> bool:
         return self.lod_enabled and self._zoom < self.lod_threshold
