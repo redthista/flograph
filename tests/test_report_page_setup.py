@@ -2,8 +2,9 @@
 
 Page setup (size, orientation, margins, cover), running headers and
 footers, and forced page breaks. The three are one feature because they are
-one settings surface — a PageSetup, kept Qt-free so the HTML export in
-chunk B can read the same thing rather than inventing a second one.
+one settings surface — a PageSetup, kept Qt-free so the shelved HTML
+export (ideas_archived.md item 8) can read the same thing rather than
+inventing a second one.
 """
 import pandas as pd
 import pytest

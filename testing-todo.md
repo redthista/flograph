@@ -62,7 +62,8 @@ gone, but the only proof that matters is yours.
 
 Known and deliberate: the two columns end level at the top and ragged at
 the bottom — Qt fills each independently. That's right for text-beside-a-
-chart and wrong for two columns of prose; balancing is chunk B's.
+chart and wrong for two columns of prose; balancing is shelved with the
+HTML export (ideas_archived.md item 8).
 
 ### The lock button
 
@@ -207,9 +208,10 @@ preview, which is deliberately not paginated.
 
 - [ ] A **long report with several charts**: check where the pages break.
       A chart that straddles a boundary is **known and not fixed** — Qt
-      cannot express `page-break-inside: avoid`, it is chunk B's job, and
-      `\pagebreak` is the manual workaround until then. Worth knowing how
-      often it actually bites before deciding how urgent B is.
+      cannot express `page-break-inside: avoid`, it belongs to the shelved
+      HTML export (ideas_archived.md item 8), and `\pagebreak` is the
+      manual workaround until then. Worth knowing how often it actually
+      bites before deciding whether to unshelve that.
 
 ## Report cards: Export PDF / Open in Browser (A9) — NEW
 

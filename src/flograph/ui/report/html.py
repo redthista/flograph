@@ -13,8 +13,9 @@ in the file would be a broken-image icon. So they are inlined as data URIs,
 which also makes the file one thing you can mail rather than a page plus a
 folder.
 
-This is not the Jinja/CSS export from ideas.md chunk B. That one owns the
-*layout* — real page rules, running elements, interactive Plotly. This
+This is not the Jinja/CSS export shelved as ideas_archived.md item 8. That
+one owns the *layout* — real page rules, running elements, interactive
+Plotly. This
 takes Qt's own HTML as it comes and only fixes the images, which is why it
 fits in a page and needs no template.
 """
@@ -69,8 +70,9 @@ def _image_uri(image) -> "str | None":
 def page_style(setup) -> str:
     """CSS that puts the report on the paper it was set up for.
 
-    Not the Jinja/CSS export from ideas.md chunk B — that one owns the
-    layout and can do running headers, counters and interactive Plotly.
+    Not the Jinja/CSS export shelved as ideas_archived.md item 8 — that
+    one owns the layout and can do running headers, counters and
+    interactive Plotly.
     This is the cheap half: the same page size and margins, and a body
     that measures the same as the PDF's text column, so a chart sized for
     the page is the same fraction of the width in both. Without it the
