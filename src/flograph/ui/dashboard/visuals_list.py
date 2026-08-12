@@ -132,25 +132,33 @@ class VisualsList(QListWidget):
         if node is None or not self.isVisible():
             return
         from .visual_preview import (
-            VisualPreviewPopup, preview_message, tile_pixmap,
+            DRAWING, VisualPreviewPopup, preview, slow_to_draw,
         )
         if self._popup is None:
             self._popup = VisualPreviewPopup(self)
-        message = preview_message(node)
-        pixmap = None if message else tile_pixmap(
-            self._graph, self._engine, node,
-            ratio=self.devicePixelRatioF() or 1.0)
-        if pixmap is None and not message:
-            # the kind is previewable but produced nothing to draw — say so
-            # rather than flashing an empty frame
-            message = "No preview available for this visual."
+        item = self._hover_item
+        if slow_to_draw(node):
+            # up before the picture is asked for: taking a Plotly chart's
+            # snapshot runs the browser, and the first of a session is slow
+            # enough that a popup appearing afterwards would look like a
+            # hang rather than a preview
+            self._popup.show_message(DRAWING)
+            self._place_popup(item)
+            self._popup.repaint()
+        pixmap, message = preview(self._graph, self._engine, node,
+                                  ratio=self.devicePixelRatioF() or 1.0)
+        if self._hover_item is not item:
+            return  # the cursor moved on while the chart was being drawn
         if pixmap is not None:
             self._popup.show_pixmap(pixmap)
         else:
             self._popup.show_message(message)
-        rect = self.visualItemRect(self._hover_item)
-        # beside the row, not under the cursor: the panel is narrow and a
-        # popup over the list would cover the rows being scanned
+        self._place_popup(item)
+
+    def _place_popup(self, item: QListWidgetItem) -> None:
+        """Beside the row, not under the cursor: the panel is narrow and a
+        popup over the list would cover the rows being scanned."""
+        rect = self.visualItemRect(item)
         self._popup.move_onto_screen(
             self.viewport().mapToGlobal(rect.topRight()) + _OFFSET)
         self._popup.show()

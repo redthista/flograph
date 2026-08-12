@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtGui import QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame, QGraphicsScene, QLabel, QVBoxLayout, QWidget,
 )
@@ -29,32 +29,92 @@ HOVER_DELAY_MS = 550
 #: would only make it blurry.
 MAX_SIZE = QSize(300, 240)
 
-#: Kinds with nothing worth showing a picture of. A webview tile is a
-#: Chromium page: building one costs a process and it paints asynchronously,
-#: so a hover would get an empty white box and a stall for its trouble.
-_NO_PICTURE = {
-    "webview": "Interactive chart — drag it onto the page to see it.",
-}
+#: Shown while a Plotly chart is having its picture taken — see
+#: `slow_to_draw`. The first snapshot of a session parses plotly.js, which
+#: is not instant, and a popup that appears empty reads as a bug.
+DRAWING = "Drawing the chart…"
+
+_RUN_FIRST = "Run the flow to see this chart."
+_NOT_A_CHART = "Web page — drag it onto the page to see it."
+_NO_PICTURE = "This chart could not be drawn."
+_NO_PREVIEW = "No preview available for this visual."
 
 
-def preview_message(node) -> str:
-    """The line shown instead of a picture, or "" when one can be drawn."""
+def slow_to_draw(node) -> bool:
+    """Whether this node's preview is worth putting a "drawing…" note up
+    for first. Only Plotly: its picture is taken by a real browser (the
+    same one the reports use), and the first one of a session has 5 MB of
+    JavaScript to parse before it can draw anything."""
     from ..canvas.node_item import card_kind
-    return _NO_PICTURE.get(card_kind(node), "")
+    return card_kind(node) == "webview"
+
+
+def preview(graph, engine, node, max_size: QSize = MAX_SIZE,
+            ratio: float = 1.0) -> "tuple[Optional[QPixmap], str]":
+    """What to show for `node`: a picture, or a line of text saying why
+    there isn't one. Never raises — a hover is not worth an exception.
+    """
+    from ..canvas.node_item import card_kind
+    try:
+        if card_kind(node) == "webview":
+            return _plotly_pixmap(engine, node, max_size, ratio)
+        pixmap = tile_pixmap(graph, engine, node, max_size, ratio)
+        return (pixmap, "") if pixmap is not None else (None, _NO_PREVIEW)
+    except Exception:
+        return None, _NO_PREVIEW
+
+
+def _plotly_pixmap(engine, node, max_size: QSize,
+                   ratio: float) -> "tuple[Optional[QPixmap], str]":
+    """A Plotly card's chart, drawn the way a report draws it.
+
+    A webview tile is a Chromium page, so unlike every other kind this one
+    cannot be previewed by building the tile: the widget paints
+    asynchronously and a hover would get an empty white box. It goes
+    through the report renderer's snapshot instead — the app's own embedded
+    browser, asked for a PNG — which is the same picture the report pages
+    put on paper, and is cached, so hovering the same chart twice draws it
+    once.
+    """
+    from .tile_item import default_tile_port
+    from ..report.render import plotly_image
+    entry = engine.cache.get(node.id) if engine is not None else None
+    port = default_tile_port(node)
+    value = entry.outputs.get(port) if entry is not None and port else None
+    # a Chart per Value node emits a list — its card shows the stack, and
+    # one chart is enough to say what the stack looks like
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if value is None:
+        return None, _RUN_FIRST
+    data = plotly_image(value, max_size.width(), False)
+    if not isinstance(data, bytes):
+        # None = not a Plotly figure at all (a Web View node's HTML); a
+        # string = the renderer's own explanation, which is markdown meant
+        # for a page rather than a line for a popup
+        return None, _NOT_A_CHART if data is None else _NO_PICTURE
+    image = QImage()
+    if not image.loadFromData(data, "PNG") or image.isNull():
+        return None, _NO_PICTURE
+    ratio = max(1.0, min(4.0, ratio))
+    box = max_size * ratio
+    if image.width() > box.width() or image.height() > box.height():
+        image = image.scaled(box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    pixmap = QPixmap.fromImage(image)
+    pixmap.setDevicePixelRatio(ratio)
+    return pixmap, ""
 
 
 def tile_pixmap(graph, engine, node, max_size: QSize = MAX_SIZE,
                 ratio: float = 1.0) -> Optional[QPixmap]:
     """`node` as it would look placed on a dashboard page, or None if it
-    cannot be drawn (an unpreviewable kind, or anything that raises — a
-    hover preview is never worth an exception reaching the user).
+    cannot be drawn (anything that raises — a hover preview is never worth
+    an exception reaching the user).
 
     `ratio` is the device pixel ratio to render at, so the preview is as
     sharp on a HiDPI screen as the tile it stands for.
     """
     from .tile_item import TileItem, default_tile_port, default_tile_size
-    if preview_message(node):
-        return None
     scene = QGraphicsScene()
     item = None
     try:

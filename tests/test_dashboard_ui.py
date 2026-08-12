@@ -516,10 +516,63 @@ class TestVisualPreview:
         # still a picture — of the tile saying it needs a run
         assert not popup._label.pixmap().isNull()
 
-    def test_webview_falls_back_to_a_message(self, window, monkeypatch):
+    def add_plotly(self, window):
+        node = window.registry.instantiate("flograph.viz.show_plotly",
+                                           pos=(0, 0))
+        window.graph.add_node(node)
+        return node
+
+    def test_plotly_chart_is_previewed_by_snapshot(self, window, monkeypatch):
+        """The same picture the report pages take, in the popup."""
+        px = pytest.importorskip("plotly.express")
+        node = self.add_plotly(window)
         add_page(window)
-        window.graph.add_node(
-            window.registry.instantiate("flograph.viz.show_plotly", pos=(0, 0)))
+        figure = px.line(pd.DataFrame({"x": [1, 2, 3], "y": [3, 1, 2]}),
+                         x="x", y="y")
+        window.engine.cache.set(node.id, {"figure": figure}, 0.01)
+        visuals = window._dashboard_pages["p1"].visuals
+        monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
+
+        popup = self.hover(visuals, 0)
+        if popup._label.pixmap().isNull():
+            pytest.skip("Qt WebEngine could not render here")
+        assert popup._label.pixmap().width() <= 300
+
+    def test_plotly_says_when_the_snapshot_cannot_be_taken(self, window,
+                                                           monkeypatch):
+        px = pytest.importorskip("plotly.express")
+        from flograph.ui.report import plotly_snapshot
+        node = self.add_plotly(window)
+        add_page(window)
+        figure = px.line(pd.DataFrame({"x": [1, 2], "y": [1, 2]}),
+                         x="x", y="y")
+        window.engine.cache.set(node.id, {"figure": figure}, 0.01)
+        monkeypatch.setattr(plotly_snapshot, "snapshot", lambda *a, **k: None)
+        monkeypatch.setattr(type(figure), "to_image",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                RuntimeError("no kaleido")))
+        visuals = window._dashboard_pages["p1"].visuals
+        monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
+
+        popup = self.hover(visuals, 0)
+        assert popup._label.pixmap().isNull()
+        assert "could not be drawn" in popup._label.text()
+
+    def test_unrun_plotly_asks_for_a_run(self, window, monkeypatch):
+        self.add_plotly(window)              # nothing cached
+        add_page(window)
+        visuals = window._dashboard_pages["p1"].visuals
+        monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
+
+        popup = self.hover(visuals, 0)
+        assert popup._label.pixmap().isNull()
+        assert "Run the flow" in popup._label.text()
+
+    def test_a_web_view_is_not_claimed_as_a_chart(self, window, monkeypatch):
+        node = window.registry.instantiate("flograph.viz.show_web", pos=(0, 0))
+        window.graph.add_node(node)
+        add_page(window)
+        window.engine.cache.set(node.id, {"view": "<p>hello</p>"}, 0.01)
         visuals = window._dashboard_pages["p1"].visuals
         monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
 

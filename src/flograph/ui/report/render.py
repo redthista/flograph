@@ -248,7 +248,7 @@ def plotly_geometry(value, image_width: int, for_print: bool) -> tuple:
     return width, height, round(scale, 3)
 
 
-def _plotly_image(value, image_width: int, for_print: bool):
+def plotly_image(value, image_width: int, for_print: bool):
     """A Plotly figure as PNG bytes, or a warning block if it cannot be.
 
     Plotly figures are interactive HTML, not pictures, so a report has to
@@ -697,7 +697,7 @@ class _Resolver:
         if image is not None:
             return self._token(image)
 
-        plotly = _plotly_image(value, self._image_width, self._for_print)
+        plotly = plotly_image(value, self._image_width, self._for_print)
         if isinstance(plotly, bytes):
             image = QImage()
             image.loadFromData(plotly, "PNG")

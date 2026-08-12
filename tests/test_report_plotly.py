@@ -15,7 +15,7 @@ from flograph.core import Graph, NodeRegistry  # noqa: E402
 from flograph.engine.cache import OutputCache  # noqa: E402
 from flograph.ui.report import plotly_snapshot  # noqa: E402
 from flograph.ui.report.render import (MAX_IMAGE_SCALE, PRINT_DPI,  # noqa: E402
-                                       _plotly_image, plotly_geometry,
+                                       plotly_geometry, plotly_image,
                                        render_report)
 
 webengine = pytest.importorskip("PySide6.QtWebEngineWidgets")
@@ -167,9 +167,9 @@ class TestInAReport:
         monkeypatch.setattr(type(figure), "to_image",
                             lambda *a, **k: (_ for _ in ()).throw(
                                 RuntimeError("no kaleido")))
-        result = _plotly_image(figure, 510, False)
+        result = plotly_image(figure, 510, False)
         assert isinstance(result, str)
         assert "could not be drawn" in result
 
     def test_a_non_plotly_value_is_not_claimed(self):
-        assert _plotly_image("just a string", 510, False) is None
+        assert plotly_image("just a string", 510, False) is None
