@@ -104,10 +104,6 @@ class MainWindow(QMainWindow):
         # from "already on a dashboard page", which look identical by dock
         # visibility alone once every panel is collapsed.
         self._current_page_id = None
-        # presentation: a maximized dashboard tile takes the whole screen,
-        # and what it hid to get there (see _apply_presentation)
-        self._presenting = False
-        self._chrome_before: Optional[tuple] = None
         self.engine = ExecutionEngine(self.graph, parent=self)
         # the scene predates the engine, so it gets the cache handed to it
         self.scene.output_cache = self.engine.cache
@@ -394,7 +390,6 @@ class MainWindow(QMainWindow):
         toolbar.setObjectName("toolbar_main")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
-        self.toolbar = toolbar
 
         # the group each act() below lands in on the Keyboard Shortcuts page;
         # rebound as the sections go by, so no call has to name its own
@@ -1224,70 +1219,6 @@ class MainWindow(QMainWindow):
             self._on_current_page_changed)
         self.page_bar.model_tab_double_clicked.connect(self.toggle_all_panels)
 
-    # ------------------------------------------------------- presentation
-
-    def _presenting_page(self) -> bool:
-        """Whether the page on screen right now has a tile maximized.
-
-        Derived rather than tracked: a project saved with a tile maximized
-        restores it during the page's own construction, before the window
-        has connected to anything, so a signal alone would miss it.
-        """
-        widget = self._dashboard_pages.get(self._current_page_id)
-        view = getattr(widget, "view", None)          # report pages have none
-        return getattr(view, "fullscreen_tile", None) is not None
-
-    def _apply_presentation(self) -> None:
-        """A maximized tile gets the *screen*, not just the page.
-
-        Maximizing already hands the tile the whole page — the visuals panel
-        and its toggle strip step aside (DashboardPage._apply_chrome) — but
-        the window it sits in kept its menu bar, toolbar, page tabs and
-        status bar, so a chart shown to a room was still framed by the tools
-        used to build it. Everything the app owns goes, and the window goes
-        fullscreen on the monitor with it.
-
-        What was showing is remembered rather than assumed on the way back:
-        the status bar or the page tabs may have been off already, and
-        restoring is not the same as turning everything on. The window state
-        travels with it, so a maximized (not fullscreen) window comes back
-        maximized.
-
-        Escape and the tile's own restore button are unaffected — they go
-        through the model like before, land here through
-        fullscreen_changed, and put all of it back.
-        """
-        active = self._presenting_page()
-        if active == self._presenting:
-            return
-        self._presenting = active
-        chrome = (self.menuBar(), self.toolbar, self.page_bar, self.statusBar())
-        if active:
-            # isHidden(), not isVisible(): the question is which of these the
-            # user had turned off, and every widget in a window that has not
-            # been shown yet answers isVisible() False regardless
-            self._chrome_before = (
-                [not widget.isHidden() for widget in chrome],
-                self.windowState())
-            for widget in chrome:
-                widget.setVisible(False)
-            if self.isVisible():
-                # never on a window that isn't up yet: showFullScreen() would
-                # *show* it. A project opened from the command line loads
-                # after the window is on screen, so there is nothing to miss
-                self.showFullScreen()
-            return
-        if self._chrome_before is None:
-            return
-        visible, state = self._chrome_before
-        self._chrome_before = None
-        for widget, was_visible in zip(chrome, visible):
-            widget.setVisible(was_visible)
-        # setWindowState rather than showNormal(): the window may have been
-        # maximized before, and showNormal() would un-maximize it
-        if self.isVisible():
-            self.setWindowState(state & ~Qt.WindowFullScreen)
-
     def _on_page_added(self, page: Page) -> None:
         if page.kind == "report":
             self._add_report_page(page)
@@ -1295,8 +1226,6 @@ class MainWindow(QMainWindow):
         widget = DashboardPage(self.graph, self.engine, self.undo_stack,
                                page.id, visuals_visible=self.visuals_visible)
         widget.visuals_visibility_changed.connect(self._set_visuals_visible)
-        widget.view.fullscreen_changed.connect(
-            lambda _active: self._apply_presentation())
         widget.scene.button_fired.connect(self._on_button_fired)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
         widget.scene.control_changed.connect(self._on_control_changed)
@@ -1613,9 +1542,6 @@ class MainWindow(QMainWindow):
         self._current_page_id = page_id
         for strip in self._edge_strips.values():
             strip.set_enabled(is_model_page)
-        # last: a page maximized when it was saved arrives already maximized,
-        # and leaving one for another page has to put the chrome back
-        self._apply_presentation()
         self._refresh_zoom_indicator()
         if self._project_path and not self._restoring_pages:
             self.settings.setValue(f"active_page/{self._project_path}",
