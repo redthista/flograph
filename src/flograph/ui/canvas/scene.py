@@ -420,12 +420,10 @@ class NodeGraphScene(QGraphicsScene):
                 wanted[(conn.id, "dst")] = (dst_owner, conn, "dst", False)
         wanted.update(self._wanted_link_pins())
 
-        for key in list(self._frame_pins):
-            pin = self._frame_pins[key]
-            want = wanted.get(key)
-            if want is None or want[0] != pin.frame_item.frame.id:
-                self._frame_pins.pop(key)
-                self.removeItem(pin)
+        self._drop_frame_pins(
+            key for key, pin in self._frame_pins.items()
+            if key not in wanted
+            or wanted[key][0] != pin.frame_item.frame.id)
         for key, (frame_id, conn, side, is_link) in wanted.items():
             if key in self._frame_pins:
                 continue
@@ -439,11 +437,25 @@ class NodeGraphScene(QGraphicsScene):
         for pin in self._frame_pins.values():
             pin.refresh_connected()
 
-    def _drop_frame_pins_for(self, node_id: str) -> None:
-        for key, pin in list(self._frame_pins.items()):
-            if pin.node_id == node_id:
-                self._frame_pins.pop(key)
+    def _drop_frame_pins(self, keys) -> None:
+        """Take these pins off the box and out of the scene.
+
+        The scene check is not defensive padding: a pin is a *child* of its
+        frame, so removing the frame takes the pin out of the scene with it,
+        and a second removeItem on the detached item is a dangling pointer
+        that segfaults later. Every pin teardown goes through here.
+        """
+        for key in list(keys):
+            pin = self._frame_pins.pop(key, None)
+            if pin is None:
+                continue
+            if pin.scene() is self:
+                pin.setParentItem(None)
                 self.removeItem(pin)
+
+    def _drop_frame_pins_for(self, node_id: str) -> None:
+        self._drop_frame_pins([key for key, pin in self._frame_pins.items()
+                               if pin.node_id == node_id])
 
     def _wanted_link_pins(self) -> dict:
         """Crossing Goto/From links that are already being drawn.
@@ -746,13 +758,22 @@ class NodeGraphScene(QGraphicsScene):
 
     def _on_frame_removed(self, frame_id: str) -> None:
         item = self.frame_items.pop(frame_id, None)
-        if item is not None:
-            item._stop_pulse()
-            # rebuild before removeItem, so the wires that were pinned to
-            # this box are anchored back onto real ports (and its contents
-            # made visible again) while its pins are still around to replace
-            self._refresh_collapsed_frames()
-            self.removeItem(item)
+        if item is None:
+            return
+        item._stop_pulse()
+        # Drop this frame's pins here, unconditionally, while the frame is
+        # still in the scene — not inside the rebuild. The rebuild can be
+        # suspended (a project load tears every frame down with it off), and
+        # a pin left in _frame_pins after its parent frame has gone is a
+        # dangling pointer the next rebuild would try to remove a second
+        # time. That crashed the app on File > New with a frame collapsed.
+        self._drop_frame_pins([key for key, pin in self._frame_pins.items()
+                               if pin.frame_item is item])
+        # The membership entry is left for the rebuild to prune, which is
+        # what makes it show the contents again — clearing it here would
+        # leave nothing to reconcile and the nodes would stay hidden.
+        self._refresh_collapsed_frames()
+        self.removeItem(item)
 
     def _on_frame_changed(self, frame: Frame) -> None:
         item = self.frame_items.get(frame.id)

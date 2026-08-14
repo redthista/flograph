@@ -717,6 +717,49 @@ class TestLoadAndCanvasSurface:
         scene.set_revealing_port_labels(False)
         assert not pin._label_shown()
 
+    def test_replacing_the_graph_drops_the_pins(self, qtbot, registry):
+        """Opening another project while a collapsed frame has pins.
+
+        A pin is a *child* of its frame, so removing the frame takes it out
+        of the scene too. _replace_graph suspends the rebuild, so nothing
+        pruned _frame_pins on the way through, and the refresh at the end
+        then called removeItem on items whose scene was already gone —
+        "item's scene (0x0) is different from this scene", four times, and
+        a segfault behind it.
+        """
+        from flograph.core import Graph
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        inner = registry.instantiate("flograph.scripting.python_script",
+                                     pos=(50.0, 50.0))
+        sink = registry.instantiate("flograph.scripting.python_script",
+                                    pos=(600.0, 50.0))
+        win.graph.add_node(inner)
+        win.graph.add_node(sink)
+        win.graph.connect(inner.id, "out1", sink.id, "in1")
+        win.graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200),
+                                  collapsed=True))
+        assert win.scene._frame_pins, "expected a pin for the crossing wire"
+
+        win._replace_graph(Graph())        # File > New, or Open Example
+        assert win.scene._frame_pins == {}
+        assert win.scene._hidden == {}
+
+    def test_removing_a_frame_drops_its_pins(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        inner = script_node(graph, registry, "inner", (50.0, 50.0))
+        sink = script_node(graph, registry, "sink", (600.0, 50.0))
+        graph.connect(inner.id, "out1", sink.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        assert scene._frame_pins
+        graph.remove_frame("f1")
+        assert scene._frame_pins == {}
+        assert scene._hidden == {}
+        assert scene.node_items["inner"].isVisible()
+
     def test_hidden_node_stops_animating(self, env, registry):
         """setVisible alone does not re-derive the QMovie decisions; the
         item has to hear about its own visibility change."""
