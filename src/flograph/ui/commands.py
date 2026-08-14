@@ -396,6 +396,25 @@ class SetPreviewEnabledCommand(QUndoCommand):
         self._graph.set_preview_enabled(self._node_id, self._old)
 
 
+class SetExclusiveCommand(QUndoCommand):
+    """Make one node run on its own, or let it run beside others. `exclusive`
+    of None hands the node back to what its script declares."""
+
+    def __init__(self, graph: Graph, node_id: str, exclusive: Optional[bool],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("toggle exclusive execution", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).exclusive_override
+        self._new = exclusive
+
+    def redo(self) -> None:
+        self._graph.set_exclusive(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_exclusive(self._node_id, self._old)
+
+
 class SetPortLabelsCommand(QUndoCommand):
     """Show/hide one node's floating port names. `shown` of None hands the
     node back to the canvas-wide preference."""

@@ -34,14 +34,28 @@ flograph
 - **`flograph/core/` is Qt-free.** No PySide6, no pandas, no matplotlib at top level. Enforced by poison test.
 - **QUndoCommands are the sole writers to the graph.** UI items react to graph events; never mutate the graph directly from a click handler.
 - **Nodes are text scripts, never imported.** They live under `src/flograph/nodes/<category>/` and are parsed by `flograph.core.script.parse_spec()`.
-- **Nodes treat inputs as read-only** — outputs are cached by reference. `scheduler._read_only_view` enforces what it can enforce for free: pandas inputs become copy-on-write shallow copies, list/dict/set/bytearray are rebuilt one level deep (items are not copied — pandas items inside are guarded, everything else is not), numpy arrays become read-only views that raise on write (`errors.readonly_input_hint` explains the error). Writing *through* an input, and any other type, are the contract's job.
+- **Nodes can run at the same time.** The engine starts every node whose
+  upstream nodes have finished, up to a worker limit (Settings > General >
+  Nodes to run at once; `engine.scheduler.default_workers` when it is Auto).
+  A node body therefore shares the process with other node bodies: module-level
+  state, a shared file, a library that is not thread-safe, and `os.chdir` are
+  all now races rather than merely poor style. A node that cannot tolerate
+  company declares `NODE["exclusive"] = True` and the engine drains the
+  in-flight set and gives it the process to itself; a user can force either
+  answer per instance from the node's context menu. `print()` is safe — see
+  `worker._StreamRouter`, which routes stdout by thread so output cannot land
+  under the wrong node.
+- **Nodes treat inputs as read-only** — outputs are cached by reference. With
+  concurrent execution this is no longer only about ordering: two nodes fed by
+  one upstream node hold the same object at the same time, so writing through
+  an input is a data race, not just a value that changes at the wrong moment. `scheduler._read_only_view` enforces what it can enforce for free: pandas inputs become copy-on-write shallow copies, list/dict/set/bytearray are rebuilt one level deep (items are not copied — pandas items inside are guarded, everything else is not), numpy arrays become read-only views that raise on write (`errors.readonly_input_hint` explains the error). Writing *through* an input, and any other type, are the contract's job.
 - **Heavy imports go inside `run()`, not top-level** — top-level code executes at registry load for every node.
-- **matplotlib: OO API only** (`matplotlib.figure.Figure()`), never `pyplot`. Not thread-safe from the worker.
+- **matplotlib: OO API only** (`matplotlib.figure.Figure()`), never `pyplot`. Not thread-safe from the worker, so a node that draws with it declares `NODE["exclusive"] = True` — `viz/show_plot.py` and `viz/chart_per_value.py` do.
 
 ## Node contract
 
 Every node script must define:
-- `NODE` dict: `label`, `category`, `inputs` (list of `(name, port_type[, opts])`), `outputs`
+- `NODE` dict: `label`, `category`, `inputs` (list of `(name, port_type[, opts])`), `outputs`, optional `exclusive` (run with nothing else in flight)
 - Optional `PARAMS` list of dicts with `name`, `type`, `default`, etc.
 - `def run(ctx, **inputs) -> dict`: returns dict keyed by output port names
 

@@ -27,6 +27,7 @@ from flograph.core import serialization
 from flograph.core import user_nodes
 from flograph.engine import (
     CacheLoadRunnable, CacheLoadSignals, ExecutionEngine, cache_persistence,
+    is_exclusive,
 )
 from flograph.paths import user_nodes_dir
 
@@ -34,8 +35,8 @@ from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
     ReorderPagesCommand, SetPageColorCommand,
-    SetActiveCommand, SetFrozenCommand, SetLabelCommand, SetLockedCommand,
-    SetParamCommand,
+    SetActiveCommand, SetExclusiveCommand, SetFrozenCommand, SetLabelCommand,
+    SetLockedCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
@@ -128,6 +129,9 @@ class MainWindow(QMainWindow):
             "stats/sampling_enabled", True, type=bool)
         self.stats_history_limit = self.settings.value(
             "stats/history_limit", HISTORY_LIMIT, type=int)
+        # 0 = automatic; see engine.scheduler.default_workers.
+        self.engine_max_workers = self.settings.value(
+            "engine/max_workers", 0, type=int)
         self.lod_enabled = self.settings.value("canvas/lod_enabled", True, type=bool)
         self.lod_threshold = self.settings.value(
             "canvas/lod_threshold", DEFAULT_LOD_THRESHOLD, type=float)
@@ -179,6 +183,12 @@ class MainWindow(QMainWindow):
         self._run_fraction = 0.0
         self._run_node_label = ""
         self._run_node_started = 0.0
+        # node_id -> when it started, for every node in flight. Several can be,
+        # so the line has to be composed from the set rather than from whichever
+        # node started most recently; the per-node detail below is kept for the
+        # common case where there is only one, which is the case where naming a
+        # node is useful.
+        self._run_inflight: dict[str, float] = {}
         self._run_last_output = 0.0
         # Whether the running node has said anything at all yet — a node that
         # has never spoken gets different wording from one that fell silent.
@@ -728,10 +738,23 @@ class MainWindow(QMainWindow):
         self.settings.setValue("stats/history_limit", limit)
         self.engine.history.set_limit(limit)
 
+    def set_engine_max_workers(self, workers: int) -> None:
+        """How many nodes may run at once; 0 means let the engine decide.
+
+        Takes effect on the next run rather than the one in flight — the plan
+        a run is working through was built and seeded against a limit, and
+        moving it underneath would be changing the rules mid-game for no gain
+        the user can see.
+        """
+        self.engine_max_workers = workers
+        self.settings.setValue("engine/max_workers", workers)
+        self.engine.max_workers = workers
+
     def _apply_stats_settings(self) -> None:
         self.resource_monitor.bar.setVisible(self.stats_bar_enabled)
         self.engine.sampling_enabled = self.stats_sampling_enabled
         self.engine.history.set_limit(self.stats_history_limit)
+        self.engine.max_workers = self.engine_max_workers
 
     # -------------------------------------------------------- zoom-out LOD
 
@@ -830,6 +853,7 @@ class MainWindow(QMainWindow):
         self._run_fraction = 0.0
         self._run_node_label = ""
         self._run_node_started = time.monotonic()
+        self._run_inflight.clear()
         self._run_last_output = time.monotonic()
         self._run_had_output = False
         self._run_prior = None
@@ -845,6 +869,7 @@ class MainWindow(QMainWindow):
         self._run_total = total
         self._run_fraction = 0.0
         self._run_node_started = time.monotonic()
+        self._run_inflight[node_id] = self._run_node_started
         self._run_last_output = self._run_node_started
         self._run_had_output = False
         # What it cost last time it finished, if it has this session. Turns
@@ -852,30 +877,57 @@ class MainWindow(QMainWindow):
         self._run_prior = self.engine.history.last_wall_time(node_id)
         self._update_run_status()
 
+    def _run_node_end(self, node_id: str) -> None:
+        """A node left the floor. Whoever is still on it keeps the line."""
+        self._run_inflight.pop(node_id, None)
+        if len(self._run_inflight) == 1:
+            # Back to a single node: name it again, and start its stopwatch
+            # from when *it* started rather than from now.
+            remaining = next(iter(self._run_inflight))
+            node = self.graph.nodes.get(remaining)
+            if node is not None:
+                self._run_node_label = node.label
+                self._run_node_started = self._run_inflight[remaining]
+                self._run_prior = self.engine.history.last_wall_time(remaining)
+                self._run_fraction = node.progress
+        self._update_run_status()
+
     def _run_end(self) -> None:
         self._run_tick.stop()
         self._run_bar.hide()
         self._run_node_label = ""
+        self._run_inflight.clear()
 
     def _update_run_status(self) -> None:
         """Compose the one line that says what the run is doing.
 
-        Serial execution — one NodeRunnable in flight — is what lets a
-        single line name a node without ambiguity.
+        Nodes can run several at a time, and a line naming one of them would
+        be picking a favourite — so it names a node only while that is
+        unambiguous, and counts them otherwise. The per-node detail (its
+        fraction, what it usually costs) goes with the name: attached to a
+        count it would be describing something the line has not identified.
         """
         if not self._run_node_label:
             return
-        elapsed = time.monotonic() - self._run_node_started
-        parts = [f"Running {self._run_node_label}"]
+        concurrent = len(self._run_inflight)
+        if concurrent > 1:
+            # Elapsed for the run's oldest node, not the newest: with several
+            # in flight, the one worth timing is the one that has been going
+            # longest — it is the one that might be stuck.
+            elapsed = time.monotonic() - min(self._run_inflight.values())
+            parts = [f"Running {concurrent} nodes"]
+        else:
+            elapsed = time.monotonic() - self._run_node_started
+            parts = [f"Running {self._run_node_label}"]
         if self._run_total:
             parts.append(f"node {self._run_index} of {self._run_total}")
-        if self._run_fraction:
+        if self._run_fraction and concurrent <= 1:
             parts.append(f"{self._run_fraction:.0%}")
         # Only once it has been going long enough to be worth timing —
         # a stopwatch on a step that takes 200ms is noise.
         if elapsed >= 1.0:
             timing = format_seconds(elapsed)
-            if self._run_prior:
+            if self._run_prior and concurrent <= 1:
                 timing += f" (usually {format_seconds(self._run_prior)})"
             parts.append(timing)
         quiet = time.monotonic() - self._run_last_output
@@ -899,11 +951,17 @@ class MainWindow(QMainWindow):
         Nodes already finished, plus however far the current one says it
         is. The total is the plan as built, so a run that prunes a failed
         branch can finish ahead of the bar rather than behind it.
+
+        Finished is "started minus still running", which with one node in
+        flight is the index behind it and with several is the only honest
+        count — the highest index started says nothing about how many of
+        them are done.
         """
         if not self._run_total:
             return 0.0
-        done = max(0, self._run_index - 1) + self._run_fraction
-        return min(1.0, done / self._run_total)
+        finished = max(0, self._run_index - max(1, len(self._run_inflight)))
+        fraction = self._run_fraction if len(self._run_inflight) <= 1 else 0.0
+        return min(1.0, (finished + fraction) / self._run_total)
 
     # --------------------------------------------------------------- wiring
 
@@ -955,6 +1013,11 @@ class MainWindow(QMainWindow):
 
         engine.run_started.connect(on_started)
         engine.node_started.connect(on_node_started)
+        # Both outcomes take the node off the floor, so the line can go back
+        # to naming whoever is left.
+        engine.node_succeeded.connect(self._run_node_end)
+        engine.node_failed.connect(
+            lambda node_id, _error: self._run_node_end(node_id))
         engine.node_progress.connect(on_node_progress)
         engine.node_log.connect(on_node_logged)
         engine.run_finished.connect(on_finished)
@@ -2210,6 +2273,13 @@ class MainWindow(QMainWindow):
             "Deactivate" if node.active else "Activate")
         freeze_action = menu.addAction("Unfreeze" if node.frozen else "Freeze")
         lock_action = menu.addAction("Unlock" if node.locked else "Lock")
+        exclusive_action = menu.addAction("Run on its own")
+        exclusive_action.setCheckable(True)
+        exclusive_action.setChecked(is_exclusive(node))
+        exclusive_action.setToolTip(
+            "Give this node the whole process while it runs, instead of "
+            "letting it share with other branches. For code that is not safe "
+            "beside anything else.")
         menu.addSeparator()
         import_action = None
         if (card_kind(node) == "grid"
@@ -2318,6 +2388,14 @@ class MainWindow(QMainWindow):
         elif chosen is lock_action:
             self.undo_stack.push(SetLockedCommand(
                 self.graph, node_id, not node.locked))
+        elif chosen is exclusive_action:
+            wanted = not is_exclusive(node)
+            # Back to None rather than to an explicit copy of the script's own
+            # answer: a node pinned to what its code already says would keep
+            # saying it after the code was edited to say the other thing.
+            self.undo_stack.push(SetExclusiveCommand(
+                self.graph, node_id,
+                None if wanted == node.spec.exclusive else wanted))
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
         elif browser_action is not None and chosen is browser_action:
@@ -2534,6 +2612,7 @@ class MainWindow(QMainWindow):
         self.set_stats_bar_enabled(True)
         self.set_stats_sampling_enabled(True)
         self.set_stats_history_limit(HISTORY_LIMIT)
+        self.set_engine_max_workers(0)
         self.set_lod_enabled(True)
         self.set_lod_threshold(DEFAULT_LOD_THRESHOLD)
         self.set_snap_enabled(True)

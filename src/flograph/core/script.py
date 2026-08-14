@@ -7,6 +7,7 @@ A node is a Python module-shaped text that declares:
         "category": "Transform",
         "inputs":  [("table", "dataframe")],            # (name, type[, opts])
         "outputs": [("filtered", "dataframe")],
+        # "exclusive": True,        # run with nothing else in flight
     }
     PARAMS = [  # optional
         {"name": "query", "type": "string", "default": ""},
@@ -24,6 +25,15 @@ ring in the node's status LED and the status bar line. Calls are throttled,
 so report as often as is convenient.
 
 Rules:
+- Your run() may be executing at the same time as another node's. Branches of
+  a flow that do not depend on each other run side by side, so a node sharing
+  anything process-wide — a module-level variable, a file it writes, the
+  working directory, a library that is not thread-safe — is racing rather than
+  merely being untidy. Keep to what arrives in the arguments and goes back in
+  the return and there is nothing to think about; when that is not possible,
+  declare NODE["exclusive"] = True and the node runs with nothing else in
+  flight. print() is already safe whoever else is printing: output is routed
+  back to the node that wrote it.
 - Treat inputs as read-only (outputs are cached and shared by reference).
   The engine guards what it can guard for free: a pandas input arrives as a
   copy-on-write shallow copy, and a list, dict, set or bytearray is rebuilt
@@ -213,6 +223,10 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         raise NodeScriptError(
             "NODE['control'] only applies when NODE['card'] is 'control'")
 
+    exclusive = node_decl.get("exclusive", False)
+    if not isinstance(exclusive, bool):
+        raise NodeScriptError("NODE['exclusive'] must be True or False")
+
     inputs = _parse_ports(node_decl.get("inputs", []), PortDirection.INPUT,
                           "NODE['inputs']")
     outputs = _parse_ports(node_decl.get("outputs", []), PortDirection.OUTPUT,
@@ -251,6 +265,7 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         doc=(namespace.get("__doc__") or "").strip(),
         card=card,
         control=control,
+        exclusive=exclusive,
     )
 
 

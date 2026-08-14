@@ -61,6 +61,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "locked": n.locked,
                     "frozen": n.frozen,
                     "frozen_fingerprint": n.frozen_fingerprint,
+                    "exclusive": n.exclusive_override,
                     "preview": n.canvas_preview_enabled,
                     "port_labels": n.port_labels,
                     "ports_collapsed": n.ports_collapsed,
@@ -174,6 +175,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             locked=entry.get("locked", False),
             frozen=entry.get("frozen", False),
             frozen_fingerprint=entry.get("frozen_fingerprint"),
+            # absent = follow the script's NODE['exclusive'], which is what
+            # every node written before concurrent execution existed wants
+            exclusive_override=entry.get("exclusive"),
             canvas_preview_enabled=entry.get("preview", True),
             # absent = follow the canvas preference, which is
             # what every node written before this existed wants

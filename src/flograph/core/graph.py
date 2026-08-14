@@ -211,6 +211,16 @@ class Graph:
         node.locked = locked
         self.events.locked_changed.emit(node_id, locked)
 
+    def set_exclusive(self, node_id: str, exclusive: Optional[bool]) -> None:
+        """Run this node on its own, or alongside others; None hands it back
+        to whatever its script declares.
+
+        No event: nothing on the canvas is drawn from this, and the menu that
+        offers it reads the value when it opens. A signal would exist only to
+        be ignored.
+        """
+        self.node(node_id).exclusive_override = exclusive
+
     def set_preview_enabled(self, node_id: str, enabled: bool) -> None:
         node = self.node(node_id)
         node.canvas_preview_enabled = enabled

@@ -41,6 +41,11 @@ class NodeRun:
     summary: str = ""            # "12,345 rows × 8 cols", "DataFrame", ...
     rss_start: int = 0
     rss_peak: int = 0            # highest process RSS seen while it ran
+    # How many nodes were in flight at once while this one ran, counting
+    # itself: 1 means it had the process to itself. Above that, rss_peak is a
+    # reading several nodes share and cannot be read as this node's own
+    # appetite — see ProcessSampler.
+    concurrent: int = 1
 
     @property
     def finished(self) -> float:
@@ -74,17 +79,33 @@ class RunRecord:
     skipped_inactive: int = 0
     rss_start: int = 0
     rss_peak: int = 0
+    # The worker limit this run was given, and the most nodes actually in
+    # flight at once. The second is the interesting one: a limit of eight on a
+    # flow that never got past two says the graph is a chain, not that the
+    # machine is busy.
+    workers: int = 1
+    peak_concurrency: int = 1
 
     @property
     def node_time(self) -> float:
         """Time inside nodes, as against the run's wall clock.
 
-        The two differ by the scheduling overhead: dispatch, the queued
-        signals that carry each result back to the GUI thread, and the cache
-        writes. A wide gap is itself a finding — it means the flow is losing
-        time between the steps rather than in them.
+        The two differ by two things now. One is the scheduling overhead —
+        dispatch, the queued signals that carry each result back to the GUI
+        thread, the cache writes — which makes node time the *smaller*
+        number. The other is overlap: nodes running side by side each charge
+        their own seconds to a clock that only ran once, so node time can
+        exceed wall time, and by how much is roughly how much the run got out
+        of running wide. Read the gap with peak_concurrency beside it.
         """
         return sum(n.wall_time for n in self.nodes)
+
+    @property
+    def overlap(self) -> float:
+        """Seconds saved by running nodes side by side, as far as the numbers
+        can say: the node time that did not cost wall time. Zero on a run
+        that never overlapped."""
+        return max(0.0, self.node_time - self.wall_time)
 
     @property
     def failed(self) -> list[NodeRun]:
@@ -159,9 +180,15 @@ class ProcessSampler:
     Deliberately approximate and labelled as such wherever it is shown. The
     interpreter, Qt, the loaded libraries and any other thread all live in
     the same process, so a node's attributed growth is "what the process did
-    while this node held the floor", not "what this node allocated". Runs are
-    serial — one NodeRunnable in flight at a time — which is what makes the
-    attribution meaningful at all.
+    while this node held the floor", not "what this node allocated".
+
+    Nodes can share that floor: when several run at once the same reading is
+    charged to each of them, because a process-wide number cannot be split
+    between its causes. NodeRun.concurrent records how many were sharing, and
+    anything showing a peak should say so — a figure that reads as one node's
+    appetite when it is really four nodes' is worse than no figure. A run
+    that never overlapped (concurrent == 1) is attributed exactly as it
+    always was.
 
     Degrades to zeroes rather than failing if psutil is unavailable or the
     platform refuses the read; a stats panel is never worth an exception.

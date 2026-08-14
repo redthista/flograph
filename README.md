@@ -99,13 +99,17 @@ markers on the failing line. There is no privileged built-in tier: the
 Group By node is a file you can open and change.
 
 **Dataflow semantics.** Data flows through typed ports; execution is a
-topological walk of the *dirty* subgraph on a background thread, so re-runs
-only recompute what actually changed. Outputs are cached per node. Status
-LEDs read at a glance: grey idle, yellow queued, pulsing blue running, green
-done, red error — and a node that reports `ctx.progress(0..1)` from its loop
-fills that LED as a ring instead of pulsing, with the percentage beside the
-node's name in the status bar. Cancellation is cooperative
-(`ctx.check_cancelled()`).
+topological walk of the *dirty* subgraph on background threads, so re-runs
+only recompute what actually changed. Branches that do not depend on each
+other **run at the same time** — a node starts as soon as its own inputs are
+ready, up to a worker limit (Settings > General > Nodes to run at once; Auto
+by default). A node that cannot share the process says so with
+`NODE["exclusive"] = True` and runs on its own. Outputs are cached per node.
+Status LEDs read at a glance: grey idle, yellow queued, pulsing blue running,
+green done, red error — and a node that reports `ctx.progress(0..1)` from its
+loop fills that LED as a ring instead of pulsing, with the percentage beside
+the node's name in the status bar. Cancellation is cooperative
+(`ctx.check_cancelled()`) and stops every node in flight.
 
 **Inspect everything.** Click any node or wire to see the data on it — a
 paged table view for DataFrames (millions of rows are fine), matplotlib
@@ -374,9 +378,10 @@ Architecture (src layout):
   registry, JSON serialization, spreadsheet engine, report parsing, layering.
   Fully unit-testable; a poison test keeps Qt and pandas out of its import
   graph.
-- **`flograph/engine`** — background execution: plan builder, single-thread
-  pool worker, output cache and its on-disk persistence, cancellation,
-  per-node stdout capture, tracebacks mapped to node script lines.
+- **`flograph/engine`** — background execution: plan builder, concurrent
+  dispatch over a thread pool, output cache and its on-disk persistence,
+  cancellation, per-node stdout capture routed by thread, tracebacks mapped
+  to node script lines.
 - **`flograph/nodes`** — the standard library; each node is a script file
   loaded as text through the same contract as user code.
 - **`flograph/ui`** — canvas (QGraphicsView from scratch), dashboard and

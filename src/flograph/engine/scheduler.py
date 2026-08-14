@@ -1,20 +1,30 @@
-"""Execution scheduling: dirty subgraph -> topo-ordered plan -> serial
-execution on a single-thread pool, with per-node caching.
+"""Execution scheduling: dirty subgraph -> topo-ordered plan -> concurrent
+execution on the shared thread pool, with per-node caching.
 
 ExecutionEngine lives on the GUI thread. Workers hand results back via queued
 signals; all graph/cache mutation happens here, never on pool threads.
+
+Several nodes run at once when the graph allows it: a node starts as soon as
+every predecessor *in this plan* has finished, up to a worker limit. The plan
+is still built in topological order, so what changes is only how many of its
+nodes may be in flight together — a wide graph runs its branches side by side
+instead of one after another, and a chain still runs in order because each
+link waits on the one before it.
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
+from collections import deque
+from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 
 from flograph.core.graph import Graph
 from flograph.core.links import from_problem
-from flograph.core.node import NodeStatus
+from flograph.core.node import NodeInstance, NodeStatus
 
 from .cache import OutputCache
 from .context import CancellationToken
@@ -28,6 +38,49 @@ from .worker import NodeRunnable, WorkerSignals
 # burst — typing across a row, dragging a slider — pays for one run instead of
 # one per commit, short enough that it still reads as the flow answering.
 REACTIVE_DELAY_MS = 300
+
+# Ceiling on the automatic worker count. Cores are not the binding constraint
+# on a flow of any size — memory is: every branch in flight holds its own
+# intermediates, and eight large frames at once is already a lot to ask of a
+# laptop. Someone who knows their machine and their data can raise it in
+# Settings; the default is chosen to not surprise anyone.
+MAX_AUTO_WORKERS = 8
+
+
+def default_workers() -> int:
+    """How many nodes run at once when nobody has said."""
+    return max(1, min(os.cpu_count() or 1, MAX_AUTO_WORKERS))
+
+
+def is_exclusive(node: NodeInstance) -> bool:
+    """Must this node run on its own, with nothing else in flight?
+
+    For the work that is not safe beside anything else: matplotlib, which is
+    not thread-safe from a worker, and any node reaching for a resource that
+    only tolerates one user — a file it writes, a device, a library with
+    global state. The node's script declares it with NODE["exclusive"], and
+    an instance may override that either way for code the user has forked.
+    """
+    if node.exclusive_override is not None:
+        return node.exclusive_override
+    return node.spec.exclusive
+
+
+@dataclass
+class _InFlight:
+    """One node currently running, and what its completion will need.
+
+    Per node rather than per engine: with several in flight, the alias map
+    and the run record belong to the node they describe, and the one that
+    finishes first must not take another's with it.
+    """
+    node_id: str
+    # id(shallow copy handed to this node) -> (src_node, src_port), so a
+    # pass-through node returning its input is still recognised as serving
+    # the upstream value rather than one of its own.
+    handed_in: dict[int, tuple[str, str]] = field(default_factory=dict)
+    run: Optional[NodeRun] = None
+
 
 # Values a node cannot change in place at all, so there is nothing to guard.
 _IMMUTABLE = frozenset({str, bytes, int, float, bool, complex, type(None),
@@ -217,22 +270,33 @@ class ExecutionEngine(QObject):
         self.cache = OutputCache()
         # the process-wide pool, never a per-engine child: destroying a pool
         # races with its expiring workers (QThread destroyed while running,
-        # fatal) whenever an engine is dropped with its window. Serial
-        # execution is enforced by _dispatch (one NodeRunnable in flight),
-        # not by the pool's thread count.
+        # fatal) whenever an engine is dropped with its window. How many nodes
+        # run at once is decided by _dispatch, not by the pool's thread count
+        # — the pool is only asked to be big enough not to be the limit.
         self.pool = QThreadPool.globalInstance()
+        # 0 = automatic (default_workers()). The main window drives this from
+        # Settings > General.
+        self.max_workers = 0
 
-        self._plan: list[str] = []
+        # Nodes from the plan that have not started yet, and the subset of
+        # those whose predecessors have all finished. Kahn's algorithm over
+        # the plan, kept incrementally: _remaining_preds counts each pending
+        # node's predecessors *within the plan*, and a node moves to _ready
+        # when that reaches zero. Scanning the pending list for a runnable
+        # node on every completion would be quadratic on a large flow, which
+        # is the same reason Graph.topo_order keeps an insertion rank.
+        self._pending: set[str] = set()
+        self._ready: deque = deque()
+        self._remaining_preds: dict[str, int] = {}
+        # node_id -> _InFlight, for every node currently running.
+        self._running: dict[str, _InFlight] = {}
+        # An exclusive node has the process to itself, so nothing new starts
+        # while one is running.
+        self._exclusive_running = False
         # Size of the plan as built and how many nodes have been started from
-        # it, for "node 3 of 12". _plan itself is consumed by popping, so it
-        # cannot answer either on its own.
+        # it, for "node 3 of 12".
         self._plan_total = 0
         self._plan_done = 0
-        self._current: Optional[str] = None
-        # id(shallow copy handed to the running node) -> (src_node, src_port),
-        # so a pass-through node returning its input is still recognised as
-        # serving the upstream value rather than one of its own.
-        self._handed_in: dict[int, tuple[str, str]] = {}
         self._token: Optional[CancellationToken] = None
         self._had_failure = False
         self._active = False
@@ -244,7 +308,6 @@ class ExecutionEngine(QObject):
         self.sampling_enabled = True
         self._sampler = ProcessSampler()
         self._record: Optional[RunRecord] = None
-        self._node_run: Optional[NodeRun] = None
         self._run_started = 0.0
         # Polls process memory while a node holds the floor. Lives on the
         # GUI thread, which is idle during a run — the work is on the pool —
@@ -281,18 +344,57 @@ class ExecutionEngine(QObject):
         if self._active:
             return
         self._token = CancellationToken()
-        self._plan = build_plan(self.graph, targets, self.cache)
-        self._plan_total = len(self._plan)
+        plan = build_plan(self.graph, targets, self.cache)
+        self._plan_total = len(plan)
         self._plan_done = 0
         self._had_failure = False
-        if not self._plan:
+        if not plan:
             return
         self._active = True
-        self._open_record(targets)
-        for node_id in self._plan:
+        self._seed_readiness(plan)
+        self._open_record(targets, plan)
+        for node_id in plan:
             self.graph.set_status(node_id, NodeStatus.QUEUED)
         self.run_started.emit()
         self._dispatch()
+
+    def worker_limit(self) -> int:
+        """How many nodes this engine will run at once."""
+        return self.max_workers if self.max_workers > 0 else default_workers()
+
+    @property
+    def running_nodes(self) -> frozenset:
+        """Every node currently in flight."""
+        return frozenset(self._running)
+
+    def _seed_readiness(self, plan: list[str]) -> None:
+        """Kahn bookkeeping for one plan: who is waiting on how many, and who
+        can start now.
+
+        Only predecessors *in the plan* count. Everything else the node needs
+        is either cached already or missing, and _blocking_problem is what
+        answers that — a clean upstream node is not something to wait for.
+        """
+        planned = set(plan)
+        self._pending = set(plan)
+        self._remaining_preds = {
+            node_id: sum(1 for p in self.graph.predecessors(node_id)
+                         if p in planned)
+            for node_id in plan
+        }
+        # Plan order, so a run with nothing to overlap behaves exactly as the
+        # serial one did and the stats read the same.
+        self._ready = deque(node_id for node_id in plan
+                            if self._remaining_preds[node_id] == 0)
+        self._running.clear()
+        self._exclusive_running = False
+        # The pool is shared with cache restores (engine.cache_worker), so it
+        # is asked for headroom beyond the nodes rather than exactly enough:
+        # a run that filled the pool would otherwise leave a project's cache
+        # load queued behind it.
+        wanted = self.worker_limit() + 2
+        if self.pool.maxThreadCount() < wanted:
+            self.pool.setMaxThreadCount(wanted)
 
     def request_run(self, targets: Iterable[str]) -> None:
         """Ask for these nodes to run soon, coalescing with anything else
@@ -357,8 +459,12 @@ class ExecutionEngine(QObject):
         self.request_changed.emit()
 
     def cancel(self) -> None:
-        """Cooperative cancel: unstarted nodes leave the plan immediately; the
-        running node stops at its next ctx.check_cancelled()."""
+        """Cooperative cancel: unstarted nodes leave the plan immediately;
+        every running node stops at its next ctx.check_cancelled().
+
+        One token covers the whole run, so nodes in flight are all told at
+        once rather than in turn.
+        """
         if not self._active or self._token is None:
             return
         # "stop" means stop: a queued reactive re-run would otherwise start
@@ -367,20 +473,44 @@ class ExecutionEngine(QObject):
         self._token.cancel()
         if self._record is not None:
             self._record.cancelled = True
-        for node_id in self._plan:
+        for node_id in self._pending:
             self.graph.set_status(node_id, NodeStatus.IDLE)
-        self._plan.clear()
-        if self._current is None:
+        self._clear_pending()
+        if not self._running:
             self._finish()
+
+    def _clear_pending(self) -> None:
+        self._pending.clear()
+        self._ready.clear()
+        self._remaining_preds.clear()
 
     # ------------------------------------------------------------- dispatch
 
     def _dispatch(self) -> None:
-        while self._current is None and self._plan:
-            node_id = self._plan.pop(0)
+        """Start whatever is ready, up to the worker limit.
+
+        Called once when a run begins and again after every completion, so
+        the free slot a finishing node leaves is filled by whichever of its
+        successors it just unblocked.
+        """
+        limit = self.worker_limit()
+        while self._ready and not self._exclusive_running:
+            if len(self._running) >= limit:
+                break
+            node_id = self._ready[0]
             node = self.graph.nodes.get(node_id)
             if node is None:
+                self._ready.popleft()
+                self._pending.discard(node_id)
                 continue
+            if is_exclusive(node) and self._running:
+                # It gets the process to itself, so it waits for the floor to
+                # clear. Left at the head of the queue: the completion that
+                # empties _running dispatches again and finds it here.
+                break
+
+            self._ready.popleft()
+            self._pending.discard(node_id)
 
             problem = self._blocking_problem(node_id)
             if problem is not None:
@@ -394,14 +524,40 @@ class ExecutionEngine(QObject):
                     ))
                 else:
                     self.graph.set_status(node_id, NodeStatus.IDLE)
+                # Everything below it goes with it, so there are no successors
+                # left to release — the prune is the whole bookkeeping here.
                 self._prune_downstream(node_id)
                 continue
 
             self._start_node(node_id)
-            return
+            if is_exclusive(node):
+                break
 
-        if self._current is None:
-            self._finish()
+        if self._running:
+            return
+        # Nothing in flight means nothing was holding the loop back — every
+        # reason it breaks early needs a node already running — so _ready is
+        # empty here and the run is over bar the bookkeeping.
+        if self._pending:
+            # Unreachable over a DAG: a pending node whose predecessors have
+            # all finished is in _ready by construction. Releasing them rather
+            # than returning is deliberate insurance — the alternative to a
+            # wrong status here is a run that never ends, with Run disabled
+            # and Cancel the only way out.
+            for node_id in self._pending:
+                self.graph.set_status(node_id, NodeStatus.IDLE)
+            self._clear_pending()
+        self._finish()
+
+    def _release_successors(self, node_id: str) -> None:
+        """One node finished: whoever was waiting only on it can start."""
+        for succ in self.graph.successors(node_id):
+            if succ not in self._pending:
+                continue        # already started, pruned, or not in this plan
+            remaining = self._remaining_preds.get(succ, 0) - 1
+            self._remaining_preds[succ] = remaining
+            if remaining <= 0:
+                self._ready.append(succ)
 
     def _blocking_problem(self, node_id: str) -> Optional[str]:
         """Why this node can't run: a required input is unconnected, or an
@@ -421,15 +577,31 @@ class ExecutionEngine(QObject):
         return None
 
     def _prune_downstream(self, node_id: str) -> None:
+        """Drop everything below a node that failed or could not start.
+
+        Nothing downstream can already be in flight: a node only starts once
+        every predecessor in the plan has finished, so a node that is running
+        has no unfinished ancestor to be pruned by.
+        """
         downstream = self.graph.downstream(node_id)
-        for nid in [n for n in self._plan if n in downstream]:
-            self._plan.remove(nid)
+        dropped = [nid for nid in self._pending if nid in downstream]
+        if not dropped:
+            return
+        self._pending.difference_update(dropped)
+        for nid in dropped:
+            self._remaining_preds.pop(nid, None)
             self.graph.set_status(nid, NodeStatus.IDLE)
+        # _ready is a deque and the dropped nodes may be anywhere in it, so it
+        # is rebuilt rather than picked at; it holds only what can start now,
+        # which is short.
+        if any(nid in self._ready for nid in dropped):
+            self._ready = deque(nid for nid in self._ready
+                                if nid in self._pending)
 
     def _start_node(self, node_id: str) -> None:
         node = self.graph.nodes[node_id]
+        inflight = _InFlight(node_id=node_id)
         inputs = {}
-        self._handed_in = {}
         for port in node.spec.inputs:
             conn = self.graph.input_connection(node_id, port.name)
             if conn is None:
@@ -439,7 +611,7 @@ class ExecutionEngine(QObject):
             guarded = _read_only_view(value)
             inputs[port.name] = guarded
             if guarded is not value:
-                self._handed_in[id(guarded)] = (conn.src_node, conn.src_port)
+                inflight.handed_in[id(guarded)] = (conn.src_node, conn.src_port)
 
         signals = WorkerSignals()  # created on the GUI thread, before pool.start
         signals.finished.connect(self._on_node_finished)
@@ -447,8 +619,10 @@ class ExecutionEngine(QObject):
         signals.logged.connect(self.node_log)
         signals.progressed.connect(self._on_node_progress)
 
-        self._current = node_id
-        self._open_node_run(node_id)
+        self._running[node_id] = inflight
+        if is_exclusive(node):
+            self._exclusive_running = True
+        inflight.run = self._open_node_run(node_id)
         self.graph.set_status(node_id, NodeStatus.RUNNING)
         self._plan_done += 1
         self.node_started.emit(node_id, self._plan_done, self._plan_total)
@@ -473,13 +647,14 @@ class ExecutionEngine(QObject):
         rather than one node's.
         """
         # Cancel clears the floor before the pool thread notices; anything
-        # still in flight from the outgoing node is no longer worth drawing.
-        if node_id != self._current or node_id not in self.graph.nodes:
+        # still in flight from an outgoing node is no longer worth drawing.
+        if node_id not in self._running or node_id not in self.graph.nodes:
             return
         self.graph.set_progress(node_id, fraction)
         self.node_progress.emit(node_id, fraction)
 
-    def _alias_source(self, node_id: str, outputs: dict) -> tuple:
+    def _alias_source(self, node_id: str, outputs: dict,
+                      handed_in: dict) -> tuple:
         """`(source_node, source_port)` if this node merely re-served a value
         that is already cached, `(None, None)` otherwise.
 
@@ -507,7 +682,7 @@ class ExecutionEngine(QObject):
         # than the cached object itself. It is still the same data — the copy
         # shares every block — so it still aliases; the identity to test is
         # against what was handed in.
-        handed = self._handed_in.get(id(value))
+        handed = handed_in.get(id(value))
         if handed is not None:
             return handed
         for port in node.spec.inputs:
@@ -520,33 +695,46 @@ class ExecutionEngine(QObject):
         return None, None
 
     def _on_node_finished(self, node_id: str, outputs: dict, wall_time: float) -> None:
-        self._current = None
+        inflight = self._retire(node_id)
         if node_id in self.graph.nodes:
-            alias_of, alias_port = self._alias_source(node_id, outputs)
+            alias_of, alias_port = self._alias_source(
+                node_id, outputs,
+                inflight.handed_in if inflight is not None else {})
             self.cache.set(node_id, outputs, wall_time,
                            alias_of=alias_of, alias_port=alias_port)
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.node_succeeded.emit(node_id)
-        self._close_node_run("ok", wall_time, node_id)
+        self._close_node_run(inflight, "ok", wall_time)
+        self._release_successors(node_id)
         self._dispatch()
 
     def _on_node_failed(self, node_id: str, error: NodeError) -> None:
-        self._current = None
+        inflight = self._retire(node_id)
         self._had_failure = self._had_failure or not error.cancelled
         self._close_node_run(
-            "cancelled" if error.cancelled else "failed", None, node_id)
+            inflight, "cancelled" if error.cancelled else "failed", None)
         if node_id in self.graph.nodes:
             self.graph.set_status(node_id, NodeStatus.ERROR, error.message)
+            # Everything below it leaves the plan, so there is nothing left
+            # for _release_successors to release.
             self._prune_downstream(node_id)
             self.node_failed.emit(node_id, error)
         self._dispatch()
+
+    def _retire(self, node_id: str) -> "Optional[_InFlight]":
+        """Take a node off the floor, whatever it finished as."""
+        inflight = self._running.pop(node_id, None)
+        if not self._running:
+            self._exclusive_running = False
+        return inflight
 
     def _finish(self) -> None:
         if not self._active:
             return
         self._active = False
         self._token = None
+        self._exclusive_running = False
         self._close_record()
         self.run_finished.emit(not self._had_failure)
         if self._requested:
@@ -555,34 +743,47 @@ class ExecutionEngine(QObject):
 
     # ----------------------------------------------------------- recording
 
-    def _open_record(self, targets: Iterable[str]) -> None:
+    def _open_record(self, targets: Iterable[str], plan: list[str]) -> None:
         rss = self._sampler.rss()
-        self._record = RunRecord(rss_start=rss, rss_peak=rss)
+        self._record = RunRecord(rss_start=rss, rss_peak=rss,
+                                 workers=self.worker_limit())
         (self._record.skipped_clean, self._record.skipped_frozen,
          self._record.skipped_inactive) = skipped_summary(
-            self.graph, targets, self.cache, self._plan)
+            self.graph, targets, self.cache, plan)
         self._run_started = time.perf_counter()
         if self.sampling_enabled:
             self._sample_timer.start()
 
-    def _open_node_run(self, node_id: str) -> None:
+    def _open_node_run(self, node_id: str) -> "Optional[NodeRun]":
         if self._record is None:
-            return
+            return None
         node = self.graph.nodes.get(node_id)
         rss = self._sampler.rss()
-        self._node_run = NodeRun(
+        # Counting this node itself: "ran alongside 1" would be a confusing
+        # way to say "ran on its own".
+        concurrent = len(self._running)
+        run = NodeRun(
             node_id=node_id,
             label=node.label if node is not None else node_id,
             started=time.perf_counter() - self._run_started,
             rss_start=rss, rss_peak=rss,
+            concurrent=concurrent,
         )
+        # Everything already in flight is now sharing with one more.
+        for other in self._running.values():
+            if other.run is not None:
+                other.run.concurrent = max(other.run.concurrent, concurrent)
+        if self._record is not None:
+            self._record.peak_concurrency = max(
+                self._record.peak_concurrency, concurrent)
+        return run
 
-    def _close_node_run(self, outcome: str, wall_time: "Optional[float]",
-                        node_id: str) -> None:
-        run = self._node_run
-        self._node_run = None
-        if run is None or self._record is None or run.node_id != node_id:
+    def _close_node_run(self, inflight: "Optional[_InFlight]", outcome: str,
+                        wall_time: "Optional[float]") -> None:
+        run = inflight.run if inflight is not None else None
+        if run is None or self._record is None:
             return
+        node_id = run.node_id
         run.outcome = outcome
         # The worker's own measurement when there is one: it brackets the
         # node's code and nothing else, where the clock here would also be
@@ -601,25 +802,35 @@ class ExecutionEngine(QObject):
     def _close_record(self) -> None:
         record = self._record
         self._record = None
-        self._node_run = None
         self._sample_timer.stop()
         if record is None:
             return
+        # Appended as they finish, which under concurrency is not the order
+        # they started in. The timeline and the table both read as a sequence,
+        # so they get one.
+        record.nodes.sort(key=lambda run: run.started)
         record.wall_time = time.perf_counter() - self._run_started
         record.ok = not self._had_failure
         self.history.add(record)
         self.run_recorded.emit(record)
 
     def _sample(self) -> None:
-        """One poll of process memory, charged to whoever is running."""
+        """One poll of process memory, charged to everyone running.
+
+        The reading is process-wide, so with several nodes in flight there is
+        no honest way to split it between them — each is charged the whole
+        peak, and NodeRun.concurrent records how many were sharing it so the
+        stats panel can say so rather than implying the growth was one node's.
+        """
         rss = self._sampler.rss()
         if not rss:
             self._sample_timer.stop()   # unavailable here; stop asking
             return
         if self._record is not None:
             self._record.rss_peak = max(self._record.rss_peak, rss)
-        if self._node_run is not None:
-            self._node_run.rss_peak = max(self._node_run.rss_peak, rss)
+        for inflight in self._running.values():
+            if inflight.run is not None:
+                inflight.run.rss_peak = max(inflight.run.rss_peak, rss)
 
     # ------------------------------------------------------------ reactions
 
