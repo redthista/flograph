@@ -908,11 +908,14 @@ class TestNudgePlan:
         assert dx > 0 and dy == 0            # nearer the right edge
         assert 80 + dx >= 100 + 20           # and clears it by the gap
 
-    def test_the_shorter_escape_wins(self):
-        # deep inside horizontally, barely inside vertically -> go down
+    def test_everything_goes_right_even_when_down_is_nearer(self):
+        """One predictable direction beats a shorter shove nobody can
+        anticipate — and a flow reads left to right, so sideways is the way
+        that keeps its shape."""
         plan = self.plan((0, 0, 400, 100), [("a", (10, 80, 50, 50))])
         dx, dy = plan["a"]
-        assert dy > 0 and dx == 0
+        assert dx > 0 and dy == 0
+        assert 10 + dx >= 400 + 20
 
     def test_a_push_ripples_to_what_it_hits(self):
         """b is nowhere near the frame, but a lands on it."""
@@ -921,11 +924,18 @@ class TestNudgePlan:
         assert plan["a"][0] > 0
         assert plan["b"][0] > 0, "b was in a's way and should have moved on"
 
-    def test_a_ripple_keeps_the_pusher_s_direction(self):
+    def test_a_ripple_also_goes_right(self):
         plan = self.plan((0, 0, 400, 100),
-                         [("a", (10, 80, 50, 50)), ("b", (10, 140, 50, 50))])
-        assert plan["a"][1] > 0 and plan["a"][0] == 0
-        assert plan["b"][1] > 0 and plan["b"][0] == 0   # down, like its pusher
+                         [("a", (10, 80, 50, 50)), ("b", (420, 80, 50, 50))])
+        assert plan["a"][0] > 0 and plan["a"][1] == 0
+        assert plan["b"][0] > 0 and plan["b"][1] == 0
+
+    def test_nothing_is_ever_pushed_downward(self):
+        plan = self.plan((0, 0, 400, 400),
+                         [("a", (10, 10, 50, 50)), ("b", (10, 200, 50, 50)),
+                          ("c", (200, 350, 50, 50))])
+        assert all(dy == 0 for _dx, dy in plan.values())
+        assert all(dx > 0 for dx, _dy in plan.values())
 
     def test_a_chain_of_three_all_move(self):
         plan = self.plan((0, 0, 100, 100),
@@ -1017,6 +1027,67 @@ class TestNudgeRespectsFrames:
             assert graph.nodes[f"child{i}"].pos == before[f"child{i}"], \
                 f"child{i} was dragged along by the overlapping neighbour"
         assert graph.nodes["theirs1"].pos != before["theirs1"]
+
+    def test_collapsing_puts_back_what_expanding_moved(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
+        script_node(graph, registry, "inside", (50.0, 50.0))
+        collapse(scene, "f1")
+        script_node(graph, registry, "bystander", (100.0, 100.0))
+        where = graph.nodes["bystander"].pos
+
+        expand(scene, "f1")
+        assert graph.nodes["bystander"].pos != where     # shoved aside
+        assert graph.frames["f1"].nudged                 # and written down
+        collapse(scene, "f1")
+        assert graph.nodes["bystander"].pos == where     # and put back
+        assert graph.frames["f1"].nudged == ()           # record spent
+
+    def test_a_node_you_moved_yourself_is_left_alone(self, env, registry):
+        """There is no way to tell an arrangement you chose from one we
+        imposed except by whether it has changed since."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
+        script_node(graph, registry, "inside", (50.0, 50.0))
+        collapse(scene, "f1")
+        script_node(graph, registry, "bystander", (100.0, 100.0))
+
+        expand(scene, "f1")
+        graph.move_node("bystander", (2000.0, 2000.0))   # you put it there
+        collapse(scene, "f1")
+        assert graph.nodes["bystander"].pos == (2000.0, 2000.0)
+
+    def test_the_put_back_is_one_undo_step(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
+        script_node(graph, registry, "inside", (50.0, 50.0))
+        collapse(scene, "f1")
+        script_node(graph, registry, "bystander", (100.0, 100.0))
+        expand(scene, "f1")
+        shoved = graph.nodes["bystander"].pos
+
+        depth = stack.index()
+        collapse(scene, "f1")
+        assert stack.index() == depth + 1
+        stack.undo()
+        assert graph.frames["f1"].collapsed is False
+        assert graph.nodes["bystander"].pos == shoved
+
+    def test_a_pushed_frame_is_put_back_with_its_contents(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="mine", rect=(0, 0, 400, 300)))
+        script_node(graph, registry, "own", (50.0, 50.0))
+        collapse(scene, "mine")
+        graph.add_frame(Frame(id="theirs", rect=(150, 40, 260, 180)))
+        script_node(graph, registry, "their1", (200.0, 80.0))
+        rect_before = graph.frames["theirs"].rect
+        pos_before = graph.nodes["their1"].pos
+
+        expand(scene, "mine")
+        assert graph.frames["theirs"].rect != rect_before
+        collapse(scene, "mine")
+        assert graph.frames["theirs"].rect == rect_before
+        assert graph.nodes["their1"].pos == pos_before
 
     def test_its_own_nested_frame_is_not_pushed_away(self, env, registry):
         graph, stack, scene = env

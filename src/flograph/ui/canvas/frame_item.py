@@ -104,18 +104,27 @@ class FrameItem(QGraphicsObject):
             # read before the command clears the membership
             keep = set(self.frame.members)
             keep_frames = set(self.frame.member_frames)
+            # planned against the region it is *about* to occupy, so what got
+            # moved can be recorded by the same command that does the fold
+            record, moves, frame_rects = scene.plan_expand_nudge(
+                self.frame.id, self.expanded_rect(), keep, keep_frames)
             scene.undo_stack.beginMacro("expand frame")
             scene.undo_stack.push(SetFrameCollapsedCommand(
-                scene.graph, self.frame.id, False))
-            scene.nudge_clear_of(self.frame.id, keep, keep_frames)
+                scene.graph, self.frame.id, False, nudged=record))
+            scene.apply_nudge(moves, frame_rects)
             scene.undo_stack.endMacro()
             return
         nodes, frames = self.carried_items()
+        # folding puts back whatever reopening it shoved aside
+        moves, frame_rects = scene.unnudge_plan(self.frame.id)
+        scene.undo_stack.beginMacro("collapse frame")
         scene.undo_stack.push(SetFrameCollapsedCommand(
             scene.graph, self.frame.id, True,
             members=tuple(item.node.id for item, _off in nodes),
             member_frames=tuple(item.frame.id for item, _off in frames),
             collapsed_size=(COMPACT_W, COMPACT_MIN_H)))
+        scene.apply_nudge(moves, frame_rects)
+        scene.undo_stack.endMacro()
 
     def apply_stacking(self) -> None:
         """Take the frame's place in the stacking order. Frames have their

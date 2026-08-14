@@ -73,6 +73,11 @@ class Frame:
     #: makes undo give back exactly the membership it took away.
     members: tuple[str, ...] = ()
     member_frames: tuple[str, ...] = ()
+    #: What expanding this frame shoved out of the way, so folding it again
+    #: can put it back: (kind, id, dx, dy, landed_x, landed_y) per thing
+    #: moved. The landing position is recorded too — anything the user has
+    #: since moved themselves is left alone rather than yanked back.
+    nudged: tuple = ()
     # Where this frame came from, when it was inserted from the user library
     # (see core.user_frames). `source` is the library frame's id and
     # `source_fingerprint` the hash of the payload it was stamped from, so a
@@ -640,7 +645,8 @@ class Graph:
                              rect: tuple[float, float, float, float],
                              expanded_size: Optional[tuple[float, float]],
                              members: tuple[str, ...],
-                             member_frames: tuple[str, ...]) -> Frame:
+                             member_frames: tuple[str, ...],
+                             nudged: tuple = ()) -> Frame:
         """Fold a frame down to a box, or open it back out.
 
         Everything the fold touches moves together, in one call, because
@@ -662,6 +668,7 @@ class Graph:
                                if expanded_size is not None else None)
         frame.members = tuple(members)
         frame.member_frames = tuple(member_frames)
+        frame.nudged = tuple(nudged)
         self.events.frame_changed.emit(frame)
         return frame
 

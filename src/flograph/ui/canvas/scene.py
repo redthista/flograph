@@ -49,52 +49,37 @@ def plan_nudge(region: QRectF, units: list, gap: float = _NUDGE_GAP,
     whole — pushing their contents out from under them instead would empty
     the frame, which is the thing an expanding neighbour must never do.
 
-    A unit directly in the way goes right or down, whichever is the shorter
-    escape. Anything it then runs into is pushed **the same way**, so a
-    cascade travels in one direction and opens a lane, rather than
-    scattering things into each other.
+    Everything goes **right**, and so does everything it then runs into, so
+    the displacement travels along one axis and opens a lane. Deliberately
+    not "whichever way is nearer": a flow reads left to right, so sideways is
+    the direction that keeps the shape of it, and one predictable direction
+    is worth more than a shorter shove nobody can anticipate.
 
     Pure geometry, no scene: the awkward part of this is the arithmetic, and
     it is worth being able to test it without a canvas.
     """
     rects = {key: QRectF(rect) for key, rect in units}
-    axis: dict = {}
     delta: dict = {}
 
-    def shift(key: str, dx: float, dy: float) -> None:
-        rects[key].translate(dx, dy)
+    def push_clear(key: str, blocker: QRectF) -> None:
+        dx = blocker.right() - rects[key].left() + gap
+        rects[key].translate(dx, 0.0)
         was = delta.get(key, (0.0, 0.0))
-        delta[key] = (was[0] + dx, was[1] + dy)
-
-    def push_clear(key: str, blocker: QRectF, way: str) -> None:
-        rect = rects[key]
-        if way == "right":
-            shift(key, blocker.right() - rect.left() + gap, 0.0)
-        else:
-            shift(key, 0.0, blocker.bottom() - rect.top() + gap)
-        axis[key] = way
+        delta[key] = (was[0] + dx, was[1])
 
     for _ in range(passes):
         moved_any = False
         # 1. clear the region itself
         for key in list(rects):
-            if not rects[key].intersects(region):
-                continue
-            rect = rects[key]
-            if key not in axis:
-                right = region.right() - rect.left() + gap
-                down = region.bottom() - rect.top() + gap
-                axis[key] = "right" if right <= down else "down"
-            push_clear(key, region, axis[key])
-            moved_any = True
-        # 2. and then each other, in whichever direction the pusher went
+            if rects[key].intersects(region):
+                push_clear(key, region)
+                moved_any = True
+        # 2. and then whatever those landed on, the same way
         for pusher in list(delta):
             for key in list(rects):
-                if key == pusher:
+                if key == pusher or not rects[pusher].intersects(rects[key]):
                     continue
-                if not rects[pusher].intersects(rects[key]):
-                    continue
-                push_clear(key, rects[pusher], axis.get(pusher, "right"))
+                push_clear(key, rects[pusher])
                 moved_any = True
         if not moved_any:
             break
@@ -431,6 +416,80 @@ class NodeGraphScene(QGraphicsScene):
         rect = item.scene_rect()
         return [nid for nid, node_item in self.node_items.items()
                 if rect.contains(node_item.sceneBoundingRect().center())]
+
+    def plan_expand_nudge(self, frame_id: str, region: QRectF, keep: set,
+                          keep_frames: set) -> tuple:
+        """(record, moves, frame_rects) for reopening a frame into `region`.
+
+        Worked out *before* the frame is expanded, so the record of what got
+        shoved aside can be written down as part of the same fold — folding
+        again then puts it back. The record keeps where each thing landed as
+        well as how far it went: anything the user has moved themselves since
+        is left where they put it rather than yanked home.
+        """
+        units = self._nudge_units(frame_id, keep, keep_frames)
+        plan = plan_nudge(region, [(key, rect) for key, rect, _n, _f in units])
+        contents = {key: (nodes, frames) for key, _r, nodes, frames in units}
+        record: list = []
+        moves: dict = {}
+        frame_rects: dict = {}
+        for key, (dx, dy) in plan.items():
+            nodes, frames = contents[key]
+            for node_id in nodes:
+                node = self.graph.nodes.get(node_id)
+                if node is None:
+                    continue
+                landed = (node.pos[0] + dx, node.pos[1] + dy)
+                moves[node_id] = (node.pos, landed)
+                record.append(("node", node_id, dx, dy, *landed))
+            for other_id in frames:
+                rect = self.graph.frames[other_id].rect
+                landed = (rect[0] + dx, rect[1] + dy)
+                frame_rects[other_id] = (*landed, rect[2], rect[3])
+                record.append(("frame", other_id, dx, dy, *landed))
+        return (tuple(record), moves, frame_rects)
+
+    def unnudge_plan(self, frame_id: str) -> tuple:
+        """(moves, frame_rects) putting back what expanding this frame moved.
+
+        Only what is still where the expand left it. A node the user has
+        since dragged somewhere deliberate is theirs, not ours to reclaim —
+        there is no way to tell an arrangement they chose from one we
+        imposed except by whether it has changed since.
+        """
+        frame = self.graph.frames.get(frame_id)
+        moves: dict = {}
+        frame_rects: dict = {}
+        for kind, item_id, dx, dy, landed_x, landed_y in (
+                frame.nudged if frame else ()):
+            if kind == "node":
+                node = self.graph.nodes.get(item_id)
+                if node is None or node.pos != (landed_x, landed_y):
+                    continue
+                moves[item_id] = (node.pos, (node.pos[0] - dx,
+                                             node.pos[1] - dy))
+            else:
+                other = self.graph.frames.get(item_id)
+                if other is None or other.rect[:2] != (landed_x, landed_y):
+                    continue
+                frame_rects[item_id] = (other.rect[0] - dx,
+                                        other.rect[1] - dy,
+                                        other.rect[2], other.rect[3])
+                for nid in self._frame_members(self.frame_items[item_id]):
+                    node = self.graph.nodes.get(nid)
+                    if node is not None and nid not in moves:
+                        moves[nid] = (node.pos, (node.pos[0] - dx,
+                                                 node.pos[1] - dy))
+        return (moves, frame_rects)
+
+    def apply_nudge(self, moves: dict, frame_rects: dict) -> None:
+        """Push a planned displacement onto the stack, inside whatever macro
+        the caller has open."""
+        if moves:
+            self.push_move_command(moves)
+        for other_id, rect in frame_rects.items():
+            self.undo_stack.push(UpdateFrameCommand(
+                self.graph, other_id, rect=rect))
 
     def nudge_clear_of(self, frame_id: str, keep: set,
                        keep_frames: set = frozenset()) -> None:
@@ -944,6 +1003,12 @@ class NodeGraphScene(QGraphicsScene):
         # stale entry to know there is anything to undo. Clearing it first
         # leaves nothing to reconcile and the contents stay hidden.
         self._refresh_collapsed_frames()
+        # The frame may have *moved*, and the wires pinned to it have their
+        # other end on a hidden node that did not move relative to it, so
+        # nothing else repaths them. Only a mouse drag used to do this, which
+        # left every other way a frame can move — a nudge, an undo, a paste,
+        # a project load — drawing its wires from where the box used to be.
+        self.frame_item_moved(frame.id)
 
     # ------------------------------------------------------------- helpers
 
