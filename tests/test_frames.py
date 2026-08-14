@@ -891,6 +891,186 @@ class TestParkedOverOtherNodes:
         assert graph.nodes["far"].pos == before
 
 
+class TestNudgePlan:
+    """The displacement arithmetic, without a canvas."""
+
+    def plan(self, region, units, gap=20.0):
+        from flograph.ui.canvas.scene import plan_nudge
+        return plan_nudge(QRectF(*region), [(k, QRectF(*r)) for k, r in units],
+                          gap=gap)
+
+    def test_nothing_in_the_way_moves_nothing(self):
+        assert self.plan((0, 0, 100, 100), [("a", (500, 500, 50, 50))]) == {}
+
+    def test_something_in_the_way_is_pushed_clear(self):
+        plan = self.plan((0, 0, 100, 100), [("a", (80, 10, 50, 50))])
+        dx, dy = plan["a"]
+        assert dx > 0 and dy == 0            # nearer the right edge
+        assert 80 + dx >= 100 + 20           # and clears it by the gap
+
+    def test_the_shorter_escape_wins(self):
+        # deep inside horizontally, barely inside vertically -> go down
+        plan = self.plan((0, 0, 400, 100), [("a", (10, 80, 50, 50))])
+        dx, dy = plan["a"]
+        assert dy > 0 and dx == 0
+
+    def test_a_push_ripples_to_what_it_hits(self):
+        """b is nowhere near the frame, but a lands on it."""
+        plan = self.plan((0, 0, 100, 100),
+                         [("a", (80, 10, 50, 50)), ("b", (140, 10, 50, 50))])
+        assert plan["a"][0] > 0
+        assert plan["b"][0] > 0, "b was in a's way and should have moved on"
+
+    def test_a_ripple_keeps_the_pusher_s_direction(self):
+        plan = self.plan((0, 0, 400, 100),
+                         [("a", (10, 80, 50, 50)), ("b", (10, 140, 50, 50))])
+        assert plan["a"][1] > 0 and plan["a"][0] == 0
+        assert plan["b"][1] > 0 and plan["b"][0] == 0   # down, like its pusher
+
+    def test_a_chain_of_three_all_move(self):
+        plan = self.plan((0, 0, 100, 100),
+                         [("a", (80, 10, 50, 50)), ("b", (140, 10, 50, 50)),
+                          ("c", (200, 10, 50, 50))])
+        assert all(plan[k][0] > 0 for k in "abc")
+
+    def test_everything_ends_clear_of_the_region_and_each_other(self):
+        units = [("a", (80, 10, 50, 50)), ("b", (140, 10, 50, 50)),
+                 ("c", (200, 10, 50, 50))]
+        region = QRectF(0, 0, 100, 100)
+        plan = self.plan((0, 0, 100, 100), units)
+        moved = []
+        for key, rect in units:
+            dx, dy = plan.get(key, (0.0, 0.0))
+            moved.append(QRectF(rect[0] + dx, rect[1] + dy, rect[2], rect[3]))
+        for i, rect in enumerate(moved):
+            assert not rect.intersects(region)
+            for other in moved[i + 1:]:
+                assert not rect.intersects(other)
+
+
+class TestNudgeRespectsFrames:
+    def test_expanding_over_a_frame_moves_it_whole(self, env, registry):
+        """The 'it stole some of the nodes' report: the neighbour used to sit
+        still while its contents were shoved out from under it."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="mine", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "own", (50.0, 50.0))
+        collapse(scene, "mine")
+
+        # a neighbour with two nodes, overlapping where 'mine' will reopen
+        graph.add_frame(Frame(id="theirs", rect=(200, 40, 260, 180)))
+        script_node(graph, registry, "their1", (240.0, 80.0))
+        script_node(graph, registry, "their2", (330.0, 120.0))
+        before = {n: graph.nodes[n].pos for n in ("their1", "their2")}
+        their_rect = graph.frames["theirs"].rect
+
+        expand(scene, "mine")
+
+        # the frame moved, and its nodes went with it by the same amount
+        assert graph.frames["theirs"].rect != their_rect
+        dx = graph.frames["theirs"].rect[0] - their_rect[0]
+        dy = graph.frames["theirs"].rect[1] - their_rect[1]
+        for name in ("their1", "their2"):
+            assert graph.nodes[name].pos == (before[name][0] + dx,
+                                             before[name][1] + dy)
+        # so the neighbour still holds exactly what it did
+        rect = QRectF(*graph.frames["theirs"].rect)
+        held = [n for n in ("their1", "their2")
+                if rect.contains(
+                    scene.node_items[n].sceneBoundingRect().center())]
+        assert held == ["their1", "their2"]
+
+    def test_one_undo_puts_the_neighbouring_frame_back(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="mine", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "own", (50.0, 50.0))
+        collapse(scene, "mine")
+        graph.add_frame(Frame(id="theirs", rect=(200, 40, 260, 180)))
+        script_node(graph, registry, "their1", (240.0, 80.0))
+        before_rect = graph.frames["theirs"].rect
+        before_pos = graph.nodes["their1"].pos
+
+        expand(scene, "mine")
+        stack.undo()
+        assert graph.frames["theirs"].rect == before_rect
+        assert graph.nodes["their1"].pos == before_pos
+
+    def test_its_own_nested_frame_is_not_pushed_away(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
+        graph.add_frame(Frame(id="inner", rect=(50, 50, 100, 100)))
+        script_node(graph, registry, "deep", (70.0, 70.0))
+        collapse(scene, "outer")
+        assert "inner" in graph.frames["outer"].member_frames
+        inner_rect = graph.frames["inner"].rect
+        expand(scene, "outer")
+        assert graph.frames["inner"].rect == inner_rect
+
+
+class TestNestedCollapse:
+    """A collapsed frame folded away inside another collapsed frame."""
+
+    def _nest(self, env, registry, inner_first):
+        graph, stack, scene = env
+        rects = [("inner", (40, 40, 200, 150)), ("outer", (0, 0, 500, 400))]
+        for fid, rect in (rects if inner_first else reversed(rects)):
+            graph.add_frame(Frame(id=fid, rect=rect))
+        script_node(graph, registry, "deep", (70.0, 70.0))    # inside inner
+        script_node(graph, registry, "mid", (300.0, 300.0))   # outer only
+        sink1 = script_node(graph, registry, "sink1", (900.0, 100.0))
+        sink2 = script_node(graph, registry, "sink2", (900.0, 400.0))
+        graph.connect("deep", "out1", sink1.id, "in1")
+        graph.connect("mid", "out1", sink2.id, "in1")
+        return graph, stack, scene
+
+    @pytest.mark.parametrize("inner_first", [True, False])
+    def test_pins_land_on_the_box_you_can_see(self, env, registry, inner_first):
+        """The owner is the outermost collapsed frame, not whichever one the
+        dictionary happened to reach first — that made the same nesting draw
+        correctly or not depending on which frame was created first."""
+        graph, stack, scene = self._nest(env, registry, inner_first)
+        collapse(scene, "inner")
+        collapse(scene, "outer")
+        assert not scene.frame_items["inner"].isVisible()
+        owners = {p.frame_item.frame.id for p in scene._frame_pins.values()}
+        assert owners == {"outer"}
+        for pin in scene._frame_pins.values():
+            assert pin.frame_item.isVisible(), "a pin on a box nobody can see"
+
+    @pytest.mark.parametrize("inner_first", [True, False])
+    def test_crossing_wires_stay_drawn(self, env, registry, inner_first):
+        graph, stack, scene = self._nest(env, registry, inner_first)
+        collapse(scene, "inner")
+        collapse(scene, "outer")
+        for item in scene.connection_items.values():
+            assert item.isVisible()
+            for anchor in (item.src_anchor, item.dst_anchor):
+                owner = getattr(anchor, "frame_item", None)
+                assert owner is None or owner.isVisible()
+
+    def test_expanding_the_outer_gives_the_inner_back_folded(self, env, registry):
+        """The inner frame was collapsed before it was buried, and comes back
+        that way — its own state is its own."""
+        graph, stack, scene = self._nest(env, registry, True)
+        collapse(scene, "inner")
+        collapse(scene, "outer")
+        expand(scene, "outer")
+        assert scene.frame_items["inner"].isVisible()
+        assert graph.frames["inner"].collapsed is True
+        assert not scene.node_items["deep"].isVisible()   # still inside it
+        owners = {p.frame_item.frame.id for p in scene._frame_pins.values()}
+        assert owners == {"inner"}
+
+    def test_undo_restores_the_nesting(self, env, registry):
+        graph, stack, scene = self._nest(env, registry, True)
+        collapse(scene, "inner")
+        collapse(scene, "outer")
+        stack.undo()
+        assert graph.frames["outer"].collapsed is False
+        assert graph.frames["inner"].collapsed is True
+        assert scene.frame_items["inner"].isVisible()
+
+
 class TestPainting:
     """paint() is where the geometry actually runs; render it for real."""
 

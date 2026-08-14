@@ -32,8 +32,73 @@ from .stacking import LAYER_LABELS
 
 SCENE_EXTENT = 1_000_000.0
 REROUTE_TYPE = "flograph.util.reroute"
-#: Clearance left when an expanding frame pushes a node out of its way.
+#: Clearance left when an expanding frame pushes something out of its way.
 _NUDGE_GAP = 20.0
+#: How many times the ripple is allowed to travel. A push can land on
+#: something that then has to be pushed itself; this bounds the chain rather
+#: than trusting a crowded canvas to settle.
+_NUDGE_PASSES = 12
+
+
+def plan_nudge(region: QRectF, units: list, gap: float = _NUDGE_GAP,
+               passes: int = _NUDGE_PASSES) -> dict:
+    """How far each unit must move to clear `region`, and then each other.
+
+    `units` is [(key, QRectF)], where a unit is one movable thing: a lone
+    node, or a frame taken *together with everything inside it*. Frames move
+    whole — pushing their contents out from under them instead would empty
+    the frame, which is the thing an expanding neighbour must never do.
+
+    A unit directly in the way goes right or down, whichever is the shorter
+    escape. Anything it then runs into is pushed **the same way**, so a
+    cascade travels in one direction and opens a lane, rather than
+    scattering things into each other.
+
+    Pure geometry, no scene: the awkward part of this is the arithmetic, and
+    it is worth being able to test it without a canvas.
+    """
+    rects = {key: QRectF(rect) for key, rect in units}
+    axis: dict = {}
+    delta: dict = {}
+
+    def shift(key: str, dx: float, dy: float) -> None:
+        rects[key].translate(dx, dy)
+        was = delta.get(key, (0.0, 0.0))
+        delta[key] = (was[0] + dx, was[1] + dy)
+
+    def push_clear(key: str, blocker: QRectF, way: str) -> None:
+        rect = rects[key]
+        if way == "right":
+            shift(key, blocker.right() - rect.left() + gap, 0.0)
+        else:
+            shift(key, 0.0, blocker.bottom() - rect.top() + gap)
+        axis[key] = way
+
+    for _ in range(passes):
+        moved_any = False
+        # 1. clear the region itself
+        for key in list(rects):
+            if not rects[key].intersects(region):
+                continue
+            rect = rects[key]
+            if key not in axis:
+                right = region.right() - rect.left() + gap
+                down = region.bottom() - rect.top() + gap
+                axis[key] = "right" if right <= down else "down"
+            push_clear(key, region, axis[key])
+            moved_any = True
+        # 2. and then each other, in whichever direction the pusher went
+        for pusher in list(delta):
+            for key in list(rects):
+                if key == pusher:
+                    continue
+                if not rects[pusher].intersects(rects[key]):
+                    continue
+                push_clear(key, rects[pusher], axis.get(pusher, "right"))
+                moved_any = True
+        if not moved_any:
+            break
+    return delta
 
 
 class NodeGraphScene(QGraphicsScene):
@@ -316,42 +381,121 @@ class NodeGraphScene(QGraphicsScene):
 
     # ------------------------------------------------------ collapsed frames
 
-    def nudge_clear_of(self, frame_id: str, keep: set) -> None:
-        """Push nodes out of the way of a frame that has just expanded.
+    def _nudge_units(self, frame_id: str, keep: set,
+                     keep_frames: set) -> list:
+        """The movable things around an expanding frame, as (key, rect, nodes,
+        frames).
 
-        Only the ones actually in the way, and only outward — right or down,
-        whichever is the shorter escape, so nothing is shoved back over
-        territory further up the flow. `keep` is the membership the frame had
-        while folded: those nodes belong inside the region and must sit still.
+        A frame and its contents are **one** unit. Pushing its nodes out
+        individually would empty it — which is exactly the complaint that a
+        frame expanding over a neighbour "stole its nodes": the neighbour sat
+        still while the things inside it were shoved out from under it.
 
-        Pushed as an ordinary move, so it joins the expand's macro and one
+        Nodes already spoken for by some frame are therefore not offered
+        separately; only genuinely loose ones are.
+        """
+        item = self.frame_items.get(frame_id)
+        spoken_for: set = set(keep)
+        units: list = []
+        for other_id, other in self.frame_items.items():
+            if other is item or not other.isVisible():
+                continue
+            if other_id in keep_frames:
+                continue        # nested inside the one expanding; it belongs
+            members = [nid for nid in self._frame_members(other)
+                       if nid in self.node_items]
+            spoken_for.update(members)
+            rect = other.scene_rect()
+            for nid in members:
+                rect = rect.united(self.node_items[nid].sceneBoundingRect())
+            units.append((("frame", other_id), rect, members, [other_id]))
+        for node_id, node_item in self.node_items.items():
+            if node_id in spoken_for or not node_item.isVisible():
+                continue
+            units.append((("node", node_id), node_item.sceneBoundingRect(),
+                          [node_id], []))
+        return units
+
+    def _frame_members(self, item) -> list:
+        """Who a frame holds: what it wrote down if folded, whatever sits
+        inside it if not."""
+        if item.collapsed:
+            return list(item.frame.members)
+        rect = item.scene_rect()
+        return [nid for nid, node_item in self.node_items.items()
+                if rect.contains(node_item.sceneBoundingRect().center())]
+
+    def nudge_clear_of(self, frame_id: str, keep: set,
+                       keep_frames: set = frozenset()) -> None:
+        """Make room for a frame that has just expanded.
+
+        Whatever the returning region lands on is pushed right or down —
+        whichever is the shorter way out — and whatever *that* runs into is
+        pushed the same way, so the displacement travels instead of piling
+        up. Frames move whole, with everything inside them.
+
+        `keep` is the membership the frame had while folded: its own contents
+        belong inside the region and must sit still.
+
+        Pushed as ordinary moves, so they join the expand's macro and one
         Ctrl+Z puts the frame and its neighbours back together.
         """
         item = self.frame_items.get(frame_id)
         if item is None:
             return
-        region = item.scene_rect()
+        units = self._nudge_units(frame_id, keep, set(keep_frames))
+        plan = plan_nudge(item.scene_rect(),
+                          [(key, rect) for key, rect, _n, _f in units])
+        if not plan:
+            return
+        contents = {key: (nodes, frames) for key, _r, nodes, frames in units}
         moves: dict = {}
-        for node_id, node_item in self.node_items.items():
-            if node_id in keep or not node_item.isVisible():
-                continue
-            bounds = node_item.sceneBoundingRect()
-            if not region.intersects(bounds):
-                continue
-            right = region.right() - bounds.left() + _NUDGE_GAP
-            down = region.bottom() - bounds.top() + _NUDGE_GAP
-            old = (node_item.pos().x(), node_item.pos().y())
-            moves[node_id] = (old, (old[0] + right, old[1]) if right <= down
-                              else (old[0], old[1] + down))
+        frame_rects: dict = {}
+        for key, (dx, dy) in plan.items():
+            nodes, frames = contents[key]
+            for node_id in nodes:
+                node = self.graph.nodes.get(node_id)
+                if node is None:
+                    continue
+                moves[node_id] = (node.pos, (node.pos[0] + dx,
+                                             node.pos[1] + dy))
+            for other_id in frames:
+                rect = self.graph.frames[other_id].rect
+                frame_rects[other_id] = (rect[0] + dx, rect[1] + dy,
+                                         rect[2], rect[3])
         if moves:
             self.push_move_command(moves)
+        for other_id, rect in frame_rects.items():
+            self.undo_stack.push(UpdateFrameCommand(
+                self.graph, other_id, rect=rect))
+
+    def _buried_frames(self) -> set:
+        """Collapsed frames that are themselves folded away inside another."""
+        return {fid for ids in self._hidden_frames.values() for fid in ids}
 
     def _owner_of(self, node_id: str) -> Optional[str]:
-        """The collapsed frame hiding this node, if any."""
+        """The collapsed frame that stands in for this node on the canvas.
+
+        The **outermost** one. A node inside a collapsed frame that is itself
+        folded away inside another belongs, as far as the canvas is
+        concerned, to the box you can actually see: pinning its wires to the
+        inner frame would draw them to a box that is not on screen.
+
+        This used to return whichever frame came first in the dictionary,
+        which made it a coin toss decided by the order the frames happened to
+        be created in — the same nesting drew correctly or not at all
+        depending on which frame you had drawn first.
+        """
+        buried = self._buried_frames()
+        fallback = None
         for frame_id, members in self._hidden.items():
-            if node_id in members:
+            if node_id not in members:
+                continue
+            if frame_id not in buried:
                 return frame_id
-        return None
+            if fallback is None:
+                fallback = frame_id
+        return fallback
 
     def wire_anchor(self, conn, side: str):
         """The item a wire's `side` end should be drawn from.

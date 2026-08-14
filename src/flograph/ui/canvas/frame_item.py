@@ -103,10 +103,11 @@ class FrameItem(QGraphicsObject):
             # its own contents belong inside the region and must sit still;
             # read before the command clears the membership
             keep = set(self.frame.members)
+            keep_frames = set(self.frame.member_frames)
             scene.undo_stack.beginMacro("expand frame")
             scene.undo_stack.push(SetFrameCollapsedCommand(
                 scene.graph, self.frame.id, False))
-            scene.nudge_clear_of(self.frame.id, keep)
+            scene.nudge_clear_of(self.frame.id, keep, keep_frames)
             scene.undo_stack.endMacro()
             return
         nodes, frames = self.carried_items()
