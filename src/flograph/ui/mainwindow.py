@@ -3034,6 +3034,10 @@ class MainWindow(QMainWindow):
         from .browser import forget_all
         forget_all()
         self._restoring_pages = True
+        # Folding is re-derived from scratch on every graph event, which is
+        # the right trade everywhere except here: a 500-node load would run
+        # it 500 times. Suspend it and fold once, at the end.
+        self.scene._suspend_collapse_refresh = True
         for page_id in list(self.graph.pages):
             self.graph.remove_page(page_id)
         for frame_id in list(self.graph.frames):
@@ -3050,6 +3054,8 @@ class MainWindow(QMainWindow):
         for page in loaded.pages.values():
             self.graph.add_page(page)
         self._restoring_pages = False
+        self.scene._suspend_collapse_refresh = False
+        self.scene._refresh_collapsed_frames()
         self.undo_stack.clear()
         self.undo_stack.setClean()
         if loaded.nodes:
