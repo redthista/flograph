@@ -482,11 +482,27 @@ class TestPanelReveal:
         node = registry.instantiate(
             "flograph.scripting.python_script", pos=(0, 0))
         window.undo_stack.push(AddNodeCommand(window.graph, node))
+        # which dock a double-click opens is the user's setting; this is
+        # about the reveal, so ask for the one being revealed
+        window.double_click_action = "code"
         window.editor_dock.close()
 
         window._on_node_double_clicked(node.id)
 
         assert window.editor_dock.isHidden() is False
+
+    def test_double_clicking_a_node_reopens_a_closed_properties_dock(
+            self, window, registry):
+        """The default action, and the same reveal path."""
+        node = registry.instantiate(
+            "flograph.scripting.python_script", pos=(0, 0))
+        window.undo_stack.push(AddNodeCommand(window.graph, node))
+        assert window.double_click_action == "properties"
+        window.properties_dock.close()
+
+        window._on_node_double_clicked(node.id)
+
+        assert window.properties_dock.isHidden() is False
 
     def test_a_revealed_dock_survives_a_dashboard_round_trip(
             self, window, registry):
@@ -495,6 +511,7 @@ class TestPanelReveal:
         node = registry.instantiate(
             "flograph.scripting.python_script", pos=(0, 0))
         window.undo_stack.push(AddNodeCommand(window.graph, node))
+        window.double_click_action = "code"
         window.editor_dock.close()
         window._on_node_double_clicked(node.id)
 

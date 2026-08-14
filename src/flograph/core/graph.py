@@ -230,10 +230,29 @@ class Graph:
         node.ports_collapsed = collapsed
         self.events.ports_collapsed_changed.emit(node_id)
 
+    def set_compact_view(self, node_id: str,
+                         compact: Optional[bool]) -> None:
+        """Draw this node as the compact square or the wide box. None hands
+        the node back to the canvas-wide preference."""
+        node = self.node(node_id)
+        node.compact_view = compact
+        self.events.compact_view_changed.emit(node_id)
+
     def set_color(self, node_id: str, color: Optional[str]) -> None:
         node = self.node(node_id)
         node.color = color or None
         self.events.color_changed.emit(node_id)
+
+    def set_mark(self, node_id: str, mark: str, mark_text: str,
+                 mark_image: str = "") -> None:
+        """What a compact node draws in its square. All three empty hands the
+        node back to its category's default mark. Set together because they
+        are one choice with four states, not three independent settings."""
+        node = self.node(node_id)
+        node.mark = mark or ""
+        node.mark_text = mark_text or ""
+        node.mark_image = mark_image or ""
+        self.events.mark_changed.emit(node_id)
 
     def set_param(self, node_id: str, name: str, value: Any) -> None:
         node = self.node(node_id)

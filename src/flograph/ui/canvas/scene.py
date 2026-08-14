@@ -20,11 +20,14 @@ from flograph.core.node import NodeStatus
 
 from ..commands import (
     AddNodeCommand, ConnectCommand, DisconnectCommand, MoveNodesCommand,
-    RemoveSelectionCommand, SetNodeColorCommand, UpdateFrameCommand,
+    RemoveSelectionCommand, SetCompactViewCommand, SetNodeColorCommand,
+    SetNodeMarkCommand, UpdateFrameCommand,
 )
 from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
-from .node_item import DEFAULT_LOD_THRESHOLD, NodeItem, PortItem
+from .node_item import (
+    DEFAULT_LOD_THRESHOLD, NodeItem, PortItem, compact_on,
+)
 from .stacking import LAYER_LABELS
 
 SCENE_EXTENT = 1_000_000.0
@@ -33,6 +36,7 @@ REROUTE_TYPE = "flograph.util.reroute"
 
 class NodeGraphScene(QGraphicsScene):
     node_double_clicked = Signal(str)   # node_id
+    node_window_requested = Signal(str)  # node_id — Ctrl+double-click
     node_rename_requested = Signal(str)  # node_id — header was double-clicked
     wire_dropped = Signal(object, QPointF)  # fixed PortItem, scene pos
     button_fired = Signal(str)          # node_id — an Action Button was clicked
@@ -82,6 +86,16 @@ class NodeGraphScene(QGraphicsScene):
         # node_item.port_labels_on.
         self.port_labels_enabled = False
 
+        # Transient: the reveal key is held down, so every port shows its
+        # name regardless of the setting above or any per-node override.
+        # Not a preference and never saved — see NodeGraphView's key handling.
+        self.revealing_port_labels = False
+
+        # Canvas-wide "draw plain nodes as squares" preference; the main
+        # window is the sole writer (MainWindow.set_compact_nodes). Card
+        # kinds are unaffected — see NodeItem.apply_compact.
+        self.compact_nodes = True
+
         self.setSceneRect(QRectF(-SCENE_EXTENT, -SCENE_EXTENT,
                                  2 * SCENE_EXTENT, 2 * SCENE_EXTENT))
 
@@ -110,6 +124,8 @@ class NodeGraphScene(QGraphicsScene):
         events.ports_collapsed_changed.connect(
             self._on_ports_collapsed_changed)
         events.color_changed.connect(self._on_color_changed)
+        events.mark_changed.connect(self._on_mark_changed)
+        events.compact_view_changed.connect(self._on_compact_view_changed)
         events.links_changed.connect(self._refresh_link_cards)
         events.links_changed.connect(self._refresh_port_connections)
         events.links_changed.connect(self._refresh_link_lines)
@@ -138,6 +154,7 @@ class NodeGraphScene(QGraphicsScene):
     def _on_node_added(self, node: NodeInstance) -> None:
         item = NodeItem(node)
         item.set_lod(self._flat_state())
+        item.apply_compact(compact_on(node, self))
         item.apply_stacking()
         self.addItem(item)
         self.node_items[node.id] = item
@@ -156,6 +173,9 @@ class NodeGraphScene(QGraphicsScene):
     def _on_node_removed(self, node_id: str) -> None:
         item = self.node_items.pop(node_id, None)
         if item is not None:
+            # before removeItem: a QMovie still delivering frames into a
+            # deleted item is a crash, not a leak
+            item.dispose_mark_image()
             self.removeItem(item)
 
     def _on_connected(self, conn: Connection) -> None:
@@ -310,6 +330,7 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.prepareGeometryChange()  # compact nodes resize their bounding rect for the label
+            item.invalidate_label()
             item.update()
 
     def _on_description_changed(self, node_id: str) -> None:
@@ -363,6 +384,33 @@ class NodeGraphScene(QGraphicsScene):
         for item in self.node_items.values():
             self._repaint_ports(item)
 
+    def set_revealing_port_labels(self, revealing: bool) -> None:
+        """Show every port's name while the reveal key is held, then put them
+        all back. Repaints the pins for the same reason
+        set_port_labels_enabled does: a pill appearing changes each pin's
+        bounding rect, and Qt's index has to be told."""
+        if revealing == self.revealing_port_labels:
+            return
+        self.revealing_port_labels = revealing
+        for item in self.node_items.values():
+            self._repaint_ports(item)
+
+    def set_compact_nodes(self, enabled: bool) -> None:
+        """Canvas-wide preference. Every plain node changes width, so its
+        pins move and every wire on them has to be re-routed; apply_compact
+        does that per item. Nodes carrying their own override are unmoved by
+        this, which is the point of the override."""
+        if enabled == self.compact_nodes:
+            return
+        self.compact_nodes = enabled
+        for item in self.node_items.values():
+            item.refresh_compact()
+
+    def _on_compact_view_changed(self, node_id: str) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.refresh_compact()
+
     @staticmethod
     def _repaint_ports(item) -> None:
         if item is None:
@@ -378,6 +426,11 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.update()
+
+    def _on_mark_changed(self, node_id: str) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.refresh_mark_image()
 
     def _on_temp_edit_changed(self, node_id: str, has_temp_edit: bool) -> None:
         item = self.node_items.get(node_id)
@@ -610,6 +663,16 @@ class NodeGraphScene(QGraphicsScene):
 
     def push_node_color(self, node_id: str, color: Optional[str]) -> None:
         self.undo_stack.push(SetNodeColorCommand(self.graph, node_id, color))
+
+    def push_node_mark(self, node_id: str, mark: str, mark_text: str,
+                       mark_image: str = "") -> None:
+        self.undo_stack.push(SetNodeMarkCommand(
+            self.graph, node_id, mark, mark_text, mark_image))
+
+    def push_compact_view(self, node_id: str,
+                          compact: Optional[bool]) -> None:
+        self.undo_stack.push(
+            SetCompactViewCommand(self.graph, node_id, compact))
 
     # -------------------------------------------------------------- reroute
 

@@ -3,20 +3,48 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QKeyEvent
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QFrame, QHBoxLayout, QLineEdit, QListWidget,
+    QListWidgetItem, QMenu, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from flograph.core import NodeRegistry, NodeSpec
+from flograph.ui import theme
+from flograph.ui.canvas import marks
 from flograph.ui.favorites import Favorites
 
 STAR = "★"
 FAVORITE_SECTION = "Favorites"
 
 NODE_TYPE_MIME = "application/x-flograph-node-type"
+
+# The mark beside each library row: the same glyph the node will wear on the
+# canvas, so a node is recognised in the list by the shape you will then look
+# for in the graph.
+MARK_ICON_SIZE = 16
+_icon_cache: dict[tuple[str, float], QIcon] = {}
+
+
+def spec_icon(spec: NodeSpec) -> QIcon:
+    """The category mark for a library row, cached per (mark, dpr).
+
+    Cached because reload() rebuilds every row on every favourites change and
+    there are only ever a handful of distinct marks — rasterising the same
+    seven paths a hundred times would be pure waste.
+    """
+    name = marks.mark_for_category(spec.category)
+    screen = QApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen is not None else 1.0
+    key = (name, ratio)
+    icon = _icon_cache.get(key)
+    if icon is None:
+        icon = marks.mark_icon(name, MARK_ICON_SIZE,
+                               QColor(theme.NODE_SUBTEXT), ratio)
+        _icon_cache[key] = icon
+    return icon
 
 
 class NodePalettePopup(QFrame):
@@ -71,6 +99,7 @@ class NodePalettePopup(QFrame):
                 continue
             prefix = STAR if favorites.contains(spec.type_id) else ""
             item = QListWidgetItem(f"{prefix} {spec.label}    ({spec.category})")
+            item.setIcon(spec_icon(spec))
             item.setData(Qt.UserRole, spec.type_id)
             self._list.addItem(item)
         if self._list.count():
@@ -121,6 +150,11 @@ class LibraryTree(QTreeWidget):
         self.setHeaderHidden(True)
         # Compact rows: uniform height, no room to grow.
         self.setUniformRowHeights(True)
+        # Set explicitly because of that: with uniform heights Qt measures one
+        # row and applies it everywhere, and the row it happens to measure may
+        # be an icon-less section header — which would then clip every mark
+        # below it. Naming the size takes the guess out of it.
+        self.setIconSize(QSize(MARK_ICON_SIZE, MARK_ICON_SIZE))
         self.setDragEnabled(True)
         self.itemActivated.connect(self._on_activated)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -182,6 +216,7 @@ class LibraryTree(QTreeWidget):
         starred = favorite and self._favorites.contains(spec.type_id)
         label = f"{STAR} {spec.label}" if starred else spec.label
         child = QTreeWidgetItem([label])
+        child.setIcon(0, spec_icon(spec))
         child.setData(0, Qt.UserRole, spec.type_id)
         child.setToolTip(0, spec.doc or spec.type_id)
         return child

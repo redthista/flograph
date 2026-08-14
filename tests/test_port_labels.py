@@ -506,7 +506,15 @@ class TestTheMenuEntry:
         window.graph.add_node(node)
         return node
 
-    def test_the_entry_says_what_clicking_will_do(self, window, monkeypatch):
+    def _dialog(self, window, node):
+        from flograph.ui.canvas.appearance_dialog import AppearanceDialog
+        return AppearanceDialog(window.scene, node.id, window)
+
+    def test_the_menu_points_at_the_appearance_dialog(self, window,
+                                                      monkeypatch):
+        """Six appearance entries became one; port names is now a tri-state
+        inside it rather than a toggle whose label had to say which way it
+        would go."""
         from PySide6.QtWidgets import QMenu
         from flograph.ui import mainwindow as mod
         node = self.add_card(window)
@@ -519,29 +527,41 @@ class TestTheMenuEntry:
 
         monkeypatch.setattr(mod, "QMenu", _Recorder)
         window._show_node_menu(node.id, window.pos())
-        assert "Show Port Names" in seen
+        assert "Appearance…" in seen
+        assert not any(text in seen for text in
+                       ("Show Port Names", "Hide Port Names"))
 
-        window.graph.set_port_labels(node.id, True)
-        seen.clear()
-        window._show_node_menu(node.id, window.pos())
-        assert "Hide Port Names" in seen
-
-    def test_toggling_is_one_undo_step(self, window):
+    def test_the_dialog_opens_on_what_the_node_is_doing(self, window, qtbot):
         node = self.add_card(window)
+        dialog = self._dialog(window, node)
+        qtbot.addWidget(dialog)
+        assert dialog._labels_combo.currentData() is None   # canvas default
+        window.graph.set_port_labels(node.id, True)
+        dialog = self._dialog(window, node)
+        qtbot.addWidget(dialog)
+        assert dialog._labels_combo.currentData() is True
+
+    def test_choosing_is_one_undo_step(self, window, qtbot):
+        node = self.add_card(window)
+        dialog = self._dialog(window, node)
+        qtbot.addWidget(dialog)
         depth = window.undo_stack.count()
-        window._toggle_port_labels(node.id, True)
+        dialog._labels_combo.setCurrentIndex(
+            dialog._labels_combo.findData(True))
         assert window.undo_stack.count() == depth + 1
         assert node.port_labels is True
         window.undo_stack.undo()
         assert node.port_labels is None
 
-    def test_toggling_back_returns_the_node_to_following_the_canvas(
-            self, window):
-        """Rather than pinning it to False, which would look identical today
-        and then ignore the global setting forever after."""
+    def test_canvas_default_is_offered_outright(self, window, qtbot):
+        """Rather than having to toggle a node on and off again to get back
+        to following the global setting."""
         node = self.add_card(window)
-        window._toggle_port_labels(node.id, True)
-        window._toggle_port_labels(node.id, False)
+        window.graph.set_port_labels(node.id, False)
+        dialog = self._dialog(window, node)
+        qtbot.addWidget(dialog)
+        dialog._labels_combo.setCurrentIndex(
+            dialog._labels_combo.findData(None))
         assert node.port_labels is None
 
     def test_the_canvas_setting_persists(self, window):
