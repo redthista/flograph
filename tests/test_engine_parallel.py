@@ -350,6 +350,33 @@ class TestOutputIsNotCrossWired:
         assert all(nid == line for nid, line in printed)
 
 
+class TestTheBundledExample:
+    """12_parallel_branches exists to show branches overlapping. If it ever
+    stops doing that it is still a flow that runs and every other test would
+    still pass, while the one thing it is for had quietly gone."""
+
+    def test_it_actually_runs_its_branches_together(self, qtbot):
+        import importlib.resources
+
+        from flograph.core import NodeRegistry, serialization
+
+        registry = NodeRegistry()
+        registry.load_builtins()
+        path = (importlib.resources.files("flograph.templates")
+                / "12_parallel_branches.flograph")
+        graph = serialization.load(str(path), registry)
+        engine = ExecutionEngine(graph)
+        engine.max_workers = 6
+
+        assert wait_run(qtbot, engine, engine.run_all)
+        record = engine.history.latest
+        # Six independent branches: every one of them should get a worker.
+        assert record.peak_concurrency == 6
+        assert record.overlap > 0
+        # and the chain inside a branch still held
+        assert record.wall_time < record.node_time
+
+
 class TestRunStatistics:
     def test_a_concurrent_run_records_what_it_overlapped(self, qtbot, tmp_path):
         graph = Graph()
