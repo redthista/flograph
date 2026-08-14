@@ -39,14 +39,36 @@ class ConnectionItem(QGraphicsPathItem):
         self.conn = conn
         self.src_port = src
         self.dst_port = dst
+        # Where each end is *drawn*, which is not always its own pin: when a
+        # node is folded inside a collapsed frame, its wires terminate on a
+        # pin on that frame's box instead. Kept separate from src_port /
+        # dst_port so identity and colour still come from the real ports.
+        self._src_anchor = src
+        self._dst_anchor = dst
         self._hover = False
         self.setZValue(WIRE_Z)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
         self.update_path()
 
+    def set_anchors(self, src: Optional[PortItem] = None,
+                    dst: Optional[PortItem] = None) -> None:
+        """Redirect either end's drawn position. None restores the real port."""
+        self._src_anchor = src if src is not None else self.src_port
+        self._dst_anchor = dst if dst is not None else self.dst_port
+        self.update_path()
+
+    @property
+    def src_anchor(self) -> PortItem:
+        return self._src_anchor
+
+    @property
+    def dst_anchor(self) -> PortItem:
+        return self._dst_anchor
+
     def update_path(self) -> None:
-        self.setPath(bezier_path(self.src_port.scenePos(), self.dst_port.scenePos()))
+        self.setPath(bezier_path(self._src_anchor.scenePos(),
+                                 self._dst_anchor.scenePos()))
 
     def shape(self) -> QPainterPath:
         stroker = QPainterPathStroker()

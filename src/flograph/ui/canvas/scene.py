@@ -68,6 +68,18 @@ class NodeGraphScene(QGraphicsScene):
         # a wire and not in graph.connections — see canvas.link_line.
         self.link_line_items: dict[str, "LinkLineItem"] = {}
         self.frame_items: dict[str, FrameItem] = {}
+        # --- collapsed frames (see _refresh_collapsed_frames) --------------
+        # Which nodes each collapsed frame is standing in for. Captured when
+        # the frame folds rather than re-derived from its rect on every
+        # rebuild: the vacated region still looks like empty canvas, so a
+        # node dropped into it later must not be silently swallowed.
+        self._hidden: dict[str, list[str]] = {}
+        self._hidden_frames: dict[str, list[str]] = {}
+        # One pin per crossing wire end, keyed (conn_id, "src"|"dst").
+        self._frame_pins: dict[tuple, "FramePortItem"] = {}
+        # Set while a bulk load replaces the graph node by node; the rebuild
+        # would otherwise run once per add and be quadratic in graph size.
+        self._suspend_collapse_refresh = False
         self._zoom = 1.0  # last zoom pushed by the view, see set_lod
 
         # Zoom-out node simplification preference; the main window is the
@@ -144,6 +156,10 @@ class NodeGraphScene(QGraphicsScene):
             self._on_frame_added(frame)
         self._refresh_link_cards()
         self._refresh_link_lines()
+        # frames were mirrored above, before any link line existed — fold
+        # again now that they do, so a collapsed frame built straight over an
+        # existing graph gets its link pins too
+        self._refresh_collapsed_frames()
         # Goto/From pairs have no wire to trace, so selecting one end glows
         # the other -- the only on-canvas evidence that a link exists, short
         # of asking for the line itself (see _refresh_link_lines)
@@ -159,6 +175,9 @@ class NodeGraphScene(QGraphicsScene):
         self.addItem(item)
         self.node_items[node.id] = item
         item.refresh_link_card()  # its text needs the scene's graph to resolve
+        # undoing a delete puts a collapsed frame's contents back; they have
+        # to go straight back under the lid rather than appear on top of it
+        self._refresh_collapsed_frames()
 
     def _on_restacked(self, kind: str, page_id) -> None:
         """One kind's stacking order changed. Every item of that kind re-reads
@@ -177,6 +196,7 @@ class NodeGraphScene(QGraphicsScene):
             # deleted item is a crash, not a leak
             item.dispose_mark_image()
             self.removeItem(item)
+        self._refresh_collapsed_frames()
 
     def _on_connected(self, conn: Connection) -> None:
         src = self.node_items[conn.src_node].output_ports[conn.src_port]
@@ -188,6 +208,8 @@ class NodeGraphScene(QGraphicsScene):
         dst_node_item = self.node_items.get(conn.dst_node)
         if dst_node_item is not None and dst_node_item.table:
             dst_node_item.refresh_table_link()
+        # a wire made through a collapsed frame's pin needs a pin of its own
+        self._refresh_collapsed_frames()
 
     def _on_disconnected(self, conn: Connection) -> None:
         item = self.connection_items.pop(conn.id, None)
@@ -202,6 +224,7 @@ class NodeGraphScene(QGraphicsScene):
                 port.refresh_connected()
             if dst_item.table:
                 dst_item.refresh_table_link()
+        self._refresh_collapsed_frames()   # the orphaned pin must go
 
     def _on_node_moved(self, node_id: str, pos: tuple[float, float]) -> None:
         item = self.node_items.get(node_id)
@@ -221,6 +244,11 @@ class NodeGraphScene(QGraphicsScene):
                 ci.dst_port = item.input_ports[ci.conn.dst_port]
             if node_id in (ci.conn.src_node, ci.conn.dst_node):
                 ci.update_path()
+        # a frame pin caches the spec it was built from, which has just been
+        # replaced — drop them so the rebuild makes fresh ones rather than
+        # leaving one pointing at a port that no longer exists
+        self._drop_frame_pins_for(node_id)
+        self._refresh_collapsed_frames()
 
     def _on_param_changed(self, node_id: str, name: str, value) -> None:
         item = self.node_items.get(node_id)
@@ -275,6 +303,250 @@ class NodeGraphScene(QGraphicsScene):
             else:
                 existing.setToolTip(f"Link: {link_label(src.node)}")
             existing.update_path()
+        # a line that crosses a collapsed boundary terminates on a pin, and
+        # the lines only exist as of this method, so re-derive after them
+        self._refresh_collapsed_frames()
+
+    # ------------------------------------------------------ collapsed frames
+
+    def _members_of(self, frame) -> tuple:
+        """(node ids, nested frame ids) a frame owns, by geometry.
+
+        Nodes by their centre, the way every other frame operation resolves
+        membership. Nested frames by *full* containment rather than centre:
+        a frame poking half out would take its own nodes with it, and the
+        half sitting outside the parent was never the parent's to hide.
+        """
+        rect = QRectF(*frame.rect)
+        nodes = [nid for nid, item in self.node_items.items()
+                 if rect.contains(item.sceneBoundingRect().center())]
+        order = {nid: i for i, nid in enumerate(self.graph.topo_order())}
+        nodes.sort(key=lambda nid: order.get(nid, 0))
+        frames = [fid for fid, item in self.frame_items.items()
+                  if fid != frame.id and rect.contains(item.scene_rect())]
+        return (nodes, frames)
+
+    def _owner_of(self, node_id: str) -> Optional[str]:
+        """The collapsed frame hiding this node, if any."""
+        for frame_id, members in self._hidden.items():
+            if node_id in members:
+                return frame_id
+        return None
+
+    def wire_anchor(self, conn, side: str):
+        """The item a wire's `side` end should be drawn from.
+
+        The frame pin standing in for it when that end is folded away,
+        otherwise the port's own pin. One rule, so every path that draws or
+        drags a wire agrees on where its ends are — including the drag
+        preview, which would otherwise spring from a hidden pin's stale
+        position.
+        """
+        pin = self._frame_pins.get((conn.id, side))
+        if pin is not None:
+            return pin
+        node_id, port = ((conn.src_node, conn.src_port) if side == "src"
+                         else (conn.dst_node, conn.dst_port))
+        item = self.node_items.get(node_id)
+        if item is None:
+            return None
+        table = item.output_ports if side == "src" else item.input_ports
+        return table.get(port)
+
+    def _refresh_collapsed_frames(self) -> None:
+        """Re-derive everything collapse implies, from scratch.
+
+        Rebuilt whole against current state rather than patched, for the same
+        reason the link lines are (see _refresh_link_lines): folding, adding
+        a wire through a pin, deleting a node inside and undoing any of it
+        all arrive as different events with the same answer. Patching would
+        mean each of those carrying its own correction, and the one a
+        collapse-time snapshot cannot know about — a wire made *through* a
+        pin, after the fold — is exactly the one that would leak.
+        """
+        if self._suspend_collapse_refresh:
+            return
+        collapsed = [f for f in self.graph.frames.values() if f.collapsed]
+        if not collapsed and not self._hidden and not self._frame_pins:
+            return      # the overwhelmingly common canvas: nothing to do
+
+        # 1. membership. Captured on the fold, then only ever pruned, so
+        #    anything that arrives in the vacated region afterwards stays put.
+        live = {f.id for f in collapsed}
+        for frame_id in list(self._hidden):
+            if frame_id not in live:
+                del self._hidden[frame_id]
+                self._hidden_frames.pop(frame_id, None)
+        for frame in collapsed:
+            if frame.id not in self._hidden:
+                nodes, frames = self._members_of(frame)
+                self._hidden[frame.id] = nodes
+                self._hidden_frames[frame.id] = frames
+            else:
+                self._hidden[frame.id] = [
+                    nid for nid in self._hidden[frame.id]
+                    if nid in self.node_items]
+                self._hidden_frames[frame.id] = [
+                    fid for fid in self._hidden_frames[frame.id]
+                    if fid in self.frame_items]
+
+        hidden_nodes = {nid for ids in self._hidden.values() for nid in ids}
+        hidden_frames = {fid for ids in self._hidden_frames.values()
+                         for fid in ids}
+
+        # 2. visibility.
+        for node_id, item in self.node_items.items():
+            item.setVisible(node_id not in hidden_nodes)
+        for frame_id, item in self.frame_items.items():
+            item.setVisible(frame_id not in hidden_frames)
+            item.set_members(self._hidden.get(frame_id, [])
+                             if item.collapsed else [])
+
+        # 3. the pins, reconciled by (conn_id, side) so a pin that survives a
+        #    rebuild keeps its hover state and stays valid mid-drag.
+        wanted: dict[tuple, tuple] = {}
+        for conn in self.graph.connections.values():
+            src_owner = self._owner_of(conn.src_node)
+            dst_owner = self._owner_of(conn.dst_node)
+            if src_owner is not None and src_owner == dst_owner:
+                continue            # wholly inside one frame: an internal wire
+            if src_owner is not None:
+                wanted[(conn.id, "src")] = (src_owner, conn, "src", False)
+            if dst_owner is not None:
+                wanted[(conn.id, "dst")] = (dst_owner, conn, "dst", False)
+        wanted.update(self._wanted_link_pins())
+
+        for key in list(self._frame_pins):
+            pin = self._frame_pins[key]
+            want = wanted.get(key)
+            if want is None or want[0] != pin.frame_item.frame.id:
+                self._frame_pins.pop(key)
+                self.removeItem(pin)
+        for key, (frame_id, conn, side, is_link) in wanted.items():
+            if key in self._frame_pins:
+                continue
+            pin = self._build_frame_pin(frame_id, conn, side, is_link)
+            if pin is not None:
+                self._frame_pins[key] = pin
+
+        # 4. lay the surviving pins out, and point the wires at them.
+        self._layout_frame_pins()
+        self._reanchor_wires(hidden_nodes)
+        for pin in self._frame_pins.values():
+            pin.refresh_connected()
+
+    def _drop_frame_pins_for(self, node_id: str) -> None:
+        for key, pin in list(self._frame_pins.items()):
+            if pin.node_id == node_id:
+                self._frame_pins.pop(key)
+                self.removeItem(pin)
+
+    def _wanted_link_pins(self) -> dict:
+        """Crossing Goto/From links that are already being drawn.
+
+        A named link the user has not asked to see has no line on the canvas,
+        so giving it a pin would invent a connection where the whole point of
+        the link was to not draw one. Only the opted-in ones cross visibly.
+        """
+        from .link_line import wants_lines
+        wanted: dict[tuple, tuple] = {}
+        for link_id, link in self.graph.links.items():
+            if link_id not in self.link_line_items:
+                continue
+            src = self.node_items.get(link.src_node)
+            dst = self.node_items.get(link.dst_node)
+            if src is None or dst is None:
+                continue
+            if not (wants_lines(src.node) or wants_lines(dst.node)):
+                continue
+            src_owner = self._owner_of(link.src_node)
+            dst_owner = self._owner_of(link.dst_node)
+            if src_owner is not None and src_owner == dst_owner:
+                continue
+            if src_owner is not None:
+                wanted[(link_id, "src")] = (src_owner, link, "src", True)
+            if dst_owner is not None:
+                wanted[(link_id, "dst")] = (dst_owner, link, "dst", True)
+        return wanted
+
+    def _build_frame_pin(self, frame_id: str, conn, side: str, is_link: bool):
+        from .frame_port import FramePortItem
+        frame_item = self.frame_items.get(frame_id)
+        if frame_item is None:
+            return None
+        node_id = conn.src_node if side == "src" else conn.dst_node
+        port_name = conn.src_port if side == "src" else conn.dst_port
+        node = self.graph.nodes.get(node_id)
+        item = self.node_items.get(node_id)
+        if node is None or item is None:
+            return None
+        table = item.output_ports if side == "src" else item.input_ports
+        port = table.get(port_name)
+        if port is None:
+            return None
+        pin = FramePortItem(frame_item, node, port.spec,
+                            getattr(conn, "id", ""), side, link=is_link)
+        return pin
+
+    def _layout_frame_pins(self) -> None:
+        """Group the pins by their frame and stack them down its edges.
+
+        Ordered by the wire's hidden end — the node's position, then the port
+        — so the pins mirror how the flow was laid out inside, and stay put
+        across rebuilds instead of shuffling whenever a wire is added.
+        """
+        by_frame: dict[str, list] = {}
+        for pin in self._frame_pins.values():
+            by_frame.setdefault(pin.frame_item.frame.id, []).append(pin)
+        for frame_id, item in self.frame_items.items():
+            pins = by_frame.get(frame_id, [])
+
+            def order(pin):
+                node_item = self.node_items.get(pin.node_id)
+                pos = node_item.pos() if node_item is not None else None
+                return (pos.y() if pos else 0.0, pos.x() if pos else 0.0,
+                        pin.spec.name, pin.conn_id)
+
+            inputs = sorted((p for p in pins if p.side == "dst"), key=order)
+            outputs = sorted((p for p in pins if p.side == "src"), key=order)
+            item.layout_pins(inputs, outputs)
+
+    def _reanchor_wires(self, hidden_nodes: set) -> None:
+        """Point every wire and link line at wherever its ends now live, and
+        hide the ones that run entirely inside a collapsed frame."""
+        for conn_id, ci in self.connection_items.items():
+            conn = ci.conn
+            src_pin = self._frame_pins.get((conn_id, "src"))
+            dst_pin = self._frame_pins.get((conn_id, "dst"))
+            internal = (conn.src_node in hidden_nodes
+                        and conn.dst_node in hidden_nodes
+                        and src_pin is None and dst_pin is None)
+            ci.setVisible(not internal)
+            ci.set_anchors(src_pin, dst_pin)
+        for link_id, line in self.link_line_items.items():
+            src_pin = self._frame_pins.get((link_id, "src"))
+            dst_pin = self._frame_pins.get((link_id, "dst"))
+            link = self.graph.links.get(link_id)
+            internal = (link is not None
+                        and link.src_node in hidden_nodes
+                        and link.dst_node in hidden_nodes
+                        and src_pin is None and dst_pin is None)
+            line.setVisible(not internal)
+            line.set_anchors(src_pin, dst_pin)
+
+    def frame_item_moved(self, frame_id: str) -> None:
+        """A collapsed frame moved, so the wires pinned to it must follow.
+        node_item_moved cannot cover this: the wires' other ends are hidden
+        nodes that did not themselves move relative to the box."""
+        for pin in self._frame_pins.values():
+            if pin.frame_item.frame.id != frame_id:
+                continue
+            for ci in self.connection_items.values():
+                if ci.conn.id == pin.conn_id:
+                    ci.update_path()
+            line = self.link_line_items.get(pin.conn_id)
+            if line is not None:
+                line.update_path()
 
     def _refresh_port_connections(self) -> None:
         """A derived Goto/From link feeds a port no drawn wire reaches, so
@@ -283,6 +555,10 @@ class NodeGraphScene(QGraphicsScene):
         for an answer that is one dictionary lookup per pin."""
         for item in self.node_items.values():
             item.refresh_port_connections()
+        # frame pins are in no node's port dict, so they are not covered by
+        # the loop above — an input pin fed only by a link would draw hollow
+        for pin in self._frame_pins.values():
+            pin.refresh_connected()
 
     def _highlight_link_partners(self) -> None:
         selected = {item.node.id for item in self.selected_node_items()}
@@ -299,6 +575,18 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.on_status_changed()  # also refreshes the tooltip
+        self._notify_owning_frame(node_id)
+
+    def _notify_owning_frame(self, node_id: str) -> None:
+        """A hidden node still shows through its frame's matrix and drives
+        that frame's own LED, so the box has to hear about it even though
+        the node item itself is invisible."""
+        frame_id = self._owner_of(node_id)
+        if frame_id is None:
+            return
+        item = self.frame_items.get(frame_id)
+        if item is not None:
+            item.refresh_status()
 
     def set_requested_nodes(self, node_ids) -> None:
         """Which nodes have a re-run queued. Only the cards whose answer
@@ -320,6 +608,7 @@ class NodeGraphScene(QGraphicsScene):
             # repaints the whole item continuously while a node runs — and the
             # RunContext has thinned these out long before they arrive here.
             item.on_progress_changed()
+        self._notify_owning_frame(node_id)
 
     def _on_dirty_changed(self, node_id: str, dirty: bool) -> None:
         item = self.node_items.get(node_id)
@@ -442,16 +731,31 @@ class NodeGraphScene(QGraphicsScene):
         item.run_requested.connect(self.frame_run_requested.emit)
         self.addItem(item)
         self.frame_items[frame.id] = item
+        item.apply_stacking()
+        # A project loads nodes, then connections, then frames, so a frame
+        # arriving already collapsed (from a file, a paste, or undo) finds
+        # everything it needs to fold around right here.
+        self._refresh_collapsed_frames()
 
     def _on_frame_removed(self, frame_id: str) -> None:
         item = self.frame_items.pop(frame_id, None)
         if item is not None:
+            item._stop_pulse()
+            # rebuild before removeItem, so the wires that were pinned to
+            # this box are anchored back onto real ports (and its contents
+            # made visible again) while its pins are still around to replace
+            self._refresh_collapsed_frames()
             self.removeItem(item)
 
     def _on_frame_changed(self, frame: Frame) -> None:
         item = self.frame_items.get(frame.id)
         if item is not None:
             item.sync_from_model()
+        # The captured membership is *not* dropped here: the rebuild prunes
+        # frames that are no longer collapsed itself, and it has to see the
+        # stale entry to know there is anything to undo. Clearing it first
+        # leaves nothing to reconcile and the contents stay hidden.
+        self._refresh_collapsed_frames()
 
     # ------------------------------------------------------------- helpers
 
@@ -484,6 +788,10 @@ class NodeGraphScene(QGraphicsScene):
         flat = self._flat_state()
         for item in self.node_items.values():
             item.set_lod(flat)
+        # a collapsed frame's pins are the only ones left at that zoom, so
+        # they have to flatten with everything else
+        for item in self.frame_items.values():
+            item.set_pins_visible(not flat)
 
     def set_lod(self, zoom: float) -> None:
         """Called by the view whenever its scale changes: push the decision

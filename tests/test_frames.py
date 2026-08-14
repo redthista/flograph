@@ -267,6 +267,166 @@ class TestMatrixWindow:
         assert item.matrix_layout()[0] == 0
 
 
+def script_node(graph, registry, node_id, pos):
+    """A node with one input and one output, for wiring things up."""
+    node = registry.instantiate("flograph.scripting.python_script", pos=pos)
+    node.id = node_id
+    return graph.add_node(node)
+
+
+class TestHiding:
+    def test_member_nodes_hide_and_restore(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        inside = script_node(graph, registry, "in", (50.0, 50.0))
+        outside = script_node(graph, registry, "out", (500.0, 50.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        assert not scene.node_items["in"].isVisible()
+        assert scene.node_items["out"].isVisible()
+        stack.undo()
+        assert scene.node_items["in"].isVisible()
+
+    def test_hidden_node_cannot_be_selected(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "in", (50.0, 50.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        scene.node_items["in"].setSelected(True)     # Qt refuses on hidden items
+        assert not scene.node_items["in"].isSelected()
+
+    def test_nested_frame_hides_and_restores(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
+        graph.add_frame(Frame(id="inner", rect=(50, 50, 100, 100)))
+        stack.push(SetFrameCollapsedCommand(graph, "outer", True))
+        assert not scene.frame_items["inner"].isVisible()
+        stack.undo()
+        assert scene.frame_items["inner"].isVisible()
+
+    def test_half_overlapping_frame_is_left_alone(self, env, registry):
+        """Full containment, not centre: a frame poking out would take its
+        own outside nodes with it."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
+        graph.add_frame(Frame(id="straddler", rect=(300, 50, 400, 100)))
+        stack.push(SetFrameCollapsedCommand(graph, "outer", True))
+        assert scene.frame_items["straddler"].isVisible()
+
+    def test_node_added_to_the_vacated_region_is_not_swallowed(self, env, registry):
+        """Membership is captured on the fold, not re-derived: the empty
+        region is still ordinary canvas."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "in", (50.0, 50.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        script_node(graph, registry, "later", (100.0, 100.0))
+        assert scene.node_items["later"].isVisible()
+
+    def test_collapsed_frame_knows_its_members(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "a", (50.0, 50.0))
+        script_node(graph, registry, "b", (80.0, 80.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        assert set(scene.frame_items["f1"].member_ids()) == {"a", "b"}
+        stack.undo()
+        assert scene.frame_items["f1"].member_ids() == []
+
+
+class TestPins:
+    def _crossing(self, env, registry, fan_out=1):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        src = script_node(graph, registry, "src", (500.0, 50.0))   # outside
+        inner = script_node(graph, registry, "inner", (50.0, 50.0))
+        graph.connect(src.id, "out1", inner.id, "in1")
+        for i in range(fan_out):
+            sink = script_node(graph, registry, f"sink{i}", (600.0, 100.0 * i))
+            graph.connect(inner.id, "out1", sink.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        return graph, stack, scene
+
+    def test_one_pin_per_crossing_wire_no_dedupe(self, env, registry):
+        """An inner output feeding three outside nodes shows three pins, not
+        one — a pin means a wire, so it has a single honest endpoint."""
+        _graph, _stack, scene = self._crossing(env, registry, fan_out=3)
+        pins = list(scene._frame_pins.values())
+        assert len(pins) == 4                      # 1 in + 3 out
+        assert sum(1 for p in pins if p.side == "src") == 3
+        assert sum(1 for p in pins if p.side == "dst") == 1
+
+    def test_pins_carry_the_inner_node_identity(self, env, registry):
+        _graph, _stack, scene = self._crossing(env, registry)
+        pin = next(p for p in scene._frame_pins.values() if p.side == "dst")
+        assert pin.node_id == "inner"
+        assert "in1" in pin.label_text()
+
+    def test_pin_label_is_hidden_at_rest_and_shown_on_hover(self, env, registry):
+        _graph, _stack, scene = self._crossing(env, registry)
+        pin = next(iter(scene._frame_pins.values()))
+        assert not pin._label_shown()
+        pin._hover = True
+        assert pin._label_shown()
+
+    def test_internal_wire_is_hidden_and_has_no_pin(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        a = script_node(graph, registry, "a", (50.0, 50.0))
+        b = script_node(graph, registry, "b", (100.0, 100.0))
+        conn, _ = graph.connect(a.id, "out1", b.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        assert scene._frame_pins == {}
+        assert not scene.connection_items[conn.id].isVisible()
+        stack.undo()
+        assert scene.connection_items[conn.id].isVisible()
+
+    def test_wire_between_two_collapsed_frames_gets_a_pin_on_each(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="fa", rect=(0, 0, 200, 200)))
+        graph.add_frame(Frame(id="fb", rect=(400, 0, 200, 200)))
+        a = script_node(graph, registry, "a", (50.0, 50.0))
+        b = script_node(graph, registry, "b", (450.0, 50.0))
+        conn, _ = graph.connect(a.id, "out1", b.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "fa", True))
+        stack.push(SetFrameCollapsedCommand(graph, "fb", True))
+        src_pin = scene._frame_pins[(conn.id, "src")]
+        dst_pin = scene._frame_pins[(conn.id, "dst")]
+        assert src_pin.frame_item.frame.id == "fa"
+        assert dst_pin.frame_item.frame.id == "fb"
+        item = scene.connection_items[conn.id]
+        assert item.isVisible()
+        assert item.src_anchor is src_pin and item.dst_anchor is dst_pin
+
+    def test_wires_reanchor_to_real_ports_on_expand(self, env, registry):
+        graph, stack, scene = self._crossing(env, registry)
+        conn = next(iter(graph.connections.values()))
+        item = scene.connection_items[conn.id]
+        assert item.src_anchor is not item.src_port \
+            or item.dst_anchor is not item.dst_port
+        stack.undo()
+        assert item.src_anchor is item.src_port
+        assert item.dst_anchor is item.dst_port
+        assert scene._frame_pins == {}
+
+    def test_pins_stack_down_the_edges(self, env, registry):
+        _graph, _stack, scene = self._crossing(env, registry, fan_out=4)
+        outputs = sorted((p for p in scene._frame_pins.values()
+                          if p.side == "src"), key=lambda p: p.pos().y())
+        ys = [p.pos().y() for p in outputs]
+        assert ys == sorted(ys) and len(set(ys)) == 4
+        assert outputs[0].pos().x() > COMPACT_W    # right edge
+        assert ys[-1] > COMPACT_MIN_H              # overflows below the box
+        inputs = [p for p in scene._frame_pins.values() if p.side == "dst"]
+        assert inputs[0].pos().x() < 0             # left edge
+
+    def test_disconnecting_removes_the_pin(self, env, registry):
+        graph, _stack, scene = self._crossing(env, registry)
+        conn = next(c for c in graph.connections.values()
+                    if c.dst_node == "inner")
+        graph.disconnect(conn.id)
+        assert (conn.id, "dst") not in scene._frame_pins
+
+
 class TestPainting:
     """paint() is where the geometry actually runs; render it for real."""
 

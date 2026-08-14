@@ -13,8 +13,9 @@ from flograph.core.node import NodeStatus
 from .. import theme
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .node_item import (COMPACT_MIN_H, COMPACT_NAME_FONT_SIZE, COMPACT_NAME_GAP,
-                        COMPACT_NAME_H, COMPACT_NAME_MAX_W, COMPACT_STATUS_GAP,
-                        COMPACT_STATUS_H, COMPACT_W, LED_RADIUS,
+                        COMPACT_NAME_H, COMPACT_NAME_MAX_W, COMPACT_PORT_TOP,
+                        COMPACT_STATUS_GAP, COMPACT_STATUS_H, COMPACT_W,
+                        LED_RADIUS, PORT_EDGE_GAP, ROW_H, PortItem,
                         paint_status_led)
 from .stacking import COLLAPSED_FRAME_Z, FRAME_Z, z_for
 
@@ -524,6 +525,32 @@ class FrameItem(QGraphicsObject):
                          stale=stale,
                          behind=theme.CANVAS_BG,
                          radius=LED_RADIUS)
+
+    # ----------------------------------------------------------- the pins
+
+    def layout_pins(self, inputs: list, outputs: list) -> None:
+        """Stack the crossing wires' pins down each edge of the box.
+
+        Inputs left, outputs right, starting at COMPACT_PORT_TOP and running
+        at ROW_H — the same rhythm a compact node's pins use, so the two read
+        as the same kind of thing. The spacing never compresses: a frame with
+        fifteen crossing wires simply runs its pins past the bottom of the
+        box and onto the canvas, which is the honest thing to do. Squeezing
+        them back inside 60px would recreate exactly the overlapping-blob
+        problem the stacking exists to avoid.
+        """
+        width, _height = self.display_size()
+        gap = PortItem.RADIUS + PORT_EDGE_GAP
+        for ports, x in ((inputs, -gap), (outputs, width + gap)):
+            for i, pin in enumerate(ports):
+                pin.setPos(x, COMPACT_PORT_TOP + ROW_H * i)
+
+    def set_pins_visible(self, visible: bool) -> None:
+        """Hide the pins when the canvas flattens for zoom, matching the real
+        pins — names for pins nobody can see are noise."""
+        for child in self.childItems():
+            if isinstance(child, PortItem):
+                child.setVisible(visible)
 
     # --------------------------------------------------------------- pulse
 
