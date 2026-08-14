@@ -1973,12 +1973,23 @@ class MainWindow(QMainWindow):
                       if f.title.strip().lower() == title), None)
         if frame is None:
             return []
-        return self._nodes_in_rect(QRectF(*frame.rect))
+        return self._nodes_of(frame)
 
     def _frame_node_ids_by_id(self, frame_id: str) -> list[str]:
         frame = self.graph.frames.get(frame_id)
         if frame is None:
             return []
+        return self._nodes_of(frame)
+
+    def _nodes_of(self, frame) -> list[str]:
+        """The nodes a frame holds — the one answer everything asks for.
+
+        A collapsed frame's rect is the little box, which covers none of
+        them, so it reports the membership it wrote down when it folded.
+        Expanded, it is whatever sits inside the region, as it always was.
+        """
+        if frame.collapsed:
+            return [nid for nid in frame.members if nid in self.graph.nodes]
         return self._nodes_in_rect(QRectF(*frame.rect))
 
     def _on_frame_run_requested(self, frame_id: str) -> None:

@@ -32,6 +32,8 @@ from .stacking import LAYER_LABELS
 
 SCENE_EXTENT = 1_000_000.0
 REROUTE_TYPE = "flograph.util.reroute"
+#: Clearance left when an expanding frame pushes a node out of its way.
+_NUDGE_GAP = 20.0
 
 
 class NodeGraphScene(QGraphicsScene):
@@ -69,10 +71,11 @@ class NodeGraphScene(QGraphicsScene):
         self.link_line_items: dict[str, "LinkLineItem"] = {}
         self.frame_items: dict[str, FrameItem] = {}
         # --- collapsed frames (see _refresh_collapsed_frames) --------------
-        # Which nodes each collapsed frame is standing in for. Captured when
-        # the frame folds rather than re-derived from its rect on every
-        # rebuild: the vacated region still looks like empty canvas, so a
-        # node dropped into it later must not be silently swallowed.
+        # Which nodes each collapsed frame is standing in for. Mirrors
+        # Frame.members, which the frame wrote down when it folded — never
+        # derived from geometry here, so undo gives back exactly the
+        # membership it took and a folded box parked over other nodes cannot
+        # adopt them.
         self._hidden: dict[str, list[str]] = {}
         self._hidden_frames: dict[str, list[str]] = {}
         # One pin per crossing wire end, keyed (conn_id, "src"|"dst").
@@ -313,22 +316,35 @@ class NodeGraphScene(QGraphicsScene):
 
     # ------------------------------------------------------ collapsed frames
 
-    def _members_of(self, frame) -> tuple:
-        """(node ids, nested frame ids) a frame owns, by geometry.
+    def nudge_clear_of(self, frame_id: str, keep: set) -> None:
+        """Push nodes out of the way of a frame that has just expanded.
 
-        Nodes by their centre, the way every other frame operation resolves
-        membership. Nested frames by *full* containment rather than centre:
-        a frame poking half out would take its own nodes with it, and the
-        half sitting outside the parent was never the parent's to hide.
+        Only the ones actually in the way, and only outward — right or down,
+        whichever is the shorter escape, so nothing is shoved back over
+        territory further up the flow. `keep` is the membership the frame had
+        while folded: those nodes belong inside the region and must sit still.
+
+        Pushed as an ordinary move, so it joins the expand's macro and one
+        Ctrl+Z puts the frame and its neighbours back together.
         """
-        rect = QRectF(*frame.rect)
-        nodes = [nid for nid, item in self.node_items.items()
-                 if rect.contains(item.sceneBoundingRect().center())]
-        order = {nid: i for i, nid in enumerate(self.graph.topo_order())}
-        nodes.sort(key=lambda nid: order.get(nid, 0))
-        frames = [fid for fid, item in self.frame_items.items()
-                  if fid != frame.id and rect.contains(item.scene_rect())]
-        return (nodes, frames)
+        item = self.frame_items.get(frame_id)
+        if item is None:
+            return
+        region = item.scene_rect()
+        moves: dict = {}
+        for node_id, node_item in self.node_items.items():
+            if node_id in keep or not node_item.isVisible():
+                continue
+            bounds = node_item.sceneBoundingRect()
+            if not region.intersects(bounds):
+                continue
+            right = region.right() - bounds.left() + _NUDGE_GAP
+            down = region.bottom() - bounds.top() + _NUDGE_GAP
+            old = (node_item.pos().x(), node_item.pos().y())
+            moves[node_id] = (old, (old[0] + right, old[1]) if right <= down
+                              else (old[0], old[1] + down))
+        if moves:
+            self.push_move_command(moves)
 
     def _owner_of(self, node_id: str) -> Optional[str]:
         """The collapsed frame hiding this node, if any."""
@@ -374,25 +390,18 @@ class NodeGraphScene(QGraphicsScene):
         if not collapsed and not self._hidden and not self._frame_pins:
             return      # the overwhelmingly common canvas: nothing to do
 
-        # 1. membership. Captured on the fold, then only ever pruned, so
-        #    anything that arrives in the vacated region afterwards stays put.
-        live = {f.id for f in collapsed}
-        for frame_id in list(self._hidden):
-            if frame_id not in live:
-                del self._hidden[frame_id]
-                self._hidden_frames.pop(frame_id, None)
-        for frame in collapsed:
-            if frame.id not in self._hidden:
-                nodes, frames = self._members_of(frame)
-                self._hidden[frame.id] = nodes
-                self._hidden_frames[frame.id] = frames
-            else:
-                self._hidden[frame.id] = [
-                    nid for nid in self._hidden[frame.id]
-                    if nid in self.node_items]
-                self._hidden_frames[frame.id] = [
-                    fid for fid in self._hidden_frames[frame.id]
-                    if fid in self.frame_items]
+        # 1. membership — read straight off the model, never recomputed here.
+        #    The frame wrote down what it owned when it folded, so this is a
+        #    pure function of the graph: undo restores exactly the membership
+        #    it took away, and a folded frame parked over other nodes cannot
+        #    quietly adopt them.
+        self._hidden = {
+            frame.id: [nid for nid in frame.members if nid in self.node_items]
+            for frame in collapsed}
+        self._hidden_frames = {
+            frame.id: [fid for fid in frame.member_frames
+                       if fid in self.frame_items]
+            for frame in collapsed}
 
         hidden_nodes = {nid for ids in self._hidden.values() for nid in ids}
         hidden_frames = {fid for ids in self._hidden_frames.values()

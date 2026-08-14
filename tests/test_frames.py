@@ -54,9 +54,9 @@ class TestModel:
         assert graph_from_dict(payload, registry).frames["f1"].collapsed is False
 
     def test_set_frame_collapsed_command_undo_redo(self, env):
-        graph, stack, _scene = env
+        graph, stack, scene = env
         graph.add_frame(Frame(id="f1", title="Stage"))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert graph.frames["f1"].collapsed is True
         stack.undo()
         assert graph.frames["f1"].collapsed is False
@@ -67,10 +67,10 @@ class TestModel:
         """UpdateFrameCommand rewrites (title, rect, color) wholesale on undo.
         Collapse must not ride along in that tuple or an unrelated undo would
         silently expand the frame."""
-        graph, stack, _scene = env
+        graph, stack, scene = env
         graph.add_frame(Frame(id="f1", title="Stage"))
         stack.push(UpdateFrameCommand(graph, "f1", title="Renamed"))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         stack.undo()                      # undo the collapse
         stack.undo()                      # undo the rename
         assert graph.frames["f1"].title == "Stage"
@@ -79,13 +79,26 @@ class TestModel:
         stack.redo()                      # redo the collapse
         assert graph.frames["f1"].collapsed is True
 
-    def test_collapsing_leaves_rect_expanded(self, env):
-        """The collapsed box is derived, not stored: rect stays the expanded
-        region so geometric membership keeps resolving."""
-        graph, stack, _scene = env
+    def test_collapsing_really_shrinks_the_rect(self, env):
+        """The frame claims no canvas it isn't drawing, so a folded box
+        cannot absorb or drag whatever it is parked over."""
+        graph, stack, scene = env
         graph.add_frame(Frame(id="f1", rect=(10, 20, 400, 260)))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
+        assert graph.frames["f1"].rect == (10, 20, COMPACT_W, COMPACT_MIN_H)
+        assert graph.frames["f1"].expanded_size == (400, 260)
+        stack.undo()
         assert graph.frames["f1"].rect == (10, 20, 400, 260)
+        assert graph.frames["f1"].expanded_size is None
+
+    def test_expanding_restores_the_size_where_it_now_sits(self, env):
+        """Position survives the fold, size is restored around it."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 260)))
+        collapse(scene, "f1")
+        graph.update_frame("f1", rect=(900.0, 700.0, COMPACT_W, COMPACT_MIN_H))
+        expand(scene, "f1")
+        assert graph.frames["f1"].rect == (900.0, 700.0, 400.0, 260.0)
 
     def test_source_provenance_round_trips(self, registry):
         graph = Graph()
@@ -103,16 +116,32 @@ def add_node(graph, registry, node_id, pos=(0.0, 0.0),
     return graph.add_node(node)
 
 
+def collapse(scene, frame_id):
+    """Fold a frame the way the chevron does.
+
+    Not by pushing SetFrameCollapsedCommand bare: the canvas is what works
+    out which items are inside, and a command built without that owns
+    nothing. Going through the item is the real path and the only one that
+    captures membership.
+    """
+    scene.frame_items[frame_id].toggle_collapsed()
+
+
+def expand(scene, frame_id):
+    scene.frame_items[frame_id].toggle_collapsed()
+
+
 class TestCollapsedBox:
     def test_collapsed_box_is_node_sized(self, env):
         graph, stack, scene = env
         graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 260)))
         item = scene.frame_items["f1"]
         assert item.display_size() == (400, 260)
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert item.display_size() == (COMPACT_W, COMPACT_MIN_H)
-        # the region itself is untouched, which is what keeps membership working
-        assert item.scene_rect().width() == 400
+        # and it really occupies only that — no invisible footprint left
+        assert item.scene_rect().width() == COMPACT_W
+        assert item.expanded_rect().width() == 400
 
     def test_collapsed_frame_cannot_be_resized(self, env):
         """A resize writes the dragged size into frame.rect, so letting the
@@ -121,7 +150,7 @@ class TestCollapsedBox:
         graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 260)))
         item = scene.frame_items["f1"]
         assert item._edge_at(QPointF(400, 260)) == "corner"
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert item._edge_at(QPointF(60, 60)) is None
         assert item._edge_at(QPointF(400, 260)) is None
 
@@ -132,7 +161,7 @@ class TestCollapsedBox:
         graph.add_frame(Frame(id="f1"))
         item = scene.frame_items["f1"]
         assert item.zValue() < NODE_Z
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert COLLAPSED_FRAME_Z <= item.zValue() < PENDING_WIRE_Z
         stack.undo()
         assert item.zValue() < NODE_Z
@@ -143,14 +172,14 @@ class TestCollapsedBox:
         item = scene.frame_items["f1"]
         assert not item._run_button_rect().isEmpty()
         assert not item._toggle_rect().isEmpty()
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert item._run_button_rect().isEmpty()
         assert not item._toggle_rect().isEmpty()
 
     def test_bounds_cover_the_name_and_status_strip(self, env):
         graph, stack, scene = env
         graph.add_frame(Frame(id="f1", title="Sales prep"))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         item = scene.frame_items["f1"]
         bounds = item.boundingRect()
         assert bounds.top() <= item._name_rect().top()
@@ -280,7 +309,7 @@ class TestHiding:
         graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
         inside = script_node(graph, registry, "in", (50.0, 50.0))
         outside = script_node(graph, registry, "out", (500.0, 50.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert not scene.node_items["in"].isVisible()
         assert scene.node_items["out"].isVisible()
         stack.undo()
@@ -290,7 +319,7 @@ class TestHiding:
         graph, stack, scene = env
         graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
         script_node(graph, registry, "in", (50.0, 50.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         scene.node_items["in"].setSelected(True)     # Qt refuses on hidden items
         assert not scene.node_items["in"].isSelected()
 
@@ -298,7 +327,7 @@ class TestHiding:
         graph, stack, scene = env
         graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
         graph.add_frame(Frame(id="inner", rect=(50, 50, 100, 100)))
-        stack.push(SetFrameCollapsedCommand(graph, "outer", True))
+        collapse(scene, "outer")
         assert not scene.frame_items["inner"].isVisible()
         stack.undo()
         assert scene.frame_items["inner"].isVisible()
@@ -309,7 +338,7 @@ class TestHiding:
         graph, stack, scene = env
         graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
         graph.add_frame(Frame(id="straddler", rect=(300, 50, 400, 100)))
-        stack.push(SetFrameCollapsedCommand(graph, "outer", True))
+        collapse(scene, "outer")
         assert scene.frame_items["straddler"].isVisible()
 
     def test_node_added_to_the_vacated_region_is_not_swallowed(self, env, registry):
@@ -318,7 +347,7 @@ class TestHiding:
         graph, stack, scene = env
         graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
         script_node(graph, registry, "in", (50.0, 50.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         script_node(graph, registry, "later", (100.0, 100.0))
         assert scene.node_items["later"].isVisible()
 
@@ -327,7 +356,7 @@ class TestHiding:
         graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
         script_node(graph, registry, "a", (50.0, 50.0))
         script_node(graph, registry, "b", (80.0, 80.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert set(scene.frame_items["f1"].member_ids()) == {"a", "b"}
         stack.undo()
         assert scene.frame_items["f1"].member_ids() == []
@@ -343,7 +372,7 @@ class TestPins:
         for i in range(fan_out):
             sink = script_node(graph, registry, f"sink{i}", (600.0, 100.0 * i))
             graph.connect(inner.id, "out1", sink.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         return graph, stack, scene
 
     def test_one_pin_per_crossing_wire_no_dedupe(self, env, registry):
@@ -374,7 +403,7 @@ class TestPins:
         a = script_node(graph, registry, "a", (50.0, 50.0))
         b = script_node(graph, registry, "b", (100.0, 100.0))
         conn, _ = graph.connect(a.id, "out1", b.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert scene._frame_pins == {}
         assert not scene.connection_items[conn.id].isVisible()
         stack.undo()
@@ -387,8 +416,8 @@ class TestPins:
         a = script_node(graph, registry, "a", (50.0, 50.0))
         b = script_node(graph, registry, "b", (450.0, 50.0))
         conn, _ = graph.connect(a.id, "out1", b.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "fa", True))
-        stack.push(SetFrameCollapsedCommand(graph, "fb", True))
+        collapse(scene, "fa")
+        collapse(scene, "fb")
         src_pin = scene._frame_pins[(conn.id, "src")]
         dst_pin = scene._frame_pins[(conn.id, "dst")]
         assert src_pin.frame_item.frame.id == "fa"
@@ -435,7 +464,7 @@ class TestLiveWires:
         sink = script_node(graph, registry, "sink", (600.0, 50.0))
         graph.connect(inner.id, "out1", sink.id, "in1")
         feeder = script_node(graph, registry, "feeder", (600.0, 300.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
 
         # the pin standing in for inner's *output* is a live drag source;
         # wire the outside feeder into inner's input the same way the scene
@@ -460,8 +489,8 @@ class TestLiveWires:
         a = script_node(graph, registry, "a", (50.0, 50.0))
         b = script_node(graph, registry, "b", (450.0, 50.0))
         conn, _ = graph.connect(a.id, "out1", b.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "fa", True))
-        stack.push(SetFrameCollapsedCommand(graph, "fb", True))
+        collapse(scene, "fa")
+        collapse(scene, "fb")
 
         dst_pin = scene._frame_pins[(conn.id, "dst")]
         src_pin = scene._frame_pins[(conn.id, "src")]
@@ -479,7 +508,7 @@ class TestLiveWires:
         conn, _ = graph.connect(inner.id, "out1", sink.id, "in1")
         item = scene.connection_items[conn.id]
         assert not item._crosses_a_collapsed_frame()
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert item._crosses_a_collapsed_frame()
         before = len(graph.nodes)
         item.mouseDoubleClickEvent(_FakeDoubleClick())
@@ -491,7 +520,7 @@ class TestMovement:
         graph, stack, scene = env
         graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
         node = script_node(graph, registry, "inner", (50.0, 50.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         item = scene.frame_items["f1"]
 
         item._press_pos = item.pos()
@@ -527,7 +556,7 @@ class TestMovement:
         graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
         script_node(graph, registry, "inner", (50.0, 50.0))
         loose = script_node(graph, registry, "loose", (700.0, 700.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
 
         scene.frame_items["f1"].setSelected(True)
         scene.node_items["loose"].setSelected(True)
@@ -553,7 +582,7 @@ class TestMovement:
         inner = script_node(graph, registry, "inner", (50.0, 50.0))
         sink = script_node(graph, registry, "sink", (600.0, 50.0))
         conn, _ = graph.connect(inner.id, "out1", sink.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         item = scene.frame_items["f1"]
         before = scene.connection_items[conn.id].path().pointAtPercent(0.0)
         item.setPos(QPointF(150.0, 120.0))
@@ -571,7 +600,7 @@ class TestDelete:
         graph.connect(a.id, "out1", b.id, "in1")
         sink = script_node(graph, registry, "sink", (600.0, 50.0))
         graph.connect(b.id, "out1", sink.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         return graph, stack, scene
 
     def test_expanded_frame_delete_leaves_its_nodes(self, env, registry):
@@ -656,7 +685,9 @@ class TestLoadAndCanvasSurface:
                                     pos=(50.0, 50.0))
         node.id = "inner"
         graph.add_node(node)
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200), collapsed=True))
+        graph.add_frame(Frame(
+            id="f1", rect=(0, 0, COMPACT_W, COMPACT_MIN_H), collapsed=True,
+            expanded_size=(300.0, 200.0), members=("inner",)))
         stack = QUndoStack()
         scene = NodeGraphScene(graph, stack, registry=registry)
         assert not scene.node_items["inner"].isVisible()
@@ -669,7 +700,9 @@ class TestLoadAndCanvasSurface:
                                     pos=(50.0, 50.0))
         node.id = "inner"
         graph.add_node(node)
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200), collapsed=True))
+        graph.add_frame(Frame(
+            id="f1", rect=(0, 0, COMPACT_W, COMPACT_MIN_H), collapsed=True,
+            expanded_size=(300.0, 200.0), members=("inner",)))
         reloaded = graph_from_dict(graph_to_dict(graph), registry)
         stack = QUndoStack()
         scene = NodeGraphScene(reloaded, stack, registry=registry)
@@ -677,17 +710,23 @@ class TestLoadAndCanvasSurface:
         assert not scene.node_items["inner"].isVisible()
         stack.clear()
 
-    def test_run_frame_by_rect_still_finds_hidden_members(self, env, registry):
-        """rect stays expanded precisely so this keeps working — the frame
-        run glyph and the Action Button both resolve nodes from it."""
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
-        script_node(graph, registry, "inner", (50.0, 50.0))
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
-        rect = QRectF(*graph.frames["f1"].rect)
-        found = [nid for nid, item in scene.node_items.items()
-                 if rect.contains(item.sceneBoundingRect().center())]
-        assert found == ["inner"]
+    def test_run_frame_still_finds_hidden_members(self, qtbot, registry):
+        """The rect no longer covers them, so the run paths read the
+        membership the frame wrote down instead."""
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        node = registry.instantiate("flograph.scripting.python_script",
+                                    pos=(50.0, 50.0))
+        node.id = "inner"
+        win.graph.add_node(node)
+        win.graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200),
+                                  title="Prep"))
+        assert win._frame_node_ids_by_id("f1") == ["inner"]
+        collapse(win.scene, "f1")
+        assert win._frame_node_ids_by_id("f1") == ["inner"]
+        assert win._frame_node_ids("Prep") == ["inner"]
 
     def test_lod_hides_the_frame_pins(self, env, registry):
         graph, stack, scene = env
@@ -695,7 +734,7 @@ class TestLoadAndCanvasSurface:
         inner = script_node(graph, registry, "inner", (50.0, 50.0))
         sink = script_node(graph, registry, "sink", (600.0, 50.0))
         graph.connect(inner.id, "out1", sink.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         pin = next(iter(scene._frame_pins.values()))
         assert pin.isVisible()
         scene.set_lod(0.05)                    # well below the threshold
@@ -709,7 +748,7 @@ class TestLoadAndCanvasSurface:
         inner = script_node(graph, registry, "inner", (50.0, 50.0))
         sink = script_node(graph, registry, "sink", (600.0, 50.0))
         graph.connect(inner.id, "out1", sink.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         pin = next(iter(scene._frame_pins.values()))
         assert not pin._label_shown()
         scene.set_revealing_port_labels(True)
@@ -739,8 +778,9 @@ class TestLoadAndCanvasSurface:
         win.graph.add_node(inner)
         win.graph.add_node(sink)
         win.graph.connect(inner.id, "out1", sink.id, "in1")
-        win.graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200),
-                                  collapsed=True))
+        win.graph.add_frame(Frame(
+            id="f1", rect=(0, 0, COMPACT_W, COMPACT_MIN_H), collapsed=True,
+            expanded_size=(300.0, 200.0), members=(inner.id,)))
         assert win.scene._frame_pins, "expected a pin for the crossing wire"
 
         win._replace_graph(Graph())        # File > New, or Open Example
@@ -753,7 +793,7 @@ class TestLoadAndCanvasSurface:
         inner = script_node(graph, registry, "inner", (50.0, 50.0))
         sink = script_node(graph, registry, "sink", (600.0, 50.0))
         graph.connect(inner.id, "out1", sink.id, "in1")
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert scene._frame_pins
         graph.remove_frame("f1")
         assert scene._frame_pins == {}
@@ -769,7 +809,7 @@ class TestLoadAndCanvasSurface:
         item = scene.node_items["inner"]
         calls = []
         item._apply_proxy_visibility = lambda: calls.append(1)
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         assert calls, "hiding a node must re-derive its playback state"
 
 
@@ -779,6 +819,76 @@ class _FakeDoubleClick:
 
     def accept(self):
         pass
+
+
+class TestParkedOverOtherNodes:
+    """The two things a folded frame must never do to whatever it is
+    sitting on: absorb it, or drag it around."""
+
+    def _folded_over_bystanders(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "inside", (50.0, 50.0))
+        script_node(graph, registry, "bystander1", (900.0, 900.0))
+        script_node(graph, registry, "bystander2", (960.0, 960.0))
+        collapse(scene, "f1")
+        # park the little box right on top of them, carrying its own member
+        # the way a real drag does
+        item = scene.frame_items["f1"]
+        graph.update_frame("f1", rect=(880.0, 880.0, COMPACT_W, COMPACT_MIN_H))
+        graph.move_node("inside", (930.0, 930.0))
+        return graph, stack, scene, item
+
+    def test_folding_again_does_not_absorb_what_it_sits_on(self, env, registry):
+        graph, stack, scene, item = self._folded_over_bystanders(env, registry)
+        expand(scene, "f1")            # region reappears over the bystanders
+        collapse(scene, "f1")          # and folds again
+        assert "bystander1" not in item.member_ids()
+        assert "bystander2" not in item.member_ids()
+        assert scene.node_items["bystander1"].isVisible()
+        assert scene.node_items["bystander2"].isVisible()
+
+    def test_dragging_it_does_not_carry_what_it_sits_on(self, env, registry):
+        """The bug behind 'ctrl-z didn't put them back': the drag moved
+        bystanders as a side effect, and that move was a separate undo entry
+        from the collapse."""
+        graph, stack, scene, item = self._folded_over_bystanders(env, registry)
+        nodes, _frames = item.carried_items()
+        carried = {i.node.id for i, _off in nodes}
+        assert carried == {"inside"}
+        assert "bystander1" not in carried and "bystander2" not in carried
+
+    def test_expanding_pushes_the_bystanders_clear(self, env, registry):
+        graph, stack, scene, item = self._folded_over_bystanders(env, registry)
+        before = graph.nodes["bystander1"].pos
+        expand(scene, "f1")
+        region = item.scene_rect()
+        for name in ("bystander1", "bystander2"):
+            assert not region.intersects(
+                scene.node_items[name].sceneBoundingRect())
+        assert graph.nodes["bystander1"].pos != before
+        # and its own contents were left exactly where they were
+        assert region.contains(
+            scene.node_items["inside"].sceneBoundingRect().center())
+
+    def test_one_undo_puts_the_frame_and_the_bystanders_back(self, env, registry):
+        graph, stack, scene, item = self._folded_over_bystanders(env, registry)
+        before = {n: graph.nodes[n].pos
+                  for n in ("bystander1", "bystander2", "inside")}
+        expand(scene, "f1")
+        stack.undo()
+        assert graph.frames["f1"].collapsed is True
+        assert {n: graph.nodes[n].pos for n in before} == before
+
+    def test_expanding_leaves_distant_nodes_alone(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "inside", (50.0, 50.0))
+        far = script_node(graph, registry, "far", (5000.0, 5000.0))
+        collapse(scene, "f1")
+        before = graph.nodes["far"].pos
+        expand(scene, "f1")
+        assert graph.nodes["far"].pos == before
 
 
 class TestPainting:
@@ -807,7 +917,7 @@ class TestPainting:
         item = scene.frame_items["f1"]
         item.set_members(ids)
         if collapsed:
-            stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+            collapse(scene, "f1")
         self._render(scene)     # must not raise
         item.set_members([])    # stop any pulse before teardown
         item._stop_pulse()
@@ -820,7 +930,7 @@ class TestPainting:
         item = scene.frame_items["f1"]
         item.set_members([node.id])
         assert item._pulse_anim is None          # expanded: no animation
-        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        collapse(scene, "f1")
         item.refresh_status()
         assert item._pulse_anim is not None      # collapsed and indeterminate
         stack.undo()

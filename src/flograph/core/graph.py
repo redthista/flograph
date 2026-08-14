@@ -56,12 +56,23 @@ class Frame:
     z: Optional[int] = None   # stacking order among frames; see core.layers
     # Drawn as a single node-sized square instead of a region, with its
     # contents hidden and the wires crossing its boundary re-routed to pins
-    # on the box. `rect` deliberately stays the *expanded* rect throughout:
-    # frame membership is geometric (a node whose centre is inside), so
-    # shrinking it would empty the frame the instant it collapsed, and
-    # everything that resolves a frame's nodes from its rect — "Run frame",
-    # the Action Button, copy/paste — keeps working untouched.
+    # on the box.
+    #
+    # `rect` is always the geometry the frame actually occupies, so while
+    # collapsed it *is* the small box — the frame claims no canvas it isn't
+    # drawing. An earlier version kept the full rect throughout and only
+    # drew small, which meant a folded frame dragged around an invisible
+    # 300x200 footprint: it absorbed whatever it was dropped on the next
+    # time it folded, and carried unrelated nodes along when moved.
     collapsed: bool = False
+    #: Size to restore on expand. None until the frame has been collapsed.
+    expanded_size: Optional[tuple[float, float]] = None
+    #: Who the frame owns while collapsed. Captured when it folds, because
+    #: the region it would otherwise be derived from is not on the canvas to
+    #: be read — and being real state rather than a recomputation is what
+    #: makes undo give back exactly the membership it took away.
+    members: tuple[str, ...] = ()
+    member_frames: tuple[str, ...] = ()
     # Where this frame came from, when it was inserted from the user library
     # (see core.user_frames). `source` is the library frame's id and
     # `source_fingerprint` the hash of the payload it was stamped from, so a
@@ -625,19 +636,32 @@ class Graph:
         self.events.frame_changed.emit(frame)
         return frame
 
-    def set_frame_collapsed(self, frame_id: str, collapsed: bool) -> Frame:
-        """Fold a frame down to a single node-sized box, or open it again.
+    def apply_frame_collapse(self, frame_id: str, *, collapsed: bool,
+                             rect: tuple[float, float, float, float],
+                             expanded_size: Optional[tuple[float, float]],
+                             members: tuple[str, ...],
+                             member_frames: tuple[str, ...]) -> Frame:
+        """Fold a frame down to a box, or open it back out.
 
-        Deliberately its own setter rather than a fourth `update_frame`
-        kwarg: UpdateFrameCommand snapshots exactly (title, rect, color) and
-        writes all three back on undo, so a field routed through it would be
-        silently reverted by any unrelated frame edit that happened to be
-        undone afterwards.
+        Everything the fold touches moves together, in one call, because
+        every part of it has to be restored together: the rect shrinks, the
+        size to grow back to is remembered, and the membership the frame can
+        no longer read off the canvas is written down. A command that
+        snapshots this tuple can undo the whole fold exactly.
+
+        Deliberately not routed through `update_frame`, which snapshots and
+        rewrites exactly (title, rect, color) — anything else passing
+        through it would be reverted by an unrelated frame edit.
         """
         frame = self.frames.get(frame_id)
         if frame is None:
             raise GraphError(f"no frame with id {frame_id!r}")
         frame.collapsed = bool(collapsed)
+        frame.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
+        frame.expanded_size = (tuple(float(v) for v in expanded_size)
+                               if expanded_size is not None else None)
+        frame.members = tuple(members)
+        frame.member_frames = tuple(member_frames)
         self.events.frame_changed.emit(frame)
         return frame
 

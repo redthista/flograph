@@ -87,13 +87,34 @@ class FrameItem(QGraphicsObject):
     def toggle_collapsed(self) -> None:
         """Fold or unfold, through the undo stack — it is saved with the
         project, so it is a graph change, not a view state the canvas can
-        quietly own."""
+        quietly own.
+
+        Folding writes down what was inside at that moment; the canvas is
+        the only thing that can see it, and once folded the region is not
+        there to be read again. Unfolding pushes aside whatever the returning
+        region would land on, in the same undo step, so one Ctrl+Z puts both
+        the frame and the neighbours back.
+        """
         scene = self.scene()
         if scene is None:
             return
         from ..commands import SetFrameCollapsedCommand
+        if self.collapsed:
+            # its own contents belong inside the region and must sit still;
+            # read before the command clears the membership
+            keep = set(self.frame.members)
+            scene.undo_stack.beginMacro("expand frame")
+            scene.undo_stack.push(SetFrameCollapsedCommand(
+                scene.graph, self.frame.id, False))
+            scene.nudge_clear_of(self.frame.id, keep)
+            scene.undo_stack.endMacro()
+            return
+        nodes, frames = self.carried_items()
         scene.undo_stack.push(SetFrameCollapsedCommand(
-            scene.graph, self.frame.id, not self.collapsed))
+            scene.graph, self.frame.id, True,
+            members=tuple(item.node.id for item, _off in nodes),
+            member_frames=tuple(item.frame.id for item, _off in frames),
+            collapsed_size=(COMPACT_W, COMPACT_MIN_H)))
 
     def apply_stacking(self) -> None:
         """Take the frame's place in the stacking order. Frames have their
@@ -108,25 +129,29 @@ class FrameItem(QGraphicsObject):
         return bool(self.frame.collapsed)
 
     def scene_rect(self) -> QRectF:
-        """The frame's *expanded* region in scene coordinates.
+        """The region the frame occupies, in scene coordinates.
 
-        Stays the full rect even while collapsed: this is what decides which
-        nodes the frame owns, and a collapsed frame that reported its 60px
-        box here would drop its contents the moment it folded.
+        While collapsed this is the small box itself, not the region it will
+        grow back into — a folded frame owns no canvas it isn't drawing, so
+        it cannot absorb or drag whatever it happens to be parked over.
         """
         return QRectF(self.pos().x(), self.pos().y(), *self._size)
 
     def display_size(self) -> tuple[float, float]:
-        """What the frame actually draws and hit-tests as — the node-sized
-        square when collapsed, the region otherwise. Every geometry method
-        except scene_rect goes through this."""
-        if self.collapsed:
-            return (COMPACT_W, COMPACT_MIN_H)
+        """What the frame draws and hit-tests as. The same as its rect now
+        that collapsing really shrinks it; kept as the name every geometry
+        method reads through."""
         return self._size
 
     def display_rect(self) -> QRectF:
-        """The drawn box in scene coordinates (for the minimap and fit)."""
-        return QRectF(self.pos().x(), self.pos().y(), *self.display_size())
+        return self.scene_rect()
+
+    def expanded_rect(self) -> QRectF:
+        """Where the frame would sit if opened here — its box while expanded,
+        and the region it will grow back into while collapsed. Only for
+        working out what an expand would land on top of."""
+        width, height = self.frame.expanded_size or self._size
+        return QRectF(self.pos().x(), self.pos().y(), width, height)
 
     def boundingRect(self) -> QRectF:
         w, h = self.display_size()
@@ -550,14 +575,29 @@ class FrameItem(QGraphicsObject):
         """What a drag of this frame takes with it: ([(node_item, offset)],
         [(frame_item, offset)]).
 
-        Nodes by their centre, nested frames by full containment. Both are
-        deliberately blind to visibility — a collapsed frame's contents are
-        hidden and must still travel with the box, or expanding it later
-        would find them stranded where the frame used to be.
+        While collapsed this is exactly the membership written down when it
+        folded — *not* whatever sits under the box. A folded frame is a 60px
+        square that can be parked anywhere, and dragging it must never pick
+        up the nodes it happens to be sitting on.
+
+        While expanded, nodes by their centre and nested frames by full
+        containment — the ordinary rule, over a region you can see. Blind to
+        visibility either way, since a collapsed frame's own contents are
+        hidden and must still travel with it.
         """
         scene = self.scene()
         if scene is None:
             return ([], [])
+        if self.collapsed:
+            nodes = [(item, item.pos() - self.pos())
+                     for item in (scene.node_items.get(n)
+                                  for n in self.frame.members)
+                     if item is not None]
+            frames = [(item, item.pos() - self.pos())
+                      for item in (scene.frame_items.get(f)
+                                   for f in self.frame.member_frames)
+                      if item is not None]
+            return (nodes, frames)
         rect = self.scene_rect()
         nodes = [(item, item.pos() - self.pos())
                  for item in scene.node_items.values()

@@ -90,6 +90,10 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "color": f.color,
                     "z": f.z,
                     "collapsed": f.collapsed,
+                    "expanded_size": (list(f.expanded_size)
+                                      if f.expanded_size else None),
+                    "members": list(f.members),
+                    "member_frames": list(f.member_frames),
                     "source": f.source,
                     "source_fingerprint": f.source_fingerprint,
                 }
@@ -224,6 +228,10 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             z=entry.get("z"),
             # absent before frames could collapse, which is the old meaning
             collapsed=bool(entry.get("collapsed", False)),
+            expanded_size=(tuple(entry["expanded_size"])
+                           if entry.get("expanded_size") else None),
+            members=tuple(entry.get("members", ())),
+            member_frames=tuple(entry.get("member_frames", ())),
             source=entry.get("source", ""),
             source_fingerprint=entry.get("source_fingerprint", ""),
         ))
