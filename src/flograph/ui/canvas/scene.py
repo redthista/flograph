@@ -80,6 +80,10 @@ class NodeGraphScene(QGraphicsScene):
         # Set while a bulk load replaces the graph node by node; the rebuild
         # would otherwise run once per add and be quadratic in graph size.
         self._suspend_collapse_refresh = False
+        # Asked before a collapsed frame takes its hidden contents with it.
+        # The main window supplies a message box; left None (tests, headless)
+        # the delete simply goes ahead.
+        self.confirm_collapsed_delete = None
         self._zoom = 1.0  # last zoom pushed by the view, see set_lod
 
         # Zoom-out node simplification preference; the main window is the
@@ -829,12 +833,21 @@ class NodeGraphScene(QGraphicsScene):
         dragging so its own itemChange snaps (Qt moves the whole selection by
         one delta, but only the pressed item was flagged before), and snapshot
         their start positions for the release commit."""
-        starts: dict = {"nodes": {}, "frames": {}}
+        starts: dict = {"nodes": {}, "frames": {}, "carried": {}}
         for item in self._selected_movables():
             item._dragging = True
             if isinstance(item, FrameItem):
                 starts["frames"][item.frame.id] = (
                     item.pos().x(), item.pos().y(), *item._size)
+                # A collapsed frame's contents cannot themselves be selected
+                # (Qt refuses to select an invisible item), so the skip-the-
+                # content-grab rule above would leave them behind. They can
+                # never be double-moved, by exactly that construction.
+                for node_id in self._hidden.get(item.frame.id, ()):
+                    node_item = self.node_items.get(node_id)
+                    if node_item is not None:
+                        starts["carried"][node_id] = (
+                            node_item.pos().x(), node_item.pos().y())
             else:
                 starts["nodes"][item.node.id] = (item.pos().x(), item.pos().y())
         return starts
@@ -853,6 +866,7 @@ class NodeGraphScene(QGraphicsScene):
             if new != old:
                 node_moves[node_id] = (old, new)
         frame_moves: dict = {}
+        deltas: dict = {}
         for frame_id, old in starts.get("frames", {}).items():
             item = self.frame_items.get(frame_id)
             if item is None:
@@ -861,6 +875,18 @@ class NodeGraphScene(QGraphicsScene):
             new = (item.pos().x(), item.pos().y(), *item._size)
             if new[:2] != old[:2]:
                 frame_moves[frame_id] = new
+                deltas[frame_id] = (new[0] - old[0], new[1] - old[1])
+        # Qt moved the selection for us, but a collapsed frame's hidden
+        # contents were never in it — shift them by their own frame's delta.
+        for frame_id, (dx, dy) in deltas.items():
+            for node_id in self._hidden.get(frame_id, ()):
+                old = starts.get("carried", {}).get(node_id)
+                item = self.node_items.get(node_id)
+                if old is None or item is None or node_id in node_moves:
+                    continue
+                new = (old[0] + dx, old[1] + dy)
+                item.setPos(*new)
+                node_moves[node_id] = (old, new)
         if not (node_moves or frame_moves):
             return
         self.undo_stack.beginMacro("move selection")
@@ -872,21 +898,54 @@ class NodeGraphScene(QGraphicsScene):
         self.undo_stack.endMacro()
 
     def delete_selection(self) -> None:
-        from ..commands import RemoveFrameCommand
         node_ids = [i.node.id for i in self.selected_node_items()]
         conn_ids = [i.conn.id for i in self.selectedItems()
                     if isinstance(i, ConnectionItem)]
         frame_ids = [i.frame.id for i in self.selectedItems()
                      if isinstance(i, FrameItem)]
+        self.delete_items(node_ids, conn_ids, frame_ids)
+
+    def delete_items(self, node_ids: list, conn_ids: list,
+                     frame_ids: list) -> None:
+        """Remove nodes, wires and frames in one undo step.
+
+        A *collapsed* frame takes its contents with it. Expanded, deleting a
+        frame has never touched the nodes inside and still doesn't — but
+        collapsed, the box is the only thing on the canvas and its contents
+        cannot be seen or selected, so removing it alone would silently
+        strand nodes nobody can reach.
+        """
+        from ..commands import RemoveFrameCommand
         if not (node_ids or conn_ids or frame_ids):
             return
+        collapsed = [fid for fid in frame_ids
+                     if fid in self.graph.frames
+                     and self.graph.frames[fid].collapsed]
+        members: list = []
+        nested: list = []
+        for frame_id in collapsed:
+            members.extend(self._hidden.get(frame_id, ()))
+            nested.extend(self._hidden_frames.get(frame_id, ()))
+        if members and self.confirm_collapsed_delete is not None:
+            titles = [self.graph.frames[f].title for f in collapsed]
+            if not self.confirm_collapsed_delete(titles, len(members)):
+                return
+        all_nodes = list(dict.fromkeys([*node_ids, *members]))
+        all_frames = list(dict.fromkeys([*frame_ids, *nested]))
+
         self.undo_stack.beginMacro("delete selection")
-        if node_ids or conn_ids:
-            self._push_orphan_snapshots(conn_ids=conn_ids, node_ids=node_ids)
-            self.undo_stack.push(
-                RemoveSelectionCommand(self.graph, node_ids, conn_ids))
-        for frame_id in frame_ids:
+        if all_nodes or conn_ids:
+            # first: it reads the wires that are about to go
+            self._push_orphan_snapshots(conn_ids=conn_ids, node_ids=all_nodes)
+        # Frames before nodes, because undo runs a macro backwards. The other
+        # way round, undo re-adds a collapsed frame while none of its members
+        # exist yet, it folds around nothing, and the nodes then come back
+        # visible on top of the box.
+        for frame_id in all_frames:
             self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
+        if all_nodes or conn_ids:
+            self.undo_stack.push(
+                RemoveSelectionCommand(self.graph, all_nodes, conn_ids))
         self.undo_stack.endMacro()
 
     # -------------------------------------------------------------- layering
@@ -956,11 +1015,18 @@ class NodeGraphScene(QGraphicsScene):
             self.graph, frame_id,
             rect=(pos.x(), pos.y(), size[0], size[1])))
 
-    def push_frame_move(self, frame_id: str, pos, size, node_moves: dict) -> None:
+    def push_frame_move(self, frame_id: str, pos, size, node_moves: dict,
+                        nested: Optional[dict] = None) -> None:
         self.undo_stack.beginMacro("move frame")
         self.push_frame_rect(frame_id, pos, size)
         if node_moves:
             self.push_move_command(node_moves)
+        # frames nested inside travel with it, in the same step: a nested
+        # frame left behind is merely odd while both are open, and outright
+        # corruption once the outer one has been folded over it
+        for nested_id, rect in (nested or {}).items():
+            self.undo_stack.push(UpdateFrameCommand(
+                self.graph, nested_id, rect=rect))
         self.undo_stack.endMacro()
 
     def push_frame_title(self, frame_id: str, title: str) -> None:
@@ -1008,10 +1074,15 @@ class NodeGraphScene(QGraphicsScene):
         if port.spec.direction.value == "input":
             existing = self.graph.input_connection(port.node_id, port.spec.name)
             if existing is not None:
-                # grab the wire: drag continues from its source output
+                # grab the wire: drag continues from its source output —
+                # or from the frame pin standing in for it, when that source
+                # is folded away inside a collapsed frame. Reaching straight
+                # for the hidden node's own pin would start the drag from a
+                # point in the vacated region, nowhere near the wire.
                 self._drag_detach = existing
-                fixed = (self.node_items[existing.src_node]
-                         .output_ports[existing.src_port])
+                fixed = self.wire_anchor(existing, "src") or (
+                    self.node_items[existing.src_node]
+                    .output_ports[existing.src_port])
                 item = self.connection_items.get(existing.id)
                 if item is not None:
                     item.hide()

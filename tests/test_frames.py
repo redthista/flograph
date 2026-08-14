@@ -5,7 +5,7 @@ the carry-your-contents behaviour were all untested — so this covers the
 collapse feature and the frame behaviour it leans on.
 """
 import pytest
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QImage, QPainter, QUndoStack
 
 from flograph.core import Frame, Graph, NodeRegistry
@@ -425,6 +425,234 @@ class TestPins:
                     if c.dst_node == "inner")
         graph.disconnect(conn.id)
         assert (conn.id, "dst") not in scene._frame_pins
+
+
+class TestLiveWires:
+    def test_dropping_a_wire_on_a_pin_connects_the_inner_node(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        inner = script_node(graph, registry, "inner", (50.0, 50.0))
+        sink = script_node(graph, registry, "sink", (600.0, 50.0))
+        graph.connect(inner.id, "out1", sink.id, "in1")
+        feeder = script_node(graph, registry, "feeder", (600.0, 300.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+
+        # the pin standing in for inner's *output* is a live drag source;
+        # wire the outside feeder into inner's input the same way the scene
+        # would once the drop lands on that pin
+        pin = next(p for p in scene._frame_pins.values() if p.side == "src")
+        assert pin.node_id == "inner"
+        out_port = scene.node_items["feeder"].output_ports["out1"]
+        assert scene._wire_valid(out_port, pin) is False   # output to output
+        graph.connect(feeder.id, "out1", pin.node_id, "in1")
+        assert graph.input_connection("inner", "in1") is not None
+        # and the new crossing wire earns a pin of its own
+        assert any(p.side == "dst" and p.node_id == "inner"
+                   for p in scene._frame_pins.values())
+
+    def test_detaching_from_a_pin_anchors_to_the_visible_source(self, env, registry):
+        """Dragging a wire off an input pin continues from its source. When
+        that source is folded inside *another* collapsed frame, the preview
+        must start at that frame's pin, not at the hidden node's own."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="fa", rect=(0, 0, 200, 200)))
+        graph.add_frame(Frame(id="fb", rect=(400, 0, 200, 200)))
+        a = script_node(graph, registry, "a", (50.0, 50.0))
+        b = script_node(graph, registry, "b", (450.0, 50.0))
+        conn, _ = graph.connect(a.id, "out1", b.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "fa", True))
+        stack.push(SetFrameCollapsedCommand(graph, "fb", True))
+
+        dst_pin = scene._frame_pins[(conn.id, "dst")]
+        src_pin = scene._frame_pins[(conn.id, "src")]
+        scene.begin_wire_drag(dst_pin)
+        assert scene._pending.fixed_port is src_pin
+        assert scene._pending.fixed_port is not \
+            scene.node_items["a"].output_ports["out1"]
+        scene.cancel_wire_drag()
+
+    def test_reroute_insertion_refused_on_a_crossing_wire(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        inner = script_node(graph, registry, "inner", (50.0, 50.0))
+        sink = script_node(graph, registry, "sink", (600.0, 50.0))
+        conn, _ = graph.connect(inner.id, "out1", sink.id, "in1")
+        item = scene.connection_items[conn.id]
+        assert not item._crosses_a_collapsed_frame()
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        assert item._crosses_a_collapsed_frame()
+        before = len(graph.nodes)
+        item.mouseDoubleClickEvent(_FakeDoubleClick())
+        assert len(graph.nodes) == before      # no reroute conjured up
+
+
+class TestMovement:
+    def test_dragging_a_collapsed_frame_carries_hidden_members(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        node = script_node(graph, registry, "inner", (50.0, 50.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        item = scene.frame_items["f1"]
+
+        item._press_pos = item.pos()
+        item._grabbed = [(scene.node_items["inner"],
+                          scene.node_items["inner"].pos() - item.pos())]
+        item._grabbed_frames = []
+        item.setPos(QPointF(100.0, 80.0))
+        scene.push_frame_move("f1", item.pos(), item._size,
+                              {"inner": ((50.0, 50.0), (150.0, 130.0))})
+        assert graph.nodes["inner"].pos == (150.0, 130.0)
+        assert graph.frames["f1"].rect[:2] == (100.0, 80.0)
+        stack.undo()                       # one macro, both back
+        assert graph.nodes["inner"].pos == (50.0, 50.0)
+        assert graph.frames["f1"].rect[:2] == (0.0, 0.0)
+
+    def test_nested_frames_travel_with_their_parent(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
+        graph.add_frame(Frame(id="inner", rect=(50, 50, 100, 100)))
+        outer = scene.frame_items["outer"]
+        _nodes, nested_items = outer.carried_items()
+        assert [i.frame.id for i, _ in nested_items] == ["inner"]
+        scene.push_frame_move("outer", QPointF(30.0, 30.0), outer._size, {},
+                              {"inner": (80.0, 80.0, 100.0, 100.0)})
+        assert graph.frames["inner"].rect[:2] == (80.0, 80.0)
+        stack.undo()
+        assert graph.frames["inner"].rect[:2] == (50.0, 50.0)
+
+    def test_multi_selection_drag_carries_hidden_members(self, env, registry):
+        """A collapsed frame's contents cannot be selected, so the group drag
+        has to carry them explicitly or they get left behind."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "inner", (50.0, 50.0))
+        loose = script_node(graph, registry, "loose", (700.0, 700.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+
+        scene.frame_items["f1"].setSelected(True)
+        scene.node_items["loose"].setSelected(True)
+        starts = scene.begin_group_drag()
+        assert "inner" in starts["carried"]
+        # Qt would move the selected items; do that part by hand. The frame
+        # is flagged as dragging, so its own itemChange snaps it to the grid —
+        # take the delta from where it actually lands, not from what we asked.
+        scene.frame_items["f1"].setPos(QPointF(40.0, 25.0))
+        scene.node_items["loose"].setPos(QPointF(740.0, 725.0))
+        landed = scene.frame_items["f1"].pos()
+        loose_landed = scene.node_items["loose"].pos()
+        scene.commit_group_move(starts)
+        assert graph.nodes["inner"].pos == (50.0 + landed.x(),
+                                            50.0 + landed.y())
+        assert graph.nodes["loose"].pos == (loose_landed.x(), loose_landed.y())
+        stack.undo()
+        assert graph.nodes["inner"].pos == (50.0, 50.0)
+
+    def test_crossing_wires_repath_after_a_frame_move(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        inner = script_node(graph, registry, "inner", (50.0, 50.0))
+        sink = script_node(graph, registry, "sink", (600.0, 50.0))
+        conn, _ = graph.connect(inner.id, "out1", sink.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        item = scene.frame_items["f1"]
+        before = scene.connection_items[conn.id].path().pointAtPercent(0.0)
+        item.setPos(QPointF(150.0, 120.0))
+        scene.frame_item_moved("f1")
+        after = scene.connection_items[conn.id].path().pointAtPercent(0.0)
+        assert before != after
+
+
+class TestDelete:
+    def _folded(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        a = script_node(graph, registry, "a", (50.0, 50.0))
+        b = script_node(graph, registry, "b", (120.0, 120.0))
+        graph.connect(a.id, "out1", b.id, "in1")
+        sink = script_node(graph, registry, "sink", (600.0, 50.0))
+        graph.connect(b.id, "out1", sink.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        return graph, stack, scene
+
+    def test_expanded_frame_delete_leaves_its_nodes(self, env, registry):
+        """Unchanged behaviour: deleting an open frame has never removed the
+        nodes inside it."""
+        graph, _stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "a", (50.0, 50.0))
+        scene.delete_items([], [], ["f1"])
+        assert "f1" not in graph.frames
+        assert "a" in graph.nodes
+
+    def test_collapsed_frame_delete_takes_its_members(self, env, registry):
+        graph, stack, scene = self._folded(env, registry)
+        scene.delete_items([], [], ["f1"])
+        assert "f1" not in graph.frames
+        assert "a" not in graph.nodes and "b" not in graph.nodes
+        assert "sink" in graph.nodes          # outside, untouched
+
+    def test_undo_restores_members_still_hidden(self, env, registry):
+        """The macro pushes the frame before the nodes, because undo runs it
+        backwards: the other order re-adds the frame while its members are
+        still gone, so it folds around nothing and they come back visible
+        sitting on top of the box."""
+        graph, stack, scene = self._folded(env, registry)
+        scene.delete_items([], [], ["f1"])
+        stack.undo()
+        assert graph.frames["f1"].collapsed is True
+        assert "a" in graph.nodes and "b" in graph.nodes
+        assert set(scene.frame_items["f1"].member_ids()) == {"a", "b"}
+        assert not scene.node_items["a"].isVisible()
+        assert not scene.node_items["b"].isVisible()
+
+    def test_undo_restores_the_crossing_wire(self, env, registry):
+        graph, stack, scene = self._folded(env, registry)
+        before = len(graph.connections)
+        scene.delete_items([], [], ["f1"])
+        stack.undo()
+        assert len(graph.connections) == before
+        assert scene._frame_pins            # and it is pinned to the box again
+
+    def test_it_is_one_undo_step(self, env, registry):
+        graph, stack, scene = self._folded(env, registry)
+        depth = stack.index()
+        scene.delete_items([], [], ["f1"])
+        assert stack.index() == depth + 1
+
+    def test_confirm_returning_false_deletes_nothing(self, env, registry):
+        graph, stack, scene = self._folded(env, registry)
+        scene.confirm_collapsed_delete = lambda titles, count: False
+        scene.delete_items([], [], ["f1"])
+        assert "f1" in graph.frames and "a" in graph.nodes
+
+    def test_confirm_is_told_what_goes(self, env, registry):
+        graph, stack, scene = self._folded(env, registry)
+        seen = {}
+
+        def confirm(titles, count):
+            seen["titles"], seen["count"] = titles, count
+            return True
+
+        scene.confirm_collapsed_delete = confirm
+        scene.delete_items([], [], ["f1"])
+        assert seen["count"] == 2
+        assert seen["titles"] == ["Frame"]
+
+    def test_expanded_frame_never_asks(self, env, registry):
+        graph, _stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "a", (50.0, 50.0))
+        scene.confirm_collapsed_delete = lambda *a: pytest.fail("asked")
+        scene.delete_items([], [], ["f1"])
+        assert "f1" not in graph.frames
+
+
+class _FakeDoubleClick:
+    def scenePos(self):
+        return QPointF(100.0, 100.0)
+
+    def accept(self):
+        pass
 
 
 class TestPainting:
