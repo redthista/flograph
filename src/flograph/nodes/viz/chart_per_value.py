@@ -60,6 +60,9 @@ NODE = {
     "label": "Chart per Value",
     "category": "Viz",
     "card": "figure",
+    # matplotlib is not thread-safe, so this node runs on its own rather than
+    # beside whatever else the flow could otherwise overlap it with.
+    "exclusive": True,
     "inputs": [("table", "dataframe")],
     "outputs": [("figures", "any")],
 }

@@ -41,6 +41,12 @@ class NodeSpec:
     # "toggle", ... None for every other card kind. Like `card`, it lives in
     # `source`, so forking or saving the node keeps it.
     control: Optional[str] = None
+    # declared by NODE["exclusive"]: this node cannot run beside another, so
+    # the engine drains the in-flight set and gives it the process to itself.
+    # For matplotlib, which is not thread-safe from a worker, and for anything
+    # reaching a resource that tolerates one user at a time. Like `card`, it
+    # lives in `source`, so forking or saving the node keeps it.
+    exclusive: bool = False
     # placeholder standing in for a type_id serialization couldn't resolve
     broken: bool = False
     # library sub-section for user-saved nodes; None/"" = ungrouped, top-level
@@ -90,6 +96,13 @@ class NodeInstance:
     # graph from one that has been quietly overtaken by an edit upstream;
     # None on a node that was never frozen. See engine.cache_persistence.
     frozen_fingerprint: Optional[str] = None
+    # Run this node on its own, with nothing else in flight — or explicitly
+    # alongside others, overriding a script that asks to be exclusive. None,
+    # which is every node until somebody says otherwise, means "follow the
+    # script's NODE['exclusive']". Tri-state for the same reason port_labels
+    # is: an instance that had silently baked in the spec's answer would keep
+    # the old one after the code was edited to say something else.
+    exclusive_override: Optional[bool] = None
     # Read-only guard: params, code and position are frozen so a working node
     # cannot be nudged by accident. Purely a UI protection — a locked node
     # runs exactly as it always did, and can still be deleted, that being an

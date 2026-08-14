@@ -80,6 +80,11 @@ class RunTimeline(QWidget):
     Bars are positioned by when the node started, so gaps between them are
     visible too — a run that is mostly gap is losing its time to scheduling
     rather than to any node, and that is worth being able to see.
+
+    Bars that line up vertically are nodes that ran at the same time, which
+    needed no new drawing: one row per node against a wall-clock axis already
+    says it. A staircase is a flow running one node at a time; a block is a
+    flow running wide.
     """
 
     def __init__(self, parent=None) -> None:
@@ -109,8 +114,12 @@ class RunTimeline(QWidget):
             return
 
         # The axis is the run's wall clock, not the sum of the node times, so
-        # the bars really do show what share of the wait each step was.
-        span = max(record.wall_time, record.node_time, 1e-6)
+        # the bars really do show what share of the wait each step was. That
+        # distinction is load-bearing now that nodes overlap: their times add
+        # up to more than the run took, and an axis long enough to hold the
+        # sum would squeeze every bar into the left of the panel and show a
+        # fast parallel run as a mostly-empty chart.
+        span = max(record.wall_time, 1e-6)
         track_x = GUTTER
         track_w = max(40, self.width() - GUTTER - 70)
         # Rows share whatever height there is rather than stacking at the top
@@ -272,8 +281,15 @@ class RunTab(QWidget):
         parts = [
             f"<b>{format_seconds(record.wall_time)}</b> total",
             f"{format_seconds(record.node_time)} in nodes",
-            f"{format_seconds(overhead)} scheduling",
         ]
+        # A run that overlapped spent no time waiting between nodes — there
+        # was always another one going — so "scheduling" is not the number to
+        # show it. What it saved by overlapping is.
+        if record.overlap > 0:
+            parts.append(f"{format_seconds(record.overlap)} saved by running "
+                         f"{record.peak_concurrency} at once")
+        else:
+            parts.append(f"{format_seconds(overhead)} scheduling")
         if record.peak_growth:
             parts.append(f"peak +{format_bytes(record.peak_growth)}")
         skipped = (record.skipped_clean + record.skipped_frozen

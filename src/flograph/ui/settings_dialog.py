@@ -420,6 +420,25 @@ class SettingsDialog(QDialog):
         rows.add("Page bar position", page_bar_combo,
                  "Which edge of the window the Model/page tabs live on.")
 
+        rows.add_group("Execution")
+
+        workers_spin = QSpinBox()
+        workers_spin.setObjectName("engine_workers_spinbox")
+        workers_spin.setRange(0, 32)
+        workers_spin.setSpecialValueText("Auto")
+        workers_spin.setValue(window.engine_max_workers)
+        workers_spin.valueChanged.connect(window.set_engine_max_workers)
+        rows.add("Nodes to run at once", workers_spin,
+                 "Branches of a flow that do not depend on each other can run "
+                 "side by side. Auto picks a number from the machine's cores, "
+                 "capped so that a wide flow does not try to hold every "
+                 "branch's data in memory at once — lower it if a run is "
+                 "using more memory than you have, raise it if the flow is "
+                 "mostly waiting on files or the network. 1 runs one node at "
+                 "a time, as flograph always did. A node whose code is not "
+                 "safe beside others can opt out on its own: right-click it "
+                 "and choose Run on its own.")
+
         rows.add_group("Reset")
 
         # short labels: in a grid the row name carries the noun, and a
