@@ -402,8 +402,15 @@ class NodeGraphScene(QGraphicsScene):
                 continue
             if other_id in keep_frames:
                 continue        # nested inside the one expanding; it belongs
+            # `keep` is subtracted, not just skipped later: frames overlap,
+            # and membership is geometric, so a neighbour can quite legally
+            # claim a node that belongs to the frame being expanded. Letting
+            # it travel with the neighbour drags the expanding frame's own
+            # contents out from under it — the ones under the overlap moved
+            # and the ones clear of it did not, which is as baffling as it
+            # sounds. Its contents sit still, whoever else lays claim.
             members = [nid for nid in self._frame_members(other)
-                       if nid in self.node_items]
+                       if nid in self.node_items and nid not in keep]
             spoken_for.update(members)
             rect = other.scene_rect()
             for nid in members:
