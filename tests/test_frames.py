@@ -995,6 +995,29 @@ class TestNudgeRespectsFrames:
         assert graph.frames["theirs"].rect == before_rect
         assert graph.nodes["their1"].pos == before_pos
 
+    def test_its_own_contents_never_travel_with_a_neighbour(self, env, registry):
+        """Frames overlap, and membership is geometric, so a neighbour can
+        legally claim nodes belonging to the frame being expanded. Letting
+        them travel with it dragged the expanding frame's own contents out
+        from under it — and only the ones under the overlap, which looked
+        like 'every child but the first'."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="mine", rect=(0, 0, 500, 200)))
+        for i in range(4):
+            script_node(graph, registry, f"child{i}", (40.0 + i * 110, 60.0))
+        collapse(scene, "mine")
+        # a neighbour overlapping where 'mine' reopens, so the later
+        # children fall inside it too
+        graph.add_frame(Frame(id="theirs", rect=(200, 20, 500, 260)))
+        script_node(graph, registry, "theirs1", (600.0, 100.0))
+
+        before = {n: graph.nodes[n].pos for n in graph.nodes}
+        expand(scene, "mine")
+        for i in range(4):
+            assert graph.nodes[f"child{i}"].pos == before[f"child{i}"], \
+                f"child{i} was dragged along by the overlapping neighbour"
+        assert graph.nodes["theirs1"].pos != before["theirs1"]
+
     def test_its_own_nested_frame_is_not_pushed_away(self, env, registry):
         graph, stack, scene = env
         graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
