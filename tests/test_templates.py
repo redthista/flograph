@@ -50,11 +50,12 @@ class TestBundledExamples:
             "09_folium_map.flograph",
             "10_svg_retrofit_workbench.flograph",
             "11_goto_from_workflow.flograph",
+            "12_parallel_branches.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 11
+        assert len(window._examples_menu.actions()) == 12
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -67,6 +68,7 @@ class TestBundledExamples:
         "08_geo_population_map.flograph",
         "10_svg_retrofit_workbench.flograph",
         "11_goto_from_workflow.flograph",
+        "12_parallel_branches.flograph",
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))

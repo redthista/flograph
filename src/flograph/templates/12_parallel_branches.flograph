@@ -1,0 +1,536 @@
+{
+  "flograph_version": "0.1.9",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t12n00note000000000000001",
+        "type": "flograph.util.note",
+        "pos": [
+          -1180.0,
+          -680.0
+        ],
+        "params": {
+          "text": "## Branches run side by side\n\nSix branches hang off **Start**, and nothing connects them to each other \u2014\nso the engine runs them **at the same time**, one worker each. Watch the\nstatus lights come on together and the status bar say *Running 6 nodes*.\n\nInside a branch the order still holds: a **Summarize** cannot begin until\nthe **Fetch** above it has finished.\n\n**Try it.** Press **F5** and time it. Then set\n*Settings > General > Nodes to run at once* to **1**, press **Ctrl+R** to\nmark everything dirty, and run it again \u2014 the same flow, one node at a\ntime, about five times the wait.\n\nEach step waits on the clock instead of on a real file, so the shape is\nhonest without shipping a big dataset.\n",
+          "width": 420,
+          "height": 0
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0
+      },
+      {
+        "id": "t12n01start00000000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -1180.0,
+          -90.0
+        ],
+        "params": {},
+        "code": "\"\"\"One source feeding every branch, so they all become ready at once.\"\"\"\nNODE = {\n    \"label\": \"Start\",\n    \"category\": \"Input\",\n    \"inputs\": [],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = []\n\n\ndef run(ctx):\n    ctx.log(\"six branches from here, none of them waiting on each other\")\n    return {\"out1\": 1}\n",
+        "label": "Start",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1
+      },
+      {
+        "id": "t12n10fetch0000000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -720.0,
+          -640.0
+        ],
+        "params": {
+          "seconds": 0.8
+        },
+        "code": "\"\"\"Stands in for a slow input \u2014 a large file, a database, an API.\n\ntime.sleep is the honest way to show scheduling: it holds the branch open\nfor a fixed, visible moment without needing a network or a 2 GB CSV in the\nrepo. A real Read CSV or HTTP node behaves the same way as far as the\nengine is concerned \u2014 it occupies one worker and lets the others run.\n\"\"\"\nNODE = {\n    \"label\": \"Fetch\",\n    \"category\": \"IO\",\n    \"inputs\": [(\"in1\", \"any\", {\"optional\": True})],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.8, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1=None):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 60\n    ctx.log(f\"waiting {total:g}s for the source\")\n    for i in range(steps):\n        ctx.check_cancelled()      # keeps Cancel working mid-wait\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)   # fills the ring in the status LED\n    return {\"out1\": (in1 or 0) + 1}\n",
+        "label": "Fetch 1",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 2
+      },
+      {
+        "id": "t12n20summarize000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -300.0,
+          -640.0
+        ],
+        "params": {
+          "seconds": 0.35
+        },
+        "code": "\"\"\"The second step of a branch, so each branch is a chain of two.\n\nIt cannot start until the Fetch above it has finished \u2014 that is the rule\nconcurrency does not bend. Six of these still run beside each other,\nbecause they belong to six different branches.\n\"\"\"\nNODE = {\n    \"label\": \"Summarize\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"in1\", \"any\")],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.4, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 40\n    for i in range(steps):\n        ctx.check_cancelled()\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)\n    return {\"out1\": in1 + 1}\n",
+        "label": "Summarize 1",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 3
+      },
+      {
+        "id": "t12n11fetch0000000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -720.0,
+          -420.0
+        ],
+        "params": {
+          "seconds": 0.6
+        },
+        "code": "\"\"\"Stands in for a slow input \u2014 a large file, a database, an API.\n\ntime.sleep is the honest way to show scheduling: it holds the branch open\nfor a fixed, visible moment without needing a network or a 2 GB CSV in the\nrepo. A real Read CSV or HTTP node behaves the same way as far as the\nengine is concerned \u2014 it occupies one worker and lets the others run.\n\"\"\"\nNODE = {\n    \"label\": \"Fetch\",\n    \"category\": \"IO\",\n    \"inputs\": [(\"in1\", \"any\", {\"optional\": True})],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.8, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1=None):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 60\n    ctx.log(f\"waiting {total:g}s for the source\")\n    for i in range(steps):\n        ctx.check_cancelled()      # keeps Cancel working mid-wait\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)   # fills the ring in the status LED\n    return {\"out1\": (in1 or 0) + 1}\n",
+        "label": "Fetch 2",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 4
+      },
+      {
+        "id": "t12n21summarize000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -300.0,
+          -420.0
+        ],
+        "params": {
+          "seconds": 0.45
+        },
+        "code": "\"\"\"The second step of a branch, so each branch is a chain of two.\n\nIt cannot start until the Fetch above it has finished \u2014 that is the rule\nconcurrency does not bend. Six of these still run beside each other,\nbecause they belong to six different branches.\n\"\"\"\nNODE = {\n    \"label\": \"Summarize\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"in1\", \"any\")],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.4, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 40\n    for i in range(steps):\n        ctx.check_cancelled()\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)\n    return {\"out1\": in1 + 1}\n",
+        "label": "Summarize 2",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 5
+      },
+      {
+        "id": "t12n12fetch0000000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -720.0,
+          -200.0
+        ],
+        "params": {
+          "seconds": 0.4
+        },
+        "code": "\"\"\"Stands in for a slow input \u2014 a large file, a database, an API.\n\ntime.sleep is the honest way to show scheduling: it holds the branch open\nfor a fixed, visible moment without needing a network or a 2 GB CSV in the\nrepo. A real Read CSV or HTTP node behaves the same way as far as the\nengine is concerned \u2014 it occupies one worker and lets the others run.\n\"\"\"\nNODE = {\n    \"label\": \"Fetch\",\n    \"category\": \"IO\",\n    \"inputs\": [(\"in1\", \"any\", {\"optional\": True})],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.8, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1=None):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 60\n    ctx.log(f\"waiting {total:g}s for the source\")\n    for i in range(steps):\n        ctx.check_cancelled()      # keeps Cancel working mid-wait\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)   # fills the ring in the status LED\n    return {\"out1\": (in1 or 0) + 1}\n",
+        "label": "Fetch 3",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 6
+      },
+      {
+        "id": "t12n22summarize000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -300.0,
+          -200.0
+        ],
+        "params": {
+          "seconds": 0.3
+        },
+        "code": "\"\"\"The second step of a branch, so each branch is a chain of two.\n\nIt cannot start until the Fetch above it has finished \u2014 that is the rule\nconcurrency does not bend. Six of these still run beside each other,\nbecause they belong to six different branches.\n\"\"\"\nNODE = {\n    \"label\": \"Summarize\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"in1\", \"any\")],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.4, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 40\n    for i in range(steps):\n        ctx.check_cancelled()\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)\n    return {\"out1\": in1 + 1}\n",
+        "label": "Summarize 3",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 7
+      },
+      {
+        "id": "t12n13fetch0000000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -720.0,
+          20.0
+        ],
+        "params": {
+          "seconds": 0.9
+        },
+        "code": "\"\"\"Stands in for a slow input \u2014 a large file, a database, an API.\n\ntime.sleep is the honest way to show scheduling: it holds the branch open\nfor a fixed, visible moment without needing a network or a 2 GB CSV in the\nrepo. A real Read CSV or HTTP node behaves the same way as far as the\nengine is concerned \u2014 it occupies one worker and lets the others run.\n\"\"\"\nNODE = {\n    \"label\": \"Fetch\",\n    \"category\": \"IO\",\n    \"inputs\": [(\"in1\", \"any\", {\"optional\": True})],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.8, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1=None):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 60\n    ctx.log(f\"waiting {total:g}s for the source\")\n    for i in range(steps):\n        ctx.check_cancelled()      # keeps Cancel working mid-wait\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)   # fills the ring in the status LED\n    return {\"out1\": (in1 or 0) + 1}\n",
+        "label": "Fetch 4",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 8
+      },
+      {
+        "id": "t12n23summarize000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -300.0,
+          20.0
+        ],
+        "params": {
+          "seconds": 0.2
+        },
+        "code": "\"\"\"The second step of a branch, so each branch is a chain of two.\n\nIt cannot start until the Fetch above it has finished \u2014 that is the rule\nconcurrency does not bend. Six of these still run beside each other,\nbecause they belong to six different branches.\n\"\"\"\nNODE = {\n    \"label\": \"Summarize\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"in1\", \"any\")],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.4, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 40\n    for i in range(steps):\n        ctx.check_cancelled()\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)\n    return {\"out1\": in1 + 1}\n",
+        "label": "Summarize 4",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 9
+      },
+      {
+        "id": "t12n14fetch0000000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -720.0,
+          240.0
+        ],
+        "params": {
+          "seconds": 0.35
+        },
+        "code": "\"\"\"Stands in for a slow input \u2014 a large file, a database, an API.\n\ntime.sleep is the honest way to show scheduling: it holds the branch open\nfor a fixed, visible moment without needing a network or a 2 GB CSV in the\nrepo. A real Read CSV or HTTP node behaves the same way as far as the\nengine is concerned \u2014 it occupies one worker and lets the others run.\n\"\"\"\nNODE = {\n    \"label\": \"Fetch\",\n    \"category\": \"IO\",\n    \"inputs\": [(\"in1\", \"any\", {\"optional\": True})],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.8, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1=None):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 60\n    ctx.log(f\"waiting {total:g}s for the source\")\n    for i in range(steps):\n        ctx.check_cancelled()      # keeps Cancel working mid-wait\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)   # fills the ring in the status LED\n    return {\"out1\": (in1 or 0) + 1}\n",
+        "label": "Fetch 5",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 10
+      },
+      {
+        "id": "t12n24summarize000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -300.0,
+          240.0
+        ],
+        "params": {
+          "seconds": 0.5
+        },
+        "code": "\"\"\"The second step of a branch, so each branch is a chain of two.\n\nIt cannot start until the Fetch above it has finished \u2014 that is the rule\nconcurrency does not bend. Six of these still run beside each other,\nbecause they belong to six different branches.\n\"\"\"\nNODE = {\n    \"label\": \"Summarize\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"in1\", \"any\")],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.4, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 40\n    for i in range(steps):\n        ctx.check_cancelled()\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)\n    return {\"out1\": in1 + 1}\n",
+        "label": "Summarize 5",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 11
+      },
+      {
+        "id": "t12n15fetch0000000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -720.0,
+          460.0
+        ],
+        "params": {
+          "seconds": 0.7
+        },
+        "code": "\"\"\"Stands in for a slow input \u2014 a large file, a database, an API.\n\ntime.sleep is the honest way to show scheduling: it holds the branch open\nfor a fixed, visible moment without needing a network or a 2 GB CSV in the\nrepo. A real Read CSV or HTTP node behaves the same way as far as the\nengine is concerned \u2014 it occupies one worker and lets the others run.\n\"\"\"\nNODE = {\n    \"label\": \"Fetch\",\n    \"category\": \"IO\",\n    \"inputs\": [(\"in1\", \"any\", {\"optional\": True})],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.8, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1=None):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 60\n    ctx.log(f\"waiting {total:g}s for the source\")\n    for i in range(steps):\n        ctx.check_cancelled()      # keeps Cancel working mid-wait\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)   # fills the ring in the status LED\n    return {\"out1\": (in1 or 0) + 1}\n",
+        "label": "Fetch 6",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 12
+      },
+      {
+        "id": "t12n25summarize000000001",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          -300.0,
+          460.0
+        ],
+        "params": {
+          "seconds": 0.4
+        },
+        "code": "\"\"\"The second step of a branch, so each branch is a chain of two.\n\nIt cannot start until the Fetch above it has finished \u2014 that is the rule\nconcurrency does not bend. Six of these still run beside each other,\nbecause they belong to six different branches.\n\"\"\"\nNODE = {\n    \"label\": \"Summarize\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"in1\", \"any\")],\n    \"outputs\": [(\"out1\", \"any\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\",\n     \"default\": 0.4, \"min\": 0.0, \"max\": 60.0},\n]\n\n\ndef run(ctx, in1):\n    import time\n    total = float(ctx.params[\"seconds\"])\n    steps = 40\n    for i in range(steps):\n        ctx.check_cancelled()\n        time.sleep(total / steps)\n        ctx.progress((i + 1) / steps)\n    return {\"out1\": in1 + 1}\n",
+        "label": "Summarize 6",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 13
+      }
+    ],
+    "connections": [
+      {
+        "id": "da4dfd40bd554e829af474c7f8f6d002",
+        "src": [
+          "t12n01start00000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n10fetch0000000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "2de79169ee2948748c09b3c180b97975",
+        "src": [
+          "t12n10fetch0000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n20summarize000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "509736359d2e4123aef976e9d3604690",
+        "src": [
+          "t12n01start00000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n11fetch0000000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "745fff38868f47bd8cd5f65d8be9c316",
+        "src": [
+          "t12n11fetch0000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n21summarize000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "77598893357446d89974c6bbfd840966",
+        "src": [
+          "t12n01start00000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n12fetch0000000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "5dd1d2b6401642b78e5f82afd02cad4e",
+        "src": [
+          "t12n12fetch0000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n22summarize000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "63d3a80e809c4a02a5bc1dac52afa2a8",
+        "src": [
+          "t12n01start00000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n13fetch0000000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "60920aa128f648a6837dce89a333264a",
+        "src": [
+          "t12n13fetch0000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n23summarize000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "9b5b5722596244e587d285e29401e536",
+        "src": [
+          "t12n01start00000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n14fetch0000000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "8d3cdd9d9f9442138803f77b1ffbc8b5",
+        "src": [
+          "t12n14fetch0000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n24summarize000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "2dba16d551cb424bbeb0e2b41d7fe3e9",
+        "src": [
+          "t12n01start00000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n15fetch0000000000001",
+          "in1"
+        ]
+      },
+      {
+        "id": "25096c2b0055498fb127ea6d87ae7d84",
+        "src": [
+          "t12n15fetch0000000000001",
+          "out1"
+        ],
+        "dst": [
+          "t12n25summarize000000001",
+          "in1"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": []
+  }
+}
