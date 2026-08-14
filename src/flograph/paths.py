@@ -31,6 +31,16 @@ def user_nodes_dir() -> Path:
     return user_data_dir() / "nodes"
 
 
+def user_frames_dir() -> Path:
+    """Directory scanned for user-saved frames (.floframe components).
+
+    A sibling of user_nodes_dir rather than a corner of it: a saved frame is
+    a fragment of a flow, not a node type, and nothing in the registry can
+    load one.
+    """
+    return user_data_dir() / "frames"
+
+
 def user_images_dir() -> Path:
     """Store for images pasted onto the canvas from the clipboard.
 

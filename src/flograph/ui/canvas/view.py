@@ -22,6 +22,7 @@ class NodeGraphView(ZoomPanGraphicsView):
     add_node_requested = Signal(QPointF, QPoint)   # scene pos, global pos
     palette_requested = Signal(QPointF, QPoint)    # scene pos, global pos
     node_dropped = Signal(str, QPointF)            # type_id, scene pos
+    frame_dropped = Signal(str, QPointF)           # component id, scene pos
     files_dropped = Signal(list, QPointF)          # local file paths, scene pos
     node_context_requested = Signal(str, QPoint)   # node_id, global pos
     frame_context_requested = Signal(str, QPoint)  # frame_id, global pos
@@ -240,8 +241,9 @@ class NodeGraphView(ZoomPanGraphicsView):
         return [p for p in local_paths if resolve_dropped_file(p)]
 
     def dragEnterEvent(self, event) -> None:
-        from .palette import NODE_TYPE_MIME
-        if event.mimeData().hasFormat(NODE_TYPE_MIME):
+        from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
+        if event.mimeData().hasFormat(NODE_TYPE_MIME) \
+                or event.mimeData().hasFormat(FRAME_ID_MIME):
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             if self._matching_dropped_files(event.mimeData()):
@@ -252,8 +254,9 @@ class NodeGraphView(ZoomPanGraphicsView):
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
-        from .palette import NODE_TYPE_MIME
-        if event.mimeData().hasFormat(NODE_TYPE_MIME):
+        from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
+        if event.mimeData().hasFormat(NODE_TYPE_MIME) \
+                or event.mimeData().hasFormat(FRAME_ID_MIME):
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             if self._matching_dropped_files(event.mimeData()):
@@ -264,11 +267,16 @@ class NodeGraphView(ZoomPanGraphicsView):
             super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
-        from .palette import NODE_TYPE_MIME
+        from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
         if event.mimeData().hasFormat(NODE_TYPE_MIME):
             type_id = bytes(event.mimeData().data(NODE_TYPE_MIME)).decode()
             self.node_dropped.emit(
                 type_id, self.mapToScene(event.position().toPoint()))
+            event.acceptProposedAction()
+        elif event.mimeData().hasFormat(FRAME_ID_MIME):
+            frame_id = bytes(event.mimeData().data(FRAME_ID_MIME)).decode()
+            self.frame_dropped.emit(
+                frame_id, self.mapToScene(event.position().toPoint()))
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             paths = self._matching_dropped_files(event.mimeData())

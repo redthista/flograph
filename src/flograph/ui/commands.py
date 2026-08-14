@@ -595,6 +595,26 @@ class SetFrameCollapsedCommand(QUndoCommand):
         self._graph.set_frame_collapsed(self._frame_id, self._old)
 
 
+class SetFrameSourceCommand(QUndoCommand):
+    """Record which library component a frame came from (or became)."""
+
+    def __init__(self, graph: Graph, frame_id: str, source: str,
+                 fingerprint: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("link frame to component", parent)
+        self._graph = graph
+        self._frame_id = frame_id
+        frame = graph.frames[frame_id]
+        self._old = (frame.source, frame.source_fingerprint)
+        self._new = (source, fingerprint)
+
+    def redo(self) -> None:
+        self._graph.set_frame_source(self._frame_id, *self._new)
+
+    def undo(self) -> None:
+        self._graph.set_frame_source(self._frame_id, *self._old)
+
+
 class AddPageCommand(QUndoCommand):
     def __init__(self, graph: Graph, page: Page,
                  parent: Optional[QUndoCommand] = None) -> None:
