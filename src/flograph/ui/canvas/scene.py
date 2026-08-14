@@ -909,7 +909,7 @@ class NodeGraphScene(QGraphicsScene):
         self.delete_items(node_ids, conn_ids, frame_ids)
 
     def delete_items(self, node_ids: list, conn_ids: list,
-                     frame_ids: list) -> None:
+                     frame_ids: list, *, confirm: bool = True) -> None:
         """Remove nodes, wires and frames in one undo step.
 
         A *collapsed* frame takes its contents with it. Expanded, deleting a
@@ -917,6 +917,11 @@ class NodeGraphScene(QGraphicsScene):
         collapsed, the box is the only thing on the canvas and its contents
         cannot be seen or selected, so removing it alone would silently
         strand nodes nobody can reach.
+
+        `confirm=False` skips the are-you-sure. For a caller that is not
+        really deleting anything — updating a component tears its contents
+        down only to build them straight back — asking would be a question
+        about something that isn't happening.
         """
         from ..commands import RemoveFrameCommand
         if not (node_ids or conn_ids or frame_ids):
@@ -929,7 +934,7 @@ class NodeGraphScene(QGraphicsScene):
         for frame_id in collapsed:
             members.extend(self._hidden.get(frame_id, ()))
             nested.extend(self._hidden_frames.get(frame_id, ()))
-        if members and self.confirm_collapsed_delete is not None:
+        if confirm and members and self.confirm_collapsed_delete is not None:
             titles = [self.graph.frames[f].title for f in collapsed]
             if not self.confirm_collapsed_delete(titles, len(members)):
                 return

@@ -2223,6 +2223,18 @@ class MainWindow(QMainWindow):
         # only way to run a folded frame
         run_action = menu.addAction("Run frame") if collapsed else None
         menu.addSeparator()
+        state = self._component_state(frame_id)
+        update_action = None
+        if state is not None and state["stale"]:
+            update_action = menu.addAction("Update from component")
+            # a modified instance has local work in it that an update would
+            # throw away, so it is shown greyed rather than hidden — the
+            # point is to say why it isn't on offer
+            update_action.setEnabled(state["pristine"])
+            if not state["pristine"]:
+                update_action.setToolTip(
+                    "This copy has been edited, so updating it would discard "
+                    "those changes.")
         save_component = menu.addAction("Save as component…")
         copy_action = menu.addAction("Copy")
         change_color = menu.addAction("Change colour…")
@@ -2238,6 +2250,8 @@ class MainWindow(QMainWindow):
                 item.toggle_collapsed()
         elif run_action is not None and chosen is run_action:
             self._on_frame_run_requested(frame_id)
+        elif update_action is not None and chosen is update_action:
+            self._update_component_instance(frame_id)
         elif chosen is save_component:
             self._save_frame_as_component(frame_id)
         elif chosen is copy_action:
@@ -2324,6 +2338,128 @@ class MainWindow(QMainWindow):
             payload,
             offset=(scene_pos.x() - origin_x, scene_pos.y() - origin_y),
             label="insert component")
+
+    def _component_state(self, frame_id: str) -> Optional[dict]:
+        """Where a frame stands relative to the component it came from.
+
+        Returns None when it came from nowhere, or the library file it names
+        has since gone. Otherwise `pristine` says whether anything inside has
+        been edited since it was stamped, and `stale` whether the library
+        file has moved on. Only a frame that is both pristine and stale can
+        be updated: a modified one has local work in it that an update would
+        silently throw away.
+        """
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        frame = self.graph.frames.get(frame_id)
+        if frame is None or not frame.source:
+            return None
+        path = user_frames.path_for(user_frames_dir(), frame.source)
+        try:
+            data = user_frames.read(path)
+        except user_frames.UserFrameError:
+            return None
+        library = user_frames.content_hash(data.get("payload", {}))
+        current = self._frame_content_hash(frame_id)
+        return {
+            "component_id": frame.source,
+            "payload": data.get("payload", {}),
+            "library_fingerprint": library,
+            "pristine": current == frame.source_fingerprint,
+            "stale": library != frame.source_fingerprint,
+        }
+
+    def _frame_content_hash(self, frame_id: str) -> str:
+        """Hash this frame as it stands now, via the clipboard payload —
+        the same shape, and so the same hash, the library file was written
+        from."""
+        from flograph.core import user_frames
+        keep = [i for i in self.scene.selectedItems()]
+        self.scene.clearSelection()
+        item = self.scene.frame_items.get(frame_id)
+        if item is not None:
+            item.setSelected(True)
+        payload = self._selection_payload() or {}
+        self.scene.clearSelection()
+        for prev in keep:
+            prev.setSelected(True)
+        return user_frames.content_hash(payload)
+
+    def _update_component_instance(self, frame_id: str) -> None:
+        """Replace a frame's contents with the library's current version.
+
+        The instance's nodes are thrown away and rebuilt from the file, so
+        the wires reaching in from outside have to be re-made afterwards.
+        They are matched by node *label* and port name: every id in a
+        component is regenerated on insert, so ids cannot carry across, and a
+        label is what the user actually named the thing.
+        """
+        from flograph.core import user_frames
+        state = self._component_state(frame_id)
+        frame = self.graph.frames.get(frame_id)
+        if state is None or frame is None:
+            return
+        members = set(self._frame_node_ids_by_id(frame_id))
+        crossings = []
+        for conn in self.graph.connections.values():
+            src_in, dst_in = conn.src_node in members, conn.dst_node in members
+            if src_in == dst_in:
+                continue        # wholly inside, or wholly outside
+            if src_in:
+                crossings.append(("out", self.graph.nodes[conn.src_node].label,
+                                  conn.src_port, conn.dst_node, conn.dst_port))
+            else:
+                crossings.append(("in", self.graph.nodes[conn.dst_node].label,
+                                  conn.dst_port, conn.src_node, conn.src_port))
+        origin = (frame.rect[0], frame.rect[1])
+        was_collapsed = frame.collapsed
+        payload = state["payload"]
+        for entry in payload.get("frames", []):
+            entry["source"] = state["component_id"]
+            entry["source_fingerprint"] = state["library_fingerprint"]
+            entry["collapsed"] = was_collapsed
+        corners = [f.get("rect", [0, 0])[:2] for f in payload.get("frames", [])]
+        corners += [n.get("pos", [0, 0]) for n in payload.get("nodes", [])]
+        off_x = origin[0] - min((c[0] for c in corners), default=0.0)
+        off_y = origin[1] - min((c[1] for c in corners), default=0.0)
+
+        self.undo_stack.beginMacro("update component")
+        # The members go explicitly rather than relying on the collapsed-frame
+        # rule: an expanded instance is being replaced just as thoroughly as a
+        # folded one, and leaving its old nodes behind would double them up.
+        # No confirm — nothing is being lost, it is rebuilt on the next line.
+        self.scene.delete_items(sorted(members), [], [frame_id], confirm=False)
+        built = self._insert_payload(payload, offset=(off_x, off_y),
+                                     label="insert component")
+        if built is not None:
+            by_label = {}
+            for old_id, new_id in built["nodes"].items():
+                node = self.graph.nodes.get(new_id)
+                if node is not None:
+                    by_label.setdefault(node.label, new_id)
+            remade = 0
+            for side, label, port, other_node, other_port in crossings:
+                new_id = by_label.get(label)
+                if new_id is None or other_node not in self.graph.nodes:
+                    continue    # that node is gone from the new version
+                try:
+                    if side == "out":
+                        self.undo_stack.push(ConnectCommand(
+                            self.graph, new_id, port, other_node, other_port))
+                    else:
+                        self.undo_stack.push(ConnectCommand(
+                            self.graph, other_node, other_port, new_id, port))
+                    remade += 1
+                except Exception:
+                    continue    # the port no longer exists, or it would cycle
+            dropped = len(crossings) - remade
+            self.undo_stack.endMacro()
+            self.statusBar().showMessage(
+                f"Updated from “{state['component_id']}”."
+                + (f" {dropped} connection{'s' if dropped != 1 else ''} "
+                   "could not be remade." if dropped else ""), 6000)
+            return
+        self.undo_stack.endMacro()
 
     def _rename_user_frame(self, component_id: str) -> None:
         from flograph.core import user_frames
@@ -2981,7 +3117,7 @@ class MainWindow(QMainWindow):
                 source_fingerprint=entry.get("source_fingerprint", ""),
             ))
         if not new_nodes and not new_frames:
-            return
+            return None
         self.undo_stack.beginMacro(label)
         for node in new_nodes:
             self.undo_stack.push(AddNodeCommand(self.graph, node))
@@ -3004,6 +3140,9 @@ class MainWindow(QMainWindow):
             item = self.scene.frame_items.get(frame.id)
             if item is not None:
                 item.setSelected(True)
+        # what it built, so a component update can re-attach the wires that
+        # used to reach the nodes this just replaced
+        return {"nodes": id_map, "frames": [f.id for f in new_frames]}
 
     # ------------------------------------------------------ project files
 
