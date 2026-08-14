@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self.undo_stack = QUndoStack(self)
         self.scene = NodeGraphScene(self.graph, self.undo_stack,
                                     registry=registry, parent=self)
+        self.scene.confirm_collapsed_delete = self._confirm_collapsed_delete
         self.view = NodeGraphView(self.scene)
         self._canvas_stack = QStackedWidget()
         self._canvas_stack.addWidget(self.view)
@@ -2205,7 +2206,14 @@ class MainWindow(QMainWindow):
         if item is not None and not item.isSelected():
             self.scene.clearSelection()
             item.setSelected(True)
+        collapsed = self.graph.frames[frame_id].collapsed
         menu = QMenu(self)
+        fold_action = menu.addAction("Expand frame" if collapsed
+                                     else "Collapse frame")
+        # the collapsed box has no room for the run glyph, so this is the
+        # only way to run a folded frame
+        run_action = menu.addAction("Run frame") if collapsed else None
+        menu.addSeparator()
         copy_action = menu.addAction("Copy")
         change_color = menu.addAction("Change colour…")
         layer_actions = add_layer_menu(menu)
@@ -2214,13 +2222,36 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(global_pos)
         if chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
+        elif chosen is fold_action:
+            item = self.scene.frame_items.get(frame_id)
+            if item is not None:
+                item.toggle_collapsed()
+        elif run_action is not None and chosen is run_action:
+            self._on_frame_run_requested(frame_id)
         elif chosen is copy_action:
             self._copy_selection()
         elif chosen is change_color:
             self._pick_frame_color(frame_id)
         elif chosen is delete_action:
-            from .commands import RemoveFrameCommand
-            self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
+            # through the scene, so a collapsed frame takes its hidden
+            # contents with it and asks first — same as the Delete key
+            self.scene.delete_items([], [], [frame_id])
+
+    def _confirm_collapsed_delete(self, titles: list, count: int) -> bool:
+        """Deleting a folded frame deletes what is inside it, which the
+        canvas cannot show — so say how much before doing it."""
+        names = ", ".join(f"“{t}”" for t in titles) or "this frame"
+        box = QMessageBox(self)
+        box.setWindowTitle("Delete frame")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(f"Delete {names} and the "
+                    f"{count} node{'s' if count != 1 else ''} inside?")
+        box.setInformativeText(
+            "The frame is collapsed, so its contents go with it. "
+            "Expand it first to delete the frame on its own.")
+        box.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
+        box.setDefaultButton(QMessageBox.Cancel)
+        return box.exec() == QMessageBox.Yes
 
     def _pick_frame_color(self, frame_id: str) -> None:
         if frame_id not in self.graph.frames:

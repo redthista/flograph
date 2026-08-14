@@ -59,6 +59,7 @@ class FrameItem(QGraphicsObject):
         self._press_size = self._size
         self._press_pos = QPointF()
         self._grabbed: list = []  # (node_item, offset)
+        self._grabbed_frames: list = []  # (frame_item, offset) — nested
         self._group_starts: dict | None = None  # multi-selection drag snapshot
         self._hover_run = False
         self._run_pressed = False
@@ -545,6 +546,27 @@ class FrameItem(QGraphicsObject):
             for i, pin in enumerate(ports):
                 pin.setPos(x, COMPACT_PORT_TOP + ROW_H * i)
 
+    def carried_items(self) -> tuple:
+        """What a drag of this frame takes with it: ([(node_item, offset)],
+        [(frame_item, offset)]).
+
+        Nodes by their centre, nested frames by full containment. Both are
+        deliberately blind to visibility — a collapsed frame's contents are
+        hidden and must still travel with the box, or expanding it later
+        would find them stranded where the frame used to be.
+        """
+        scene = self.scene()
+        if scene is None:
+            return ([], [])
+        rect = self.scene_rect()
+        nodes = [(item, item.pos() - self.pos())
+                 for item in scene.node_items.values()
+                 if rect.contains(item.sceneBoundingRect().center())]
+        frames = [(other, other.pos() - self.pos())
+                  for other in scene.frame_items.values()
+                  if other is not self and rect.contains(other.scene_rect())]
+        return (nodes, frames)
+
     def set_pins_visible(self, visible: bool) -> None:
         """Hide the pins when the canvas flattens for zoom, matching the real
         pins — names for pins nobody can see are noise."""
@@ -663,11 +685,8 @@ class FrameItem(QGraphicsObject):
             super().mousePressEvent(event)
             self._group_starts = scene.begin_group_drag()
             return
-        # Single-frame drag: carry the nodes whose centers sit inside.
-        rect = self.scene_rect()
-        for item in scene.node_items.values():
-            if rect.contains(item.sceneBoundingRect().center()):
-                self._grabbed.append((item, item.pos() - self.pos()))
+        # Single-frame drag: carry whatever sits inside.
+        self._grabbed, self._grabbed_frames = self.carried_items()
         if event.button() == Qt.LeftButton:
             self._dragging = True  # snap the frame's position while moving
         super().mousePressEvent(event)
@@ -704,6 +723,14 @@ class FrameItem(QGraphicsObject):
         super().mouseMoveEvent(event)
         for item, offset in self._grabbed:
             item.setPos(self.pos() + offset)
+        for item, offset in self._grabbed_frames:
+            item.setPos(self.pos() + offset)
+        scene = self.scene()
+        if scene is not None:
+            # the wires pinned to this box have their other end on a hidden
+            # node that did not move relative to it, so node_item_moved never
+            # fires for them
+            scene.frame_item_moved(self.frame.id)
 
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
@@ -738,9 +765,13 @@ class FrameItem(QGraphicsObject):
                 old = self._press_pos + offset
                 moves[item.node.id] = ((old.x(), old.y()),
                                        (item.pos().x(), item.pos().y()))
+            nested = {item.frame.id: (item.pos().x(), item.pos().y(),
+                                      *item._size)
+                      for item, _offset in self._grabbed_frames}
             scene.push_frame_move(self.frame.id, self.pos(), self._size,
-                                  moves)
+                                  moves, nested)
         self._grabbed = []
+        self._grabbed_frames = []
 
     def mouseDoubleClickEvent(self, event) -> None:
         if (self._run_button_rect().contains(event.pos())

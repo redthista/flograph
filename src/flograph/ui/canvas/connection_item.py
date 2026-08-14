@@ -99,9 +99,22 @@ class ConnectionItem(QGraphicsPathItem):
 
     def mouseDoubleClickEvent(self, event) -> None:
         scene = self.scene()
-        if scene is not None:
+        if scene is not None and not self._crosses_a_collapsed_frame():
             scene.insert_reroute(self.conn, event.scenePos())
         event.accept()
+
+    def _crosses_a_collapsed_frame(self) -> bool:
+        """Whether either end is pinned to a folded frame.
+
+        A reroute is inserted where the wire was double-clicked, which for
+        the visible stub of a crossing wire is inside the collapsed frame's
+        vacated region. The new node would not be hidden — it is not in the
+        captured membership — so it would sit in apparently empty canvas,
+        get swept up by anything that resolves the frame's nodes from its
+        rect, and reappear inside the frame on expand.
+        """
+        return (self._src_anchor is not self.src_port
+                or self._dst_anchor is not self.dst_port)
 
 
 class PendingConnectionItem(QGraphicsPathItem):
