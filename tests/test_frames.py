@@ -5,7 +5,7 @@ the carry-your-contents behaviour were all untested — so this covers the
 collapse feature and the frame behaviour it leans on.
 """
 import pytest
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter, QUndoStack
 
 from flograph.core import Frame, Graph, NodeRegistry
@@ -645,6 +645,89 @@ class TestDelete:
         scene.confirm_collapsed_delete = lambda *a: pytest.fail("asked")
         scene.delete_items([], [], ["f1"])
         assert "f1" not in graph.frames
+
+
+class TestLoadAndCanvasSurface:
+    def test_scene_built_over_a_collapsed_graph_hides_members(self, qtbot, registry):
+        """The constructor mirrors nodes, then wires, then frames — a frame
+        that is already collapsed has to fold on arrival."""
+        graph = Graph()
+        node = registry.instantiate("flograph.scripting.python_script",
+                                    pos=(50.0, 50.0))
+        node.id = "inner"
+        graph.add_node(node)
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200), collapsed=True))
+        stack = QUndoStack()
+        scene = NodeGraphScene(graph, stack, registry=registry)
+        assert not scene.node_items["inner"].isVisible()
+        assert scene.frame_items["f1"].member_ids() == ["inner"]
+        stack.clear()
+
+    def test_collapsed_survives_a_save_and_reload(self, qtbot, registry):
+        graph = Graph()
+        node = registry.instantiate("flograph.scripting.python_script",
+                                    pos=(50.0, 50.0))
+        node.id = "inner"
+        graph.add_node(node)
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200), collapsed=True))
+        reloaded = graph_from_dict(graph_to_dict(graph), registry)
+        stack = QUndoStack()
+        scene = NodeGraphScene(reloaded, stack, registry=registry)
+        assert reloaded.frames["f1"].collapsed is True
+        assert not scene.node_items["inner"].isVisible()
+        stack.clear()
+
+    def test_run_frame_by_rect_still_finds_hidden_members(self, env, registry):
+        """rect stays expanded precisely so this keeps working — the frame
+        run glyph and the Action Button both resolve nodes from it."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "inner", (50.0, 50.0))
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        rect = QRectF(*graph.frames["f1"].rect)
+        found = [nid for nid, item in scene.node_items.items()
+                 if rect.contains(item.sceneBoundingRect().center())]
+        assert found == ["inner"]
+
+    def test_lod_hides_the_frame_pins(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        inner = script_node(graph, registry, "inner", (50.0, 50.0))
+        sink = script_node(graph, registry, "sink", (600.0, 50.0))
+        graph.connect(inner.id, "out1", sink.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        pin = next(iter(scene._frame_pins.values()))
+        assert pin.isVisible()
+        scene.set_lod(0.05)                    # well below the threshold
+        assert not pin.isVisible()
+        scene.set_lod(1.0)
+        assert pin.isVisible()
+
+    def test_reveal_key_shows_the_pin_labels(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        inner = script_node(graph, registry, "inner", (50.0, 50.0))
+        sink = script_node(graph, registry, "sink", (600.0, 50.0))
+        graph.connect(inner.id, "out1", sink.id, "in1")
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        pin = next(iter(scene._frame_pins.values()))
+        assert not pin._label_shown()
+        scene.set_revealing_port_labels(True)
+        assert pin._label_shown()
+        scene.set_revealing_port_labels(False)
+        assert not pin._label_shown()
+
+    def test_hidden_node_stops_animating(self, env, registry):
+        """setVisible alone does not re-derive the QMovie decisions; the
+        item has to hear about its own visibility change."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
+        script_node(graph, registry, "inner", (50.0, 50.0))
+        item = scene.node_items["inner"]
+        calls = []
+        item._apply_proxy_visibility = lambda: calls.append(1)
+        stack.push(SetFrameCollapsedCommand(graph, "f1", True))
+        assert calls, "hiding a node must re-derive its playback state"
 
 
 class _FakeDoubleClick:

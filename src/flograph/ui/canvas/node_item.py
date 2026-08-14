@@ -64,6 +64,10 @@ _HANDLED_ITEM_CHANGES = frozenset({
     QGraphicsItem.ItemPositionChange,
     QGraphicsItem.ItemPositionHasChanged,
     QGraphicsItem.ItemSelectedHasChanged,
+    # Rare — only a collapsing frame folding its contents away, or opening
+    # again — but an animated card that is hidden rather than flattened
+    # would otherwise carry on rendering frames nobody can see.
+    QGraphicsItem.ItemVisibleHasChanged,
 })
 # A deactivated node is faded rather than hidden: it is still part of the
 # graph, still wired, and still the thing you click to switch back on.
@@ -1439,9 +1443,12 @@ class NodeItem(QGraphicsObject):
             self._report_animator = None
 
     def _report_should_animate(self) -> bool:
-        """Same two switches as an image card: flattened by LOD or with its
-        preview turned off means nobody is looking at it."""
-        return not self._flat and self.node.canvas_preview_enabled
+        """Same three switches as an image card: flattened by LOD, preview
+        turned off, or hidden inside a collapsed frame all mean nobody is
+        looking at it."""
+        return (not self._flat
+                and self.node.canvas_preview_enabled
+                and self.isVisible())
 
     # --------------------------------------------------------- table viewer
 
@@ -3024,6 +3031,10 @@ class NodeItem(QGraphicsObject):
             scene = self.scene()
             if scene is not None:
                 scene.node_item_moved(self.node.id)
+        if change == QGraphicsItem.ItemVisibleHasChanged:
+            # re-derives every "is anyone looking at this" answer, which is
+            # where the QMovie playback decisions live
+            self._apply_proxy_visibility()
         if change == QGraphicsItem.ItemSelectedHasChanged \
                 and self._button_edit and not value:
             # Clicking the canvas or another node drops the selection, which

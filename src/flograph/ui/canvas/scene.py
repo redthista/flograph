@@ -687,6 +687,9 @@ class NodeGraphScene(QGraphicsScene):
         self.revealing_port_labels = revealing
         for item in self.node_items.values():
             self._repaint_ports(item)
+        for pin in self._frame_pins.values():
+            pin.prepareGeometryChange()   # the pill changes its bounds
+            pin.update()
 
     def set_compact_nodes(self, enabled: bool) -> None:
         """Canvas-wide preference. Every plain node changes width, so its

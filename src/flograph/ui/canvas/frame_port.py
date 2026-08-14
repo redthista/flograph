@@ -55,14 +55,17 @@ class FramePortItem(PortItem):
         return f"{label} · {self.spec.name}"
 
     def _label_shown(self) -> bool:
-        """Only while hovered.
+        """While hovered, or while the reveal key is held.
 
-        A node shows its port names when the canvas-wide setting says so, but
-        this box is 60px square with pins running past the bottom of it —
-        every name on permanently would be a wall of text wider than the
-        frame it came from, which is the opposite of collapsing it.
+        Deliberately not the canvas-wide "always show port labels" setting a
+        node obeys: this box is 60px square with pins running past the bottom
+        of it, and every name on permanently would be a wall of text wider
+        than the frame it came from, which is the opposite of collapsing it.
+        Holding the reveal key is a momentary "show me everything", and a
+        collapsed frame staying blank through that would be a hole in it.
         """
-        return self._hover
+        return self._hover or bool(
+            getattr(self.scene(), "revealing_port_labels", False))
 
     # The label pill is inside boundingRect (see PortItem.boundingRect), so
     # showing it on hover is a real geometry change, not just a repaint. The

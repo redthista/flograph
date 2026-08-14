@@ -2695,6 +2695,7 @@ class MainWindow(QMainWindow):
                 if c.src_node in ids and c.dst_node in ids],
             "frames": [{
                 "title": f.title, "rect": list(f.rect), "color": f.color,
+                "collapsed": f.collapsed,
             } for f in frames],
         }
 
@@ -2831,6 +2832,9 @@ class MainWindow(QMainWindow):
                 rect=(rect[0] + PASTE_OFFSET, rect[1] + PASTE_OFFSET,
                      rect[2], rect[3]),
                 color=entry.get("color") or "#33415c",
+                collapsed=bool(entry.get("collapsed", False)),
+                source=entry.get("source", ""),
+                source_fingerprint=entry.get("source_fingerprint", ""),
             ))
         if not new_nodes and not new_frames:
             return
