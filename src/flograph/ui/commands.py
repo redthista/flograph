@@ -586,7 +586,7 @@ class SetFrameCollapsedCommand(QUndoCommand):
 
     def __init__(self, graph: Graph, frame_id: str, collapsed: bool,
                  members: tuple = (), member_frames: tuple = (),
-                 collapsed_size: tuple = (60.0, 60.0),
+                 collapsed_size: tuple = (60.0, 60.0), nudged: tuple = (),
                  parent: Optional[QUndoCommand] = None) -> None:
         super().__init__("collapse frame" if collapsed else "expand frame",
                          parent)
@@ -594,23 +594,25 @@ class SetFrameCollapsedCommand(QUndoCommand):
         self._frame_id = frame_id
         frame = graph.frames[frame_id]
         self._old = (frame.collapsed, frame.rect, frame.expanded_size,
-                     frame.members, frame.member_frames)
+                     frame.members, frame.member_frames, frame.nudged)
         x, y, width, height = frame.rect
         if collapsed:
+            # folding puts back whatever the last expand shoved aside, so the
+            # record is spent and cleared
             self._new = (True, (x, y, *collapsed_size), (width, height),
-                         tuple(members), tuple(member_frames))
+                         tuple(members), tuple(member_frames), ())
         else:
             # grow back to whatever it was before it folded; a frame with no
             # remembered size was never folded, so its rect already is one
             grow = frame.expanded_size or (width, height)
-            self._new = (False, (x, y, *grow), None, (), ())
+            self._new = (False, (x, y, *grow), None, (), (), tuple(nudged))
 
     def _apply(self, state) -> None:
-        collapsed, rect, expanded_size, members, member_frames = state
+        collapsed, rect, expanded_size, members, member_frames, nudged = state
         self._graph.apply_frame_collapse(
             self._frame_id, collapsed=collapsed, rect=rect,
             expanded_size=expanded_size, members=members,
-            member_frames=member_frames)
+            member_frames=member_frames, nudged=nudged)
 
     def redo(self) -> None:
         self._apply(self._new)
