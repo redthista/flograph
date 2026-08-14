@@ -54,6 +54,20 @@ class Frame:
     rect: tuple[float, float, float, float] = (0.0, 0.0, 300.0, 200.0)
     color: str = "#33415c"
     z: Optional[int] = None   # stacking order among frames; see core.layers
+    # Drawn as a single node-sized square instead of a region, with its
+    # contents hidden and the wires crossing its boundary re-routed to pins
+    # on the box. `rect` deliberately stays the *expanded* rect throughout:
+    # frame membership is geometric (a node whose centre is inside), so
+    # shrinking it would empty the frame the instant it collapsed, and
+    # everything that resolves a frame's nodes from its rect — "Run frame",
+    # the Action Button, copy/paste — keeps working untouched.
+    collapsed: bool = False
+    # Where this frame came from, when it was inserted from the user library
+    # (see core.user_frames). `source` is the library frame's id and
+    # `source_fingerprint` the hash of the payload it was stamped from, so a
+    # copy that nobody has edited can still be recognised and updated later.
+    source: str = ""
+    source_fingerprint: str = ""
 
 
 @dataclass
@@ -608,6 +622,33 @@ class Graph:
             frame.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
         if color is not None:
             frame.color = color
+        self.events.frame_changed.emit(frame)
+        return frame
+
+    def set_frame_collapsed(self, frame_id: str, collapsed: bool) -> Frame:
+        """Fold a frame down to a single node-sized box, or open it again.
+
+        Deliberately its own setter rather than a fourth `update_frame`
+        kwarg: UpdateFrameCommand snapshots exactly (title, rect, color) and
+        writes all three back on undo, so a field routed through it would be
+        silently reverted by any unrelated frame edit that happened to be
+        undone afterwards.
+        """
+        frame = self.frames.get(frame_id)
+        if frame is None:
+            raise GraphError(f"no frame with id {frame_id!r}")
+        frame.collapsed = bool(collapsed)
+        self.events.frame_changed.emit(frame)
+        return frame
+
+    def set_frame_source(self, frame_id: str, source: str,
+                         fingerprint: str) -> Frame:
+        """Stamp where this frame was inserted from — see core.user_frames."""
+        frame = self.frames.get(frame_id)
+        if frame is None:
+            raise GraphError(f"no frame with id {frame_id!r}")
+        frame.source = source
+        frame.source_fingerprint = fingerprint
         self.events.frame_changed.emit(frame)
         return frame
 

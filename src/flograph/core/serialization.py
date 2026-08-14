@@ -89,6 +89,9 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "rect": list(f.rect),
                     "color": f.color,
                     "z": f.z,
+                    "collapsed": f.collapsed,
+                    "source": f.source,
+                    "source_fingerprint": f.source_fingerprint,
                 }
                 for f in graph.frames.values()
             ],
@@ -219,6 +222,10 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent before layering existed: add_frame then assigns z in
             # load order, which is exactly the old stacking
             z=entry.get("z"),
+            # absent before frames could collapse, which is the old meaning
+            collapsed=bool(entry.get("collapsed", False)),
+            source=entry.get("source", ""),
+            source_fingerprint=entry.get("source_fingerprint", ""),
         ))
 
     for entry in payload.get("pages", []):
