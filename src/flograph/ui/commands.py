@@ -18,6 +18,10 @@ _ID_PARAM = 1002
 _ID_TILE_RECT = 1003
 _ID_DESCRIPTION = 1004
 _ID_PAGE_BODY = 1005
+# The mark is live-applied from the Appearance dialog as the user tries
+# things, so merging keeps clicking through sixteen swatches to find the
+# right one a single undo step rather than sixteen.
+_ID_MARK = 1006
 
 
 class AddNodeCommand(QUndoCommand):
@@ -439,11 +443,60 @@ class SetNodeColorCommand(QUndoCommand):
         self._old = graph.node(node_id).color
         self._new = color
 
+    # Deliberately does not merge, unlike the mark it sits beside in the
+    # Appearance dialog: a colour arrives through a modal picker, so each one
+    # is already a single deliberate act, and resetting to the theme default
+    # is its own decision that deserves its own step back.
+
     def redo(self) -> None:
         self._graph.set_color(self._node_id, self._new)
 
     def undo(self) -> None:
         self._graph.set_color(self._node_id, self._old)
+
+
+class SetCompactViewCommand(QUndoCommand):
+    def __init__(self, graph: Graph, node_id: str, compact: Optional[bool],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("change node view", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).compact_view
+        self._new = compact
+
+    def redo(self) -> None:
+        self._graph.set_compact_view(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_compact_view(self._node_id, self._old)
+
+
+class SetNodeMarkCommand(QUndoCommand):
+    def __init__(self, graph: Graph, node_id: str, mark: str, mark_text: str,
+                 mark_image: str = "",
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("change node mark", parent)
+        self._graph = graph
+        self._node_id = node_id
+        node = graph.node(node_id)
+        self._old = (node.mark, node.mark_text, node.mark_image)
+        self._new = (mark, mark_text, mark_image)
+
+    def id(self) -> int:
+        return _ID_MARK
+
+    def redo(self) -> None:
+        self._graph.set_mark(self._node_id, *self._new)
+
+    def undo(self) -> None:
+        self._graph.set_mark(self._node_id, *self._old)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (not isinstance(other, SetNodeMarkCommand)
+                or other._node_id != self._node_id):
+            return False
+        self._new = other._new
+        return True
 
 
 class AddFrameCommand(QUndoCommand):

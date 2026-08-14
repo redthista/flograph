@@ -35,15 +35,14 @@ from .commands import (
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
     ReorderPagesCommand, SetPageColorCommand,
     SetActiveCommand, SetFrozenCommand, SetLabelCommand, SetLockedCommand,
-    SetParamCommand, SetPreviewEnabledCommand,
+    SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
 from .canvas import grid
+from .canvas import view as canvas_view
 from .canvas.stacking import add_layer_menu
-from .canvas.node_item import (
-    DEFAULT_LOD_THRESHOLD, IMAGE_TYPE, PREVIEW_TOGGLABLE_KINDS, card_kind,
-)
+from .canvas.node_item import DEFAULT_LOD_THRESHOLD, IMAGE_TYPE, card_kind
 from .canvas.palette import LibraryPanel, NodePalettePopup
 from .favorites import Favorites
 from .dashboard import (
@@ -119,6 +118,9 @@ class MainWindow(QMainWindow):
         self._gpu_viewport_checked_on_show = False
         self._settings_dialog: Optional[SettingsDialog] = None
         self._stats_window: Optional[StatsWindow] = None
+        # Floating per-node Properties/Code windows, keyed by node id — one
+        # per node, several nodes at once. See ui.node_window.
+        self._node_windows: dict = {}
 
         self.stats_bar_enabled = self.settings.value(
             "stats/bar_enabled", True, type=bool)
@@ -144,6 +146,15 @@ class MainWindow(QMainWindow):
         self.port_labels_enabled = self.settings.value(
             "canvas/port_labels", False, type=bool)
         self.scene.set_port_labels_enabled(self.port_labels_enabled)
+        self.compact_nodes = self.settings.value(
+            "canvas/compact_nodes", True, type=bool)
+        self.scene.set_compact_nodes(self.compact_nodes)
+        self.reveal_ports_key = int(self.settings.value(
+            "canvas/reveal_ports_key", canvas_view.DEFAULT_REVEAL_PORTS_KEY,
+            type=int))
+        self.view.set_reveal_ports_key(self.reveal_ports_key)
+        self.double_click_action = str(self.settings.value(
+            "canvas/double_click_action", "properties"))
         self.tint_soft = self.settings.value(
             "canvas/tint_soft", theme.DEFAULT_TINT_SOFT, type=float)
         self.tint_strong = self.settings.value(
@@ -569,6 +580,26 @@ class MainWindow(QMainWindow):
         self.settings.setValue("canvas/port_labels", enabled)
         self.scene.set_port_labels_enabled(enabled)
 
+    def set_double_click_action(self, action: str) -> None:
+        """What a plain double-click on a node's body opens: "properties",
+        "code" or "rename"."""
+        self.double_click_action = action
+        self.settings.setValue("canvas/double_click_action", action)
+
+    def set_reveal_ports_key(self, key: int) -> None:
+        """Which key, held over the canvas, floats every port's name."""
+        self.reveal_ports_key = int(key)
+        self.settings.setValue("canvas/reveal_ports_key", int(key))
+        self.view.set_reveal_ports_key(int(key))
+
+    def set_compact_nodes(self, enabled: bool) -> None:
+        """Canvas-wide: draw plain nodes as a fixed square with the name
+        above, rather than the wide labelled box. Cards keep their size —
+        their content is the point of them."""
+        self.compact_nodes = enabled
+        self.settings.setValue("canvas/compact_nodes", enabled)
+        self.scene.set_compact_nodes(enabled)
+
     def set_tints(self, soft: float, strong: float) -> None:
         """Retune how strongly user-picked colours are muted against the
         theme, and repaint everything that renders one."""
@@ -770,8 +801,13 @@ class MainWindow(QMainWindow):
             QApplication.focusWidget().clearFocus()
         # Same hazard, different editor: a text param is held back until
         # typing pauses, so hitting F5 mid-word would otherwise run against
-        # the value as it was one keystroke ago.
+        # the value as it was one keystroke ago. Floating node windows carry
+        # their own params panel and the same debounce, so they get the same
+        # treatment — a run started from the main window must see what was
+        # typed in one of them.
         self.params_panel.flush_pending()
+        for window in list(self._node_windows.values()):
+            window.flush_pending()
 
     def _on_memory_pressure(self, message: str) -> None:
         """Said once, when the project becomes the reason memory is tight.
@@ -956,6 +992,7 @@ class MainWindow(QMainWindow):
         self.view.frame_context_requested.connect(self._show_frame_menu)
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self.scene.node_double_clicked.connect(self._on_node_double_clicked)
+        self.scene.node_window_requested.connect(self.open_node_window)
         self.scene.node_rename_requested.connect(self._rename_node)
         self.scene.wire_dropped.connect(self._on_wire_dropped)
         self.scene.button_fired.connect(self._on_button_fired)
@@ -1662,15 +1699,46 @@ class MainWindow(QMainWindow):
             self.inspector_panel.show_node(None)
 
     def _on_node_double_clicked(self, node_id: str) -> None:
+        """Plain double-click on a node's body. What it opens is the user's
+        choice (Settings > Canvas), defaulting to Properties — which is what
+        you want nine times out of ten, code being the rarer errand."""
         node = self.graph.nodes.get(node_id)
-        if node is not None and card_kind(node) in ("note", "button"):
-            # notes and buttons are edited through their params, not their code
-            self.params_panel.set_node(node_id)
-            self._reveal_dock(self.properties_dock)
+        if node is None:
             return
-        self.editor_panel.set_node(node_id)
-        self._reveal_dock(self.editor_dock)
-        self.editor_panel.editor.setFocus()
+        action = self.double_click_action
+        if action == "rename":
+            self._rename_node(node_id)
+            return
+        # Notes and buttons are edited through their params whatever the
+        # setting says: their "code" is boilerplate nobody wants, and their
+        # text *is* a param.
+        if action == "code" and card_kind(node) not in ("note", "button"):
+            self.editor_panel.set_node(node_id)
+            self._reveal_dock(self.editor_dock)
+            self.editor_panel.editor.setFocus()
+            return
+        self.params_panel.set_node(node_id)
+        self._reveal_dock(self.properties_dock)
+
+    def open_node_window(self, node_id: str, tab: str = "properties") -> None:
+        """Ctrl+double-click: this node's Properties and Code in a window of
+        their own, so it can sit beside another node's. One window per node —
+        see NodeWindow on why the same node twice is not offered."""
+        if node_id not in self.graph.nodes:
+            return
+        window = self._node_windows.get(node_id)
+        if window is None:
+            from .node_window import NodeWindow
+            window = NodeWindow(self.graph, self.undo_stack, self.registry,
+                                node_id, cache=self.engine.cache, parent=self)
+            window.save_as_user_node_requested.connect(self._save_as_user_node)
+            window.closed.connect(
+                lambda nid: self._node_windows.pop(nid, None))
+            self._node_windows[node_id] = window
+        window.show_tab(tab)
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _reveal_dock(self, dock: QDockWidget) -> None:
         """Open `dock` and bring it to the front of its tab group. show()
@@ -2099,15 +2167,13 @@ class MainWindow(QMainWindow):
         if color.isValid():
             self.scene.push_frame_color(frame_id, color.name())
 
-    def _pick_node_color(self, node_id: str) -> None:
+    def _edit_node_appearance(self, node_id: str) -> None:
+        """Everything about how this node looks, in one place. Applies live,
+        so there is nothing to confirm — see AppearanceDialog."""
         if node_id not in self.graph.nodes:
             return
-        node = self.graph.nodes[node_id]
-        from . import theme
-        current = QColor(node.color) if node.color else theme.NODE_HEADER
-        color = QColorDialog.getColor(current, self, "Node colour")
-        if color.isValid():
-            self.scene.push_node_color(node_id, color.name())
+        from .canvas.appearance_dialog import AppearanceDialog
+        AppearanceDialog(self.scene, node_id, self).exec()
 
     def _refresh_stale_pins(self) -> set:
         """Recompute which frozen nodes the graph has moved on from, and
@@ -2132,9 +2198,12 @@ class MainWindow(QMainWindow):
         run_to = menu.addAction("Run To This Node")
         menu.addSeparator()
         edit_code = menu.addAction("Edit Code")
+        open_window = menu.addAction("Open in Window")
         rename = menu.addAction("Rename")
-        colour = menu.addAction("Change colour…")
-        reset_colour = menu.addAction("Reset colour") if node.color else None
+        # One entry for colour, mark, shape, port names, port collapsing and
+        # the canvas preview. They were six, half of them conditional, so the
+        # menu changed shape depending on what you right-clicked.
+        appearance = menu.addAction("Appearance…")
         rerun = menu.addAction("Mark Dirty")
         menu.addSeparator()
         active_action = menu.addAction(
@@ -2142,11 +2211,6 @@ class MainWindow(QMainWindow):
         freeze_action = menu.addAction("Unfreeze" if node.frozen else "Freeze")
         lock_action = menu.addAction("Unlock" if node.locked else "Lock")
         menu.addSeparator()
-        preview_action = None
-        if card_kind(node) in PREVIEW_TOGGLABLE_KINDS:
-            preview_action = menu.addAction(
-                "Disable Canvas Preview" if node.canvas_preview_enabled
-                else "Enable Canvas Preview")
         import_action = None
         if (card_kind(node) == "grid"
                 and self._table_import_source(node_id) is not None):
@@ -2211,16 +2275,6 @@ class MainWindow(QMainWindow):
             noun = "Link Lines" if is_goto(node) else "Link Line"
             lines_action = menu.addAction(
                 f"{'Hide' if showing_lines else 'Show'} {noun}")
-        # per-node override of Settings > Canvas > Show port names; the label
-        # says what clicking will do, so it reads off whatever is showing now
-        from .canvas.node_item import port_labels_on
-        showing = port_labels_on(node, self.scene)
-        labels_action = menu.addAction(
-            "Hide Port Names" if showing else "Show Port Names")
-        collapse_action = None
-        if item is not None and item.collapsible():
-            collapse_action = menu.addAction(
-                "Expand Ports" if node.ports_collapsed else "Collapse Ports")
         layer_actions = add_layer_menu(menu)
         view_actions = self._add_view_actions(menu, node_id)
         page_actions: list = []
@@ -2244,13 +2298,15 @@ class MainWindow(QMainWindow):
             self._flush_pending_edits()
             self.engine.run_to(node_id)
         elif chosen is edit_code:
-            self._on_node_double_clicked(node_id)
+            self.editor_panel.set_node(node_id)
+            self._reveal_dock(self.editor_dock)
+            self.editor_panel.editor.setFocus()
+        elif chosen is open_window:
+            self.open_node_window(node_id)
         elif chosen is rename:
             self._rename_node(node_id)
-        elif chosen is colour:
-            self._pick_node_color(node_id)
-        elif reset_colour is not None and chosen is reset_colour:
-            self.scene.push_node_color(node_id, None)
+        elif chosen is appearance:
+            self._edit_node_appearance(node_id)
         elif chosen is rerun:
             self.graph.mark_dirty(node_id)
         elif chosen is active_action:
@@ -2262,9 +2318,6 @@ class MainWindow(QMainWindow):
         elif chosen is lock_action:
             self.undo_stack.push(SetLockedCommand(
                 self.graph, node_id, not node.locked))
-        elif preview_action is not None and chosen is preview_action:
-            self.undo_stack.push(SetPreviewEnabledCommand(
-                self.graph, node_id, not node.canvas_preview_enabled))
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
         elif browser_action is not None and chosen is browser_action:
@@ -2284,10 +2337,6 @@ class MainWindow(QMainWindow):
             self.undo_stack.push(SetParamCommand(
                 self.graph, node_id, SHOW_LINES_PARAM, not showing_lines,
                 merge=False))
-        elif chosen is labels_action:
-            self._toggle_port_labels(node_id, not showing)
-        elif collapse_action is not None and chosen is collapse_action:
-            item.toggle_ports_collapsed()
         elif chosen is copy_action:
             self._copy_selection()
         elif chosen is delete:
@@ -2327,19 +2376,6 @@ class MainWindow(QMainWindow):
         hunt for it by eye across a big graph, and so does a hit in the
         Find Node bar."""
         self.view.go_to_node(node_id)
-
-    def _toggle_port_labels(self, node_id: str, shown: bool) -> None:
-        """Show/hide one node's port names.
-
-        Stored as None when the wanted state already matches the canvas-wide
-        preference, so toggling a node on and off again leaves it following
-        the global setting rather than pinned to whatever that setting
-        happened to be — no third "reset" menu item needed.
-        """
-        from .commands import SetPortLabelsCommand
-        override = None if shown == self.port_labels_enabled else shown
-        self.undo_stack.push(
-            SetPortLabelsCommand(self.graph, node_id, override))
 
     def _add_view_actions(self, menu: QMenu, node_id: str) -> list:
         """Add 'View Table (port)'/'View Visual (port)' entries for any
@@ -2504,6 +2540,9 @@ class MainWindow(QMainWindow):
         self.set_grid_step(grid.DEFAULT_STEP)
         self.set_minimap_enabled(True)
         self.set_port_labels_enabled(False)
+        self.set_reveal_ports_key(canvas_view.DEFAULT_REVEAL_PORTS_KEY)
+        self.set_double_click_action("properties")
+        self.set_compact_nodes(True)
         self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)
         self.action_gpu_viewport.setChecked(False)
         from .spreadsheet import set_autosize_default, set_date_formats_setting

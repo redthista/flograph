@@ -140,6 +140,24 @@ can never block a load.
 | Settings | `Ctrl+,` |
 | Undo anything | `Ctrl+Z` — every graph mutation is on the undo stack |
 
+A node that is only a step in the pipeline draws as a **fixed 60×60 square**
+— a mark inside, its name floating above, its status light below — so a graph
+of them reads as a pipeline rather than a row of differently-sized boxes. The
+size never varies; a node with more ports than fit runs them onto the canvas
+below. Cards keep their own size.
+
+**Right-click → Appearance…** is everything about how one node looks, in one
+live dialog: its shape, its colour, its port names, and its mark — the
+category default, a different drawn mark, a few characters of your own text,
+or a picture (PNG, SVG or animated GIF, carried inside the project file so it
+travels with the flow). Turn the squares off for the whole canvas under
+Settings → Canvas.
+
+**Hold Q** over the canvas to float every port's name for as long as you hold
+it. **Double-click** a node for its properties (or its code, or a rename —
+your choice in Settings), and **Ctrl+double-click** for both in a window of
+its own that you can leave open beside another node's.
+
 Nodes can be recoloured, aligned and distributed, locked into frames, and
 stacked in a deliberate front-to-back order. **Goto / From** nodes give you a
 wire without the wire: name a value at the Goto, pick it up at any number of

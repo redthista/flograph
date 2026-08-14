@@ -111,8 +111,30 @@ class NodeInstance:
     # default — a collapsed node hides which input is which, which is only
     # worth paying once a graph is complex enough to want the quiet.
     ports_collapsed: bool = False
+    # canvas-UI-only: draw this plain node as the compact square (True) or
+    # the wide labelled box (False). None — every node until somebody
+    # right-clicks one — means "follow the canvas-wide preference".
+    # Tri-state rather than a plain bool for the same reason port_labels is:
+    # the global toggle has to keep working on nodes nobody has singled out.
+    # Ignored by every card kind, which has only ever had the one size.
+    compact_view: Optional[bool] = None
     # custom header colour (hex string); None = default theme colour
     color: Optional[str] = None
+    # canvas-UI-only: what a compact node draws inside its square. Empty
+    # means the mark its category maps to (see ui.canvas.marks); a name from
+    # marks.MARK_NAMES picks a different drawn mark instead.
+    mark: str = ""
+    # canvas-UI-only: a few characters drawn in place of a mark. Wins over
+    # `mark` when set. Two fields rather than one because a single one would
+    # have to guess whether "funnel" meant the drawn funnel or the literal
+    # word — a guess that changes meaning the day a mark is named after
+    # something somebody typed.
+    mark_text: str = ""
+    # canvas-UI-only: a picture drawn in the square instead of a mark, held
+    # as a data: URI so it travels inside the .flograph file rather than as a
+    # path into a folder the next person won't have. Downscaled on import —
+    # see ui.canvas.marks.encode_mark_image. Wins over both fields above.
+    mark_image: str = ""
     # Index in the canvas's back-to-front stacking order (see core.layers).
     # None means "not placed yet" — Graph.add_node puts it on top, which is
     # both what a freshly dropped node wants and what a file written before

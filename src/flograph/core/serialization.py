@@ -65,6 +65,10 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "port_labels": n.port_labels,
                     "ports_collapsed": n.ports_collapsed,
                     "color": n.color,
+                    "compact_view": n.compact_view,
+                    "mark": n.mark,
+                    "mark_text": n.mark_text,
+                    "mark_image": n.mark_image,
                     "z": n.z,
                 }
                 for n in graph.nodes.values()
@@ -176,6 +180,14 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             port_labels=entry.get("port_labels"),
             ports_collapsed=entry.get("ports_collapsed", False),
             color=entry.get("color"),
+            # absent = follow the canvas preference, which is what every node
+            # written before the compact square existed wants
+            compact_view=entry.get("compact_view"),
+            # absent = no override, so the node draws its category's mark —
+            # which is what every node written before marks existed wants
+            mark=entry.get("mark", "") or "",
+            mark_text=entry.get("mark_text", "") or "",
+            mark_image=entry.get("mark_image", "") or "",
             # absent before layering existed: add_node then assigns z in
             # load order, which is exactly the old stacking
             z=entry.get("z"),

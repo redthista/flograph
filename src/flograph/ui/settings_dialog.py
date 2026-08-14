@@ -14,6 +14,7 @@ from __future__ import annotations
 import platform
 
 from PySide6.QtCore import QSize, Qt, qVersion
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
     QKeySequenceEdit, QLineEdit, QMessageBox, QPushButton, QSpinBox,
@@ -224,12 +225,16 @@ class SettingsDialog(QDialog):
         combo_values = {
             "page_bar_position_combo": ["bottom", "top"].index(
                 window.page_bar_position),
+            "double_click_action_combo": ["properties", "code",
+                                          "rename"].index(
+                window.double_click_action),
         }
         checks = {
             "gpu_viewport_checkbox": window.action_gpu_viewport.isChecked(),
             "lod_enabled_checkbox": window.lod_enabled,
             "snap_enabled_checkbox": window.snap_enabled,
             "minimap_enabled_checkbox": window.minimap_enabled,
+            "compact_nodes_checkbox": window.compact_nodes,
             "port_labels_checkbox": window.port_labels_enabled,
             "table_autosize_checkbox": autosize_default_enabled(),
             "stats_bar_checkbox": window.stats_bar_enabled,
@@ -257,6 +262,15 @@ class SettingsDialog(QDialog):
                     widget.setValue(value)
             finally:
                 widget.blockSignals(blocked)
+
+        reveal_edit = self.findChild(QKeySequenceEdit, "reveal_ports_key_edit")
+        if reveal_edit is not None:
+            blocked = reveal_edit.blockSignals(True)
+            try:
+                reveal_edit.setKeySequence(
+                    QKeySequence(window.reveal_ports_key))
+            finally:
+                reveal_edit.blockSignals(blocked)
 
         grid_combo = self.findChild(QComboBox, "grid_step_combo")
         if grid_combo is not None:
@@ -511,6 +525,20 @@ class SettingsDialog(QDialog):
                  "the current viewport — click or drag on it to jump around "
                  "a large graph.")
 
+        compact_check = QCheckBox()
+        compact_check.setObjectName("compact_nodes_checkbox")
+        compact_check.setChecked(window.compact_nodes)
+        rows.add("Compact nodes", compact_check,
+                 "Draw ordinary nodes — the ones that are only a step in the "
+                 "pipeline, with nothing to show — as a small fixed square "
+                 "carrying a mark, with the node's name above it and its "
+                 "status light below. Every one is the same size, so the "
+                 "canvas reads as the shape of the graph rather than a row "
+                 "of differently-sized boxes. Charts, tables and the other "
+                 "cards are unaffected: their content is the point of them. "
+                 "Turn this off for the older wide box, which prints the "
+                 "port names inside the node.")
+
         ports_check = QCheckBox()
         ports_check.setObjectName("port_labels_checkbox")
         ports_check.setChecked(window.port_labels_enabled)
@@ -522,6 +550,36 @@ class SettingsDialog(QDialog):
                  "also show or hide them for one node at a time by "
                  "right-clicking it, which overrides this setting for that "
                  "node.")
+
+        dclick_combo = QComboBox()
+        dclick_combo.setObjectName("double_click_action_combo")
+        for label, value in (("Properties", "properties"), ("Code", "code"),
+                             ("Rename", "rename")):
+            dclick_combo.addItem(label, value)
+        dclick_combo.setCurrentIndex(
+            max(0, dclick_combo.findData(window.double_click_action)))
+        rows.add("Double-click a node opens", dclick_combo,
+                 "What double-clicking a node's body brings up. Its *name* "
+                 "always renames, whatever this says — that is what a label "
+                 "is for. Notes and buttons always open their properties, "
+                 "since their text is a parameter rather than code. "
+                 "Ctrl+double-click any node to get both at once in a window "
+                 "of its own, which you can leave open beside another "
+                 "node's.")
+
+        reveal_edit = QKeySequenceEdit()
+        reveal_edit.setObjectName("reveal_ports_key_edit")
+        reveal_edit.setMaximumSequenceLength(1)
+        reveal_edit.setKeySequence(QKeySequence(window.reveal_ports_key))
+        rows.add("Hold to show port names", reveal_edit,
+                 "Hold this key over the canvas and every port name appears "
+                 "for as long as you hold it, whatever the setting above "
+                 "says and whatever any individual node has been set to; let "
+                 "go and they all go back to how they were. Nothing is saved "
+                 "— it is a look, not a change. A plain key rather than a "
+                 "modifier, because Alt belongs to the menu bar; avoid the "
+                 "ones the canvas already uses (F frames the selection, Tab "
+                 "opens the node search, Space pans).")
 
         rows.add_group("Snapping")
 
@@ -579,7 +637,22 @@ class SettingsDialog(QDialog):
         threshold_spin.valueChanged.connect(
             lambda value: window.set_lod_threshold(value / 100.0))
         minimap_check.toggled.connect(window.set_minimap_enabled)
+        def _push_reveal_key(sequence) -> None:
+            """A capture field yields a whole QKeySequence; the view compares
+            one key code, so take the first chord's key and drop whatever
+            modifiers were held with it."""
+            if not sequence.count():
+                return
+            chord = sequence[0]
+            key = chord.key() if hasattr(chord, "key") else int(chord)
+            window.set_reveal_ports_key(int(key))
+
+        compact_check.toggled.connect(window.set_compact_nodes)
         ports_check.toggled.connect(window.set_port_labels_enabled)
+        reveal_edit.keySequenceChanged.connect(_push_reveal_key)
+        dclick_combo.currentIndexChanged.connect(
+            lambda index: window.set_double_click_action(
+                dclick_combo.itemData(index)))
         snap_check.toggled.connect(window.set_snap_enabled)
         snap_check.toggled.connect(grid_combo.setEnabled)
         grid_combo.currentIndexChanged.connect(

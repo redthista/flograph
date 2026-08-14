@@ -21,6 +21,7 @@ from flograph.core.node import NodeStatus
 from .. import theme
 from ..data_table import DataTableView
 from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
+from . import marks
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .stacking import NODE_Z, z_for
 
@@ -29,6 +30,34 @@ HEADER_H = 26.0
 ROW_H = 20.0
 PAD_BOTTOM = 8.0
 LED_RADIUS = 5.0
+
+# Compact ("square") plain nodes — Settings > Canvas > Compact nodes, on by
+# default. A node with no card kind is only ever a set of connections, so it
+# is drawn the way most node-graph tools draw one: a fixed square carrying a
+# mark, its name floating above, pins either side, status light below. The
+# size never varies with port count the way the wide box's did, which is the
+# whole point — the eye reads the shape of the graph instead of the shape of
+# the boxes.
+#
+# The item's origin stays at the square's *top-left*, exactly where the wide
+# node's header started. Everything downstream — link lines anchoring to
+# (width, body_height/2), frames, align/distribute, fit, grid snap — keys off
+# width/body_height and off the item position, so keeping the origin put is
+# what lets an existing project file open with its nodes still where they
+# were. The name above and the status row below live outside the body and
+# show up in boundingRect alone.
+COMPACT_W = 60.0
+COMPACT_MIN_H = 60.0
+COMPACT_NAME_H = 12.0          # one line of name above the square
+COMPACT_NAME_GAP = 4.0
+COMPACT_NAME_MAX_W = 120.0     # names may overhang the square on both sides
+COMPACT_NAME_FONT_SIZE = 8.5
+COMPACT_STATUS_H = 14.0
+COMPACT_STATUS_GAP = 2.0
+COMPACT_PORT_TOP = 10.0        # highest a pin stack may start; see _stack_ports
+COMPACT_MARK_INSET = 16.0      # the mark gets the middle 28 x 28
+COMPACT_IMAGE_INSET = 2.0      # a picture gets nearly the lot: 56 x 56
+COMPACT_TEXT_FONT_SIZE = 13.0  # a mark_text override, drawn in the square
 
 # The only QGraphicsItem changes NodeItem.itemChange acts on; see there.
 _HANDLED_ITEM_CHANGES = frozenset({
@@ -261,11 +290,32 @@ def port_labels_on(node, scene) -> bool:
     the global toggle stay meaningful after a node has been singled out: the
     per-node choice is recorded as an *override*, not as a copy of whatever
     the global happened to be at the time.
+
+    Holding the reveal key beats both, for as long as it is held. It is a
+    look, not a setting: nothing is written down, and letting go puts every
+    node back to whichever of the two above it was answering to.
     """
+    if getattr(scene, "revealing_port_labels", False):
+        return True
     own = getattr(node, "port_labels", None)
     if own is not None:
         return bool(own)
     return bool(getattr(scene, "port_labels_enabled", False))
+
+
+def compact_on(node, scene) -> bool:
+    """Whether `node` draws as the compact square.
+
+    Same tri-state as port_labels_on: the node's own choice wins, None
+    follows the canvas-wide preference. A card kind never draws as a square
+    whatever either of them says — its size is its content's.
+    """
+    if card_kind(node) is not None:
+        return False
+    own = getattr(node, "compact_view", None)
+    if own is not None:
+        return bool(own)
+    return bool(getattr(scene, "compact_nodes", True))
 
 
 class CardTextEditor(QPlainTextEdit):
@@ -464,6 +514,18 @@ class NodeItem(QGraphicsObject):
         self.link_card = self.goto_card or self.from_card
         self._link_partners: set[str] = set()  # highlighted with this node
         self.broken = node.spec.broken
+        # No card kind at all — an ordinary node, and the only kind the
+        # compact square applies to. Deliberately not called "compact": that
+        # name is taken, a few lines up, by the reroute dot.
+        self.plain = kind is None
+        # Whether this plain node is drawing as a square right now. Held on
+        # the item rather than asked of the scene from paint()/boundingRect(),
+        # which Qt calls on every pan and zoom, for an answer that changes
+        # only when the setting does. _apply_compact is the sole writer; it
+        # starts on, matching the shipping default, so an item built outside
+        # a scene (tests, previews) looks like the real thing.
+        self._square = self.plain
+        self._name_cache: tuple[str, ...] | None = None  # wrapped label
         if self.link_card:
             self.width = self._link_card_width()
         elif self.compact:
@@ -499,7 +561,7 @@ class NodeItem(QGraphicsObject):
                 CONTROL_MIN_W, float(node.params.get(
                     "width", self._control_default_size()[0]))))
         else:
-            self.width = NODE_WIDTH
+            self.width = COMPACT_W if self._square else NODE_WIDTH
         self._note_doc: QTextDocument | None = None
         self._resizing_card = False
         self._resize_edge = "corner"  # which edge/corner the drag grabbed
@@ -530,6 +592,8 @@ class NodeItem(QGraphicsObject):
         self._kpi_value: object = None
         self._kpi_has_value = False
         self._image: "CardImage | None" = None  # built lazily, see _card_image
+        # the compact square's picture-instead-of-a-mark, same deal
+        self._mark_image: "CardImage | None" = None
         self._image_run_source: Optional[str] = None  # see _image_source
         self._slicer_list: SlicerListWidget | None = None
         self._slicer_toolbar: SlicerToolbar | None = None
@@ -653,6 +717,14 @@ class NodeItem(QGraphicsObject):
             default = self._control_default_size()[1]
             fixed = float(self.node.params.get("height", default) or default)
             return min(CONTROL_MAX_H, max(CONTROL_MIN_H, fixed))
+        if self._square:
+            # Fixed, whatever the port count. A square that grew with its
+            # ports would be back to the wide box's problem — nodes of
+            # different sizes in a row — for the sake of the handful of nodes
+            # that have more than three of them. Those simply run their pins
+            # out of the bottom onto the canvas, which _space_card_ports has
+            # been doing for cards all along.
+            return COMPACT_MIN_H
         rows = max(len(self.node.spec.inputs), len(self.node.spec.outputs), 1)
         return HEADER_H + rows * ROW_H + PAD_BOTTOM
 
@@ -1393,6 +1465,55 @@ class NodeItem(QGraphicsObject):
     def _kpi_label(self) -> str:
         return kpi_caption(self.node.params)
 
+    # ----------------------------------------------------------- mark image
+
+    def _mark_card_image(self) -> "CardImage":
+        """The picture a compact node wears instead of a drawn mark, built on
+        first use. A second CardImage alongside the Image card's own — the
+        class already survives being hosted twice (dashboard tiles do it),
+        and everything a 56px glyph needs from it, a 320px card needed
+        first: decode-at-display-size, one-frame-at-a-time animation, and
+        pausing when nobody is looking."""
+        if self._mark_image is None:
+            from .image_card import CardImage
+            self._mark_image = CardImage(self.update)
+            self._sync_mark_image()
+        return self._mark_image
+
+    def _sync_mark_image(self) -> None:
+        if self._mark_image is None:
+            return
+        self._mark_image.set_source(self.node.mark_image, "Fit", True, 1.0)
+        self._mark_image.set_playing(self._mark_should_play())
+
+    def _mark_should_play(self) -> bool:
+        """Animate only while the square can actually be seen — not
+        flattened by LOD, not preview-disabled, not on a hidden tab. Exactly
+        the Image card's rule; a canvas of animated marks must cost nothing
+        while you are working somewhere else on it."""
+        return (not self._flat
+                and self.node.canvas_preview_enabled
+                and self.isVisible())
+
+    def refresh_mark_image(self) -> None:
+        """The node's mark changed. Drops the old artwork rather than
+        re-pointing it: a CardImage keys its decode cache on the source, and
+        a mark swapped back and forth is not worth holding two of."""
+        if self._mark_image is not None:
+            self._mark_image.set_playing(False)
+            self._mark_image = None
+        if self.node.mark_image:
+            self._mark_card_image()
+        self.update()
+
+    def dispose_mark_image(self) -> None:
+        """Stop the animation before the item goes. A QMovie still delivering
+        frames into a deleted item is a crash, which is why dashboard tiles
+        have carried the same call since they grew images."""
+        if self._mark_image is not None:
+            self._mark_image.set_playing(False)
+            self._mark_image = None
+
     # ----------------------------------------------------------- image card
 
     def _card_image(self) -> "CardImage":
@@ -1676,10 +1797,103 @@ class NodeItem(QGraphicsObject):
 
     def boundingRect(self) -> QRectF:
         base = QRectF(-2, -2, self.width + 4, self.body_height + 4)
-        label_rect = self._reroute_label_rect()
-        if label_rect is not None:
-            return base.united(label_rect.adjusted(-2, -2, 2, 2))
+        # Three things can hang outside the body, none of them at once: the
+        # reroute's floating label, and a square node's name above and status
+        # row below.
+        for extra in (self._reroute_label_rect(), self._name_rect(),
+                      self._status_rect()):
+            if extra is not None:
+                base = base.united(extra.adjusted(-2, -2, 2, 2))
         return base
+
+    def shape(self) -> QPainterPath:
+        """What a click and a rubber band actually catch.
+
+        Qt's default is the whole bounding rect, which on a square node would
+        hand it the empty air between the name and the box, and the status
+        row under it — a node twice as clickable as it looks, and a rubber
+        band that picks up nodes it only grazed. The name is worth catching
+        (it renames, and it drags), the gap is not.
+        """
+        if not self._square:
+            return super().shape()
+        path = QPainterPath()
+        path.addRect(QRectF(0, 0, self.width, self.body_height))
+        name = self._name_rect()
+        if name is not None:
+            path.addRect(name)
+        return path
+
+    # -------------------------------------------------- compact node chrome
+
+    @staticmethod
+    def _name_font() -> QFont:
+        font = QFont()
+        font.setPointSizeF(COMPACT_NAME_FONT_SIZE)
+        font.setBold(True)
+        return font
+
+    def invalidate_label(self) -> None:
+        """The node's name changed, so a square node's wrap of it is stale.
+        Callers pair this with prepareGeometryChange — the wrap decides how
+        tall the name is, and so how far the bounding rect reaches up."""
+        self._name_cache = None
+
+    def _name_layout(self) -> tuple[str, ...]:
+        """The label wrapped for the space above the square: one line when it
+        fits, otherwise two with the second elided.
+
+        Cached, because boundingRect calls it and Qt calls boundingRect
+        constantly — measuring text on every one of those would be a font
+        query per node per frame.
+        """
+        if self._name_cache is not None:
+            return self._name_cache
+        text = f"⚠ {self.node.label}" if self.broken else self.node.label
+        metrics = QFontMetrics(self._name_font())
+        limit = int(COMPACT_NAME_MAX_W)
+        if metrics.horizontalAdvance(text) <= COMPACT_NAME_MAX_W:
+            lines: tuple[str, ...] = (text,)
+        else:
+            # Break at the last word that still fits, so "String
+            # Manipulation" splits between its words rather than mid-word.
+            words = text.split()
+            head = ""
+            tail = text
+            for i in range(len(words) - 1, 0, -1):
+                candidate = " ".join(words[:i])
+                if metrics.horizontalAdvance(candidate) <= COMPACT_NAME_MAX_W:
+                    head, tail = candidate, " ".join(words[i:])
+                    break
+            if head:
+                lines = (head, metrics.elidedText(tail, Qt.ElideRight, limit))
+            else:
+                # one word too long for the line: no break point exists
+                lines = (metrics.elidedText(text, Qt.ElideRight, limit),)
+        self._name_cache = lines
+        return lines
+
+    def _name_rect(self) -> Optional[QRectF]:
+        """Local-coordinate rect of the name above a square node, centred on
+        it and free to overhang either side. None for anything else."""
+        if not self._square:
+            return None
+        lines = self._name_layout()
+        metrics = QFontMetrics(self._name_font())
+        width = max(metrics.horizontalAdvance(line) for line in lines)
+        height = COMPACT_NAME_H * len(lines)
+        return QRectF(self.width / 2 - width / 2,
+                      -COMPACT_NAME_GAP - height, width, height)
+
+    def _status_rect(self) -> Optional[QRectF]:
+        """Local-coordinate rect of the strip under a square node: the status
+        LED, the lock/freeze badges and the temp-edit dot. They used to share
+        the header and the air above it, both of which the square spends on
+        the mark and the name instead."""
+        if not self._square:
+            return None
+        return QRectF(0, self.body_height + COMPACT_STATUS_GAP,
+                      self.width, COMPACT_STATUS_H)
 
     def _reroute_label_rect(self) -> Optional[QRectF]:
         """Local-coordinate rect of the reroute's label pill, centered between
@@ -1835,12 +2049,40 @@ class NodeItem(QGraphicsObject):
             self._space_card_ports(self.input_ports.values(), left)
             self._space_card_ports(self.output_ports.values(), right)
             return
+        if self._square:
+            self._stack_ports(self.input_ports.values(), left)
+            self._stack_ports(self.output_ports.values(), right)
+            return
         for i, spec in enumerate(self.node.spec.inputs):
             self.input_ports[spec.name].setPos(
                 left, HEADER_H + ROW_H * (i + 0.5))
         for i, spec in enumerate(self.node.spec.outputs):
             self.output_ports[spec.name].setPos(
                 right, HEADER_H + ROW_H * (i + 0.5))
+
+    def _stack_ports(self, ports, x: float) -> None:
+        """Lay a square node's pins down its edge, ROW_H apart.
+
+        Centred on the body while they fit — a lone pin belongs on the centre
+        line, and a wire entering along the top edge of every node in a chain
+        reads as a mistake — but never starting higher than COMPACT_PORT_TOP.
+        That clamp is what makes a node with more pins than the square has
+        room for spill *downward only*, past the bottom edge and onto the
+        canvas, rather than creeping up into the node's name.
+
+        Three fit; the fourth and beyond hang out below, which is the same
+        honest overflow `_space_card_ports` gives a card and for the same
+        reason: the alternative is compressing the spacing until the pins are
+        an unpickable blob. At exactly three the two rules agree, so there is
+        no visible step where one takes over from the other.
+        """
+        items = list(ports)
+        if not items:
+            return
+        top = max(COMPACT_PORT_TOP,
+                  self.body_height / 2 - ROW_H * (len(items) - 1) / 2)
+        for i, port in enumerate(items):
+            port.setPos(x, top + ROW_H * i)
 
     @property
     def ports_collapsed(self) -> bool:
@@ -1939,6 +2181,35 @@ class NodeItem(QGraphicsObject):
         if scene is not None:
             scene.node_item_moved(self.node.id)   # wires follow the pins
 
+    def refresh_compact(self) -> None:
+        """Re-derive whether this node is a square from its own setting and
+        the canvas-wide one. The single entry point: callers should not have
+        to know which of the two won."""
+        self.apply_compact(compact_on(self.node, self.scene()))
+
+    def apply_compact(self, enabled: bool) -> None:
+        """Switch a plain node between the compact square and the wide box.
+
+        Every card kind ignores this — their size is their content's, and a
+        Show Plot squeezed into 60px would be a chart of nothing. Called once
+        when the item joins a scene (an item's scene() is None throughout
+        __init__, so the setting cannot be read there) and again whenever
+        either the canvas-wide setting or the node's own override changes.
+        """
+        enabled = bool(enabled) and self.plain
+        if enabled == self._square:
+            return
+        self.prepareGeometryChange()
+        self._square = enabled
+        self.width = COMPACT_W if enabled else NODE_WIDTH
+        self._name_cache = None
+        self._layout_ports()
+        self._layout_badges()
+        self.update()
+        scene = self.scene()
+        if scene is not None:
+            scene.node_item_moved(self.node.id)  # wires follow the pins
+
     def _ports_follow_width(self) -> None:
         """Re-anchor ports after a width change and re-route their wires."""
         self._layout_ports()
@@ -1967,6 +2238,9 @@ class NodeItem(QGraphicsObject):
         # worth spending frames on.
         if self._image is not None:
             self._image.set_playing(self._image_should_play())
+        # and a compact node's mark picture, if it has one
+        if self._mark_image is not None:
+            self._mark_image.set_playing(self._mark_should_play())
         # a report card's animated embeds answer to the same two switches
         if self._report_animator is not None:
             self._report_animator.set_playing(self._report_should_animate())
@@ -2059,8 +2333,22 @@ class NodeItem(QGraphicsObject):
         self.update()
 
     def _layout_badges(self) -> None:
-        """Pack the visible badges left to right above the header, so a node
-        showing one of them never leaves the other's slot empty."""
+        """Pack the visible badges so a node showing one of them never leaves
+        the other's slot empty.
+
+        Above the header on a wide node, left to right. A square node has no
+        room up there — that is where its name goes — so they move into the
+        status row instead, packing leftwards from the LED.
+        """
+        if self._square:
+            status = self._status_rect()
+            y = status.center().y() - NodeBadge.H / 2
+            x = self.width / 2 - LED_RADIUS - 6.0 - NodeBadge.W
+            for badge in (self._freeze_badge, self._lock_badge):
+                if badge.isVisible():
+                    badge.setPos(x, y)
+                    x -= NodeBadge.W + 3.0
+            return
         x = 1.0
         for badge in (self._freeze_badge, self._lock_badge):
             if badge.isVisible():
@@ -2175,6 +2463,9 @@ class NodeItem(QGraphicsObject):
         if self.image_card:
             self._paint_image(painter)
             return
+        if self._square:
+            self._paint_compact(painter)
+            return
         rect = QRectF(0, 0, self.width, self.body_height)
 
         body = QPainterPath()
@@ -2266,6 +2557,22 @@ class NodeItem(QGraphicsObject):
             label_text, Qt.ElideRight, int(label_rect.width()))
         painter.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, label)
 
+        led_center_x = width - 13
+        self._paint_status_led(painter, led_center_x, HEADER_H / 2,
+                               self._header_color())
+        self._paint_temp_edit_dot(painter, led_center_x - LED_RADIUS - 10,
+                                  HEADER_H / 2)
+
+    def _paint_status_led(self, painter: QPainter, cx: float, cy: float,
+                          behind: QColor) -> None:
+        """The status light, centred on (cx, cy).
+
+        `behind` is whatever the LED is sitting on, and is only used to hollow
+        out a stale-but-done node — in the wide node's header that is the
+        header colour, but a square node's LED hangs below the body on bare
+        canvas, where the header colour would read as a coloured pip rather
+        than a hole.
+        """
         led_color = QColor(theme.status_color(self.node.status))
         running = self.node.status == NodeStatus.RUNNING
         # A node that reports a fraction gets a ring that fills; one that
@@ -2278,8 +2585,7 @@ class NodeItem(QGraphicsObject):
             led_color.setAlphaF(0.35 + 0.65 * self._pulse)
         painter.setPen(QPen(theme.NODE_BORDER, 1))
         painter.setBrush(QBrush(led_color))
-        led_center_x = width - 13
-        led_rect = QRectF(led_center_x - LED_RADIUS, HEADER_H / 2 - LED_RADIUS,
+        led_rect = QRectF(cx - LED_RADIUS, cy - LED_RADIUS,
                           2 * LED_RADIUS, 2 * LED_RADIUS)
         if fraction:
             track = QColor(led_color)
@@ -2297,19 +2603,98 @@ class NodeItem(QGraphicsObject):
         painter.drawEllipse(led_rect)
         if self.node.dirty and self.node.status == NodeStatus.DONE:
             # stale: hollow out the green LED
-            painter.setBrush(QBrush(self._header_color()))
-            painter.drawEllipse(
-                QRectF(led_center_x - 2, HEADER_H / 2 - 2, 4, 4))
+            painter.setBrush(QBrush(behind))
+            painter.drawEllipse(QRectF(cx - 2, cy - 2, 4, 4))
 
-        # Unsaved temp-edit indicator — small amber dot beside status LED.
-        if self.node._temp_edit:
-            INDICATOR_R = 3.0
-            indicator_x = led_center_x - LED_RADIUS - 10
-            painter.setPen(QPen(theme.NODE_BORDER, 0.5))
-            painter.setBrush(QBrush("#eab308"))
-            painter.drawEllipse(
-                QRectF(indicator_x - INDICATOR_R, HEADER_H / 2 - INDICATOR_R,
-                       2 * INDICATOR_R, 2 * INDICATOR_R))
+    def _paint_temp_edit_dot(self, painter: QPainter,
+                             cx: float, cy: float) -> None:
+        """Unsaved temp-edit indicator — small amber dot beside status LED."""
+        if not self.node._temp_edit:
+            return
+        radius = 3.0
+        painter.setPen(QPen(theme.NODE_BORDER, 0.5))
+        painter.setBrush(QBrush("#eab308"))
+        painter.drawEllipse(
+            QRectF(cx - radius, cy - radius, 2 * radius, 2 * radius))
+
+    def _paint_compact(self, painter: QPainter) -> None:
+        """A plain node as a square: mark inside, name above, status below.
+
+        No header strip, so nothing here elides the label into 150px of
+        chrome — the name gets its own air above the box and is allowed to
+        overhang it, which is what makes a 60px node still readable.
+        """
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(0, 0, self.width, self.body_height)
+        body = QPainterPath()
+        body.addRoundedRect(rect, 7, 7)
+        painter.fillPath(body, theme.NODE_HEADER_BROKEN if self.broken
+                         else self._body_color())
+        if self.isSelected():
+            outline = QPen(theme.SELECTION_OUTLINE, 2.0)
+        elif self.broken:
+            outline = QPen(theme.NODE_BORDER_BROKEN, 1.4)
+        else:
+            outline = QPen(theme.NODE_BORDER, 1.2)
+        painter.setPen(outline)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(body)
+
+        self._paint_mark(painter, rect)
+
+        # name, above the square
+        painter.setPen(QPen(theme.NODE_TEXT))
+        painter.setFont(self._name_font())
+        name_rect = self._name_rect()
+        for i, line in enumerate(self._name_layout()):
+            painter.drawText(
+                QRectF(name_rect.left(), name_rect.top() + i * COMPACT_NAME_H,
+                       name_rect.width(), COMPACT_NAME_H),
+                Qt.AlignCenter, line)
+
+        # status row, below it
+        status = self._status_rect()
+        mid_y = status.center().y()
+        self._paint_status_led(painter, self.width / 2, mid_y, theme.CANVAS_BG)
+        self._paint_temp_edit_dot(
+            painter, self.width / 2 + LED_RADIUS + 8, mid_y)
+
+    def _paint_mark(self, painter: QPainter, rect: QRectF) -> None:
+        """Whatever the square carries, most specific first: a picture the
+        user gave it, else their own short text, else the drawn mark its
+        category maps to (or the one they picked instead). See
+        ui.canvas.marks."""
+        color = QColor(theme.NODE_TEXT)
+        inner = rect.adjusted(COMPACT_MARK_INSET, COMPACT_MARK_INSET,
+                              -COMPACT_MARK_INSET, -COMPACT_MARK_INSET)
+        if self.node.mark_image:
+            image = self._mark_card_image()
+            if image.has_content() and not image.error:
+                # A picture gets nearly the whole square rather than the
+                # glyph's inset: a logo reads as the node at 56px and is a
+                # smudge at 28.
+                image.paint(painter,
+                            rect.adjusted(COMPACT_IMAGE_INSET,
+                                          COMPACT_IMAGE_INSET,
+                                          -COMPACT_IMAGE_INSET,
+                                          -COMPACT_IMAGE_INSET),
+                            self._image_render_ratio())
+                return
+            # unreadable: fall through to the drawn mark rather than an
+            # empty square that says nothing about which node this is
+        text = self.node.mark_text.strip()
+        if text:
+            painter.save()
+            painter.setPen(QPen(color))
+            font = QFont()
+            font.setPointSizeF(COMPACT_TEXT_FONT_SIZE)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignCenter, QFontMetrics(font).elidedText(
+                text, Qt.ElideRight, int(rect.width() - 8)))
+            painter.restore()
+            return
+        marks.draw(marks.mark_for(self.node), painter, inner, color)
 
     def _paint_table(self, painter: QPainter) -> None:
         rect = QRectF(0, 0, self.width, self.body_height)
@@ -2531,9 +2916,13 @@ class NodeItem(QGraphicsObject):
 
     def _header_h(self) -> float:
         """Height of the drag bar — the only region a move can start from.
-        Headerless kinds (reroute, button) drag by their whole body, having
-        nothing else to grab; notes get a thin top strip."""
-        if self.compact or self.button:
+        Headerless kinds (reroute, button, the compact square) drag by their
+        whole body, having nothing else to grab; notes get a thin top strip.
+
+        A square node's name sits at negative y, so it comes in under this
+        too and drags the node along with it — which is what you expect of a
+        label attached to a box."""
+        if self.compact or self.button or self._square:
             return self.body_height
         return HEADER_H
 
@@ -2736,11 +3125,19 @@ class NodeItem(QGraphicsObject):
         super().mouseMoveEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
+        scene = self.scene()
+        if event.modifiers() & Qt.ControlModifier:
+            # Ctrl beats every special case below — including a note's and a
+            # report's in-place editors, which are exactly the nodes with no
+            # other way to reach their code.
+            if scene is not None:
+                scene.node_window_requested.emit(self.node.id)
+            event.accept()
+            return
         if self.note:
             self.start_note_edit()
             event.accept()
             return
-        scene = self.scene()
         if self.report_card and event.pos().y() >= HEADER_H:
             # body: edit the text in place. The header still renames, and
             # Edit Code is still on the context menu.
@@ -2754,6 +3151,17 @@ class NodeItem(QGraphicsObject):
             # editing; opening its code (what this used to do) is useless.
             if scene is not None:
                 scene.node_rename_requested.emit(self.node.id)
+            event.accept()
+            return
+        if self._square:
+            # The header/body split, relocated: the name renames, the square
+            # opens the node's code, same as clicking a header vs. a body.
+            name = self._name_rect()
+            if scene is not None:
+                if name is not None and name.contains(event.pos()):
+                    scene.node_rename_requested.emit(self.node.id)
+                else:
+                    scene.node_double_clicked.emit(self.node.id)
             event.accept()
             return
         if not self.button and event.pos().y() < HEADER_H:

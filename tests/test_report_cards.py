@@ -593,7 +593,7 @@ class TestEditingACardInPlace:
     def test_the_header_still_renames(self, env):
         """Double-clicking the title bar is rename, as on every other card
         — only the body opens the editor."""
-        from PySide6.QtCore import QPointF
+        from PySide6.QtCore import QPointF, Qt
         _graph, _stack, item, node_id = env
         renamed = []
         item.scene().node_rename_requested.connect(renamed.append)
@@ -604,6 +604,11 @@ class TestEditingACardInPlace:
 
             def pos(self):
                 return self._pos
+
+            def modifiers(self):
+                # Ctrl+double-click opens the node's own window instead; a
+                # bare double-click is what this test is about.
+                return Qt.NoModifier
 
             def accept(self):
                 pass

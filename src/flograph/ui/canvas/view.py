@@ -3,13 +3,19 @@ drag & drop, the Tab palette, node keyboard shortcuts, minimap, and the
 node context menu."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPointF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import QKeyEvent
 
 from .base_view import ZoomPanGraphicsView
 from .file_drop import resolve_dropped_file
 from .scene import NodeGraphScene
 from .stacking import layer_action_for
+
+# Hold this to see every port's name. Q because the canvas has already spent
+# F (frame), Tab (palette), Space (pan), Delete/Backspace and the arrows, and
+# because a letter next to nothing important is cheap to hold with the left
+# hand while the right one is on the mouse.
+DEFAULT_REVEAL_PORTS_KEY = Qt.Key_Q
 
 
 class NodeGraphView(ZoomPanGraphicsView):
@@ -23,6 +29,12 @@ class NodeGraphView(ZoomPanGraphicsView):
     def __init__(self, scene: NodeGraphScene, parent=None) -> None:
         super().__init__(scene, parent)
         self.setAcceptDrops(True)
+        # Held-key port-name reveal. A bare key rather than a modifier: Alt
+        # is the menu bar's on both Linux and Windows, so binding it here
+        # means either swallowing that or having the menu bar flicker into
+        # focus on every tap. The main window is the sole writer.
+        self.reveal_ports_key = DEFAULT_REVEAL_PORTS_KEY
+        self._reveal_held = False
 
         from .minimap import Minimap
         self.minimap = Minimap(self)
@@ -78,6 +90,15 @@ class NodeGraphView(ZoomPanGraphicsView):
             super().keyPressEvent(event)
             return
         key = event.key()
+        # Before everything else, and only on a bare press: holding it with a
+        # modifier down is somebody reaching for a different shortcut.
+        # isAutoRepeat is mandatory — X11 and Wayland synthesise release/press
+        # pairs while a key is held, so without it a hold reads as a stutter.
+        if (key == self.reveal_ports_key and not event.isAutoRepeat()
+                and not event.modifiers()):
+            self._set_reveal_held(True)
+            event.accept()
+            return
         if key == Qt.Key_Tab:
             cursor_pos = self.mapFromGlobal(self.cursor().pos())
             if not self.viewport().rect().contains(cursor_pos):
@@ -103,6 +124,44 @@ class NodeGraphView(ZoomPanGraphicsView):
             event.accept()
             return
         super().keyPressEvent(event)  # space-pan lives in the base view
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if event.key() == self.reveal_ports_key and not event.isAutoRepeat():
+            self._set_reveal_held(False)
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+    def _set_reveal_held(self, held: bool) -> None:
+        if held == self._reveal_held:
+            return
+        self._reveal_held = held
+        self.scene().set_revealing_port_labels(held)
+
+    def set_reveal_ports_key(self, key: int) -> None:
+        """Rebind the hold-to-reveal key. Ends any reveal in progress, since
+        the release of the old key will never be recognised."""
+        self._set_reveal_held(False)
+        self.reveal_ports_key = key
+
+    # The key-release that ends a reveal can be swallowed outright — a popup
+    # takes focus, the pointer leaves, the window deactivates with the key
+    # still down — and the names would then stay up with nothing holding
+    # them. Same three belts space-pan wears, for the same reason.
+
+    def focusOutEvent(self, event) -> None:
+        self._set_reveal_held(False)
+        super().focusOutEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._set_reveal_held(False)
+        super().leaveEvent(event)
+
+    def changeEvent(self, event) -> None:
+        if (event.type() == QEvent.ActivationChange
+                and not self.isActiveWindow()):
+            self._set_reveal_held(False)
+        super().changeEvent(event)
 
     def _nudge_selection(self, key, step: float) -> None:
         scene: NodeGraphScene = self.scene()
