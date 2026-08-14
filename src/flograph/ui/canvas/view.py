@@ -73,6 +73,15 @@ class NodeGraphView(ZoomPanGraphicsView):
         item = scene.node_items.get(node_id)
         if item is None:
             return False
+        if not item.isVisible():
+            # Search resolves against the graph, so a node folded inside a
+            # collapsed frame is findable — but centring on it would park the
+            # view on empty canvas with nothing selected (Qt ignores
+            # setSelected on a hidden item). Show the box holding it instead.
+            owner = scene._owner_of(node_id)
+            frame_item = scene.frame_items.get(owner) if owner else None
+            if frame_item is not None:
+                item = frame_item
         scene.clearSelection()
         item.setSelected(True)
         if self.zoom < MIN_REVEAL_ZOOM:
@@ -177,10 +186,20 @@ class NodeGraphView(ZoomPanGraphicsView):
         scene.push_move_command(moves)
 
     def frame_content(self) -> None:
-        """F: fit the selection (or everything) in view."""
+        """F: fit the selection (or everything) in view.
+
+        Everything *visible*: nodes folded inside a collapsed frame would
+        otherwise pull the fit out over a region showing nothing. Frames
+        count too, or a canvas holding only collapsed ones fits to nothing.
+        """
         scene: NodeGraphScene = self.scene()
-        self.fit_items(scene.selected_node_items()
-                       or list(scene.node_items.values()))
+        selected = scene.selected_node_items()
+        if selected:
+            self.fit_items(selected)
+            return
+        self.fit_items([item for item in (*scene.node_items.values(),
+                                          *scene.frame_items.values())
+                        if item.isVisible()])
 
     # --------------------------------------------------------- context menu
 
