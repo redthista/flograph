@@ -571,6 +571,30 @@ class UpdateFrameCommand(QUndoCommand):
         self._graph.update_frame(self._frame_id, title=title, rect=rect, color=color)
 
 
+class SetFrameCollapsedCommand(QUndoCommand):
+    """Fold a frame down to a single box, or open it back out.
+
+    Its own command rather than a field on UpdateFrameCommand, for the
+    reason Graph.set_frame_collapsed spells out: that command rewrites
+    (title, rect, color) wholesale on undo.
+    """
+
+    def __init__(self, graph: Graph, frame_id: str, collapsed: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("collapse frame" if collapsed else "expand frame",
+                         parent)
+        self._graph = graph
+        self._frame_id = frame_id
+        self._old = graph.frames[frame_id].collapsed
+        self._new = collapsed
+
+    def redo(self) -> None:
+        self._graph.set_frame_collapsed(self._frame_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_frame_collapsed(self._frame_id, self._old)
+
+
 class AddPageCommand(QUndoCommand):
     def __init__(self, graph: Graph, page: Page,
                  parent: Optional[QUndoCommand] = None) -> None:
