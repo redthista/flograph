@@ -261,6 +261,27 @@ class LockBadge(NodeBadge):
                                 1.5, 1.5)
 
 
+class HeavyBadge(NodeBadge):
+    """A stack of discs: this step is holding a lot of the memory in use.
+
+    Only shown while memory is actually short — a badge that is always there
+    is furniture, and this one is meant to answer the question the status bar
+    raises. "Which step is doing this" is the one thing a person can act on
+    without knowing how any of this works: it is the node to give a Max rows
+    to, or to filter earlier.
+    """
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(self.colour, 1.1))
+        painter.setBrush(Qt.NoBrush)
+        # three ellipses stacked, drawn bottom-up so each hides the last's
+        # lower arc and it reads as a pile rather than three separate rings
+        for i in (2, 1, 0):
+            painter.drawEllipse(
+                QRectF(0.6, 0.8 + i * 3.3, self.W - 1.2, 3.6))
+
+
 class FreezeBadge(NodeBadge):
     """A pause glyph: this node's output is pinned and it will not re-run.
 
@@ -677,6 +698,10 @@ class NodeItem(QGraphicsObject):
         # painter cannot reach.
         self._lock_badge = LockBadge(self)
         self._freeze_badge = FreezeBadge(self)
+        self._heavy_badge = HeavyBadge(self)
+        # The same amber as a stale pin: one colour meaning "worth a look,
+        # nothing is broken" across the whole app.
+        self._heavy_badge.colour = theme.PIN_STALE
         # read by the minimap, which is too small for a badge and has to say
         # the same thing in colour
         self.pin_stale = False
@@ -2438,6 +2463,20 @@ class NodeItem(QGraphicsObject):
         self._refresh_tooltip()
         self.update()
 
+    def set_heavy(self, heavy: bool) -> None:
+        """Mark (or unmark) this node as one of the ones holding the memory.
+
+        Driven by the resource monitor's pressure state, so it appears only
+        while memory is actually short and clears when it is not. A tooltip
+        would be the obvious place for the byte count, but the node's tooltip
+        already belongs to its own status message; the monitor's tooltip
+        carries the figures.
+        """
+        if self._heavy_badge.isVisible() == bool(heavy):
+            return
+        self._heavy_badge.setVisible(bool(heavy))
+        self._layout_badges()
+
     def _layout_badges(self) -> None:
         """Pack the visible badges so a node showing one of them never leaves
         the other's slot empty.
@@ -2450,13 +2489,14 @@ class NodeItem(QGraphicsObject):
             status = self._status_rect()
             y = status.center().y() - NodeBadge.H / 2
             x = self.width / 2 - LED_RADIUS - 6.0 - NodeBadge.W
-            for badge in (self._freeze_badge, self._lock_badge):
+            for badge in (self._heavy_badge, self._freeze_badge,
+                          self._lock_badge):
                 if badge.isVisible():
                     badge.setPos(x, y)
                     x -= NodeBadge.W + 3.0
             return
         x = 1.0
-        for badge in (self._freeze_badge, self._lock_badge):
+        for badge in (self._heavy_badge, self._freeze_badge, self._lock_badge):
             if badge.isVisible():
                 badge.setPos(x, -(NodeBadge.H + 3.0))
                 x += NodeBadge.W + 4.0

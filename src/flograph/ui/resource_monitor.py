@@ -24,6 +24,9 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from flograph.engine import ExecutionEngine
+from flograph.engine.pressure import (COMFORT_FREE, FREE_RELIEF, LOW_FREE,
+                                      PRESSURE_RELIEF, SYSTEM_PRESSURE,
+                                      machine_is_tight)
 from flograph.engine.runstats import ProcessSampler
 
 from . import theme
@@ -40,13 +43,15 @@ _WARN_LABEL_STYLE = "color: #eab308; font-size: 8pt; padding: 0 4px;"
 # "a node is clean iff its outputs are cached", so dropping an entry behind
 # the user's back marks the node dirty and it silently re-runs later. Saying
 # so and leaving the choice with them is the honest half of that trade.
-SYSTEM_PRESSURE = 0.85   # fraction of system memory in use
+# "Is the machine short of memory" lives in the engine (engine.pressure) —
+# the scheduler acts on the same reading, and one definition acting in two
+# places beats two definitions drifting apart. Re-exported here because this
+# is where the thresholds are read from and tested.
 CACHE_SHARE = 0.10       # fraction of system memory held as cached outputs
-# How far back below those lines it has to fall before the warning clears.
-# Memory in use wanders by a percentage point or two from moment to moment,
-# so a bare threshold flickers the bar and re-announces itself every couple
-# of seconds while hovering. Warn late, stop warning later.
-PRESSURE_RELIEF = 0.05
+# How far back below the line the *share* has to fall before the warning
+# clears. Memory in use wanders by a percentage point or two from moment to
+# moment, so a bare threshold flickers the bar and re-announces itself every
+# couple of seconds while hovering. Warn late, stop warning later.
 CACHE_RELIEF = 0.02
 # The same amber as the stale-pin and unsaved-edit markers on the canvas —
 # one colour meaning "worth a look, nothing is broken" across the app.
@@ -62,22 +67,32 @@ def format_bytes(n: float) -> str:
 
 
 def memory_pressure(cache: int, used: int, total: int,
-                    already_warning: bool = False) -> bool:
+                    already_warning: bool = False,
+                    available: Optional[int] = None) -> bool:
     """Is this project the reason the machine is running out?
 
-    Both halves matter. A machine at 90% is not this flow's doing if the
-    flow holds 200 MB, and a flow holding 12 GB of a 128 GB box has not
+    Both halves matter. A machine that is tight is not this flow's doing if
+    the flow holds 200 MB, and a flow holding 12 GB of a 128 GB box has not
     caused a problem yet. Warning on either alone would cry wolf.
 
-    `already_warning` lowers both lines, so a reading that wanders across
+    `available` is what the OS says can still be allocated, which is the only
+    figure that means the same thing on Windows, macOS and Linux — `used`
+    means three different things across them (Linux already excludes
+    reclaimable page cache; Windows defines used as total minus available).
+    Derived from `total - used` when a caller has not measured it, which is
+    the same thing on the platform this app is mostly used to build for.
+
+    `already_warning` relaxes every line, so a reading that wanders across
     the threshold — which is what memory in use does — does not toggle the
     bar and re-announce itself every couple of seconds.
     """
     if total <= 0:
         return False
-    system_line = SYSTEM_PRESSURE - (PRESSURE_RELIEF if already_warning else 0.0)
+    if available is None:
+        available = max(0, total - used)
     cache_line = CACHE_SHARE - (CACHE_RELIEF if already_warning else 0.0)
-    return used / total >= system_line and cache / total >= cache_line
+    return (machine_is_tight(used, total, available, already_warning)
+            and cache / total >= cache_line)
 
 
 def format_seconds(s: float) -> str:
@@ -218,7 +233,8 @@ class ResourceMonitorWidget(QWidget):
         cache = self._engine.cache.total_bytes()
         process = self._sampler.rss()
         under_pressure = memory_pressure(cache, vm.used, vm.total,
-                                         already_warning=self._warned)
+                                         already_warning=self._warned,
+                                         available=vm.available)
         self.bar.set_values(cache, process, vm.used, vm.total)
         self.bar.set_warning(under_pressure)
         self._mem_label.setText(
@@ -238,8 +254,11 @@ class ResourceMonitorWidget(QWidget):
 
         if under_pressure != self._warned:
             self._warned = under_pressure
-            if under_pressure:
-                self.pressure_changed.emit(self._pressure_summary(cache, vm.total))
+            # Both directions. The run line carries this while a run is on,
+            # so it needs to be told when to stop carrying it — an empty
+            # string is "nothing to say" rather than a message to show.
+            self.pressure_changed.emit(
+                self._pressure_summary(cache, vm.total) if under_pressure else "")
 
         self._run_label.setText(self._run_text())
         self._node_label.setText(self._node_text())
@@ -254,19 +273,28 @@ class ResourceMonitorWidget(QWidget):
         return out
 
     def _pressure_summary(self, cache: int, total: int) -> str:
-        """One line for the status bar — what is held, and what to do."""
+        """One line for the status bar — what is held, and what to do.
+
+        Led by the advice that needs no knowledge of this app: whoever is
+        looking at this may have been handed the tool rather than built it,
+        and "freeze the node" means nothing to them. Closing something else
+        always helps; reading fewer rows is the next lever and lives on the
+        step that reads the data, where it is a deliberate choice.
+        """
         heaviest = self._heaviest(1)
         worst = (f", the largest being {heaviest[0][0]} at {heaviest[0][1]}"
                  if heaviest else "")
-        return (f"Memory is tight — cached outputs are "
+        return (f"Memory is running low — this flow is holding "
                 f"{format_bytes(cache)} of {format_bytes(total)}{worst}. "
-                f"Freeze what you still need, or Reset Caches to release it.")
+                f"Close other applications, lower Max rows where the data is "
+                f"read, or Reset Caches to release what is held.")
 
     def _pressure_detail(self, cache: int, total: int) -> str:
         # tab-aligned to match the three rows above it in the tooltip
-        lines = ["Memory is tight. Holding the most:"]
+        lines = ["Memory is running low. Holding the most:"]
         lines += [f"  {label}\t{size}" for label, size in self._heaviest(3)]
-        lines.append("Freeze what you still need, or Reset Caches to release.")
+        lines.append("Close other applications, lower Max rows where the data "
+                     "is read, or Reset Caches to release.")
         return "\n".join(lines)
 
     def _run_text(self) -> str:

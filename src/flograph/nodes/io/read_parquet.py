@@ -12,6 +12,12 @@ loaded: one `column op value` per line (ops: == != < <= > >= in
 not in; `in` takes a comma-separated list), combined with AND. Values
 that look numeric are compared as numbers. Lines starting with # are
 ignored.
+
+**Max rows** keeps the first N rows, for building a flow against a slice of
+something large. It trims after the read rather than during it — pandas'
+Parquet reader takes no row limit — so it bounds what the rest of the flow
+carries, not the read. Columns and Row filters are the ones that make the
+read itself cheaper.
 """
 NODE = {
     "label": "Read Parquet",
@@ -29,6 +35,8 @@ PARAMS = [
      "options": ["auto", "pyarrow", "fastparquet"], "default": "auto"},
     {"name": "dtype_backend", "type": "choice", "label": "Dtype backend",
      "options": ["default", "numpy_nullable", "pyarrow"], "default": "default"},
+    {"name": "nrows", "type": "int", "label": "Max rows (0 = all)",
+     "default": 0, "min": 0},
 ]
 
 _FILTER_OPS = ("not in", "in", "==", "!=", "<=", ">=", "<", ">")
@@ -96,5 +104,14 @@ def run(ctx):
         kwargs["dtype_backend"] = p["dtype_backend"]
 
     table = pd.read_parquet(path, **kwargs)
+    nrows = int(p.get("nrows", 0) or 0)
+    if nrows and len(table) > nrows:
+        # Trimmed after reading, not while: pandas' Parquet reader has no
+        # row limit to push down, so this bounds what the rest of the flow
+        # carries rather than what the read itself costs. Row filters and
+        # Columns above *do* push down — reach for those first on a file
+        # too big to read at all.
+        table = table.head(nrows).copy()
+        ctx.log(f"trimmed to the first {nrows} rows")
     ctx.log(f"loaded {len(table)} rows x {len(table.columns)} columns")
     return table

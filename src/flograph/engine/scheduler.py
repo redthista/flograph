@@ -26,6 +26,7 @@ from flograph.core.graph import Graph
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
 
+from . import pressure
 from .cache import OutputCache
 from .cache_worker import CacheWarmRunnable, CacheWarmSignals
 from .context import CancellationToken
@@ -47,10 +48,26 @@ REACTIVE_DELAY_MS = 300
 # Settings; the default is chosen to not surprise anyone.
 MAX_AUTO_WORKERS = 8
 
+# How often a run re-reads how full the machine is. Reading it is a /proc
+# scrape on Linux and one call on Windows, so this could be far more often;
+# once a second is simply as fine-grained as the answer is useful.
+PRESSURE_POLL_MS = 1000
+
 
 def default_workers() -> int:
     """How many nodes run at once when nobody has said."""
     return max(1, min(os.cpu_count() or 1, MAX_AUTO_WORKERS))
+
+
+def _memory_adapt_default() -> bool:
+    """Whether new engines throttle themselves under memory pressure.
+
+    Off via FLOGRAPH_MEMORY_ADAPT=0, which the test suite sets: several tests
+    prove that nodes *do* run side by side, and a throttle that halves the
+    limit because the machine running the tests happens to be busy would fail
+    them for a reason that has nothing to do with what they test.
+    """
+    return os.environ.get("FLOGRAPH_MEMORY_ADAPT", "1") != "0"
 
 
 def is_exclusive(node: NodeInstance) -> bool:
@@ -284,6 +301,20 @@ class ExecutionEngine(QObject):
         # Settings > General.
         self.max_workers = 0
 
+        # How full the machine is, and what reads it. The probe is swappable
+        # so the throttle can be tested at any pressure without a machine
+        # actually being under any; `memory_adapt` is the off switch the test
+        # suite uses, so a loaded CI box cannot make a concurrency test flaky
+        # by throttling it halfway through.
+        self.memory_probe = pressure.read_memory
+        self.memory_adapt = _memory_adapt_default()
+        self._pressure_level = pressure.CALM
+        # Its own timer: runstats' sampler is behind a Settings toggle and
+        # gives up permanently if the platform will not report memory.
+        self._pressure_timer = QTimer(self)
+        self._pressure_timer.setInterval(PRESSURE_POLL_MS)
+        self._pressure_timer.timeout.connect(self._poll_pressure)
+
         # Nodes from the plan that have not started yet, and the subset of
         # those whose predecessors have all finished. Kahn's algorithm over
         # the plan, kept incrementally: _remaining_preds counts each pending
@@ -366,6 +397,12 @@ class ExecutionEngine(QObject):
         if not plan:
             return
         self._active = True
+        # Read the machine before the first node starts, not a second into
+        # the run: a flow launched on an already-full machine should be
+        # throttled from its first dispatch rather than after it has piled
+        # eight branches on.
+        self._poll_pressure()
+        self._pressure_timer.start()
         self._seed_readiness(plan)
         self._open_record(targets, plan)
         for node_id in plan:
@@ -452,9 +489,39 @@ class ExecutionEngine(QObject):
         if self._active:
             self._dispatch()
 
-    def worker_limit(self) -> int:
-        """How many nodes this engine will run at once."""
+    def _base_workers(self) -> int:
+        """How many nodes would run at once if memory were no object."""
         return self.max_workers if self.max_workers > 0 else default_workers()
+
+    def worker_limit(self) -> int:
+        """How many nodes this engine will run at once, right now.
+
+        Shrinks when the machine is running out of memory. Running eight
+        branches at once is only a good idea while there is room for eight
+        branches' worth of intermediates; past that point the honest thing is
+        to get slower rather than to take the machine down, which is a trade
+        the person on the other end of a shared flow cannot make for
+        themselves and would not know how to.
+        """
+        return max(1, pressure.worker_cap(
+            self._base_workers(), self._pressure_level,
+            explicit=self.max_workers > 0))
+
+    def _poll_pressure(self) -> None:
+        """Re-read how much trouble the machine is in.
+
+        On its own timer rather than sharing runstats' sampler: that one only
+        runs when Settings > Statistics has sampling switched on, and stops
+        for good if the platform will not report memory. Neither is a
+        reasonable way to lose the thing that keeps a run from filling the
+        machine.
+        """
+        if not self.memory_adapt:
+            self._pressure_level = pressure.CALM
+            return
+        used, total, available = self.memory_probe()
+        self._pressure_level = pressure.pressure_level(
+            used, total, available, current=self._pressure_level)
 
     @property
     def running_nodes(self) -> frozenset:
@@ -486,7 +553,11 @@ class ExecutionEngine(QObject):
         # is asked for headroom beyond the nodes rather than exactly enough:
         # a run that filled the pool would otherwise leave a project's cache
         # load queued behind it.
-        wanted = self.worker_limit() + 2
+        # Sized from what the run *could* use, not from what it is throttled
+        # to right now: the pool only ever grows, so a run that started while
+        # memory was tight would otherwise fix a small pool and be unable to
+        # open back up when the pressure lifted.
+        wanted = self._base_workers() + 2
         if self.pool.maxThreadCount() < wanted:
             self.pool.setMaxThreadCount(wanted)
 
@@ -845,6 +916,7 @@ class ExecutionEngine(QObject):
         # over either way, and leaving the flag set would make _dispatch a
         # no-op for the *next* run, which would then never start.
         self._warming = False
+        self._pressure_timer.stop()
         self._close_record()
         self.run_finished.emit(not self._had_failure)
         if self._requested:

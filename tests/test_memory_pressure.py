@@ -5,13 +5,17 @@ its outputs are cached", so dropping an entry behind the user's back marks
 the node dirty and it re-runs later with no explanation. These tests pin the
 warning, and pin that it stays a warning.
 """
+import math
+
 import pytest
 
 from flograph.engine.cache import OutputCache
-from flograph.ui.resource_monitor import (CACHE_SHARE, SYSTEM_PRESSURE,
+from flograph.ui.resource_monitor import (CACHE_SHARE, COMFORT_FREE,
+                                          SYSTEM_PRESSURE, machine_is_tight,
                                           memory_pressure)
 
 GB = 1024 ** 3
+MB = 1024 ** 2
 
 
 class TestMemoryPressure:
@@ -31,9 +35,16 @@ class TestMemoryPressure:
         assert memory_pressure(cache=12 * GB, used=29 * GB, total=32 * GB)
 
     def test_thresholds_are_the_boundary(self):
-        total = 100 * GB
-        used = int(total * SYSTEM_PRESSURE)
-        cache = int(total * CACHE_SHARE)
+        # 32 GB, so 85% leaves ~5 GB free: little enough that the machine is
+        # not comfortable and the *ratio* is what decides. On a 100 GB box the
+        # same ratio leaves 15 GB free and the answer is "nothing is wrong"
+        # however high the percentage looks — see TestHeadroom.
+        total = 32 * GB
+        # ceil, not int: 32 GiB * 0.85 lands a fraction of a byte below the
+        # line once it has been through a float, and a boundary test that
+        # sits a hair on the wrong side of its own boundary tests nothing.
+        used = math.ceil(total * SYSTEM_PRESSURE)
+        cache = math.ceil(total * CACHE_SHARE)
         assert memory_pressure(cache=cache, used=used, total=total)
         assert not memory_pressure(cache=cache - GB, used=used, total=total)
         assert not memory_pressure(cache=cache, used=used - 2 * GB, total=total)
@@ -44,13 +55,80 @@ class TestMemoryPressure:
         assert not memory_pressure(cache=0, used=0, total=0)
 
 
+class TestHeadroom:
+    """A percentage means different things on different machines.
+
+    The tool is meant to be powerful when there is room to be, so a big
+    machine must not be nagged for being busy — 85% of 128 GB is 19 GB free
+    and nothing is wrong. The same 85% of an 8 GB laptop is nothing left. So
+    the ratio only counts once the headroom has gone, and a machine that is
+    genuinely nearly full is tight whatever its ratio says.
+    """
+
+    def test_a_big_machine_at_a_high_ratio_is_left_alone(self):
+        total = 128 * GB
+        assert not memory_pressure(cache=40 * GB, used=int(total * 0.85),
+                                   total=total, available=19 * GB)
+
+    def test_a_small_machine_at_the_same_ratio_is_not(self):
+        total = 16 * GB
+        assert memory_pressure(cache=6 * GB, used=total - 2 * GB,
+                               total=total, available=2 * GB)
+
+    def test_nearly_nothing_free_is_tight_at_any_size(self):
+        """A terabyte with 800 MB left is in trouble, and 0.9985 of it being
+        'in use' is not the interesting part of that sentence."""
+        total = 1024 * GB
+        assert machine_is_tight(used=total - 800 * MB, total=total,
+                                available=800 * MB)
+
+    def test_plenty_free_is_fine_at_any_ratio(self):
+        total = 1024 * GB
+        assert not machine_is_tight(used=int(total * 0.97), total=total,
+                                    available=30 * GB)
+
+    def test_being_full_is_still_not_our_fault_on_its_own(self):
+        """The headroom rule answers 'is the machine tight'. Whether this
+        project is *why* is still a separate question, and still required."""
+        total = 16 * GB
+        assert machine_is_tight(used=15 * GB, total=total, available=GB)
+        assert not memory_pressure(cache=50 * MB, used=15 * GB, total=total,
+                                   available=GB)
+
+    def test_available_defaults_to_what_is_not_used(self):
+        total = 16 * GB
+        used = int(total * 0.90)
+        assert (memory_pressure(cache=8 * GB, used=used, total=total)
+                is memory_pressure(cache=8 * GB, used=used, total=total,
+                                   available=total - used))
+
+    def test_headroom_has_relief_too(self):
+        """Crossing back over the comfort line must not un-warn instantly,
+        for the same reason the ratio has relief.
+
+        Sized so the *ratio* is unambiguously over its line either way: this
+        is isolating the headroom rule, so the other half must not be what
+        decides the answer.
+        """
+        total = 64 * GB
+        just_over = COMFORT_FREE + 256 * MB      # 8.25 GB free, ~87% used
+        assert machine_is_tight(used=total - just_over, total=total,
+                                available=just_over, already_warning=True)
+        assert not machine_is_tight(used=total - just_over, total=total,
+                                    available=just_over)
+
+
 class TestHysteresis:
     """Memory in use wanders by a point or two from moment to moment. On a
     bare threshold that flickers the bar and re-announces itself every
     refresh, which is exactly the nagging the warning is meant to avoid."""
 
     def total(self):
-        return 100 * GB
+        # A machine where the percentage is the binding constraint: 32 GB at
+        # 85% leaves ~5 GB free, which is neither comfortable nor desperate,
+        # so these tests exercise the ratio and its relief rather than the
+        # headroom rule sitting in front of it.
+        return 32 * GB
 
     def test_a_dip_below_the_line_does_not_clear_the_warning(self):
         total = self.total()
