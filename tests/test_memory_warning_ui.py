@@ -84,7 +84,7 @@ class TestTheHeavyNodeMark:
 class TestTheWarningReachesTheUser:
     def test_it_is_shown_when_nothing_is_running(self, window):
         window._on_memory_pressure("Memory is running low — 900 MB")
-        assert "Memory is running low" in window.statusBar().currentMessage()
+        assert "Memory is running low" in window.status_message()
 
     def test_it_is_carried_by_the_run_line_instead_of_dropped(self, window):
         """The regression: during a run this used to return early and the
@@ -94,7 +94,7 @@ class TestTheWarningReachesTheUser:
         assert window.engine.active is False   # the guard is on the note, not the run
 
         window._update_run_status()
-        line = window.statusBar().currentMessage()
+        line = window.status_message()
         assert "Running Group By" in line
         assert "memory is tight" in line
 
@@ -103,7 +103,7 @@ class TestTheWarningReachesTheUser:
         window._on_memory_pressure("memory is tight")
         window._on_memory_pressure("")
         window._update_run_status()
-        assert "memory is tight" not in window.statusBar().currentMessage()
+        assert "memory is tight" not in window.status_message()
 
     def test_the_note_can_stand_on_its_own(self, window):
         """Pressure can arrive before any node has claimed the floor. The
@@ -111,6 +111,6 @@ class TestTheWarningReachesTheUser:
         window._run_node_label = ""
         window._on_memory_pressure("memory is tight")
         window._update_run_status()
-        line = window.statusBar().currentMessage()
+        line = window.status_message()
         assert "memory is tight" in line
         assert "Running " not in line

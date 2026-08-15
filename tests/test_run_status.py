@@ -59,7 +59,7 @@ def status(window, *, elapsed=0.0, quiet=0.0, fraction=0.0,
     window._run_node_started = now - elapsed
     window._run_last_output = now - quiet
     window._update_run_status()
-    return window.statusBar().currentMessage()
+    return window.status_message()
 
 
 class TestRunStatusLine:
@@ -99,6 +99,18 @@ class TestRunProgressBar:
     def test_hidden_until_a_run_starts(self, win):
         assert not win._run_bar.isVisible()
 
+    def test_it_sits_at_the_left_ahead_of_the_run_message(self, win):
+        """The bar heads the run's own line at the bottom left, so it has to
+        be left of the message rather than parked among the permanent
+        widgets on the right."""
+        assert win._run_bar.x() < win._status_label.x()
+        assert win._status_label.x() < win.resource_monitor.x()
+
+    def test_it_is_a_thin_track_not_a_full_height_control(self, win):
+        """A default-height bar was the tallest thing in the status bar and
+        set the height of the whole strip."""
+        assert win._run_bar.height() == 6
+
     def test_tracks_nodes_finished_plus_the_current_fraction(self, win):
         win._run_total, win._run_index = 4, 3
         win._run_fraction = 0.5
@@ -113,3 +125,25 @@ class TestRunProgressBar:
         outrun the total that was recorded when it was built."""
         win._run_total, win._run_index, win._run_fraction = 2, 5, 1.0
         assert win._run_completion() == 1.0
+
+
+class TestShowStatus:
+    """The status line is ours now rather than QStatusBar's temporary
+    message, so the parts of showMessage() that callers relied on have to
+    keep working."""
+
+    def test_an_untimed_message_stays_up(self, win, qtbot):
+        win.show_status("Running…")
+        qtbot.wait(30)
+        assert win.status_message() == "Running…"
+
+    def test_a_timed_message_lapses_into_a_blank_line(self, win, qtbot):
+        win.show_status("Saved /tmp/x.flograph", 20)
+        qtbot.waitUntil(lambda: win.status_message() == "", timeout=1000)
+
+    def test_a_newer_message_outlives_the_last_one_countdown(self, win, qtbot):
+        """The old message's timer must not blank the new message."""
+        win.show_status("Saved /tmp/x.flograph", 20)
+        win.show_status("Running…")
+        qtbot.wait(80)
+        assert win.status_message() == "Running…"
