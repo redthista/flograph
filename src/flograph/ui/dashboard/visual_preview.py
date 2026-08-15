@@ -80,7 +80,8 @@ def _plotly_pixmap(engine, node, max_size: QSize,
     from ..report.render import plotly_image
     entry = engine.cache.get(node.id) if engine is not None else None
     port = default_tile_port(node)
-    value = entry.outputs.get(port) if entry is not None and port else None
+    value = (engine.cache.outputs_for(node.id).get(port)
+             if entry is not None and port else None)
     # a Chart per Value node emits a list — its card shows the stack, and
     # one chart is enough to say what the stack looks like
     if isinstance(value, (list, tuple)):

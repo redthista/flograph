@@ -22,14 +22,21 @@ import hashlib
 import json
 import os
 import pickle
+import shutil
 from pathlib import Path
 from typing import Any
 
 from flograph.core.graph import Graph
 
 from .cache import OutputCache
+from .frames import normalize_strings
 
-CACHE_SCHEMA = 1
+CACHE_SCHEMA = 2
+# Schema 2 adds "bytes" and "ports" per node, which is what lets a project
+# open without unpickling anything. Schema 1 side-cars are still read: they
+# simply do not know how big an entry is until it is loaded, and discarding
+# somebody's cached work over a missing size would be a poor trade.
+SUPPORTED_SCHEMAS = (1, 2)
 
 
 def _cache_dir_for(project_path: str | Path) -> Path:
@@ -162,12 +169,15 @@ def _alias_meta(graph: Graph, node_id: str, entry, manifest: dict):
     """
     if entry.alias_of is None or entry.alias_port is None:
         return None
-    if entry.alias_of not in manifest or len(entry.outputs) != 1:
+    # `ports()`, not `entry.outputs`: a spilled entry has no outputs in hand
+    # and reading them would mean loading the very blob this save is trying
+    # to avoid touching.
+    ports = entry.ports()
+    if entry.alias_of not in manifest or len(ports) != 1:
         return None
     if graph.nodes[node_id].frozen:
         return None
-    return {"node": entry.alias_of, "port": entry.alias_port,
-            "as": next(iter(entry.outputs))}
+    return {"node": entry.alias_of, "port": entry.alias_port, "as": ports[0]}
 
 
 def restore_aliases(graph: Graph, cache: OutputCache,
@@ -199,6 +209,33 @@ def restore_aliases(graph: Graph, cache: OutputCache,
     return restored
 
 
+def _carry_blob_over(source_project: str | None, cache_dir: Path,
+                     blob_name: str) -> bool:
+    """Make sure a spilled entry's blob exists in `cache_dir`. True on success.
+
+    Usually a no-op, because the entry was spilled from this same project. On
+    Save As it is a file copy — which is what keeps "save the project
+    somewhere else" from quietly discarding every cached result that had not
+    been loaded, at a cost that is disk-to-disk rather than through memory.
+    """
+    if source_project is None:
+        return False
+    source = _cache_dir_for(source_project) / blob_name
+    target = cache_dir / blob_name
+    try:
+        if target.exists() and source.exists() and source.samefile(target):
+            return True
+        if not source.exists():
+            return False
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        tmp = cache_dir / f"{blob_name}.tmp"
+        shutil.copyfile(source, tmp)
+        os.replace(tmp, target)
+        return True
+    except OSError:
+        return False
+
+
 def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> None:
     cache_dir = _cache_dir_for(project_path)
     memo: dict[str, str] = {}
@@ -214,24 +251,52 @@ def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> No
                 "fingerprint": node_fingerprint(graph, node_id, memo),
                 "wall_time": entry.wall_time,
                 "timestamp": entry.timestamp,
+                "bytes": entry.memory_bytes,
+                "ports": list(entry.ports()),
                 "alias": alias,
             }
             continue
-        try:
-            blob = pickle.dumps(entry.outputs, protocol=pickle.HIGHEST_PROTOCOL)
-        except Exception:
-            continue  # unpicklable output — skip; that node loads dirty next time
-        cache_dir.mkdir(parents=True, exist_ok=True)
+
         blob_name = f"{node_id}.pkl"
+        if not entry.resident:
+            # The value is on disk and has not been loaded. Move the *file*,
+            # never the value: reading a blob back only to write out what we
+            # just read would undo the whole point of not loading it. The
+            # entry must still join keep_files, or the sweep at the end of
+            # this function deletes the blob a live entry depends on.
+            if not _carry_blob_over(entry.blob, cache_dir, blob_name):
+                continue    # source blob gone — that node loads dirty next time
+            keep_files.add(blob_name)
+            manifest[node_id] = {
+                "fingerprint": node_fingerprint(graph, node_id, memo),
+                "wall_time": entry.wall_time,
+                "timestamp": entry.timestamp,
+                "bytes": entry.memory_bytes,
+                "ports": list(entry.ports()),
+            }
+            continue
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
         blob_path = cache_dir / blob_name
         tmp_path = cache_dir / f"{blob_name}.tmp"
-        tmp_path.write_bytes(blob)
+        try:
+            # Streamed, not pickle.dumps() then write_bytes(): building the
+            # whole blob in memory first doubles the cost of the largest
+            # thing in the project at the moment it is least affordable.
+            with open(tmp_path, "wb") as fh:
+                pickle.dump(entry.outputs, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception:
+            # unpicklable output — skip; that node loads dirty next time
+            tmp_path.unlink(missing_ok=True)
+            continue
         os.replace(tmp_path, blob_path)
         keep_files.add(blob_name)
         manifest[node_id] = {
             "fingerprint": node_fingerprint(graph, node_id, memo),
             "wall_time": entry.wall_time,
             "timestamp": entry.timestamp,
+            "bytes": entry.memory_bytes,
+            "ports": list(entry.ports()),
         }
 
     if not manifest:
@@ -271,7 +336,7 @@ def resolve_entries(
         manifest = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError):
         return []
-    if manifest.get("cache_schema") != CACHE_SCHEMA:
+    if manifest.get("cache_schema") not in SUPPORTED_SCHEMAS:
         return []
 
     memo: dict[str, str] = {}
@@ -299,6 +364,74 @@ def load_blob(project_path: str | Path, node_id: str) -> Any:
     return pickle.loads((cache_dir / f"{node_id}.pkl").read_bytes())
 
 
+def load_outputs(project_path: str | Path, node_id: str) -> Any:
+    """`load_blob` plus storage normalisation — the function to hand to
+    OutputCache.set_loader.
+
+    Normalising here rather than in the cache keeps engine.cache free of both
+    I/O and pandas, and puts the conversion exactly where old blobs come back:
+    a value written months ago carries whatever layout pandas used then, and
+    on real project caches the Python-string layout costs two-thirds more
+    memory than the Arrow one for identical data.
+    """
+    return normalize_strings(load_blob(project_path, node_id))
+
+
+def register_cache(graph: Graph, cache: OutputCache,
+                   project_path: str | Path) -> list[str]:
+    """Register every still-valid cache entry *without loading anything*.
+
+    The counterpart to load_cache, and what opening a project should do. It
+    reads one JSON file and allocates nothing: each node is recorded as
+    cached-but-spilled, which is enough for it to count as clean, and its
+    value is fetched only when something actually asks for it.
+
+    The difference is not marginal. On a 14-node project whose side-car holds
+    2M-row frames, load_cache costs about 4 GB of resident memory before the
+    user has pressed anything; this costs a directory read.
+    """
+    cache.set_loader(load_outputs)
+    project = str(project_path)
+    registered = []
+    for node_id, meta in resolve_entries(graph, project_path):
+        alias = meta.get("alias") if is_alias(meta) else None
+        if alias is not None:
+            # No blob of its own; it resolves through its source, which is
+            # registered too and may itself still be spilled.
+            if alias.get("node") is None or alias.get("as") is None:
+                continue
+            cache.register_spilled(
+                node_id, None, meta.get("wall_time", 0.0),
+                memory_bytes=meta.get("bytes", 0) or 0,
+                port_names=tuple(meta.get("ports") or (alias["as"],)),
+                alias_of=alias["node"], alias_port=alias.get("port"),
+            )
+        else:
+            cache.register_spilled(
+                node_id, project, meta.get("wall_time", 0.0),
+                memory_bytes=_known_size(meta, project_path, node_id),
+                port_names=tuple(meta.get("ports") or ()),
+            )
+        registered.append(node_id)
+    return registered
+
+
+def _known_size(meta: dict, project_path: str | Path, node_id: str) -> int:
+    """How big a spilled entry is, without reading it.
+
+    Schema 2 records the measured size. Schema 1 does not, so fall back to the
+    blob's size on disk — a stat, and a serviceable lower bound: the readouts
+    would otherwise report a reopened project as holding nothing at all.
+    """
+    recorded = meta.get("bytes")
+    if isinstance(recorded, int) and recorded > 0:
+        return recorded
+    try:
+        return (_cache_dir_for(project_path) / f"{node_id}.pkl").stat().st_size
+    except OSError:
+        return 0
+
+
 def load_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> list[str]:
     """Restore whatever cache entries are still valid for the *current*
     graph. Returns the ids of nodes that were restored — the caller is
@@ -306,16 +439,16 @@ def load_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> li
     raises: any problem just means fewer (or zero) nodes get restored.
 
     Synchronous end-to-end (resolve + unpickle) — fine for small caches and
-    for tests/headless use. The GUI opens a project through
-    flograph.engine.cache_worker instead, so unpickling large blobs doesn't
-    block the event loop."""
+    for tests/headless use. The GUI opens a project through `register_cache`
+    instead, which loads nothing up front."""
+    cache.set_loader(load_outputs)
     restored = []
     entries = resolve_entries(graph, project_path)
     for node_id, meta in entries:
         if is_alias(meta):
             continue        # no blob of its own; rebuilt below from its source
         try:
-            outputs = load_blob(project_path, node_id)
+            outputs = load_outputs(project_path, node_id)
         except Exception:
             continue
         cache.set(node_id, outputs, meta.get("wall_time", 0.0))

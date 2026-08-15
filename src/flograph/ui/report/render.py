@@ -294,9 +294,13 @@ def embeddable_nodes(graph, cache) -> list:
     """
     if cache is None:
         return []
+    # `ports()`, not `outputs`: a cached result that has not been loaded off
+    # disk yet is still a result. Testing the outputs dict would drop every
+    # node in a freshly-opened project from the list of things that can be
+    # embedded, which is the opposite of what this function is for.
     return sorted((node for node in graph.nodes.values()
                    if cache.get(node.id) is not None
-                   and cache.get(node.id).outputs),
+                   and cache.get(node.id).ports()),
                   key=lambda n: n.label.casefold())
 
 
@@ -412,9 +416,16 @@ def by_label(graph, cache):
         node = matches[0]
         entry = cache.get(node.id) if cache is not None else None
         name = port or (node.spec.outputs[0].name if node.spec.outputs else "")
-        if entry is None or name not in entry.outputs:
+        if entry is None or name not in entry.ports():
             return None, unrun_embed(ref), f"“{ref}” hasn’t run"
-        return entry.outputs[name], "", ""
+        # outputs_for, not entry.outputs: rendering is the point at which the
+        # value has to be real. Writing a report is an export, not a preview,
+        # so a blob that has not been loaded is worth reading now — the
+        # alternative is a report with a hole where the table should be.
+        outputs = cache.outputs_for(node.id)
+        if name not in outputs:
+            return None, unrun_embed(ref), f"“{ref}” hasn’t run"
+        return outputs[name], "", ""
     return lookup
 
 
@@ -449,9 +460,12 @@ def by_wired_input(graph, cache, node_id: str):
                           "something to that input."), \
                 f"nothing wired into “{name}”"
         entry = cache.get(conn.src_node) if cache is not None else None
-        if entry is None or conn.src_port not in entry.outputs:
+        if entry is None or conn.src_port not in entry.ports():
             return None, unrun_embed(name), f"“{name}” hasn’t run"
-        return entry.outputs[conn.src_port], "", ""
+        outputs = cache.outputs_for(conn.src_node)   # an export: load it
+        if conn.src_port not in outputs:
+            return None, unrun_embed(name), f"“{name}” hasn’t run"
+        return outputs[conn.src_port], "", ""
     return lookup
 
 
