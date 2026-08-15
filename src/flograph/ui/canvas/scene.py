@@ -36,6 +36,10 @@ REROUTE_TYPE = "flograph.util.reroute"
 #: one reopening (see _grow_enclosing) — flush against the parent's edge
 #: reads as overflowing it.
 _ENCLOSE_PAD = 16.0
+#: The floor a frame cannot be taken below by undoing a stretch, matching
+#: what a resize drag allows (see FrameItem.mouseMoveEvent).
+_MIN_FRAME_W = 120.0
+_MIN_FRAME_H = 60.0
 
 
 def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
@@ -569,9 +573,10 @@ class NodeGraphScene(QGraphicsScene):
 
         Worked out *before* the frame is expanded, so the record of what got
         shoved aside can be written down as part of the same fold — folding
-        again then puts it back. The record keeps where each thing landed as
-        well as how far it went: anything the user has moved themselves since
-        is left where they put it rather than yanked home.
+        again then takes it back off. What the record needs is how far each
+        thing went; where it landed is written down too, but only as history
+        (see unnudge_plan, which applies the inverse shift wherever the thing
+        has since got to).
         """
         units = self._nudge_units(frame_id, keep, keep_frames)
         plan = plan_nudge(box, region,
@@ -604,35 +609,51 @@ class NodeGraphScene(QGraphicsScene):
     def unnudge_plan(self, frame_id: str) -> tuple:
         """(moves, frame_rects) putting back what expanding this frame moved.
 
-        Only what is still where the expand left it. A node the user has
-        since dragged somewhere deliberate is theirs, not ours to reclaim —
-        there is no way to tell an arrangement they chose from one we
-        imposed except by whether it has changed since.
+        The **inverse shift**, applied wherever the thing is now — not a
+        restoration of the position it was left at. Anything the user has
+        moved in the meantime keeps their move; it simply loses the
+        displacement we imposed on top of it.
+
+        This started out as "only what is still where the expand left it",
+        on the reasoning that an arrangement the user chose is theirs and not
+        ours to reclaim. That is true, and this respects it — subtracting the
+        shift preserves their move exactly, as an offset from where the thing
+        would have been. What it gets wrong is *consistency*: displace two
+        frames, move one of them, fold again, and one comes home while the
+        other stays behind, which reads as the fold simply forgetting. A
+        systematic shift has to be reversible as a whole or not at all.
+
+        The cost, stated plainly: a thing moved somewhere deliberate since
+        the expand still slides back by the shift when the frame folds. That
+        is the same amount everything else moves, it is one Ctrl+Z, and it
+        beats a canvas that half-restores.
         """
         frame = self.graph.frames.get(frame_id)
         moves: dict = {}
         frame_rects: dict = {}
-        for kind, item_id, dx, dy, landed_x, landed_y in (
+        for kind, item_id, dx, dy, _landed_x, _landed_y in (
                 frame.nudged if frame else ()):
             if kind == "node":
                 node = self.graph.nodes.get(item_id)
-                if node is None or node.pos != (landed_x, landed_y):
-                    continue
+                if node is None:
+                    continue        # deleted since; nothing to put back
                 moves[item_id] = (node.pos, (node.pos[0] - dx,
                                              node.pos[1] - dy))
             elif kind == "grow":
-                # a frame that stretched to hold this one; "where it landed"
-                # is a size rather than a position, but the rule is the same
-                # one — leave alone anything the user has resized since
+                # a frame that stretched to hold this one: the displacement
+                # was a size rather than a position, and comes off the same
+                # way. Floored rather than trusted — the user may have
+                # shrunk it themselves in between, and a frame cannot come
+                # back inside out.
                 other = self.graph.frames.get(item_id)
-                if other is None or other.rect[2:] != (landed_x, landed_y):
+                if other is None:
                     continue
                 frame_rects[item_id] = (other.rect[0], other.rect[1],
-                                        other.rect[2] - dx,
-                                        other.rect[3] - dy)
+                                        max(_MIN_FRAME_W, other.rect[2] - dx),
+                                        max(_MIN_FRAME_H, other.rect[3] - dy))
             else:
                 other = self.graph.frames.get(item_id)
-                if other is None or other.rect[:2] != (landed_x, landed_y):
+                if other is None:
                     continue
                 frame_rects[item_id] = (other.rect[0] - dx,
                                         other.rect[1] - dy,

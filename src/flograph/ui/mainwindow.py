@@ -2820,14 +2820,47 @@ class MainWindow(QMainWindow):
             center = self.view.mapToScene(self.view.viewport().rect().center())
             frame = Frame(id=uuid.uuid4().hex,
                           rect=(center.x() - 200, center.y() - 130, 400, 260))
-        self.undo_stack.push(AddFrameCommand(self.graph, frame))
+        self._push_new_frame(frame)
 
     def _add_frame_at(self, scene_pos: QPointF) -> None:
         from flograph.core import Frame
-        from .commands import AddFrameCommand
         frame = Frame(id=uuid.uuid4().hex,
                       rect=(scene_pos.x(), scene_pos.y(), 400, 260))
+        self._push_new_frame(frame)
+
+    def _push_new_frame(self, frame) -> None:
+        """Add a frame, and drop it behind anything it has been drawn around.
+
+        A new frame arrives on top of the others, which is right for one you
+        have drawn on empty canvas and wrong for one you have drawn *around*
+        existing frames: it covers them, and since a frame takes the click
+        anywhere in its body, they can no longer be selected at all without
+        sending the new one to the back by hand.
+
+        Not simply "frames go to the back on arrival" — that breaks the
+        mirror case just as badly. A small frame drawn *inside* a big one
+        would arrive behind it and be the unreachable one instead. What
+        settles it is containment, not arrival order: a frame that encloses
+        another belongs behind it, so this drops the new frame just behind
+        the backmost frame it encloses, and leaves it on top when it encloses
+        nothing.
+        """
+        from .commands import AddFrameCommand, RestackCommand
+        rect = QRectF(*frame.rect)
+        order = self.graph.stacking_order("frame")
+        inside = [fid for fid in order
+                  if rect.contains(QRectF(*self.graph.frames[fid].rect))]
+        if not inside:
+            self.undo_stack.push(AddFrameCommand(self.graph, frame))
+            return
+        new_order = order + [frame.id]
+        new_order.remove(frame.id)
+        new_order.insert(min(order.index(fid) for fid in inside), frame.id)
+        self.undo_stack.beginMacro("add frame")
         self.undo_stack.push(AddFrameCommand(self.graph, frame))
+        self.undo_stack.push(RestackCommand(
+            self.graph, "frame", new_order, text="add frame"))
+        self.undo_stack.endMacro()
 
     def _align(self, mode: str) -> None:
         # frames line up alongside nodes: a collapsed one is a box in the
