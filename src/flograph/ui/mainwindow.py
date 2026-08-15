@@ -13,9 +13,9 @@ from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDockWidget, QFileDialog,
-    QInputDialog, QLineEdit, QMainWindow, QMenu,
+    QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QProgressBar, QProgressDialog,
-    QStackedWidget, QTextEdit,
+    QSizePolicy, QStackedWidget, QTextEdit,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -226,7 +226,7 @@ class MainWindow(QMainWindow):
         self.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         self.statusBar().addPermanentWidget(self._zoom_indicator)
         # Progress across the plan, shown only while a run is on. Narrow,
-        # thin and text-free: the status line beside it already says what is
+        # thin and text-free: the message beside it already says what is
         # running, and this only has to answer "how much is left". The fixed
         # height keeps it a hairline track rather than the chunky default,
         # which otherwise sets the height of the whole status bar.
@@ -235,7 +235,25 @@ class MainWindow(QMainWindow):
         self._run_bar.setTextVisible(False)
         self._run_bar.setFixedSize(110, 6)
         self._run_bar.hide()
-        self.statusBar().addPermanentWidget(self._run_bar)
+        # The bar reads as the head of the run's own message, so the two sit
+        # together at the bottom left: [====----]  Running: Group By · 3 of 8.
+        # That is why the message is a label of ours rather than QStatusBar's
+        # showMessage() -- a temporary message is painted from the left edge
+        # of the bar, straight through any widget parked there, and it hides
+        # the left-hand widgets while it is up. Owning the text is what lets
+        # the bar live next to it. Everything goes through show_status().
+        self.statusBar().addWidget(self._run_bar)
+        self._status_label = QLabel(self)
+        # Ignored, so a long message clips instead of widening the window's
+        # minimum -- the behaviour showMessage() had.
+        self._status_label.setSizePolicy(QSizePolicy.Ignored,
+                                         QSizePolicy.Preferred)
+        self.statusBar().addWidget(self._status_label, 1)
+        # one timer, restarted per message: a timed message clears itself,
+        # and a newer message always outlives an older one's countdown
+        self._status_timer = QTimer(self)
+        self._status_timer.setSingleShot(True)
+        self._status_timer.timeout.connect(self._status_label.clear)
         self._update_title()
         # captured before any saved layout is applied, so "reset window
         # layout" has a real default to go back to rather than a guess
@@ -251,7 +269,26 @@ class MainWindow(QMainWindow):
         self.resource_monitor.pressure_changed.connect(self._on_memory_pressure)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self._apply_stats_settings()
-        self.statusBar().showMessage("Ready")
+        self.show_status("Ready")
+
+    def show_status(self, message: str, timeout: int = 0) -> None:
+        """Say something on the status line, optionally for `timeout` ms.
+
+        Stands in for QStatusBar.showMessage() -- same contract, including
+        "a timed message leaves the line blank when it lapses" -- but as a
+        widget, so the run bar can sit beside the text instead of being
+        painted over by it. A new message always wins, and cancels any
+        countdown the last one was running on.
+        """
+        self._status_timer.stop()
+        self._status_label.setText(message)
+        if timeout > 0:
+            self._status_timer.start(timeout)
+
+    def status_message(self) -> str:
+        """What the status line currently reads. The counterpart of
+        QStatusBar.currentMessage(), which no longer sees our text."""
+        return self._status_label.text()
 
     def _canvas_pages(self) -> list:
         """Pages that actually have a scene and a view. Report pages are
@@ -731,7 +768,7 @@ class MainWindow(QMainWindow):
         if context is not None and context.isValid():
             return
         self.action_gpu_viewport.setChecked(False)  # -> reverts + persists off
-        self.statusBar().showMessage(
+        self.show_status(
             "GPU acceleration isn't available here — reverted to standard "
             "rendering.", 6000)
 
@@ -861,7 +898,7 @@ class MainWindow(QMainWindow):
             self._update_run_status()
             return
         if message:
-            self.statusBar().showMessage(message, 15000)
+            self.show_status(message, 15000)
 
     def _mark_heavy_nodes(self, under_pressure: bool) -> None:
         """Amber the few steps holding the most, or clear every mark.
@@ -896,7 +933,7 @@ class MainWindow(QMainWindow):
         self._run_bar.setValue(0)
         self._run_bar.show()
         self._run_tick.start()
-        self.statusBar().showMessage("Running…")
+        self.show_status("Running…")
 
     def _run_node_begin(self, node_id: str, label: str,
                         index: int, total: int) -> None:
@@ -989,7 +1026,7 @@ class MainWindow(QMainWindow):
             # front of the line, but present — this used to be dropped during
             # a run, which is the one time it is worth saying.
             parts.append(self._run_pressure_note)
-        self.statusBar().showMessage("  ·  ".join(parts))
+        self.show_status("  ·  ".join(parts))
         self._run_bar.setValue(int(100 * self._run_completion()))
 
     def _run_completion(self) -> float:
@@ -1056,7 +1093,7 @@ class MainWindow(QMainWindow):
                             f"{'s' if len(stale) > 1 else ''} did not "
                             f"refresh and no longer match their inputs: "
                             f"{names}{more}")
-            self.statusBar().showMessage(message, 5000 if not stale else 15000)
+            self.show_status(message, 5000 if not stale else 15000)
 
         engine.run_started.connect(on_started)
         engine.node_started.connect(on_node_started)
@@ -1119,7 +1156,7 @@ class MainWindow(QMainWindow):
         labels = ", ".join(self.graph.nodes[n].label for n in node_ids
                            if n in self.graph.nodes)
         if labels:
-            self.statusBar().showMessage(
+            self.show_status(
                 f"{labels}: kept the linked contents in the table", 5000)
 
     def _on_figure_node_succeeded(self, node_id: str) -> None:
@@ -1259,7 +1296,7 @@ class MainWindow(QMainWindow):
             return
         self.undo_stack.push(SetParamCommand(
             self.graph, node_id, "data", _json.dumps(merged), merge=False))
-        self.statusBar().showMessage(
+        self.show_status(
             "Input copied into the table — the cells are yours to edit now, "
             "though a run will refresh the input's columns again", 5000)
 
@@ -1453,7 +1490,7 @@ class MainWindow(QMainWindow):
                 f"Exported to {path}, but some embeds didn't resolve:\n\n• "
                 + "\n• ".join(dict.fromkeys(rendered.problems)))
         else:
-            self.statusBar().showMessage(f"Exported {path}", 6000)
+            self.show_status(f"Exported {path}", 6000)
 
     def _export_report_card_html(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
@@ -1486,7 +1523,7 @@ class MainWindow(QMainWindow):
         # the open tab shows the new version on a refresh — without it the
         # page was written once and quietly went stale.
         remember(node_id, path)
-        self.statusBar().showMessage(status_message(node, path), 8000)
+        self.show_status(status_message(node, path), 8000)
 
     def _refresh_open_report_cards(self) -> None:
         """Keep an open browser tab level with the report cards on canvas.
@@ -1584,7 +1621,7 @@ class MainWindow(QMainWindow):
                 f"Saved to {path}, but some embeds didn't resolve:\n\n• "
                 + "\n• ".join(dict.fromkeys(rendered.problems)))
         else:
-            self.statusBar().showMessage(f"Saved {path}", 6000)
+            self.show_status(f"Saved {path}", 6000)
 
     def _export_report_html(self, page_id: str) -> None:
         """The report as one self-contained HTML file.
@@ -1629,7 +1666,7 @@ class MainWindow(QMainWindow):
                 f"Exported to {path}, but some embeds didn't resolve:\n\n• "
                 + "\n• ".join(dict.fromkeys(rendered.problems)))
         else:
-            self.statusBar().showMessage(f"Exported {path}", 6000)
+            self.show_status(f"Exported {path}", 6000)
 
     def _on_page_removed(self, page_id: str) -> None:
         widget = self._dashboard_pages.pop(page_id, None)
@@ -1793,7 +1830,7 @@ class MainWindow(QMainWindow):
 
     def _on_node_failed(self, node_id: str, error) -> None:
         if node_id in self.graph.nodes:
-            self.statusBar().showMessage(
+            self.show_status(
                 f"{self.graph.nodes[node_id].label}: {error.message}", 8000)
         self.editor_panel.on_node_failed(node_id, error)
 
@@ -1921,7 +1958,7 @@ class MainWindow(QMainWindow):
                 for item in scene.tile_items.values():
                     item.refresh_content()
         self.inspector_panel.on_cache_cleared()
-        self.statusBar().showMessage("Caches cleared — everything is stale", 4000)
+        self.show_status("Caches cleared — everything is stale", 4000)
 
     def _show_packages(self) -> None:
         from .packages_dialog import PackagesDialog
@@ -1972,7 +2009,7 @@ class MainWindow(QMainWindow):
         else:
             targets = self._named_node_ids(node.params.get("targets", ""))
         if not targets:
-            self.statusBar().showMessage(f"{node.label}: nothing to run", 5000)
+            self.show_status(f"{node.label}: nothing to run", 5000)
             return
         if node.params.get("clear_cache", True):
             for target_id in targets:
@@ -2067,7 +2104,7 @@ class MainWindow(QMainWindow):
         self._flush_pending_edits()
         targets = self._frame_node_ids_by_id(frame_id)
         if not targets:
-            self.statusBar().showMessage("Frame is empty — nothing to run", 4000)
+            self.show_status("Frame is empty — nothing to run", 4000)
             return
         self.engine.run_targets(targets)
 
@@ -2124,7 +2161,7 @@ class MainWindow(QMainWindow):
             # message that had already timed out
             path, reason = errors[0]
             more = f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""
-            self.statusBar().showMessage(
+            self.show_status(
                 f"User node {path.name} was skipped{more}: {reason}", 10000)
 
     def _save_as_user_node(self, node_id: str) -> None:
@@ -2149,7 +2186,7 @@ class MainWindow(QMainWindow):
             type_id = user_nodes.write_user_node(
                 nodes_dir, group, name, node.source, overwrite=True)
         self._reload_user_nodes()
-        self.statusBar().showMessage(f"Saved user node {type_id}", 4000)
+        self.show_status(f"Saved user node {type_id}", 4000)
 
     def _new_user_group(self) -> None:
         name, ok = QInputDialog.getText(self, "New group", "Group name:")
@@ -2366,7 +2403,7 @@ class MainWindow(QMainWindow):
             item.setSelected(True)
         payload = self._selection_payload()
         if payload is None:
-            self.statusBar().showMessage("Nothing to save.", 4000)
+            self.show_status("Nothing to save.", 4000)
             return
         name, ok = QInputDialog.getText(
             self, "Save as component", "Name:", QLineEdit.Normal, frame.title)
@@ -2390,7 +2427,7 @@ class MainWindow(QMainWindow):
             self.graph, frame_id, component_id,
             user_frames.content_hash(payload)))
         self.library_tree.reload()
-        self.statusBar().showMessage(
+        self.show_status(
             f"Saved component “{name.strip()}”.", 4000)
 
     def _insert_component_at_view_center(self, component_id: str) -> None:
@@ -2558,7 +2595,7 @@ class MainWindow(QMainWindow):
                     continue    # the port no longer exists, or it would cycle
             dropped = len(crossings) - remade
             self.undo_stack.endMacro()
-            self.statusBar().showMessage(
+            self.show_status(
                 f"Updated from “{state['component_id']}”."
                 + (f" {dropped} connection{'s' if dropped != 1 else ''} "
                    "could not be remade." if dropped else ""), 6000)
@@ -3031,7 +3068,7 @@ class MainWindow(QMainWindow):
         for strip in strips:
             strip.collapse() if hiding else strip.expand()
         self._sync_toggle_panels_action()
-        self.statusBar().showMessage(
+        self.show_status(
             "Panels hidden — Ctrl+Shift+H to bring them back." if hiding
             else "Panels restored.", 4000)
 
@@ -3053,7 +3090,7 @@ class MainWindow(QMainWindow):
             dock.show()
         self._docks_open_on_model_page = list(self._model_docks)
         self.properties_dock.raise_()
-        self.statusBar().showMessage("Window layout reset.", 4000)
+        self.show_status("Window layout reset.", 4000)
 
     def reset_settings(self) -> None:
         """Wipe every stored preference and re-apply the defaults live, so
@@ -3090,7 +3127,7 @@ class MainWindow(QMainWindow):
             # and rewriting its widgets mid-click is asking for trouble
             QTimer.singleShot(
                 0, lambda: self._settings_dialog.refresh_from(self))
-        self.statusBar().showMessage("Settings reset to defaults.", 4000)
+        self.show_status("Settings reset to defaults.", 4000)
 
     # ----------------------------------------------------------- copy/paste
 
@@ -3190,8 +3227,7 @@ class MainWindow(QMainWindow):
         try:
             path = save_clipboard_image(QApplication.clipboard().mimeData())
         except OSError as exc:
-            self.statusBar().showMessage(f"Could not save the image: {exc}",
-                                         8000)
+            self.show_status(f"Could not save the image: {exc}", 8000)
             return False
         if path is None:
             return False
@@ -3209,7 +3245,7 @@ class MainWindow(QMainWindow):
         item = self.scene.node_items.get(node.id)
         if item is not None:
             item.setSelected(True)
-        self.statusBar().showMessage("Pasted image from the clipboard", 4000)
+        self.show_status("Pasted image from the clipboard", 4000)
         return True
 
     def _paste(self, scene_pos: Optional[QPointF] = None) -> None:
@@ -3410,7 +3446,7 @@ class MainWindow(QMainWindow):
     def _cache_still_loading(self) -> bool:
         if self._cache_load_signals is None:
             return False
-        self.statusBar().showMessage(
+        self.show_status(
             "Still restoring cached results from the previous project — try again in a moment",
             4000)
         return True
@@ -3470,7 +3506,7 @@ class MainWindow(QMainWindow):
         self._replace_graph(loaded)
         self._project_path = None
         self._update_title()
-        self.statusBar().showMessage(
+        self.show_status(
             f"Loaded example '{path.stem}' — use Save As to keep it", 4000)
 
     def open_path(self, path: str, confirm: bool = True) -> bool:
@@ -3492,11 +3528,11 @@ class MainWindow(QMainWindow):
             self.page_bar.select_page(saved_page)
         broken = sum(1 for n in loaded.nodes.values() if n.spec.broken)
         if broken:
-            self.statusBar().showMessage(
+            self.show_status(
                 f"Opened {path} — {broken} node(s) couldn't be resolved and "
                 f"were loaded as broken placeholders", 6000)
         else:
-            self.statusBar().showMessage(f"Opened {path}", 4000)
+            self.show_status(f"Opened {path}", 4000)
         self._restore_cache(path, quiet=bool(broken))
         return True
 
@@ -3526,7 +3562,7 @@ class MainWindow(QMainWindow):
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.engine.node_succeeded.emit(node_id)
         if not quiet:
-            self.statusBar().showMessage(
+            self.show_status(
                 f"Opened {path} — {len(registered)} node(s) restored from cache",
                 4000)
 
@@ -3578,7 +3614,7 @@ class MainWindow(QMainWindow):
                 self.graph, self.engine.cache, self._project_path)
         self.undo_stack.setClean()
         self._push_recent(self._project_path)
-        self.statusBar().showMessage(f"Saved {self._project_path}", 4000)
+        self.show_status(f"Saved {self._project_path}", 4000)
         return True
 
     def _save_as(self) -> bool:

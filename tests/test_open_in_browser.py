@@ -392,7 +392,7 @@ class TestCanvasMenu:
     def test_it_says_so_on_the_status_bar(self, window, opened, tmp_pages):
         node = add_web_node(window)
         window._open_in_browser(node.id)
-        assert "Sales Map" in window.statusBar().currentMessage()
+        assert "Sales Map" in window.status_message()
 
     def test_a_deleted_node_is_survivable(self, window, opened):
         assert window._open_in_browser("nope") is None

@@ -200,7 +200,9 @@ def open_node_from(widget, node, entry) -> Optional[str]:
     """
     path = open_node(node, entry)
     window = widget.window() if widget is not None else None
-    bar = getattr(window, "statusBar", None)
-    if callable(bar):
-        bar().showMessage(status_message(node, path), 8000)
+    # show_status() rather than statusBar().showMessage(): the window owns
+    # its status line as a widget now, so the run bar can share it.
+    say = getattr(window, "show_status", None)
+    if callable(say):
+        say(status_message(node, path), 8000)
     return path
