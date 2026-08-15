@@ -1984,13 +1984,26 @@ class MainWindow(QMainWindow):
     def _nodes_of(self, frame) -> list[str]:
         """The nodes a frame holds — the one answer everything asks for.
 
-        A collapsed frame's rect is the little box, which covers none of
-        them, so it reports the membership it wrote down when it folded.
-        Expanded, it is whatever sits inside the region, as it always was.
+        The canvas's own containment rule, so "Run frame" reaches exactly what
+        dragging the frame would carry and what folding it would take in. Two
+        things a plain sweep of the rectangle gets wrong, both of which showed
+        up as running the wrong set:
+
+        A folded frame inside this one is a 60px box, and the nodes it stands
+        for are still recorded wherever they were before it folded — which can
+        be outside this frame entirely. Sweeping the rectangle misses them, so
+        running a frame quietly skipped part of what was in it.
+
+        And the sweep has to be blind to visibility, or it would miss those
+        nodes altogether — but blind means it also picks up nodes belonging to
+        some *other* folded frame that happens to have left them lying under
+        this rectangle. Running a frame would then run somebody else's nodes.
         """
-        if frame.collapsed:
+        item = self.scene.frame_items.get(frame.id)
+        if item is None:        # mirrored before the canvas caught up
             return [nid for nid in frame.members if nid in self.graph.nodes]
-        return self._nodes_in_rect(QRectF(*frame.rect))
+        node_ids, _frames = self.scene.frame_contents(item)
+        return [nid for nid in node_ids if nid in self.graph.nodes]
 
     def _on_frame_run_requested(self, frame_id: str) -> None:
         self._flush_pending_edits()
