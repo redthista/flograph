@@ -2643,3 +2643,90 @@ class TestFrameSequences:
         hidden = sorted(n for n in expected
                         if not window.scene.node_items[n].isVisible())
         assert not hidden, f"still hidden with every frame open: {hidden}"
+
+
+class TestRunningAFrameReachesItsFrames:
+    """"Run frame" targets exactly what dragging the frame would carry — so a
+    frame folded inside it runs like the nodes it stands for would."""
+
+    @pytest.fixture
+    def window(self, qtbot, registry):
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def _node(self, window, registry, nid, pos):
+        node = registry.instantiate("flograph.scripting.python_script", pos=pos)
+        node.id = nid
+        return window.graph.add_node(node)
+
+    def _folded_child_reaching_outside(self, window, registry):
+        """A folded sub-frame whose members are recorded outside the parent —
+        the shape a plain sweep of the rectangle misses."""
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="inner", rect=(300, 100, 300, 160)))
+        self._node(window, registry, "held", (330.0, 150.0))
+        self._node(window, registry, "overhang", (520.0, 150.0))
+        scene.frame_items["inner"].toggle_collapsed()
+        graph.add_frame(Frame(id="outer", rect=(260, 60, 160, 160)))
+        self._node(window, registry, "loose", (280.0, 100.0))
+        return graph, scene
+
+    def test_it_reaches_the_nodes_of_a_folded_child(self, window, registry):
+        graph, scene = self._folded_child_reaching_outside(window, registry)
+        targets = set(window._nodes_of(graph.frames["outer"]))
+        assert {"held", "overhang", "loose"} == targets
+
+    def test_it_does_not_run_another_frames_hidden_nodes(self, window,
+                                                         registry):
+        """The sweep has to be blind to visibility, and blind meant it picked
+        up nodes some other folded frame had left lying under this rect."""
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="other", rect=(100, 100, 300, 200)))
+        self._node(window, registry, "theirs1", (140.0, 150.0))
+        self._node(window, registry, "theirs2", (260.0, 150.0))
+        scene.frame_items["other"].toggle_collapsed()
+        graph.add_frame(Frame(id="mine", rect=(120, 120, 320, 220)))
+        self._node(window, registry, "ours", (300.0, 250.0))
+        assert set(window._nodes_of(graph.frames["mine"])) == {"ours"}
+
+    def test_a_folded_frame_runs_everything_it_stands_for(self, window,
+                                                          registry):
+        graph, scene = self._folded_child_reaching_outside(window, registry)
+        scene.frame_items["outer"].toggle_collapsed()
+        targets = set(window._nodes_of(graph.frames["outer"]))
+        assert {"held", "overhang", "loose"} == targets
+
+    def test_the_plain_case_is_unchanged(self, window, registry):
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="f1", rect=(100, 100, 400, 240)))
+        self._node(window, registry, "a", (140.0, 150.0))
+        self._node(window, registry, "b", (300.0, 150.0))
+        self._node(window, registry, "outside", (900.0, 150.0))
+        assert set(window._nodes_of(graph.frames["f1"])) == {"a", "b"}
+
+    def test_run_by_title_agrees(self, window, registry):
+        graph, scene = self._folded_child_reaching_outside(window, registry)
+        graph.update_frame("outer", title="Stage One")
+        assert set(window._frame_node_ids("Stage One")) == {
+            "held", "overhang", "loose"}
+
+    def test_the_nodes_really_execute(self, qtbot, window, registry):
+        """Not just the target list — the engine actually runs them."""
+        graph, scene = self._folded_child_reaching_outside(window, registry)
+        for nid in ("held", "overhang", "loose"):
+            assert graph.nodes[nid].dirty
+        with qtbot.waitSignal(window.engine.run_finished, timeout=30000):
+            window._on_frame_run_requested("outer")
+        for nid in ("held", "overhang", "loose"):
+            assert not graph.nodes[nid].dirty, f"{nid} was never run"
+
+    def test_a_node_outside_is_left_alone_by_the_run(self, qtbot, window,
+                                                     registry):
+        graph, scene = self._folded_child_reaching_outside(window, registry)
+        self._node(window, registry, "elsewhere", (2000.0, 2000.0))
+        with qtbot.waitSignal(window.engine.run_finished, timeout=30000):
+            window._on_frame_run_requested("outer")
+        assert graph.nodes["elsewhere"].dirty
