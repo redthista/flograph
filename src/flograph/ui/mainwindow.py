@@ -2798,10 +2798,19 @@ class MainWindow(QMainWindow):
     def _add_frame(self) -> None:
         from flograph.core import Frame
         from .commands import AddFrameCommand
-        selected = self.scene.selected_node_items()
+        # frames count as much as nodes here. A collapsed frame is a box in
+        # the flow like any other, and grouping a row of them is the obvious
+        # thing to want; reading only the nodes meant a selection of nothing
+        # but frames looked empty, and Ctrl+G silently dropped a default
+        # frame in the middle of the viewport instead of around them.
+        selected = (self.scene.selected_node_items()
+                    + self.scene.selected_frame_items())
         if selected:
             rect = None
             for item in selected:
+                # what the item actually draws, so a collapsed frame
+                # contributes its little square and not the region it would
+                # grow back into
                 bounds = item.sceneBoundingRect()
                 rect = bounds if rect is None else rect.united(bounds)
             rect.adjust(-30, -50, 30, 30)
@@ -2821,18 +2830,22 @@ class MainWindow(QMainWindow):
         self.undo_stack.push(AddFrameCommand(self.graph, frame))
 
     def _align(self, mode: str) -> None:
-        items = self.scene.selected_node_items()
+        # frames line up alongside nodes: a collapsed one is a box in the
+        # flow like any other, and leaving it behind while the nodes either
+        # side of it shuffled into line was the same blind spot that put a
+        # Ctrl+G frame in the wrong place (see _add_frame)
+        items = (self.scene.selected_node_items()
+                 + self.scene.selected_frame_items())
         if len(items) < 2:
             return
-        moves = {}
+        placements: dict = {}
         if mode in ("left", "top"):
             anchor = min(i.pos().x() if mode == "left" else i.pos().y()
                          for i in items)
             for item in items:
                 old = (item.pos().x(), item.pos().y())
-                new = (anchor, old[1]) if mode == "left" else (old[0], anchor)
-                if new != old:
-                    moves[item.node.id] = (old, new)
+                placements[item] = ((anchor, old[1]) if mode == "left"
+                                    else (old[0], anchor))
         else:
             horizontal = mode == "dist_h"
             key = (lambda i: i.pos().x()) if horizontal else (lambda i: i.pos().y())
@@ -2842,11 +2855,14 @@ class MainWindow(QMainWindow):
             for index, item in enumerate(ordered):
                 old = (item.pos().x(), item.pos().y())
                 coord = first + step * index
-                new = (coord, old[1]) if horizontal else (old[0], coord)
-                if new != old:
-                    moves[item.node.id] = (old, new)
-        if moves:
-            self.scene.push_move_command(moves)
+                placements[item] = ((coord, old[1]) if horizontal
+                                    else (old[0], coord))
+        moves, frame_rects = self.scene.placement_plan(placements)
+        if not moves and not frame_rects:
+            return
+        self.undo_stack.beginMacro(f"align {mode}")
+        self.scene.apply_nudge(moves, frame_rects)
+        self.undo_stack.endMacro()
 
     # -------------------------------------------------------- window state
 

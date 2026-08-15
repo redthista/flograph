@@ -32,57 +32,74 @@ from .stacking import LAYER_LABELS
 
 SCENE_EXTENT = 1_000_000.0
 REROUTE_TYPE = "flograph.util.reroute"
-#: Clearance left when an expanding frame pushes something out of its way.
-_NUDGE_GAP = 20.0
-#: How many times the ripple is allowed to travel. A push can land on
-#: something that then has to be pushed itself; this bounds the chain rather
-#: than trusting a crowded canvas to settle.
-_NUDGE_PASSES = 12
+#: Breathing room left inside a frame that had to stretch to hold a nested
+#: one reopening (see _grow_enclosing) — flush against the parent's edge
+#: reads as overflowing it.
+_ENCLOSE_PAD = 16.0
 
 
-def plan_nudge(region: QRectF, units: list, gap: float = _NUDGE_GAP,
-               passes: int = _NUDGE_PASSES) -> dict:
-    """How far each unit must move to clear `region`, and then each other.
+def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
+    """How far each unit moves when a folded frame reopens into `region`.
 
-    `units` is [(key, QRectF)], where a unit is one movable thing: a lone
-    node, or a frame taken *together with everything inside it*. Frames move
-    whole — pushing their contents out from under them instead would empty
-    the frame, which is the thing an expanding neighbour must never do.
+    `box` is the little square as it stands; `region` is what it is about to
+    become, growing down and right from that same top-left corner. `units` is
+    [(key, QRectF)], where a unit is one movable thing: a lone node, or a
+    frame taken *together with everything inside it*. Frames move whole —
+    pushing their contents out from under them instead would empty the frame,
+    which is the thing an expanding neighbour must never do.
 
-    Everything goes **right**, and so does everything it then runs into, so
-    the displacement travels along one axis and opens a lane. Deliberately
-    not "whichever way is nearer": a flow reads left to right, so sideways is
-    the direction that keeps the shape of it, and one predictable direction
-    is worth more than a shorter shove nobody can anticipate.
+    Two questions, answered separately: **which** things move, and **how far**.
+
+    Which: draw a line straight down from the square's bottom-right corner.
+    Everything at or beyond it goes right, along with anything standing under
+    the square itself. Everything below the square that still falls in the
+    column the frame is about to occupy goes down. Everything else — to the
+    left, or above — is not in the frame's way and is never touched. So most
+    things go right, and only what is genuinely underneath goes down.
+
+    How far: the least that clears the region, and nothing if the region is
+    already clear. That last part matters more than it sounds. A frame that
+    folds and reopens with nothing else changed must land exactly where it
+    was, because the space it is growing back into is the space it vacated.
+    Shifting by the width gained regardless looks the same on screen but
+    ratchets: fold and unfold a frame three times and the canvas to the right
+    of it has walked 1200px away, and folding again cannot pull it back
+    because on each fold there was nothing recorded to put back.
+
+    Within a group the shift is **uniform** — everything that moves, moves by
+    the same amount — and that is what keeps a layout intact across an expand:
+    same spacing, same alignment, same relative order, and the gaps either
+    side of the frame exactly as they were. Shoving each unit just far enough
+    to clear the one before it compounds instead: the second thing along is
+    pushed past the first, the third past the second, and a tidy row comes
+    back fanned out with the far end flung twice as far as it should be.
+
+    The classification is exhaustive over things that are actually in the way,
+    which is the property worth holding on to. Anything overlapping the region
+    either sits under the square or reaches past the line (so it goes right),
+    or is clear below it in the column (so it goes down); nothing in the way
+    falls through. Each mover then clears the region by construction, since
+    the shift is the largest any of them needed.
 
     Pure geometry, no scene: the awkward part of this is the arithmetic, and
     it is worth being able to test it without a canvas.
     """
-    rects = {key: QRectF(rect) for key, rect in units}
+    right: list = []
+    down: list = []
+    for key, rect in units:
+        if rect.left() >= box.right() or rect.intersects(box):
+            right.append((key, rect))
+        elif rect.top() >= box.bottom() and rect.right() > box.left():
+            down.append((key, rect))
+    dx = max([region.right() - rect.left()
+              for _key, rect in right if rect.intersects(region)] or [0.0])
+    dy = max([region.bottom() - rect.top()
+              for _key, rect in down if rect.intersects(region)] or [0.0])
     delta: dict = {}
-
-    def push_clear(key: str, blocker: QRectF) -> None:
-        dx = blocker.right() - rects[key].left() + gap
-        rects[key].translate(dx, 0.0)
-        was = delta.get(key, (0.0, 0.0))
-        delta[key] = (was[0] + dx, was[1])
-
-    for _ in range(passes):
-        moved_any = False
-        # 1. clear the region itself
-        for key in list(rects):
-            if rects[key].intersects(region):
-                push_clear(key, region)
-                moved_any = True
-        # 2. and then whatever those landed on, the same way
-        for pusher in list(delta):
-            for key in list(rects):
-                if key == pusher or not rects[pusher].intersects(rects[key]):
-                    continue
-                push_clear(key, rects[pusher])
-                moved_any = True
-        if not moved_any:
-            break
+    if dx > 0:
+        delta.update({key: (dx, 0.0) for key, _rect in right})
+    if dy > 0:
+        delta.update({key: (0.0, dy) for key, _rect in down})
     return delta
 
 
@@ -366,6 +383,22 @@ class NodeGraphScene(QGraphicsScene):
 
     # ------------------------------------------------------ collapsed frames
 
+    def enclosing_frames(self, frame_id: str) -> set:
+        """The visible frames this one sits inside.
+
+        Containment by geometry, the same rule that decides what a frame
+        carries when you drag it — so what the canvas shows you is what this
+        agrees with, and a frame you have merely parked on top of another is
+        not mistaken for one nested in it.
+        """
+        item = self.frame_items.get(frame_id)
+        if item is None:
+            return set()
+        rect = item.scene_rect()
+        return {other_id for other_id, other in self.frame_items.items()
+                if other is not item and other.isVisible()
+                and other.scene_rect().contains(rect)}
+
     def _nudge_units(self, frame_id: str, keep: set,
                      keep_frames: set) -> list:
         """The movable things around an expanding frame, as (key, rect, nodes,
@@ -378,8 +411,20 @@ class NodeGraphScene(QGraphicsScene):
 
         Nodes already spoken for by some frame are therefore not offered
         separately; only genuinely loose ones are.
+
+        A frame the expanding one lives *inside* is the exception, and it has
+        to be: it is not in the way, it is the room. Pushing a parent aside to
+        make space for its own child sends the parent and its other contents
+        off to the right while the child, held still by `keep`, stays exactly
+        where it was — the frame visibly tears itself apart. So an enclosing
+        frame is transparent here. It is not offered as a unit and it lays no
+        claim to its contents, which are offered singly instead, so the
+        expanding frame's siblings shuffle along *within* their shared parent
+        while the parent itself holds its ground and grows (see
+        `_grow_enclosing`).
         """
         item = self.frame_items.get(frame_id)
+        enclosing = self.enclosing_frames(frame_id)
         spoken_for: set = set(keep)
         units: list = []
         for other_id, other in self.frame_items.items():
@@ -387,6 +432,8 @@ class NodeGraphScene(QGraphicsScene):
                 continue
             if other_id in keep_frames:
                 continue        # nested inside the one expanding; it belongs
+            if other_id in enclosing:
+                continue        # the room, not the furniture — see above
             # `keep` is subtracted, not just skipped later: frames overlap,
             # and membership is geometric, so a neighbour can quite legally
             # claim a node that belongs to the frame being expanded. Letting
@@ -417,8 +464,48 @@ class NodeGraphScene(QGraphicsScene):
         return [nid for nid, node_item in self.node_items.items()
                 if rect.contains(node_item.sceneBoundingRect().center())]
 
-    def plan_expand_nudge(self, frame_id: str, region: QRectF, keep: set,
-                          keep_frames: set) -> tuple:
+    def _grow_enclosing(self, frame_id: str, region: QRectF,
+                        landings: list) -> tuple:
+        """(record, frame_rects) letting the frames around this one hold it.
+
+        A frame reopening inside another can easily come back bigger than the
+        room it is in. The parent is not in the way — it *is* the way — so it
+        stretches to fit rather than being shoved aside, which is what makes
+        an expand-in-place read as opening out rather than bursting.
+
+        It has to cover `landings` — where the displaced things ended up — and
+        not just the region, because the same expand that needs the extra room
+        has just pushed the parent's own contents to the right. Growing for
+        the region alone leaves a node that was comfortably inside its frame
+        sitting just past the edge of it, evicted by a sibling opening up.
+
+        Only ever outwards, and only as far as it must. The region shares its
+        top-left corner with the folded square, which is already inside the
+        parent, and everything moves right or down, so the union can only add
+        width on the right and height at the bottom.
+        """
+        record: list = []
+        frame_rects: dict = {}
+        for other_id in self.enclosing_frames(frame_id):
+            x, y, w, h = self.graph.frames[other_id].rect
+            rect = QRectF(x, y, w, h)
+            grown = QRectF(rect).united(region)
+            for before, after in landings:
+                # only what this frame was already holding: a neighbour shunted
+                # along outside it is not its business to grow around
+                if rect.contains(before.center()):
+                    grown = grown.united(after)
+            if grown != rect:
+                grown = grown.adjusted(0, 0, _ENCLOSE_PAD, _ENCLOSE_PAD)
+            if (grown.width(), grown.height()) == (w, h):
+                continue
+            frame_rects[other_id] = (x, y, grown.width(), grown.height())
+            record.append(("grow", other_id, grown.width() - w,
+                           grown.height() - h, grown.width(), grown.height()))
+        return (tuple(record), frame_rects)
+
+    def plan_expand_nudge(self, frame_id: str, box: QRectF, region: QRectF,
+                          keep: set, keep_frames: set) -> tuple:
         """(record, moves, frame_rects) for reopening a frame into `region`.
 
         Worked out *before* the frame is expanded, so the record of what got
@@ -428,12 +515,16 @@ class NodeGraphScene(QGraphicsScene):
         is left where they put it rather than yanked home.
         """
         units = self._nudge_units(frame_id, keep, keep_frames)
-        plan = plan_nudge(region, [(key, rect) for key, rect, _n, _f in units])
+        plan = plan_nudge(box, region,
+                          [(key, rect) for key, rect, _n, _f in units])
         contents = {key: (nodes, frames) for key, _r, nodes, frames in units}
+        rects = {key: rect for key, rect, _n, _f in units}
         record: list = []
         moves: dict = {}
         frame_rects: dict = {}
+        landings: list = []
         for key, (dx, dy) in plan.items():
+            landings.append((rects[key], rects[key].translated(dx, dy)))
             nodes, frames = contents[key]
             for node_id in nodes:
                 node = self.graph.nodes.get(node_id)
@@ -447,7 +538,9 @@ class NodeGraphScene(QGraphicsScene):
                 landed = (rect[0] + dx, rect[1] + dy)
                 frame_rects[other_id] = (*landed, rect[2], rect[3])
                 record.append(("frame", other_id, dx, dy, *landed))
-        return (tuple(record), moves, frame_rects)
+        grow_record, grown = self._grow_enclosing(frame_id, region, landings)
+        frame_rects.update(grown)
+        return (tuple(record) + grow_record, moves, frame_rects)
 
     def unnudge_plan(self, frame_id: str) -> tuple:
         """(moves, frame_rects) putting back what expanding this frame moved.
@@ -468,6 +561,16 @@ class NodeGraphScene(QGraphicsScene):
                     continue
                 moves[item_id] = (node.pos, (node.pos[0] - dx,
                                              node.pos[1] - dy))
+            elif kind == "grow":
+                # a frame that stretched to hold this one; "where it landed"
+                # is a size rather than a position, but the rule is the same
+                # one — leave alone anything the user has resized since
+                other = self.graph.frames.get(item_id)
+                if other is None or other.rect[2:] != (landed_x, landed_y):
+                    continue
+                frame_rects[item_id] = (other.rect[0], other.rect[1],
+                                        other.rect[2] - dx,
+                                        other.rect[3] - dy)
             else:
                 other = self.graph.frames.get(item_id)
                 if other is None or other.rect[:2] != (landed_x, landed_y):
@@ -482,53 +585,53 @@ class NodeGraphScene(QGraphicsScene):
                                                  node.pos[1] - dy))
         return (moves, frame_rects)
 
+    def placement_plan(self, placements: dict) -> tuple:
+        """(moves, frame_rects) for putting these items at these positions.
+
+        Keyed by the item, which may be a node or a frame. A frame takes what
+        it holds along with it, exactly as dragging it does — moving a frame
+        off its own contents is never what anyone meant, and for a collapsed
+        one it would strand nodes nobody can see.
+
+        A node that is both selected in its own right and inside a selected
+        frame is placed where it was asked to go, not where its frame would
+        have carried it. The explicit instruction wins.
+        """
+        moves: dict = {}
+        frame_rects: dict = {}
+        carried_nodes: dict = {}
+        carried_frames: dict = {}
+        for item, (x, y) in placements.items():
+            old = (item.pos().x(), item.pos().y())
+            if (x, y) == old:
+                continue
+            frame = getattr(item, "frame", None)
+            if frame is None:
+                moves[item.node.id] = (old, (x, y))
+                continue
+            frame_rects[frame.id] = (x, y, *item.display_size())
+            dx, dy = x - old[0], y - old[1]
+            nodes, frames = item.carried_items()
+            for node_item, _offset in nodes:
+                node = self.graph.nodes.get(node_item.node.id)
+                if node is not None:
+                    carried_nodes[node.id] = (node.pos, (node.pos[0] + dx,
+                                                         node.pos[1] + dy))
+            for other, _offset in frames:
+                rect = self.graph.frames[other.frame.id].rect
+                carried_frames[other.frame.id] = (rect[0] + dx, rect[1] + dy,
+                                                  rect[2], rect[3])
+        # folded in afterwards, never during: an item placed explicitly must
+        # win over one merely carried, whichever order they came in
+        for node_id, move in carried_nodes.items():
+            moves.setdefault(node_id, move)
+        for frame_id, rect in carried_frames.items():
+            frame_rects.setdefault(frame_id, rect)
+        return (moves, frame_rects)
+
     def apply_nudge(self, moves: dict, frame_rects: dict) -> None:
         """Push a planned displacement onto the stack, inside whatever macro
         the caller has open."""
-        if moves:
-            self.push_move_command(moves)
-        for other_id, rect in frame_rects.items():
-            self.undo_stack.push(UpdateFrameCommand(
-                self.graph, other_id, rect=rect))
-
-    def nudge_clear_of(self, frame_id: str, keep: set,
-                       keep_frames: set = frozenset()) -> None:
-        """Make room for a frame that has just expanded.
-
-        Whatever the returning region lands on is pushed right or down —
-        whichever is the shorter way out — and whatever *that* runs into is
-        pushed the same way, so the displacement travels instead of piling
-        up. Frames move whole, with everything inside them.
-
-        `keep` is the membership the frame had while folded: its own contents
-        belong inside the region and must sit still.
-
-        Pushed as ordinary moves, so they join the expand's macro and one
-        Ctrl+Z puts the frame and its neighbours back together.
-        """
-        item = self.frame_items.get(frame_id)
-        if item is None:
-            return
-        units = self._nudge_units(frame_id, keep, set(keep_frames))
-        plan = plan_nudge(item.scene_rect(),
-                          [(key, rect) for key, rect, _n, _f in units])
-        if not plan:
-            return
-        contents = {key: (nodes, frames) for key, _r, nodes, frames in units}
-        moves: dict = {}
-        frame_rects: dict = {}
-        for key, (dx, dy) in plan.items():
-            nodes, frames = contents[key]
-            for node_id in nodes:
-                node = self.graph.nodes.get(node_id)
-                if node is None:
-                    continue
-                moves[node_id] = (node.pos, (node.pos[0] + dx,
-                                             node.pos[1] + dy))
-            for other_id in frames:
-                rect = self.graph.frames[other_id].rect
-                frame_rects[other_id] = (rect[0] + dx, rect[1] + dy,
-                                         rect[2], rect[3])
         if moves:
             self.push_move_command(moves)
         for other_id, rect in frame_rects.items():
@@ -769,16 +872,20 @@ class NodeGraphScene(QGraphicsScene):
             line.setVisible(not internal)
             line.set_anchors(src_pin, dst_pin)
 
-    def frame_item_moved(self, frame_id: str) -> None:
+    def frame_item_moved(self, frame_id: Optional[str] = None) -> None:
         """A collapsed frame moved, so the wires pinned to it must follow.
         node_item_moved cannot cover this: the wires' other ends are hidden
-        nodes that did not themselves move relative to the box."""
+        nodes that did not themselves move relative to the box.
+
+        `None` means every collapsed frame, for the drags that move several
+        at once and cannot say which.
+        """
         for pin in self._frame_pins.values():
-            if pin.frame_item.frame.id != frame_id:
+            if frame_id is not None and pin.frame_item.frame.id != frame_id:
                 continue
-            for ci in self.connection_items.values():
-                if ci.conn.id == pin.conn_id:
-                    ci.update_path()
+            ci = self.connection_items.get(pin.conn_id)
+            if ci is not None:
+                ci.update_path()
             line = self.link_line_items.get(pin.conn_id)
             if line is not None:
                 line.update_path()
