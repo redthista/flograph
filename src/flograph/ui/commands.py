@@ -571,6 +571,76 @@ class UpdateFrameCommand(QUndoCommand):
         self._graph.update_frame(self._frame_id, title=title, rect=rect, color=color)
 
 
+class SetFrameCollapsedCommand(QUndoCommand):
+    """Fold a frame down to a single box, or open it back out.
+
+    Snapshots the whole fold — collapsed flag, rect, the size to grow back
+    to, and the membership — because they only make sense together: undoing
+    a collapse has to give back the region *and* exactly the nodes it took,
+    not recompute a membership from geometry that has since moved.
+
+    `members` / `member_frames` are supplied by the caller rather than
+    worked out here: deciding what sits inside a frame needs the items'
+    drawn bounds, which is the canvas's business, not the graph's.
+    """
+
+    def __init__(self, graph: Graph, frame_id: str, collapsed: bool,
+                 members: tuple = (), member_frames: tuple = (),
+                 collapsed_size: tuple = (60.0, 60.0), nudged: tuple = (),
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("collapse frame" if collapsed else "expand frame",
+                         parent)
+        self._graph = graph
+        self._frame_id = frame_id
+        frame = graph.frames[frame_id]
+        self._old = (frame.collapsed, frame.rect, frame.expanded_size,
+                     frame.members, frame.member_frames, frame.nudged)
+        x, y, width, height = frame.rect
+        if collapsed:
+            # folding puts back whatever the last expand shoved aside, so the
+            # record is spent and cleared
+            self._new = (True, (x, y, *collapsed_size), (width, height),
+                         tuple(members), tuple(member_frames), ())
+        else:
+            # grow back to whatever it was before it folded; a frame with no
+            # remembered size was never folded, so its rect already is one
+            grow = frame.expanded_size or (width, height)
+            self._new = (False, (x, y, *grow), None, (), (), tuple(nudged))
+
+    def _apply(self, state) -> None:
+        collapsed, rect, expanded_size, members, member_frames, nudged = state
+        self._graph.apply_frame_collapse(
+            self._frame_id, collapsed=collapsed, rect=rect,
+            expanded_size=expanded_size, members=members,
+            member_frames=member_frames, nudged=nudged)
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+
+class SetFrameSourceCommand(QUndoCommand):
+    """Record which library component a frame came from (or became)."""
+
+    def __init__(self, graph: Graph, frame_id: str, source: str,
+                 fingerprint: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("link frame to component", parent)
+        self._graph = graph
+        self._frame_id = frame_id
+        frame = graph.frames[frame_id]
+        self._old = (frame.source, frame.source_fingerprint)
+        self._new = (source, fingerprint)
+
+    def redo(self) -> None:
+        self._graph.set_frame_source(self._frame_id, *self._new)
+
+    def undo(self) -> None:
+        self._graph.set_frame_source(self._frame_id, *self._old)
+
+
 class AddPageCommand(QUndoCommand):
     def __init__(self, graph: Graph, page: Page,
                  parent: Optional[QUndoCommand] = None) -> None:

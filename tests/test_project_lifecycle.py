@@ -270,8 +270,12 @@ class TestCopyPaste:
         window._copy_selection()
         payload = json.loads(QApplication.clipboard().text())
         assert payload["frames"] == [{
+            "id": "f1", "root": True,
             "title": "Notes", "rect": [500.0, 500.0, 300.0, 200.0],
-            "color": "#ff0000",
+            "color": "#ff0000", "collapsed": False,
+            # carried so a copy of a folded frame arrives folded, standing in
+            # for the copies of its contents rather than for the originals
+            "expanded_size": None, "members": [], "member_frames": [],
         }]
         assert payload["nodes"] == []
 
@@ -282,6 +286,26 @@ class TestCopyPaste:
         assert new_frame.title == "Notes"
         assert new_frame.color == "#ff0000"
         assert new_frame.rect == (530.0, 530.0, 300.0, 200.0)
+        assert new_frame.collapsed is False
+
+    def test_copy_paste_keeps_a_frame_collapsed(self, window):
+        """A folded frame pastes folded — duplicating the box means
+        duplicating the box, not quietly unpacking it."""
+        from flograph.core import Frame
+        from flograph.ui.commands import AddFrameCommand
+        frame = Frame(id="f1", rect=(500.0, 500.0, 300.0, 200.0),
+                      title="Prep", collapsed=True)
+        window.undo_stack.push(AddFrameCommand(window.graph, frame))
+        window.scene.frame_items["f1"].setSelected(True)
+
+        window._copy_selection()
+        assert json.loads(
+            QApplication.clipboard().text())["frames"][0]["collapsed"] is True
+
+        window._paste()
+        new_frame = next(f for f in window.graph.frames.values()
+                         if f.id != "f1")
+        assert new_frame.collapsed is True
         selected = window.scene.selected_frame_items()
         assert len(selected) == 1
         assert selected[0].frame.id == new_frame.id

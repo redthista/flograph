@@ -39,14 +39,36 @@ class ConnectionItem(QGraphicsPathItem):
         self.conn = conn
         self.src_port = src
         self.dst_port = dst
+        # Where each end is *drawn*, which is not always its own pin: when a
+        # node is folded inside a collapsed frame, its wires terminate on a
+        # pin on that frame's box instead. Kept separate from src_port /
+        # dst_port so identity and colour still come from the real ports.
+        self._src_anchor = src
+        self._dst_anchor = dst
         self._hover = False
         self.setZValue(WIRE_Z)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
         self.update_path()
 
+    def set_anchors(self, src: Optional[PortItem] = None,
+                    dst: Optional[PortItem] = None) -> None:
+        """Redirect either end's drawn position. None restores the real port."""
+        self._src_anchor = src if src is not None else self.src_port
+        self._dst_anchor = dst if dst is not None else self.dst_port
+        self.update_path()
+
+    @property
+    def src_anchor(self) -> PortItem:
+        return self._src_anchor
+
+    @property
+    def dst_anchor(self) -> PortItem:
+        return self._dst_anchor
+
     def update_path(self) -> None:
-        self.setPath(bezier_path(self.src_port.scenePos(), self.dst_port.scenePos()))
+        self.setPath(bezier_path(self._src_anchor.scenePos(),
+                                 self._dst_anchor.scenePos()))
 
     def shape(self) -> QPainterPath:
         stroker = QPainterPathStroker()
@@ -77,9 +99,22 @@ class ConnectionItem(QGraphicsPathItem):
 
     def mouseDoubleClickEvent(self, event) -> None:
         scene = self.scene()
-        if scene is not None:
+        if scene is not None and not self._crosses_a_collapsed_frame():
             scene.insert_reroute(self.conn, event.scenePos())
         event.accept()
+
+    def _crosses_a_collapsed_frame(self) -> bool:
+        """Whether either end is pinned to a folded frame.
+
+        A reroute is inserted where the wire was double-clicked, which for
+        the visible stub of a crossing wire is inside the collapsed frame's
+        vacated region. The new node would not be hidden — it is not in the
+        captured membership — so it would sit in apparently empty canvas,
+        get swept up by anything that resolves the frame's nodes from its
+        rect, and reappear inside the frame on expand.
+        """
+        return (self._src_anchor is not self.src_port
+                or self._dst_anchor is not self.dst_port)
 
 
 class PendingConnectionItem(QGraphicsPathItem):

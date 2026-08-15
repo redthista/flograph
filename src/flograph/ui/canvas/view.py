@@ -22,6 +22,7 @@ class NodeGraphView(ZoomPanGraphicsView):
     add_node_requested = Signal(QPointF, QPoint)   # scene pos, global pos
     palette_requested = Signal(QPointF, QPoint)    # scene pos, global pos
     node_dropped = Signal(str, QPointF)            # type_id, scene pos
+    frame_dropped = Signal(str, QPointF)           # component id, scene pos
     files_dropped = Signal(list, QPointF)          # local file paths, scene pos
     node_context_requested = Signal(str, QPoint)   # node_id, global pos
     frame_context_requested = Signal(str, QPoint)  # frame_id, global pos
@@ -73,6 +74,15 @@ class NodeGraphView(ZoomPanGraphicsView):
         item = scene.node_items.get(node_id)
         if item is None:
             return False
+        if not item.isVisible():
+            # Search resolves against the graph, so a node folded inside a
+            # collapsed frame is findable — but centring on it would park the
+            # view on empty canvas with nothing selected (Qt ignores
+            # setSelected on a hidden item). Show the box holding it instead.
+            owner = scene._owner_of(node_id)
+            frame_item = scene.frame_items.get(owner) if owner else None
+            if frame_item is not None:
+                item = frame_item
         scene.clearSelection()
         item.setSelected(True)
         if self.zoom < MIN_REVEAL_ZOOM:
@@ -177,10 +187,20 @@ class NodeGraphView(ZoomPanGraphicsView):
         scene.push_move_command(moves)
 
     def frame_content(self) -> None:
-        """F: fit the selection (or everything) in view."""
+        """F: fit the selection (or everything) in view.
+
+        Everything *visible*: nodes folded inside a collapsed frame would
+        otherwise pull the fit out over a region showing nothing. Frames
+        count too, or a canvas holding only collapsed ones fits to nothing.
+        """
         scene: NodeGraphScene = self.scene()
-        self.fit_items(scene.selected_node_items()
-                       or list(scene.node_items.values()))
+        selected = scene.selected_node_items()
+        if selected:
+            self.fit_items(selected)
+            return
+        self.fit_items([item for item in (*scene.node_items.values(),
+                                          *scene.frame_items.values())
+                        if item.isVisible()])
 
     # --------------------------------------------------------- context menu
 
@@ -221,8 +241,9 @@ class NodeGraphView(ZoomPanGraphicsView):
         return [p for p in local_paths if resolve_dropped_file(p)]
 
     def dragEnterEvent(self, event) -> None:
-        from .palette import NODE_TYPE_MIME
-        if event.mimeData().hasFormat(NODE_TYPE_MIME):
+        from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
+        if event.mimeData().hasFormat(NODE_TYPE_MIME) \
+                or event.mimeData().hasFormat(FRAME_ID_MIME):
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             if self._matching_dropped_files(event.mimeData()):
@@ -233,8 +254,9 @@ class NodeGraphView(ZoomPanGraphicsView):
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
-        from .palette import NODE_TYPE_MIME
-        if event.mimeData().hasFormat(NODE_TYPE_MIME):
+        from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
+        if event.mimeData().hasFormat(NODE_TYPE_MIME) \
+                or event.mimeData().hasFormat(FRAME_ID_MIME):
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             if self._matching_dropped_files(event.mimeData()):
@@ -245,11 +267,16 @@ class NodeGraphView(ZoomPanGraphicsView):
             super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
-        from .palette import NODE_TYPE_MIME
+        from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
         if event.mimeData().hasFormat(NODE_TYPE_MIME):
             type_id = bytes(event.mimeData().data(NODE_TYPE_MIME)).decode()
             self.node_dropped.emit(
                 type_id, self.mapToScene(event.position().toPoint()))
+            event.acceptProposedAction()
+        elif event.mimeData().hasFormat(FRAME_ID_MIME):
+            frame_id = bytes(event.mimeData().data(FRAME_ID_MIME)).decode()
+            self.frame_dropped.emit(
+                frame_id, self.mapToScene(event.position().toPoint()))
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             paths = self._matching_dropped_files(event.mimeData())

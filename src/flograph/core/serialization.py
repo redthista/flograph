@@ -89,6 +89,14 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "rect": list(f.rect),
                     "color": f.color,
                     "z": f.z,
+                    "collapsed": f.collapsed,
+                    "expanded_size": (list(f.expanded_size)
+                                      if f.expanded_size else None),
+                    "members": list(f.members),
+                    "member_frames": list(f.member_frames),
+                    "nudged": [list(entry) for entry in f.nudged],
+                    "source": f.source,
+                    "source_fingerprint": f.source_fingerprint,
                 }
                 for f in graph.frames.values()
             ],
@@ -219,6 +227,15 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent before layering existed: add_frame then assigns z in
             # load order, which is exactly the old stacking
             z=entry.get("z"),
+            # absent before frames could collapse, which is the old meaning
+            collapsed=bool(entry.get("collapsed", False)),
+            expanded_size=(tuple(entry["expanded_size"])
+                           if entry.get("expanded_size") else None),
+            members=tuple(entry.get("members", ())),
+            member_frames=tuple(entry.get("member_frames", ())),
+            nudged=tuple(tuple(n) for n in entry.get("nudged", ())),
+            source=entry.get("source", ""),
+            source_fingerprint=entry.get("source_fingerprint", ""),
         ))
 
     for entry in payload.get("pages", []):

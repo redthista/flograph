@@ -32,6 +32,96 @@ from .stacking import LAYER_LABELS
 
 SCENE_EXTENT = 1_000_000.0
 REROUTE_TYPE = "flograph.util.reroute"
+#: Breathing room left inside a frame that had to stretch to hold a nested
+#: one reopening (see _grow_enclosing) — flush against the parent's edge
+#: reads as overflowing it.
+_ENCLOSE_PAD = 16.0
+#: The floor a frame cannot be taken below by undoing a stretch, matching
+#: what a resize drag allows (see FrameItem.mouseMoveEvent).
+_MIN_FRAME_W = 120.0
+_MIN_FRAME_H = 60.0
+#: Clearance left between a reopened frame and whatever it pushed out of the
+#: way. Landing exactly on the edge is arithmetically correct and looks like
+#: a collision — the node appears stuck to the frame rather than beside it.
+NUDGE_GAP = 20.0
+
+
+def plan_nudge(box: QRectF, region: QRectF, units: list,
+               gap: float = NUDGE_GAP) -> dict:
+    """How far each unit moves when a folded frame reopens into `region`.
+
+    `box` is the little square as it stands; `region` is what it is about to
+    become, growing down and right from that same top-left corner. `units` is
+    [(key, QRectF)], where a unit is one movable thing: a lone node, or a
+    frame taken *together with everything inside it*. Frames move whole —
+    pushing their contents out from under them instead would empty the frame,
+    which is the thing an expanding neighbour must never do.
+
+    Two questions, answered separately: **which** things move, and **how far**.
+
+    Which: draw a line straight down from the square's bottom-right corner.
+    Everything at or beyond it goes right, along with anything standing under
+    the square itself. Everything below the square that still falls in the
+    column the frame is about to occupy goes down. Everything else — to the
+    left, or above — is not in the frame's way and is never touched. So most
+    things go right, and only what is genuinely underneath goes down.
+
+    Nothing that **starts** to the left of the square is ever moved, not even
+    if it reaches across and overlaps it. A frame is only ever going to grow
+    right and down, so its left-hand neighbour cannot be in its way; and a
+    wide frame whose right-hand edge happens to overlap the little box would
+    otherwise be flung the whole width of the region to "clear" it, which is
+    a violent answer to a collision the expand did not create.
+
+    How far: the least that clears the region **plus `gap`**, and nothing at
+    all if the region is already clear. The clearance is not cosmetic
+    padding — landing a node exactly on the frame's edge is arithmetically
+    right and reads as a collision, the node looking stuck to the frame
+    rather than standing beside it. That last part matters more than it sounds. A frame that
+    folds and reopens with nothing else changed must land exactly where it
+    was, because the space it is growing back into is the space it vacated.
+    Shifting by the width gained regardless looks the same on screen but
+    ratchets: fold and unfold a frame three times and the canvas to the right
+    of it has walked 1200px away, and folding again cannot pull it back
+    because on each fold there was nothing recorded to put back.
+
+    Within a group the shift is **uniform** — everything that moves, moves by
+    the same amount — and that is what keeps a layout intact across an expand:
+    same spacing, same alignment, same relative order, and the gaps either
+    side of the frame exactly as they were. Shoving each unit just far enough
+    to clear the one before it compounds instead: the second thing along is
+    pushed past the first, the third past the second, and a tidy row comes
+    back fanned out with the far end flung twice as far as it should be.
+
+    The classification is exhaustive over things that are actually in the way,
+    which is the property worth holding on to. Anything overlapping the region
+    either sits under the square or reaches past the line (so it goes right),
+    or is clear below it in the column (so it goes down); nothing in the way
+    falls through. Each mover then clears the region by construction, since
+    the shift is the largest any of them needed — and clears it by `gap` at
+    the very least.
+
+    Pure geometry, no scene: the awkward part of this is the arithmetic, and
+    it is worth being able to test it without a canvas.
+    """
+    right: list = []
+    down: list = []
+    for key, rect in units:
+        under = rect.intersects(box) and rect.left() >= box.left()
+        if rect.left() >= box.right() or under:
+            right.append((key, rect))
+        elif rect.top() >= box.bottom() and rect.right() > box.left():
+            down.append((key, rect))
+    dx = max([region.right() + gap - rect.left()
+              for _key, rect in right if rect.intersects(region)] or [0.0])
+    dy = max([region.bottom() + gap - rect.top()
+              for _key, rect in down if rect.intersects(region)] or [0.0])
+    delta: dict = {}
+    if dx > 0:
+        delta.update({key: (dx, 0.0) for key, _rect in right})
+    if dy > 0:
+        delta.update({key: (0.0, dy) for key, _rect in down})
+    return delta
 
 
 class NodeGraphScene(QGraphicsScene):
@@ -68,6 +158,23 @@ class NodeGraphScene(QGraphicsScene):
         # a wire and not in graph.connections — see canvas.link_line.
         self.link_line_items: dict[str, "LinkLineItem"] = {}
         self.frame_items: dict[str, FrameItem] = {}
+        # --- collapsed frames (see _refresh_collapsed_frames) --------------
+        # Which nodes each collapsed frame is standing in for. Mirrors
+        # Frame.members, which the frame wrote down when it folded — never
+        # derived from geometry here, so undo gives back exactly the
+        # membership it took and a folded box parked over other nodes cannot
+        # adopt them.
+        self._hidden: dict[str, list[str]] = {}
+        self._hidden_frames: dict[str, list[str]] = {}
+        # One pin per crossing wire end, keyed (conn_id, "src"|"dst").
+        self._frame_pins: dict[tuple, "FramePortItem"] = {}
+        # Set while a bulk load replaces the graph node by node; the rebuild
+        # would otherwise run once per add and be quadratic in graph size.
+        self._suspend_collapse_refresh = False
+        # Asked before a collapsed frame takes its hidden contents with it.
+        # The main window supplies a message box; left None (tests, headless)
+        # the delete simply goes ahead.
+        self.confirm_collapsed_delete = None
         self._zoom = 1.0  # last zoom pushed by the view, see set_lod
 
         # Zoom-out node simplification preference; the main window is the
@@ -144,6 +251,10 @@ class NodeGraphScene(QGraphicsScene):
             self._on_frame_added(frame)
         self._refresh_link_cards()
         self._refresh_link_lines()
+        # frames were mirrored above, before any link line existed — fold
+        # again now that they do, so a collapsed frame built straight over an
+        # existing graph gets its link pins too
+        self._refresh_collapsed_frames()
         # Goto/From pairs have no wire to trace, so selecting one end glows
         # the other -- the only on-canvas evidence that a link exists, short
         # of asking for the line itself (see _refresh_link_lines)
@@ -159,6 +270,9 @@ class NodeGraphScene(QGraphicsScene):
         self.addItem(item)
         self.node_items[node.id] = item
         item.refresh_link_card()  # its text needs the scene's graph to resolve
+        # undoing a delete puts a collapsed frame's contents back; they have
+        # to go straight back under the lid rather than appear on top of it
+        self._refresh_collapsed_frames()
 
     def _on_restacked(self, kind: str, page_id) -> None:
         """One kind's stacking order changed. Every item of that kind re-reads
@@ -177,6 +291,7 @@ class NodeGraphScene(QGraphicsScene):
             # deleted item is a crash, not a leak
             item.dispose_mark_image()
             self.removeItem(item)
+        self._refresh_collapsed_frames()
 
     def _on_connected(self, conn: Connection) -> None:
         src = self.node_items[conn.src_node].output_ports[conn.src_port]
@@ -188,6 +303,8 @@ class NodeGraphScene(QGraphicsScene):
         dst_node_item = self.node_items.get(conn.dst_node)
         if dst_node_item is not None and dst_node_item.table:
             dst_node_item.refresh_table_link()
+        # a wire made through a collapsed frame's pin needs a pin of its own
+        self._refresh_collapsed_frames()
 
     def _on_disconnected(self, conn: Connection) -> None:
         item = self.connection_items.pop(conn.id, None)
@@ -202,6 +319,7 @@ class NodeGraphScene(QGraphicsScene):
                 port.refresh_connected()
             if dst_item.table:
                 dst_item.refresh_table_link()
+        self._refresh_collapsed_frames()   # the orphaned pin must go
 
     def _on_node_moved(self, node_id: str, pos: tuple[float, float]) -> None:
         item = self.node_items.get(node_id)
@@ -221,6 +339,11 @@ class NodeGraphScene(QGraphicsScene):
                 ci.dst_port = item.input_ports[ci.conn.dst_port]
             if node_id in (ci.conn.src_node, ci.conn.dst_node):
                 ci.update_path()
+        # a frame pin caches the spec it was built from, which has just been
+        # replaced — drop them so the rebuild makes fresh ones rather than
+        # leaving one pointing at a port that no longer exists
+        self._drop_frame_pins_for(node_id)
+        self._refresh_collapsed_frames()
 
     def _on_param_changed(self, node_id: str, name: str, value) -> None:
         item = self.node_items.get(node_id)
@@ -275,6 +398,630 @@ class NodeGraphScene(QGraphicsScene):
             else:
                 existing.setToolTip(f"Link: {link_label(src.node)}")
             existing.update_path()
+        # a line that crosses a collapsed boundary terminates on a pin, and
+        # the lines only exist as of this method, so re-derive after them
+        self._refresh_collapsed_frames()
+
+    # ------------------------------------------------------ collapsed frames
+
+    def enclosing_frames(self, frame_id: str) -> set:
+        """The visible frames this one sits inside.
+
+        Containment by geometry, the same rule that decides what a frame
+        carries when you drag it — so what the canvas shows you is what this
+        agrees with, and a frame you have merely parked on top of another is
+        not mistaken for one nested in it.
+        """
+        item = self.frame_items.get(frame_id)
+        if item is None:
+            return set()
+        rect = item.scene_rect()
+        return {other_id for other_id, other in self.frame_items.items()
+                if other is not item and other.isVisible()
+                and other.scene_rect().contains(rect)}
+
+    def _nudge_units(self, frame_id: str, keep: set,
+                     keep_frames: set) -> list:
+        """The movable things around an expanding frame, as (key, rect, nodes,
+        frames).
+
+        A frame and its contents are **one** unit. Pushing its nodes out
+        individually would empty it — which is exactly the complaint that a
+        frame expanding over a neighbour "stole its nodes": the neighbour sat
+        still while the things inside it were shoved out from under it.
+
+        Nodes already spoken for by some frame are therefore not offered
+        separately; only genuinely loose ones are.
+
+        A frame the expanding one lives *inside* is the exception, and it has
+        to be: it is not in the way, it is the room. Pushing a parent aside to
+        make space for its own child sends the parent and its other contents
+        off to the right while the child, held still by `keep`, stays exactly
+        where it was — the frame visibly tears itself apart. So an enclosing
+        frame is transparent here. It is not offered as a unit and it lays no
+        claim to its contents, which are offered singly instead, so the
+        expanding frame's siblings shuffle along *within* their shared parent
+        while the parent itself holds its ground and grows (see
+        `_grow_enclosing`).
+        """
+        item = self.frame_items.get(frame_id)
+        enclosing = self.enclosing_frames(frame_id)
+        spoken_for: set = set(keep)
+        units: list = []
+        for other_id, other in self.frame_items.items():
+            if other is item or not other.isVisible():
+                continue
+            if other_id in keep_frames:
+                continue        # nested inside the one expanding; it belongs
+            if other_id in enclosing:
+                continue        # the room, not the furniture — see above
+            # `keep` is subtracted, not just skipped later: frames overlap,
+            # and membership is geometric, so a neighbour can quite legally
+            # claim a node that belongs to the frame being expanded. Letting
+            # it travel with the neighbour drags the expanding frame's own
+            # contents out from under it — the ones under the overlap moved
+            # and the ones clear of it did not, which is as baffling as it
+            # sounds. Its contents sit still, whoever else lays claim.
+            members = [nid for nid in self._frame_members(other)
+                       if nid in self.node_items and nid not in keep]
+            spoken_for.update(members)
+            rect = other.scene_rect()
+            if not other.collapsed:
+                # a node can hang over its frame's edge, and the whole unit
+                # has to clear the region, so the overhang counts
+                for nid in members:
+                    rect = rect.united(
+                        self.node_items[nid].sceneBoundingRect())
+            # a folded frame's members are hidden and occupy no canvas, so
+            # the unit is the little box and nothing else. Unioning their
+            # stored positions in would stretch the unit across everywhere
+            # they used to be, and a 60px box would push things about as
+            # though it were still the size of the flow inside it.
+            units.append((("frame", other_id), rect, members, [other_id]))
+        for node_id, node_item in self.node_items.items():
+            if node_id in spoken_for or not node_item.isVisible():
+                continue
+            units.append((("node", node_id), node_item.sceneBoundingRect(),
+                          [node_id], []))
+        return units
+
+    def _already_held(self) -> tuple:
+        """(node_ids, frame_ids) that some folded frame already stands for.
+
+        The rule this exists to enforce: **a node belongs to one frame
+        directly**. If a folded frame wrote it down, it is that frame's, and
+        anything else reaches it only by containing that frame.
+
+        Geometric membership has to be blind to visibility — a folded frame's
+        own contents are hidden and must still travel with it — but blind
+        also means a frame drawn anywhere near where those hidden nodes were
+        left standing will happily claim them as well. Two frames then both
+        record the same node, whichever one you open shows it while the other
+        still believes it is holding it, and which of them owns it is decided
+        by dictionary order. That is the "losing nodes" of nested frames.
+        """
+        held_nodes: set = set()
+        held_frames: set = set()
+        for frame in self.graph.frames.values():
+            if not frame.collapsed:
+                continue
+            held_nodes.update(frame.members)
+            held_frames.update(frame.member_frames)
+        return (held_nodes, held_frames)
+
+    def _frame_members(self, item) -> list:
+        """Who a frame holds directly: what it wrote down if folded, whatever
+        sits inside it if not. Not transitive — see frame_contents."""
+        if item.collapsed:
+            return list(item.frame.members)
+        held, _frames = self._already_held()
+        rect = item.scene_rect()
+        return [nid for nid, node_item in self.node_items.items()
+                if nid not in held
+                and rect.contains(node_item.sceneBoundingRect().center())]
+
+    def _frame_member_frames(self, item) -> list:
+        """The frames a frame holds directly. A frame already folded away
+        inside another is that one's to carry, for the same reason."""
+        _nodes, held = self._already_held()
+        if item.collapsed:
+            return list(item.frame.member_frames)
+        rect = item.scene_rect()
+        return [fid for fid, other in self.frame_items.items()
+                if other is not item and fid not in held
+                and rect.contains(other.scene_rect())]
+
+    def frame_contents(self, item) -> tuple:
+        """(node_ids, frame_ids) — everything this frame holds, including
+        everything its nested frames hold.
+
+        Transitive, and that is the whole point. Direct membership uses two
+        different rules — a node counts by its centre, a frame by its whole
+        rectangle — and at the edges they disagree: a frame can sit wholly
+        inside this one while a node *it* holds hangs out past the edge. Take
+        the frame without its contents and two things break, both reported.
+        Dragging the box leaves those nodes behind, so the flow comes back
+        scattered relative to its own frame. And a wire reaching one of them
+        gets pinned to the nested frame, which is itself hidden — a visible
+        wire drawn to a box that is not on the canvas, trailing off across
+        the scene to nothing.
+
+        If you carry the frame, you carry what is in it, wherever it reaches.
+        """
+        # dict rather than set throughout: the member list is the order the
+        # indicators light up in on the folded box, so it has to be stable
+        nodes: dict = {nid: None for nid in self._frame_members(item)}
+        frames: list = []
+        seen: set = {item.frame.id}
+        queue: list = list(self._frame_member_frames(item))
+        while queue:
+            frame_id = queue.pop(0)
+            if frame_id in seen or frame_id not in self.frame_items:
+                continue        # a frame cannot contain itself, but a stale
+            seen.add(frame_id)  # member list could still say so
+            frames.append(frame_id)
+            nested = self.frame_items[frame_id]
+            nodes.update({nid: None for nid in self._frame_members(nested)})
+            queue.extend(self._frame_member_frames(nested))
+        return (list(nodes), frames)
+
+    def _grow_enclosing(self, frame_id: str, region: QRectF,
+                        landings: list) -> tuple:
+        """(record, frame_rects) letting the frames around this one hold it.
+
+        A frame reopening inside another can easily come back bigger than the
+        room it is in. The parent is not in the way — it *is* the way — so it
+        stretches to fit rather than being shoved aside, which is what makes
+        an expand-in-place read as opening out rather than bursting.
+
+        It has to cover `landings` — where the displaced things ended up — and
+        not just the region, because the same expand that needs the extra room
+        has just pushed the parent's own contents to the right. Growing for
+        the region alone leaves a node that was comfortably inside its frame
+        sitting just past the edge of it, evicted by a sibling opening up.
+
+        Only ever outwards, and only as far as it must. The region shares its
+        top-left corner with the folded square, which is already inside the
+        parent, and everything moves right or down, so the union can only add
+        width on the right and height at the bottom.
+        """
+        record: list = []
+        frame_rects: dict = {}
+        for other_id in self.enclosing_frames(frame_id):
+            x, y, w, h = self.graph.frames[other_id].rect
+            rect = QRectF(x, y, w, h)
+            grown = QRectF(rect).united(region)
+            for before, after in landings:
+                # only what this frame was already holding: a neighbour shunted
+                # along outside it is not its business to grow around
+                if rect.contains(before.center()):
+                    grown = grown.united(after)
+            if grown != rect:
+                grown = grown.adjusted(0, 0, _ENCLOSE_PAD, _ENCLOSE_PAD)
+            if (grown.width(), grown.height()) == (w, h):
+                continue
+            frame_rects[other_id] = (x, y, grown.width(), grown.height())
+            record.append(("grow", other_id, grown.width() - w,
+                           grown.height() - h, grown.width(), grown.height()))
+        return (tuple(record), frame_rects)
+
+    def plan_expand_nudge(self, frame_id: str, box: QRectF, region: QRectF,
+                          keep: set, keep_frames: set) -> tuple:
+        """(record, moves, frame_rects) for reopening a frame into `region`.
+
+        Worked out *before* the frame is expanded, so the record of what got
+        shoved aside can be written down as part of the same fold — folding
+        again then takes it back off. What the record needs is how far each
+        thing went; where it landed is written down too, but only as history
+        (see unnudge_plan, which applies the inverse shift wherever the thing
+        has since got to).
+        """
+        units = self._nudge_units(frame_id, keep, keep_frames)
+        plan = plan_nudge(box, region,
+                          [(key, rect) for key, rect, _n, _f in units])
+        contents = {key: (nodes, frames) for key, _r, nodes, frames in units}
+        rects = {key: rect for key, rect, _n, _f in units}
+        record: list = []
+        moves: dict = {}
+        frame_rects: dict = {}
+        landings: list = []
+        for key, (dx, dy) in plan.items():
+            landings.append((rects[key], rects[key].translated(dx, dy)))
+            nodes, frames = contents[key]
+            for node_id in nodes:
+                node = self.graph.nodes.get(node_id)
+                if node is None:
+                    continue
+                landed = (node.pos[0] + dx, node.pos[1] + dy)
+                moves[node_id] = (node.pos, landed)
+                record.append(("node", node_id, dx, dy, *landed))
+            for other_id in frames:
+                rect = self.graph.frames[other_id].rect
+                landed = (rect[0] + dx, rect[1] + dy)
+                frame_rects[other_id] = (*landed, rect[2], rect[3])
+                record.append(("frame", other_id, dx, dy, *landed))
+        grow_record, grown = self._grow_enclosing(frame_id, region, landings)
+        frame_rects.update(grown)
+        return (tuple(record) + grow_record, moves, frame_rects)
+
+    def unnudge_plan(self, frame_id: str) -> tuple:
+        """(moves, frame_rects) putting back what expanding this frame moved.
+
+        The **inverse shift**, applied wherever the thing is now — not a
+        restoration of the position it was left at. Anything the user has
+        moved in the meantime keeps their move; it simply loses the
+        displacement we imposed on top of it.
+
+        This started out as "only what is still where the expand left it",
+        on the reasoning that an arrangement the user chose is theirs and not
+        ours to reclaim. That is true, and this respects it — subtracting the
+        shift preserves their move exactly, as an offset from where the thing
+        would have been. What it gets wrong is *consistency*: displace two
+        frames, move one of them, fold again, and one comes home while the
+        other stays behind, which reads as the fold simply forgetting. A
+        systematic shift has to be reversible as a whole or not at all.
+
+        The cost, stated plainly: a thing moved somewhere deliberate since
+        the expand still slides back by the shift when the frame folds. That
+        is the same amount everything else moves, it is one Ctrl+Z, and it
+        beats a canvas that half-restores.
+        """
+        frame = self.graph.frames.get(frame_id)
+        moves: dict = {}
+        frame_rects: dict = {}
+        for kind, item_id, dx, dy, _landed_x, _landed_y in (
+                frame.nudged if frame else ()):
+            if kind == "node":
+                node = self.graph.nodes.get(item_id)
+                if node is None:
+                    continue        # deleted since; nothing to put back
+                moves[item_id] = (node.pos, (node.pos[0] - dx,
+                                             node.pos[1] - dy))
+            elif kind == "grow":
+                # a frame that stretched to hold this one: the displacement
+                # was a size rather than a position, and comes off the same
+                # way. Floored rather than trusted — the user may have
+                # shrunk it themselves in between, and a frame cannot come
+                # back inside out.
+                other = self.graph.frames.get(item_id)
+                if other is None:
+                    continue
+                frame_rects[item_id] = (other.rect[0], other.rect[1],
+                                        max(_MIN_FRAME_W, other.rect[2] - dx),
+                                        max(_MIN_FRAME_H, other.rect[3] - dy))
+            else:
+                other = self.graph.frames.get(item_id)
+                if other is None:
+                    continue
+                frame_rects[item_id] = (other.rect[0] - dx,
+                                        other.rect[1] - dy,
+                                        other.rect[2], other.rect[3])
+                for nid in self._frame_members(self.frame_items[item_id]):
+                    node = self.graph.nodes.get(nid)
+                    if node is not None and nid not in moves:
+                        moves[nid] = (node.pos, (node.pos[0] - dx,
+                                                 node.pos[1] - dy))
+        return (moves, frame_rects)
+
+    def placement_plan(self, placements: dict) -> tuple:
+        """(moves, frame_rects) for putting these items at these positions.
+
+        Keyed by the item, which may be a node or a frame. A frame takes what
+        it holds along with it, exactly as dragging it does — moving a frame
+        off its own contents is never what anyone meant, and for a collapsed
+        one it would strand nodes nobody can see.
+
+        A node that is both selected in its own right and inside a selected
+        frame is placed where it was asked to go, not where its frame would
+        have carried it. The explicit instruction wins.
+        """
+        moves: dict = {}
+        frame_rects: dict = {}
+        carried_nodes: dict = {}
+        carried_frames: dict = {}
+        for item, (x, y) in placements.items():
+            old = (item.pos().x(), item.pos().y())
+            if (x, y) == old:
+                continue
+            frame = getattr(item, "frame", None)
+            if frame is None:
+                moves[item.node.id] = (old, (x, y))
+                continue
+            frame_rects[frame.id] = (x, y, *item.display_size())
+            dx, dy = x - old[0], y - old[1]
+            nodes, frames = item.carried_items()
+            for node_item, _offset in nodes:
+                node = self.graph.nodes.get(node_item.node.id)
+                if node is not None:
+                    carried_nodes[node.id] = (node.pos, (node.pos[0] + dx,
+                                                         node.pos[1] + dy))
+            for other, _offset in frames:
+                rect = self.graph.frames[other.frame.id].rect
+                carried_frames[other.frame.id] = (rect[0] + dx, rect[1] + dy,
+                                                  rect[2], rect[3])
+        # folded in afterwards, never during: an item placed explicitly must
+        # win over one merely carried, whichever order they came in
+        for node_id, move in carried_nodes.items():
+            moves.setdefault(node_id, move)
+        for frame_id, rect in carried_frames.items():
+            frame_rects.setdefault(frame_id, rect)
+        return (moves, frame_rects)
+
+    def apply_nudge(self, moves: dict, frame_rects: dict) -> None:
+        """Push a planned displacement onto the stack, inside whatever macro
+        the caller has open."""
+        if moves:
+            self.push_move_command(moves)
+        for other_id, rect in frame_rects.items():
+            self.undo_stack.push(UpdateFrameCommand(
+                self.graph, other_id, rect=rect))
+
+    def _buried_frames(self) -> set:
+        """Collapsed frames that are themselves folded away inside another."""
+        return {fid for ids in self._hidden_frames.values() for fid in ids}
+
+    def _burier_of(self) -> dict:
+        """frame_id -> the collapsed frame that has folded it away."""
+        return {fid: owner for owner, ids in self._hidden_frames.items()
+                for fid in ids}
+
+    def _owner_of(self, node_id: str) -> Optional[str]:
+        """The collapsed frame that stands in for this node on the canvas.
+
+        The **outermost** one, found by climbing: whichever frame claims the
+        node, then whatever has folded *that* away, until we reach one nobody
+        has buried. That frame is the box actually on screen, and it is the
+        only correct place to pin the node's wires — pinning them to a buried
+        frame draws them to something invisible, which is a wire trailing off
+        across the canvas to nowhere.
+
+        Climbing rather than "the first unburied frame that claims it",
+        because the two membership rules disagree at the edges (see
+        frame_contents) and an outer frame's own list can miss a node that a
+        frame it carries holds. Following the chain gets the right answer
+        even then, and also for projects saved before this was fixed.
+
+        Before that it returned whichever frame came first in the dictionary,
+        which made it a coin toss decided by the order the frames happened to
+        be created in — the same nesting drew correctly or not at all
+        depending on which frame you had drawn first.
+        """
+        burier = self._burier_of()
+        for frame_id, members in self._hidden.items():
+            if node_id not in members:
+                continue
+            seen = {frame_id}
+            while frame_id in burier:
+                frame_id = burier[frame_id]
+                if frame_id in seen:
+                    break       # a cycle in stale membership; stop climbing
+                seen.add(frame_id)
+            return frame_id
+        return None
+
+    def wire_anchor(self, conn, side: str):
+        """The item a wire's `side` end should be drawn from.
+
+        The frame pin standing in for it when that end is folded away,
+        otherwise the port's own pin. One rule, so every path that draws or
+        drags a wire agrees on where its ends are — including the drag
+        preview, which would otherwise spring from a hidden pin's stale
+        position.
+        """
+        pin = self._frame_pins.get((conn.id, side))
+        if pin is not None:
+            return pin
+        node_id, port = ((conn.src_node, conn.src_port) if side == "src"
+                         else (conn.dst_node, conn.dst_port))
+        item = self.node_items.get(node_id)
+        if item is None:
+            return None
+        table = item.output_ports if side == "src" else item.input_ports
+        return table.get(port)
+
+    def _refresh_collapsed_frames(self) -> None:
+        """Re-derive everything collapse implies, from scratch.
+
+        Rebuilt whole against current state rather than patched, for the same
+        reason the link lines are (see _refresh_link_lines): folding, adding
+        a wire through a pin, deleting a node inside and undoing any of it
+        all arrive as different events with the same answer. Patching would
+        mean each of those carrying its own correction, and the one a
+        collapse-time snapshot cannot know about — a wire made *through* a
+        pin, after the fold — is exactly the one that would leak.
+        """
+        if self._suspend_collapse_refresh:
+            return
+        collapsed = [f for f in self.graph.frames.values() if f.collapsed]
+        if not collapsed and not self._hidden and not self._frame_pins:
+            return      # the overwhelmingly common canvas: nothing to do
+
+        # 1. membership — read straight off the model, never recomputed here.
+        #    The frame wrote down what it owned when it folded, so this is a
+        #    pure function of the graph: undo restores exactly the membership
+        #    it took away, and a folded frame parked over other nodes cannot
+        #    quietly adopt them.
+        self._hidden = {
+            frame.id: [nid for nid in frame.members if nid in self.node_items]
+            for frame in collapsed}
+        self._hidden_frames = {
+            frame.id: [fid for fid in frame.member_frames
+                       if fid in self.frame_items]
+            for frame in collapsed}
+
+        hidden_nodes = {nid for ids in self._hidden.values() for nid in ids}
+        hidden_frames = {fid for ids in self._hidden_frames.values()
+                         for fid in ids}
+
+        # 2. visibility.
+        for node_id, item in self.node_items.items():
+            item.setVisible(node_id not in hidden_nodes)
+        for frame_id, item in self.frame_items.items():
+            item.setVisible(frame_id not in hidden_frames)
+            item.set_members(self._hidden.get(frame_id, [])
+                             if item.collapsed else [])
+
+        # 3. the pins, reconciled by (conn_id, side) so a pin that survives a
+        #    rebuild keeps its hover state and stays valid mid-drag.
+        wanted: dict[tuple, tuple] = {}
+        for conn in self.graph.connections.values():
+            src_owner = self._owner_of(conn.src_node)
+            dst_owner = self._owner_of(conn.dst_node)
+            if src_owner is not None and src_owner == dst_owner:
+                continue            # wholly inside one frame: an internal wire
+            if src_owner is not None:
+                wanted[(conn.id, "src")] = (src_owner, conn, "src", False)
+            if dst_owner is not None:
+                wanted[(conn.id, "dst")] = (dst_owner, conn, "dst", False)
+        wanted.update(self._wanted_link_pins())
+
+        self._drop_frame_pins(
+            key for key, pin in self._frame_pins.items()
+            if key not in wanted
+            or wanted[key][0] != pin.frame_item.frame.id)
+        for key, (frame_id, conn, side, is_link) in wanted.items():
+            if key in self._frame_pins:
+                continue
+            pin = self._build_frame_pin(frame_id, conn, side, is_link)
+            if pin is not None:
+                self._frame_pins[key] = pin
+
+        # 4. lay the surviving pins out, and point the wires at them.
+        self._layout_frame_pins()
+        self._reanchor_wires(hidden_nodes)
+        for pin in self._frame_pins.values():
+            pin.refresh_connected()
+
+    def _drop_frame_pins(self, keys) -> None:
+        """Take these pins off the box and out of the scene.
+
+        The scene check is not defensive padding: a pin is a *child* of its
+        frame, so removing the frame takes the pin out of the scene with it,
+        and a second removeItem on the detached item is a dangling pointer
+        that segfaults later. Every pin teardown goes through here.
+        """
+        for key in list(keys):
+            pin = self._frame_pins.pop(key, None)
+            if pin is None:
+                continue
+            if pin.scene() is self:
+                pin.setParentItem(None)
+                self.removeItem(pin)
+
+    def _drop_frame_pins_for(self, node_id: str) -> None:
+        self._drop_frame_pins([key for key, pin in self._frame_pins.items()
+                               if pin.node_id == node_id])
+
+    def _wanted_link_pins(self) -> dict:
+        """Crossing Goto/From links that are already being drawn.
+
+        A named link the user has not asked to see has no line on the canvas,
+        so giving it a pin would invent a connection where the whole point of
+        the link was to not draw one. Only the opted-in ones cross visibly.
+        """
+        from .link_line import wants_lines
+        wanted: dict[tuple, tuple] = {}
+        for link_id, link in self.graph.links.items():
+            if link_id not in self.link_line_items:
+                continue
+            src = self.node_items.get(link.src_node)
+            dst = self.node_items.get(link.dst_node)
+            if src is None or dst is None:
+                continue
+            if not (wants_lines(src.node) or wants_lines(dst.node)):
+                continue
+            src_owner = self._owner_of(link.src_node)
+            dst_owner = self._owner_of(link.dst_node)
+            if src_owner is not None and src_owner == dst_owner:
+                continue
+            if src_owner is not None:
+                wanted[(link_id, "src")] = (src_owner, link, "src", True)
+            if dst_owner is not None:
+                wanted[(link_id, "dst")] = (dst_owner, link, "dst", True)
+        return wanted
+
+    def _build_frame_pin(self, frame_id: str, conn, side: str, is_link: bool):
+        from .frame_port import FramePortItem
+        frame_item = self.frame_items.get(frame_id)
+        if frame_item is None:
+            return None
+        node_id = conn.src_node if side == "src" else conn.dst_node
+        port_name = conn.src_port if side == "src" else conn.dst_port
+        node = self.graph.nodes.get(node_id)
+        item = self.node_items.get(node_id)
+        if node is None or item is None:
+            return None
+        table = item.output_ports if side == "src" else item.input_ports
+        port = table.get(port_name)
+        if port is None:
+            return None
+        pin = FramePortItem(frame_item, node, port.spec,
+                            getattr(conn, "id", ""), side, link=is_link)
+        return pin
+
+    def _layout_frame_pins(self) -> None:
+        """Group the pins by their frame and stack them down its edges.
+
+        Ordered by the wire's hidden end — the node's position, then the port
+        — so the pins mirror how the flow was laid out inside, and stay put
+        across rebuilds instead of shuffling whenever a wire is added.
+        """
+        by_frame: dict[str, list] = {}
+        for pin in self._frame_pins.values():
+            by_frame.setdefault(pin.frame_item.frame.id, []).append(pin)
+        for frame_id, item in self.frame_items.items():
+            pins = by_frame.get(frame_id, [])
+
+            def order(pin):
+                node_item = self.node_items.get(pin.node_id)
+                pos = node_item.pos() if node_item is not None else None
+                return (pos.y() if pos else 0.0, pos.x() if pos else 0.0,
+                        pin.spec.name, pin.conn_id)
+
+            inputs = sorted((p for p in pins if p.side == "dst"), key=order)
+            outputs = sorted((p for p in pins if p.side == "src"), key=order)
+            item.layout_pins(inputs, outputs)
+
+    def _reanchor_wires(self, hidden_nodes: set) -> None:
+        """Point every wire and link line at wherever its ends now live, and
+        hide the ones that run entirely inside a collapsed frame."""
+        for conn_id, ci in self.connection_items.items():
+            conn = ci.conn
+            src_pin = self._frame_pins.get((conn_id, "src"))
+            dst_pin = self._frame_pins.get((conn_id, "dst"))
+            internal = (conn.src_node in hidden_nodes
+                        and conn.dst_node in hidden_nodes
+                        and src_pin is None and dst_pin is None)
+            ci.setVisible(not internal)
+            ci.set_anchors(src_pin, dst_pin)
+        for link_id, line in self.link_line_items.items():
+            src_pin = self._frame_pins.get((link_id, "src"))
+            dst_pin = self._frame_pins.get((link_id, "dst"))
+            link = self.graph.links.get(link_id)
+            internal = (link is not None
+                        and link.src_node in hidden_nodes
+                        and link.dst_node in hidden_nodes
+                        and src_pin is None and dst_pin is None)
+            line.setVisible(not internal)
+            line.set_anchors(src_pin, dst_pin)
+
+    def frame_item_moved(self, frame_id: Optional[str] = None) -> None:
+        """A collapsed frame moved, so the wires pinned to it must follow.
+        node_item_moved cannot cover this: the wires' other ends are hidden
+        nodes that did not themselves move relative to the box.
+
+        `None` means every collapsed frame, for the drags that move several
+        at once and cannot say which.
+        """
+        for pin in self._frame_pins.values():
+            if frame_id is not None and pin.frame_item.frame.id != frame_id:
+                continue
+            ci = self.connection_items.get(pin.conn_id)
+            if ci is not None:
+                ci.update_path()
+            line = self.link_line_items.get(pin.conn_id)
+            if line is not None:
+                line.update_path()
 
     def _refresh_port_connections(self) -> None:
         """A derived Goto/From link feeds a port no drawn wire reaches, so
@@ -283,6 +1030,10 @@ class NodeGraphScene(QGraphicsScene):
         for an answer that is one dictionary lookup per pin."""
         for item in self.node_items.values():
             item.refresh_port_connections()
+        # frame pins are in no node's port dict, so they are not covered by
+        # the loop above — an input pin fed only by a link would draw hollow
+        for pin in self._frame_pins.values():
+            pin.refresh_connected()
 
     def _highlight_link_partners(self) -> None:
         selected = {item.node.id for item in self.selected_node_items()}
@@ -299,6 +1050,18 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None:
             item.on_status_changed()  # also refreshes the tooltip
+        self._notify_owning_frame(node_id)
+
+    def _notify_owning_frame(self, node_id: str) -> None:
+        """A hidden node still shows through its frame's matrix and drives
+        that frame's own LED, so the box has to hear about it even though
+        the node item itself is invisible."""
+        frame_id = self._owner_of(node_id)
+        if frame_id is None:
+            return
+        item = self.frame_items.get(frame_id)
+        if item is not None:
+            item.refresh_status()
 
     def set_requested_nodes(self, node_ids) -> None:
         """Which nodes have a re-run queued. Only the cards whose answer
@@ -320,6 +1083,7 @@ class NodeGraphScene(QGraphicsScene):
             # repaints the whole item continuously while a node runs — and the
             # RunContext has thinned these out long before they arrive here.
             item.on_progress_changed()
+        self._notify_owning_frame(node_id)
 
     def _on_dirty_changed(self, node_id: str, dirty: bool) -> None:
         item = self.node_items.get(node_id)
@@ -394,6 +1158,9 @@ class NodeGraphScene(QGraphicsScene):
         self.revealing_port_labels = revealing
         for item in self.node_items.values():
             self._repaint_ports(item)
+        for pin in self._frame_pins.values():
+            pin.prepareGeometryChange()   # the pill changes its bounds
+            pin.update()
 
     def set_compact_nodes(self, enabled: bool) -> None:
         """Canvas-wide preference. Every plain node changes width, so its
@@ -442,16 +1209,46 @@ class NodeGraphScene(QGraphicsScene):
         item.run_requested.connect(self.frame_run_requested.emit)
         self.addItem(item)
         self.frame_items[frame.id] = item
+        item.apply_stacking()
+        # A project loads nodes, then connections, then frames, so a frame
+        # arriving already collapsed (from a file, a paste, or undo) finds
+        # everything it needs to fold around right here.
+        self._refresh_collapsed_frames()
 
     def _on_frame_removed(self, frame_id: str) -> None:
         item = self.frame_items.pop(frame_id, None)
-        if item is not None:
-            self.removeItem(item)
+        if item is None:
+            return
+        item._stop_pulse()
+        # Drop this frame's pins here, unconditionally, while the frame is
+        # still in the scene — not inside the rebuild. The rebuild can be
+        # suspended (a project load tears every frame down with it off), and
+        # a pin left in _frame_pins after its parent frame has gone is a
+        # dangling pointer the next rebuild would try to remove a second
+        # time. That crashed the app on File > New with a frame collapsed.
+        self._drop_frame_pins([key for key, pin in self._frame_pins.items()
+                               if pin.frame_item is item])
+        # The membership entry is left for the rebuild to prune, which is
+        # what makes it show the contents again — clearing it here would
+        # leave nothing to reconcile and the nodes would stay hidden.
+        self._refresh_collapsed_frames()
+        self.removeItem(item)
 
     def _on_frame_changed(self, frame: Frame) -> None:
         item = self.frame_items.get(frame.id)
         if item is not None:
             item.sync_from_model()
+        # The captured membership is *not* dropped here: the rebuild prunes
+        # frames that are no longer collapsed itself, and it has to see the
+        # stale entry to know there is anything to undo. Clearing it first
+        # leaves nothing to reconcile and the contents stay hidden.
+        self._refresh_collapsed_frames()
+        # The frame may have *moved*, and the wires pinned to it have their
+        # other end on a hidden node that did not move relative to it, so
+        # nothing else repaths them. Only a mouse drag used to do this, which
+        # left every other way a frame can move — a nudge, an undo, a paste,
+        # a project load — drawing its wires from where the box used to be.
+        self.frame_item_moved(frame.id)
 
     # ------------------------------------------------------------- helpers
 
@@ -484,6 +1281,10 @@ class NodeGraphScene(QGraphicsScene):
         flat = self._flat_state()
         for item in self.node_items.values():
             item.set_lod(flat)
+        # a collapsed frame's pins are the only ones left at that zoom, so
+        # they have to flatten with everything else
+        for item in self.frame_items.values():
+            item.set_pins_visible(not flat)
 
     def set_lod(self, zoom: float) -> None:
         """Called by the view whenever its scale changes: push the decision
@@ -521,12 +1322,21 @@ class NodeGraphScene(QGraphicsScene):
         dragging so its own itemChange snaps (Qt moves the whole selection by
         one delta, but only the pressed item was flagged before), and snapshot
         their start positions for the release commit."""
-        starts: dict = {"nodes": {}, "frames": {}}
+        starts: dict = {"nodes": {}, "frames": {}, "carried": {}}
         for item in self._selected_movables():
             item._dragging = True
             if isinstance(item, FrameItem):
                 starts["frames"][item.frame.id] = (
                     item.pos().x(), item.pos().y(), *item._size)
+                # A collapsed frame's contents cannot themselves be selected
+                # (Qt refuses to select an invisible item), so the skip-the-
+                # content-grab rule above would leave them behind. They can
+                # never be double-moved, by exactly that construction.
+                for node_id in self._hidden.get(item.frame.id, ()):
+                    node_item = self.node_items.get(node_id)
+                    if node_item is not None:
+                        starts["carried"][node_id] = (
+                            node_item.pos().x(), node_item.pos().y())
             else:
                 starts["nodes"][item.node.id] = (item.pos().x(), item.pos().y())
         return starts
@@ -545,6 +1355,7 @@ class NodeGraphScene(QGraphicsScene):
             if new != old:
                 node_moves[node_id] = (old, new)
         frame_moves: dict = {}
+        deltas: dict = {}
         for frame_id, old in starts.get("frames", {}).items():
             item = self.frame_items.get(frame_id)
             if item is None:
@@ -553,6 +1364,18 @@ class NodeGraphScene(QGraphicsScene):
             new = (item.pos().x(), item.pos().y(), *item._size)
             if new[:2] != old[:2]:
                 frame_moves[frame_id] = new
+                deltas[frame_id] = (new[0] - old[0], new[1] - old[1])
+        # Qt moved the selection for us, but a collapsed frame's hidden
+        # contents were never in it — shift them by their own frame's delta.
+        for frame_id, (dx, dy) in deltas.items():
+            for node_id in self._hidden.get(frame_id, ()):
+                old = starts.get("carried", {}).get(node_id)
+                item = self.node_items.get(node_id)
+                if old is None or item is None or node_id in node_moves:
+                    continue
+                new = (old[0] + dx, old[1] + dy)
+                item.setPos(*new)
+                node_moves[node_id] = (old, new)
         if not (node_moves or frame_moves):
             return
         self.undo_stack.beginMacro("move selection")
@@ -564,21 +1387,59 @@ class NodeGraphScene(QGraphicsScene):
         self.undo_stack.endMacro()
 
     def delete_selection(self) -> None:
-        from ..commands import RemoveFrameCommand
         node_ids = [i.node.id for i in self.selected_node_items()]
         conn_ids = [i.conn.id for i in self.selectedItems()
                     if isinstance(i, ConnectionItem)]
         frame_ids = [i.frame.id for i in self.selectedItems()
                      if isinstance(i, FrameItem)]
+        self.delete_items(node_ids, conn_ids, frame_ids)
+
+    def delete_items(self, node_ids: list, conn_ids: list,
+                     frame_ids: list, *, confirm: bool = True) -> None:
+        """Remove nodes, wires and frames in one undo step.
+
+        A *collapsed* frame takes its contents with it. Expanded, deleting a
+        frame has never touched the nodes inside and still doesn't — but
+        collapsed, the box is the only thing on the canvas and its contents
+        cannot be seen or selected, so removing it alone would silently
+        strand nodes nobody can reach.
+
+        `confirm=False` skips the are-you-sure. For a caller that is not
+        really deleting anything — updating a component tears its contents
+        down only to build them straight back — asking would be a question
+        about something that isn't happening.
+        """
+        from ..commands import RemoveFrameCommand
         if not (node_ids or conn_ids or frame_ids):
             return
+        collapsed = [fid for fid in frame_ids
+                     if fid in self.graph.frames
+                     and self.graph.frames[fid].collapsed]
+        members: list = []
+        nested: list = []
+        for frame_id in collapsed:
+            members.extend(self._hidden.get(frame_id, ()))
+            nested.extend(self._hidden_frames.get(frame_id, ()))
+        if confirm and members and self.confirm_collapsed_delete is not None:
+            titles = [self.graph.frames[f].title for f in collapsed]
+            if not self.confirm_collapsed_delete(titles, len(members)):
+                return
+        all_nodes = list(dict.fromkeys([*node_ids, *members]))
+        all_frames = list(dict.fromkeys([*frame_ids, *nested]))
+
         self.undo_stack.beginMacro("delete selection")
-        if node_ids or conn_ids:
-            self._push_orphan_snapshots(conn_ids=conn_ids, node_ids=node_ids)
-            self.undo_stack.push(
-                RemoveSelectionCommand(self.graph, node_ids, conn_ids))
-        for frame_id in frame_ids:
+        if all_nodes or conn_ids:
+            # first: it reads the wires that are about to go
+            self._push_orphan_snapshots(conn_ids=conn_ids, node_ids=all_nodes)
+        # Frames before nodes, because undo runs a macro backwards. The other
+        # way round, undo re-adds a collapsed frame while none of its members
+        # exist yet, it folds around nothing, and the nodes then come back
+        # visible on top of the box.
+        for frame_id in all_frames:
             self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
+        if all_nodes or conn_ids:
+            self.undo_stack.push(
+                RemoveSelectionCommand(self.graph, all_nodes, conn_ids))
         self.undo_stack.endMacro()
 
     # -------------------------------------------------------------- layering
@@ -648,11 +1509,18 @@ class NodeGraphScene(QGraphicsScene):
             self.graph, frame_id,
             rect=(pos.x(), pos.y(), size[0], size[1])))
 
-    def push_frame_move(self, frame_id: str, pos, size, node_moves: dict) -> None:
+    def push_frame_move(self, frame_id: str, pos, size, node_moves: dict,
+                        nested: Optional[dict] = None) -> None:
         self.undo_stack.beginMacro("move frame")
         self.push_frame_rect(frame_id, pos, size)
         if node_moves:
             self.push_move_command(node_moves)
+        # frames nested inside travel with it, in the same step: a nested
+        # frame left behind is merely odd while both are open, and outright
+        # corruption once the outer one has been folded over it
+        for nested_id, rect in (nested or {}).items():
+            self.undo_stack.push(UpdateFrameCommand(
+                self.graph, nested_id, rect=rect))
         self.undo_stack.endMacro()
 
     def push_frame_title(self, frame_id: str, title: str) -> None:
@@ -700,10 +1568,15 @@ class NodeGraphScene(QGraphicsScene):
         if port.spec.direction.value == "input":
             existing = self.graph.input_connection(port.node_id, port.spec.name)
             if existing is not None:
-                # grab the wire: drag continues from its source output
+                # grab the wire: drag continues from its source output —
+                # or from the frame pin standing in for it, when that source
+                # is folded away inside a collapsed frame. Reaching straight
+                # for the hidden node's own pin would start the drag from a
+                # point in the vacated region, nowhere near the wire.
                 self._drag_detach = existing
-                fixed = (self.node_items[existing.src_node]
-                         .output_ports[existing.src_port])
+                fixed = self.wire_anchor(existing, "src") or (
+                    self.node_items[existing.src_node]
+                    .output_ports[existing.src_port])
                 item = self.connection_items.get(existing.id)
                 if item is not None:
                     item.hide()

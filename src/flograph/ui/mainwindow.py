@@ -35,8 +35,8 @@ from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
     ReorderPagesCommand, SetPageColorCommand,
-    SetActiveCommand, SetExclusiveCommand, SetFrozenCommand, SetLabelCommand,
-    SetLockedCommand, SetParamCommand,
+    SetActiveCommand, SetExclusiveCommand, SetFrameSourceCommand,
+    SetFrozenCommand, SetLabelCommand, SetLockedCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_file
@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self.undo_stack = QUndoStack(self)
         self.scene = NodeGraphScene(self.graph, self.undo_stack,
                                     registry=registry, parent=self)
+        self.scene.confirm_collapsed_delete = self._confirm_collapsed_delete
         self.view = NodeGraphView(self.scene)
         self._canvas_stack = QStackedWidget()
         self._canvas_stack.addWidget(self.view)
@@ -301,6 +302,14 @@ class MainWindow(QMainWindow):
         self.library_tree.move_user_node_requested.connect(self._move_user_node)
         self.library_tree.delete_user_node_requested.connect(
             self._delete_user_node)
+        self.library_tree.insert_frame_requested.connect(
+            self._insert_component_at_view_center)
+        self.library_tree.rename_user_frame_requested.connect(
+            self._rename_user_frame)
+        self.library_tree.move_user_frame_requested.connect(
+            self._move_user_frame)
+        self.library_tree.delete_user_frame_requested.connect(
+            self._delete_user_frame)
 
         # ----------------------------------------------- properties/code/log
         # one tab group: all three answer "what is this node doing", and the
@@ -1050,6 +1059,7 @@ class MainWindow(QMainWindow):
         self.view.add_node_requested.connect(self._show_add_node_menu)
         self.view.palette_requested.connect(self._show_palette)
         self.view.node_dropped.connect(self._add_node_at)
+        self.view.frame_dropped.connect(self._insert_component_at)
         self.view.files_dropped.connect(self._add_reader_nodes_for_files)
         self.view.node_context_requested.connect(self._show_node_menu)
         self.view.frame_context_requested.connect(self._show_frame_menu)
@@ -1963,13 +1973,37 @@ class MainWindow(QMainWindow):
                       if f.title.strip().lower() == title), None)
         if frame is None:
             return []
-        return self._nodes_in_rect(QRectF(*frame.rect))
+        return self._nodes_of(frame)
 
     def _frame_node_ids_by_id(self, frame_id: str) -> list[str]:
         frame = self.graph.frames.get(frame_id)
         if frame is None:
             return []
-        return self._nodes_in_rect(QRectF(*frame.rect))
+        return self._nodes_of(frame)
+
+    def _nodes_of(self, frame) -> list[str]:
+        """The nodes a frame holds — the one answer everything asks for.
+
+        The canvas's own containment rule, so "Run frame" reaches exactly what
+        dragging the frame would carry and what folding it would take in. Two
+        things a plain sweep of the rectangle gets wrong, both of which showed
+        up as running the wrong set:
+
+        A folded frame inside this one is a 60px box, and the nodes it stands
+        for are still recorded wherever they were before it folded — which can
+        be outside this frame entirely. Sweeping the rectangle misses them, so
+        running a frame quietly skipped part of what was in it.
+
+        And the sweep has to be blind to visibility, or it would miss those
+        nodes altogether — but blind means it also picks up nodes belonging to
+        some *other* folded frame that happens to have left them lying under
+        this rectangle. Running a frame would then run somebody else's nodes.
+        """
+        item = self.scene.frame_items.get(frame.id)
+        if item is None:        # mirrored before the canvas caught up
+            return [nid for nid in frame.members if nid in self.graph.nodes]
+        node_ids, _frames = self.scene.frame_contents(item)
+        return [nid for nid in node_ids if nid in self.graph.nodes]
 
     def _on_frame_run_requested(self, frame_id: str) -> None:
         self._flush_pending_edits()
@@ -2205,7 +2239,33 @@ class MainWindow(QMainWindow):
         if item is not None and not item.isSelected():
             self.scene.clearSelection()
             item.setSelected(True)
+        collapsed = self.graph.frames[frame_id].collapsed
         menu = QMenu(self)
+        fold_action = menu.addAction("Expand frame" if collapsed
+                                     else "Collapse frame")
+        # Always offered, folded or not. The run glyph in the title bar is a
+        # shortcut, not a substitute: it is gone while the frame is folded,
+        # and on an expanded frame holding folded ones it is easy to miss, so
+        # hiding the menu entry left people with no way in they could find.
+        run_action = menu.addAction("Run frame")
+        targets = self._frame_node_ids_by_id(frame_id)
+        run_action.setEnabled(bool(targets))
+        if not targets:
+            run_action.setToolTip("This frame holds no nodes to run.")
+        menu.addSeparator()
+        state = self._component_state(frame_id)
+        update_action = None
+        if state is not None and state["stale"]:
+            update_action = menu.addAction("Update from component")
+            # a modified instance has local work in it that an update would
+            # throw away, so it is shown greyed rather than hidden — the
+            # point is to say why it isn't on offer
+            update_action.setEnabled(state["pristine"])
+            if not state["pristine"]:
+                update_action.setToolTip(
+                    "This copy has been edited, so updating it would discard "
+                    "those changes.")
+        save_component = menu.addAction("Save as component…")
         copy_action = menu.addAction("Copy")
         change_color = menu.addAction("Change colour…")
         layer_actions = add_layer_menu(menu)
@@ -2214,13 +2274,302 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(global_pos)
         if chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
+        elif chosen is fold_action:
+            item = self.scene.frame_items.get(frame_id)
+            if item is not None:
+                item.toggle_collapsed()
+        elif chosen is run_action:
+            self._on_frame_run_requested(frame_id)
+        elif update_action is not None and chosen is update_action:
+            self._update_component_instance(frame_id)
+        elif chosen is save_component:
+            self._save_frame_as_component(frame_id)
         elif chosen is copy_action:
             self._copy_selection()
         elif chosen is change_color:
             self._pick_frame_color(frame_id)
         elif chosen is delete_action:
-            from .commands import RemoveFrameCommand
-            self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
+            # through the scene, so a collapsed frame takes its hidden
+            # contents with it and asks first — same as the Delete key
+            self.scene.delete_items([], [], [frame_id])
+
+    # ------------------------------------------------------- components
+
+    def _save_frame_as_component(self, frame_id: str) -> None:
+        """Write a frame and everything inside it to the user library."""
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        frame = self.graph.frames.get(frame_id)
+        if frame is None:
+            return
+        item = self.scene.frame_items.get(frame_id)
+        if item is not None and not item.isSelected():
+            self.scene.clearSelection()
+            item.setSelected(True)
+        payload = self._selection_payload()
+        if payload is None:
+            self.statusBar().showMessage("Nothing to save.", 4000)
+            return
+        name, ok = QInputDialog.getText(
+            self, "Save as component", "Name:", QLineEdit.Normal, frame.title)
+        if not (ok and name.strip()):
+            return
+        frames_dir = user_frames_dir()
+        try:
+            component_id = user_frames.write_user_frame(
+                frames_dir, None, name.strip(), payload)
+        except user_frames.UserFrameError:
+            if QMessageBox.question(
+                    self, "Replace component?",
+                    f"A component named “{name.strip()}” already exists. "
+                    "Replace it?") != QMessageBox.Yes:
+                return
+            component_id = user_frames.write_user_frame(
+                frames_dir, None, name.strip(), payload, overwrite=True)
+        # stamp the frame we saved *from* as an instance of what it became,
+        # so it reads as pristine rather than as an unrelated copy
+        self.undo_stack.push(SetFrameSourceCommand(
+            self.graph, frame_id, component_id,
+            user_frames.content_hash(payload)))
+        self.library_tree.reload()
+        self.statusBar().showMessage(
+            f"Saved component “{name.strip()}”.", 4000)
+
+    def _insert_component_at_view_center(self, component_id: str) -> None:
+        center = self.view.mapToScene(self.view.viewport().rect().center())
+        self._insert_component_at(component_id, center)
+
+    def _insert_component_at(self, component_id: str, scene_pos) -> None:
+        """Drop a copy of a saved component onto the canvas.
+
+        A copy, not a link: every id is regenerated, and editing it never
+        writes back to the library file. The provenance stamp is what lets a
+        copy nobody has touched still be recognised later.
+        """
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        path = user_frames.path_for(user_frames_dir(), component_id)
+        try:
+            data = user_frames.read(path)
+        except user_frames.UserFrameError as exc:
+            QMessageBox.warning(self, "Insert failed", str(exc))
+            return
+        payload = data.get("payload", {})
+        fingerprint = user_frames.content_hash(payload)
+        # land it under the cursor: shift by its own top-left corner
+        corners = [f.get("rect", [0, 0])[:2] for f in payload.get("frames", [])]
+        corners += [n.get("pos", [0, 0]) for n in payload.get("nodes", [])]
+        origin_x = min((c[0] for c in corners), default=0.0)
+        origin_y = min((c[1] for c in corners), default=0.0)
+        for entry in payload.get("frames", []):
+            entry["source"] = component_id
+            entry["source_fingerprint"] = fingerprint
+        self._insert_payload(
+            payload,
+            offset=(scene_pos.x() - origin_x, scene_pos.y() - origin_y),
+            label="insert component")
+
+    def _component_state(self, frame_id: str) -> Optional[dict]:
+        """Where a frame stands relative to the component it came from.
+
+        Returns None when it came from nowhere, or the library file it names
+        has since gone. Otherwise `pristine` says whether anything inside has
+        been edited since it was stamped, and `stale` whether the library
+        file has moved on. Only a frame that is both pristine and stale can
+        be updated: a modified one has local work in it that an update would
+        silently throw away.
+        """
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        frame = self.graph.frames.get(frame_id)
+        if frame is None or not frame.source:
+            return None
+        path = user_frames.path_for(user_frames_dir(), frame.source)
+        try:
+            data = user_frames.read(path)
+        except user_frames.UserFrameError:
+            return None
+        library = user_frames.content_hash(data.get("payload", {}))
+        current = self._frame_content_hash(frame_id)
+        return {
+            "component_id": frame.source,
+            "payload": data.get("payload", {}),
+            "library_fingerprint": library,
+            "pristine": current == frame.source_fingerprint,
+            "stale": library != frame.source_fingerprint,
+        }
+
+    def _frame_content_hash(self, frame_id: str) -> str:
+        """Hash this frame as it stands now, via the clipboard payload —
+        the same shape, and so the same hash, the library file was written
+        from."""
+        from flograph.core import user_frames
+        keep = [i for i in self.scene.selectedItems()]
+        self.scene.clearSelection()
+        item = self.scene.frame_items.get(frame_id)
+        if item is not None:
+            item.setSelected(True)
+        payload = self._selection_payload() or {}
+        self.scene.clearSelection()
+        for prev in keep:
+            prev.setSelected(True)
+        return user_frames.content_hash(payload)
+
+    def _update_component_instance(self, frame_id: str) -> None:
+        """Replace a frame's contents with the library's current version.
+
+        The instance's nodes are thrown away and rebuilt from the file, so
+        the wires reaching in from outside have to be re-made afterwards.
+        They are matched by node *label* and port name: every id in a
+        component is regenerated on insert, so ids cannot carry across, and a
+        label is what the user actually named the thing.
+        """
+        from flograph.core import user_frames
+        state = self._component_state(frame_id)
+        frame = self.graph.frames.get(frame_id)
+        if state is None or frame is None:
+            return
+        # transitive: a component can hold frames of its own now, and the old
+        # instance has to go completely or the update leaves the previous
+        # nesting standing alongside the new copy of it
+        item = self.scene.frame_items.get(frame_id)
+        if item is None:
+            return
+        member_list, nested_frames = self.scene.frame_contents(item)
+        members = set(member_list)
+        crossings = []
+        for conn in self.graph.connections.values():
+            src_in, dst_in = conn.src_node in members, conn.dst_node in members
+            if src_in == dst_in:
+                continue        # wholly inside, or wholly outside
+            if src_in:
+                crossings.append(("out", self.graph.nodes[conn.src_node].label,
+                                  conn.src_port, conn.dst_node, conn.dst_port))
+            else:
+                crossings.append(("in", self.graph.nodes[conn.dst_node].label,
+                                  conn.dst_port, conn.src_node, conn.src_port))
+        origin = (frame.rect[0], frame.rect[1])
+        was_collapsed = frame.collapsed
+        payload = state["payload"]
+        for entry in payload.get("frames", []):
+            # only the component's own outer frame takes the instance's
+            # provenance and folded state; a frame nested inside it keeps
+            # whatever it was saved as. Absent "root" means a file written
+            # before components could nest, where the single frame is the
+            # root by definition.
+            if not entry.get("root", True):
+                continue
+            entry["source"] = state["component_id"]
+            entry["source_fingerprint"] = state["library_fingerprint"]
+            entry["collapsed"] = was_collapsed
+        corners = [f.get("rect", [0, 0])[:2] for f in payload.get("frames", [])]
+        corners += [n.get("pos", [0, 0]) for n in payload.get("nodes", [])]
+        off_x = origin[0] - min((c[0] for c in corners), default=0.0)
+        off_y = origin[1] - min((c[1] for c in corners), default=0.0)
+
+        self.undo_stack.beginMacro("update component")
+        # The members go explicitly rather than relying on the collapsed-frame
+        # rule: an expanded instance is being replaced just as thoroughly as a
+        # folded one, and leaving its old nodes behind would double them up.
+        # No confirm — nothing is being lost, it is rebuilt on the next line.
+        self.scene.delete_items(sorted(members), [],
+                                [frame_id] + list(nested_frames),
+                                confirm=False)
+        built = self._insert_payload(payload, offset=(off_x, off_y),
+                                     label="insert component")
+        if built is not None:
+            by_label = {}
+            for old_id, new_id in built["nodes"].items():
+                node = self.graph.nodes.get(new_id)
+                if node is not None:
+                    by_label.setdefault(node.label, new_id)
+            remade = 0
+            for side, label, port, other_node, other_port in crossings:
+                new_id = by_label.get(label)
+                if new_id is None or other_node not in self.graph.nodes:
+                    continue    # that node is gone from the new version
+                try:
+                    if side == "out":
+                        self.undo_stack.push(ConnectCommand(
+                            self.graph, new_id, port, other_node, other_port))
+                    else:
+                        self.undo_stack.push(ConnectCommand(
+                            self.graph, other_node, other_port, new_id, port))
+                    remade += 1
+                except Exception:
+                    continue    # the port no longer exists, or it would cycle
+            dropped = len(crossings) - remade
+            self.undo_stack.endMacro()
+            self.statusBar().showMessage(
+                f"Updated from “{state['component_id']}”."
+                + (f" {dropped} connection{'s' if dropped != 1 else ''} "
+                   "could not be remade." if dropped else ""), 6000)
+            return
+        self.undo_stack.endMacro()
+
+    def _rename_user_frame(self, component_id: str) -> None:
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        name, ok = QInputDialog.getText(
+            self, "Rename component", "Name:", QLineEdit.Normal, "")
+        if not (ok and name.strip()):
+            return
+        try:
+            user_frames.rename_user_frame(user_frames_dir(), component_id,
+                                          name.strip())
+        except user_frames.UserFrameError as exc:
+            QMessageBox.warning(self, "Rename failed", str(exc))
+            return
+        self.library_tree.reload()
+
+    def _move_user_frame(self, component_id: str) -> None:
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        group, ok = QInputDialog.getText(
+            self, "Move component", "Group (blank for top level):",
+            QLineEdit.Normal, "")
+        if not ok:
+            return
+        try:
+            user_frames.move_user_frame(
+                user_frames_dir(), component_id,
+                user_frames.slugify(group) if group.strip() else None)
+        except user_frames.UserFrameError as exc:
+            QMessageBox.warning(self, "Move failed", str(exc))
+            return
+        self.library_tree.reload()
+
+    def _delete_user_frame(self, component_id: str) -> None:
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        if QMessageBox.question(
+                self, "Delete component",
+                f"Delete the saved component “{component_id}”? "
+                "Flows already using it are not affected."
+        ) != QMessageBox.Yes:
+            return
+        try:
+            user_frames.delete_user_frame(user_frames_dir(), component_id)
+        except user_frames.UserFrameError as exc:
+            QMessageBox.warning(self, "Delete failed", str(exc))
+            return
+        self.library_tree.reload()
+
+    def _confirm_collapsed_delete(self, titles: list, count: int) -> bool:
+        """Deleting a folded frame deletes what is inside it, which the
+        canvas cannot show — so say how much before doing it."""
+        names = ", ".join(f"“{t}”" for t in titles) or "this frame"
+        box = QMessageBox(self)
+        box.setWindowTitle("Delete frame")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(f"Delete {names} and the "
+                    f"{count} node{'s' if count != 1 else ''} inside?")
+        box.setInformativeText(
+            "The frame is collapsed, so its contents go with it. "
+            "Expand it first to delete the frame on its own.")
+        box.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
+        box.setDefaultButton(QMessageBox.Cancel)
+        return box.exec() == QMessageBox.Yes
 
     def _pick_frame_color(self, frame_id: str) -> None:
         if frame_id not in self.graph.frames:
@@ -2484,10 +2833,19 @@ class MainWindow(QMainWindow):
     def _add_frame(self) -> None:
         from flograph.core import Frame
         from .commands import AddFrameCommand
-        selected = self.scene.selected_node_items()
+        # frames count as much as nodes here. A collapsed frame is a box in
+        # the flow like any other, and grouping a row of them is the obvious
+        # thing to want; reading only the nodes meant a selection of nothing
+        # but frames looked empty, and Ctrl+G silently dropped a default
+        # frame in the middle of the viewport instead of around them.
+        selected = (self.scene.selected_node_items()
+                    + self.scene.selected_frame_items())
         if selected:
             rect = None
             for item in selected:
+                # what the item actually draws, so a collapsed frame
+                # contributes its little square and not the region it would
+                # grow back into
                 bounds = item.sceneBoundingRect()
                 rect = bounds if rect is None else rect.united(bounds)
             rect.adjust(-30, -50, 30, 30)
@@ -2497,28 +2855,65 @@ class MainWindow(QMainWindow):
             center = self.view.mapToScene(self.view.viewport().rect().center())
             frame = Frame(id=uuid.uuid4().hex,
                           rect=(center.x() - 200, center.y() - 130, 400, 260))
-        self.undo_stack.push(AddFrameCommand(self.graph, frame))
+        self._push_new_frame(frame)
 
     def _add_frame_at(self, scene_pos: QPointF) -> None:
         from flograph.core import Frame
-        from .commands import AddFrameCommand
         frame = Frame(id=uuid.uuid4().hex,
                       rect=(scene_pos.x(), scene_pos.y(), 400, 260))
+        self._push_new_frame(frame)
+
+    def _push_new_frame(self, frame) -> None:
+        """Add a frame, and drop it behind anything it has been drawn around.
+
+        A new frame arrives on top of the others, which is right for one you
+        have drawn on empty canvas and wrong for one you have drawn *around*
+        existing frames: it covers them, and since a frame takes the click
+        anywhere in its body, they can no longer be selected at all without
+        sending the new one to the back by hand.
+
+        Not simply "frames go to the back on arrival" — that breaks the
+        mirror case just as badly. A small frame drawn *inside* a big one
+        would arrive behind it and be the unreachable one instead. What
+        settles it is containment, not arrival order: a frame that encloses
+        another belongs behind it, so this drops the new frame just behind
+        the backmost frame it encloses, and leaves it on top when it encloses
+        nothing.
+        """
+        from .commands import AddFrameCommand, RestackCommand
+        rect = QRectF(*frame.rect)
+        order = self.graph.stacking_order("frame")
+        inside = [fid for fid in order
+                  if rect.contains(QRectF(*self.graph.frames[fid].rect))]
+        if not inside:
+            self.undo_stack.push(AddFrameCommand(self.graph, frame))
+            return
+        new_order = order + [frame.id]
+        new_order.remove(frame.id)
+        new_order.insert(min(order.index(fid) for fid in inside), frame.id)
+        self.undo_stack.beginMacro("add frame")
         self.undo_stack.push(AddFrameCommand(self.graph, frame))
+        self.undo_stack.push(RestackCommand(
+            self.graph, "frame", new_order, text="add frame"))
+        self.undo_stack.endMacro()
 
     def _align(self, mode: str) -> None:
-        items = self.scene.selected_node_items()
+        # frames line up alongside nodes: a collapsed one is a box in the
+        # flow like any other, and leaving it behind while the nodes either
+        # side of it shuffled into line was the same blind spot that put a
+        # Ctrl+G frame in the wrong place (see _add_frame)
+        items = (self.scene.selected_node_items()
+                 + self.scene.selected_frame_items())
         if len(items) < 2:
             return
-        moves = {}
+        placements: dict = {}
         if mode in ("left", "top"):
             anchor = min(i.pos().x() if mode == "left" else i.pos().y()
                          for i in items)
             for item in items:
                 old = (item.pos().x(), item.pos().y())
-                new = (anchor, old[1]) if mode == "left" else (old[0], anchor)
-                if new != old:
-                    moves[item.node.id] = (old, new)
+                placements[item] = ((anchor, old[1]) if mode == "left"
+                                    else (old[0], anchor))
         else:
             horizontal = mode == "dist_h"
             key = (lambda i: i.pos().x()) if horizontal else (lambda i: i.pos().y())
@@ -2528,11 +2923,14 @@ class MainWindow(QMainWindow):
             for index, item in enumerate(ordered):
                 old = (item.pos().x(), item.pos().y())
                 coord = first + step * index
-                new = (coord, old[1]) if horizontal else (old[0], coord)
-                if new != old:
-                    moves[item.node.id] = (old, new)
-        if moves:
-            self.scene.push_move_command(moves)
+                placements[item] = ((coord, old[1]) if horizontal
+                                    else (old[0], coord))
+        moves, frame_rects = self.scene.placement_plan(placements)
+        if not moves and not frame_rects:
+            return
+        self.undo_stack.beginMacro(f"align {mode}")
+        self.scene.apply_nudge(moves, frame_rects)
+        self.undo_stack.endMacro()
 
     # -------------------------------------------------------- window state
 
@@ -2639,14 +3037,26 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------- copy/paste
 
     def _selection_payload(self) -> Optional[dict]:
-        frame_items = self.scene.selected_frame_items()
         node_ids = {item.node.id for item in self.scene.selected_node_items()}
-        for item in frame_items:
-            # a frame carries the nodes sitting inside it, same as a drag
-            node_ids.update(self._frame_node_ids_by_id(item.frame.id))
+        # dicts as ordered sets: the frames come out in a stable order, and a
+        # frame reachable two ways is only written once
+        frame_ids: dict = {}
+        roots = {item.frame.id for item in self.scene.selected_frame_items()}
+        for item in self.scene.selected_frame_items():
+            frame_ids[item.frame.id] = None
+            # a frame carries what is inside it, same as a drag — and that
+            # includes any frame inside it, and whatever *those* hold. Copying
+            # only the frames you had selected quietly flattened the nesting:
+            # you got the nodes and the outer frame, and the inner frame was
+            # simply not in the clipboard at all.
+            nodes_in, frames_in = self.scene.frame_contents(item)
+            node_ids.update(nodes_in)
+            for nested_id in frames_in:
+                frame_ids[nested_id] = None
         nodes = [self.graph.nodes[nid] for nid in node_ids
-                if nid in self.graph.nodes]
-        frames = [item.frame for item in frame_items]
+                 if nid in self.graph.nodes]
+        frames = [self.graph.frames[fid] for fid in frame_ids
+                  if fid in self.graph.frames]
         if not nodes and not frames:
             return None
         ids = {n.id for n in nodes}
@@ -2663,7 +3073,27 @@ class MainWindow(QMainWindow):
             } for c in self.graph.connections.values()
                 if c.src_node in ids and c.dst_node in ids],
             "frames": [{
+                # the id is what lets the membership below be re-pointed at
+                # the copies on paste; without it a folded frame arrives
+                # standing in for nothing
+                "id": f.id,
+                # the one you actually selected, as against a frame that came
+                # along because it was inside it. A component update stamps
+                # the instance's folded state onto the root and leaves the
+                # nesting to keep its own.
+                "root": f.id in roots,
                 "title": f.title, "rect": list(f.rect), "color": f.color,
+                "collapsed": f.collapsed,
+                # without this a pasted folded frame can never open back to
+                # the right size — it only knows the 60px box
+                "expanded_size": (list(f.expanded_size)
+                                  if f.expanded_size else None),
+                "members": [m for m in f.members if m in ids],
+                "member_frames": [m for m in f.member_frames
+                                  if m in frame_ids],
+                # `nudged` is deliberately not copied: it records what this
+                # frame shoved aside *on this canvas*, which the copy has
+                # displaced nothing of.
             } for f in frames],
         }
 
@@ -2758,9 +3188,19 @@ class MainWindow(QMainWindow):
                 params[param.name] = id_map[target]
         return params
 
-    def _insert_payload(self, payload: dict) -> None:
+    def _insert_payload(self, payload: dict,
+                        offset: Optional[tuple] = None,
+                        label: str = "paste") -> None:
+        """Stamp a clipboard-shaped fragment into the graph with fresh ids.
+
+        `offset` shifts everything it contains; the default nudge is what
+        makes a paste land clear of what it was copied from. A component
+        dropped from the library passes its own, so it arrives under the
+        cursor instead.
+        """
         from flograph.core import Frame
         from .commands import AddFrameCommand
+        dx, dy = offset if offset is not None else (PASTE_OFFSET, PASTE_OFFSET)
         # ids are assigned up front, before any node is built: a param that
         # references another node (a From's Goto) may name an entry that comes
         # later in the payload
@@ -2786,24 +3226,45 @@ class MainWindow(QMainWindow):
                 params=self._remap_node_refs(
                     {**spec.default_params(), **entry.get("params", {})},
                     spec, id_map),
-                pos=(entry["pos"][0] + PASTE_OFFSET,
-                     entry["pos"][1] + PASTE_OFFSET),
+                pos=(entry["pos"][0] + dx, entry["pos"][1] + dy),
                 label_override=entry.get("label"),
                 color=entry.get("color"),
                 description=entry.get("description", ""),
             ))
+        # frames get an id map of their own, for the same reason the nodes do:
+        # a folded frame names the nodes and frames it stands in for, and
+        # those names have to be re-pointed at the copies. Assigned up front
+        # so a frame can name a nested one written after it.
+        frame_entries = payload.get("frames", [])
+        frame_map: dict = {}
+        for index, entry in enumerate(frame_entries):
+            # older clipboard fragments carry no frame id, and there is
+            # nothing to re-point in them — key by position so they still paste
+            frame_map[entry.get("id") or f"\0frame{index}"] = uuid.uuid4().hex
         new_frames: list[Frame] = []
-        for entry in payload.get("frames", []):
+        for index, entry in enumerate(frame_entries):
             rect = entry.get("rect", [0.0, 0.0, 300.0, 200.0])
+            size = entry.get("expanded_size")
             new_frames.append(Frame(
-                id=uuid.uuid4().hex, title=entry.get("title", "Frame"),
-                rect=(rect[0] + PASTE_OFFSET, rect[1] + PASTE_OFFSET,
-                     rect[2], rect[3]),
+                id=frame_map[entry.get("id") or f"\0frame{index}"],
+                title=entry.get("title", "Frame"),
+                rect=(rect[0] + dx, rect[1] + dy, rect[2], rect[3]),
                 color=entry.get("color") or "#33415c",
+                collapsed=bool(entry.get("collapsed", False)),
+                expanded_size=tuple(size) if size else None,
+                # anything the fragment did not bring with it is dropped
+                # rather than carried as a dangling name
+                members=tuple(id_map[m] for m in entry.get("members", ())
+                              if m in id_map),
+                member_frames=tuple(frame_map[m]
+                                    for m in entry.get("member_frames", ())
+                                    if m in frame_map),
+                source=entry.get("source", ""),
+                source_fingerprint=entry.get("source_fingerprint", ""),
             ))
         if not new_nodes and not new_frames:
-            return
-        self.undo_stack.beginMacro("paste")
+            return None
+        self.undo_stack.beginMacro(label)
         for node in new_nodes:
             self.undo_stack.push(AddNodeCommand(self.graph, node))
         for frame in new_frames:
@@ -2825,6 +3286,9 @@ class MainWindow(QMainWindow):
             item = self.scene.frame_items.get(frame.id)
             if item is not None:
                 item.setSelected(True)
+        # what it built, so a component update can re-attach the wires that
+        # used to reach the nodes this just replaced
+        return {"nodes": id_map, "frames": [f.id for f in new_frames]}
 
     # ------------------------------------------------------ project files
 
@@ -3034,6 +3498,10 @@ class MainWindow(QMainWindow):
         from .browser import forget_all
         forget_all()
         self._restoring_pages = True
+        # Folding is re-derived from scratch on every graph event, which is
+        # the right trade everywhere except here: a 500-node load would run
+        # it 500 times. Suspend it and fold once, at the end.
+        self.scene._suspend_collapse_refresh = True
         for page_id in list(self.graph.pages):
             self.graph.remove_page(page_id)
         for frame_id in list(self.graph.frames):
@@ -3050,6 +3518,8 @@ class MainWindow(QMainWindow):
         for page in loaded.pages.values():
             self.graph.add_page(page)
         self._restoring_pages = False
+        self.scene._suspend_collapse_refresh = False
+        self.scene._refresh_collapsed_frames()
         self.undo_stack.clear()
         self.undo_stack.setClean()
         if loaded.nodes:

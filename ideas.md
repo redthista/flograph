@@ -27,20 +27,6 @@ worth a spike to size before it becomes a plan.
 
 ---
 
-## D. Canvas at scale  (was 25)
-
-**D1. Collapsible frames.** Collapse a frame down to a single node-sized box:
-put the data inputs and tables in a frame, wire onward with gotos, collapse
-it, and the canvas stays fast. Frames are already a first-class model object
-(`core/graph.py`, `ui/canvas/frame_item.py`) with their own stacking order,
-so the code is a display state plus a rule for what happens to wires that
-cross the collapsed boundary — and that rule *is* the design question.
-
-Already shipped in this area, for reference: per-node canvas previews can be
-switched off (right-click a viz node), and zoom-out LOD flattening.
-
----
-
 ## E. Charts  (was 27)
 
 **E1. Explicit Y bounds on the chart-per-value nodes.** Partly overtaken:

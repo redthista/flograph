@@ -20,6 +20,15 @@ STAR = "★"
 FAVORITE_SECTION = "Favorites"
 
 NODE_TYPE_MIME = "application/x-flograph-node-type"
+#: A saved frame (see core.user_frames) drags as its own kind. It is not a
+#: node type — nothing instantiates it — so sharing NODE_TYPE_MIME would put
+#: an id through the registry that could never resolve.
+FRAME_ID_MIME = "application/x-flograph-frame-id"
+#: Item roles: the type_id a row adds, the section marker, and the component
+#: id for rows in the User Frames section.
+TYPE_ID_ROLE = Qt.UserRole
+SECTION_ROLE = Qt.UserRole + 1
+FRAME_ID_ROLE = Qt.UserRole + 2
 
 # The mark beside each library row: the same glyph the node will wear on the
 # canvas, so a node is recognised in the list by the shape you will then look
@@ -132,6 +141,7 @@ class LibraryTree(QTreeWidget):
     on top; Ctrl+Shift+F stars the selected row."""
 
     USER_SECTION = "User Nodes"
+    USER_FRAMES_SECTION = "User Frames"
     FAVORITE_SECTION = FAVORITE_SECTION
 
     add_requested = Signal(str)            # type_id
@@ -139,6 +149,10 @@ class LibraryTree(QTreeWidget):
     rename_user_node_requested = Signal(str)   # type_id
     delete_user_node_requested = Signal(str)   # type_id
     move_user_node_requested = Signal(str)     # type_id
+    insert_frame_requested = Signal(str)       # component id
+    rename_user_frame_requested = Signal(str)  # component id
+    delete_user_frame_requested = Signal(str)  # component id
+    move_user_frame_requested = Signal(str)    # component id
 
     def __init__(self, registry: NodeRegistry, favorites: Favorites,
                  parent=None) -> None:
@@ -203,8 +217,41 @@ class LibraryTree(QTreeWidget):
                 parent.addChild(self._node_item(spec, favorite=True))
         user_top.setExpanded(True)
 
+        self._build_frames_section()
+
         # re-apply whatever search / favorites-only filter was active
         self.filter(self._last_query)
+
+    def _build_frames_section(self) -> None:
+        """Saved frames, grouped by folder like the user nodes above.
+
+        Built from its own scan of the library rather than from the registry:
+        a component is a fragment of a flow, not a node type, so there is no
+        NodeSpec for one and nothing in `registry.all()` will ever list it.
+        """
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        entries = user_frames.scan(user_frames_dir())
+        if not entries:
+            return          # no empty section on a canvas that has none
+        top = self._section(self.USER_FRAMES_SECTION)
+        top.setData(0, SECTION_ROLE, self.USER_FRAMES_SECTION)
+        groups: dict = {}
+        for entry in entries:
+            groups.setdefault(entry["group"], []).append(entry)
+        for group in sorted(groups, key=lambda g: (g is not None, g or "")):
+            parent = top
+            if group is not None:
+                parent = QTreeWidgetItem([group])
+                parent.setFlags(parent.flags() & ~Qt.ItemIsDragEnabled)
+                top.addChild(parent)
+                parent.setExpanded(True)
+            for entry in groups[group]:
+                child = QTreeWidgetItem([entry["name"]])
+                child.setData(0, FRAME_ID_ROLE, entry["id"])
+                child.setToolTip(0, f"Component · {entry['id']}")
+                parent.addChild(child)
+        top.setExpanded(True)
 
     def _section(self, title: str, marker: str = "") -> QTreeWidgetItem:
         top = QTreeWidgetItem([f"{marker} {title}" if marker else title])
@@ -222,14 +269,33 @@ class LibraryTree(QTreeWidget):
         return child
 
     def _on_activated(self, item: QTreeWidgetItem, column: int) -> None:
-        type_id = item.data(0, Qt.UserRole)
+        type_id = item.data(0, TYPE_ID_ROLE)
         if type_id:
             self.add_requested.emit(type_id)
+            return
+        frame_id = item.data(0, FRAME_ID_ROLE)
+        if frame_id:
+            self.insert_frame_requested.emit(frame_id)
 
     def _on_context_menu(self, pos: QPoint) -> None:
         item = self.itemAt(pos)
         menu = QMenu(self)
-        type_id = item.data(0, Qt.UserRole) if item else None
+        frame_id = item.data(0, FRAME_ID_ROLE) if item else None
+        if frame_id:
+            # A component is managed, not favourited: favourites are node
+            # types and the palette's star filter is built from those.
+            menu.addAction("Insert",
+                           lambda: self.insert_frame_requested.emit(frame_id))
+            menu.addSeparator()
+            menu.addAction("Rename…",
+                           lambda: self.rename_user_frame_requested.emit(frame_id))
+            menu.addAction("Move to group…",
+                           lambda: self.move_user_frame_requested.emit(frame_id))
+            menu.addAction("Delete",
+                           lambda: self.delete_user_frame_requested.emit(frame_id))
+            menu.exec(self.viewport().mapToGlobal(pos))
+            return
+        type_id = item.data(0, TYPE_ID_ROLE) if item else None
         if type_id:
             fav_label = ("Remove from Favorites" if
                          self._favorites.contains(type_id)
@@ -262,14 +328,18 @@ class LibraryTree(QTreeWidget):
     def mimeData(self, items) -> QMimeData:
         mime = QMimeData()
         for item in items:
-            type_id = item.data(0, Qt.UserRole)
+            type_id = item.data(0, TYPE_ID_ROLE)
             if type_id:
                 mime.setData(NODE_TYPE_MIME, type_id.encode())
+                break
+            frame_id = item.data(0, FRAME_ID_ROLE)
+            if frame_id:
+                mime.setData(FRAME_ID_MIME, frame_id.encode())
                 break
         return mime
 
     def mimeTypes(self) -> list[str]:
-        return [NODE_TYPE_MIME]
+        return [NODE_TYPE_MIME, FRAME_ID_MIME]
 
     def set_favorites_only(self, on: bool) -> None:
         self._favorites_only = on
