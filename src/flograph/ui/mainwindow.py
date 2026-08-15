@@ -225,13 +225,15 @@ class MainWindow(QMainWindow):
             lambda: self._active_canvas_view().set_zoom(1.0))
         self.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         self.statusBar().addPermanentWidget(self._zoom_indicator)
-        # Progress across the plan, shown only while a run is on. Narrow and
-        # text-free: the status line beside it already says what is running,
-        # and this only has to answer "how much is left".
+        # Progress across the plan, shown only while a run is on. Narrow,
+        # thin and text-free: the status line beside it already says what is
+        # running, and this only has to answer "how much is left". The fixed
+        # height keeps it a hairline track rather than the chunky default,
+        # which otherwise sets the height of the whole status bar.
         self._run_bar = QProgressBar(self)
         self._run_bar.setRange(0, 100)
         self._run_bar.setTextVisible(False)
-        self._run_bar.setFixedWidth(110)
+        self._run_bar.setFixedSize(110, 6)
         self._run_bar.hide()
         self.statusBar().addPermanentWidget(self._run_bar)
         self._update_title()
