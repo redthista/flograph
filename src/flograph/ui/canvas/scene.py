@@ -476,22 +476,51 @@ class NodeGraphScene(QGraphicsScene):
                           [node_id], []))
         return units
 
+    def _already_held(self) -> tuple:
+        """(node_ids, frame_ids) that some folded frame already stands for.
+
+        The rule this exists to enforce: **a node belongs to one frame
+        directly**. If a folded frame wrote it down, it is that frame's, and
+        anything else reaches it only by containing that frame.
+
+        Geometric membership has to be blind to visibility — a folded frame's
+        own contents are hidden and must still travel with it — but blind
+        also means a frame drawn anywhere near where those hidden nodes were
+        left standing will happily claim them as well. Two frames then both
+        record the same node, whichever one you open shows it while the other
+        still believes it is holding it, and which of them owns it is decided
+        by dictionary order. That is the "losing nodes" of nested frames.
+        """
+        held_nodes: set = set()
+        held_frames: set = set()
+        for frame in self.graph.frames.values():
+            if not frame.collapsed:
+                continue
+            held_nodes.update(frame.members)
+            held_frames.update(frame.member_frames)
+        return (held_nodes, held_frames)
+
     def _frame_members(self, item) -> list:
         """Who a frame holds directly: what it wrote down if folded, whatever
         sits inside it if not. Not transitive — see frame_contents."""
         if item.collapsed:
             return list(item.frame.members)
+        held, _frames = self._already_held()
         rect = item.scene_rect()
         return [nid for nid, node_item in self.node_items.items()
-                if rect.contains(node_item.sceneBoundingRect().center())]
+                if nid not in held
+                and rect.contains(node_item.sceneBoundingRect().center())]
 
     def _frame_member_frames(self, item) -> list:
-        """The frames a frame holds directly."""
+        """The frames a frame holds directly. A frame already folded away
+        inside another is that one's to carry, for the same reason."""
+        _nodes, held = self._already_held()
         if item.collapsed:
             return list(item.frame.member_frames)
         rect = item.scene_rect()
         return [fid for fid, other in self.frame_items.items()
-                if other is not item and rect.contains(other.scene_rect())]
+                if other is not item and fid not in held
+                and rect.contains(other.scene_rect())]
 
     def frame_contents(self, item) -> tuple:
         """(node_ids, frame_ids) — everything this frame holds, including
