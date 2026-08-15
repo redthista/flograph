@@ -62,8 +62,23 @@ class InspectorPanel(QWidget):
 
     # -------------------------------------------------------------- refresh
 
+    def _clear_tabs(self) -> None:
+        """Drop every page, deleting the widgets rather than just removing the
+        tabs.
+
+        QTabWidget.clear() detaches pages without deleting them, so a panel
+        that is refilled on every selection would otherwise keep every node's
+        widgets — and whatever they are displaying, DataFrames included — alive
+        as orphaned children of the tab widget forever. Draining with an
+        explicit deleteLater is what actually lets the previous node's data go.
+        """
+        while self._tabs.count():
+            widget = self._tabs.widget(0)
+            self._tabs.removeTab(0)
+            widget.deleteLater()
+
     def _refresh(self) -> None:
-        self._tabs.clear()
+        self._clear_tabs()
         if self._node_id is None or self._node_id not in self._graph.nodes:
             self._header.setText("Nothing selected")
             self._stale.hide()
@@ -108,16 +123,29 @@ class InspectorPanel(QWidget):
                 sub = QTabWidget()
                 sub.setDocumentMode(True)
                 sub.addTab(_view_for(value, embed_figures=False), "Data")
-                self._add_lazy_spec_tab(sub, value)
+                self._add_lazy_spec_tab(sub, self._node_id, port.name)
                 host_layout.addWidget(sub, 1)
             else:
                 host_layout.addWidget(_view_for(value, embed_figures=False), 1)
             self._tabs.addTab(host, port.name)
 
-    def _add_lazy_spec_tab(self, sub: QTabWidget, value) -> None:
+    def on_cache_cleared(self) -> None:
+        """Caches were reset: re-read the selected node.
+
+        The entry is gone, so the panel drops whatever big value it was
+        displaying back to the placeholder instead of pinning it until the
+        user happens to select something else."""
+        self._refresh()
+
+    def _add_lazy_spec_tab(self, sub: QTabWidget, node_id: str, port_name: str) -> None:
         """Column stats (nunique/min/max) walk the whole table, which is slow
         for large data — build the Spec tab only once the user opens it,
-        instead of on every node click."""
+        instead of on every node click.
+
+        The value is fetched from the cache when the tab is opened, not
+        captured at construction: a closure that pins the whole DataFrame
+        keeps it alive as long as the widget is, which is exactly the sort of
+        retention that made "reset caches" unable to reclaim anything."""
         placeholder = QLabel("Spec loads when this tab is opened —\n"
                               "can be slow for very large tables.")
         placeholder.setAlignment(Qt.AlignCenter)
@@ -134,7 +162,11 @@ class InspectorPanel(QWidget):
             sub.currentChanged.disconnect(build_spec)
             spec_layout.removeWidget(placeholder)
             placeholder.deleteLater()
-            spec_layout.addWidget(spec_view_for(value))
+            value = self._engine.cache.outputs_for(node_id).get(port_name)
+            if is_tabular(value):
+                spec_layout.addWidget(spec_view_for(value))
+            else:
+                spec_layout.addWidget(QLabel("No table to spec."))
 
         sub.currentChanged.connect(build_spec)
 
