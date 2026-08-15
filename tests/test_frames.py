@@ -1996,3 +1996,276 @@ class TestANewFrameStacksByContainment:
         window._add_frame()
         window.undo_stack.undo()
         assert graph.stacking_order("frame") == before
+
+
+class TestCopyingAFrameTakesItsFrames:
+    """Copying a frame copies what is inside it — including any frame inside
+    it, folded or not, and whatever those hold. It used to copy only the
+    frames you had selected, so the nesting was quietly flattened: you got
+    the nodes and the outer frame, and the inner frame was not in the
+    clipboard at all."""
+
+    @pytest.fixture
+    def window(self, qtbot, registry):
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def _nested(self, window, registry, fold_inner):
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="outer", title="Outer",
+                              rect=(100, 100, 620, 320)))
+        graph.add_frame(Frame(id="inner", title="Inner",
+                              rect=(160, 170, 280, 180)))
+        for nid, pos in (("a", (190.0, 220.0)), ("b", (320.0, 220.0)),
+                         ("c", (520.0, 220.0))):
+            node = registry.instantiate("flograph.scripting.python_script",
+                                        pos=pos)
+            node.id = nid
+            graph.add_node(node)
+        graph.connect("a", "out1", "b", "in1")
+        graph.connect("b", "out1", "c", "in1")
+        if fold_inner:
+            scene.frame_items["inner"].toggle_collapsed()
+        scene.clearSelection()
+        scene.frame_items["outer"].setSelected(True)
+        return graph, scene
+
+    def _paste(self, window, payload):
+        before_f, before_n = set(window.graph.frames), set(window.graph.nodes)
+        window._insert_payload(payload)
+        return ([f for f in window.graph.frames if f not in before_f],
+                [n for n in window.graph.nodes if n not in before_n])
+
+    @pytest.mark.parametrize("fold_inner", [False, True])
+    def test_the_nested_frame_is_in_the_payload(self, window, registry,
+                                                fold_inner):
+        self._nested(window, registry, fold_inner)
+        payload = window._selection_payload()
+        assert {f["title"] for f in payload["frames"]} == {"Outer", "Inner"}
+
+    @pytest.mark.parametrize("fold_inner", [False, True])
+    def test_pasting_rebuilds_both_frames(self, window, registry, fold_inner):
+        graph, scene = self._nested(window, registry, fold_inner)
+        frames, nodes = self._paste(window, window._selection_payload())
+        assert len(frames) == 2
+        assert len(nodes) == 3
+
+    def test_a_folded_nested_frame_pastes_folded(self, window, registry):
+        graph, scene = self._nested(window, registry, True)
+        frames, _nodes = self._paste(window, window._selection_payload())
+        folded = [graph.frames[f] for f in frames if graph.frames[f].collapsed]
+        assert len(folded) == 1 and folded[0].title == "Inner"
+
+    def test_its_membership_points_at_the_copies(self, window, registry):
+        """Not at the originals — that would have two frames standing in for
+        the same nodes, and hiding one would blank the other."""
+        graph, scene = self._nested(window, registry, True)
+        frames, nodes = self._paste(window, window._selection_payload())
+        folded = next(graph.frames[f] for f in frames
+                      if graph.frames[f].collapsed)
+        assert len(folded.members) == 2
+        assert set(folded.members) <= set(nodes)
+        assert not set(folded.members) & {"a", "b", "c"}
+
+    def test_the_copy_keeps_the_size_it_opens_back_to(self, window, registry):
+        """Without it a pasted folded frame only knows its 60px box and can
+        never open back to anything."""
+        graph, scene = self._nested(window, registry, True)
+        frames, _nodes = self._paste(window, window._selection_payload())
+        folded = next(graph.frames[f] for f in frames
+                      if graph.frames[f].collapsed)
+        assert folded.expanded_size == (280.0, 180.0)
+
+    def test_the_copies_contents_are_hidden_like_the_original(self, window,
+                                                              registry):
+        graph, scene = self._nested(window, registry, True)
+        frames, nodes = self._paste(window, window._selection_payload())
+        folded = next(graph.frames[f] for f in frames
+                      if graph.frames[f].collapsed)
+        for nid in folded.members:
+            assert not scene.node_items[nid].isVisible()
+
+    def test_expanding_the_copy_gives_its_nodes_back(self, window, registry):
+        graph, scene = self._nested(window, registry, True)
+        frames, _nodes = self._paste(window, window._selection_payload())
+        copy_id = next(f for f in frames if graph.frames[f].collapsed)
+        members = list(graph.frames[copy_id].members)
+        offsets = {nid: (graph.nodes[nid].pos[0]
+                         - graph.frames[copy_id].rect[0],
+                         graph.nodes[nid].pos[1]
+                         - graph.frames[copy_id].rect[1])
+                   for nid in members}
+        scene.frame_items[copy_id].toggle_collapsed()
+        assert graph.frames[copy_id].collapsed is False
+        for nid in members:
+            assert scene.node_items[nid].isVisible()
+            now = (graph.nodes[nid].pos[0] - graph.frames[copy_id].rect[0],
+                   graph.nodes[nid].pos[1] - graph.frames[copy_id].rect[1])
+            assert now == offsets[nid]
+
+    def test_the_original_is_untouched_by_the_paste(self, window, registry):
+        graph, scene = self._nested(window, registry, True)
+        before = tuple(graph.frames["inner"].members)
+        self._paste(window, window._selection_payload())
+        assert tuple(graph.frames["inner"].members) == before
+        assert graph.frames["inner"].collapsed is True
+
+    def test_wires_inside_the_nested_frame_come_too(self, window, registry):
+        graph, scene = self._nested(window, registry, True)
+        before = len(graph.connections)
+        self._paste(window, window._selection_payload())
+        assert len(graph.connections) == before + 2
+
+    def test_three_deep_nesting_survives(self, window, registry):
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="l1", title="L1", rect=(0, 0, 700, 400)))
+        graph.add_frame(Frame(id="l2", title="L2", rect=(60, 60, 540, 280)))
+        graph.add_frame(Frame(id="l3", title="L3", rect=(120, 120, 380, 160)))
+        node = registry.instantiate("flograph.scripting.python_script",
+                                    pos=(160.0, 170.0))
+        node.id = "deep"
+        graph.add_node(node)
+        scene.frame_items["l3"].toggle_collapsed()
+        scene.clearSelection()
+        scene.frame_items["l1"].setSelected(True)
+        frames, nodes = self._paste(window, window._selection_payload())
+        assert len(frames) == 3 and len(nodes) == 1
+        folded = next(graph.frames[f] for f in frames
+                      if graph.frames[f].collapsed)
+        assert list(folded.members) == nodes
+
+    def test_a_frame_naming_a_nested_frame_repoints_at_the_copy(self, window,
+                                                               registry):
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="outer", title="Outer", rect=(0, 0, 600, 360)))
+        graph.add_frame(Frame(id="inner", title="Inner", rect=(60, 60, 300, 200)))
+        node = registry.instantiate("flograph.scripting.python_script",
+                                    pos=(100.0, 110.0))
+        node.id = "n1"
+        graph.add_node(node)
+        scene.frame_items["inner"].toggle_collapsed()
+        scene.frame_items["outer"].toggle_collapsed()   # holds a folded frame
+        scene.clearSelection()
+        scene.frame_items["outer"].setSelected(True)
+        frames, _nodes = self._paste(window, window._selection_payload())
+        copy_outer = next(graph.frames[f] for f in frames
+                          if graph.frames[f].title == "Outer")
+        assert len(copy_outer.member_frames) == 1
+        assert copy_outer.member_frames[0] in frames
+        assert copy_outer.member_frames[0] != "inner"
+
+    def test_the_displacement_record_is_not_copied(self, window, registry):
+        """It records what the frame shoved aside on *this* canvas; the copy
+        has displaced nothing."""
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
+        node = registry.instantiate("flograph.scripting.python_script",
+                                    pos=(40.0, 40.0))
+        node.id = "inside"
+        graph.add_node(node)
+        scene.frame_items["f1"].toggle_collapsed()
+        # parked in the space the fold vacated, so reopening has to shove it
+        squatter = registry.instantiate("flograph.scripting.python_script",
+                                        pos=(150.0, 40.0))
+        squatter.id = "squatter"
+        graph.add_node(squatter)
+        scene.frame_items["f1"].toggle_collapsed()      # records a nudge
+        assert graph.frames["f1"].nudged
+        scene.clearSelection()
+        scene.frame_items["f1"].setSelected(True)
+        frames, _nodes = self._paste(window, window._selection_payload())
+        assert graph.frames[frames[0]].nudged == ()
+
+    def test_an_old_clipboard_fragment_without_frame_ids_still_pastes(
+            self, window, registry):
+        graph, scene = window.graph, window.scene
+        payload = {
+            "flograph/clipboard": 1, "nodes": [], "connections": [],
+            "frames": [{"title": "Legacy", "rect": [0, 0, 300, 200],
+                        "color": "#33415c", "collapsed": False}],
+        }
+        frames, _nodes = self._paste(window, payload)
+        assert len(frames) == 1
+        assert graph.frames[frames[0]].title == "Legacy"
+
+
+class TestComponentsCanNestToo:
+    """Saving a frame to the library goes through the same payload, so a
+    component can now hold frames of its own — which the update path has to
+    account for or it leaves the old nesting standing beside the new copy."""
+
+    @pytest.fixture
+    def window(self, qtbot, registry, tmp_path, monkeypatch):
+        from flograph.ui.mainwindow import MainWindow
+        (tmp_path / "frames").mkdir()
+        monkeypatch.setattr("flograph.paths.user_frames_dir",
+                            lambda: tmp_path / "frames")
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def _nested_instance(self, window, registry):
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="outer", title="Outer",
+                              rect=(100, 100, 600, 340)))
+        graph.add_frame(Frame(id="inner", title="Inner",
+                              rect=(160, 170, 300, 200)))
+        for nid, pos in (("a", (200.0, 220.0)), ("b", (330.0, 220.0))):
+            node = registry.instantiate("flograph.scripting.python_script",
+                                        pos=pos)
+            node.id = nid
+            graph.add_node(node)
+        graph.connect("a", "out1", "b", "in1")
+        scene.frame_items["inner"].toggle_collapsed()
+        scene.clearSelection()
+        scene.frame_items["outer"].setSelected(True)
+        return graph, scene
+
+    def test_only_the_selected_frame_is_the_root(self, window, registry):
+        self._nested_instance(window, registry)
+        payload = window._selection_payload()
+        roots = [f["title"] for f in payload["frames"] if f["root"]]
+        assert roots == ["Outer"]
+
+    def test_the_nested_frame_is_not_a_root(self, window, registry):
+        self._nested_instance(window, registry)
+        payload = window._selection_payload()
+        inner = next(f for f in payload["frames"] if f["title"] == "Inner")
+        assert inner["root"] is False
+        assert inner["collapsed"] is True
+
+    def test_updating_an_instance_replaces_the_nesting_rather_than_doubling_it(
+            self, window, registry, monkeypatch):
+        from flograph.core import user_frames
+        graph, scene = self._nested_instance(window, registry)
+        payload = window._selection_payload()
+        from flograph.paths import user_frames_dir
+        component_id = user_frames.write_user_frame(
+            user_frames_dir(), None, "Nested", payload)
+        from flograph.ui.commands import SetFrameSourceCommand
+        window.undo_stack.push(SetFrameSourceCommand(
+            graph, "outer", component_id, user_frames.content_hash(payload)))
+        before_frames = len(graph.frames)
+        before_nodes = len(graph.nodes)
+        window._update_component_instance("outer")
+        assert len(graph.frames) == before_frames
+        assert len(graph.nodes) == before_nodes
+
+    def test_the_rebuilt_instance_still_holds_a_folded_frame(self, window,
+                                                            registry):
+        from flograph.core import user_frames
+        from flograph.paths import user_frames_dir
+        graph, scene = self._nested_instance(window, registry)
+        payload = window._selection_payload()
+        component_id = user_frames.write_user_frame(
+            user_frames_dir(), None, "Nested2", payload)
+        from flograph.ui.commands import SetFrameSourceCommand
+        window.undo_stack.push(SetFrameSourceCommand(
+            graph, "outer", component_id, user_frames.content_hash(payload)))
+        window._update_component_instance("outer")
+        folded = [f for f in graph.frames.values() if f.collapsed]
+        assert len(folded) == 1 and folded[0].title == "Inner"

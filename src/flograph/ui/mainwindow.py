@@ -2410,7 +2410,14 @@ class MainWindow(QMainWindow):
         frame = self.graph.frames.get(frame_id)
         if state is None or frame is None:
             return
-        members = set(self._frame_node_ids_by_id(frame_id))
+        # transitive: a component can hold frames of its own now, and the old
+        # instance has to go completely or the update leaves the previous
+        # nesting standing alongside the new copy of it
+        item = self.scene.frame_items.get(frame_id)
+        if item is None:
+            return
+        member_list, nested_frames = self.scene.frame_contents(item)
+        members = set(member_list)
         crossings = []
         for conn in self.graph.connections.values():
             src_in, dst_in = conn.src_node in members, conn.dst_node in members
@@ -2426,6 +2433,13 @@ class MainWindow(QMainWindow):
         was_collapsed = frame.collapsed
         payload = state["payload"]
         for entry in payload.get("frames", []):
+            # only the component's own outer frame takes the instance's
+            # provenance and folded state; a frame nested inside it keeps
+            # whatever it was saved as. Absent "root" means a file written
+            # before components could nest, where the single frame is the
+            # root by definition.
+            if not entry.get("root", True):
+                continue
             entry["source"] = state["component_id"]
             entry["source_fingerprint"] = state["library_fingerprint"]
             entry["collapsed"] = was_collapsed
@@ -2439,7 +2453,9 @@ class MainWindow(QMainWindow):
         # rule: an expanded instance is being replaced just as thoroughly as a
         # folded one, and leaving its old nodes behind would double them up.
         # No confirm — nothing is being lost, it is rebuilt on the next line.
-        self.scene.delete_items(sorted(members), [], [frame_id], confirm=False)
+        self.scene.delete_items(sorted(members), [],
+                                [frame_id] + list(nested_frames),
+                                confirm=False)
         built = self._insert_payload(payload, offset=(off_x, off_y),
                                      label="insert component")
         if built is not None:
@@ -3002,14 +3018,26 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------- copy/paste
 
     def _selection_payload(self) -> Optional[dict]:
-        frame_items = self.scene.selected_frame_items()
         node_ids = {item.node.id for item in self.scene.selected_node_items()}
-        for item in frame_items:
-            # a frame carries the nodes sitting inside it, same as a drag
-            node_ids.update(self._frame_node_ids_by_id(item.frame.id))
+        # dicts as ordered sets: the frames come out in a stable order, and a
+        # frame reachable two ways is only written once
+        frame_ids: dict = {}
+        roots = {item.frame.id for item in self.scene.selected_frame_items()}
+        for item in self.scene.selected_frame_items():
+            frame_ids[item.frame.id] = None
+            # a frame carries what is inside it, same as a drag — and that
+            # includes any frame inside it, and whatever *those* hold. Copying
+            # only the frames you had selected quietly flattened the nesting:
+            # you got the nodes and the outer frame, and the inner frame was
+            # simply not in the clipboard at all.
+            nodes_in, frames_in = self.scene.frame_contents(item)
+            node_ids.update(nodes_in)
+            for nested_id in frames_in:
+                frame_ids[nested_id] = None
         nodes = [self.graph.nodes[nid] for nid in node_ids
-                if nid in self.graph.nodes]
-        frames = [item.frame for item in frame_items]
+                 if nid in self.graph.nodes]
+        frames = [self.graph.frames[fid] for fid in frame_ids
+                  if fid in self.graph.frames]
         if not nodes and not frames:
             return None
         ids = {n.id for n in nodes}
@@ -3026,8 +3054,27 @@ class MainWindow(QMainWindow):
             } for c in self.graph.connections.values()
                 if c.src_node in ids and c.dst_node in ids],
             "frames": [{
+                # the id is what lets the membership below be re-pointed at
+                # the copies on paste; without it a folded frame arrives
+                # standing in for nothing
+                "id": f.id,
+                # the one you actually selected, as against a frame that came
+                # along because it was inside it. A component update stamps
+                # the instance's folded state onto the root and leaves the
+                # nesting to keep its own.
+                "root": f.id in roots,
                 "title": f.title, "rect": list(f.rect), "color": f.color,
                 "collapsed": f.collapsed,
+                # without this a pasted folded frame can never open back to
+                # the right size — it only knows the 60px box
+                "expanded_size": (list(f.expanded_size)
+                                  if f.expanded_size else None),
+                "members": [m for m in f.members if m in ids],
+                "member_frames": [m for m in f.member_frames
+                                  if m in frame_ids],
+                # `nudged` is deliberately not copied: it records what this
+                # frame shoved aside *on this canvas*, which the copy has
+                # displaced nothing of.
             } for f in frames],
         }
 
@@ -3165,14 +3212,34 @@ class MainWindow(QMainWindow):
                 color=entry.get("color"),
                 description=entry.get("description", ""),
             ))
+        # frames get an id map of their own, for the same reason the nodes do:
+        # a folded frame names the nodes and frames it stands in for, and
+        # those names have to be re-pointed at the copies. Assigned up front
+        # so a frame can name a nested one written after it.
+        frame_entries = payload.get("frames", [])
+        frame_map: dict = {}
+        for index, entry in enumerate(frame_entries):
+            # older clipboard fragments carry no frame id, and there is
+            # nothing to re-point in them — key by position so they still paste
+            frame_map[entry.get("id") or f"\0frame{index}"] = uuid.uuid4().hex
         new_frames: list[Frame] = []
-        for entry in payload.get("frames", []):
+        for index, entry in enumerate(frame_entries):
             rect = entry.get("rect", [0.0, 0.0, 300.0, 200.0])
+            size = entry.get("expanded_size")
             new_frames.append(Frame(
-                id=uuid.uuid4().hex, title=entry.get("title", "Frame"),
+                id=frame_map[entry.get("id") or f"\0frame{index}"],
+                title=entry.get("title", "Frame"),
                 rect=(rect[0] + dx, rect[1] + dy, rect[2], rect[3]),
                 color=entry.get("color") or "#33415c",
                 collapsed=bool(entry.get("collapsed", False)),
+                expanded_size=tuple(size) if size else None,
+                # anything the fragment did not bring with it is dropped
+                # rather than carried as a dangling name
+                members=tuple(id_map[m] for m in entry.get("members", ())
+                              if m in id_map),
+                member_frames=tuple(frame_map[m]
+                                    for m in entry.get("member_frames", ())
+                                    if m in frame_map),
                 source=entry.get("source", ""),
                 source_fingerprint=entry.get("source_fingerprint", ""),
             ))

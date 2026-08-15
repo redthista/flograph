@@ -270,8 +270,12 @@ class TestCopyPaste:
         window._copy_selection()
         payload = json.loads(QApplication.clipboard().text())
         assert payload["frames"] == [{
+            "id": "f1", "root": True,
             "title": "Notes", "rect": [500.0, 500.0, 300.0, 200.0],
             "color": "#ff0000", "collapsed": False,
+            # carried so a copy of a folded frame arrives folded, standing in
+            # for the copies of its contents rather than for the originals
+            "expanded_size": None, "members": [], "member_frames": [],
         }]
         assert payload["nodes"] == []
 
