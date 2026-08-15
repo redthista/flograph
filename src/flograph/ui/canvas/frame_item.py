@@ -107,7 +107,8 @@ class FrameItem(QGraphicsObject):
             # planned against the region it is *about* to occupy, so what got
             # moved can be recorded by the same command that does the fold
             record, moves, frame_rects = scene.plan_expand_nudge(
-                self.frame.id, self.expanded_rect(), keep, keep_frames)
+                self.frame.id, self.scene_rect(), self.expanded_rect(),
+                keep, keep_frames)
             scene.undo_stack.beginMacro("expand frame")
             scene.undo_stack.push(SetFrameCollapsedCommand(
                 scene.graph, self.frame.id, False, nudged=record))
@@ -700,6 +701,16 @@ class FrameItem(QGraphicsObject):
             step = grid_step(self.scene())
             x, y = snap_point(value.x(), value.y(), step)
             return QPointF(x, y)
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            # Wherever the move came from — this frame's own drag, a
+            # multi-selection, a parent frame carrying it, the model syncing
+            # back — the wires pinned to the box have to follow. NodeItem
+            # repaths from here for exactly this reason; doing it in the
+            # mouse handler instead is what left a nested collapsed frame
+            # trailing its wires from where it started until you let go.
+            scene = self.scene()
+            if scene is not None:
+                scene.frame_item_moved(self.frame.id)
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
@@ -775,12 +786,8 @@ class FrameItem(QGraphicsObject):
             item.setPos(self.pos() + offset)
         for item, offset in self._grabbed_frames:
             item.setPos(self.pos() + offset)
-        scene = self.scene()
-        if scene is not None:
-            # the wires pinned to this box have their other end on a hidden
-            # node that did not move relative to it, so node_item_moved never
-            # fires for them
-            scene.frame_item_moved(self.frame.id)
+        # no repathing here: every setPos above lands in itemChange, which
+        # does it for this frame and for each one riding along
 
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
