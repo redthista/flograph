@@ -1119,9 +1119,10 @@ class TestNudgeRespectsFrames:
         assert graph.nodes["bystander"].pos == where     # and put back
         assert graph.frames["f1"].nudged == ()           # record spent
 
-    def test_a_node_you_moved_yourself_is_left_alone(self, env, registry):
-        """There is no way to tell an arrangement you chose from one we
-        imposed except by whether it has changed since."""
+    def test_a_node_you_moved_yourself_keeps_your_move(self, env, registry):
+        """The shift comes off wherever the thing has got to, so your own
+        move survives it — as an offset from where the thing would have
+        been, which is what you meant by making it."""
         graph, stack, scene = env
         graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
         script_node(graph, registry, "inside", (50.0, 50.0))
@@ -1129,9 +1130,33 @@ class TestNudgeRespectsFrames:
         script_node(graph, registry, "bystander", (100.0, 100.0))
 
         expand(scene, "f1")
-        graph.move_node("bystander", (2000.0, 2000.0))   # you put it there
+        shifted = graph.nodes["bystander"].pos
+        graph.move_node("bystander", (shifted[0] + 40.0, shifted[1] + 90.0))
         collapse(scene, "f1")
-        assert graph.nodes["bystander"].pos == (2000.0, 2000.0)
+        assert graph.nodes["bystander"].pos == (140.0, 190.0)
+
+    def test_everything_displaced_comes_back_or_nothing_does(self, env,
+                                                             registry):
+        """The reported inconsistency: displace two, move one of them, fold
+        again, and one came home while the other stayed behind — which reads
+        as the fold simply forgetting about it. A systematic shift has to be
+        reversible as a whole."""
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
+        script_node(graph, registry, "inside", (50.0, 50.0))
+        collapse(scene, "f1")
+        a = script_node(graph, registry, "a", (100.0, 40.0))
+        b = script_node(graph, registry, "b", (100.0, 180.0))
+
+        expand(scene, "f1")
+        moved = graph.nodes["a"].pos[0] - 100.0
+        assert moved > 0
+        # you drag one of them somewhere of your own while it is open
+        graph.move_node("b", (graph.nodes["b"].pos[0], 900.0))
+        collapse(scene, "f1")
+        assert graph.nodes["a"].pos == (100.0, 40.0)     # untouched: home
+        assert graph.nodes["b"].pos == (100.0, 900.0)    # moved: also home,
+        #                                    keeping the drag you made of it
 
     def test_the_put_back_is_one_undo_step(self, env, registry):
         graph, stack, scene = env
@@ -1645,15 +1670,31 @@ class TestAParentThatMustStretch:
         assert graph.frames["outer"].rect == before
         assert graph.frames["inner"].collapsed is True
 
-    def test_a_parent_the_user_has_resized_since_is_left_alone(self, env,
+    def test_a_parent_the_user_has_resized_since_keeps_the_resize(
+            self, env, registry):
+        """Same rule as a node you have dragged: the stretch comes off
+        whatever size the frame is now, so your own resize survives it."""
+        graph, stack, scene = self._too_big_for_its_parent(env, registry)
+        before = graph.frames["outer"].rect
+        expand(scene, "inner")
+        grown = graph.frames["outer"].rect
+        stretch = (grown[2] - before[2], grown[3] - before[3])
+        assert stretch[0] > 0 or stretch[1] > 0
+        graph.update_frame("outer", rect=(0.0, 0.0, grown[2] + 200.0,
+                                          grown[3] + 100.0))
+        collapse(scene, "inner")
+        assert graph.frames["outer"].rect == (0.0, 0.0,
+                                              before[2] + 200.0,
+                                              before[3] + 100.0)
+
+    def test_undoing_a_stretch_cannot_turn_a_frame_inside_out(self, env,
                                                               registry):
-        """Same rule as a node the user has dragged: we only put back what is
-        still where we left it."""
         graph, stack, scene = self._too_big_for_its_parent(env, registry)
         expand(scene, "inner")
-        graph.update_frame("outer", rect=(0.0, 0.0, 900.0, 700.0))
+        graph.update_frame("outer", rect=(0.0, 0.0, 130.0, 70.0))
         collapse(scene, "inner")
-        assert graph.frames["outer"].rect == (0.0, 0.0, 900.0, 700.0)
+        assert graph.frames["outer"].rect[2] >= 120.0
+        assert graph.frames["outer"].rect[3] >= 60.0
 
 
 def wires_anchored_to_hidden(scene):
@@ -1869,3 +1910,89 @@ class TestNoScatterWhenFoldingOverFoldedChildren:
         expand(scene, "outer")
         assert wires_anchored_to_hidden(scene) == []
         assert {n: graph.nodes[n].pos for n in graph.nodes} == before
+
+
+class TestANewFrameStacksByContainment:
+    """A frame drawn around others has to sit behind them, or it covers them
+    and — since a frame takes the click anywhere in its body — they cannot be
+    selected at all without sending the new one to the back by hand."""
+
+    @pytest.fixture
+    def window(self, qtbot, registry):
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def _two_frames(self, window):
+        graph = window.graph
+        for i, x in enumerate((300.0, 700.0)):
+            graph.add_frame(Frame(id=f"f{i}", rect=(x, 300, 200, 160)))
+        return graph, window.scene
+
+    def test_a_frame_drawn_around_others_goes_behind_them(self, window):
+        graph, scene = self._two_frames(window)
+        for fid in ("f0", "f1"):
+            scene.frame_items[fid].setSelected(True)
+        window._add_frame()
+        new_id = next(f for f in graph.frames if f not in ("f0", "f1"))
+        order = graph.stacking_order("frame")     # back to front
+        assert order.index(new_id) < order.index("f0")
+        assert order.index(new_id) < order.index("f1")
+
+    def test_and_therefore_draws_below_them(self, window):
+        graph, scene = self._two_frames(window)
+        for fid in ("f0", "f1"):
+            scene.frame_items[fid].setSelected(True)
+        window._add_frame()
+        new_id = next(f for f in graph.frames if f not in ("f0", "f1"))
+        assert (scene.frame_items[new_id].zValue()
+                < scene.frame_items["f0"].zValue())
+
+    def test_the_enclosed_frames_are_still_the_ones_you_click(self, window):
+        graph, scene = self._two_frames(window)
+        for fid in ("f0", "f1"):
+            scene.frame_items[fid].setSelected(True)
+        window._add_frame()
+        # topmost item at a point inside f0 must still be f0
+        from flograph.ui.canvas.frame_item import FrameItem
+        centre = scene.frame_items["f0"].scene_rect().center()
+        hit = [i for i in scene.items(centre) if isinstance(i, FrameItem)]
+        assert hit and hit[0] is scene.frame_items["f0"]
+
+    def test_a_frame_drawn_inside_another_stays_in_front_of_it(self, window):
+        """The mirror case, and why 'frames go to the back on arrival' is the
+        wrong rule — it would make this one the unreachable frame instead."""
+        graph, scene = self._two_frames(window)
+        graph.add_frame(Frame(id="big", rect=(100.0, 100.0, 900.0, 600.0)))
+        window._add_frame_at(QPointF(400.0, 350.0))
+        new_id = next(f for f in graph.frames
+                      if f not in ("f0", "f1", "big"))
+        order = graph.stacking_order("frame")
+        assert order.index(new_id) > order.index("big")
+
+    def test_a_frame_enclosing_nothing_arrives_on_top_as_before(self, window):
+        graph, scene = self._two_frames(window)
+        window._add_frame_at(QPointF(2000.0, 2000.0))
+        new_id = next(f for f in graph.frames if f not in ("f0", "f1"))
+        order = graph.stacking_order("frame")
+        assert order[-1] == new_id
+
+    def test_it_is_one_undo_step(self, window):
+        graph, scene = self._two_frames(window)
+        for fid in ("f0", "f1"):
+            scene.frame_items[fid].setSelected(True)
+        window._add_frame()
+        assert len(graph.frames) == 3
+        window.undo_stack.undo()
+        assert set(graph.frames) == {"f0", "f1"}
+
+    def test_undo_restores_the_previous_order(self, window):
+        graph, scene = self._two_frames(window)
+        before = graph.stacking_order("frame")
+        for fid in ("f0", "f1"):
+            scene.frame_items[fid].setSelected(True)
+        window._add_frame()
+        window.undo_stack.undo()
+        assert graph.stacking_order("frame") == before
