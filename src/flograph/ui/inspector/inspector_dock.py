@@ -90,8 +90,13 @@ class InspectorPanel(QWidget):
         wire_note = f" · wire: {self._port_filter}" if self._port_filter else ""
         self._header.setText(
             f"{node.label} — computed in {entry.wall_time * 1000:.0f} ms{wire_note}")
+        # Looking at a node is the moment its value has to be real. A project
+        # opens without loading anything, so this may be the read that brings
+        # the value back off disk — one node, because the user asked for it,
+        # which is the trade the lazy open is making.
+        outputs = self._engine.cache.outputs_for(self._node_id)
         for port in ports:
-            value = entry.outputs.get(port.name)
+            value = outputs.get(port.name)
             host = QWidget()
             host_layout = QVBoxLayout(host)
             host_layout.setContentsMargins(0, 2, 0, 0)

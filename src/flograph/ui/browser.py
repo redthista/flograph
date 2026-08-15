@@ -66,6 +66,13 @@ def can_open(node, entry) -> bool:
     """Whether Open in Browser would have anything to open. Cheap enough to
     call while building a context menu — the coercion is string work over an
     object already in the cache."""
+    if entry is not None and not entry.resident:
+        # Cached but not loaded. Reading the blob back to answer a context
+        # menu would be the one thing a lazily-opened project must not do, so
+        # answer from the port list and let the open itself load it. Worst
+        # case the menu offers something that turns out not to coerce.
+        port = node.spec.outputs[0].name if node.spec.outputs else "figure"
+        return port in entry.ports()
     return html_for(node, entry) is not None
 
 

@@ -660,7 +660,12 @@ class TileItem(QGraphicsObject):
             # painted like the button face: crisp vector text, no widget
             entry = self._engine.cache.get(self.tile.node_id)
             self._kpi_has_value = entry is not None
-            self._kpi_value = entry.outputs.get("value") if entry else None
+            # outputs_for: a dashboard is a page the user chose to look at,
+            # and its tiles are a set they curated, so loading them back off
+            # disk is the right moment to spend the memory. The canvas, where
+            # the node count is unbounded, deliberately does not do this.
+            self._kpi_value = (self._engine.cache.outputs_for(
+                self.tile.node_id).get("value") if entry else None)
             if self._kpi_has_value:
                 self._proxy.hide()
             else:
@@ -692,7 +697,8 @@ class TileItem(QGraphicsObject):
         entry = self._engine.cache.get(self.tile.node_id)
         value = None
         if entry is not None and self.tile.port:
-            value = entry.outputs.get(self.tile.port)
+            value = self._engine.cache.outputs_for(
+                self.tile.node_id).get(self.tile.port)
 
         if kind == "figure":
             if value is None:
@@ -837,7 +843,7 @@ class TileItem(QGraphicsObject):
             return
         from ..canvas.image_card import image_source
         entry = self._engine.cache.get(self.tile.node_id)
-        payload = (entry.outputs.get(self.tile.port)
+        payload = (self._engine.cache.outputs_for(self.tile.node_id).get(self.tile.port)
                    if entry is not None and self.tile.port else None)
         image = self._card_image()
         image.set_source(

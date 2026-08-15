@@ -58,8 +58,10 @@ class PopupView(QDialog):
         import shiboken6
         if not shiboken6.isValid(self):
             return
-        entry = self._engine.cache.get(self._node_id)
-        value = entry.outputs.get(self._port_name) if entry else None
+        # outputs_for, not entry.outputs: a popped-out view is one node the
+        # user explicitly opened, so it is worth loading back off disk if the
+        # project has not needed it until now.
+        value = self._engine.cache.outputs_for(self._node_id).get(self._port_name)
         if self._current_widget is not None:
             self._layout.removeWidget(self._current_widget)
             self._current_widget.deleteLater()

@@ -27,6 +27,7 @@ from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
 
 from .cache import OutputCache
+from .cache_worker import CacheWarmRunnable, CacheWarmSignals
 from .context import CancellationToken
 from .errors import NodeError
 from .runstats import (SAMPLE_MS, NodeRun, ProcessSampler, RunHistory,
@@ -263,6 +264,11 @@ class ExecutionEngine(QObject):
     # The set of nodes with a reactive re-run queued has changed. Views paint
     # from it (see request_run / is_requested), so it has to say when it moves.
     request_changed = Signal()
+    # A cached result could not be read back off disk. The node has been
+    # dropped and marked dirty, so it will recompute — but silently losing a
+    # cached value and silently recomputing it look identical from the
+    # outside, and only one of them is what happened.
+    cache_load_failed = Signal(str)        # node_id
 
     def __init__(self, graph: Graph, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -300,6 +306,15 @@ class ExecutionEngine(QObject):
         self._token: Optional[CancellationToken] = None
         self._had_failure = False
         self._active = False
+        # True while a run's spilled inputs are being read back off disk. The
+        # plan is seeded and queued but nothing has started; _dispatch is
+        # called when the last one lands.
+        self._warming = False
+        self._warm_remaining = 0
+        # Bumped per run so a warm still in flight from a cancelled one
+        # cannot decrement the new run's counter and dispatch it early.
+        self._warm_generation = 0
+        self._warm_signals: list = []
 
         # What runs cost, kept for the session (see engine.runstats).
         self.history = RunHistory()
@@ -356,7 +371,86 @@ class ExecutionEngine(QObject):
         for node_id in plan:
             self.graph.set_status(node_id, NodeStatus.QUEUED)
         self.run_started.emit()
-        self._dispatch()
+        if not self._warm_plan(plan):
+            self._dispatch()
+
+    def _warm_plan(self, plan: list[str]) -> bool:
+        """Read back any spilled entries this plan will consume. True if that
+        started, in which case _dispatch waits for it.
+
+        A project opens without loading its cached results, so the values a
+        run reads may be on disk. They have to come back before the first
+        node starts, and they must not come back on this thread: _start_node
+        runs on the GUI thread, and unpickling a large frame there freezes
+        the window. Only inputs from *outside* the plan are warmed — anything
+        inside it is about to be recomputed anyway.
+        """
+        planned = set(plan)
+        wanted: dict[str, str] = {}          # blob owner -> project path
+        for node_id in plan:
+            node = self.graph.nodes.get(node_id)
+            if node is None:
+                continue
+            for port in node.spec.inputs:
+                conn = self.graph.input_connection(node_id, port.name)
+                if conn is None or conn.src_node in planned:
+                    continue
+                root = self.cache.blob_source(conn.src_node)
+                if root is None or root in wanted:
+                    continue
+                entry = self.cache.get(root)
+                if entry is not None and entry.blob:
+                    wanted[root] = entry.blob
+        if not wanted:
+            return False
+
+        # Grouped by project because that is what the runnable takes; in
+        # practice one engine's cache is one project's.
+        by_project: dict[str, list[str]] = {}
+        for root, project in wanted.items():
+            by_project.setdefault(project, []).append(root)
+        self._warm_generation += 1
+        generation = self._warm_generation
+        self._warming = True
+        self._warm_remaining = len(by_project)
+        # Held for the duration: the runnable is the pool's, but nothing else
+        # owns the signals object, and one collected early is a `finished`
+        # that never arrives and a run that never starts.
+        self._warm_signals = []
+        for project, node_ids in by_project.items():
+            signals = CacheWarmSignals()     # GUI thread, before pool.start
+            signals.warmed.connect(self._on_entry_warmed)
+            signals.finished.connect(self._on_warm_finished)
+            self._warm_signals.append(signals)
+            self.pool.start(
+                CacheWarmRunnable(project, node_ids, signals, generation))
+        return True
+
+    def _on_entry_warmed(self, node_id: str, outputs: object) -> None:
+        """One spilled entry came back — or didn't."""
+        if outputs is None:
+            # Unreadable blob. Drop it and dirty the node so it recomputes:
+            # the alternative is handing the flow a missing input and calling
+            # the result an answer. _blocking_problem now sees no entry and
+            # takes the branch out of this run without calling it an error.
+            self.cache.evict(node_id)
+            if node_id in self.graph.nodes:
+                self.graph.mark_dirty(node_id)
+            self.cache_load_failed.emit(node_id)
+            return
+        self.cache.mark_resident(node_id, outputs)
+
+    def _on_warm_finished(self, generation: int) -> None:
+        if generation != self._warm_generation:
+            return          # left over from a run that was already cancelled
+        self._warm_remaining -= 1
+        if self._warm_remaining > 0:
+            return
+        self._warming = False
+        # Cancel during warming already finished the run; dispatching now
+        # would start a plan nobody asked for any more.
+        if self._active:
+            self._dispatch()
 
     def worker_limit(self) -> int:
         """How many nodes this engine will run at once."""
@@ -493,6 +587,11 @@ class ExecutionEngine(QObject):
         the free slot a finishing node leaves is filled by whichever of its
         successors it just unblocked.
         """
+        if not self._active or self._warming:
+            # Warming holds the plan back on purpose, and with nothing yet
+            # running the tail of this function would read that as "the run
+            # is over" and finish it before a single node had started.
+            return
         limit = self.worker_limit()
         while self._ready and not self._exclusive_running:
             if len(self._running) >= limit:
@@ -690,7 +789,14 @@ class ExecutionEngine(QObject):
             if conn is None:
                 continue
             entry = self.cache.get(conn.src_node)
-            if entry is not None and entry.outputs.get(conn.src_port) is value:
+            # `resident` explicitly: a spilled entry holds no outputs, so it
+            # cannot be the identity source of a value in hand. Saying so
+            # here keeps this from ever being "fixed" into a load — it runs
+            # on every completion of every node, and reading a blob back to
+            # answer an identity test would be the most expensive question
+            # in the engine.
+            if (entry is not None and entry.resident
+                    and entry.outputs.get(conn.src_port) is value):
                 return conn.src_node, conn.src_port
         return None, None
 
@@ -735,6 +841,10 @@ class ExecutionEngine(QObject):
         self._active = False
         self._token = None
         self._exclusive_running = False
+        # A cancel can land while inputs are still being read back. The run is
+        # over either way, and leaving the flag set would make _dispatch a
+        # no-op for the *next* run, which would then never start.
+        self._warming = False
         self._close_record()
         self.run_finished.emit(not self._had_failure)
         if self._requested:

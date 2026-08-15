@@ -352,6 +352,7 @@ class DashboardView(ZoomPanGraphicsView):
         elif browser_action is not None and chosen is browser_action:
             from ..browser import open_node_from
             scene = self.scene()
+            scene.engine.cache.outputs_for(node.id)   # load it if it was spilled
             open_node_from(self, node, scene.engine.cache.get(node.id))
         event.accept()
 

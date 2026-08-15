@@ -26,8 +26,7 @@ from flograph.core import (
 from flograph.core import serialization
 from flograph.core import user_nodes
 from flograph.engine import (
-    CacheLoadRunnable, CacheLoadSignals, ExecutionEngine, cache_persistence,
-    is_exclusive,
+    CacheLoadSignals, ExecutionEngine, cache_persistence, is_exclusive,
 )
 from flograph.paths import user_nodes_dir
 
@@ -1147,6 +1146,10 @@ class MainWindow(QMainWindow):
         node = self.graph.nodes.get(node_id)
         if node is None:
             return None
+        # Load it back if the project was opened without reading its cache:
+        # the user asked for this one node's output, which is exactly when
+        # paying for the read is right.
+        self.engine.cache.outputs_for(node_id)
         return open_node_from(self, node, self.engine.cache.get(node_id))
 
     def _refresh_report_cards(self) -> None:
@@ -3443,54 +3446,34 @@ class MainWindow(QMainWindow):
         return True
 
     def _restore_cache(self, path: str, quiet: bool = False) -> None:
-        """Restore cached node outputs for the just-opened project. Resolving
-        which entries are still valid is cheap and happens here; unpickling
-        each blob can be slow for large cached DataFrames/figures, so that
-        part runs on a pool thread (flograph.engine.cache_worker) with a
-        progress dialog rather than freezing the window."""
-        entries = cache_persistence.resolve_entries(self.graph, path)
-        if not entries:
+        """Register the just-opened project's cached results without reading
+        any of them.
+
+        This used to unpickle every valid blob up front, on a pool thread
+        behind a progress dialog. That is a lot of work to do before the user
+        has asked for anything, and on a project whose side-car holds a few
+        large frames it is gigabytes: a 14-node project with 2M-row tables
+        cost about 4 GB of resident memory just to open, and duplicating such
+        a flow was enough to exhaust the machine before Run was ever pressed.
+
+        Now opening reads one manifest. Each node is recorded as cached but
+        not loaded, which is all it takes for it to count as clean, and its
+        value is fetched when something actually wants it — the engine warms
+        a run's inputs on a pool thread (ExecutionEngine._warm_plan), and the
+        inspector loads a single node's value when asked to show it.
+        """
+        registered = cache_persistence.register_cache(
+            self.graph, self.engine.cache, path)
+        if not registered:
             return
-
-        dialog = QProgressDialog(
-            "Restoring cached results…", "", 0, len(entries), self)
-        dialog.setWindowTitle("Loading")
-        dialog.setWindowModality(Qt.WindowModal)
-        dialog.setCancelButton(None)
-        dialog.setMinimumDuration(400)
-        dialog.setValue(0)
-
-        signals = CacheLoadSignals()  # created on the GUI thread, before pool.start
-        restored: list[str] = []
-
-        def mark_restored(node_id: str) -> None:
+        for node_id in registered:
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.engine.node_succeeded.emit(node_id)
-            restored.append(node_id)
-            dialog.setValue(len(restored))
-
-        def on_entry(node_id: str, outputs: dict, wall_time: float) -> None:
-            self.engine.cache.set(node_id, outputs, wall_time)
-            mark_restored(node_id)
-
-        def on_finished() -> None:
-            # Goto/From/Reroute nodes share their source's value rather than
-            # carrying a copy, so they have no blob to wait for and are
-            # rebuilt here, on this thread, now the blobs are all in.
-            for node_id in cache_persistence.restore_aliases(
-                    self.graph, self.engine.cache, entries):
-                mark_restored(node_id)
-            dialog.close()
-            self._cache_load_signals = None
-            if not quiet:
-                self.statusBar().showMessage(
-                    f"Opened {path} — {len(restored)} node(s) restored from cache", 4000)
-
-        signals.entry_loaded.connect(on_entry)
-        signals.finished.connect(on_finished)
-        self._cache_load_signals = signals  # keep alive until finished
-        QThreadPool.globalInstance().start(CacheLoadRunnable(path, entries, signals))
+        if not quiet:
+            self.statusBar().showMessage(
+                f"Opened {path} — {len(registered)} node(s) restored from cache",
+                4000)
 
     def _replace_graph(self, loaded: Graph) -> None:
         # pages opened in a browser belong to the project being closed; the

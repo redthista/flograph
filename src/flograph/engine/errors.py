@@ -44,9 +44,36 @@ def readonly_input_hint(exc: BaseException) -> Optional[str]:
             "first: arr = arr.copy().")
 
 
-def build_node_error(node_id: str, source: str, exc: BaseException) -> NodeError:
-    """Extract the node-script line and a readable traceback from an exception
-    raised inside a node's run()."""
+def memory_error_hint(exc: BaseException) -> Optional[str]:
+    """What to actually do about a MemoryError, or None.
+
+    Deliberately says nothing about *which* nodes are heaviest, tempting as
+    that is: this runs on a pool thread, and OutputCache is read and written
+    from the GUI thread with no lock. Racing it to decorate an error message
+    would be a poor trade. The resource monitor already names the heaviest
+    nodes in its tooltip, from the thread that owns the cache.
+    """
+    if not isinstance(exc, MemoryError):
+        return None
+    return ("Ran out of memory building this node's output. Try filtering or "
+            "sampling rows earlier in the flow, lowering Settings > General > "
+            "Nodes to run at once, or Reset Caches to release results you no "
+            "longer need.")
+
+
+def _describe(exc: BaseException) -> str:
+    """"Type: message", or bare "Type" when there is no message.
+
+    MemoryError is the reason this exists: it is raised with no arguments, so
+    the obvious f-string renders the useless "MemoryError: " -- a colon
+    promising detail that never comes.
+    """
+    text = str(exc)
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+def _format_traceback(node_id: str, source: str,
+                      exc: BaseException) -> tuple[list[str], Optional[int]]:
     virtual = node_filename(node_id)
     source_lines = source.splitlines()
     frames = traceback.extract_tb(exc.__traceback__)
@@ -61,12 +88,32 @@ def build_node_error(node_id: str, source: str, exc: BaseException) -> NodeError
                 parts.append(f"    {source_lines[frame.lineno - 1].strip()}")
         elif frame.line:
             parts.append(f"    {frame.line.strip()}")
-    parts.append(f"{type(exc).__name__}: {exc}")
+    return parts, script_line
+
+
+def build_node_error(node_id: str, source: str, exc: BaseException) -> NodeError:
+    """Extract the node-script line and a readable traceback from an exception
+    raised inside a node's run().
+
+    Formatting the traceback allocates -- it splits the source and builds a
+    list of strings per frame -- and the exception most in need of a good
+    message is the one raised because allocation just failed. If that happens
+    here the MemoryError escapes NodeRunnable's `except BaseException`, the
+    pool thread dies without emitting `failed`, and the node sits in Running
+    forever with the run never finishing. So the traceback is best-effort and
+    a minimal NodeError is always produced.
+    """
+    try:
+        parts, script_line = _format_traceback(node_id, source, exc)
+    except BaseException:
+        parts, script_line = ["Traceback unavailable (out of memory)."], None
+    parts.append(_describe(exc))
 
     # "No module named 'plotly'" is accurate and useless on its own — say
     # where to get it, since the app can install packages itself
-    message = f"{type(exc).__name__}: {exc}"
-    hint = missing_module_hint(exc) or readonly_input_hint(exc)
+    message = _describe(exc)
+    hint = (missing_module_hint(exc) or readonly_input_hint(exc)
+            or memory_error_hint(exc))
     if hint:
         message = f"{message} — {hint}"
         parts.append("")
