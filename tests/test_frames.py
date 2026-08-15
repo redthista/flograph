@@ -2837,3 +2837,88 @@ class TestRunIsAlwaysOnTheFrameMenu:
                             lambda self, fid: fired.append(fid))
         window._show_frame_menu("outer", QPoint(0, 0))
         assert fired == ["outer"]
+
+
+class TestFoldingDoesNotAffectExecution:
+    """Collapse is a view state. The engine schedules from graph.nodes and
+    graph.connections, neither of which folding touches, so a folded flow
+    runs exactly as the open one does — same targets, same dependencies,
+    and therefore the same concurrency.
+
+    Asserted as "the engine sees no difference" rather than by timing a run.
+    Whether two nodes actually overlap is covered by the rendezvous tests in
+    test_engine_parallel.py, and repeating that here would only add another
+    thread-pool-sensitive test to the suite for a claim that follows.
+    """
+
+    @pytest.fixture
+    def window(self, qtbot, registry):
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def _two_branches(self, window, registry):
+        """A frame holding two independent chains, one nested a level deeper."""
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="stage", rect=(100, 100, 620, 340)))
+        graph.add_frame(Frame(id="pair", rect=(160, 170, 380, 200)))
+        for nid, pos in (("a1", (200.0, 220.0)), ("a2", (330.0, 220.0)),
+                         ("b1", (200.0, 300.0)), ("b2", (330.0, 300.0))):
+            node = registry.instantiate("flograph.scripting.python_script",
+                                        pos=pos)
+            node.id = nid
+            graph.add_node(node)
+        graph.connect("a1", "out1", "a2", "in1")
+        graph.connect("b1", "out1", "b2", "in1")
+        return graph, scene
+
+    def _plan(self, window, targets):
+        from flograph.engine.scheduler import build_plan
+        return build_plan(window.graph, sorted(targets), window.engine.cache)
+
+    def test_folding_changes_neither_the_nodes_nor_the_wires(self, window,
+                                                            registry):
+        graph, scene = self._two_branches(window, registry)
+        before = (set(graph.nodes),
+                  {(c.src_node, c.src_port, c.dst_node, c.dst_port)
+                   for c in graph.connections.values()})
+        scene.frame_items["pair"].toggle_collapsed()
+        scene.frame_items["stage"].toggle_collapsed()
+        after = (set(graph.nodes),
+                 {(c.src_node, c.src_port, c.dst_node, c.dst_port)
+                  for c in graph.connections.values()})
+        assert before == after
+
+    def test_running_the_frame_targets_the_same_nodes_either_way(self, window,
+                                                                 registry):
+        graph, scene = self._two_branches(window, registry)
+        open_targets = set(window._nodes_of(graph.frames["stage"]))
+        scene.frame_items["pair"].toggle_collapsed()
+        assert set(window._nodes_of(graph.frames["stage"])) == open_targets
+        scene.frame_items["stage"].toggle_collapsed()
+        assert set(window._nodes_of(graph.frames["stage"])) == open_targets
+        assert open_targets == {"a1", "a2", "b1", "b2"}
+
+    def test_the_execution_plan_is_identical_folded(self, window, registry):
+        graph, scene = self._two_branches(window, registry)
+        targets = window._nodes_of(graph.frames["stage"])
+        before = self._plan(window, targets)
+        scene.frame_items["pair"].toggle_collapsed()
+        scene.frame_items["stage"].toggle_collapsed()
+        assert self._plan(window, targets) == before
+
+    def test_the_branches_stay_independent_when_folded(self, window, registry):
+        """What concurrency actually rests on: nothing about folding
+        introduces a dependency between the two chains."""
+        graph, scene = self._two_branches(window, registry)
+        scene.frame_items["pair"].toggle_collapsed()
+        scene.frame_items["stage"].toggle_collapsed()
+        upstream: dict = {nid: set() for nid in graph.nodes}
+        for conn in graph.connections.values():
+            upstream[conn.dst_node].add(conn.src_node)
+        assert upstream["b1"] == set()          # nothing gates the second
+        assert upstream["a1"] == set()          # nor the first
+        assert upstream["a2"] == {"a1"}
+        assert upstream["b2"] == {"b1"}
