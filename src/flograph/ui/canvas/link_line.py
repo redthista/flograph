@@ -54,6 +54,11 @@ class LinkLineItem(QGraphicsPathItem):
         self.link_id = link_id
         self.src_item = src_item
         self.dst_item = dst_item
+        # A card folded inside a collapsed frame draws its end of the line on
+        # a pin on that frame's box instead of on itself — same indirection
+        # ConnectionItem uses, and for the same reason.
+        self._src_anchor = None
+        self._dst_anchor = None
         self.setZValue(LINK_LINE_Z)
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setAcceptedMouseButtons(Qt.NoButton)
@@ -61,14 +66,24 @@ class LinkLineItem(QGraphicsPathItem):
         self.setToolTip(f"Link: {label}")
         self.update_path()
 
+    def set_anchors(self, src=None, dst=None) -> None:
+        """Redirect either end. None restores the card's own edge."""
+        self._src_anchor = src
+        self._dst_anchor = dst
+        self.update_path()
+
     def update_path(self) -> None:
         self.setPath(bezier_path(self._start(), self._end()))
 
     def _start(self) -> QPointF:
+        if self._src_anchor is not None:
+            return self._src_anchor.scenePos()
         item = self.src_item
         return item.mapToScene(QPointF(item.width, item.body_height / 2.0))
 
     def _end(self) -> QPointF:
+        if self._dst_anchor is not None:
+            return self._dst_anchor.scenePos()
         item = self.dst_item
         return item.mapToScene(QPointF(0.0, item.body_height / 2.0))
 

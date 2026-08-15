@@ -64,6 +64,10 @@ _HANDLED_ITEM_CHANGES = frozenset({
     QGraphicsItem.ItemPositionChange,
     QGraphicsItem.ItemPositionHasChanged,
     QGraphicsItem.ItemSelectedHasChanged,
+    # Rare — only a collapsing frame folding its contents away, or opening
+    # again — but an animated card that is hidden rather than flattened
+    # would otherwise carry on rendering frames nobody can see.
+    QGraphicsItem.ItemVisibleHasChanged,
 })
 # A deactivated node is faded rather than hidden: it is still part of the
 # graph, still wired, and still the thing you click to switch back on.
@@ -301,6 +305,56 @@ def port_labels_on(node, scene) -> bool:
     if own is not None:
         return bool(own)
     return bool(getattr(scene, "port_labels_enabled", False))
+
+
+def paint_status_led(painter: QPainter, cx: float, cy: float, *,
+                     status: NodeStatus, progress: float, pulse: float,
+                     stale: bool, behind: QColor,
+                     radius: float = LED_RADIUS) -> None:
+    """The status light, centred on (cx, cy).
+
+    Free-standing rather than a NodeItem method because a collapsed frame
+    draws the same indicator twice over — once per contained node in its
+    matrix, and once for its own aggregate — and two implementations of "what
+    a status light looks like" would drift the moment either was touched.
+
+    `behind` is whatever the LED is sitting on, and is only used to hollow
+    out a stale-but-done node — in the wide node's header that is the header
+    colour, but a square node's LED hangs below the body on bare canvas,
+    where the header colour would read as a coloured pip rather than a hole.
+    """
+    led_color = QColor(theme.status_color(status))
+    running = status == NodeStatus.RUNNING
+    # A node that reports a fraction gets a ring that fills; one that
+    # never calls ctx.progress() keeps the pulse. Indeterminate and
+    # determinate are the honest distinction, and the LED is already a
+    # circle — a progress bar here would be new chrome to reconcile with
+    # the chevron, the temp-edit dot and every collapsed card.
+    fraction = progress if running else 0.0
+    if running and not fraction:
+        led_color.setAlphaF(0.35 + 0.65 * pulse)
+    painter.setPen(QPen(theme.NODE_BORDER, 1))
+    painter.setBrush(QBrush(led_color))
+    led_rect = QRectF(cx - radius, cy - radius, 2 * radius, 2 * radius)
+    if fraction:
+        track = QColor(led_color)
+        track.setAlphaF(0.25)
+        painter.setBrush(QBrush(track))
+        painter.drawEllipse(led_rect)
+        # Qt angles are sixteenths of a degree, zero at 3 o'clock and
+        # rising anticlockwise, so filling clockwise from noon is a
+        # negative span starting at 90.
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(led_color))
+        painter.drawPie(led_rect, 90 * 16, -int(fraction * 360 * 16))
+        painter.setPen(QPen(theme.NODE_BORDER, 1))
+        painter.setBrush(Qt.NoBrush)
+    painter.drawEllipse(led_rect)
+    if stale and status == NodeStatus.DONE:
+        # stale: hollow out the green LED
+        hole = radius * 0.4
+        painter.setBrush(QBrush(behind))
+        painter.drawEllipse(QRectF(cx - hole, cy - hole, 2 * hole, 2 * hole))
 
 
 def compact_on(node, scene) -> bool:
@@ -1389,9 +1443,12 @@ class NodeItem(QGraphicsObject):
             self._report_animator = None
 
     def _report_should_animate(self) -> bool:
-        """Same two switches as an image card: flattened by LOD or with its
-        preview turned off means nobody is looking at it."""
-        return not self._flat and self.node.canvas_preview_enabled
+        """Same three switches as an image card: flattened by LOD, preview
+        turned off, or hidden inside a collapsed frame all mean nobody is
+        looking at it."""
+        return (not self._flat
+                and self.node.canvas_preview_enabled
+                and self.isVisible())
 
     # --------------------------------------------------------- table viewer
 
@@ -2565,46 +2622,13 @@ class NodeItem(QGraphicsObject):
 
     def _paint_status_led(self, painter: QPainter, cx: float, cy: float,
                           behind: QColor) -> None:
-        """The status light, centred on (cx, cy).
-
-        `behind` is whatever the LED is sitting on, and is only used to hollow
-        out a stale-but-done node — in the wide node's header that is the
-        header colour, but a square node's LED hangs below the body on bare
-        canvas, where the header colour would read as a coloured pip rather
-        than a hole.
-        """
-        led_color = QColor(theme.status_color(self.node.status))
-        running = self.node.status == NodeStatus.RUNNING
-        # A node that reports a fraction gets a ring that fills; one that
-        # never calls ctx.progress() keeps the pulse. Indeterminate and
-        # determinate are the honest distinction, and the LED is already a
-        # circle — a progress bar here would be new chrome to reconcile with
-        # the chevron, the temp-edit dot and every collapsed card.
-        fraction = self.node.progress if running else 0.0
-        if running and not fraction:
-            led_color.setAlphaF(0.35 + 0.65 * self._pulse)
-        painter.setPen(QPen(theme.NODE_BORDER, 1))
-        painter.setBrush(QBrush(led_color))
-        led_rect = QRectF(cx - LED_RADIUS, cy - LED_RADIUS,
-                          2 * LED_RADIUS, 2 * LED_RADIUS)
-        if fraction:
-            track = QColor(led_color)
-            track.setAlphaF(0.25)
-            painter.setBrush(QBrush(track))
-            painter.drawEllipse(led_rect)
-            # Qt angles are sixteenths of a degree, zero at 3 o'clock and
-            # rising anticlockwise, so filling clockwise from noon is a
-            # negative span starting at 90.
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(led_color))
-            painter.drawPie(led_rect, 90 * 16, -int(fraction * 360 * 16))
-            painter.setPen(QPen(theme.NODE_BORDER, 1))
-            painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(led_rect)
-        if self.node.dirty and self.node.status == NodeStatus.DONE:
-            # stale: hollow out the green LED
-            painter.setBrush(QBrush(behind))
-            painter.drawEllipse(QRectF(cx - 2, cy - 2, 4, 4))
+        """This node's status light, centred on (cx, cy)."""
+        paint_status_led(painter, cx, cy,
+                         status=self.node.status,
+                         progress=self.node.progress,
+                         pulse=self._pulse,
+                         stale=self.node.dirty,
+                         behind=behind)
 
     def _paint_temp_edit_dot(self, painter: QPainter,
                              cx: float, cy: float) -> None:
@@ -3007,6 +3031,10 @@ class NodeItem(QGraphicsObject):
             scene = self.scene()
             if scene is not None:
                 scene.node_item_moved(self.node.id)
+        if change == QGraphicsItem.ItemVisibleHasChanged:
+            # re-derives every "is anyone looking at this" answer, which is
+            # where the QMovie playback decisions live
+            self._apply_proxy_visibility()
         if change == QGraphicsItem.ItemSelectedHasChanged \
                 and self._button_edit and not value:
             # Clicking the canvas or another node drops the selection, which

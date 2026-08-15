@@ -54,6 +54,36 @@ class Frame:
     rect: tuple[float, float, float, float] = (0.0, 0.0, 300.0, 200.0)
     color: str = "#33415c"
     z: Optional[int] = None   # stacking order among frames; see core.layers
+    # Drawn as a single node-sized square instead of a region, with its
+    # contents hidden and the wires crossing its boundary re-routed to pins
+    # on the box.
+    #
+    # `rect` is always the geometry the frame actually occupies, so while
+    # collapsed it *is* the small box — the frame claims no canvas it isn't
+    # drawing. An earlier version kept the full rect throughout and only
+    # drew small, which meant a folded frame dragged around an invisible
+    # 300x200 footprint: it absorbed whatever it was dropped on the next
+    # time it folded, and carried unrelated nodes along when moved.
+    collapsed: bool = False
+    #: Size to restore on expand. None until the frame has been collapsed.
+    expanded_size: Optional[tuple[float, float]] = None
+    #: Who the frame owns while collapsed. Captured when it folds, because
+    #: the region it would otherwise be derived from is not on the canvas to
+    #: be read — and being real state rather than a recomputation is what
+    #: makes undo give back exactly the membership it took away.
+    members: tuple[str, ...] = ()
+    member_frames: tuple[str, ...] = ()
+    #: What expanding this frame shoved out of the way, so folding it again
+    #: can put it back: (kind, id, dx, dy, landed_x, landed_y) per thing
+    #: moved. The landing position is recorded too — anything the user has
+    #: since moved themselves is left alone rather than yanked back.
+    nudged: tuple = ()
+    # Where this frame came from, when it was inserted from the user library
+    # (see core.user_frames). `source` is the library frame's id and
+    # `source_fingerprint` the hash of the payload it was stamped from, so a
+    # copy that nobody has edited can still be recognised and updated later.
+    source: str = ""
+    source_fingerprint: str = ""
 
 
 @dataclass
@@ -608,6 +638,48 @@ class Graph:
             frame.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
         if color is not None:
             frame.color = color
+        self.events.frame_changed.emit(frame)
+        return frame
+
+    def apply_frame_collapse(self, frame_id: str, *, collapsed: bool,
+                             rect: tuple[float, float, float, float],
+                             expanded_size: Optional[tuple[float, float]],
+                             members: tuple[str, ...],
+                             member_frames: tuple[str, ...],
+                             nudged: tuple = ()) -> Frame:
+        """Fold a frame down to a box, or open it back out.
+
+        Everything the fold touches moves together, in one call, because
+        every part of it has to be restored together: the rect shrinks, the
+        size to grow back to is remembered, and the membership the frame can
+        no longer read off the canvas is written down. A command that
+        snapshots this tuple can undo the whole fold exactly.
+
+        Deliberately not routed through `update_frame`, which snapshots and
+        rewrites exactly (title, rect, color) — anything else passing
+        through it would be reverted by an unrelated frame edit.
+        """
+        frame = self.frames.get(frame_id)
+        if frame is None:
+            raise GraphError(f"no frame with id {frame_id!r}")
+        frame.collapsed = bool(collapsed)
+        frame.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
+        frame.expanded_size = (tuple(float(v) for v in expanded_size)
+                               if expanded_size is not None else None)
+        frame.members = tuple(members)
+        frame.member_frames = tuple(member_frames)
+        frame.nudged = tuple(nudged)
+        self.events.frame_changed.emit(frame)
+        return frame
+
+    def set_frame_source(self, frame_id: str, source: str,
+                         fingerprint: str) -> Frame:
+        """Stamp where this frame was inserted from — see core.user_frames."""
+        frame = self.frames.get(frame_id)
+        if frame is None:
+            raise GraphError(f"no frame with id {frame_id!r}")
+        frame.source = source
+        frame.source_fingerprint = fingerprint
         self.events.frame_changed.emit(frame)
         return frame
 

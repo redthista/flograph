@@ -20,6 +20,14 @@ LINK_LINE_Z = -1500.0
 WIRE_Z = -1000.0
 NODE_Z = 0.0
 
+# A collapsed frame leaves the backdrop band entirely: it is no longer a
+# region behind the flow but a single box standing in the middle of it, with
+# live pins that have to be clickable. Far above NODE_Z rather than one band
+# up, because a node's own stacking index is added to its band and a project
+# with a thousand-odd nodes would otherwise start drawing them over the
+# collapsed frames.
+COLLAPSED_FRAME_Z = 500_000.0
+
 # The wire being dragged, and a tile blown up over a whole dashboard page:
 # both are transient states that own the view while they last.
 PENDING_WIRE_Z = 1_000_000.0

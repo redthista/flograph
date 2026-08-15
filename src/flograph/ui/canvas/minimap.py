@@ -85,10 +85,14 @@ class Minimap(QWidget):
     def _content_rect(self) -> QRectF:
         scene = self._view.scene()
         rect = QRectF()
+        # hidden items are inside a collapsed frame; the map shows the canvas
+        # as it looks, and their region is represented by that frame's box
         for item in scene.node_items.values():
-            rect = rect.united(item.sceneBoundingRect())
+            if item.isVisible():
+                rect = rect.united(item.sceneBoundingRect())
         for item in scene.frame_items.values():
-            rect = rect.united(item.scene_rect())
+            if item.isVisible():
+                rect = rect.united(item.display_rect())
         viewport = self._view.mapToScene(
             self._view.viewport().rect()).boundingRect()
         rect = rect.united(viewport)
@@ -131,7 +135,11 @@ class Minimap(QWidget):
         s = self._scale(content)
 
         for item in scene.frame_items.values():
-            rect = item.scene_rect()
+            if not item.isVisible():
+                continue
+            # display_rect, not scene_rect: a collapsed frame keeps its full
+            # region in the model, but on the map it is the small box
+            rect = item.display_rect()
             top_left = self._to_mini(rect.topLeft(), content, s)
             color = QColor(item.frame.color)
             color.setAlphaF(0.35)
@@ -141,6 +149,8 @@ class Minimap(QWidget):
                                     rect.size() * s).toRect())
 
         for item in scene.node_items.values():
+            if not item.isVisible():
+                continue
             rect = item.sceneBoundingRect()
             top_left = self._to_mini(rect.topLeft(), content, s)
             painter.setPen(_node_pen(item))
