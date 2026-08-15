@@ -57,6 +57,13 @@ def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
     left, or above — is not in the frame's way and is never touched. So most
     things go right, and only what is genuinely underneath goes down.
 
+    Nothing that **starts** to the left of the square is ever moved, not even
+    if it reaches across and overlaps it. A frame is only ever going to grow
+    right and down, so its left-hand neighbour cannot be in its way; and a
+    wide frame whose right-hand edge happens to overlap the little box would
+    otherwise be flung the whole width of the region to "clear" it, which is
+    a violent answer to a collision the expand did not create.
+
     How far: the least that clears the region, and nothing if the region is
     already clear. That last part matters more than it sounds. A frame that
     folds and reopens with nothing else changed must land exactly where it
@@ -87,7 +94,8 @@ def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
     right: list = []
     down: list = []
     for key, rect in units:
-        if rect.left() >= box.right() or rect.intersects(box):
+        under = rect.intersects(box) and rect.left() >= box.left()
+        if rect.left() >= box.right() or under:
             right.append((key, rect))
         elif rect.top() >= box.bottom() and rect.right() > box.left():
             down.append((key, rect))
@@ -445,8 +453,17 @@ class NodeGraphScene(QGraphicsScene):
                        if nid in self.node_items and nid not in keep]
             spoken_for.update(members)
             rect = other.scene_rect()
-            for nid in members:
-                rect = rect.united(self.node_items[nid].sceneBoundingRect())
+            if not other.collapsed:
+                # a node can hang over its frame's edge, and the whole unit
+                # has to clear the region, so the overhang counts
+                for nid in members:
+                    rect = rect.united(
+                        self.node_items[nid].sceneBoundingRect())
+            # a folded frame's members are hidden and occupy no canvas, so
+            # the unit is the little box and nothing else. Unioning their
+            # stored positions in would stretch the unit across everywhere
+            # they used to be, and a 60px box would push things about as
+            # though it were still the size of the flow inside it.
             units.append((("frame", other_id), rect, members, [other_id]))
         for node_id, node_item in self.node_items.items():
             if node_id in spoken_for or not node_item.isVisible():
@@ -456,13 +473,55 @@ class NodeGraphScene(QGraphicsScene):
         return units
 
     def _frame_members(self, item) -> list:
-        """Who a frame holds: what it wrote down if folded, whatever sits
-        inside it if not."""
+        """Who a frame holds directly: what it wrote down if folded, whatever
+        sits inside it if not. Not transitive — see frame_contents."""
         if item.collapsed:
             return list(item.frame.members)
         rect = item.scene_rect()
         return [nid for nid, node_item in self.node_items.items()
                 if rect.contains(node_item.sceneBoundingRect().center())]
+
+    def _frame_member_frames(self, item) -> list:
+        """The frames a frame holds directly."""
+        if item.collapsed:
+            return list(item.frame.member_frames)
+        rect = item.scene_rect()
+        return [fid for fid, other in self.frame_items.items()
+                if other is not item and rect.contains(other.scene_rect())]
+
+    def frame_contents(self, item) -> tuple:
+        """(node_ids, frame_ids) — everything this frame holds, including
+        everything its nested frames hold.
+
+        Transitive, and that is the whole point. Direct membership uses two
+        different rules — a node counts by its centre, a frame by its whole
+        rectangle — and at the edges they disagree: a frame can sit wholly
+        inside this one while a node *it* holds hangs out past the edge. Take
+        the frame without its contents and two things break, both reported.
+        Dragging the box leaves those nodes behind, so the flow comes back
+        scattered relative to its own frame. And a wire reaching one of them
+        gets pinned to the nested frame, which is itself hidden — a visible
+        wire drawn to a box that is not on the canvas, trailing off across
+        the scene to nothing.
+
+        If you carry the frame, you carry what is in it, wherever it reaches.
+        """
+        # dict rather than set throughout: the member list is the order the
+        # indicators light up in on the folded box, so it has to be stable
+        nodes: dict = {nid: None for nid in self._frame_members(item)}
+        frames: list = []
+        seen: set = {item.frame.id}
+        queue: list = list(self._frame_member_frames(item))
+        while queue:
+            frame_id = queue.pop(0)
+            if frame_id in seen or frame_id not in self.frame_items:
+                continue        # a frame cannot contain itself, but a stale
+            seen.add(frame_id)  # member list could still say so
+            frames.append(frame_id)
+            nested = self.frame_items[frame_id]
+            nodes.update({nid: None for nid in self._frame_members(nested)})
+            queue.extend(self._frame_member_frames(nested))
+        return (list(nodes), frames)
 
     def _grow_enclosing(self, frame_id: str, region: QRectF,
                         landings: list) -> tuple:
@@ -642,29 +701,44 @@ class NodeGraphScene(QGraphicsScene):
         """Collapsed frames that are themselves folded away inside another."""
         return {fid for ids in self._hidden_frames.values() for fid in ids}
 
+    def _burier_of(self) -> dict:
+        """frame_id -> the collapsed frame that has folded it away."""
+        return {fid: owner for owner, ids in self._hidden_frames.items()
+                for fid in ids}
+
     def _owner_of(self, node_id: str) -> Optional[str]:
         """The collapsed frame that stands in for this node on the canvas.
 
-        The **outermost** one. A node inside a collapsed frame that is itself
-        folded away inside another belongs, as far as the canvas is
-        concerned, to the box you can actually see: pinning its wires to the
-        inner frame would draw them to a box that is not on screen.
+        The **outermost** one, found by climbing: whichever frame claims the
+        node, then whatever has folded *that* away, until we reach one nobody
+        has buried. That frame is the box actually on screen, and it is the
+        only correct place to pin the node's wires — pinning them to a buried
+        frame draws them to something invisible, which is a wire trailing off
+        across the canvas to nowhere.
 
-        This used to return whichever frame came first in the dictionary,
+        Climbing rather than "the first unburied frame that claims it",
+        because the two membership rules disagree at the edges (see
+        frame_contents) and an outer frame's own list can miss a node that a
+        frame it carries holds. Following the chain gets the right answer
+        even then, and also for projects saved before this was fixed.
+
+        Before that it returned whichever frame came first in the dictionary,
         which made it a coin toss decided by the order the frames happened to
         be created in — the same nesting drew correctly or not at all
         depending on which frame you had drawn first.
         """
-        buried = self._buried_frames()
-        fallback = None
+        burier = self._burier_of()
         for frame_id, members in self._hidden.items():
             if node_id not in members:
                 continue
-            if frame_id not in buried:
-                return frame_id
-            if fallback is None:
-                fallback = frame_id
-        return fallback
+            seen = {frame_id}
+            while frame_id in burier:
+                frame_id = burier[frame_id]
+                if frame_id in seen:
+                    break       # a cycle in stale membership; stop climbing
+                seen.add(frame_id)
+            return frame_id
+        return None
 
     def wire_anchor(self, conn, side: str):
         """The item a wire's `side` end should be drawn from.

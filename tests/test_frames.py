@@ -1654,3 +1654,218 @@ class TestAParentThatMustStretch:
         graph.update_frame("outer", rect=(0.0, 0.0, 900.0, 700.0))
         collapse(scene, "inner")
         assert graph.frames["outer"].rect == (0.0, 0.0, 900.0, 700.0)
+
+
+def wires_anchored_to_hidden(scene):
+    """Visible wires whose ends are drawn from something not on the canvas.
+
+    The scatter: a line running off to a box that isn't there. Worth asserting
+    as an invariant rather than case by case — any way of reaching this state
+    is a bug, whatever produced it.
+    """
+    bad = []
+    for ci in scene.connection_items.values():
+        if not ci.isVisible():
+            continue
+        for side, anchor in (("src", ci.src_anchor), ("dst", ci.dst_anchor)):
+            if anchor is not None and not anchor.isVisible():
+                bad.append(f"{ci.conn.src_node}->{ci.conn.dst_node} ({side})")
+    return bad
+
+
+class TestNothingToTheLeftEverMoves:
+    """A frame only ever grows right and down, so its left-hand neighbour
+    cannot be in its way — not even one wide enough to overlap the folded
+    square, which used to be flung the whole width of the region."""
+
+    def _left_neighbour(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="mid", rect=(400, 100, 380, 240)))
+        add_node(graph, registry, "m1", pos=(430.0, 160.0))
+        # wide enough that its right-hand edge covers where the box will sit
+        graph.add_frame(Frame(id="left", rect=(60, 100, 380, 240)))
+        add_node(graph, registry, "l1", pos=(100.0, 160.0))
+        collapse(scene, "mid")
+        return graph, stack, scene
+
+    def test_a_left_frame_overlapping_the_box_stays_put(self, env, registry):
+        graph, stack, scene = self._left_neighbour(env, registry)
+        before = graph.frames["left"].rect
+        expand(scene, "mid")
+        assert graph.frames["left"].rect == before
+
+    def test_its_contents_stay_put_too(self, env, registry):
+        graph, stack, scene = self._left_neighbour(env, registry)
+        before = graph.nodes["l1"].pos
+        expand(scene, "mid")
+        assert graph.nodes["l1"].pos == before
+
+    def test_a_node_overlapping_the_box_from_the_left_stays_put(self, env,
+                                                               registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(400, 100, 380, 240)))
+        add_node(graph, registry, "inside", pos=(430.0, 160.0))
+        collapse(scene, "f1")
+        # sits across the box's left edge
+        left = add_node(graph, registry, "left", pos=(360.0, 110.0))
+        before = graph.nodes["left"].pos
+        expand(scene, "f1")
+        assert graph.nodes["left"].pos == before
+
+    def test_the_plan_never_moves_anything_starting_left_of_the_box(self):
+        from flograph.ui.canvas.scene import plan_nudge
+        box, region = QRectF(400, 100, 60, 60), QRectF(400, 100, 380, 240)
+        for x in range(0, 400, 20):
+            plan = plan_nudge(box, region, [("a", QRectF(x, 100, 380, 240))])
+            assert plan == {}, f"a unit starting at x={x} was moved"
+
+
+class TestAFoldedFrameOccupiesOnlyItsBox:
+    """Its members are hidden and occupy no canvas, so the unit an expanding
+    neighbour has to reckon with is the little square and nothing else."""
+
+    def test_its_hidden_members_do_not_stretch_it(self, env, registry):
+        graph, stack, scene = env
+        # a folded frame parked well clear, whose members are still recorded
+        # at positions overlapping the frame about to expand
+        graph.add_frame(Frame(id="far", rect=(0, 0, 400, 260)))
+        add_node(graph, registry, "farnode", pos=(40.0, 40.0))
+        collapse(scene, "far")
+        graph.update_frame("far", rect=(2000.0, 0.0, COMPACT_W, COMPACT_MIN_H))
+        # 'farnode' is left behind at (40, 40) on purpose: the folded box is
+        # what occupies canvas, not where its contents used to be
+        graph.add_frame(Frame(id="f1", rect=(600, 0, 300, 200)))
+        add_node(graph, registry, "inside", pos=(640.0, 40.0))
+        collapse(scene, "f1")
+        units = scene._nudge_units("f1", {"inside"}, set())
+        rect = next(r for key, r, _n, _f in units if key == ("frame", "far"))
+        assert rect.width() == COMPACT_W and rect.height() == COMPACT_MIN_H
+
+
+class TestAFrameCarriesWhatItsNestedFramesHold:
+    """The two membership rules disagree at the edges — a node counts by its
+    centre, a frame by its whole rect — so a nested frame can be carried
+    while a node it holds hangs out past the edge and is not."""
+
+    def _overhanging(self, env, registry):
+        """A frame folded down to its box, then a frame drawn around that box.
+
+        The outer frame contains the 60px square, so it carries the inner
+        frame — but the inner frame's members are still spread out at their
+        expanded positions, and one of them is well outside the outer frame.
+        That is the only way the two rules can disagree, and it is exactly
+        what happens when you fold a row of frames and then draw a frame
+        around them.
+        """
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="inner", rect=(300, 100, 240, 140)))
+        script_node(graph, registry, "held", (320.0, 140.0))
+        script_node(graph, registry, "overhang", (440.0, 140.0))
+        graph.connect("held", "out1", "overhang", "in1")
+        script_node(graph, registry, "outside", (900.0, 140.0))
+        graph.connect("overhang", "out1", "outside", "in1")
+        collapse(scene, "inner")
+        assert "overhang" in graph.frames["inner"].members
+        graph.add_frame(Frame(id="outer", rect=(260, 60, 160, 160)))
+        assert "inner" in scene._frame_member_frames(scene.frame_items["outer"])
+        return graph, stack, scene
+
+    def test_the_overhanging_node_is_still_a_member(self, env, registry):
+        graph, stack, scene = self._overhanging(env, registry)
+        collapse(scene, "outer")
+        assert "overhang" in graph.frames["outer"].members
+        assert "held" in graph.frames["outer"].members
+
+    def test_it_is_hidden_with_the_rest(self, env, registry):
+        graph, stack, scene = self._overhanging(env, registry)
+        collapse(scene, "outer")
+        assert not scene.node_items["overhang"].isVisible()
+
+    def test_dragging_the_box_takes_it_along(self, env, registry):
+        """It used to be left behind, so the flow came back scattered
+        relative to its own frame."""
+        graph, stack, scene = self._overhanging(env, registry)
+        collapse(scene, "outer")
+        item = scene.frame_items["outer"]
+        carried = {n.node.id for n, _off in item.carried_items()[0]}
+        assert {"held", "overhang"} <= carried
+
+    def test_no_wire_is_left_pointing_at_a_hidden_box(self, env, registry):
+        """The scatter: overhang's wire out was pinned to 'inner', which is
+        itself folded away inside 'outer' — a visible line drawn to a box
+        that is not on the canvas."""
+        graph, stack, scene = self._overhanging(env, registry)
+        collapse(scene, "outer")
+        assert wires_anchored_to_hidden(scene) == []
+
+    def test_the_owner_of_a_buried_frames_node_is_the_visible_box(
+            self, env, registry):
+        graph, stack, scene = self._overhanging(env, registry)
+        collapse(scene, "outer")
+        owner = scene._owner_of("overhang")
+        assert owner is not None
+        assert scene.frame_items[owner].isVisible()
+        assert owner == "outer"
+
+
+class TestNoScatterWhenFoldingOverFoldedChildren:
+    """End to end, the reported sequence: a row of collapsed frames, a frame
+    drawn round them, then that frame folded too."""
+
+    def _row_in_a_frame(self, env, registry):
+        graph, stack, scene = env
+        for i, x in enumerate((100.0, 460.0, 820.0)):
+            graph.add_frame(Frame(id=f"f{i}", rect=(x, 200, 280, 180)))
+            for j in range(2):
+                script_node(graph, registry, f"n{i}{j}",
+                            (x + 25 + j * 130, 250.0))
+            graph.connect(f"n{i}0", "out1", f"n{i}1", "in1")
+        script_node(graph, registry, "down", (1400.0, 250.0))
+        graph.connect("n00", "out1", "n10", "in1")
+        graph.connect("n10", "out1", "n20", "in1")
+        graph.connect("n21", "out1", "down", "in1")
+        for i in range(3):
+            collapse(scene, f"f{i}")
+        graph.add_frame(Frame(id="outer", rect=(40, 134, 900, 260)))
+        return graph, stack, scene
+
+    def test_folding_the_surrounding_frame_leaves_no_stray_wires(self, env,
+                                                                registry):
+        graph, stack, scene = self._row_in_a_frame(env, registry)
+        collapse(scene, "outer")
+        assert wires_anchored_to_hidden(scene) == []
+
+    def test_every_nested_frame_is_hidden_with_it(self, env, registry):
+        graph, stack, scene = self._row_in_a_frame(env, registry)
+        collapse(scene, "outer")
+        for i in range(3):
+            assert not scene.frame_items[f"f{i}"].isVisible()
+
+    def test_every_node_in_every_nested_frame_is_hidden(self, env, registry):
+        graph, stack, scene = self._row_in_a_frame(env, registry)
+        collapse(scene, "outer")
+        for i in range(3):
+            for j in range(2):
+                assert not scene.node_items[f"n{i}{j}"].isVisible(), f"n{i}{j}"
+
+    def test_expanding_an_inner_frame_leaves_the_others_where_they_were(
+            self, env, registry):
+        graph, stack, scene = self._row_in_a_frame(env, registry)
+        before = {f"f{i}": graph.frames[f"f{i}"].rect for i in (1, 2)}
+        expand(scene, "f0")
+        assert {f"f{i}": graph.frames[f"f{i}"].rect for i in (1, 2)} == before
+
+    def test_and_puts_its_own_nodes_back_where_they_were(self, env, registry):
+        graph, stack, scene = self._row_in_a_frame(env, registry)
+        before = {n: graph.nodes[n].pos for n in ("n00", "n01")}
+        expand(scene, "f0")
+        assert {n: graph.nodes[n].pos for n in before} == before
+
+    def test_the_whole_round_trip_is_clean(self, env, registry):
+        graph, stack, scene = self._row_in_a_frame(env, registry)
+        before = {n: graph.nodes[n].pos for n in graph.nodes}
+        collapse(scene, "outer")
+        assert wires_anchored_to_hidden(scene) == []
+        expand(scene, "outer")
+        assert wires_anchored_to_hidden(scene) == []
+        assert {n: graph.nodes[n].pos for n in graph.nodes} == before
