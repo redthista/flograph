@@ -1,6 +1,15 @@
 from __future__ import annotations
 
 import gc
+import os
+
+# Before flograph is imported, so every engine built in the suite reads it.
+# The engine halves its worker limit when the machine is short of memory,
+# which is right in the app and wrong here: several tests prove that nodes
+# *do* run side by side, and they would fail on a busy machine for a reason
+# that has nothing to do with what they are testing. Tests that want the
+# throttle set engine.memory_adapt = True and drive engine.memory_probe.
+os.environ.setdefault("FLOGRAPH_MEMORY_ADAPT", "0")
 
 import pytest
 

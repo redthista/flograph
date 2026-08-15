@@ -193,6 +193,10 @@ class MainWindow(QMainWindow):
         # Whether the running node has said anything at all yet — a node that
         # has never spoken gets different wording from one that fell silent.
         self._run_had_output = False
+        # Carried on the run line while memory is tight. Set and cleared by
+        # the resource monitor's pressure signal, not by the run — the
+        # machine does not stop being full because a run ended.
+        self._run_pressure_note = ""
         self._run_prior: Optional[float] = None
         self._run_tick = QTimer(self)
         self._run_tick.setInterval(RUN_TICK_MS)
@@ -843,13 +847,35 @@ class MainWindow(QMainWindow):
     def _on_memory_pressure(self, message: str) -> None:
         """Said once, when the project becomes the reason memory is tight.
 
-        Not while a run is on: the status line is busy saying what is
-        running, and that is the more useful thing at that moment. The amber
-        bar and its tooltip carry it until the run ends.
+        A run is when this matters most and it used to be when it was
+        dropped: the status line is busy saying what is running, so the
+        message was thrown away rather than shown. It is carried into the run
+        line instead — the one moment the user is watching that line is the
+        moment the flow is filling the machine up.
         """
+        self._run_pressure_note = message
+        self._mark_heavy_nodes(bool(message))
         if self.engine.active:
+            self._update_run_status()
             return
-        self.statusBar().showMessage(message, 15000)
+        if message:
+            self.statusBar().showMessage(message, 15000)
+
+    def _mark_heavy_nodes(self, under_pressure: bool) -> None:
+        """Amber the few steps holding the most, or clear every mark.
+
+        The status bar can say memory is short; only the canvas can say
+        *which step*, and that is the part somebody can act on without
+        knowing how the app works — it is the node to put a Max rows on, or
+        to filter earlier. Marks are cleared wholesale rather than tracked,
+        because the heaviest set changes as the flow runs and a stale badge
+        on a node that is no longer heavy is worse than no badge.
+        """
+        heavy = set()
+        if under_pressure:
+            heavy = {nid for nid, _ in self.engine.cache.heaviest(3)}
+        for node_id, item in self.scene.node_items.items():
+            item.set_heavy(node_id in heavy)
 
     # ----------------------------------------------------------- run status
 
@@ -915,7 +941,7 @@ class MainWindow(QMainWindow):
         fraction, what it usually costs) goes with the name: attached to a
         count it would be describing something the line has not identified.
         """
-        if not self._run_node_label:
+        if not self._run_node_label and not self._run_pressure_note:
             return
         concurrent = len(self._run_inflight)
         if concurrent > 1:
@@ -924,9 +950,15 @@ class MainWindow(QMainWindow):
             # longest — it is the one that might be stuck.
             elapsed = time.monotonic() - min(self._run_inflight.values())
             parts = [f"Running {concurrent} nodes"]
-        else:
+        elif self._run_node_label:
             elapsed = time.monotonic() - self._run_node_started
             parts = [f"Running {self._run_node_label}"]
+        else:
+            # Nothing has claimed the floor yet, but there is a pressure note
+            # to carry — the line exists for that alone rather than saying
+            # "Running" and naming nobody.
+            elapsed = 0.0
+            parts = []
         if self._run_total:
             parts.append(f"node {self._run_index} of {self._run_total}")
         if self._run_fraction and concurrent <= 1:
@@ -950,6 +982,11 @@ class MainWindow(QMainWindow):
             else:
                 parts.append(f"quiet for {format_seconds(quiet)} — "
                              f"Cancel to stop it")
+        if self._run_pressure_note:
+            # Last, so it never pushes the thing the user asked for off the
+            # front of the line, but present — this used to be dropped during
+            # a run, which is the one time it is worth saying.
+            parts.append(self._run_pressure_note)
         self.statusBar().showMessage("  ·  ".join(parts))
         self._run_bar.setValue(int(100 * self._run_completion()))
 

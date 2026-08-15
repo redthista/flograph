@@ -6,6 +6,11 @@ table or the result of a SQL query (stdlib sqlite3 — no server needed).
 In table mode a blank table name fails with the list of tables in the
 database. Column types take one `column = dtype` per line; lines
 starting with # are ignored.
+
+**Max rows** keeps the first N, for building a flow against a slice of
+something large. In table mode it becomes a `LIMIT` and the rest is never
+fetched; in query mode the SQL is yours, so the rows are trimmed after it
+runs — put a `LIMIT` in the query itself to make the query cheaper too.
 """
 NODE = {
     "label": "Read SQLite",
@@ -27,6 +32,8 @@ PARAMS = [
      "default": "", "placeholder": "comma separated columns"},
     {"name": "dtypes", "type": "text", "label": "Column types",
      "default": "", "placeholder": "id = int64\nname = string"},
+    {"name": "nrows", "type": "int", "label": "Max rows (0 = all)",
+     "default": 0, "min": 0},
 ]
 
 
@@ -58,6 +65,7 @@ def run(ctx):
     path = p["path"]
     if not path:
         raise ValueError("no database selected — set 'Database file' in the node's properties")
+    nrows = int(p.get("nrows", 0) or 0)
 
     with sqlite3.connect(path) as conn:
         if p.get("source", "query") == "table":
@@ -71,6 +79,10 @@ def run(ctx):
                                  f"database: {available}")
             quoted = name.replace('"', '""')
             query = f'SELECT * FROM "{quoted}"'
+            if nrows:
+                # This half we wrote, so the limit goes into the SQL and the
+                # rows are never fetched at all.
+                query += f" LIMIT {nrows}"
         else:
             query = (p.get("query") or "").strip()
             if not query:
@@ -87,5 +99,12 @@ def run(ctx):
         if dtypes:
             kwargs["dtype"] = dtypes
         table = pd.read_sql_query(query, conn, **kwargs)
+    if nrows and len(table) > nrows:
+        # Query mode: the SQL is the user's, and wrapping somebody else's
+        # statement in a subquery to bolt a LIMIT on breaks as soon as it is
+        # anything but a plain SELECT. Trim after instead, and say so — add
+        # your own LIMIT to make the query itself cheaper.
+        table = table.head(nrows).copy()
+        ctx.log(f"trimmed to the first {nrows} rows")
     ctx.log(f"loaded {len(table)} rows x {len(table.columns)} columns")
     return table

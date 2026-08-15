@@ -55,10 +55,15 @@ def memory_error_hint(exc: BaseException) -> Optional[str]:
     """
     if not isinstance(exc, MemoryError):
         return None
-    return ("Ran out of memory building this node's output. Try filtering or "
-            "sampling rows earlier in the flow, lowering Settings > General > "
-            "Nodes to run at once, or Reset Caches to release results you no "
-            "longer need.")
+    # Ordered by who can act on it. Whoever is looking at this may have been
+    # handed the flow rather than built it: closing something else needs no
+    # knowledge of the app, and "Max rows" is a box on the step that reads
+    # the data. The workers setting is builder advice and goes last.
+    return ("The machine ran out of memory building this step. Close other "
+            "applications and run it again, or work with fewer rows by "
+            "setting Max rows on the step that reads the data. If it keeps "
+            "happening, lower Settings > General > Nodes to run at once, or "
+            "Reset Caches to release results you no longer need.")
 
 
 def _describe(exc: BaseException) -> str:
