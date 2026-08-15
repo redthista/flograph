@@ -1704,12 +1704,22 @@ def wires_anchored_to_hidden(scene):
     as an invariant rather than case by case — any way of reaching this state
     is a bug, whatever produced it.
     """
+    def owner_visible(anchor):
+        # asked of the item that owns the pin, not of the pin: zooming out
+        # flattens cards and hides their ports by design (see _apply_lod),
+        # which is not the same thing as a wire trailing off to nothing
+        holder = getattr(anchor, "frame_item", None)
+        if holder is not None:
+            return holder.isVisible()
+        item = scene.node_items.get(getattr(anchor, "node_id", None))
+        return item is None or item.isVisible()
+
     bad = []
     for ci in scene.connection_items.values():
         if not ci.isVisible():
             continue
         for side, anchor in (("src", ci.src_anchor), ("dst", ci.dst_anchor)):
-            if anchor is not None and not anchor.isVisible():
+            if anchor is not None and not owner_visible(anchor):
                 bad.append(f"{ci.conn.src_node}->{ci.conn.dst_node} ({side})")
     return bad
 
@@ -2269,3 +2279,367 @@ class TestComponentsCanNestToo:
         window._update_component_instance("outer")
         folded = [f for f in graph.frames.values() if f.collapsed]
         assert len(folded) == 1 and folded[0].title == "Inner"
+
+
+class TestANodeBelongsToOneFrame:
+    """The rule that keeps nesting coherent: a node a folded frame wrote down
+    is *that* frame's, and anything else reaches it only by containing that
+    frame.
+
+    Geometric membership has to be blind to visibility, so a folded frame's
+    own contents travel with it. Blind also meant a second frame drawn near
+    where those hidden nodes were left standing claimed them as well — two
+    frames recording the same node, whichever you opened showing it while the
+    other still believed it held it, and dictionary order deciding which one
+    owned it. Found by fuzzing sequences of collapse/expand/copy/group.
+    """
+
+    def _folded_over_another_frames_region(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="keeper", rect=(100, 100, 300, 200)))
+        script_node(graph, registry, "held1", (140.0, 150.0))
+        script_node(graph, registry, "held2", (260.0, 150.0))
+        collapse(scene, "keeper")
+        # a second frame drawn over the region the folded one vacated — its
+        # hidden members are still recorded at positions inside this rect
+        graph.add_frame(Frame(id="latecomer", rect=(80, 80, 400, 300)))
+        return graph, stack, scene
+
+    def test_the_latecomer_does_not_claim_them_directly(self, env, registry):
+        """Geometrically it covers where they are recorded, so the old rule
+        adopted them outright. They belong to the frame that wrote them
+        down; this one may only reach them by carrying that frame."""
+        graph, stack, scene = self._folded_over_another_frames_region(
+            env, registry)
+        direct = scene._frame_members(scene.frame_items["latecomer"])
+        assert "held1" not in direct and "held2" not in direct
+
+    def test_it_claims_them_through_the_frame_that_holds_them(self, env,
+                                                              registry):
+        """It contains the folded frame, so it carries it — and the nodes
+        come with the frame, not separately."""
+        graph, stack, scene = self._folded_over_another_frames_region(
+            env, registry)
+        collapse(scene, "latecomer")
+        assert "keeper" in graph.frames["latecomer"].member_frames
+        # transitive membership still reaches them
+        assert {"held1", "held2"} <= set(graph.frames["latecomer"].members)
+
+    def test_a_frame_that_does_not_contain_the_holder_gets_nothing(
+            self, env, registry):
+        graph, stack, scene = self._folded_over_another_frames_region(
+            env, registry)
+        # sits over where the hidden nodes are recorded, but not over the box
+        graph.update_frame("latecomer", rect=(120.0, 120.0, 320.0, 220.0))
+        collapse(scene, "latecomer")
+        assert graph.frames["latecomer"].members == ()
+        assert graph.frames["latecomer"].member_frames == ()
+
+    def test_no_two_unrelated_frames_record_the_same_node(self, env, registry):
+        graph, stack, scene = self._folded_over_another_frames_region(
+            env, registry)
+        graph.update_frame("latecomer", rect=(120.0, 120.0, 320.0, 220.0))
+        collapse(scene, "latecomer")
+        claims: dict = {}
+        for fid, frame in graph.frames.items():
+            if not frame.collapsed:
+                continue
+            for nid in frame.members:
+                assert nid not in claims, (
+                    f"{nid} is claimed by both {claims.get(nid)} and {fid}")
+                claims[nid] = fid
+
+    def test_opening_one_does_not_strand_the_other(self, env, registry):
+        """The symptom: expand one frame and the node appears, while the
+        other still believes it is holding it — so folding that one hides a
+        node it does not own."""
+        graph, stack, scene = self._folded_over_another_frames_region(
+            env, registry)
+        graph.update_frame("latecomer", rect=(120.0, 120.0, 320.0, 220.0))
+        collapse(scene, "latecomer")
+        expand(scene, "keeper")
+        for nid in ("held1", "held2"):
+            assert scene.node_items[nid].isVisible()
+
+    def test_a_buried_frame_is_not_claimed_by_a_third_frame(self, env,
+                                                            registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="inner", rect=(200, 200, 240, 160)))
+        script_node(graph, registry, "n1", (240.0, 240.0))
+        collapse(scene, "inner")
+        graph.add_frame(Frame(id="owner", rect=(160, 160, 200, 200)))
+        collapse(scene, "owner")
+        assert "inner" in graph.frames["owner"].member_frames
+        # a third frame drawn over the same area must reach it only through
+        # 'owner' — never adopt it directly, which would have two frames
+        # holding the same box
+        graph.add_frame(Frame(id="third", rect=(140, 140, 400, 300)))
+        direct = scene._frame_member_frames(scene.frame_items["third"])
+        assert "inner" not in direct
+        assert "owner" in direct
+
+    def test_everything_comes_back_when_it_is_all_opened(self, env, registry):
+        """The end-to-end version: whatever the sequence, opening every frame
+        must put every node back on the canvas."""
+        graph, stack, scene = self._folded_over_another_frames_region(
+            env, registry)
+        collapse(scene, "latecomer")
+        for _ in range(6):
+            folded = [f for f, fr in graph.frames.items()
+                      if fr.collapsed and scene.frame_items[f].isVisible()]
+            if not folded:
+                break
+            expand(scene, sorted(folded)[0])
+        assert all(item.isVisible() for item in scene.node_items.values())
+
+
+# --------------------------------------------------------------- invariants
+
+def frame_invariants(win):
+    """Every way the canvas can be left incoherent by frame operations.
+
+    Written as one checker rather than as separate assertions because the
+    interesting failures are *combinations* — collapse, then group, then
+    paste, then undo — and any of them can leave the canvas wrong in a way
+    the individual operation's own tests would never look for. Returns a list
+    of human-readable failures, empty when the canvas is sound.
+    """
+    graph, scene = win.graph, win.scene
+    bad = []
+
+    if set(graph.nodes) != set(scene.node_items):
+        bad.append("node_items out of step with graph.nodes")
+    if set(graph.frames) != set(scene.frame_items):
+        bad.append("frame_items out of step with graph.frames")
+    if set(graph.connections) != set(scene.connection_items):
+        bad.append("connection_items out of step with graph.connections")
+
+    for fid, frame in graph.frames.items():
+        for nid in frame.members:
+            if nid not in graph.nodes:
+                bad.append(f"frame {fid} names missing node {nid}")
+        for other in frame.member_frames:
+            if other not in graph.frames:
+                bad.append(f"frame {fid} names missing frame {other}")
+        if fid in frame.member_frames:
+            bad.append(f"frame {fid} contains itself")
+
+    def holds(outer_id, inner_id, seen=None):
+        seen = seen if seen is not None else set()
+        if outer_id in seen:
+            return False
+        seen.add(outer_id)
+        frame = graph.frames.get(outer_id)
+        if frame is None:
+            return False
+        return (inner_id in frame.member_frames
+                or any(holds(s, inner_id, seen) for s in frame.member_frames))
+
+    # two folded frames may both name a node only when one contains the
+    # other; that overlap is what transitive membership is
+    claims: dict = {}
+    for fid, frame in graph.frames.items():
+        if not frame.collapsed:
+            continue
+        for nid in frame.members:
+            prev = claims.get(nid)
+            if prev is not None and not (holds(prev, fid) or holds(fid, prev)):
+                bad.append(f"node {nid} held by unrelated {prev} and {fid}")
+            claims[nid] = fid
+
+    # nothing is lost: a hidden node must be accounted for by a folded frame
+    # you can actually see
+    for nid, item in scene.node_items.items():
+        if item.isVisible():
+            continue
+        owner = scene._owner_of(nid)
+        if owner is None:
+            bad.append(f"node {nid} is hidden and nothing owns it")
+        elif owner not in scene.frame_items:
+            bad.append(f"node {nid} owned by missing frame {owner}")
+        elif not scene.frame_items[owner].isVisible():
+            bad.append(f"node {nid} owned by hidden frame {owner}")
+
+    for fid, frame in graph.frames.items():
+        if not scene.frame_items[fid].isVisible():
+            continue
+        if frame.collapsed:
+            for nid in frame.members:
+                if nid in scene.node_items and scene.node_items[nid].isVisible():
+                    bad.append(f"{fid} is folded but member {nid} is showing")
+        elif frame.members or frame.member_frames:
+            bad.append(f"expanded frame {fid} still records members")
+
+    # no visible wire is drawn from something that is not on the canvas.
+    # Asked of the item that owns the anchor, not of the pin: zooming out
+    # flattens cards and hides their ports by design, which is not the same
+    # thing as a wire trailing off to a box that is not there.
+    def owner_visible(anchor):
+        holder = getattr(anchor, "frame_item", None)
+        if holder is not None:
+            return holder.isVisible()
+        item = scene.node_items.get(getattr(anchor, "node_id", None))
+        return item is None or item.isVisible()
+
+    for ci in scene.connection_items.values():
+        if not ci.isVisible():
+            continue
+        for side in ("src_anchor", "dst_anchor"):
+            anchor = getattr(ci, side)
+            if anchor is not None and not owner_visible(anchor):
+                bad.append(f"wire {ci.conn.src_node}->{ci.conn.dst_node} "
+                           f"{side} is not on the canvas")
+    return bad
+
+
+class TestFrameSequences:
+    """Sequences of frame operations, checked against the invariants after
+    every step.
+
+    Every frame bug reported so far survived the tests for the operation that
+    caused it and only showed up in combination — collapse then group then
+    paste then undo. Fixed seeds rather than random ones so a failure is
+    reproducible and the suite is deterministic; the same driver was run over
+    400 seeds by hand, which is where the last of them was found.
+    """
+
+    @pytest.fixture
+    def window(self, qtbot, registry):
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        # deleting a folded frame asks first; a modal offscreen never returns
+        win.scene.confirm_collapsed_delete = lambda *a, **k: True
+        qtbot.addWidget(win)
+        return win
+
+    def _build(self, win, registry):
+        from flograph.core import Graph
+        win._replace_graph(Graph())
+        win.undo_stack.clear()
+        win.scene.confirm_collapsed_delete = lambda *a, **k: True
+        graph = win.graph
+        graph.add_frame(Frame(id="outer", title="Outer", rect=(80, 80, 700, 380)))
+        graph.add_frame(Frame(id="inner", title="Inner", rect=(150, 160, 320, 200)))
+        graph.add_frame(Frame(id="side", title="Side", rect=(860, 80, 300, 200)))
+        for nid, pos in (("a", (190.0, 210.0)), ("b", (330.0, 210.0)),
+                         ("c", (560.0, 210.0)), ("d", (900.0, 130.0)),
+                         ("e", (1300.0, 130.0))):
+            node = registry.instantiate("flograph.scripting.python_script",
+                                        pos=pos)
+            node.id = nid
+            graph.add_node(node)
+        for src, dst in (("a", "b"), ("b", "c"), ("c", "d"), ("d", "e")):
+            graph.connect(src, "out1", dst, "in1")
+
+    # --- the operations, each returning a label or None if not applicable
+
+    def _visible_frames(self, win):
+        return sorted(f for f in win.graph.frames
+                      if win.scene.frame_items[f].isVisible())
+
+    def _toggle(self, win, rng, want_collapsed):
+        pool = [f for f in self._visible_frames(win)
+                if win.graph.frames[f].collapsed is want_collapsed]
+        if not pool:
+            return None
+        fid = rng.choice(pool)
+        win.scene.frame_items[fid].toggle_collapsed()
+        return ("expand" if want_collapsed else "collapse") + f"({fid})"
+
+    def _copy_paste(self, win, rng):
+        if len(win.graph.frames) > 10 or len(win.graph.nodes) > 30:
+            return None
+        pool = self._visible_frames(win)
+        if not pool:
+            return None
+        fid = rng.choice(pool)
+        win.scene.clearSelection()
+        win.scene.frame_items[fid].setSelected(True)
+        payload = win._selection_payload()
+        if payload is None:
+            return None
+        win._insert_payload(payload)
+        return f"copy_paste({fid})"
+
+    def _group(self, win, rng):
+        pool = self._visible_frames(win)
+        if len(pool) < 2 or len(win.graph.frames) > 10:
+            return None
+        picked = rng.sample(pool, 2)
+        win.scene.clearSelection()
+        for fid in picked:
+            win.scene.frame_items[fid].setSelected(True)
+        win._add_frame()
+        return f"group({picked})"
+
+    def _delete(self, win, rng):
+        pool = self._visible_frames(win)
+        if not pool:
+            return None
+        fid = rng.choice(pool)
+        win.scene.clearSelection()
+        win.scene.frame_items[fid].setSelected(True)
+        win.scene.delete_selection()
+        return f"delete({fid})"
+
+    def _save_load(self, win, rng):
+        from flograph.core.serialization import graph_from_dict, graph_to_dict
+        win._replace_graph(graph_from_dict(graph_to_dict(win.graph),
+                                           win.registry))
+        return "save_load"
+
+    def _undo(self, win, rng):
+        if not win.undo_stack.canUndo():
+            return None
+        win.undo_stack.undo()
+        return "undo"
+
+    def _redo(self, win, rng):
+        if not win.undo_stack.canRedo():
+            return None
+        win.undo_stack.redo()
+        return "redo"
+
+    def _run(self, win, registry, seed, steps=18):
+        import random
+        ops = [lambda w, r: self._toggle(w, r, False),
+               lambda w, r: self._toggle(w, r, True),
+               self._copy_paste, self._group, self._delete,
+               self._save_load, self._undo, self._redo]
+        rng = random.Random(seed)
+        self._build(win, registry)
+        history: list = []
+        for _ in range(steps):
+            label = rng.choice(ops)(win, rng)
+            if label is None:
+                continue
+            history.append(label)
+            bad = frame_invariants(win)
+            assert not bad, (f"seed {seed} after {' -> '.join(history)}:\n  "
+                             + "\n  ".join(sorted(set(bad))))
+        return history
+
+    @pytest.mark.parametrize("seed", range(8))
+    def test_a_sequence_of_frame_operations_stays_coherent(self, window,
+                                                           registry, seed):
+        self._run(window, registry, seed)
+
+    @pytest.mark.parametrize("seed", range(4))
+    def test_opening_every_frame_puts_every_node_back(self, window, registry,
+                                                      seed):
+        """The 'losing nodes' check, end to end. However tangled the sequence,
+        unfolding everything has to leave every node on the canvas."""
+        self._run(window, registry, seed)
+        expected = set(window.graph.nodes)
+        for _ in range(40):
+            folded = [f for f in self._visible_frames(window)
+                      if window.graph.frames[f].collapsed]
+            if not folded:
+                break
+            window.scene.frame_items[sorted(folded)[0]].toggle_collapsed()
+            assert not frame_invariants(window)
+        assert set(window.graph.nodes) == expected
+        hidden = sorted(n for n in expected
+                        if not window.scene.node_items[n].isVisible())
+        assert not hidden, f"still hidden with every frame open: {hidden}"
