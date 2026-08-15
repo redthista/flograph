@@ -1866,6 +1866,22 @@ class MainWindow(QMainWindow):
         for node_id in self.graph.nodes:
             self.graph.mark_dirty(node_id)
         self.engine.cache.clear()
+        # Reset is "discard everything", not "pretend nothing happened": the
+        # cards were displaying values that just got thrown away, and every
+        # one still on show is pinning it — a table's model holds its frame,
+        # a webview's renderer keeps the last chart it rendered. Clear the
+        # canvas cards, refresh dashboard tiles (they re-read the now-empty
+        # cache and fall back to their placeholder) and re-read the
+        # inspector, so the memory Reset Caches is meant to free is actually
+        # released instead of waiting for the user to scroll away.
+        for item in self.scene.node_items.values():
+            item.clear_output()
+        for page in self._dashboard_pages.values():
+            scene = getattr(page, "scene", None)
+            if scene is not None:
+                for item in scene.tile_items.values():
+                    item.refresh_content()
+        self.inspector_panel.on_cache_cleared()
         self.statusBar().showMessage("Caches cleared — everything is stale", 4000)
 
     def _show_packages(self) -> None:
@@ -3480,6 +3496,12 @@ class MainWindow(QMainWindow):
         # incoming one must not inherit them and start rewriting its files
         from .browser import forget_all
         forget_all()
+        # The engine cache is keyed by node id and is *not* emptied by
+        # removing nodes — a New/Open would otherwise inherit every frame the
+        # previous project had resident. Drop it up front; the incoming
+        # project's own entries are registered right after (open_path ->
+        # _restore_cache).
+        self.engine.cache.clear()
         self._restoring_pages = True
         # Folding is re-derived from scratch on every graph event, which is
         # the right trade everywhere except here: a 500-node load would run

@@ -290,6 +290,11 @@ class NodeGraphScene(QGraphicsScene):
             # before removeItem: a QMovie still delivering frames into a
             # deleted item is a crash, not a leak
             item.dispose_mark_image()
+            # then free what the card was displaying: the item won't be
+            # collected on its own (its own reference cycles pin it), so the
+            # webview's renderer, the table model's frame and the figure
+            # canvas would otherwise outlive the node
+            item.teardown()
             self.removeItem(item)
         self._refresh_collapsed_frames()
 

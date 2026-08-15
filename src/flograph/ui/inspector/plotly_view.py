@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QUrl, Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from flograph.core import html as core_html
@@ -110,7 +110,16 @@ class PlotlyView(QWidget):
         html = to_html(content, *self._grid)
         if html is None:
             if self.view is not None:
-                self.view.hide()
+                # Drop the renderer, not just the page. A renderer's heap
+                # stays at its peak even after navigating it away, so the
+                # only way to give back the memory a big chart took is to
+                # destroy the view; _ensure_view rebuilds it lazily when the
+                # next content arrives.
+                view = self.view
+                self._layout.removeWidget(view)
+                view.hide()
+                view.deleteLater()
+                self.view = None
             self.placeholder.setText(RUN_PROMPT)
             self.placeholder.show()
             return
@@ -119,7 +128,6 @@ class PlotlyView(QWidget):
             self.placeholder.setText(NO_WEBENGINE)
             self.placeholder.show()
             return
-        from PySide6.QtCore import QUrl
         path = _plotly_html_path(self._token)
         path.write_text(html, encoding="utf-8")
         view.load(QUrl.fromLocalFile(str(path)))

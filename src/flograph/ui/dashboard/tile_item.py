@@ -768,6 +768,7 @@ class TileItem(QGraphicsObject):
         elif kind == "table":
             import sys
             pd = sys.modules.get("pandas")
+            previous = self._table_view.model()
             if value is None or pd is None or not isinstance(value, pd.DataFrame):
                 self._table_view.setModel(None)
                 widget.hide()
@@ -779,6 +780,11 @@ class TileItem(QGraphicsObject):
                     PandasModel(value, parent=self._table_view))
                 self._placeholder.hide()
                 widget.show()
+            if previous is not None:
+                # setModel does not delete the model it replaces; a tile fed
+                # on every run would otherwise keep every table it had ever
+                # shown alive. (See node_item.set_table_data.)
+                previous.deleteLater()
         else:  # generic: rebuild via the inspector's dispatcher
             if self._generic_child is not None:
                 self._generic_child.setParent(None)

@@ -1372,6 +1372,21 @@ class NodeItem(QGraphicsObject):
         self._plotly_widget.set_figure(figure)
         self._plotly_widget.set_zoom(self._card_scale())
 
+    def clear_output(self) -> None:
+        """Drop whatever this card is displaying that came from the cache.
+
+        Called when caches are reset: the data itself is gone, so a chart or
+        table still on show would be a stale lie — and it would pin the frame
+        / figure (and, for webview cards, the rendered page held in a renderer
+        process) that Reset Caches is supposed to release.
+        """
+        if self.plotly_card:
+            self.set_plotly_figure(None)
+        elif self.figure_card:
+            self.set_figure(None)
+        if self.table_viewer:
+            self.set_table_data(None)
+
     # ----------------------------------------------------------- report card
 
     def _report_proxy_rect(self) -> QRectF:
@@ -1493,17 +1508,24 @@ class NodeItem(QGraphicsObject):
         view = self._table_viewer_view
         if view is None:
             return
+        previous = view.model()
         import sys
         pd = sys.modules.get("pandas")
         if table is None or pd is None or not isinstance(table, pd.DataFrame):
             view.setModel(None)
             view.hide()
             self._table_viewer_placeholder.show()
-            return
-        self._table_viewer_placeholder.hide()
-        from ..inspector.pandas_model import PandasModel
-        view.setModel(PandasModel(table, parent=view))
-        view.show()
+        else:
+            self._table_viewer_placeholder.hide()
+            from ..inspector.pandas_model import PandasModel
+            view.setModel(PandasModel(table, parent=view))
+            view.show()
+        if previous is not None:
+            # setModel swaps models without deleting the old one — Qt does
+            # not take ownership of the model it replaces — so a card that
+            # was re-fed every run was pinning every previous frame it had
+            # ever shown until the card itself was destroyed.
+            previous.deleteLater()
 
     # ------------------------------------------------------------- kpi card
 
@@ -1570,6 +1592,33 @@ class NodeItem(QGraphicsObject):
         if self._mark_image is not None:
             self._mark_image.set_playing(False)
             self._mark_image = None
+
+    def teardown(self) -> None:
+        """Destroy the card's heavy widgets when the node is removed.
+
+        Removing a node drops the item out of the scene, but the item itself
+        is kept alive by its own reference cycles (a PortItem points back at
+        its parent NodeItem, the proxies point at their widgets), so the
+        memory a card was displaying would stay resident until the app
+        closed — webviews keep their renderer process, table models keep the
+        frame, figure canvases keep the chart. The widgets are QObjects, so
+        deleteLater is deterministic: this frees the memory even if the
+        item's Python wrapper is never collected."""
+        self.dispose_mark_image()
+        if self.plotly_card and self._plotly_widget is not None:
+            # set_content(None) destroys the webview, releasing the renderer
+            self._plotly_widget.set_content(None)
+            self._plotly_widget.deleteLater()
+            self._plotly_widget = None
+        if self._table_viewer_view is not None:
+            # drops the model, releasing the frame it was displaying
+            self.set_table_data(None)
+            self._table_viewer_view.deleteLater()
+            self._table_viewer_view = None
+        if self._figure_view is not None:
+            self._figure_view.clear()
+            self._figure_view.deleteLater()
+            self._figure_view = None
 
     # ----------------------------------------------------------- image card
 
