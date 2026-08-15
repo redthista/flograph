@@ -595,27 +595,20 @@ class FrameItem(QGraphicsObject):
         containment — the ordinary rule, over a region you can see. Blind to
         visibility either way, since a collapsed frame's own contents are
         hidden and must still travel with it.
+
+        Whatever a nested frame holds is held too, however far outside this
+        one it reaches — see scene.frame_contents, which is where that is
+        worked out.
         """
         scene = self.scene()
         if scene is None:
             return ([], [])
-        if self.collapsed:
-            nodes = [(item, item.pos() - self.pos())
-                     for item in (scene.node_items.get(n)
-                                  for n in self.frame.members)
-                     if item is not None]
-            frames = [(item, item.pos() - self.pos())
-                      for item in (scene.frame_items.get(f)
-                                   for f in self.frame.member_frames)
-                      if item is not None]
-            return (nodes, frames)
-        rect = self.scene_rect()
-        nodes = [(item, item.pos() - self.pos())
-                 for item in scene.node_items.values()
-                 if rect.contains(item.sceneBoundingRect().center())]
-        frames = [(other, other.pos() - self.pos())
-                  for other in scene.frame_items.values()
-                  if other is not self and rect.contains(other.scene_rect())]
+        node_ids, frame_ids = scene.frame_contents(self)
+        nodes = [(scene.node_items[nid], scene.node_items[nid].pos() - self.pos())
+                 for nid in node_ids if nid in scene.node_items]
+        frames = [(scene.frame_items[fid],
+                   scene.frame_items[fid].pos() - self.pos())
+                  for fid in frame_ids if fid in scene.frame_items]
         return (nodes, frames)
 
     def set_pins_visible(self, visible: bool) -> None:
