@@ -5,7 +5,7 @@ the carry-your-contents behaviour were all untested — so this covers the
 collapse feature and the frame behaviour it leans on.
 """
 import pytest
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QImage, QPainter, QUndoStack
 
 from flograph.core import Frame, Graph, NodeRegistry
@@ -952,8 +952,10 @@ class TestNudgePlan:
         assert self.plan((0, 0, 60, 60), [("a", (500, 500, 50, 50))]) == {}
 
     def test_beyond_the_line_slides_right_just_clear_of_the_region(self):
+        from flograph.ui.canvas.scene import NUDGE_GAP
         plan = self.plan((0, 0, 300, 200), [("a", (80, 10, 50, 50))])
-        assert plan["a"] == (220.0, 0.0)       # 300 - 80, and not a pixel more
+        # 300 - 80 to clear it, and the clearance gap, and nothing more
+        assert plan["a"] == (220.0 + NUDGE_GAP, 0.0)
 
     def test_left_of_the_line_is_left_alone(self):
         """The complaint was a frame expanding and dragging along something
@@ -964,8 +966,22 @@ class TestNudgePlan:
         assert self.plan((0, 0, 300, 200), [("a", (10, -200, 50, 50))]) == {}
 
     def test_below_in_the_column_slides_down_just_clear_of_the_region(self):
+        from flograph.ui.canvas.scene import NUDGE_GAP
         plan = self.plan((0, 0, 300, 200), [("a", (10, 80, 50, 50))])
-        assert plan["a"] == (0.0, 120.0)       # 200 - 80
+        assert plan["a"] == (0.0, 120.0 + NUDGE_GAP)   # 200 - 80, plus gap
+
+    def test_what_is_pushed_lands_clear_of_the_frame_not_against_it(self):
+        """Landing exactly on the edge is arithmetically right and reads as a
+        collision — the node looks stuck to the frame rather than beside it."""
+        from flograph.ui.canvas.scene import NUDGE_GAP
+        region = QRectF(0, 0, 300, 200)
+        for start, expect_axis in (((80, 10, 50, 50), "x"),
+                                   ((10, 80, 50, 50), "y")):
+            plan = self.plan((0, 0, 300, 200), [("a", start)])
+            landed = QRectF(*start).translated(*plan["a"])
+            gap = (landed.left() - region.right() if expect_axis == "x"
+                   else landed.top() - region.bottom())
+            assert gap == NUDGE_GAP, f"{start} landed {gap} from the edge"
 
     def test_a_clear_region_moves_nothing_at_all(self):
         """The ratchet. A frame folding and reopening with nothing else
@@ -988,9 +1004,11 @@ class TestNudgePlan:
         plan = self.plan((0, 0, 300, 200),
                          [("a", (80, 10, 50, 50)), ("b", (280, 10, 50, 50)),
                           ("c", (480, 10, 50, 50))])
-        # a needs the most room (300 - 80); everything beyond the line goes
-        # with it, including c, which was not itself in the way
-        assert plan["a"] == plan["b"] == plan["c"] == (220.0, 0.0)
+        # a needs the most room (300 - 80, plus the clearance gap); everything
+        # beyond the line goes with it, including c, which was not itself in
+        # the way
+        from flograph.ui.canvas.scene import NUDGE_GAP
+        assert plan["a"] == plan["b"] == plan["c"] == (220.0 + NUDGE_GAP, 0.0)
 
     def test_no_gaps_are_opened_or_closed(self):
         units = [("a", (80, 10, 50, 50)), ("b", (280, 10, 50, 50))]
@@ -2730,3 +2748,92 @@ class TestRunningAFrameReachesItsFrames:
         with qtbot.waitSignal(window.engine.run_finished, timeout=30000):
             window._on_frame_run_requested("outer")
         assert graph.nodes["elsewhere"].dirty
+
+
+class TestRunIsAlwaysOnTheFrameMenu:
+    """The run glyph in the title bar is a shortcut, not a substitute. It is
+    gone while the frame is folded, and on an expanded frame holding folded
+    ones it is easy to miss — hiding the menu entry left no way in that could
+    be found."""
+
+    @pytest.fixture
+    def window(self, qtbot, registry):
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def _menu_entries(self, window, monkeypatch, frame_id):
+        """Open the frame menu without a real popup and read its actions."""
+        from PySide6.QtWidgets import QMenu
+        from flograph.ui import mainwindow as mw
+        seen: dict = {}
+
+        class _Peek(QMenu):
+            def exec(self, *args):
+                seen["labels"] = [(a.text(), a.isEnabled())
+                                  for a in self.actions()]
+                return None
+
+        monkeypatch.setattr(mw, "QMenu", _Peek)
+        window._show_frame_menu(frame_id, QPoint(0, 0))
+        return seen.get("labels", [])
+
+    def _nested(self, window, registry, fold_inner):
+        graph, scene = window.graph, window.scene
+        graph.add_frame(Frame(id="outer", rect=(100, 100, 600, 340)))
+        graph.add_frame(Frame(id="inner", rect=(160, 170, 300, 200)))
+        for nid, pos in (("a", (200.0, 220.0)), ("b", (330.0, 220.0))):
+            node = registry.instantiate("flograph.scripting.python_script",
+                                        pos=pos)
+            node.id = nid
+            graph.add_node(node)
+        if fold_inner:
+            scene.frame_items["inner"].toggle_collapsed()
+        return graph, scene
+
+    @pytest.mark.parametrize("fold_inner", [False, True])
+    def test_an_expanded_frame_offers_run(self, window, registry, monkeypatch,
+                                          fold_inner):
+        self._nested(window, registry, fold_inner)
+        labels = [text for text, _on in
+                  self._menu_entries(window, monkeypatch, "outer")]
+        assert "Run frame" in labels
+
+    def test_a_folded_frame_still_offers_run(self, window, registry,
+                                             monkeypatch):
+        graph, scene = self._nested(window, registry, True)
+        scene.frame_items["outer"].toggle_collapsed()
+        labels = [text for text, _on in
+                  self._menu_entries(window, monkeypatch, "outer")]
+        assert "Run frame" in labels
+
+    def test_it_is_enabled_when_the_frame_holds_nodes(self, window, registry,
+                                                      monkeypatch):
+        self._nested(window, registry, True)
+        entries = dict(self._menu_entries(window, monkeypatch, "outer"))
+        assert entries["Run frame"] is True
+
+    def test_it_is_greyed_when_the_frame_is_empty(self, window, registry,
+                                                  monkeypatch):
+        window.graph.add_frame(Frame(id="empty", rect=(900, 900, 300, 200)))
+        entries = dict(self._menu_entries(window, monkeypatch, "empty"))
+        assert entries["Run frame"] is False
+
+    def test_choosing_it_runs_the_frame(self, window, registry, monkeypatch):
+        from PySide6.QtWidgets import QMenu
+        from flograph.ui import mainwindow as mw
+        self._nested(window, registry, True)
+
+        class _Pick(QMenu):
+            def exec(self, *args):
+                return next(a for a in self.actions()
+                            if a.text() == "Run frame")
+
+        monkeypatch.setattr(mw, "QMenu", _Pick)
+        fired: list = []
+        monkeypatch.setattr(type(window), "_on_frame_run_requested",
+                            lambda self, fid: fired.append(fid))
+        window._show_frame_menu("outer", QPoint(0, 0))
+        assert fired == ["outer"]

@@ -2243,9 +2243,15 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         fold_action = menu.addAction("Expand frame" if collapsed
                                      else "Collapse frame")
-        # the collapsed box has no room for the run glyph, so this is the
-        # only way to run a folded frame
-        run_action = menu.addAction("Run frame") if collapsed else None
+        # Always offered, folded or not. The run glyph in the title bar is a
+        # shortcut, not a substitute: it is gone while the frame is folded,
+        # and on an expanded frame holding folded ones it is easy to miss, so
+        # hiding the menu entry left people with no way in they could find.
+        run_action = menu.addAction("Run frame")
+        targets = self._frame_node_ids_by_id(frame_id)
+        run_action.setEnabled(bool(targets))
+        if not targets:
+            run_action.setToolTip("This frame holds no nodes to run.")
         menu.addSeparator()
         state = self._component_state(frame_id)
         update_action = None
@@ -2272,7 +2278,7 @@ class MainWindow(QMainWindow):
             item = self.scene.frame_items.get(frame_id)
             if item is not None:
                 item.toggle_collapsed()
-        elif run_action is not None and chosen is run_action:
+        elif chosen is run_action:
             self._on_frame_run_requested(frame_id)
         elif update_action is not None and chosen is update_action:
             self._update_component_instance(frame_id)
