@@ -40,9 +40,14 @@ _ENCLOSE_PAD = 16.0
 #: what a resize drag allows (see FrameItem.mouseMoveEvent).
 _MIN_FRAME_W = 120.0
 _MIN_FRAME_H = 60.0
+#: Clearance left between a reopened frame and whatever it pushed out of the
+#: way. Landing exactly on the edge is arithmetically correct and looks like
+#: a collision — the node appears stuck to the frame rather than beside it.
+NUDGE_GAP = 20.0
 
 
-def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
+def plan_nudge(box: QRectF, region: QRectF, units: list,
+               gap: float = NUDGE_GAP) -> dict:
     """How far each unit moves when a folded frame reopens into `region`.
 
     `box` is the little square as it stands; `region` is what it is about to
@@ -68,8 +73,11 @@ def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
     otherwise be flung the whole width of the region to "clear" it, which is
     a violent answer to a collision the expand did not create.
 
-    How far: the least that clears the region, and nothing if the region is
-    already clear. That last part matters more than it sounds. A frame that
+    How far: the least that clears the region **plus `gap`**, and nothing at
+    all if the region is already clear. The clearance is not cosmetic
+    padding — landing a node exactly on the frame's edge is arithmetically
+    right and reads as a collision, the node looking stuck to the frame
+    rather than standing beside it. That last part matters more than it sounds. A frame that
     folds and reopens with nothing else changed must land exactly where it
     was, because the space it is growing back into is the space it vacated.
     Shifting by the width gained regardless looks the same on screen but
@@ -90,7 +98,8 @@ def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
     either sits under the square or reaches past the line (so it goes right),
     or is clear below it in the column (so it goes down); nothing in the way
     falls through. Each mover then clears the region by construction, since
-    the shift is the largest any of them needed.
+    the shift is the largest any of them needed — and clears it by `gap` at
+    the very least.
 
     Pure geometry, no scene: the awkward part of this is the arithmetic, and
     it is worth being able to test it without a canvas.
@@ -103,9 +112,9 @@ def plan_nudge(box: QRectF, region: QRectF, units: list) -> dict:
             right.append((key, rect))
         elif rect.top() >= box.bottom() and rect.right() > box.left():
             down.append((key, rect))
-    dx = max([region.right() - rect.left()
+    dx = max([region.right() + gap - rect.left()
               for _key, rect in right if rect.intersects(region)] or [0.0])
-    dy = max([region.bottom() - rect.top()
+    dy = max([region.bottom() + gap - rect.top()
               for _key, rect in down if rect.intersects(region)] or [0.0])
     delta: dict = {}
     if dx > 0:
