@@ -109,7 +109,8 @@ class TestRunProgressBar:
     def test_it_is_a_thin_track_not_a_full_height_control(self, win):
         """A default-height bar was the tallest thing in the status bar and
         set the height of the whole strip."""
-        assert win._run_bar.height() == 6
+        assert win._run_bar.height() == 8
+        assert win._run_bar.width() == 80
 
     def test_tracks_nodes_finished_plus_the_current_fraction(self, win):
         win._run_total, win._run_index = 4, 3
