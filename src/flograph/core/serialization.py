@@ -23,6 +23,7 @@ from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from . import dotenv
 from .datatypes import PortType
 from .graph import Connection, Frame, Graph, GraphError, Page, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
@@ -124,6 +125,9 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                 }
                 for p in graph.pages.values()
             ],
+            # Where `${env:NAME}` reads its secrets from — the path only.
+            # The values stay in that file and never enter this one.
+            "env_path": graph.env_path,
         },
     }
 
@@ -145,6 +149,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
         input_ports_needed.setdefault(dst_node, set()).add(dst_port)
 
     graph = Graph()
+    # Absent in files written before variables existed, which is what the
+    # empty default means anyway: use the per-user secrets file.
+    graph.env_path = str(payload.get("env_path", "") or "")
     for entry in node_entries:
         type_id = entry["type"]
         code = entry.get("code")
@@ -322,4 +329,8 @@ def load(path: str | Path, registry: NodeRegistry) -> Graph:
         data = json.loads(Path(path).read_text())
     except json.JSONDecodeError as exc:
         raise GraphError(f"not a flograph project: invalid JSON ({exc})") from exc
-    return graph_from_dict(data, registry)
+    graph = graph_from_dict(data, registry)
+    # Secrets are loaded here because this is the only place that knows where
+    # the project file sits, and `env_path` is stored relative to it.
+    graph.env = dotenv.environment(dotenv.resolve_path(graph.env_path, str(path)))
+    return graph

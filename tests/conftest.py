@@ -39,8 +39,9 @@ def _drain_qt_after_each_test():
 class FakeContext:
     """Minimal stand-in for the engine's RunContext, for direct run() calls."""
 
-    def __init__(self, params=None, node_id="test-node"):
+    def __init__(self, params=None, node_id="test-node", variables=None):
         self.params = params or {}
+        self.vars = variables or {}
         self.node_id = node_id
         self.logs: list[str] = []
         self.fractions: list[float] = []

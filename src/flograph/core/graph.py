@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
-from . import links
+from . import links, varlinks
 from .datatypes import can_connect
 from .events import GraphEvents
 from .layers import next_z, order_of
@@ -147,8 +147,25 @@ class Graph:
         # directly: see core.links and _refresh_links. Topology reads union
         # them with `connections`; persistence and wire-drawing don't.
         self.links: dict[str, Connection] = {}
+        # Derived `${name}` variable edges — same deal as `links` above, and
+        # derived by the same kind of pure function (see core.varlinks). The
+        # one difference: a variable edge carries no value to a port, so its
+        # `dst_port` is empty and `_edges` keeps it out of the by-input
+        # index. It exists only to say "this node depends on that one".
+        self.var_links: dict[str, Connection] = {}
         self.frames: dict[str, Frame] = {}
         self.pages: dict[str, Page] = {}
+        # Where this project's secrets live, for `${env:NAME}`. A *path*,
+        # relative to the project file where it can be — never the values,
+        # which must not enter a file that gets emailed around. Empty means
+        # the per-user default (see core.dotenv.resolve_path).
+        self.env_path: str = ""
+        # The secrets themselves, loaded from that file. Runtime-only and
+        # never serialized; whoever knows the project's location fills it
+        # (the main window on open, the env dialog on save, the headless
+        # runner on load), which keeps the engine from needing to know where
+        # anything is on disk.
+        self.env: dict[str, str] = {}
         self.events = GraphEvents()
         # Lookup tables over the edge set, rebuilt on demand rather than
         # patched at each mutation: there are only three places edges change
@@ -299,10 +316,17 @@ class Graph:
         spec = node.spec.param(name)
         if spec is None:
             raise GraphError(f"node {node.label!r} has no param {name!r}")
+        previous = node.params.get(name)
         node.params[name] = value
         self.events.param_changed.emit(node_id, name, value)
         if name == links.SOURCE_PARAM and links.is_from(node):
             self._refresh_links()   # marks the Froms it moved dirty itself
+        elif self._may_change_var_links(node, spec, previous, value):
+            # An edit that adds or removes a `${name}` changes the derived
+            # edge set, so it has to be re-derived — but only then. The
+            # guard keeps every ordinary param edit off the scan, which is
+            # every param edit anyone makes.
+            self._refresh_links()
         if name == links.NAME_PARAM and links.is_link_node(node):
             return  # renaming a link is cosmetic: don't invalidate its subtree
         if spec.cosmetic:
@@ -359,27 +383,87 @@ class Graph:
     # ---------------------------------------------------------------- links
 
     def _refresh_links(self) -> None:
-        """Re-derive the whole Goto/From link set and adopt it.
+        """Re-derive both derived edge sets — Goto/From links and `${name}`
+        variable edges — and adopt them.
 
         Rebuilt whole, never patched — a From can exist before the Goto it
-        reads (the load path adds nodes in file order). Any From whose
-        incoming link appeared or vanished is marked dirty here: its input
-        changed without its own params changing, so nothing else would.
+        reads (the load path adds nodes in file order), and so can a node
+        referencing a variable. Goto/From first: variable-edge loop
+        rejection tests candidates against the links as well as the wires,
+        so those have to be settled before it runs.
+
+        Every caller of this method gets both sets for free, which is why it
+        keeps the old name — the six sites that call it are unchanged.
         """
-        resolved = links.resolve_links(self)
-        if resolved == self.links:
+        self._adopt_edges("links", links.resolve_links(self))
+        self._adopt_edges("var_links", varlinks.resolve_var_links(self))
+
+    def _adopt_edges(self, attr: str, resolved: dict[str, Connection]) -> None:
+        """Swap in a freshly derived edge set, dirtying whoever it moved
+        under. A node whose incoming derived edge appeared or vanished is
+        marked dirty here: its inputs changed without its own params
+        changing, so nothing else would."""
+        current: dict[str, Connection] = getattr(self, attr)
+        if resolved == current:
             return
         moved = {
-            (resolved.get(key) or self.links[key]).dst_node
-            for key in set(resolved) | set(self.links)
-            if resolved.get(key) != self.links.get(key)
+            (resolved.get(key) or current[key]).dst_node
+            for key in set(resolved) | set(current)
+            if resolved.get(key) != current.get(key)
         }
-        self.links = resolved
+        setattr(self, attr, resolved)
         self._invalidate_edges()
         self.events.links_changed.emit()
         for node_id in sorted(moved):
             if node_id in self.nodes:
                 self.mark_dirty(node_id)
+
+    # ------------------------------------------------------------ secrets
+
+    def set_env_path(self, path: str) -> None:
+        """Point the project at a different .env file."""
+        self.env_path = str(path or "")
+        self._dirty_env_readers()
+
+    def set_env(self, values: dict[str, str]) -> None:
+        """Adopt freshly loaded secrets. Runtime state, not undoable: it
+        mirrors a file on disk, and undo cannot put that back."""
+        self.env = dict(values)
+        self._dirty_env_readers()
+
+    def _dirty_env_readers(self) -> None:
+        """Re-run whatever reads a secret. Nothing else can notice: a
+        `${env:NAME}` creates no edge — there is no node to depend on — so
+        the usual invalidation has nothing to follow.
+        """
+        for node_id, node in self.nodes.items():
+            if varlinks.uses_env(node):
+                self.mark_dirty(node_id)
+
+    @staticmethod
+    def _may_change_var_links(node, spec, previous: Any, value: Any) -> bool:
+        """Could this param edit have changed the variable-edge set?
+
+        Two ways: the edit renamed or removed a variable somebody reads
+        (a Variables node's assignments), or it added/removed a `${name}`
+        reference. Everything else — and it is the overwhelming majority of
+        param edits — skips the re-derivation entirely.
+        """
+        if varlinks.is_vars(node) and spec.name == varlinks.ASSIGNMENTS_PARAM:
+            return True
+        if spec.type not in varlinks.SUBSTITUTABLE:
+            return False
+        return varlinks.MARKER in f"{previous}{value}"
+
+    def var_sources(self, node_id: str) -> list[str]:
+        """The Variables nodes this node reads `${name}` values from.
+
+        Its own accessor because the edges are portless: the by-port reads
+        below cannot see them, so anything that needs a node's *full*
+        dependency set — the cache fingerprint above all — has to ask here.
+        """
+        return sorted({conn.src_node for conn in self.var_links.values()
+                       if conn.dst_node == node_id})
 
     # ----------------------------------------------------------- connections
 
@@ -447,10 +531,12 @@ class Graph:
         return conn
 
     def _iter_edges(self) -> Iterable[Connection]:
-        """Every edge values flow along: drawn wires plus derived Goto/From
-        links. The one place link-awareness lives — everything below inherits
-        it. Persistence and wire-drawing read `self.connections` instead."""
-        return (*self.connections.values(), *self.links.values())
+        """Every edge the topology follows: drawn wires, derived Goto/From
+        links, and derived `${name}` variable edges. The one place
+        link-awareness lives — everything below inherits it. Persistence and
+        wire-drawing read `self.connections` instead."""
+        return (*self.connections.values(), *self.links.values(),
+                *self.var_links.values())
 
     def _invalidate_edges(self) -> None:
         """Call after any change to `connections` or `links`. Cheap enough to
@@ -467,7 +553,12 @@ class Graph:
                 # setdefault, not assignment: first edge on a port wins, which
                 # is what the old `next(...)` scan did and is what keeps a real
                 # wire ahead of a link claiming the same input
-                by_input.setdefault((conn.dst_node, conn.dst_port), conn)
+                if conn.dst_port:
+                    by_input.setdefault((conn.dst_node, conn.dst_port), conn)
+                # ...and a variable edge, which has no destination port at
+                # all, never lands here: `input_connection` must only ever
+                # answer with an edge that actually carries a value to that
+                # port. It still counts for ordering and dirtying below.
                 into.setdefault(conn.dst_node, []).append(conn)
                 out_of.setdefault(conn.src_node, []).append(conn)
             index = self._edge_index = _EdgeIndex(by_input, into, out_of)

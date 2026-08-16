@@ -25,8 +25,9 @@ from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 from flograph.core.graph import Graph
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
+from flograph.core.varlinks import VariableError, var_problem
 
-from . import pressure
+from . import pressure, varsubst
 from .cache import OutputCache
 from .cache_worker import CacheWarmRunnable, CacheWarmSignals
 from .context import CancellationToken
@@ -682,24 +683,16 @@ class ExecutionEngine(QObject):
             self._ready.popleft()
             self._pending.discard(node_id)
 
+            # _start_node can refuse too — a ${name} that cannot be resolved
+            # is found there, where the values are — so both answers go
+            # through the same refusal path.
             problem = self._blocking_problem(node_id)
+            if problem is None:
+                problem = self._start_node(node_id)
             if problem is not None:
-                mark_error = not problem.startswith("upstream")
-                if mark_error:
-                    self.graph.set_status(node_id, NodeStatus.ERROR, problem)
-                    self._had_failure = True
-                    self.node_failed.emit(node_id, NodeError(
-                        node_id=node_id, message=problem,
-                        exc_type="NotConfigured", formatted_tb=problem,
-                    ))
-                else:
-                    self.graph.set_status(node_id, NodeStatus.IDLE)
-                # Everything below it goes with it, so there are no successors
-                # left to release — the prune is the whole bookkeeping here.
-                self._prune_downstream(node_id)
+                self._refuse(node_id, problem)
                 continue
 
-            self._start_node(node_id)
             if is_exclusive(node):
                 break
 
@@ -718,6 +711,25 @@ class ExecutionEngine(QObject):
                 self.graph.set_status(node_id, NodeStatus.IDLE)
             self._clear_pending()
         self._finish()
+
+    def _refuse(self, node_id: str, problem: str) -> None:
+        """A node that cannot start: report it and take its subtree with it.
+
+        "upstream ..." is not this node's fault, so it goes quiet — it did
+        not fail, it never got the chance to run.
+        """
+        if problem.startswith("upstream"):
+            self.graph.set_status(node_id, NodeStatus.IDLE)
+        else:
+            self.graph.set_status(node_id, NodeStatus.ERROR, problem)
+            self._had_failure = True
+            self.node_failed.emit(node_id, NodeError(
+                node_id=node_id, message=problem,
+                exc_type="NotConfigured", formatted_tb=problem,
+            ))
+        # Everything below it goes with it, so there are no successors left
+        # to release — the prune is the whole bookkeeping here.
+        self._prune_downstream(node_id)
 
     def _release_successors(self, node_id: str) -> None:
         """One node finished: whoever was waiting only on it can start."""
@@ -744,6 +756,15 @@ class ExecutionEngine(QObject):
                 continue
             if not self.cache.has(conn.src_node):
                 return f"upstream node did not produce output"
+        # A ${name} is a dependency with no port, so the loop above cannot
+        # see it: an unresolvable reference, and a Variables node that
+        # produced nothing, both have to be asked about separately.
+        problem = var_problem(self.graph, node_id)
+        if problem is not None:
+            return problem
+        for src in self.graph.var_sources(node_id):
+            if not self.cache.has(src):
+                return f"upstream node did not produce output"
         return None
 
     def _prune_downstream(self, node_id: str) -> None:
@@ -768,8 +789,20 @@ class ExecutionEngine(QObject):
             self._ready = deque(nid for nid in self._ready
                                 if nid in self._pending)
 
-    def _start_node(self, node_id: str) -> None:
+    def _start_node(self, node_id: str) -> Optional[str]:
+        """Dispatch a node, or return why it could not be dispatched.
+
+        The `${name}` substitution happens here because this is the one
+        place a node's params are handed to a worker — below this line
+        nothing knows a variable was ever involved, which is what keeps the
+        node contract unchanged. It runs before any state is registered, so
+        a refusal leaves nothing half-started behind.
+        """
         node = self.graph.nodes[node_id]
+        try:
+            params, variables = varsubst.resolve(self.graph, node_id, self.cache)
+        except VariableError as exc:
+            return f"not configured: {exc}"
         inflight = _InFlight(node_id=node_id)
         inputs = {}
         for port in node.spec.inputs:
@@ -799,12 +832,14 @@ class ExecutionEngine(QObject):
         self.pool.start(NodeRunnable(
             node_id=node_id,
             source=node.source,
-            params=dict(node.params),
+            params=params,
+            variables=variables,
             inputs=inputs,
             output_ports=list(node.spec.outputs),
             token=self._token,
             signals=signals,
         ))
+        return None
 
     # ------------------------------------------- worker results (GUI thread)
 

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from flograph.core import Graph, ParamSpec
+from flograph.core import Graph, ParamSpec, varlinks
 
 from ..canvas.node_item import card_kind
 from ..controls import UNCAPPED_TEXT
@@ -174,11 +174,36 @@ class ParamsPanel(QWidget):
         for spec in node.spec.params:
             if spec.hidden:   # edited elsewhere (e.g. the Table node's grid)
                 continue
-            widget, setter = self._make_widget(spec, node.params.get(spec.name))
+            value = node.params.get(spec.name)
+            widget, setter = self._make_widget(spec, value)
             self._setters[spec.name] = setter
-            self._add_row(spec.label or spec.name, widget)
+            item = self._add_row(spec.label or spec.name, widget)
+            self._annotate_variables(item, node, spec, value)
 
-    def _add_row(self, label: str, widget: QWidget) -> None:
+    def _annotate_variables(self, item: QTreeWidgetItem, node,
+                            spec: ParamSpec, value: Any) -> None:
+        """Mark a param that holds a ${name} and say what it resolves to.
+
+        A reference is invisible otherwise — the box shows "${data_dir}/x.csv"
+        and nothing says whether that name exists or what is in it. Hovering
+        is the cheapest place to answer both.
+        """
+        if (spec.type not in varlinks.SUBSTITUTABLE
+                or not isinstance(value, str) or varlinks.MARKER not in value):
+            return
+        lines = varlinks.describe(self._graph, node)
+        if not lines:
+            return
+        tip = "Flow variables:\n" + "\n".join(lines)
+        font = item.font(0)
+        font.setItalic(True)
+        item.setFont(0, font)
+        item.setToolTip(0, tip)
+        widget = self.tree.itemWidget(item, 1)
+        if widget is not None:
+            widget.setToolTip(tip)
+
+    def _add_row(self, label: str, widget: QWidget) -> QTreeWidgetItem:
         item = QTreeWidgetItem([label, ""])
         item.setToolTip(0, label)
         self.tree.addTopLevelItem(item)
@@ -192,6 +217,7 @@ class ParamsPanel(QWidget):
         # silently discarded -- so pass the widget's own preferred width.
         height = max(24, min(widget.sizeHint().height(), widget.maximumHeight()))
         item.setSizeHint(1, QSize(widget.sizeHint().width(), height))
+        return item
 
     # -------------------------------------------------------------- widgets
 

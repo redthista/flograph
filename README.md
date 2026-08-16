@@ -167,7 +167,14 @@ its own that you can leave open beside another node's.
 Nodes can be recoloured, aligned and distributed, locked into frames, and
 stacked in a deliberate front-to-back order. **Goto / From** nodes give you a
 wire without the wire: name a value at the Goto, pick it up at any number of
-Froms, and keep a busy canvas readable. A **minimap** (toggleable in
+Froms, and keep a busy canvas readable. A **Variables** node does the same
+for settings rather than values: name something once (`data_dir = C:/data`)
+and write `${data_dir}` into any text box in the Properties panel, or read
+`ctx.vars` in a script. Change it in one place and everything that reads it
+re-runs — a reference is a real edge in the graph, so ordering and cache
+invalidation work exactly as they would with a wire. Secrets stay out of the
+project file: `${env:NAME}` reads from a .env file you manage under
+**Tools ▸ Secrets…**, and the project stores only its path. A **minimap** (toggleable in
 Settings) and a status-bar resource monitor — system memory, the open
 project's cache footprint, the selected node's own — keep an eye on the
 scale of things.
@@ -183,8 +190,8 @@ read.
 Any node can declare `NODE["card"]` and become a live card on the canvas —
 not a preview pane elsewhere, the node *is* the chart. Card kinds shipped
 today: `figure`, `webview`, `table_viewer`, `kpi`, `grid`, `slicer`,
-`button`, `note`, `control`, `report`, plus the structural `reroute`, `goto`
-and `from`.
+`button`, `note`, `control`, `report`, plus the structural `reroute`, `goto`,
+`from` and `vars`.
 
 Click **+** on the page bar to add a **dashboard page**. Drag nodes onto it
 and each becomes a tile — the same widget as the canvas card, resizable and
@@ -268,7 +275,7 @@ either backend — Slicer, Report.
 Any web-view node has **Open in Browser** on its right-click menu — the same
 document, in a real browser, refreshed in place when the flow re-runs.
 
-**Util** — Constant, Reroute, Note, Action Button, Goto, From.
+**Util** — Constant, Reroute, Note, Action Button, Goto, From, Variables.
 
 **Scripting** — Python Script, plus Node Template and Control Template to
 fork when you're writing your own.

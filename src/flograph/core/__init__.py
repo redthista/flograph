@@ -13,7 +13,7 @@ from .ports import PortDirection, PortSpec
 from .registry import NodeRegistry, fuzzy_score
 from .script import NodeScriptError, compile_run, node_filename, parse_spec
 from .search import search_nodes
-from . import serialization
+from . import dotenv, serialization, varlinks
 
 __all__ = [
     "PortType", "can_connect", "validate_value", "WIRE_COLORS",
@@ -24,5 +24,5 @@ __all__ = [
     "NodeRegistry", "fuzzy_score",
     "NodeScriptError", "compile_run", "node_filename", "parse_spec",
     "search_nodes",
-    "serialization",
+    "dotenv", "serialization", "varlinks",
 ]

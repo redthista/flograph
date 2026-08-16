@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Optional
+from types import MappingProxyType
+from typing import Any, Callable, Mapping, Optional
 
 # ctx.progress() is called from inside a node's own loop, so the node that
 # most wants it is also the one most able to drown the GUI: the callback ends
@@ -32,7 +33,7 @@ class CancellationToken:
 
 class RunContext:
     """What a node's run(ctx, ...) receives. The public node-facing API —
-    keep it small and stable: params, log, check_cancelled, progress,
+    keep it small and stable: params, vars, log, check_cancelled, progress,
     node_id."""
 
     def __init__(
@@ -42,9 +43,16 @@ class RunContext:
         token: CancellationToken,
         log: Callable[[str, str, str], None],
         progress: Optional[Callable[[str, float], None]] = None,
+        variables: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.node_id = node_id
         self.params = dict(params)
+        # The flow's variables, for a script that wants to read one directly
+        # rather than through a ${name} in a param. A MappingProxyType, not
+        # a dict: nodes run on pool threads, so a writable shared store
+        # would make a re-run depend on what happened to run beside it.
+        # Variables are declared by a flow, never edited by a node.
+        self.vars: Mapping[str, Any] = MappingProxyType(dict(variables or {}))
         self._token = token
         self._log = log
         self._progress = progress
