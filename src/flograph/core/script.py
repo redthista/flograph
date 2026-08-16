@@ -63,7 +63,7 @@ from typing import Any, Callable
 from .datatypes import PortType
 from .node import NodeSpec
 from .params import ParamSpec
-from .ports import PortDirection, PortSpec
+from .ports import PortDirection, PortSpec, is_flow
 
 
 class NodeScriptError(Exception):
@@ -154,6 +154,12 @@ def _execute(source: str, filename: str) -> dict[str, Any]:
     return namespace
 
 
+#: The port types a node script may name. FLOW is left out: the flow port is
+#: implicit on every node and carries no value, so a script declaring one
+#: would be asking for a second, hand-made copy of something it already has.
+_DECLARABLE = tuple(t for t in PortType if t is not PortType.FLOW)
+
+
 def _parse_ports(
     entries: Any, direction: PortDirection, where: str
 ) -> list[PortSpec]:
@@ -174,14 +180,25 @@ def _parse_ports(
             )
         if name in seen:
             raise NodeScriptError(f"{where}: duplicate port name {name!r}")
+        if is_flow(name):
+            raise NodeScriptError(
+                f"{where}[{i}]: {name!r} is reserved — every node already has "
+                "a flow port, for ordering it against another node"
+            )
         seen.add(name)
         try:
             port_type = PortType(type_str)
         except ValueError:
-            valid = ", ".join(t.value for t in PortType)
+            valid = ", ".join(t.value for t in _DECLARABLE)
             raise NodeScriptError(
                 f"{where}[{i}]: unknown port type {type_str!r} (valid: {valid})"
             ) from None
+        if port_type not in _DECLARABLE:
+            valid = ", ".join(t.value for t in _DECLARABLE)
+            raise NodeScriptError(
+                f"{where}[{i}]: port type {type_str!r} is not a script's to "
+                f"declare (valid: {valid})"
+            )
         if not isinstance(opts, dict):
             raise NodeScriptError(f"{where}[{i}]: options must be a dict")
         ports.append(PortSpec(

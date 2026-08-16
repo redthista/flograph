@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from .params import ParamSpec
-from .ports import PortSpec
+from .ports import FLOW_INPUT, FLOW_OUTPUT, PortSpec, is_flow
 
 
 class NodeStatus(str, Enum):
@@ -53,9 +53,13 @@ class NodeSpec:
     group: Optional[str] = None
 
     def input(self, name: str) -> Optional[PortSpec]:
+        if is_flow(name):
+            return FLOW_INPUT   # implicit on every node; see core.ports
         return next((p for p in self.inputs if p.name == name), None)
 
     def output(self, name: str) -> Optional[PortSpec]:
+        if is_flow(name):
+            return FLOW_OUTPUT
         return next((p for p in self.outputs if p.name == name), None)
 
     def param(self, name: str) -> Optional[ParamSpec]:

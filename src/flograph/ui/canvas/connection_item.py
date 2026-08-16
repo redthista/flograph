@@ -26,6 +26,27 @@ def bezier_path(start: QPointF, end: QPointF) -> QPainterPath:
     return path
 
 
+def order_path(start: QPointF, end: QPointF) -> QPainterPath:
+    """The arc an order edge draws: up out of one node's top edge and down
+    into the other's.
+
+    Vertical control points, where `bezier_path` uses horizontal ones,
+    because that is where the flow pins are — and because an order edge
+    reading as an arc *over* the two nodes rather than a wire *between* them
+    is most of what tells the two kinds apart at a glance. It carries no
+    value, so it should not look like the wires that do.
+    """
+    lift = max(30.0, min(90.0, abs(end.x() - start.x()) * 0.25
+                         + abs(end.y() - start.y()) * 0.25))
+    path = QPainterPath(start)
+    path.cubicTo(
+        QPointF(start.x(), start.y() - lift),
+        QPointF(end.x(), end.y() - lift),
+        end,
+    )
+    return path
+
+
 def _color_for(src: Optional[PortItem], dst: Optional[PortItem]) -> QColor:
     """A wire takes the color of its concrete end; ANY defers to the other."""
     types = [p.spec.type for p in (src, dst) if p is not None]
@@ -66,9 +87,15 @@ class ConnectionItem(QGraphicsPathItem):
     def dst_anchor(self) -> PortItem:
         return self._dst_anchor
 
+    @property
+    def is_order(self) -> bool:
+        """Whether this wire is an order edge rather than a data wire."""
+        return self.src_port.spec.type == PortType.FLOW
+
     def update_path(self) -> None:
-        self.setPath(bezier_path(self._src_anchor.scenePos(),
-                                 self._dst_anchor.scenePos()))
+        draw = order_path if self.is_order else bezier_path
+        self.setPath(draw(self._src_anchor.scenePos(),
+                          self._dst_anchor.scenePos()))
 
     def shape(self) -> QPainterPath:
         stroker = QPainterPathStroker()
@@ -78,14 +105,22 @@ class ConnectionItem(QGraphicsPathItem):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         color = (theme.SELECTION_OUTLINE if self.isSelected()
                  else _color_for(self.src_port, self.dst_port))
-        width = 3.0 if (self.isSelected() or self._hover) else 2.0
+        # thinner and dashed: an order edge is a constraint on the run, not a
+        # path anything travels along, and it should stay quiet behind the
+        # wires that do carry the data
+        order = self.is_order
+        width = (2.0 if order else 3.0) if (self.isSelected() or self._hover) \
+            else (1.4 if order else 2.0)
         scene = self.scene()
         threshold = getattr(scene, "lod_threshold", DEFAULT_LOD_THRESHOLD)
         lod_enabled = getattr(scene, "lod_enabled", True)
         lod = option.levelOfDetailFromTransform(painter.worldTransform())
         if not lod_enabled or lod >= threshold:  # a bezier is indistinguishable
             painter.setRenderHint(QPainter.Antialiasing)  # from a line this small
-        painter.setPen(QPen(color, width))
+        pen = QPen(color, width)
+        if order:
+            pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(self.path())
 
@@ -99,7 +134,11 @@ class ConnectionItem(QGraphicsPathItem):
 
     def mouseDoubleClickEvent(self, event) -> None:
         scene = self.scene()
-        if scene is not None and not self._crosses_a_collapsed_frame():
+        # A reroute dot passes a value along, so there is nothing for it to
+        # do on an order edge — splitting one would only put a node in the
+        # middle of a constraint.
+        if (scene is not None and not self.is_order
+                and not self._crosses_a_collapsed_frame()):
             scene.insert_reroute(self.conn, event.scenePos())
         event.accept()
 
@@ -131,7 +170,9 @@ class PendingConnectionItem(QGraphicsPathItem):
         start = self.fixed_port.scenePos()
         from_output = self.fixed_port.spec.direction.value == "output"
         a, b = (start, cursor) if from_output else (cursor, start)
-        self.setPath(bezier_path(a, b))
+        draw = (order_path if self.fixed_port.spec.type == PortType.FLOW
+                else bezier_path)
+        self.setPath(draw(a, b))
         color = (theme.WIRE_PENDING if valid is None
                  else theme.WIRE_VALID if valid else theme.WIRE_INVALID)
         pen = self.pen()

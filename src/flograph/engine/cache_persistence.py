@@ -97,6 +97,11 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
     # themselves are not hashed: the Variables node's own fingerprint covers
     # them, and folding it in here is what makes the dependency transitive.
     parents.extend(graph.var_sources(node_id))
+    # An order edge is a dependency too, and portless in the same way. A node
+    # told to run after a step that writes a file is stale the moment that
+    # step changes, even though nothing was handed to it directly — that is
+    # the reason to have drawn the edge at all.
+    parents.extend(graph.order_sources(node_id))
     if not resolved:
         pending = [p for p in parents if p not in memo]
         if pending:
@@ -127,7 +132,8 @@ def freeze_fingerprint(graph: Graph, node_id: str) -> str:
         conn = graph.input_connection(node_id, port.name)
         if conn is not None:
             upstream_fps.append(node_fingerprint(graph, conn.src_node, memo))
-    for src in graph.var_sources(node_id):   # portless — see _fingerprint_one
+    for src in (*graph.var_sources(node_id),   # portless — see _fingerprint_one
+                *graph.order_sources(node_id)):
         upstream_fps.append(node_fingerprint(graph, src, memo))
     payload = json.dumps({
         "type_id": node.type_id,

@@ -17,6 +17,7 @@ from flograph.core import (
     Connection, Frame, Graph, NodeInstance, NodeRegistry, PortSpec, can_connect,
 )
 from flograph.core.node import NodeStatus
+from flograph.core.ports import is_flow
 
 from ..commands import (
     AddNodeCommand, ConnectCommand, DisconnectCommand, MoveNodesCommand,
@@ -299,8 +300,8 @@ class NodeGraphScene(QGraphicsScene):
         self._refresh_collapsed_frames()
 
     def _on_connected(self, conn: Connection) -> None:
-        src = self.node_items[conn.src_node].output_ports[conn.src_port]
-        dst = self.node_items[conn.dst_node].input_ports[conn.dst_port]
+        src = self.node_items[conn.src_node].port_item(conn.src_port, "output")
+        dst = self.node_items[conn.dst_node].port_item(conn.dst_port, "input")
         item = ConnectionItem(conn, src, dst)
         self.addItem(item)
         self.connection_items[conn.id] = item
@@ -317,7 +318,7 @@ class NodeGraphScene(QGraphicsScene):
             self.removeItem(item)
         dst_item = self.node_items.get(conn.dst_node)
         if dst_item is not None:
-            port = dst_item.input_ports.get(conn.dst_port)
+            port = dst_item.port_item(conn.dst_port, "input")
             if port is not None:
                 # not necessarily hollow now: a Goto/From link can still be
                 # feeding this port after the drawn wire goes
@@ -339,9 +340,9 @@ class NodeGraphScene(QGraphicsScene):
         # reattach surviving wires to the freshly built port items
         for ci in self.connection_items.values():
             if ci.conn.src_node == node_id:
-                ci.src_port = item.output_ports[ci.conn.src_port]
+                ci.src_port = item.port_item(ci.conn.src_port, "output")
             if ci.conn.dst_node == node_id:
-                ci.dst_port = item.input_ports[ci.conn.dst_port]
+                ci.dst_port = item.port_item(ci.conn.dst_port, "input")
             if node_id in (ci.conn.src_node, ci.conn.dst_node):
                 ci.update_path()
         # a frame pin caches the spec it was built from, which has just been
@@ -956,8 +957,8 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if node is None or item is None:
             return None
-        table = item.output_ports if side == "src" else item.input_ports
-        port = table.get(port_name)
+        port = item.port_item(port_name,
+                              "output" if side == "src" else "input")
         if port is None:
             return None
         pin = FramePortItem(frame_item, node, port.spec,
@@ -1258,6 +1259,11 @@ class NodeGraphScene(QGraphicsScene):
     # ------------------------------------------------------------- helpers
 
     def is_port_connected(self, node_id: str, spec: PortSpec) -> bool:
+        if is_flow(spec.name) and spec.direction.value == "input":
+            # The flow port takes any number of order edges and is kept out
+            # of the by-input index because it receives no value, so the
+            # lookup below would always answer "no".
+            return bool(self.graph.order_sources(node_id))
         if spec.direction.value == "input":
             return self.graph.input_connection(node_id, spec.name) is not None
         # out_connections is indexed; scanning every wire in the graph here

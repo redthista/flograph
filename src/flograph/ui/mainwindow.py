@@ -2301,7 +2301,13 @@ class MainWindow(QMainWindow):
     def _on_wire_dropped(self, port_item, scene_pos: QPointF) -> None:
         """Blueprint behavior: dropping a fresh wire on empty canvas opens the
         palette filtered to nodes that can accept it."""
-        from flograph.core import can_connect
+        from flograph.core import PortType, can_connect
+        if port_item.spec.type == PortType.FLOW:
+            # An order edge is drawn between two nodes that already exist —
+            # "run after" needs something to run after. The palette would
+            # offer the whole library, since every node has a flow port, and
+            # every entry would mean the same thing.
+            return
         from_output = port_item.spec.direction.value == "output"
         port_type = port_item.spec.type
         self._palette_scene_pos = scene_pos

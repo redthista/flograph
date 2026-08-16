@@ -17,6 +17,11 @@ class PortType(str, Enum):
     BOOL = "bool"
     OBJECT = "object"
     FIGURE = "figure"
+    # The flow port every node carries (see core.ports). It moves no value —
+    # a wire between two of these says only "that one first" — so it is
+    # deliberately outside the compatibility rules below: FLOW joins FLOW and
+    # nothing else, not even ANY. A node script cannot declare one.
+    FLOW = "flow"
 
 
 # Concrete types that may flow one-way into an OBJECT input.
@@ -38,11 +43,16 @@ WIRE_COLORS: dict[PortType, str] = {
     PortType.BOOL: "#f87171",
     PortType.OBJECT: "#9ca3af",
     PortType.FIGURE: "#c084fc",
+    PortType.FLOW: "#94a3b8",
 }
 
 
 def can_connect(out_type: PortType, in_type: PortType) -> bool:
     """May a wire run from an output of `out_type` to an input of `in_type`?"""
+    if PortType.FLOW in (out_type, in_type):
+        # An order wire is its own thing and joins nothing else — ANY is a
+        # wildcard over *values*, and the flow port carries none.
+        return out_type == in_type
     if out_type == in_type:
         return True
     if PortType.ANY in (out_type, in_type):
