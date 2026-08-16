@@ -31,7 +31,9 @@ from PySide6.QtWidgets import (
 
 from .. import theme
 from . import marks
-from .node_item import PREVIEW_TOGGLABLE_KINDS, card_kind, port_labels_on
+from .node_item import (
+    PREVIEW_TOGGLABLE_KINDS, card_kind, port_labels_on, renders_plain,
+)
 
 MARK_TEXT_MAX = 4  # characters; past that nothing legible fits in 60px
 _SWATCH = 30
@@ -79,8 +81,9 @@ class AppearanceDialog(QDialog):
         self.setWindowTitle(f"Appearance — {node.label}")
 
         # A card's size is its content's and it has no square to mark, so the
-        # shape and mark sections are simply absent for one.
-        self._plain = card_kind(node) is None
+        # shape and mark sections are simply absent for one. An identity-only
+        # card (Variables) draws as an ordinary node and keeps both.
+        self._plain = renders_plain(node)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
