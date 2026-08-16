@@ -164,6 +164,29 @@ def card_kind(node) -> Optional[str]:
     return node.spec.card or _LEGACY_CARD_BY_TYPE_ID.get(node.type_id)
 
 
+# Card kinds that say what a node *is* without changing how it draws.
+#
+# NODE["card"] normally means "this node renders its own content", and the
+# canvas reads it that way in three places: the compact square, the mark, and
+# which sections the Appearance dialog offers. But the Variables node needs a
+# marker only so core.varlinks can recognise it — one that survives forking
+# and saving, exactly as core.links recognises "goto"/"from" — and it draws
+# nothing of its own. Without this it would be the only Util node that cannot
+# be a square, cannot take a mark and has half an Appearance dialog.
+IDENTITY_CARDS = frozenset({"vars"})
+
+
+def renders_plain(node) -> bool:
+    """Does this node draw as an ordinary node — square-able, mark-able?
+
+    True for a node with no card at all, and for the identity-only kinds
+    above. Ask this rather than `card_kind(node) is None` wherever the
+    question is about drawing rather than about a specific card.
+    """
+    kind = card_kind(node)
+    return kind is None or kind in IDENTITY_CARDS
+
+
 # Card kinds with a real, expensive embedded widget — the ones the
 # canvas-preview toggle (idea #21) applies to. "kpi" is painted directly with
 # no widget, so it's excluded. "grid" (the Table node) is user *input* rather
@@ -383,9 +406,10 @@ def compact_on(node, scene) -> bool:
 
     Same tri-state as port_labels_on: the node's own choice wins, None
     follows the canvas-wide preference. A card kind never draws as a square
-    whatever either of them says — its size is its content's.
+    whatever either of them says — its size is its content's. An
+    identity-only card has no content, so it still can.
     """
-    if card_kind(node) is not None:
+    if not renders_plain(node):
         return False
     own = getattr(node, "compact_view", None)
     if own is not None:
@@ -589,10 +613,11 @@ class NodeItem(QGraphicsObject):
         self.link_card = self.goto_card or self.from_card
         self._link_partners: set[str] = set()  # highlighted with this node
         self.broken = node.spec.broken
-        # No card kind at all — an ordinary node, and the only kind the
-        # compact square applies to. Deliberately not called "compact": that
-        # name is taken, a few lines up, by the reroute dot.
-        self.plain = kind is None
+        # Draws as an ordinary node — no card kind at all, or an
+        # identity-only one (see renders_plain). The only kind the compact
+        # square applies to. Deliberately not called "compact": that name is
+        # taken, a few lines up, by the reroute dot.
+        self.plain = renders_plain(node)
         # Whether this plain node is drawing as a square right now. Held on
         # the item rather than asked of the scene from paint()/boundingRect(),
         # which Qt calls on every pan and zoom, for an answer that changes

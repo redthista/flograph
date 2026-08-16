@@ -1,10 +1,14 @@
 """The UI and CLI surfaces of flow variables: the secrets dialog, the
 properties-panel annotation, and headless --var."""
+from types import SimpleNamespace
+
 import pytest
 from PySide6.QtGui import QUndoStack
 
 from flograph.core import Graph, dotenv, varlinks
 from flograph.engine import headless
+from flograph.ui.canvas.appearance_dialog import AppearanceDialog
+from flograph.ui.canvas.node_item import card_kind, compact_on, renders_plain
 from flograph.ui.env_dialog import EnvDialog, MASK, usage_counts
 from flograph.ui.properties.params_panel import ParamsPanel
 
@@ -68,6 +72,40 @@ class TestParamsPanel:
                 for i in range(panel.tree.topLevelItemCount())}
         assert not rows["Value"].font(0).italic()
         stack.clear()
+
+
+class TestLooksLikeAnOrdinaryNode:
+    """The `vars` card marks *identity*, not rendering. The node draws
+    nothing of its own, so it must keep the square, the marks and the full
+    Appearance dialog every other Util node has."""
+
+    def test_it_keeps_its_identity_marker(self, flow):
+        _graph, variables, _consumer = flow
+        assert card_kind(variables) == "vars"
+
+    def test_but_renders_as_a_plain_node(self, flow):
+        _graph, variables, _consumer = flow
+        assert renders_plain(variables)
+
+    def test_so_it_can_draw_as_the_compact_square(self, flow):
+        _graph, variables, _consumer = flow
+        scene = SimpleNamespace(compact_nodes=True)
+        assert compact_on(variables, scene)
+
+    def test_a_real_card_still_cannot(self, registry):
+        graph = Graph()
+        slicer = graph.add_node(registry.instantiate("flograph.viz.slicer"))
+        scene = SimpleNamespace(compact_nodes=True)
+        assert not renders_plain(slicer)
+        assert not compact_on(slicer, scene)
+
+    def test_the_appearance_dialog_offers_shape_and_mark(self, qtbot, flow):
+        graph, variables, _consumer = flow
+        scene = SimpleNamespace(graph=graph, compact_nodes=True,
+                                node_items={}, undo_stack=QUndoStack())
+        dialog = AppearanceDialog(scene, variables.id)
+        qtbot.addWidget(dialog)
+        assert dialog._plain
 
 
 class TestEnvDialog:
