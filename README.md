@@ -174,7 +174,15 @@ and write `${data_dir}` into any text box in the Properties panel, or read
 re-runs — a reference is a real edge in the graph, so ordering and cache
 invalidation work exactly as they would with a wire. Secrets stay out of the
 project file: `${env:NAME}` reads from a .env file you manage under
-**Tools ▸ Secrets…**, and the project stores only its path. A **minimap** (toggleable in
+**Tools ▸ Secrets…**, and the project stores only its path.
+
+Sometimes the order matters but no data passes — write the file, *then* read
+it back. Every node carries a small **flow pin** off each of its upper
+corners; drag one to another node's and you have said "that one first". The
+dashed arc that results carries nothing, but it is a real dependency: the
+dependent re-runs when its prerequisite changes, its cached result is
+invalidated with it, and it is held back if the prerequisite fails or is
+switched off. A node can wait on as many as you like. A **minimap** (toggleable in
 Settings) and a status-bar resource monitor — system memory, the open
 project's cache footprint, the selected node's own — keep an eye on the
 scale of things.

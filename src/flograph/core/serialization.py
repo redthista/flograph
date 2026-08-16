@@ -28,7 +28,7 @@ from .datatypes import PortType
 from .graph import Connection, Frame, Graph, GraphError, Page, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .page_setup import PageSetup
-from .ports import PortDirection, PortSpec
+from .ports import PortDirection, PortSpec, is_flow
 from .registry import NodeRegistry
 from .script import NodeScriptError, parse_spec
 
@@ -145,8 +145,12 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     for entry in conn_entries:
         src_node, src_port = entry["src"]
         dst_node, dst_port = entry["dst"]
-        output_ports_needed.setdefault(src_node, set()).add(src_port)
-        input_ports_needed.setdefault(dst_node, set()).add(dst_port)
+        # the flow port is implicit on every spec, broken placeholders
+        # included, so it must not be synthesized as a data port here
+        if not is_flow(src_port):
+            output_ports_needed.setdefault(src_node, set()).add(src_port)
+        if not is_flow(dst_port):
+            input_ports_needed.setdefault(dst_node, set()).add(dst_port)
 
     graph = Graph()
     # Absent in files written before variables existed, which is what the

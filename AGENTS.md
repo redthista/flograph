@@ -69,6 +69,20 @@ as often as is convenient.
 
 Port types: `any, dataframe, series, number, string, bool, object, figure`.
 
+**Every node also has a flow port**, implicitly and whatever its script says
+(`core.ports.FLOW_INPUT` / `FLOW_OUTPUT`, reserved name `flow`, type
+`PortType.FLOW`). A wire between two of them is an **order edge**: it hands
+over no value and exists only to say "that node first". A script may declare
+neither the name nor the type. It is an ordinary `Connection` on a reserved
+port — so ordering, dirtying, cycle rejection, cache invalidation, undo and
+persistence are all the ones wires already had — but it is deliberately kept
+out of `NodeSpec.inputs`/`outputs` and out of the graph's by-input index,
+because nothing about it feeds a port. `Graph.order_sources(node_id)` is how
+to ask for a node's prerequisites, exactly as `var_sources` is for `${name}`.
+On the canvas the pins live off a node's two upper corners
+(`NodeItem.flow_ports`, keyed by direction) and the wire draws as a dashed
+upward arc (`connection_item.order_path`).
+
 Optional `NODE["card"]` gives a node a rich canvas card / dashboard tile
 (`figure`, `webview`, `table_viewer`, `kpi`, `grid`, `slicer`, `button`,
 `note`, `control`, ...). `card: "control"` additionally requires

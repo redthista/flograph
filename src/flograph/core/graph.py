@@ -16,7 +16,7 @@ from .events import GraphEvents
 from .layers import next_z, order_of
 from .node import NodeInstance, NodeStatus, NodeSpec
 from .page_setup import PageSetup
-from .ports import PortDirection
+from .ports import PortDirection, is_flow
 
 
 class GraphError(Exception):
@@ -477,6 +477,17 @@ class Graph:
         return sorted({conn.src_node for conn in self.var_links.values()
                        if conn.dst_node == node_id})
 
+    def order_sources(self, node_id: str) -> list[str]:
+        """The nodes this one has been told to run after — the sources of its
+        incoming order edges (see core.ports.FLOW_INPUT).
+
+        Its own accessor for the same reason `var_sources` is: the edge lands
+        on the flow port, which the by-port reads deliberately ignore, so
+        anything needing a node's full dependency set has to ask here.
+        """
+        return sorted({conn.src_node for conn in self.connections.values()
+                       if conn.dst_node == node_id and is_flow(conn.dst_port)})
+
     # ----------------------------------------------------------- connections
 
     def connect(
@@ -507,10 +518,21 @@ class Graph:
         if self.would_cycle(src_node, dst_node):
             raise GraphError("connection would create a cycle")
 
-        # only a real wire can be displaced: links aren't the user's to drop
-        displaced = self.input_connection(dst_node, dst_port, include_links=False)
-        if displaced is not None:
-            self.disconnect(displaced.id)
+        if is_flow(dst_port):
+            # An order edge displaces nothing: a node may have to wait for
+            # several others, and "run after A and B" has no reading in which
+            # wiring B throws A away. The same wire twice is refused instead
+            # of quietly doubling up.
+            if any(c.src_node == src_node and c.dst_node == dst_node
+                   and is_flow(c.dst_port) for c in self.connections.values()):
+                raise GraphError("those nodes are already ordered")
+            displaced = None
+        else:
+            # only a real wire can be displaced: links aren't the user's to drop
+            displaced = self.input_connection(dst_node, dst_port,
+                                              include_links=False)
+            if displaced is not None:
+                self.disconnect(displaced.id)
 
         conn = Connection(
             id=conn_id or uuid.uuid4().hex,
@@ -565,12 +587,14 @@ class Graph:
                 # setdefault, not assignment: first edge on a port wins, which
                 # is what the old `next(...)` scan did and is what keeps a real
                 # wire ahead of a link claiming the same input
-                if conn.dst_port:
+                if conn.dst_port and not is_flow(conn.dst_port):
                     by_input.setdefault((conn.dst_node, conn.dst_port), conn)
-                # ...and a variable edge, which has no destination port at
-                # all, never lands here: `input_connection` must only ever
-                # answer with an edge that actually carries a value to that
-                # port. It still counts for ordering and dirtying below.
+                # ...and neither a variable edge, which has no destination
+                # port at all, nor an order edge, whose flow port is not a
+                # destination for any value: `input_connection` must only
+                # ever answer with an edge that actually carries a value to
+                # that port. Both still count for ordering and dirtying
+                # below, which is the whole of what they are for.
                 into.setdefault(conn.dst_node, []).append(conn)
                 out_of.setdefault(conn.src_node, []).append(conn)
             index = self._edge_index = _EdgeIndex(by_input, into, out_of)

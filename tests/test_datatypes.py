@@ -10,7 +10,9 @@ class TestCanConnect:
             assert can_connect(t, t)
 
     def test_any_connects_both_ways(self):
-        for t in PortType:
+        # ...to every type that carries a value. FLOW carries none, so the
+        # wildcard has nothing to be wild about — see test_order_edges.
+        for t in (t for t in PortType if t is not PortType.FLOW):
             assert can_connect(PortType.ANY, t)
             assert can_connect(t, PortType.ANY)
 

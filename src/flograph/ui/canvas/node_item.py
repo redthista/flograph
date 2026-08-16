@@ -14,9 +14,10 @@ from PySide6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from flograph.core import NodeInstance, PortSpec
+from flograph.core import NodeInstance, PortSpec, PortType
 from flograph.core.links import link_label, source_id
 from flograph.core.node import NodeStatus
+from flograph.core.ports import FLOW_INPUT, FLOW_OUTPUT, is_flow
 
 from .. import theme
 from ..data_table import DataTableView
@@ -455,6 +456,10 @@ class PortItem(QGraphicsItem):
     """A circular pin. Wire drags start here and are managed by the scene."""
 
     RADIUS = 5.5
+    # The flow pin is drawn smaller: it is on every node whether or not
+    # anybody uses it, so it has to stay quieter than the pins that carry
+    # the data. See NodeItem._layout_flow_ports.
+    FLOW_RADIUS = 3.5
 
     def __init__(self, node_item: "NodeItem", spec: PortSpec) -> None:
         super().__init__(node_item)
@@ -479,6 +484,14 @@ class PortItem(QGraphicsItem):
     def node_id(self) -> str:
         return self.node_item.node.id
 
+    @property
+    def is_flow(self) -> bool:
+        return self.spec.type == PortType.FLOW
+
+    @property
+    def base_radius(self) -> float:
+        return self.FLOW_RADIUS if self.is_flow else self.RADIUS
+
     def set_drag_tint(self, valid: Optional[bool]) -> None:
         if valid != self._drag_tint:
             self._drag_tint = valid
@@ -502,6 +515,11 @@ class PortItem(QGraphicsItem):
         flattened for zoom — the pins themselves aren't drawn at that
         distance, so their names would be labels for nothing.
         """
+        if self.is_flow:
+            # Never labelled: the name would be the same word on every node
+            # on the canvas, and the pin's own tooltip already says what it
+            # is for.
+            return False
         return port_labels_on(self.node_item.node, self.scene()) \
             and not self.node_item._flat
 
@@ -550,11 +568,12 @@ class PortItem(QGraphicsItem):
             painter.setPen(QPen(theme.NODE_SUBTEXT))
             painter.setFont(_port_label_font())
             painter.drawText(label, Qt.AlignCenter, self.label_text())
-        radius = self.RADIUS + (2 if self._hover else 0)
+        base = self.base_radius
+        radius = base + (2 if self._hover else 0)
         color = theme.wire_color(self.spec.type)
         if self._drag_tint is True:
             color = theme.WIRE_VALID
-            radius = self.RADIUS + 2.5
+            radius = base + 2.5
         elif self._drag_tint is False:
             color = theme.WIRE_INVALID
         painter.setPen(QPen(theme.NODE_BORDER, 1.2))
@@ -733,6 +752,11 @@ class NodeItem(QGraphicsObject):
 
         self.input_ports: dict[str, PortItem] = {}
         self.output_ports: dict[str, PortItem] = {}
+        # The flow pins, keyed by direction. Kept out of the two dicts above
+        # on purpose: those are the node's *data* ports, and the geometry,
+        # the collapse, the labels and everything that counts ports all read
+        # them. A pin that carries no value belongs in none of that.
+        self.flow_ports: dict[str, PortItem] = {}
         self._group_starts: dict | None = None  # group-drag snapshot
         self._pulse = 0.0
         self._pulse_anim: Optional[QVariantAnimation] = None
@@ -2157,17 +2181,34 @@ class NodeItem(QGraphicsObject):
         an output always draws filled, so it never asks."""
         for port in self.input_ports.values():
             port.refresh_connected()
+        flow_in = self.flow_ports.get("input")
+        if flow_in is not None:
+            flow_in.refresh_connected()
 
     def rebuild_ports(self) -> None:
         """(Re)create port items from the current spec — called at build time
         and again whenever the node's code changes its ports."""
-        for item in (*self.input_ports.values(), *self.output_ports.values()):
+        for item in (*self.input_ports.values(), *self.output_ports.values(),
+                     *self.flow_ports.values()):
             if item.scene() is not None:
                 item.scene().removeItem(item)
             item.setParentItem(None)
         self.input_ports.clear()
         self.output_ports.clear()
+        self.flow_ports.clear()
         self.prepareGeometryChange()
+        # Every node has these, whatever its script says, and a code edit
+        # cannot take them away — so they are rebuilt first and independently
+        # of every rule below. The one exception is a reroute, which is a
+        # bend in a wire drawn as a dot: two pins on top of one would be
+        # bigger than the node.
+        for spec in () if self.compact else (FLOW_INPUT, FLOW_OUTPUT):
+            pin = PortItem(self, spec)
+            pin.setToolTip(
+                "run after another node — drag to another node's flow pin"
+                if spec is FLOW_INPUT else
+                "run before another node — drag to another node's flow pin")
+            self.flow_ports[spec.direction.value] = pin
         for spec in self.node.spec.inputs:
             if self.from_card:
                 continue  # the link end: real in the spec, never on the canvas
@@ -2194,6 +2235,7 @@ class NodeItem(QGraphicsObject):
         """Pin port items to the current geometry. Cards resize at runtime,
         so this runs again on every width change — output ports (and the
         wires on them) must ride the right edge, not stay where they were."""
+        self._layout_flow_ports()
         left, right = self._port_x()
         if self.compact or self.link_card:
             for port in self.input_ports.values():
@@ -2215,6 +2257,32 @@ class NodeItem(QGraphicsObject):
         for i, spec in enumerate(self.node.spec.outputs):
             self.output_ports[spec.name].setPos(
                 right, HEADER_H + ROW_H * (i + 0.5))
+
+    def _layout_flow_ports(self) -> None:
+        """The flow pins sit off the node's two upper corners, diagonally: in
+        at the top left, out at the top right.
+
+        The corners are the only real estate every node has spare. The left
+        and right edges are where the data pins run — as far down as a node
+        with twenty of them needs — the top edge above a square node is
+        where its name goes, the strip below it is the status row, and the
+        air above a wide node's header belongs to its badges. A corner is
+        outside all four, on every node kind, at every port count.
+
+        Their being *above* the node is also why `order_path` arcs upward:
+        both ends of an order edge leave through the top.
+        """
+        if not self.flow_ports:
+            return
+        out = PortItem.FLOW_RADIUS + PORT_EDGE_GAP
+        # A square node's name is centred above it and free to overhang both
+        # sides, so on a long label it runs straight through where the
+        # corners are. The pins clear it by sitting above the name instead —
+        # still the corners, just the corners of everything the node draws.
+        name = self._name_rect()
+        y = -out if name is None else name.top() - out
+        self.flow_ports["input"].setPos(-out, y)
+        self.flow_ports["output"].setPos(self.width + out, y)
 
     def _stack_ports(self, ports, x: float) -> None:
         """Lay a square node's pins down its edge, ROW_H apart.
@@ -2267,6 +2335,11 @@ class NodeItem(QGraphicsObject):
         as a side effect. Both are re-derived here together.
         """
         collapsed = self.ports_collapsed
+        for pin in self.flow_ports.values():
+            # Only the LOD flattening applies: collapsing gathers a *stack*
+            # of pins behind its first one, and there is only ever one of
+            # these per side.
+            pin.setVisible(not self._flat)
         for ports in (self.input_ports, self.output_ports):
             items = list(ports.values())
             for i, port in enumerate(items):
@@ -2374,6 +2447,8 @@ class NodeItem(QGraphicsObject):
             scene.node_item_moved(self.node.id)
 
     def port_item(self, name: str, direction: str) -> Optional[PortItem]:
+        if is_flow(name):
+            return self.flow_ports.get(direction)
         table = self.input_ports if direction == "input" else self.output_ports
         return table.get(name)
 
