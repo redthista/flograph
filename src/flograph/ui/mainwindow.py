@@ -233,7 +233,7 @@ class MainWindow(QMainWindow):
         self._run_bar = QProgressBar(self)
         self._run_bar.setRange(0, 100)
         self._run_bar.setTextVisible(False)
-        self._run_bar.setFixedSize(110, 6)
+        self._run_bar.setFixedSize(80, 8)
         self._run_bar.hide()
         # The bar reads as the head of the run's own message, so the two sit
         # together at the bottom left: [====----]  Running: Group By · 3 of 8.
