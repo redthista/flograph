@@ -119,16 +119,10 @@ def declared_names(node) -> list[str]:
 # -------------------------------------------------------------- references
 
 def _param_texts(node):
-    """Every substitutable param value on a node, as text.
-
-    A Variables node's own assignments are skipped: resolving a variable out
-    of the text that defines variables is a chain nobody asked for, and it
-    would make `declared_names` depend on a run.
-    """
+    """Every substitutable param value on a node, as text. See
+    `substitutable` for which params qualify."""
     for spec in node.spec.params:
-        if spec.type not in SUBSTITUTABLE:
-            continue
-        if is_vars(node) and spec.name == ASSIGNMENTS_PARAM:
+        if not substitutable(node, spec):
             continue
         value = node.params.get(spec.name)
         if isinstance(value, str) and MARKER in value:
@@ -217,6 +211,30 @@ def declared_values(graph: "Graph") -> dict[str, str]:
         if is_vars(node):
             values.update(parse_assignments(node.params.get(ASSIGNMENTS_PARAM))[0])
     return values
+
+
+def completion_names(graph: "Graph") -> list[str]:
+    """What `${` can be completed to: every declared variable, then every
+    key the secrets *file* declares as `env:NAME`.
+
+    Deliberately `graph.env_keys` and not `graph.env` — the latter carries
+    the whole process environment as a resolution fallback, and offering
+    PATH and HOME in this list would bury the handful of names that matter.
+    """
+    return (sorted(declared_values(graph))
+            + [f"{ENV_PREFIX}{key}" for key in sorted(graph.env_keys or ())])
+
+
+def substitutable(node, spec) -> bool:
+    """Can this param hold a `${name}`? The one place the rule lives — the
+    resolver, the panel's marker and its completer all ask here.
+
+    A Variables node's own assignments are excluded: resolving a variable
+    out of the text that *defines* variables is a chain nobody asked for,
+    and it would make `declared_names` depend on a run.
+    """
+    return (spec.type in SUBSTITUTABLE
+            and not (is_vars(node) and spec.name == ASSIGNMENTS_PARAM))
 
 
 def describe(graph: "Graph", node) -> list[str]:

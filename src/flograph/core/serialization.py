@@ -332,5 +332,5 @@ def load(path: str | Path, registry: NodeRegistry) -> Graph:
     graph = graph_from_dict(data, registry)
     # Secrets are loaded here because this is the only place that knows where
     # the project file sits, and `env_path` is stored relative to it.
-    graph.env = dotenv.environment(dotenv.resolve_path(graph.env_path, str(path)))
+    dotenv.bind(graph, dotenv.resolve_path(graph.env_path, str(path)))
     return graph

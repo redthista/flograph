@@ -4,12 +4,16 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtGui import QUndoStack
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLineEdit, QPlainTextEdit, QPushButton, QWidget,
+)
 
 from flograph.core import Graph, dotenv, varlinks
 from flograph.engine import headless
 from flograph.ui.canvas.appearance_dialog import AppearanceDialog
 from flograph.ui.canvas.node_item import card_kind, compact_on, renders_plain
 from flograph.ui.env_dialog import EnvDialog, MASK, usage_counts
+from flograph.ui.properties import var_completion
 from flograph.ui.properties.params_panel import ParamsPanel
 
 VARS = "flograph.util.variables"
@@ -106,6 +110,136 @@ class TestLooksLikeAnOrdinaryNode:
         dialog = AppearanceDialog(scene, variables.id)
         qtbot.addWidget(dialog)
         assert dialog._plain
+
+
+class TestCompletionNames:
+    def test_declared_variables_come_first(self, flow):
+        graph, variables, _consumer = flow
+        graph.set_param(variables.id, "assignments", "region = N\ndata_dir = /d")
+        graph.set_env({"TOKEN": "x"}, file_keys=["TOKEN"])
+        assert varlinks.completion_names(graph) == ["data_dir", "region",
+                                                    "env:TOKEN"]
+
+    def test_the_process_environment_is_not_offered(self, flow):
+        graph, _variables, _consumer = flow
+        # graph.env carries the whole environment so a reference can resolve
+        # against it; offering PATH and HOME would bury the real names.
+        graph.set_env({"TOKEN": "x", "PATH": "/usr/bin", "HOME": "/home/me"},
+                      file_keys=["TOKEN"])
+        assert varlinks.completion_names(graph) == ["region", "env:TOKEN"]
+
+    def test_a_variables_nodes_own_text_takes_no_completions(self, flow):
+        graph, variables, _consumer = flow
+        spec = variables.spec.param("assignments")
+        assert not varlinks.substitutable(variables, spec)
+
+
+class TestCompleter:
+    def _line_completer(self, qtbot, names):
+        edit = QLineEdit()
+        qtbot.addWidget(edit)
+        return edit, var_completion.attach(edit, lambda: names)
+
+    def test_it_finds_the_editor_inside_a_host_widget(self, qtbot):
+        host = QWidget()
+        layout = QHBoxLayout(host)
+        edit = QLineEdit()
+        layout.addWidget(edit)
+        layout.addWidget(QPushButton("Browse"))
+        qtbot.addWidget(host)
+        completer = var_completion.attach(host, lambda: ["region"])
+        assert completer is not None
+        assert completer._editor is edit
+
+    def test_typing_the_marker_offers_every_name(self, qtbot):
+        edit, completer = self._line_completer(qtbot, ["region", "env:TOKEN"])
+        edit.setText("${")
+        edit.setCursorPosition(2)
+        completer._refresh()
+        assert completer._completer.completionCount() == 2
+
+    def test_it_narrows_as_you_type(self, qtbot):
+        edit, completer = self._line_completer(qtbot, ["region", "revenue",
+                                                       "data_dir"])
+        edit.setText("${re")
+        edit.setCursorPosition(4)
+        completer._refresh()
+        assert completer._completer.completionPrefix() == "re"
+        assert completer._completer.completionCount() == 2
+
+    def test_a_colon_keeps_a_secret_completing(self, qtbot):
+        edit, completer = self._line_completer(qtbot, ["env:TOKEN", "region"])
+        edit.setText("${env:TO")
+        edit.setCursorPosition(8)
+        completer._refresh()
+        assert completer._completer.completionCount() == 1
+
+    def test_a_closed_reference_offers_nothing(self, qtbot):
+        edit, completer = self._line_completer(qtbot, ["region"])
+        edit.setText("${region} and more")
+        edit.setCursorPosition(len(edit.text()))
+        completer._refresh()
+        assert not completer._completer.popup().isVisible()
+
+    def test_accepting_writes_the_whole_reference(self, qtbot):
+        edit, completer = self._line_completer(qtbot, ["region"])
+        edit.setText("sales in ${re")
+        edit.setCursorPosition(13)
+        completer._refresh()
+        completer._insert("region")
+        assert edit.text() == "sales in ${region}"
+        assert edit.cursorPosition() == len(edit.text())
+
+    def test_it_completes_mid_text_without_eating_the_rest(self, qtbot):
+        edit, completer = self._line_completer(qtbot, ["data_dir"])
+        edit.setText("${da/sales.csv")
+        edit.setCursorPosition(4)       # between "da" and "/"
+        completer._refresh()
+        completer._insert("data_dir")
+        assert edit.text() == "${data_dir}/sales.csv"
+
+    def test_it_refuses_to_splice_when_the_cursor_has_moved_away(self, qtbot):
+        # _insert re-derives its own position, so a stale offset can never
+        # eat text the user typed in between.
+        edit, completer = self._line_completer(qtbot, ["region"])
+        edit.setText("${re")
+        edit.setCursorPosition(4)
+        completer._refresh()
+        edit.setText("no reference here")
+        edit.setCursorPosition(4)
+        completer._insert("region")
+        assert edit.text() == "no reference here"
+
+    def test_a_brace_already_typed_is_not_doubled(self, qtbot):
+        edit, completer = self._line_completer(qtbot, ["region"])
+        edit.setText("${}")
+        edit.setCursorPosition(2)
+        completer._refresh()
+        completer._insert("region")
+        assert edit.text() == "${region}"
+
+    def test_it_works_in_the_multiline_editor(self, qtbot):
+        text = QPlainTextEdit()
+        qtbot.addWidget(text)
+        completer = var_completion.attach(text, lambda: ["region"])
+        text.setPlainText("a = ${re\nb = 2")
+        cursor = text.textCursor()
+        cursor.setPosition(8)
+        text.setTextCursor(cursor)
+        completer._insert("region")
+        assert text.toPlainText() == "a = ${region}\nb = 2"
+
+    def test_the_panel_attaches_one_to_a_text_param(self, qtbot, flow):
+        graph, _variables, consumer = flow
+        stack = QUndoStack()
+        panel = ParamsPanel(graph, stack)
+        qtbot.addWidget(panel)
+        panel.set_node(consumer.id)
+        rows = {panel.tree.topLevelItem(i).text(0): panel.tree.topLevelItem(i)
+                for i in range(panel.tree.topLevelItemCount())}
+        widget = panel.tree.itemWidget(rows["Value"], 1)
+        assert widget.findChildren(var_completion.VariableCompleter)
+        stack.clear()
 
 
 class TestEnvDialog:
