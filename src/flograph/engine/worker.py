@@ -15,7 +15,7 @@ import io
 import sys
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from PySide6.QtCore import QObject, QRunnable, Signal
 
@@ -165,11 +165,13 @@ class NodeRunnable(QRunnable):
         output_ports: list[PortSpec],
         token: CancellationToken,
         signals: WorkerSignals,
+        variables: Optional[Mapping[str, Any]] = None,
     ) -> None:
         super().__init__()
         self.node_id = node_id
         self.source = source
         self.params = params
+        self.variables = variables
         self.inputs = inputs
         self.output_ports = output_ports
         self.token = token
@@ -185,6 +187,7 @@ class NodeRunnable(QRunnable):
             ctx = RunContext(
                 node_id=node_id,
                 params=self.params,
+                variables=self.variables,
                 token=self.token,
                 log=self.signals.logged.emit,
                 progress=self.signals.progressed.emit,

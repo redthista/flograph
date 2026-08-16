@@ -23,6 +23,7 @@ from flograph.core import (
     Graph, GraphError, NodeInstance, NodeRegistry, NodeStatus, Page, Tile,
     parse_spec,
 )
+from flograph.core import dotenv
 from flograph.core import serialization
 from flograph.core import user_nodes
 from flograph.engine import (
@@ -542,6 +543,7 @@ class MainWindow(QMainWindow):
                                    self._show_packages)
         self.action_ai_settings = act("AI Assistant &Settings…", None,
                                       self._show_ai_settings)
+        self.action_secrets = act("Sec&rets…", None, self._show_secrets)
 
         for action in (self.action_run, self.action_run_selected,
                        self.action_cancel):
@@ -589,6 +591,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction(self.action_packages)
         tools_menu.addAction(self.action_ai_settings)
+        tools_menu.addAction(self.action_secrets)
 
         section["name"] = "View"
         view_menu = self.menuBar().addMenu("&View")
@@ -1976,6 +1979,10 @@ class MainWindow(QMainWindow):
     def _show_ai_settings(self) -> None:
         from .ai_settings_dialog import AiSettingsDialog
         AiSettingsDialog(self).exec()
+
+    def _show_secrets(self) -> None:
+        from .env_dialog import EnvDialog
+        EnvDialog(self.graph, self._project_path, self.undo_stack, self).exec()
 
     def _show_stats(self) -> None:
         if self._stats_window is None:
@@ -3456,7 +3463,12 @@ class MainWindow(QMainWindow):
             return
         if not self._confirm_discard():
             return
-        self._replace_graph(Graph())
+        graph = Graph()
+        # An unsaved project has no folder to hold a .env, so it reads the
+        # per-user one. `serialization.load` does the same for a project that
+        # does have a folder, relative to it.
+        graph.set_env(dotenv.environment(dotenv.default_path()))
+        self._replace_graph(graph)
         self._project_path = None
         self._update_title()
 

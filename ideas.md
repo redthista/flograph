@@ -75,4 +75,3 @@ G2. when zoomed out and we have the low lod version of the nodes showing, can we
 - is there a way to be able to generate outputs of a node programatically? ie a excel reader that can output each sheet/list object in its own connector automatically? 
 - transform node - Unique - pandas dataframe to capture only unique values in rows, and return a unique filtered table.
 - add a folder open type to possible node params
-- is there a way to programatically fill the params

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from flograph.core.graph import Graph
+from flograph.core.varlinks import uses_env
 
 from .cache import OutputCache
 from .frames import normalize_strings
@@ -89,6 +90,13 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
         conn = graph.input_connection(node_id, port.name)
         if conn is not None:
             parents.append(conn.src_node)
+    # A `${name}` reference is a real dependency with no port to hang off, so
+    # the by-port walk above cannot see it. Without this, a node whose param
+    # reads "${region}" hashes identically whichever region is selected — and
+    # the engine would serve the cached frame for the wrong one. The values
+    # themselves are not hashed: the Variables node's own fingerprint covers
+    # them, and folding it in here is what makes the dependency transitive.
+    parents.extend(graph.var_sources(node_id))
     if not resolved:
         pending = [p for p in parents if p not in memo]
         if pending:
@@ -119,6 +127,8 @@ def freeze_fingerprint(graph: Graph, node_id: str) -> str:
         conn = graph.input_connection(node_id, port.name)
         if conn is not None:
             upstream_fps.append(node_fingerprint(graph, conn.src_node, memo))
+    for src in graph.var_sources(node_id):   # portless — see _fingerprint_one
+        upstream_fps.append(node_fingerprint(graph, src, memo))
     payload = json.dumps({
         "type_id": node.type_id,
         "source": node.source,
@@ -244,6 +254,14 @@ def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> No
     for node_id in graph.topo_order():
         entry = cache.get(node_id)
         if entry is None:
+            continue
+        if uses_env(graph.nodes[node_id]):
+            # A node reading `${env:...}` is never persisted. Its fingerprint
+            # cannot include the secret without putting a hash of it in a
+            # file beside the project, and leaving the secret out would let a
+            # value computed from the old one come back after the .env
+            # changed. Recomputing it on reopen costs one run and is right
+            # both ways.
             continue
         alias = _alias_meta(graph, node_id, entry, manifest)
         if alias is not None:

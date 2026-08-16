@@ -264,6 +264,29 @@ class ResetCodeCommand(QUndoCommand):
                                 conn.dst_node, conn.dst_port, conn_id=conn.id)
 
 
+class SetEnvPathCommand(QUndoCommand):
+    """Repoint the project at a different secrets file.
+
+    Only the *path* is undoable, and only the path is what the project
+    holds. The file's contents are not: they live on disk, this never wrote
+    them, and an undo that silently rewrote somebody's secrets file would be
+    a far worse surprise than one that leaves it alone.
+    """
+
+    def __init__(self, graph: Graph, new_path: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("set secrets file", parent)
+        self._graph = graph
+        self._old = graph.env_path
+        self._new = new_path
+
+    def redo(self) -> None:
+        self._graph.set_env_path(self._new)
+
+    def undo(self) -> None:
+        self._graph.set_env_path(self._old)
+
+
 class SetLabelCommand(QUndoCommand):
     def __init__(self, graph: Graph, node_id: str, new_label: Optional[str],
                  parent: Optional[QUndoCommand] = None) -> None:

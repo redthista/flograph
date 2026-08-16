@@ -104,6 +104,9 @@ CARD_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer",
     "button", "note", "grid", "reroute", "goto", "from", "control",
     "report", "image",
+    # names a flow's `${name}` variables; the card lists what they resolved
+    # to, which is the one thing that keeps them from being invisible
+    "vars",
 })
 
 # Widget shapes for NODE["card"] == "control": input controls whose value the
