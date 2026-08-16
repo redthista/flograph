@@ -166,6 +166,11 @@ class Graph:
         # runner on load), which keeps the engine from needing to know where
         # anything is on disk.
         self.env: dict[str, str] = {}
+        # Just the keys the *file* declares. `env` also carries the whole
+        # process environment as a fallback, which is right for resolving a
+        # reference and wrong for offering one: a completion list holding
+        # PATH, HOME and everything else the shell exported would be useless.
+        self.env_keys: list[str] = []
         self.events = GraphEvents()
         # Lookup tables over the edge set, rebuilt on demand rather than
         # patched at each mutation: there are only three places edges change
@@ -425,10 +430,17 @@ class Graph:
         self.env_path = str(path or "")
         self._dirty_env_readers()
 
-    def set_env(self, values: dict[str, str]) -> None:
+    def set_env(self, values: dict[str, str],
+                file_keys: Optional[Iterable[str]] = None) -> None:
         """Adopt freshly loaded secrets. Runtime state, not undoable: it
-        mirrors a file on disk, and undo cannot put that back."""
+        mirrors a file on disk, and undo cannot put that back.
+
+        `file_keys` names the subset that came from the .env file itself;
+        it defaults to all of them, which is what a caller passing only the
+        file's contents means.
+        """
         self.env = dict(values)
+        self.env_keys = sorted(self.env if file_keys is None else file_keys)
         self._dirty_env_readers()
 
     def _dirty_env_readers(self) -> None:

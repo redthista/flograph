@@ -136,6 +136,17 @@ def save(path: Path | str, values: dict[str, str]) -> None:
         pass
 
 
+def bind(graph, path: Path | str) -> None:
+    """Load a secrets file into a graph.
+
+    One call so the two halves can never drift: `graph.env` resolves a
+    reference (file first, process environment filling gaps) while
+    `graph.env_keys` is what the file itself declares, which is the only
+    sensible thing to offer in a completion list.
+    """
+    graph.set_env(environment(path), file_keys=load(path))
+
+
 def environment(path: Path | str) -> dict[str, str]:
     """The secrets a run should see: the file's keys, with `os.environ`
     filling gaps.

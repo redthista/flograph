@@ -224,4 +224,4 @@ class EnvDialog(QDialog):
                 self._undo_stack.push(SetEnvPathCommand(self._graph, stored))
             else:
                 self._graph.set_env_path(stored)
-        self._graph.set_env(dotenv.environment(self._path))
+        dotenv.bind(self._graph, self._path)

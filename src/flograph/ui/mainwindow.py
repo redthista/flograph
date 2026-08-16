@@ -3467,7 +3467,7 @@ class MainWindow(QMainWindow):
         # An unsaved project has no folder to hold a .env, so it reads the
         # per-user one. `serialization.load` does the same for a project that
         # does have a folder, relative to it.
-        graph.set_env(dotenv.environment(dotenv.default_path()))
+        dotenv.bind(graph, dotenv.default_path())
         self._replace_graph(graph)
         self._project_path = None
         self._update_title()

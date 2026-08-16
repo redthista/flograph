@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from flograph.core import Graph, ParamSpec, varlinks
 
+from . import var_completion
 from ..canvas.node_item import card_kind
 from ..controls import UNCAPPED_TEXT
 from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
@@ -179,6 +180,12 @@ class ParamsPanel(QWidget):
             self._setters[spec.name] = setter
             item = self._add_row(spec.label or spec.name, widget)
             self._annotate_variables(item, node, spec, value)
+            if varlinks.substitutable(node, spec):
+                # Read through a callable, not a snapshot: the panel outlives
+                # edits to the Variables node, and a stale list would offer
+                # names that no longer exist.
+                var_completion.attach(
+                    widget, lambda: varlinks.completion_names(self._graph))
 
     def _annotate_variables(self, item: QTreeWidgetItem, node,
                             spec: ParamSpec, value: Any) -> None:
@@ -188,7 +195,7 @@ class ParamsPanel(QWidget):
         and nothing says whether that name exists or what is in it. Hovering
         is the cheapest place to answer both.
         """
-        if (spec.type not in varlinks.SUBSTITUTABLE
+        if (not varlinks.substitutable(node, spec)
                 or not isinstance(value, str) or varlinks.MARKER not in value):
             return
         lines = varlinks.describe(self._graph, node)
