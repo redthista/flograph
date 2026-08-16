@@ -25,6 +25,16 @@ class UserNodeError(Exception):
     """A user-node file/dir operation could not be completed."""
 
 
+class UserNodeExistsError(UserNodeError):
+    """The destination is already taken.
+
+    Its own class because it is the one failure with an obvious next move —
+    the caller offers to overwrite — and catching the base class for that
+    would offer to overwrite in answer to "this code doesn't load", where
+    trying again can only fail the same way.
+    """
+
+
 # --------------------------------------------------------------- naming utils
 
 def slugify(name: str) -> str:
@@ -62,8 +72,12 @@ def set_node_metadata(source: str, label: str, category: str) -> str:
     replaced. Leaves PARAMS and run() untouched. If NODE isn't a simple dict
     literal with string label/category values, returns the source unchanged.
 
-    Node scripts are ASCII, so ast column offsets are treated as character
-    offsets.
+    Node scripts are not assumed to be ASCII: ast column offsets count UTF-8
+    *bytes* into their line, so they are converted to character offsets
+    before slicing (see `_abs_offset`). A rewrite that somehow fails to parse
+    is discarded rather than written — this function's whole job is to hand
+    back something loadable, and a mangled node saves to disk but then
+    vanishes from the library at load time.
     """
     try:
         tree = ast.parse(source)
@@ -82,26 +96,53 @@ def set_node_metadata(source: str, label: str, category: str) -> str:
         return source
 
     replacements: list[tuple[int, int, str]] = []  # (start, end, new_text)
-    line_starts = _line_starts(source)
+    lines = source.splitlines(keepends=True)
+    line_starts = _line_starts(lines)
     wanted = {"label": label, "category": category}
     for key_node, val_node in zip(node_dict.keys, node_dict.values):
         if (isinstance(key_node, ast.Constant) and key_node.value in wanted
                 and isinstance(val_node, ast.Constant)
                 and isinstance(val_node.value, str)):
-            start = line_starts[val_node.lineno - 1] + val_node.col_offset
-            end = line_starts[val_node.end_lineno - 1] + val_node.end_col_offset
+            start = _abs_offset(lines, line_starts,
+                                val_node.lineno, val_node.col_offset)
+            end = _abs_offset(lines, line_starts,
+                              val_node.end_lineno, val_node.end_col_offset)
+            if start is None or end is None:
+                return source
             replacements.append((start, end, repr(wanted[key_node.value])))
 
+    rewritten = source
     for start, end, new_text in sorted(replacements, reverse=True):
-        source = source[:start] + new_text + source[end:]
-    return source
+        rewritten = rewritten[:start] + new_text + rewritten[end:]
+    try:
+        ast.parse(rewritten)
+    except SyntaxError:
+        return source
+    return rewritten
 
 
-def _line_starts(source: str) -> list[int]:
+def _line_starts(lines: list[str]) -> list[int]:
     starts = [0]
-    for line in source.splitlines(keepends=True):
+    for line in lines:
         starts.append(starts[-1] + len(line))
     return starts
+
+
+def _abs_offset(lines: list[str], line_starts: list[int],
+                lineno: int, col_offset: int) -> Optional[int]:
+    """Absolute character index in the source for an ast (lineno, col_offset).
+
+    `col_offset` counts UTF-8 bytes into the line, so an em dash or an accent
+    anywhere to its left on that line makes it larger than the character
+    index. Converting it is what keeps a label like "Café — x" from splicing
+    the replacement a few characters too far along and shredding the dict.
+    """
+    line = lines[lineno - 1]
+    try:
+        prefix = line.encode("utf-8")[:col_offset].decode("utf-8")
+    except UnicodeDecodeError:  # offset inside a character: not ours to guess
+        return None
+    return line_starts[lineno - 1] + len(prefix)
 
 
 # ------------------------------------------------------------- file mutations
@@ -117,10 +158,33 @@ def write_user_node(nodes_dir: Path, group: Optional[str], name: str,
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{stem}.py"
     if dest.exists() and not overwrite:
-        raise UserNodeError(f"a user node already exists at {dest}")
+        raise UserNodeExistsError(f"a user node already exists at {dest}")
     body = set_node_metadata(source, label=name, category=group or "User")
-    dest.write_text(body)
+    _reject_unloadable(body, type_id)
+    dest.write_text(body, encoding="utf-8")
     return type_id
+
+
+def _reject_unloadable(body: str, type_id: str) -> None:
+    """Refuse to write a node script the library could not load back.
+
+    A file that saves and then fails to parse is the worst outcome available
+    here: it reports success, occupies the name, and simply never appears in
+    the library. Checking costs one parse of a script that is already loaded
+    in this process. A *missing package* is deliberately allowed through —
+    that is this machine's state, not a fault in the script, and the node
+    loads as a placeholder that installing the package fixes.
+    """
+    from .script import MissingDependencyError, NodeScriptError, parse_spec
+    try:
+        parse_spec(body, type_id)
+    except MissingDependencyError:
+        return
+    except NodeScriptError as exc:
+        raise UserNodeError(
+            f"this node's code can't be loaded as a node script, so saving "
+            f"it would put something in the library that never appears "
+            f"there: {exc}") from None
 
 
 def delete_user_node(nodes_dir: Path, type_id: str) -> None:
@@ -136,13 +200,14 @@ def rename_user_node(nodes_dir: Path, type_id: str, new_name: str) -> str:
     src = path_for(nodes_dir, type_id)
     if not src.exists():
         raise UserNodeError(f"no such user node: {type_id}")
-    source = set_node_metadata(src.read_text(), label=new_name,
-                               category=group or "User")
+    source = set_node_metadata(src.read_text(encoding="utf-8"),
+                               label=new_name, category=group or "User")
     new_stem = slugify(new_name)
     dest = (nodes_dir / group if group else nodes_dir) / f"{new_stem}.py"
     if dest != src and dest.exists():
-        raise UserNodeError(f"a user node already exists at {dest}")
-    dest.write_text(source)
+        raise UserNodeExistsError(f"a user node already exists at {dest}")
+    _reject_unloadable(source, type_id_for(group, new_stem))
+    dest.write_text(source, encoding="utf-8")
     if dest != src:
         src.unlink()
     return type_id_for(group, new_stem)
@@ -162,11 +227,13 @@ def move_user_node(nodes_dir: Path, type_id: str,
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{stem}.py"
     if dest.exists():
-        raise UserNodeError(f"a user node already exists at {dest}")
+        raise UserNodeExistsError(f"a user node already exists at {dest}")
     # keep the label, refresh the category to match the new group
     label = _current_label(src) or stem
-    src.write_text(set_node_metadata(src.read_text(), label=label,
-                                     category=new_group or "User"))
+    moved = set_node_metadata(src.read_text(encoding="utf-8"), label=label,
+                              category=new_group or "User")
+    _reject_unloadable(moved, type_id_for(new_group, stem))
+    src.write_text(moved, encoding="utf-8")
     src.rename(dest)
     return type_id_for(new_group, stem)
 
@@ -186,8 +253,8 @@ def list_groups(nodes_dir: Path) -> list[str]:
 
 def _current_label(path: Path) -> Optional[str]:
     try:
-        tree = ast.parse(path.read_text())
-    except (OSError, SyntaxError):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
         return None
     for stmt in tree.body:
         if (isinstance(stmt, ast.Assign)
