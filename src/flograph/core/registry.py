@@ -57,7 +57,8 @@ class NodeRegistry:
                 if not entry.name.endswith(".py") or entry.name.startswith("_"):
                     continue
                 type_id = f"flograph.{pkg.name}.{entry.name[:-3]}"
-                self.register(parse_spec(entry.read_text(), type_id, builtin=True))
+                self.register(parse_spec(entry.read_text(encoding="utf-8"),
+                                         type_id, builtin=True))
                 loaded.append(type_id)
         return loaded
 
@@ -79,8 +80,13 @@ class NodeRegistry:
             stem = path.name[:-3]
             type_id = f"user.{group}.{stem}" if group else f"user.{stem}"
             try:
-                spec = parse_spec(path.read_text(), type_id, builtin=False)
-            except (NodeScriptError, OSError) as exc:
+                spec = parse_spec(path.read_text(encoding="utf-8"), type_id,
+                                  builtin=False)
+            # UnicodeDecodeError is caught by name because it is a ValueError,
+            # not an OSError: without it one file saved under a non-UTF-8
+            # locale would abort the scan and empty the whole User Nodes
+            # section instead of skipping itself.
+            except (NodeScriptError, OSError, UnicodeDecodeError) as exc:
                 errors.append((path, str(exc)))
                 return
             spec.group = group

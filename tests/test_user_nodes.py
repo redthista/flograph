@@ -47,6 +47,33 @@ class TestSetMetadata:
         src = "NODE = {\n"
         assert user_nodes.set_node_metadata(src, "A", "B") == src
 
+    @pytest.mark.parametrize("label", ["Café — x", "Sum Σ", "Rows → Cols",
+                                       "Temp °C", "Chart 📊"])
+    def test_non_ascii_label_rewrites_cleanly(self, label):
+        """ast column offsets count UTF-8 bytes, not characters. Treating them
+        as characters spliced the dict apart, so the node saved to disk but
+        never loaded again."""
+        src = SAMPLE.replace('"label": "Read CSV"', f'"label": "{label}"')
+        out = user_nodes.set_node_metadata(src, "New Name", "grp")
+        spec = parse_spec(out, "user.grp.new_name")
+        assert spec.label == "New Name"
+        assert spec.category == "grp"
+
+    def test_single_line_node_dict_with_non_ascii(self):
+        src = ('NODE = {"label": "Café — x", "category": "Text", '
+               '"inputs": [], "outputs": [("o", "string")]}\n\n'
+               'def run(ctx):\n    return "1"\n')
+        out = user_nodes.set_node_metadata(src, "Renamed", "grp")
+        spec = parse_spec(out, "user.grp.renamed")
+        assert spec.label == "Renamed" and spec.category == "grp"
+
+    def test_never_returns_unparseable_source(self):
+        """The rewrite is discarded if it somehow fails to parse: a mangled
+        node would save happily and then vanish from the library."""
+        out = user_nodes.set_node_metadata(SAMPLE, "A — B", "IO")
+        import ast as _ast
+        _ast.parse(out)
+
 
 class TestSlugAndTypeId:
     def test_slugify(self):
@@ -83,11 +110,57 @@ class TestWriteAndLoad:
         assert reg.maybe_get("user.bad") is None
         assert len(errors) == 1 and errors[0][0].name == "bad.py"
 
+    def test_non_ascii_name_survives_save_and_scan(self, tmp_path):
+        """The reported bug end to end: saved to disk, missing from the
+        library, because the written file no longer parsed."""
+        type_id = user_nodes.write_user_node(tmp_path, None, "Café — x", SAMPLE)
+        reg = NodeRegistry()
+        errors = reg.load_user_nodes(tmp_path)
+        assert errors == []
+        assert reg.get(type_id).label == "Café — x"
+
+    def test_non_ascii_group_and_rename_and_move(self, tmp_path):
+        type_id = user_nodes.write_user_node(tmp_path, "grp", "Rows → Cols",
+                                             SAMPLE)
+        type_id = user_nodes.rename_user_node(tmp_path, type_id, "Σ Sum")
+        type_id = user_nodes.move_user_node(tmp_path, type_id, None)
+        reg = NodeRegistry()
+        assert reg.load_user_nodes(tmp_path) == []
+        assert reg.get(type_id).label == "Σ Sum"
+
+    def test_undecodable_file_skips_itself_only(self, tmp_path):
+        (tmp_path / "good.py").write_text(SAMPLE, encoding="utf-8")
+        # a node script saved under a non-UTF-8 locale on another machine
+        (tmp_path / "legacy.py").write_bytes(
+            SAMPLE.replace("Read CSV", "Caf\xe9").encode("cp1252"))
+        reg = NodeRegistry()
+        errors = reg.load_user_nodes(tmp_path)
+        assert reg.maybe_get("user.good") is not None
+        assert [p.name for p, _ in errors] == ["legacy.py"]
+
     def test_overwrite_guard(self, tmp_path):
         user_nodes.write_user_node(tmp_path, None, "Dup", SAMPLE)
-        with pytest.raises(user_nodes.UserNodeError):
+        with pytest.raises(user_nodes.UserNodeExistsError):
             user_nodes.write_user_node(tmp_path, None, "Dup", SAMPLE)
         user_nodes.write_user_node(tmp_path, None, "Dup", SAMPLE, overwrite=True)
+
+    @pytest.mark.parametrize("source", ["", "NODE = 5\n", "def run(ctx:\n"])
+    def test_unloadable_source_is_refused_not_written(self, tmp_path, source):
+        """Better a failed save than a file that occupies the name and never
+        shows up in the library."""
+        with pytest.raises(user_nodes.UserNodeError) as exc:
+            user_nodes.write_user_node(tmp_path, None, "Broken", source)
+        assert not isinstance(exc.value, user_nodes.UserNodeExistsError)
+        assert not (tmp_path / "broken.py").exists()
+
+    def test_missing_package_still_saves(self, tmp_path):
+        """A top-level import this machine lacks is the machine's state, not a
+        broken script — it loads as a placeholder and must stay saveable."""
+        src = SAMPLE.replace("def run(ctx):",
+                             "import definitely_not_installed_xyz\n\n\ndef run(ctx):")
+        type_id = user_nodes.write_user_node(tmp_path, None, "Needs Pkg", src)
+        assert (tmp_path / "needs_pkg.py").exists()
+        assert type_id == "user.needs_pkg"
 
     def test_reload_drops_deleted(self, tmp_path):
         reg = NodeRegistry()

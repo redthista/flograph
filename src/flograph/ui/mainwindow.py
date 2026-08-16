@@ -2184,14 +2184,23 @@ class MainWindow(QMainWindow):
         try:
             type_id = user_nodes.write_user_node(
                 nodes_dir, group, name, node.source)
-        except user_nodes.UserNodeError:
+        except user_nodes.UserNodeExistsError:
             if QMessageBox.question(
                     self, "Overwrite user node?",
                     f"A user node named {name!r} already exists in this "
                     f"group. Overwrite it?") != QMessageBox.Yes:
                 return
-            type_id = user_nodes.write_user_node(
-                nodes_dir, group, name, node.source, overwrite=True)
+            try:
+                type_id = user_nodes.write_user_node(
+                    nodes_dir, group, name, node.source, overwrite=True)
+            except user_nodes.UserNodeError as exc:
+                QMessageBox.warning(self, "Save failed", str(exc))
+                return
+        except user_nodes.UserNodeError as exc:
+            # said out loud rather than written to disk: a node that can't be
+            # loaded back would save happily and never reach the library
+            QMessageBox.warning(self, "Save failed", str(exc))
+            return
         self._reload_user_nodes()
         self.show_status(f"Saved user node {type_id}", 4000)
 
