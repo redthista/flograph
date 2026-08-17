@@ -197,7 +197,20 @@ class NodeGraphScene(QGraphicsScene):
         # Transient: the reveal key is held down, so every port shows its
         # name regardless of the setting above or any per-node override.
         # Not a preference and never saved — see NodeGraphView's key handling.
+        # It reveals the flow pins too: the moment you want to know what
+        # connects to what is the moment you want to see all of it.
         self.revealing_port_labels = False
+
+        # Canvas-wide "show the flow pins" preference — the pins an order
+        # edge is drawn between (core.ports). Off by default, unlike every
+        # other pin, because most canvases never draw one; the main window is
+        # the sole writer. See node_item.flow_pins_on.
+        self.flow_pins_enabled = False
+
+        # Transient: an order edge is being dragged right now, so every flow
+        # pin shows itself for the duration — you cannot aim at a pin that
+        # is not on screen. Set by begin_wire_drag, cleared by _cleanup_drag.
+        self.drawing_order_edge = False
 
         # Canvas-wide "draw plain nodes as squares" preference; the main
         # window is the sole writer (MainWindow.set_compact_nodes). Card
@@ -229,6 +242,7 @@ class NodeGraphScene(QGraphicsScene):
         events.frozen_changed.connect(self._on_frozen_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
         events.port_labels_changed.connect(self._on_port_labels_changed)
+        events.flow_pins_changed.connect(self._on_flow_pins_changed)
         events.ports_collapsed_changed.connect(
             self._on_ports_collapsed_changed)
         events.color_changed.connect(self._on_color_changed)
@@ -270,6 +284,10 @@ class NodeGraphScene(QGraphicsScene):
         item.apply_stacking()
         self.addItem(item)
         self.node_items[node.id] = item
+        # After addItem, not before: whether the flow pins show is a question
+        # about the *canvas*, and an item still outside the scene has no way
+        # to ask it — it would answer "hidden" and stay that way.
+        item._apply_port_visibility()
         item.refresh_link_card()  # its text needs the scene's graph to resolve
         # undoing a delete puts a collapsed frame's contents back; they have
         # to go straight back under the lid rather than appear on top of it
@@ -306,6 +324,10 @@ class NodeGraphScene(QGraphicsScene):
         self.addItem(item)
         self.connection_items[conn.id] = item
         dst.refresh_connected()  # input pin becomes filled
+        if item.is_order:
+            # both ends: an order edge is what keeps an otherwise hidden flow
+            # pin on screen, at the source as much as the destination
+            self._refresh_order_pins(conn)
         dst_node_item = self.node_items.get(conn.dst_node)
         if dst_node_item is not None and dst_node_item.table:
             dst_node_item.refresh_table_link()
@@ -316,6 +338,8 @@ class NodeGraphScene(QGraphicsScene):
         item = self.connection_items.pop(conn.id, None)
         if item is not None:
             self.removeItem(item)
+        if is_flow(conn.dst_port):
+            self._refresh_order_pins(conn)   # they may go back into hiding
         dst_item = self.node_items.get(conn.dst_node)
         if dst_item is not None:
             port = dst_item.port_item(conn.dst_port, "input")
@@ -1143,6 +1167,42 @@ class NodeGraphScene(QGraphicsScene):
     def _on_port_labels_changed(self, node_id: str) -> None:
         self._repaint_ports(self.node_items.get(node_id))
 
+    def _on_flow_pins_changed(self, node_id: str) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item._apply_port_visibility()
+
+    def set_flow_pins_enabled(self, enabled: bool) -> None:
+        """Canvas-wide preference: show every node's flow pins, or leave them
+        to the nodes that have an order edge on them. Nodes carrying their own
+        override are unmoved by this, which is the point of the override."""
+        if enabled == self.flow_pins_enabled:
+            return
+        self.flow_pins_enabled = enabled
+        self._refresh_flow_pins()
+
+    def set_drawing_order_edge(self, drawing: bool) -> None:
+        """Reveal every flow pin for the length of an order-edge drag. A
+        look, not a setting — nothing is written down, and it goes back the
+        moment the drag ends."""
+        if drawing == self.drawing_order_edge:
+            return
+        self.drawing_order_edge = drawing
+        self._refresh_flow_pins()
+
+    def _refresh_flow_pins(self) -> None:
+        for item in self.node_items.values():
+            item._apply_port_visibility()
+
+    def _refresh_order_pins(self, conn: Connection) -> None:
+        """Re-read both ends of an order edge that has just appeared or gone.
+        Their pins are drawn whenever a wire lands on them, so the answer
+        changes with the wire."""
+        for node_id in (conn.src_node, conn.dst_node):
+            item = self.node_items.get(node_id)
+            if item is not None:
+                item.refresh_port_connections()
+
     def set_port_labels_enabled(self, enabled: bool) -> None:
         """Canvas-wide preference. Repaints every node, because a pill
         appearing changes each port's bounding rect — Qt would otherwise
@@ -1164,6 +1224,7 @@ class NodeGraphScene(QGraphicsScene):
         self.revealing_port_labels = revealing
         for item in self.node_items.values():
             self._repaint_ports(item)
+            item._apply_port_visibility()   # the flow pins come up too
         for pin in self._frame_pins.values():
             pin.prepareGeometryChange()   # the pill changes its bounds
             pin.update()
@@ -1591,6 +1652,10 @@ class NodeGraphScene(QGraphicsScene):
                 item = self.connection_items.get(existing.id)
                 if item is not None:
                     item.hide()
+        if port.is_flow:
+            # bring every other node's flow pins up, so there is something
+            # to aim at
+            self.set_drawing_order_edge(True)
         self._pending = PendingConnectionItem(fixed)
         self.addItem(self._pending)
         self._pending.update_drag(port.scenePos(), None)
@@ -1649,6 +1714,7 @@ class NodeGraphScene(QGraphicsScene):
         self._cleanup_drag()
 
     def _cleanup_drag(self) -> None:
+        self.set_drawing_order_edge(False)
         if self._pending is not None:
             self.removeItem(self._pending)
             self._pending = None

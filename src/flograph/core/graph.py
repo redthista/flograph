@@ -286,6 +286,13 @@ class Graph:
         node.port_labels = shown
         self.events.port_labels_changed.emit(node_id)
 
+    def set_flow_pins(self, node_id: str, shown: Optional[bool]) -> None:
+        """Show/hide this node's two flow pins. None hands the node back to
+        the canvas-wide preference."""
+        node = self.node(node_id)
+        node.flow_pins = shown
+        self.events.flow_pins_changed.emit(node_id)
+
     def set_ports_collapsed(self, node_id: str, collapsed: bool) -> None:
         """Gather this node's pins into the header, or fan them back out."""
         node = self.node(node_id)

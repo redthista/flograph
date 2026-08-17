@@ -81,7 +81,13 @@ because nothing about it feeds a port. `Graph.order_sources(node_id)` is how
 to ask for a node's prerequisites, exactly as `var_sources` is for `${name}`.
 On the canvas the pins live off a node's two upper corners
 (`NodeItem.flow_ports`, keyed by direction) and the wire draws as a dashed
-upward arc (`connection_item.order_path`).
+upward arc (`connection_item.order_path`). They are **hidden by default** —
+`node_item.flow_pins_on` decides, on the same tri-state as `port_labels_on`
+(per-node `NodeInstance.flow_pins`, then `scene.flow_pins_enabled`), plus
+the held reveal key and `scene.drawing_order_edge`; a pin with an edge on it
+is drawn regardless. Right-clicking an order edge opens a menu whose point
+is `ui/canvas/order_help.py` — keep that text true if the behaviour moves,
+since it is the only explanation a user can reach from the canvas.
 
 Optional `NODE["card"]` gives a node a rich canvas card / dashboard tile
 (`figure`, `webview`, `table_viewer`, `kpi`, `grid`, `slicer`, `button`,

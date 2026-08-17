@@ -1,13 +1,15 @@
-"""The canvas side of order edges: the two flow pins on every node, dragging
-one to another node, and the dashed arc that results."""
+"""The canvas side of order edges: the two flow pins on every node, when
+they are on screen at all, dragging one to another node, and the dashed arc
+that results."""
 import pytest
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QUndoStack
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QUndoStack
 
 from flograph.core import Graph, NodeRegistry
 from flograph.ui.canvas import NodeGraphScene
 from flograph.ui.canvas.connection_item import order_path
-from flograph.ui.canvas.node_item import PortItem
+from flograph.ui.canvas.node_item import PortItem, flow_pins_on
+from flograph.ui.canvas.order_help import order_edges_html, reveal_key_name
 
 FLOW = "flow"
 
@@ -85,6 +87,105 @@ class TestPins:
         graph.move_node(a.id, (0.0, 400.0))
         scene.node_item_moved(a.id)
         assert wire.path().boundingRect() != before
+
+
+class TestWhenTheyShow:
+    """Hidden by default; four ways to bring them up."""
+
+    def test_hidden_until_asked_for(self, env):
+        graph, _stack, scene, a, b = env
+        for node in (a, b):
+            item = scene.node_items[node.id]
+            assert not flow_pins_on(node, scene)
+            assert not any(p.isVisible() for p in item.flow_ports.values())
+        # the data pins are unaffected — this is not a general LOD switch
+        assert scene.node_items[a.id].output_ports["value"].isVisible()
+
+    def test_the_canvas_wide_preference_shows_them(self, env):
+        graph, _stack, scene, a, _b = env
+        scene.set_flow_pins_enabled(True)
+        assert all(p.isVisible() for p in scene.node_items[a.id].flow_ports.values())
+        scene.set_flow_pins_enabled(False)
+        assert not any(p.isVisible()
+                       for p in scene.node_items[a.id].flow_ports.values())
+
+    def test_holding_the_reveal_key_shows_them(self, env):
+        graph, _stack, scene, a, _b = env
+        scene.set_revealing_port_labels(True)
+        assert all(p.isVisible()
+                   for p in scene.node_items[a.id].flow_ports.values())
+        scene.set_revealing_port_labels(False)
+        assert not any(p.isVisible()
+                       for p in scene.node_items[a.id].flow_ports.values())
+
+    def test_dragging_one_shows_the_others(self, env):
+        """You cannot aim at a pin that is not on screen."""
+        graph, _stack, scene, a, b = env
+        a_out, _ = flow_pins(scene, a.id)
+        scene.begin_wire_drag(a_out)
+        assert scene.drawing_order_edge
+        assert all(p.isVisible()
+                   for p in scene.node_items[b.id].flow_ports.values())
+        scene.cancel_wire_drag()
+        assert not scene.drawing_order_edge
+        assert not any(p.isVisible()
+                       for p in scene.node_items[b.id].flow_ports.values())
+
+    def test_dragging_a_data_wire_does_not(self, env):
+        graph, _stack, scene, a, b = env
+        scene.begin_wire_drag(scene.node_items[a.id].output_ports["value"])
+        assert not scene.drawing_order_edge
+        assert not any(p.isVisible()
+                       for p in scene.node_items[b.id].flow_ports.values())
+        scene.cancel_wire_drag()
+
+    def test_a_wired_pin_stays_on_screen(self, env):
+        """A hidden pin under a dashed line would leave the wire running
+        into the side of a node."""
+        graph, _stack, scene, a, b = env
+        graph.connect(a.id, FLOW, b.id, FLOW)
+        assert scene.node_items[a.id].flow_ports["output"].isVisible()
+        assert scene.node_items[b.id].flow_ports["input"].isVisible()
+        # ...and only the ends that carry it
+        assert not scene.node_items[a.id].flow_ports["input"].isVisible()
+        assert not scene.node_items[b.id].flow_ports["output"].isVisible()
+
+    def test_removing_the_edge_puts_them_away_again(self, env):
+        graph, _stack, scene, a, b = env
+        conn, _ = graph.connect(a.id, FLOW, b.id, FLOW)
+        graph.disconnect(conn.id)
+        assert not any(p.isVisible()
+                       for p in scene.node_items[a.id].flow_ports.values())
+        assert not any(p.isVisible()
+                       for p in scene.node_items[b.id].flow_ports.values())
+
+    def test_a_node_can_be_set_on_its_own(self, env):
+        graph, stack, scene, a, b = env
+        from flograph.ui.commands import SetFlowPinsCommand
+        stack.push(SetFlowPinsCommand(graph, a.id, True))
+        assert scene.node_items[a.id].flow_ports["input"].isVisible()
+        assert not scene.node_items[b.id].flow_ports["input"].isVisible()
+        # ...and the canvas-wide toggle no longer speaks for it
+        scene.set_flow_pins_enabled(False)
+        assert scene.node_items[a.id].flow_ports["input"].isVisible()
+        stack.undo()
+        assert not scene.node_items[a.id].flow_ports["input"].isVisible()
+
+    def test_a_node_can_opt_out_while_the_canvas_shows_them(self, env):
+        graph, stack, scene, a, b = env
+        from flograph.ui.commands import SetFlowPinsCommand
+        scene.set_flow_pins_enabled(True)
+        stack.push(SetFlowPinsCommand(graph, a.id, False))
+        assert not scene.node_items[a.id].flow_ports["input"].isVisible()
+        assert scene.node_items[b.id].flow_ports["input"].isVisible()
+
+    def test_a_node_added_later_answers_the_canvas(self, env, registry):
+        graph, _stack, scene, _a, _b = env
+        scene.set_flow_pins_enabled(True)
+        late = graph.add_node(registry.instantiate("flograph.util.constant",
+                                                   pos=(0, 500)))
+        assert all(p.isVisible()
+                   for p in scene.node_items[late.id].flow_ports.values())
 
 
 class TestDragging:
@@ -182,3 +283,65 @@ class TestTheWire:
     def test_the_arc_rises_between_its_ends(self):
         path = order_path(QPointF(0, 0), QPointF(200, 0))
         assert path.boundingRect().top() < 0
+
+
+class TestRightClick:
+    """Right-clicking an order edge is the only way in to what it is: it
+    shows nothing and carries nothing, so there is nothing else to poke."""
+
+    def test_right_clicking_one_asks_for_its_menu(self, qtbot, env):
+        from flograph.ui.canvas import NodeGraphView
+        graph, _stack, scene, a, b = env
+        conn, _ = graph.connect(a.id, FLOW, b.id, FLOW)
+        view = NodeGraphView(scene)
+        qtbot.addWidget(view)
+        wire = scene.connection_items[conn.id]
+        asked: list = []
+        view.order_context_requested.connect(
+            lambda conn_id, _pos: asked.append(conn_id))
+        _right_click(view, wire.path().pointAtPercent(0.5))
+        assert asked == [conn.id]
+
+    def test_right_clicking_a_data_wire_does_not(self, qtbot, env):
+        from flograph.ui.canvas import NodeGraphView
+        graph, _stack, scene, a, b = env
+        conn, _ = graph.connect(a.id, "value", b.id, "in1")
+        view = NodeGraphView(scene)
+        qtbot.addWidget(view)
+        wire = scene.connection_items[conn.id]
+        asked: list = []
+        view.order_context_requested.connect(
+            lambda conn_id, _pos: asked.append(conn_id))
+        _right_click(view, wire.path().pointAtPercent(0.5))
+        assert asked == []
+
+
+class TestHelp:
+    def test_it_explains_the_things_that_are_not_obvious(self):
+        html = order_edges_html("Q")
+        for phrase in ("no data", "run that node first", "several",
+                       "Delete", "Appearance"):
+            assert phrase in html
+
+    def test_it_names_the_key_that_is_actually_bound(self):
+        assert "hold Q" in order_edges_html("Q")
+        assert "hold F4" in order_edges_html("F4")
+
+    def test_the_reveal_key_reads_as_the_user_would_say_it(self):
+        assert reveal_key_name(Qt.Key_Q) == "Q"
+        assert reveal_key_name(Qt.Key_F4) == "F4"
+
+    def test_the_dialog_rewrites_itself_for_a_rebound_key(self, qtbot):
+        from flograph.ui.canvas.order_help import OrderEdgeHelpDialog
+        dialog = OrderEdgeHelpDialog(reveal_key="Q")
+        qtbot.addWidget(dialog)
+        assert "hold Q" in dialog._browser.toHtml()
+        dialog.set_reveal_key("F4")
+        assert "hold F4" in dialog._browser.toHtml()
+
+
+def _right_click(view, scene_pos: QPointF) -> None:
+    from PySide6.QtGui import QContextMenuEvent
+    view.contextMenuEvent(QContextMenuEvent(
+        QContextMenuEvent.Mouse, view.mapFromScene(scene_pos),
+        view.viewport().mapToGlobal(view.mapFromScene(scene_pos))))

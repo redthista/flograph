@@ -352,6 +352,31 @@ def port_labels_on(node, scene) -> bool:
     return bool(getattr(scene, "port_labels_enabled", False))
 
 
+def flow_pins_on(node, scene) -> bool:
+    """Whether `node` should show its two flow pins.
+
+    The same tri-state as `port_labels_on`, and revealed by the same held
+    key — a flow pin is a thing you go looking for exactly when you are
+    looking at what connects to what. It differs in one way: a drag from
+    some *other* node's flow pin turns them on everywhere for the duration,
+    because a wire you cannot see where to drop is a wire you cannot draw.
+
+    Hidden by default, unlike a port name, which is merely off by default:
+    the ordering these express is the exception in a flow, and two more pins
+    on every node is a permanent cost to the great majority of canvases that
+    never draw a single order edge. A pin that *has* an order edge on it is
+    drawn whatever this returns — see NodeItem._apply_port_visibility.
+    """
+    if getattr(scene, "revealing_port_labels", False):
+        return True
+    if getattr(scene, "drawing_order_edge", False):
+        return True
+    own = getattr(node, "flow_pins", None)
+    if own is not None:
+        return bool(own)
+    return bool(getattr(scene, "flow_pins_enabled", False))
+
+
 def paint_status_led(painter: QPainter, cx: float, cy: float, *,
                      status: NodeStatus, progress: float, pulse: float,
                      stale: bool, behind: QColor,
@@ -491,6 +516,16 @@ class PortItem(QGraphicsItem):
     @property
     def base_radius(self) -> float:
         return self.FLOW_RADIUS if self.is_flow else self.RADIUS
+
+    @property
+    def has_edge(self) -> bool:
+        """Whether a wire actually terminates on this pin.
+
+        The same cached answer `paint` uses to draw an input filled or
+        hollow, read for a second purpose: it is what keeps a flow pin on
+        screen when the flow pins are otherwise hidden.
+        """
+        return self._connected
 
     def set_drag_tint(self, valid: Optional[bool]) -> None:
         if valid != self._drag_tint:
@@ -2178,12 +2213,19 @@ class NodeItem(QGraphicsObject):
 
     def refresh_port_connections(self) -> None:
         """Re-read every input pin's filled/hollow state. Inputs only —
-        an output always draws filled, so it never asks."""
+        an output always draws filled, so it never asks.
+
+        Both flow pins ask, including the output, because for those the
+        answer decides something an output pin has never had to care about:
+        whether the pin is on screen at all.
+        """
         for port in self.input_ports.values():
             port.refresh_connected()
-        flow_in = self.flow_ports.get("input")
-        if flow_in is not None:
-            flow_in.refresh_connected()
+        for pin in self.flow_ports.values():
+            pin.refresh_connected()
+        # ...which may have just been the last order edge off this node, or
+        # its first
+        self._apply_port_visibility()
 
     def rebuild_ports(self) -> None:
         """(Re)create port items from the current spec — called at build time
@@ -2205,9 +2247,13 @@ class NodeItem(QGraphicsObject):
         for spec in () if self.compact else (FLOW_INPUT, FLOW_OUTPUT):
             pin = PortItem(self, spec)
             pin.setToolTip(
-                "run after another node — drag to another node's flow pin"
-                if spec is FLOW_INPUT else
-                "run before another node — drag to another node's flow pin")
+                ("Flow pin — run this node after another.\nDrag to another "
+                 "node's flow pin; no data passes. Right-click the dashed "
+                 "line for what these do."
+                 if spec is FLOW_INPUT else
+                 "Flow pin — run another node after this one.\nDrag to "
+                 "another node's flow pin; no data passes. Right-click the "
+                 "dashed line for what these do."))
             self.flow_ports[spec.direction.value] = pin
         for spec in self.node.spec.inputs:
             if self.from_card:
@@ -2335,11 +2381,15 @@ class NodeItem(QGraphicsObject):
         as a side effect. Both are re-derived here together.
         """
         collapsed = self.ports_collapsed
+        # Collapsing has no say here — it gathers a *stack* of pins behind
+        # its first one, and there is only ever one of these per side. The
+        # LOD flattening and the show/hide rule do.
+        shown = flow_pins_on(self.node, self.scene())
         for pin in self.flow_ports.values():
-            # Only the LOD flattening applies: collapsing gathers a *stack*
-            # of pins behind its first one, and there is only ever one of
-            # these per side.
-            pin.setVisible(not self._flat)
+            # A pin with an order edge on it is always drawn: the wire has to
+            # terminate somewhere, and hiding the pin under it would leave a
+            # dashed line running into the side of a node.
+            pin.setVisible(not self._flat and (shown or pin.has_edge))
         for ports in (self.input_ports, self.output_ports):
             items = list(ports.values())
             for i, port in enumerate(items):

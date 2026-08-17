@@ -26,6 +26,9 @@ class NodeGraphView(ZoomPanGraphicsView):
     files_dropped = Signal(list, QPointF)          # local file paths, scene pos
     node_context_requested = Signal(str, QPoint)   # node_id, global pos
     frame_context_requested = Signal(str, QPoint)  # frame_id, global pos
+    # An order edge only: a data wire has never had a menu, and the one this
+    # opens is about what an order edge *is*.
+    order_context_requested = Signal(str, QPoint)  # conn_id, global pos
 
     def __init__(self, scene: NodeGraphScene, parent=None) -> None:
         super().__init__(scene, parent)
@@ -207,6 +210,7 @@ class NodeGraphView(ZoomPanGraphicsView):
     def contextMenuEvent(self, event) -> None:
         from .node_item import NodeItem, PortItem
         from .frame_item import FrameItem
+        from .connection_item import ConnectionItem
         item = self.itemAt(event.pos())
         if item is None:
             self.add_node_requested.emit(
@@ -227,6 +231,10 @@ class NodeGraphView(ZoomPanGraphicsView):
             return
         if isinstance(item, FrameItem):
             self.frame_context_requested.emit(item.frame.id, event.globalPos())
+            event.accept()
+            return
+        if isinstance(item, ConnectionItem) and item.is_order:
+            self.order_context_requested.emit(item.conn.id, event.globalPos())
             event.accept()
             return
         super().contextMenuEvent(event)
