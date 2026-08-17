@@ -821,3 +821,244 @@ class TestScriptingNodes:
         with pytest.raises(ValueError, match="not in table"):
             run_node(registry, "flograph.scripting.node_template",
                      {"source": "nope"}, table=table)
+
+
+READ_FILE = "flograph.io.read_file"
+
+
+def run_with_log(registry, type_id, params=None, **inputs):
+    """run_node, but keeping the context so the log can be asserted on.
+
+    Which engine actually did the reading is invisible in the frame that
+    comes back — a test that only checks the rows would pass just as well if
+    the node silently fell back to something else.
+    """
+    spec = registry.get(type_id)
+    defaults = spec.default_params()
+    defaults.update(params or {})
+    run = compile_run(spec.source, f"test-{type_id}")
+    ctx = FakeContext(params=defaults)
+    return run(ctx, **inputs), "\n".join(ctx.logs)
+
+
+@pytest.fixture
+def csv_file(table, tmp_path):
+    path = tmp_path / "data.csv"
+    table.to_csv(path, index=False)
+    return path
+
+
+class TestReadFileNode:
+    """The one reader with a Format dropdown — flograph.io.read_file."""
+
+    # ------------------------------------------------------------ detection
+    def test_detects_csv_from_extension(self, registry, table, csv_file):
+        out, log = run_with_log(registry, READ_FILE, {"path": str(csv_file)})
+        assert list(out.columns) == list(table.columns)
+        assert len(out) == len(table)
+        assert "detected csv" in log
+        assert "csv via pandas" in log
+
+    def test_detects_parquet_from_extension(self, registry, table, tmp_path):
+        pytest.importorskip("pyarrow")
+        path = tmp_path / "data.parquet"
+        table.to_parquet(path, index=False)
+        out = run_node(registry, READ_FILE, {"path": str(path)})
+        assert out.equals(table)
+
+    def test_detects_through_a_compression_suffix(self, registry, table, tmp_path):
+        path = tmp_path / "data.csv.gz"
+        table.to_csv(path, index=False, compression="gzip")
+        out = run_node(registry, READ_FILE, {"path": str(path)})
+        assert len(out) == len(table)
+
+    def test_jsonl_extension_overrides_the_records_default(self, registry,
+                                                           table, tmp_path):
+        path = tmp_path / "data.jsonl"
+        table.to_json(path, orient="records", lines=True)
+        out = run_node(registry, READ_FILE, {"path": str(path)})
+        assert len(out) == len(table)
+
+    def test_unknown_extension_names_the_fix(self, registry, tmp_path):
+        path = tmp_path / "mystery.dat"
+        path.write_text("nothing useful")
+        with pytest.raises(ValueError, match="set Format explicitly"):
+            run_node(registry, READ_FILE, {"path": str(path)})
+
+    def test_explicit_format_beats_the_extension(self, registry, table, tmp_path):
+        path = tmp_path / "actually_csv.dat"
+        table.to_csv(path, index=False)
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "format": "csv"})
+        assert len(out) == len(table)
+
+    def test_requires_a_path(self, registry):
+        with pytest.raises(ValueError, match="no file selected"):
+            run_node(registry, READ_FILE, {})
+
+    # ----------------------------------------------------------- csv options
+    def test_csv_separator_and_row_window(self, registry, tmp_path):
+        path = tmp_path / "t.csv"
+        path.write_text("a\tb\n1\t2\n3\t4\n5\t6\n")
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "separator": "\\t", "nrows": 2})
+        assert list(out.columns) == ["a", "b"]
+        assert len(out) == 2
+
+    def test_csv_dtypes_apply_while_parsing(self, registry, tmp_path):
+        """Leading zeros survive only if the dtype reaches the parser."""
+        path = tmp_path / "codes.csv"
+        path.write_text("code,n\n01234,1\n00077,2\n")
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "dtypes": "code = string"})
+        assert list(out["code"]) == ["01234", "00077"]
+
+    def test_csv_columns_and_na_values(self, registry, tmp_path):
+        path = tmp_path / "t.csv"
+        path.write_text("a,b,c\n1,-,3\n4,5,6\n")
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "columns": "a, b", "na_values": "-"})
+        assert list(out.columns) == ["a", "b"]
+        assert out["b"].isna().iloc[0]
+
+    # --------------------------------------------------------------- excel
+    def test_excel_round_trip(self, registry, table, tmp_path):
+        pytest.importorskip("openpyxl")
+        path = tmp_path / "book.xlsx"
+        table.to_excel(path, index=False)
+        out = run_node(registry, READ_FILE, {"path": str(path)})
+        assert list(out.columns) == list(table.columns)
+        assert len(out) == len(table)
+
+    def test_excel_engine_auto_prefers_calamine(self, registry, table, tmp_path):
+        pytest.importorskip("python_calamine")
+        path = tmp_path / "book.xlsx"
+        table.to_excel(path, index=False)
+        out, log = run_with_log(registry, READ_FILE, {"path": str(path)})
+        assert len(out) == len(table)
+        assert "calamine" in log
+
+    def test_excel_engine_can_be_pinned_to_openpyxl(self, registry, table,
+                                                    tmp_path):
+        pytest.importorskip("openpyxl")
+        path = tmp_path / "book.xlsx"
+        table.to_excel(path, index=False)
+        out, log = run_with_log(registry, READ_FILE,
+                                {"path": str(path),
+                                 "excel_engine": "openpyxl"})
+        assert len(out) == len(table)
+        assert "openpyxl" in log
+        assert "calamine" not in log
+
+    def test_excel_all_sheets_stack_with_a_sheet_column(self, registry, table,
+                                                        tmp_path):
+        pytest.importorskip("openpyxl")
+        path = tmp_path / "book.xlsx"
+        with pd.ExcelWriter(path) as writer:
+            table.to_excel(writer, sheet_name="one", index=False)
+            table.to_excel(writer, sheet_name="two", index=False)
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "sheet_name": "*"})
+        assert list(out["sheet"].unique()) == ["one", "two"]
+        assert len(out) == 2 * len(table)
+
+    # -------------------------------------------------------------- sqlite
+    def test_sqlite_table_mode(self, registry, table, tmp_path):
+        import sqlite3
+
+        path = tmp_path / "db.sqlite"
+        with sqlite3.connect(path) as conn:
+            table.to_sql("sales", conn, index=False)
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "source": "table", "table": "sales"})
+        assert len(out) == len(table)
+
+    def test_sqlite_blank_table_lists_what_is_there(self, registry, table,
+                                                    tmp_path):
+        import sqlite3
+
+        path = tmp_path / "db.sqlite"
+        with sqlite3.connect(path) as conn:
+            table.to_sql("sales", conn, index=False)
+        with pytest.raises(ValueError, match="sales"):
+            run_node(registry, READ_FILE,
+                     {"path": str(path), "source": "table"})
+
+    def test_polars_refuses_sqlite_by_name(self, registry, tmp_path):
+        pytest.importorskip("polars")
+        path = tmp_path / "db.sqlite"
+        path.write_bytes(b"")
+        with pytest.raises(ValueError, match="Engine to pandas"):
+            run_node(registry, READ_FILE,
+                     {"path": str(path), "engine": "polars"})
+
+    # -------------------------------------------------------------- polars
+    def test_polars_reads_csv_to_the_same_frame(self, registry, table, csv_file):
+        pytest.importorskip("polars")
+        pandas_out = run_node(registry, READ_FILE, {"path": str(csv_file)})
+        polars_out, log = run_with_log(registry, READ_FILE,
+                                       {"path": str(csv_file),
+                                        "engine": "polars"})
+        assert "csv via polars" in log   # not a silent fall back to pandas
+        pd.testing.assert_frame_equal(pandas_out, polars_out)
+
+    def test_polars_reads_parquet(self, registry, table, tmp_path):
+        pytest.importorskip("polars")
+        path = tmp_path / "data.parquet"
+        table.to_parquet(path, index=False)
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "engine": "polars"})
+        assert out.equals(table)
+
+    def test_polars_reads_excel(self, registry, table, tmp_path):
+        pytest.importorskip("polars")
+        pytest.importorskip("fastexcel")
+        path = tmp_path / "book.xlsx"
+        table.to_excel(path, index=False)
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "engine": "polars"})
+        assert list(out.columns) == list(table.columns)
+        assert len(out) == len(table)
+
+    def test_polars_keeps_leading_zeros_via_schema_overrides(self, registry,
+                                                             tmp_path):
+        pytest.importorskip("polars")
+        path = tmp_path / "codes.csv"
+        path.write_text("code,n\n01234,1\n00077,2\n")
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "engine": "polars",
+                        "dtypes": "code = string"})
+        assert list(out["code"]) == ["01234", "00077"]
+
+    def test_polars_refuses_an_option_it_cannot_honour(self, registry, csv_file):
+        pytest.importorskip("polars")
+        with pytest.raises(ValueError, match="Thousands mark"):
+            run_node(registry, READ_FILE,
+                     {"path": str(csv_file), "engine": "polars",
+                      "thousands": ","})
+
+    def test_polars_refuses_an_unmappable_dtype_by_name(self, registry, csv_file):
+        pytest.importorskip("polars")
+        with pytest.raises(ValueError, match="datetime64"):
+            run_node(registry, READ_FILE,
+                     {"path": str(csv_file), "engine": "polars",
+                      "dtypes": "region = datetime64[ns]"})
+
+    def test_polars_refuses_excel_letter_ranges(self, registry, table, tmp_path):
+        pytest.importorskip("polars")
+        pytest.importorskip("fastexcel")
+        path = tmp_path / "book.xlsx"
+        table.to_excel(path, index=False)
+        with pytest.raises(ValueError, match="letter ranges"):
+            run_node(registry, READ_FILE,
+                     {"path": str(path), "engine": "polars", "columns": "A:B"})
+
+    def test_polars_row_limit_and_parse_dates(self, registry, tmp_path):
+        pytest.importorskip("polars")
+        path = tmp_path / "t.csv"
+        path.write_text("when,n\n2024-01-01,1\n2024-01-02,2\n2024-01-03,3\n")
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "engine": "polars",
+                        "parse_dates": "when", "nrows": 2})
+        assert len(out) == 2
+        assert pd.api.types.is_datetime64_any_dtype(out["when"])

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core import Graph, ParamSpec, varlinks
+from flograph.core.params import controllers
 
 from . import var_completion
 from ..canvas.node_item import card_kind
@@ -173,7 +174,9 @@ class ParamsPanel(QWidget):
             self._add_row("Description", desc_edit)
 
         for spec in node.spec.params:
-            if spec.hidden:   # edited elsewhere (e.g. the Table node's grid)
+            # hidden (edited elsewhere, e.g. the Table node's grid) or not
+            # applicable to what the sibling params currently say
+            if not spec.visible_for(node.params):
                 continue
             value = node.params.get(spec.name)
             widget, setter = self._make_widget(spec, value)
@@ -565,8 +568,24 @@ class ParamsPanel(QWidget):
     # --------------------------------------------------------------- events
 
     def _on_param_changed(self, node_id: str, name: str, value: Any) -> None:
-        if node_id == self._node_id and name in self._setters:
+        if node_id != self._node_id:
+            return
+        if name in self._setters:
             self._setters[name](value)
+        node = self._graph.node(node_id)
+        if name in controllers(node.spec.params):
+            # This one decides which other rows exist, so the grid has to be
+            # rebuilt — but never from inside the signal of the widget that
+            # the rebuild is about to delete. Qt would be left holding a
+            # combo it destroyed mid-emit. Next event loop turn is soon
+            # enough and the widget has finished by then.
+            QTimer.singleShot(0, self._rebuild_if_live)
+
+    def _rebuild_if_live(self) -> None:
+        """Deferred rebuild — the node may have been deselected or deleted
+        between scheduling and firing."""
+        if self._node_id is not None and self._node_id in self._graph.nodes:
+            self._rebuild()
 
     def _on_code_changed(self, node_id: str) -> None:
         if node_id == self._node_id:

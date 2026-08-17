@@ -39,9 +39,10 @@ Issues = "https://github.com/redthista/flograph/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-qt>=4.4"]
-excel = ["openpyxl"]
+excel = ["openpyxl", "python-calamine"]
 matplotlib = ["matplotlib>=3.8"]
 parquet = ["pyarrow", "fastparquet"]
+polars = ["polars>=1.0", "fastexcel"]
 plotly = ["plotly"]
 geo = ["geopandas", "folium"]
 ai = ["requests"]
