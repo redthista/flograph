@@ -270,6 +270,28 @@ _POLARS_DTYPES = {
 }
 
 
+def _normalise_letter_range(spec):
+    """Make a pandas `usecols` string fastexcel will take.
+
+    fastexcel understands the whole spelling — `A:C`, `A:C,F`, `A,C`,
+    `A:C,E:F` — with one exception: a range whose ends are the same column
+    ("A:A") is rejected as an empty range, where pandas reads it as that one
+    column. Collapse those and the two engines accept the same input.
+    """
+    import re
+
+    parts = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        match = re.fullmatch(r"([A-Za-z]+):([A-Za-z]+)", part)
+        if match and match.group(1).upper() == match.group(2).upper():
+            part = match.group(1)
+        parts.append(part)
+    return ",".join(parts)
+
+
 def _polars_schema(dtypes):
     import polars as pl
 
@@ -461,10 +483,6 @@ def _read_excel_polars(ctx, p, path, kw):
         "Thousands mark": bool(kw["thousands"]),
         "Column types": bool(kw["dtypes"]),
     })
-    if kw["columns_raw"] and ":" in kw["columns_raw"]:
-        raise ValueError(
-            "the polars engine takes column names, not Excel letter ranges "
-            f"like {kw['columns_raw']!r} — set Engine to pandas")
 
     read_options = {}
     if kw["skiprows"]:
@@ -472,10 +490,14 @@ def _read_excel_polars(ctx, p, path, kw):
     if kw["nrows"]:
         read_options["n_rows"] = kw["nrows"]
     kwargs = {"has_header": bool(p.get("header", True))}
+    if kw["columns_raw"] and ":" in kw["columns_raw"]:
+        # fastexcel takes the same "A:C,F" spelling pandas' usecols does,
+        # bar a range whose ends match ("A:A"), which it calls empty
+        read_options["use_columns"] = _normalise_letter_range(kw["columns_raw"])
+    elif kw["columns"]:
+        kwargs["columns"] = kw["columns"]
     if read_options:
         kwargs["read_options"] = read_options
-    if kw["columns"]:
-        kwargs["columns"] = kw["columns"]
 
     if sheet_arg is None:
         sheets = pl.read_excel(path, sheet_id=0, **kwargs)
