@@ -1044,14 +1044,24 @@ class TestReadFileNode:
                      {"path": str(csv_file), "engine": "polars",
                       "dtypes": "region = datetime64[ns]"})
 
-    def test_polars_refuses_excel_letter_ranges(self, registry, table, tmp_path):
+    @pytest.mark.parametrize("engine", ["pandas", "polars"])
+    # Only a spec containing ":" is read as Excel letters — "A,C" stays a
+    # list of column *names*, since that is what it usually is.
+    @pytest.mark.parametrize("spec,expected", [
+        ("A:B", ["region", "units"]),
+        ("A:A", ["region"]),          # fastexcel calls this empty; we don't
+        ("A:C", ["region", "units", "revenue"]),
+    ])
+    def test_excel_letter_ranges_agree_across_engines(self, registry, table,
+                                                      tmp_path, engine, spec,
+                                                      expected):
         pytest.importorskip("polars")
         pytest.importorskip("fastexcel")
         path = tmp_path / "book.xlsx"
         table.to_excel(path, index=False)
-        with pytest.raises(ValueError, match="letter ranges"):
-            run_node(registry, READ_FILE,
-                     {"path": str(path), "engine": "polars", "columns": "A:B"})
+        out = run_node(registry, READ_FILE,
+                       {"path": str(path), "engine": engine, "columns": spec})
+        assert list(out.columns) == expected
 
     def test_polars_row_limit_and_parse_dates(self, registry, tmp_path):
         pytest.importorskip("polars")
