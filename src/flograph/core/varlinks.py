@@ -33,6 +33,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from .graph import Connection, Graph
 
 VAR_CARD = "vars"           # NODE["card"] marking a Variables node
+NOTE_CARD = "note"          # ...and a Note, which runs nothing — see below
 VAR_PORT = "vars"           # the output port its dict arrives on
 ASSIGNMENTS_PARAM = "assignments"
 ENV_PREFIX = "env:"
@@ -232,9 +233,21 @@ def substitutable(node, spec) -> bool:
     A Variables node's own assignments are excluded: resolving a variable
     out of the text that *defines* variables is a chain nobody asked for,
     and it would make `declared_names` depend on a run.
+
+    A Note's text is excluded because a Note takes no part in execution —
+    it has no ports and its `run` returns nothing, and the canvas draws the
+    text exactly as written. So substituting into it changes nothing anyone
+    can see, while costing two things that are real: a derived edge onto a
+    card that consumes nothing, and a *failed run* the moment the text
+    names something undeclared. Which is precisely what writing a note
+    explaining the `${name}` syntax does — the one note every flow that
+    uses variables wants.
     """
-    return (spec.type in SUBSTITUTABLE
-            and not (is_vars(node) and spec.name == ASSIGNMENTS_PARAM))
+    if is_vars(node) and spec.name == ASSIGNMENTS_PARAM:
+        return False
+    if node.spec.card == NOTE_CARD:
+        return False
+    return spec.type in SUBSTITUTABLE
 
 
 def describe(graph: "Graph", node) -> list[str]:

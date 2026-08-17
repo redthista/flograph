@@ -51,11 +51,14 @@ class TestBundledExamples:
             "10_svg_retrofit_workbench.flograph",
             "11_goto_from_workflow.flograph",
             "12_parallel_branches.flograph",
+            "13_order_edges.flograph",
+            "14_flow_variables.flograph",
+            "15_report_page.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 12
+        assert len(window._examples_menu.actions()) == 15
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -69,6 +72,9 @@ class TestBundledExamples:
         "10_svg_retrofit_workbench.flograph",
         "11_goto_from_workflow.flograph",
         "12_parallel_branches.flograph",
+        "14_flow_variables.flograph",
+        "15_report_page.flograph",
+        # 13 writes a file, so it runs in a tmp_path of its own below
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))
@@ -371,6 +377,119 @@ class TestBundledExamples:
         assert len(graph.pages) == 1
         page = next(iter(graph.pages.values()))
         assert len(page.tiles) == 6
+
+
+class TestTheOrderEdgeExample:
+    """13_order_edges: the write-then-read story. It writes a file, so it
+    gets a working directory of its own rather than leaving one in the repo."""
+
+    def test_it_runs_and_the_read_sees_what_the_write_put_there(
+            self, qtbot, window, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        window._open_example(template_path("13_order_edges.flograph"))
+        assert wait_run(qtbot, window.engine)
+
+        assert (tmp_path / "flograph_order_demo.csv").exists()
+        read = window.graph.nodes["t13_read"]
+        table = window.engine.cache.outputs_for(read.id)["table"]
+        assert len(table) == 9
+        assert set(table["region"]) == {"North", "South", "East"}
+
+    def test_the_ordering_is_what_makes_it_work(self, qtbot, window):
+        """The point of the example: nothing joins these two nodes but the
+        order edge, and the reader would otherwise be free to go first."""
+        window._open_example(template_path("13_order_edges.flograph"))
+        graph = window.graph
+        assert graph.order_sources("t13_read") == ["t13_write"]
+        # ...and it is the *only* thing that orders them
+        assert not [c for c in graph.connections.values()
+                    if c.dst_node == "t13_read" and c.dst_port != "flow"]
+        assert graph.topo_order().index("t13_write") < \
+            graph.topo_order().index("t13_read")
+
+    def test_both_paths_come_from_the_one_variable(self, qtbot, window):
+        window._open_example(template_path("13_order_edges.flograph"))
+        graph = window.graph
+        for nid in ("t13_write", "t13_read"):
+            assert graph.nodes[nid].params["path"] == "${export_path}"
+            assert graph.order_sources(nid) or graph.var_sources(nid)
+            assert "t13_vars" in graph.var_sources(nid)
+
+
+class TestTheFlowVariablesExample:
+    """14_flow_variables: one name, read from three places."""
+
+    def test_it_filters_to_the_declared_region(self, qtbot, window):
+        window._open_example(template_path("14_flow_variables.flograph"))
+        assert wait_run(qtbot, window.engine)
+        cache = window.engine.cache
+        filtered = cache.outputs_for("t14_filter")["filtered"]
+        assert set(filtered["region"]) == {"North"}
+        assert cache.outputs_for("t14_card")["value"] == 113
+
+    def test_every_reader_is_downstream_of_the_declaration(self, qtbot,
+                                                           window):
+        """What the note claims: a `${name}` is a real edge, so the readers
+        re-run when the value moves."""
+        window._open_example(template_path("14_flow_variables.flograph"))
+        graph = window.graph
+        for reader in ("t14_filter", "t14_plot", "t14_card"):
+            assert graph.var_sources(reader) == ["t14_vars"]
+            assert reader in graph.downstream("t14_vars")
+
+    def test_the_note_explaining_the_syntax_is_not_a_reader(self, qtbot,
+                                                            window):
+        """It is full of `${...}` tokens, including one no Variables node
+        declares. A Note takes no part in execution, so none of them count —
+        without that, this example could not run at all."""
+        window._open_example(template_path("14_flow_variables.flograph"))
+        graph = window.graph
+        assert "${env:API_KEY}" in graph.nodes["t14_note"].params["text"]
+        assert graph.var_sources("t14_note") == []
+
+    def test_changing_the_value_re_runs_the_readers(self, qtbot, window):
+        window._open_example(template_path("14_flow_variables.flograph"))
+        wait_run(qtbot, window.engine)
+        assert all(not window.graph.nodes[n].dirty
+                   for n in ("t14_filter", "t14_card"))
+        window.graph.set_param("t14_vars", "assignments",
+                               "region = East\nmin_units = 20\n"
+                               "chart_title = Units by month")
+        assert all(window.graph.nodes[n].dirty
+                   for n in ("t14_filter", "t14_card"))
+        assert wait_run(qtbot, window.engine)
+        assert window.engine.cache.outputs_for("t14_card")["value"] == 145
+
+
+class TestTheReportExample:
+    """15_report_page: the page setup a report can now carry."""
+
+    def test_the_page_is_set_up_the_way_the_note_says(self, qtbot, window):
+        window._open_example(template_path("15_report_page.flograph"))
+        page = next(iter(window.graph.pages.values()))
+        assert page.kind == "report"
+        setup = page.setup
+        assert setup.cover and setup.cover_date
+        assert setup.cover_subtitle
+        assert setup.footer_center == "Page {page} of {pages}"
+        assert not setup.bands_on_first_page
+
+    def test_the_body_uses_the_features_it_describes(self, qtbot, window):
+        window._open_example(template_path("15_report_page.flograph"))
+        body = next(iter(window.graph.pages.values())).body
+        assert "```columns" in body
+        assert "\\pagebreak" in body
+        assert "![[Monthly Units|width=100%]]" in body
+        assert "![[Regional Detail]]" in body
+
+    def test_every_embed_names_a_node_that_exists(self, qtbot, window):
+        """An embed resolves by node *label*, and a typo fails quietly on
+        the page rather than on load."""
+        window._open_example(template_path("15_report_page.flograph"))
+        body = next(iter(window.graph.pages.values())).body
+        labels = {n.label for n in window.graph.nodes.values()}
+        for embed in re.findall(r"!\[\[([^\]|]+)", body):
+            assert embed.strip() in labels
 
 
 class TestSvgRetrofitRefusesToGuess:
