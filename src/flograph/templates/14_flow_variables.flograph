@@ -1,0 +1,315 @@
+{
+  "flograph_version": "0.1.9",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t14_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -700
+        ],
+        "params": {
+          "text": "## Name it once, use it everywhere\n\nThe **Variables** node declares three names. Every `${...}` below reads from\nit \u2014 the filter's query, the chart's title, the card's caption.\n\nChange `region` to `South` in the Variables node and press **F5**: the\nfilter, the chart and the card all follow. Nothing else was edited.\n\n**A `${name}` is a real edge in the graph**, not a lookup \u2014 that is what\nmakes the re-run correct. Everything reading a variable is downstream of the\nnode that declares it, so it re-runs when the value changes and its cached\nresult is thrown away with it. Hold **Q** and you will see no wire, because\nthe dependency is derived from the text, not drawn.\n\n**Try it from a scheduler.** The same file, once per region, nothing edited:\n\n    python -m flograph.engine.headless 14_flow_variables.flograph --var region=South\n\nA name the flow doesn't declare stops the run rather than being ignored.\n\nSecrets work the same way but live outside the project: `${env:API_KEY}`\nreads from the .env file you point at under *Tools > Secrets\u2026*, so a\npassword never enters the .flograph you send someone.\n\n(A Note's own text is never substituted \u2014 otherwise this note would be\nasking for a variable called `env:API_KEY` and stopping the run.)\n",
+          "width": 460,
+          "height": 560
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0
+      },
+      {
+        "id": "t14_vars",
+        "type": "flograph.util.variables",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "assignments": "# name = value, one per line\nregion = North\nmin_units = 20\nchart_title = Units by month\n",
+          "table_mode": "first row (columns are names)"
+        },
+        "code": null,
+        "label": "Settings",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1
+      },
+      {
+        "id": "t14_data",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          220
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"month\", \"type\": \"text\"}, {\"name\": \"units\", \"type\": \"integer\"}], \"rows\": [[\"North\", \"Jan\", 34], [\"North\", \"Feb\", 41], [\"North\", \"Mar\", 38], [\"South\", \"Jan\", 22], [\"South\", \"Feb\", 19], [\"South\", \"Mar\", 27], [\"East\", \"Jan\", 45], [\"East\", \"Feb\", 52], [\"East\", \"Mar\", 48]]}",
+          "width": 380,
+          "height": 240
+        },
+        "code": null,
+        "label": "Sales",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 2
+      },
+      {
+        "id": "t14_filter",
+        "type": "flograph.transform.filter_rows",
+        "pos": [
+          620,
+          200
+        ],
+        "params": {
+          "query": "region == \"${region}\" and units >= ${min_units}"
+        },
+        "code": null,
+        "label": "This region only",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 3
+      },
+      {
+        "id": "t14_group",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          920,
+          200
+        ],
+        "params": {
+          "by": "month",
+          "agg": "sum",
+          "values": "units"
+        },
+        "code": null,
+        "label": "By month",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 4
+      },
+      {
+        "id": "t14_plot",
+        "type": "flograph.viz.show_plot",
+        "pos": [
+          1220,
+          -80
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "month",
+          "y": "units",
+          "title": "${chart_title} \u2014 ${region}",
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Monthly units",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 5
+      },
+      {
+        "id": "t14_card",
+        "type": "flograph.viz.card",
+        "pos": [
+          1220,
+          400
+        ],
+        "params": {
+          "column": "units",
+          "aggregation": "Sum",
+          "label": "${region} total units",
+          "format": "",
+          "width": 240,
+          "height": 140
+        },
+        "code": null,
+        "label": "Region total",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 6
+      }
+    ],
+    "connections": [
+      {
+        "id": "t14_c1",
+        "src": [
+          "t14_data",
+          "table"
+        ],
+        "dst": [
+          "t14_filter",
+          "table"
+        ]
+      },
+      {
+        "id": "t14_c2",
+        "src": [
+          "t14_filter",
+          "filtered"
+        ],
+        "dst": [
+          "t14_group",
+          "table"
+        ]
+      },
+      {
+        "id": "t14_c3",
+        "src": [
+          "t14_group",
+          "aggregated"
+        ],
+        "dst": [
+          "t14_plot",
+          "table"
+        ]
+      },
+      {
+        "id": "t14_c4",
+        "src": [
+          "t14_group",
+          "aggregated"
+        ],
+        "dst": [
+          "t14_card",
+          "table"
+        ]
+      }
+    ],
+    "frames": [],
+    "pages": [
+      {
+        "id": "t14_p1",
+        "title": "Region",
+        "kind": "dashboard",
+        "body": "",
+        "color": null,
+        "maximized_tile": null,
+        "view_mode": false,
+        "setup": {},
+        "tiles": [
+          {
+            "id": "t14_t1",
+            "node": "t14_card",
+            "port": "value",
+            "rect": [
+              40,
+              40,
+              260,
+              160
+            ],
+            "z": 0
+          },
+          {
+            "id": "t14_t2",
+            "node": "t14_plot",
+            "port": "figure",
+            "rect": [
+              40,
+              240,
+              560,
+              360
+            ],
+            "z": 1
+          }
+        ]
+      }
+    ],
+    "env_path": ""
+  }
+}

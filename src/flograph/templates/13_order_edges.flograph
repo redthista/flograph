@@ -1,0 +1,275 @@
+{
+  "flograph_version": "0.1.9",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t13_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -560
+        ],
+        "params": {
+          "text": "## Write it, then read it back\n\n**Read CSV has no input port.** There is no wire you could draw that would\nmake it wait for the file to be written \u2014 so before order edges, these two\nnodes were free to run at the same time, and the read usually lost.\n\nThe **dashed grey arc** is the answer. It joins the two nodes' *flow pins*\nand carries nothing at all; it says only **\"that one first\"**.\n\n**Try it.** Press **F5**. Write CSV runs, then Read CSV, then the table\nappears. Now delete the dashed line, press **Ctrl+R** to mark everything\ndirty and run again \u2014 on a machine with a spare core the read fires\nalongside the write and fails, or worse, quietly serves you *yesterday's*\nfile.\n\n**The pins are hidden** until something is wired to them. Hold **Q** over\nthe canvas to see all four, or turn them on for good in\n*Settings > Canvas > Show flow pins*. Right-click the dashed line for\n**What is this?**.\n\nBoth paths read `${export_path}`, declared once in the **Variables** node \u2014\nchange it there and both nodes follow. It is written wherever you launched\nflograph from.\n",
+          "width": 460,
+          "height": 440
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0
+      },
+      {
+        "id": "t13_vars",
+        "type": "flograph.util.variables",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "assignments": "export_path = flograph_order_demo.csv",
+          "table_mode": "first row (columns are names)"
+        },
+        "code": null,
+        "label": "Paths",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1
+      },
+      {
+        "id": "t13_data",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          220
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"month\", \"type\": \"text\"}, {\"name\": \"units\", \"type\": \"integer\"}], \"rows\": [[\"North\", \"Jan\", 34], [\"North\", \"Feb\", 41], [\"North\", \"Mar\", 38], [\"South\", \"Jan\", 22], [\"South\", \"Feb\", 19], [\"South\", \"Mar\", 27], [\"East\", \"Jan\", 45], [\"East\", \"Feb\", 52], [\"East\", \"Mar\", 48]]}",
+          "width": 340,
+          "height": 220
+        },
+        "code": null,
+        "label": "Sales",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 2
+      },
+      {
+        "id": "t13_write",
+        "type": "flograph.io.write_csv",
+        "pos": [
+          580,
+          200
+        ],
+        "params": {
+          "path": "${export_path}",
+          "index": false,
+          "sep": ",",
+          "header": true,
+          "mode": "overwrite",
+          "encoding": "",
+          "columns": "",
+          "na_rep": "",
+          "float_format": "",
+          "date_format": "",
+          "decimal": ".",
+          "quoting": "minimal"
+        },
+        "code": null,
+        "label": "Write CSV",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 3
+      },
+      {
+        "id": "t13_read",
+        "type": "flograph.io.read_csv",
+        "pos": [
+          880,
+          200
+        ],
+        "params": {
+          "path": "${export_path}",
+          "sep": ",",
+          "header": true,
+          "encoding": "",
+          "columns": "",
+          "index_col": "",
+          "skiprows": 0,
+          "nrows": 0,
+          "decimal": ".",
+          "thousands": "",
+          "quotechar": "\"",
+          "comment": "",
+          "na_values": "",
+          "parse_dates": "",
+          "dtypes": "",
+          "skip_blank_lines": true,
+          "on_bad_lines": "error",
+          "engine": "auto"
+        },
+        "code": null,
+        "label": "Read it back",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 4
+      },
+      {
+        "id": "t13_show",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1180,
+          60
+        ],
+        "params": {
+          "width": 420,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "What landed on disk",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 5
+      }
+    ],
+    "connections": [
+      {
+        "id": "t13_c1",
+        "src": [
+          "t13_data",
+          "table"
+        ],
+        "dst": [
+          "t13_write",
+          "table"
+        ]
+      },
+      {
+        "id": "t13_c2",
+        "src": [
+          "t13_write",
+          "flow"
+        ],
+        "dst": [
+          "t13_read",
+          "flow"
+        ]
+      },
+      {
+        "id": "t13_c3",
+        "src": [
+          "t13_read",
+          "table"
+        ],
+        "dst": [
+          "t13_show",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "t13_f1",
+        "title": "Ordered: write, then read",
+        "rect": [
+          540,
+          120,
+          440,
+          220
+        ],
+        "color": "#3f5e4a",
+        "z": 0,
+        "collapsed": false,
+        "expanded_size": null,
+        "members": [],
+        "member_frames": [],
+        "nudged": [],
+        "source": "",
+        "source_fingerprint": ""
+      }
+    ],
+    "pages": [],
+    "env_path": ""
+  }
+}

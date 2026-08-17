@@ -115,6 +115,44 @@ class TestSubstitution:
 
 # -------------------------------------------------------------- edges
 
+class TestANoteIsNotAReader:
+    """A Note documenting the `${name}` syntax must not be *using* it.
+
+    It has no ports, its run returns nothing, and the canvas draws its text
+    exactly as written — so substituting into it changes nothing anyone can
+    see, while costing a spurious edge and, for any name the flow doesn't
+    declare, a failed run. Which is what every note explaining this feature
+    would have done.
+    """
+
+    NOTE = "flograph.util.note"
+
+    def test_a_note_reading_a_declared_name_is_not_an_edge(self, registry):
+        graph = Graph()
+        variables = graph.add_node(registry.instantiate(VARS))
+        note = graph.add_node(registry.instantiate(self.NOTE))
+        graph.set_param(variables.id, "assignments", "region = North")
+        graph.set_param(note.id, "text", "Type ${region} in any text box.")
+        assert graph.var_sources(note.id) == []
+        assert graph.var_links == {}
+
+    def test_a_note_naming_something_undeclared_still_runs(self, qtbot,
+                                                           registry):
+        graph = Graph()
+        note = graph.add_node(registry.instantiate(self.NOTE))
+        graph.set_param(note.id, "text",
+                        "`${env:API_KEY}` reads from the .env file.")
+        assert varlinks.var_problem(graph, note.id) is None
+        assert not varlinks.uses_env(graph.nodes[note.id])
+        engine = ExecutionEngine(graph)
+        assert wait_run(qtbot, engine, lambda: engine.run_all())
+
+    def test_a_real_consumer_is_unaffected(self, flow):
+        """The exclusion is the Note's alone — nothing else lost its edge."""
+        graph, variables, consumer = flow
+        assert graph.var_sources(consumer.id) == [variables.id]
+
+
 class TestDerivedEdges:
     def test_reference_becomes_an_edge_but_not_a_connection(self, flow):
         graph, variables, consumer = flow
