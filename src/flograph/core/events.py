@@ -47,6 +47,7 @@ class GraphEvents:
         self.frozen_changed = Event()  # (node_id: str, frozen: bool)
         self.preview_enabled_changed = Event()  # (node_id: str, enabled: bool)
         self.port_labels_changed = Event()  # (node_id: str)
+        self.flow_pins_changed = Event()    # (node_id: str)
         self.ports_collapsed_changed = Event()  # (node_id: str)
         self.color_changed = Event()   # (node_id: str)
         self.mark_changed = Event()    # (node_id: str)

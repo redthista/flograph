@@ -65,6 +65,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "exclusive": n.exclusive_override,
                     "preview": n.canvas_preview_enabled,
                     "port_labels": n.port_labels,
+                    "flow_pins": n.flow_pins,
                     "ports_collapsed": n.ports_collapsed,
                     "color": n.color,
                     "compact_view": n.compact_view,
@@ -201,6 +202,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent = follow the canvas preference, which is
             # what every node written before this existed wants
             port_labels=entry.get("port_labels"),
+            flow_pins=entry.get("flow_pins"),
             ports_collapsed=entry.get("ports_collapsed", False),
             color=entry.get("color"),
             # absent = follow the canvas preference, which is what every node

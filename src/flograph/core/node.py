@@ -122,6 +122,15 @@ class NodeInstance:
     # node. Tri-state rather than a plain bool so the global toggle keeps
     # working on nodes nobody has singled out.
     port_labels: Optional[bool] = None
+    # canvas-UI-only: show this node's two flow pins (see core.ports). Hidden
+    # on every node until asked for, because the ordering they exist to
+    # express is the exception rather than the rule and two more pins on
+    # every node is a real cost to a canvas that never uses them. A pin with
+    # an order edge on it is drawn regardless — a wire has to end somewhere.
+    # Tri-state for the same reason port_labels is: None follows the
+    # canvas-wide preference, so the global toggle keeps working on nodes
+    # nobody has singled out.
+    flow_pins: Optional[bool] = None
     # canvas-UI-only: gather this node's pins back into the header instead of
     # running them down its edge. For a node with many ports, whose pins
     # otherwise extend past the bottom of the card by design. Expanded by

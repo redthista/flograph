@@ -215,6 +215,17 @@ class AppearanceDialog(QDialog):
         self._labels_combo.currentIndexChanged.connect(self._push_port_labels)
         form.addRow("Port names", self._labels_combo)
 
+        self._flow_combo = QComboBox()
+        self._flow_combo.setObjectName("appearance_flow_pins_combo")
+        for label, value in (("Canvas default", None), ("Show", True),
+                             ("Hide", False)):
+            self._flow_combo.addItem(label, value)
+        self._flow_combo.setToolTip(
+            "The two pins an order edge is drawn between — \"run this node "
+            "after that one\". Hidden unless something is wired to them.")
+        self._flow_combo.currentIndexChanged.connect(self._push_flow_pins)
+        form.addRow("Flow pins", self._flow_combo)
+
         # Only worth offering where it means something: one pin a side is
         # already as gathered as it gets.
         item = self._scene.node_items.get(self._node_id)
@@ -262,6 +273,8 @@ class AppearanceDialog(QDialog):
         self._refresh_colour()
         self._labels_combo.setCurrentIndex(
             max(0, self._labels_combo.findData(node.port_labels)))
+        self._flow_combo.setCurrentIndex(
+            max(0, self._flow_combo.findData(node.flow_pins)))
         if self._collapse_check is not None:
             self._collapse_check.setChecked(bool(node.ports_collapsed))
         if self._preview_check is not None:
@@ -284,6 +297,13 @@ class AppearanceDialog(QDialog):
         from ..commands import SetPortLabelsCommand
         self._scene.undo_stack.push(SetPortLabelsCommand(
             self._graph, self._node_id, self._labels_combo.currentData()))
+
+    def _push_flow_pins(self, _index: int) -> None:
+        if self._loading:
+            return
+        from ..commands import SetFlowPinsCommand
+        self._scene.undo_stack.push(SetFlowPinsCommand(
+            self._graph, self._node_id, self._flow_combo.currentData()))
 
     def _push_collapsed(self, collapsed: bool) -> None:
         if self._loading:

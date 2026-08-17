@@ -151,6 +151,9 @@ class MainWindow(QMainWindow):
         self.port_labels_enabled = self.settings.value(
             "canvas/port_labels", False, type=bool)
         self.scene.set_port_labels_enabled(self.port_labels_enabled)
+        self.flow_pins_enabled = self.settings.value(
+            "canvas/flow_pins", False, type=bool)
+        self.scene.set_flow_pins_enabled(self.flow_pins_enabled)
         self.compact_nodes = self.settings.value(
             "canvas/compact_nodes", True, type=bool)
         self.scene.set_compact_nodes(self.compact_nodes)
@@ -643,6 +646,14 @@ class MainWindow(QMainWindow):
         self.port_labels_enabled = enabled
         self.settings.setValue("canvas/port_labels", enabled)
         self.scene.set_port_labels_enabled(enabled)
+
+    def set_flow_pins_enabled(self, enabled: bool) -> None:
+        """Canvas-wide: show every node's flow pins, the ones an order edge
+        joins. Nodes that have been set on their own keep their own setting,
+        and a pin with a wire on it is drawn either way."""
+        self.flow_pins_enabled = enabled
+        self.settings.setValue("canvas/flow_pins", enabled)
+        self.scene.set_flow_pins_enabled(enabled)
 
     def set_double_click_action(self, action: str) -> None:
         """What a plain double-click on a node's body opens: "properties",
@@ -1141,6 +1152,7 @@ class MainWindow(QMainWindow):
         self.view.files_dropped.connect(self._add_reader_nodes_for_files)
         self.view.node_context_requested.connect(self._show_node_menu)
         self.view.frame_context_requested.connect(self._show_frame_menu)
+        self.view.order_context_requested.connect(self._show_order_edge_menu)
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self.scene.node_double_clicked.connect(self._on_node_double_clicked)
         self.scene.node_window_requested.connect(self.open_node_window)
@@ -2306,7 +2318,12 @@ class MainWindow(QMainWindow):
             # An order edge is drawn between two nodes that already exist —
             # "run after" needs something to run after. The palette would
             # offer the whole library, since every node has a flow port, and
-            # every entry would mean the same thing.
+            # every entry would mean the same thing. Say so rather than
+            # letting the drag end in nothing at all.
+            self.show_status(
+                "Drop an order edge on another node's flow pin — it orders "
+                "two nodes that already exist. Right-click one for what "
+                "they do.", 6000)
             return
         from_output = port_item.spec.direction.value == "output"
         port_type = port_item.spec.type
@@ -2348,6 +2365,49 @@ class MainWindow(QMainWindow):
             self._paste(scene_pos)  # land it where the menu was opened
         elif chosen is not None and chosen.data():
             self._add_node_at(chosen.data(), scene_pos)
+
+    def _show_order_edge_menu(self, conn_id: str, global_pos: QPoint) -> None:
+        """Right-clicking an order edge: what it does to the two nodes it
+        joins, a way to remove it, and an explanation of the whole idea.
+
+        The explanation is the reason this menu exists. An order edge shows
+        nothing and carries nothing — there is no output to open and no
+        value to hover — so somebody meeting one on a flow they did not
+        build has no way to find out what it is by poking at it.
+        """
+        conn = self.graph.connections.get(conn_id)
+        if conn is None:
+            return
+        src = self.graph.nodes.get(conn.src_node)
+        dst = self.graph.nodes.get(conn.dst_node)
+        menu = QMenu(self)
+        if src is not None and dst is not None:
+            heading = menu.addAction(f"“{dst.label}” runs after “{src.label}”")
+            heading.setEnabled(False)
+            menu.addSeparator()
+        delete_action = menu.addAction("Delete")
+        menu.addSeparator()
+        help_action = menu.addAction("What is this?")
+        chosen = menu.exec(global_pos)
+        if chosen is delete_action:
+            self.scene.delete_items([], [conn_id], [])
+        elif chosen is help_action:
+            self._show_order_edge_help()
+
+    def _show_order_edge_help(self) -> None:
+        """One dialog, reused: it is non-modal, so opening a fresh one from
+        the next wire would stack them up behind each other."""
+        from .canvas.order_help import OrderEdgeHelpDialog, reveal_key_name
+        dialog = getattr(self, "_order_help", None)
+        if dialog is None:
+            dialog = OrderEdgeHelpDialog(self)
+            self._order_help = dialog
+        # Re-read every time: the reveal key the text names is rebindable,
+        # and this is the one place that says which key it is.
+        dialog.set_reveal_key(reveal_key_name(self.reveal_ports_key))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _show_frame_menu(self, frame_id: str, global_pos: QPoint) -> None:
         if frame_id not in self.graph.frames:
@@ -3134,6 +3194,7 @@ class MainWindow(QMainWindow):
         self.set_grid_step(grid.DEFAULT_STEP)
         self.set_minimap_enabled(True)
         self.set_port_labels_enabled(False)
+        self.set_flow_pins_enabled(False)
         self.set_reveal_ports_key(canvas_view.DEFAULT_REVEAL_PORTS_KEY)
         self.set_double_click_action("properties")
         self.set_compact_nodes(True)

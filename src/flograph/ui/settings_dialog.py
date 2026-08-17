@@ -236,6 +236,7 @@ class SettingsDialog(QDialog):
             "minimap_enabled_checkbox": window.minimap_enabled,
             "compact_nodes_checkbox": window.compact_nodes,
             "port_labels_checkbox": window.port_labels_enabled,
+            "flow_pins_checkbox": window.flow_pins_enabled,
             "table_autosize_checkbox": autosize_default_enabled(),
             "stats_bar_checkbox": window.stats_bar_enabled,
             "stats_sampling_checkbox": window.stats_sampling_enabled,
@@ -570,6 +571,18 @@ class SettingsDialog(QDialog):
                  "right-clicking it, which overrides this setting for that "
                  "node.")
 
+        flow_check = QCheckBox()
+        flow_check.setObjectName("flow_pins_checkbox")
+        flow_check.setChecked(window.flow_pins_enabled)
+        rows.add("Show flow pins", flow_check,
+                 "Every node has a small pin off each of its upper corners. "
+                 "A wire between two of them is an order edge: it carries no "
+                 "data and says only \"run this node after that one\". They "
+                 "are hidden unless something is wired to them, since most "
+                 "flows never need one — turn this on to keep them in view, "
+                 "hold the reveal key above to see them for a moment, or set "
+                 "them per node from its Appearance dialog.")
+
         dclick_combo = QComboBox()
         dclick_combo.setObjectName("double_click_action_combo")
         for label, value in (("Properties", "properties"), ("Code", "code"),
@@ -668,6 +681,7 @@ class SettingsDialog(QDialog):
 
         compact_check.toggled.connect(window.set_compact_nodes)
         ports_check.toggled.connect(window.set_port_labels_enabled)
+        flow_check.toggled.connect(window.set_flow_pins_enabled)
         reveal_edit.keySequenceChanged.connect(_push_reveal_key)
         dclick_combo.currentIndexChanged.connect(
             lambda index: window.set_double_click_action(

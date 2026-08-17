@@ -182,7 +182,12 @@ corners; drag one to another node's and you have said "that one first". The
 dashed arc that results carries nothing, but it is a real dependency: the
 dependent re-runs when its prerequisite changes, its cached result is
 invalidated with it, and it is held back if the prerequisite fails or is
-switched off. A node can wait on as many as you like. A **minimap** (toggleable in
+switched off. A node can wait on as many as you like. The pins stay out of
+the way until you want them — hidden unless something is wired to them, and
+brought up by holding the same key that floats the port names, by **Settings
+▸ Canvas ▸ Show flow pins**, or per node from its Appearance dialog.
+Right-click a dashed arc for **What is this?**, which explains the whole
+idea. A **minimap** (toggleable in
 Settings) and a status-bar resource monitor — system memory, the open
 project's cache footprint, the selected node's own — keep an eye on the
 scale of things.

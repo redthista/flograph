@@ -457,6 +457,25 @@ class SetPortLabelsCommand(QUndoCommand):
         self._graph.set_port_labels(self._node_id, self._old)
 
 
+class SetFlowPinsCommand(QUndoCommand):
+    """Show/hide one node's two flow pins. `shown` of None hands the node
+    back to the canvas-wide preference."""
+
+    def __init__(self, graph: Graph, node_id: str, shown: Optional[bool],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("toggle flow pins", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).flow_pins
+        self._new = shown
+
+    def redo(self) -> None:
+        self._graph.set_flow_pins(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_flow_pins(self._node_id, self._old)
+
+
 class SetPortsCollapsedCommand(QUndoCommand):
     """Gather a node's pins into its header, or fan them back out."""
 
