@@ -377,6 +377,19 @@ def flow_pins_on(node, scene) -> bool:
     return bool(getattr(scene, "flow_pins_enabled", False))
 
 
+def _led_corner(radius: float) -> float:
+    """How rounded the status light's corners are, for a light of `radius`.
+
+    The light is a rounded square rather than a circle so that it is never
+    mistaken for a port pin, which is a circle and lives a few pixels away
+    on the same node. That only works if it stays visibly square, so the
+    corner is capped in absolute pixels rather than scaled all the way up:
+    a bigger light reads as squarer, and only the tiny ones a collapsed
+    frame packs into its matrix scale their corners down to stay drawable.
+    """
+    return min(2.0, radius * 0.4)
+
+
 def paint_status_led(painter: QPainter, cx: float, cy: float, *,
                      status: NodeStatus, progress: float, pulse: float,
                      stale: bool, behind: QColor,
@@ -395,36 +408,48 @@ def paint_status_led(painter: QPainter, cx: float, cy: float, *,
     """
     led_color = QColor(theme.status_color(status))
     running = status == NodeStatus.RUNNING
-    # A node that reports a fraction gets a ring that fills; one that
+    # A node that reports a fraction gets a light that fills; one that
     # never calls ctx.progress() keeps the pulse. Indeterminate and
-    # determinate are the honest distinction, and the LED is already a
-    # circle — a progress bar here would be new chrome to reconcile with
-    # the chevron, the temp-edit dot and every collapsed card.
+    # determinate are the honest distinction — a progress bar here would be
+    # new chrome to reconcile with the chevron, the temp-edit dot and every
+    # collapsed card.
     fraction = progress if running else 0.0
     if running and not fraction:
         led_color.setAlphaF(0.35 + 0.65 * pulse)
     painter.setPen(QPen(theme.NODE_BORDER, 1))
     painter.setBrush(QBrush(led_color))
     led_rect = QRectF(cx - radius, cy - radius, 2 * radius, 2 * radius)
+    corner = _led_corner(radius)
     if fraction:
         track = QColor(led_color)
         track.setAlphaF(0.25)
         painter.setBrush(QBrush(track))
-        painter.drawEllipse(led_rect)
+        painter.drawRoundedRect(led_rect, corner, corner)
         # Qt angles are sixteenths of a degree, zero at 3 o'clock and
         # rising anticlockwise, so filling clockwise from noon is a
-        # negative span starting at 90.
+        # negative span starting at 90. A pie is only ever an arc of an
+        # ellipse, so the square is filled by clipping to its own outline
+        # and swinging a pie big enough to reach past the corners.
+        painter.save()
+        clip = QPainterPath()
+        clip.addRoundedRect(led_rect, corner, corner)
+        painter.setClipPath(clip)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(led_color))
-        painter.drawPie(led_rect, 90 * 16, -int(fraction * 360 * 16))
+        reach = radius * 0.45
+        painter.drawPie(led_rect.adjusted(-reach, -reach, reach, reach),
+                        90 * 16, -int(fraction * 360 * 16))
+        painter.restore()
         painter.setPen(QPen(theme.NODE_BORDER, 1))
         painter.setBrush(Qt.NoBrush)
-    painter.drawEllipse(led_rect)
+    painter.drawRoundedRect(led_rect, corner, corner)
     if stale and status == NodeStatus.DONE:
         # stale: hollow out the green LED
         hole = radius * 0.4
+        hole_corner = _led_corner(hole)
         painter.setBrush(QBrush(behind))
-        painter.drawEllipse(QRectF(cx - hole, cy - hole, 2 * hole, 2 * hole))
+        painter.drawRoundedRect(QRectF(cx - hole, cy - hole, 2 * hole, 2 * hole),
+                                hole_corner, hole_corner)
 
 
 def compact_on(node, scene) -> bool:
