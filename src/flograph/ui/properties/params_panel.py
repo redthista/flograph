@@ -277,20 +277,29 @@ class ParamsPanel(QWidget):
                     self._silently(text.setPlainText, str(v or ""))
             return text, set_text
 
-        if spec.type in ("file_open", "file_save"):
+        if spec.type in ("file_open", "file_save", "folder_open"):
             host = QWidget()
             row = QHBoxLayout(host)
             row.setContentsMargins(0, 0, 0, 0)
             edit = QLineEdit(str(value or ""))
+            edit.setObjectName(f"param_{name}")
             # An Image node's "file" may be a whole base64-encoded picture,
             # which the default cap would silently cut to 32767 characters.
             edit.setMaxLength(UNCAPPED_TEXT)
+            if spec.placeholder:
+                edit.setPlaceholderText(spec.placeholder)
             browse = QToolButton()
+            browse.setObjectName(f"param_{name}_browse")
             browse.setText("…")
 
             def pick() -> None:
                 if spec.type == "file_open":
                     path, _ = QFileDialog.getOpenFileName(self, spec.label or name)
+                elif spec.type == "folder_open":
+                    # a folder param wants the directory itself, so the file
+                    # dialog must not offer files that would never be valid
+                    path = QFileDialog.getExistingDirectory(
+                        self, spec.label or name, edit.text().strip())
                 else:
                     path, _ = QFileDialog.getSaveFileName(self, spec.label or name)
                 if path:

@@ -321,10 +321,10 @@ def run(ctx, table):
 
 Port types: `any, dataframe, series, number, string, bool, object, figure`.
 Param types include `string, text, int, float, bool, choice, columns, date,
-password`. A `columns` param renders with a ▾ picker listing the columns of
-the DataFrames cached on the node's inputs (run upstream once to populate
-it); add `"multi": False` so picking replaces instead of toggling a comma
-list.
+password, file_open, file_save, folder_open`. A `columns` param renders with
+a ▾ picker listing the columns of the DataFrames cached on the node's inputs
+(run upstream once to populate it); add `"multi": False` so picking replaces
+instead of toggling a comma list.
 
 Rules that matter:
 

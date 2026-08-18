@@ -42,7 +42,8 @@ ENV_PREFIX = "env:"
 # on purpose: a QSpinBox cannot hold "${x}", so binding those needs an
 # affordance of its own rather than a placeholder in the text.
 SUBSTITUTABLE = frozenset({
-    "string", "text", "columns", "file_open", "file_save", "password",
+    "string", "text", "columns", "file_open", "file_save", "folder_open",
+    "password",
 })
 
 # Deliberately strict — no whitespace, no dotted paths, no expressions. A

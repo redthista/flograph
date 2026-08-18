@@ -33,7 +33,7 @@ NODE = {
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
-    {"name": "path", "type": "file_open", "label": "Folder", "default": "",
+    {"name": "path", "type": "folder_open", "label": "Folder", "default": "",
      "placeholder": "folder holding the CSV files"},
     {"name": "sep", "type": "string", "label": "Separator", "default": ",",
      "placeholder": ", ; \\t or auto"},

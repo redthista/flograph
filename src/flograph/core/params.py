@@ -18,6 +18,7 @@ PARAM_TYPES = {
     "choice",     # QComboBox (requires options)
     "file_open",  # line edit + browse (existing file)
     "file_save",  # line edit + browse (save path)
+    "folder_open",  # line edit + browse (existing directory)
     "columns",    # free string in v1; column picker later
     "password",   # QLineEdit with masked echo + reveal toggle
     "node_ref",   # QComboBox of other nodes in the graph; stores a node id
@@ -27,6 +28,7 @@ PARAM_TYPES = {
 _TYPE_DEFAULTS: dict[str, Any] = {
     "string": "", "text": "", "int": 0, "float": 0.0, "bool": False,
     "choice": None, "file_open": "", "file_save": "", "columns": "",
+    "folder_open": "",
     "password": "", "node_ref": "", "date": "",
 }
 

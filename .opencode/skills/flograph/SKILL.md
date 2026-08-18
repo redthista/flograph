@@ -146,7 +146,7 @@ def run(ctx, table):
 ```
 
 Port types: `any, dataframe, series, number, string, bool, object, figure`.
-Param types: `string, text, int, float, bool, choice, file_open, file_save, columns`.
+Param types: `string, text, int, float, bool, choice, file_open, file_save, folder_open, columns`.
 
 ---
 

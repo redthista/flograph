@@ -62,7 +62,8 @@ def run(ctx, table):        # inputs arrive as kwargs named after input ports
 - Required (non-optional) inputs block execution when unconnected; optional
   inputs arrive as `None`.
 - Param types → widgets: `string`, `text` (multiline), `int`, `float`,
-  `bool`, `choice` (needs `options`), `file_open`, `file_save`, `columns`.
+  `bool`, `choice` (needs `options`), `file_open`, `file_save`, `folder_open`,
+  `columns`.
   `min`/`max` supported for int/float; `placeholder` for string-likes.
 - **Order `PARAMS` for a clean Properties panel.** Each entry renders as one
   form row, top to bottom, in list order. `text` renders as a fixed ~90px
