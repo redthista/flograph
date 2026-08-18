@@ -37,7 +37,7 @@ NODE = {
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
-    {"name": "path", "type": "file_open", "label": "Folder", "default": "",
+    {"name": "path", "type": "folder_open", "label": "Folder", "default": "",
      "placeholder": "folder holding the workbooks"},
     {"name": "sheet_name", "type": "string", "label": "Sheet",
      "default": "0", "placeholder": "name, 0-based index, or * for all"},

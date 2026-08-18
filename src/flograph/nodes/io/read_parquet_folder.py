@@ -33,7 +33,7 @@ NODE = {
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
-    {"name": "path", "type": "file_open", "label": "Folder", "default": "",
+    {"name": "path", "type": "folder_open", "label": "Folder", "default": "",
      "placeholder": "folder holding the .parquet files"},
     {"name": "include_pattern", "type": "string", "label": "Include patterns",
      "default": "", "placeholder": "globs, e.g. part-*.parquet"},

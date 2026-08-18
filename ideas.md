@@ -74,4 +74,3 @@ G2. when zoomed out and we have the low lod version of the nodes showing, can we
 - can we look to add lines to from and goto nodes, so i right click a from or goto and have the option of show lines / hide lines. default false, just to make it easier to follow the connections.
 - is there a way to be able to generate outputs of a node programatically? ie a excel reader that can output each sheet/list object in its own connector automatically? 
 - transform node - Unique - pandas dataframe to capture only unique values in rows, and return a unique filtered table.
-- add a folder open type to possible node params
