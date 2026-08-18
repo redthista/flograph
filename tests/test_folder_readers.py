@@ -14,6 +14,7 @@ from tests.conftest import FakeContext
 EXCEL_FOLDER = "flograph.io.read_excel_folder"
 CSV_FOLDER = "flograph.io.read_csv_folder"
 PARQUET_FOLDER = "flograph.io.read_parquet_folder"
+CSV_DICT = "flograph.io.read_csv_dict"
 
 
 def run_folder(registry, type_id, params=None, path_input=None):
@@ -325,3 +326,144 @@ class TestReadParquetFolder:
         many, _ = run_folder(registry, PARQUET_FOLDER,
                              {"path": str(parquet_dir), "parallel_files": 3})
         pd.testing.assert_frame_equal(one, many)
+
+
+def run_dict(registry, params=None, path_input=None):
+    """The dict reader, unwrapped to the `tables` payload."""
+    out, log = run_folder(registry, CSV_DICT, params, path_input)
+    return out["tables"], log
+
+
+def normalise(registry, type_id, result):
+    """Put a run() result through the engine's port mapping.
+
+    The helpers above call run() directly, which is the wrong altitude for
+    the one question a dict-valued output raises — whether the engine reads
+    the returned dict as the payload or as the port mapping.
+    """
+    from flograph.engine.worker import NodeRunnable
+
+    spec = registry.get(type_id)
+    runnable = NodeRunnable("test", spec.source, {}, {}, list(spec.outputs),
+                            None, None)
+    return runnable._normalize(result)
+
+
+class TestReadCsvDict:
+    def test_one_entry_per_file_keyed_by_name(self, registry, csv_dir, parts):
+        tables, log = run_dict(registry, {"path": str(csv_dir)})
+        assert list(tables) == ["a.csv", "b.csv", "c.csv"]
+        for name, expected in zip(["a.csv", "b.csv", "c.csv"], parts):
+            pd.testing.assert_frame_equal(tables[name], expected)
+        assert "3 table(s), 9 rows in total" in log
+
+    def test_frames_are_not_stacked(self, registry, csv_dir):
+        """The whole point: three frames of three rows, not one of nine."""
+        tables, _ = run_dict(registry, {"path": str(csv_dir)})
+        assert [len(frame) for frame in tables.values()] == [3, 3, 3]
+
+    def test_key_without_extension(self, registry, csv_dir):
+        tables, _ = run_dict(registry, {"path": str(csv_dir),
+                                        "key": "name without extension"})
+        assert list(tables) == ["a", "b", "c"]
+
+    def test_key_full_path(self, registry, csv_dir):
+        tables, _ = run_dict(registry, {"path": str(csv_dir), "key": "full path"})
+        assert list(tables) == [str(csv_dir / n) for n in ["a.csv", "b.csv", "c.csv"]]
+
+    def test_colliding_stems_are_reported_not_silently_dropped(self, registry,
+                                                               tmp_path, parts):
+        parts[0].to_csv(tmp_path / "sales.csv", index=False)
+        parts[1].to_csv(tmp_path / "sales.tsv", index=False)
+        with pytest.raises(ValueError, match="share a key"):
+            run_dict(registry, {"path": str(tmp_path),
+                                "key": "name without extension"})
+
+    def test_colliding_stems_are_fine_when_keyed_by_name(self, registry, tmp_path,
+                                                         parts):
+        parts[0].to_csv(tmp_path / "sales.csv", index=False)
+        parts[1].to_csv(tmp_path / "sales.tsv", index=False)
+        tables, _ = run_dict(registry, {"path": str(tmp_path), "sep": ","})
+        assert set(tables) == {"sales.csv", "sales.tsv"}
+
+    def test_include_and_exclude(self, registry, csv_dir):
+        tables, _ = run_dict(registry, {"path": str(csv_dir),
+                                        "exclude_pattern": "b.csv"})
+        assert list(tables) == ["a.csv", "c.csv"]
+
+    def test_nrows_caps_each_file_not_the_total(self, registry, csv_dir):
+        """Where Read CSV (Folder) caps the stack, here each file is a result."""
+        tables, _ = run_dict(registry, {"path": str(csv_dir), "nrows": 2})
+        assert [len(frame) for frame in tables.values()] == [2, 2, 2]
+
+    def test_a_bad_file_is_named_in_the_error(self, registry, csv_dir):
+        (csv_dir / "broken.csv").write_text("")
+        with pytest.raises(ValueError, match="broken.csv"):
+            run_dict(registry, {"path": str(csv_dir)})
+
+    def test_path_input_overrides_the_param(self, registry, csv_dir, tmp_path):
+        tables, _ = run_dict(registry, {"path": str(tmp_path / "nowhere")},
+                             path_input=str(csv_dir))
+        assert list(tables) == ["a.csv", "b.csv", "c.csv"]
+
+    def test_requires_a_folder(self, registry):
+        with pytest.raises(ValueError, match="no folder selected"):
+            run_dict(registry, {"path": ""})
+
+    def test_empty_folder_says_what_it_wanted(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="no .csv"):
+            run_dict(registry, {"path": str(tmp_path)})
+
+    def test_dtypes_reach_the_parser(self, registry, tmp_path):
+        (tmp_path / "codes.csv").write_text("code,n\n01234,1\n")
+        tables, _ = run_dict(registry, {"path": str(tmp_path),
+                                        "dtypes": "code = string"})
+        assert list(tables["codes.csv"]["code"]) == ["01234"]
+
+    def test_parallel_reads_give_the_same_dict(self, registry, csv_dir):
+        one, _ = run_dict(registry, {"path": str(csv_dir), "parallel_files": 1})
+        many, _ = run_dict(registry, {"path": str(csv_dir), "parallel_files": 3})
+        assert list(one) == list(many)
+        for name in one:
+            pd.testing.assert_frame_equal(one[name], many[name])
+
+    def test_polars_matches_the_pandas_result(self, registry, csv_dir):
+        pytest.importorskip("polars")
+        pandas_out, _ = run_dict(registry, {"path": str(csv_dir)})
+        polars_out, log = run_dict(registry, {"path": str(csv_dir),
+                                              "engine": "polars"})
+        assert "via polars" in log
+        assert list(pandas_out) == list(polars_out)
+        for name in pandas_out:
+            pd.testing.assert_frame_equal(pandas_out[name], polars_out[name])
+
+    def test_polars_refuses_what_it_cannot_do(self, registry, csv_dir):
+        pytest.importorskip("polars")
+        with pytest.raises(ValueError, match="Thousands mark"):
+            run_dict(registry, {"path": str(csv_dir), "engine": "polars",
+                                "thousands": ","})
+
+    def test_the_engine_hands_on_the_dict_itself(self, registry, csv_dir):
+        """Not the port mapping — a single output takes a bare return, and a
+        bare dict keyed like the ports would be read as the mapping."""
+        spec = registry.get(CSV_DICT)
+        run = compile_run(spec.source, "test-dict")
+        params = spec.default_params() | {"path": str(csv_dir)}
+        result = run(FakeContext(params=params), path_input=None)
+        outputs = normalise(registry, CSV_DICT, result)
+        assert list(outputs) == ["tables"]
+        assert list(outputs["tables"]) == ["a.csv", "b.csv", "c.csv"]
+
+    def test_a_lone_file_named_after_the_port_is_still_a_dict(self, registry,
+                                                              tmp_path, parts):
+        """The trap the named return exists for: one file whose stem is
+        'tables' makes the payload's keys equal the port names."""
+        parts[0].to_csv(tmp_path / "tables.csv", index=False)
+        spec = registry.get(CSV_DICT)
+        run = compile_run(spec.source, "test-dict")
+        params = spec.default_params() | {"path": str(tmp_path),
+                                          "key": "name without extension"}
+        outputs = normalise(registry, CSV_DICT,
+                            run(FakeContext(params=params), path_input=None))
+        assert isinstance(outputs["tables"], dict)
+        assert list(outputs["tables"]) == ["tables"]
