@@ -29,8 +29,9 @@ work. Optional extras pull in what individual nodes need:
 | --- | --- | --- |
 | `matplotlib` | matplotlib | Show Plot, Chart per Value |
 | `plotly` | plotly | Show Plotly, Chart per Value (Plotly) |
-| `excel` | openpyxl | Read/Write Excel |
-| `parquet` | pyarrow | Read/Write Parquet |
+| `excel` | openpyxl, python-calamine | Read File (Excel), Write Excel |
+| `parquet` | pyarrow, fastparquet | Read File (Parquet), Write Parquet |
+| `polars` | polars, fastexcel | the fast **polars** engine on Read File |
 | `geo` | geopandas, folium | maps in a web-view node |
 | `ai` | requests | the local-LLM node assistant |
 | `dev` | pytest, pytest-qt | running the test suite |
@@ -262,11 +263,16 @@ favorites first in the `Tab` search popup. The star button next to the
 search box narrows the whole tree to favorites only. Favorites persist
 per-machine in settings.
 
-**Input** — Slider, Number, Text, Date, Toggle, Choice.
+**Input** — Slider, Between Slider, Number, Text, Date, Toggle, Choice.
 
-**IO** — Read/Write CSV, Excel, Parquet, JSON (incl. JSONL) and SQLite
-(query in, table out); drag a file onto the canvas to get the right reader
-already configured. **Table** is a real spreadsheet you edit on the canvas,
+**IO** — **Read File** reads CSV, Excel, JSON (incl. JSONL), Parquet and
+SQLite through one node: pick the **Format** (or leave it on *auto* and let
+the extension decide) and the **Engine** — *polars* parses in Rust and
+releases the GIL, so several readers genuinely run at once. The single-format
+Read nodes are all still there, as are Write CSV/Excel/Parquet/JSON/SQLite;
+drag a file onto the canvas to get the right reader already configured. **Read
+CSV/Excel/Parquet (Folder)** reads a whole directory as one stacked table, and
+**Read CSV (Folder → Dict)** hands back one table per file. **Table** is a real spreadsheet you edit on the canvas,
 with formulas (`=SUM(A1:A9)`, plus `AVERAGE`, `ROUND`, `POWER`, `CONCAT`,
 `LEFT`/`MID`/`RIGHT`, `AND`/`OR`/`NOT` and the rest of the usual set), fill,
 copy/paste, and an optional linked input that keeps its contents when you
@@ -283,7 +289,8 @@ pan in place), Show Web View (render *anything* that produces HTML: folium
 maps, altair, bokeh, your own template), Card (a Power BI-style KPI number),
 Table Spec (the incoming table's structure), Chart per Value and Chart per
 Value (Plotly) — one chart per distinct value of a column, as a stack, in
-either backend — Slicer, Report.
+either backend — Slicer, Image (any picture on the canvas, animated GIFs
+included, from a file or a base64 string), Report.
 
 Any web-view node has **Open in Browser** on its right-click menu — the same
 document, in a real browser, refreshed in place when the flow re-runs.
