@@ -51,6 +51,48 @@ class _NodeRefCombo(QComboBox):
         super().showPopup()
 
 
+# Marks the actions in a column picker that should leave the menu showing
+# when they fire, rather than closing it the way a normal menu entry does.
+_STAYS_OPEN = "flograph_stays_open"
+
+
+class _ColumnsMenu(QMenu):
+    """Column picker menu that stays up while columns are ticked.
+
+    A plain QMenu closes on every pick, so choosing six columns out of a
+    multi-select param meant opening the menu six times. Actions carrying
+    the `_STAYS_OPEN` property fire in place and leave the menu showing;
+    everything else (a disabled placeholder, a single-select column) keeps
+    the ordinary close-on-choose behaviour, because there the pick is the
+    whole interaction.
+    """
+
+    @staticmethod
+    def _stays_open(action) -> bool:
+        return (action is not None and action.isEnabled()
+                and bool(action.property(_STAYS_OPEN)))
+
+    def mouseReleaseEvent(self, event) -> None:
+        action = self.actionAt(event.position().toPoint())
+        if self._stays_open(action):
+            action.trigger()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        # keyboard users get the same deal: Space/Enter ticks without
+        # dismissing, so a menu walked with the arrow keys behaves like one
+        # clicked through
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            action = self.activeAction()
+            if self._stays_open(action):
+                action.trigger()
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+
 class ParamsPanel(QWidget):
     def __init__(self, graph: Graph, undo_stack: QUndoStack, parent=None,
                  cache=None) -> None:
@@ -266,7 +308,10 @@ class ParamsPanel(QWidget):
 
         if spec.type == "text":
             text = QPlainTextEdit(str(value or ""))
+            text.setObjectName(f"param_{name}")
             text.setMaximumHeight(90)
+            if spec.placeholder:
+                text.setPlaceholderText(spec.placeholder)
             text.textChanged.connect(
                 lambda: self._commit_typed(name, text.toPlainText()))
 
@@ -275,6 +320,8 @@ class ParamsPanel(QWidget):
                 # would reset the cursor to the start — only sync real changes
                 if text.toPlainText() != str(v or ""):
                     self._silently(text.setPlainText, str(v or ""))
+            if spec.insert_columns:
+                return self._with_column_inserter(spec, text), set_text
             return text, set_text
 
         if spec.type in ("file_open", "file_save", "folder_open"):
@@ -355,6 +402,56 @@ class ParamsPanel(QWidget):
         edit.editingFinished.connect(self.flush_pending)
         return edit, self._line_setter(edit)
 
+    def _with_column_inserter(self, spec: ParamSpec,
+                              text: QPlainTextEdit) -> QWidget:
+        """Put an upstream-column picker beside a multiline text box.
+
+        The box holds free text — a rename mapping, a set of expressions —
+        so the picker cannot own the value the way a 'columns' param's does.
+        All it does is type the name in at the cursor, which is the part
+        that was sending people back to a table view to copy from."""
+        host = QWidget()
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        pick = QToolButton()
+        pick.setObjectName(f"param_{spec.name}_columns")
+        pick.setText("▾")
+        pick.setToolTip("Insert an upstream column name (needs an upstream run)")
+        pick.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(pick)
+        pick.setMenu(menu)
+        # built on demand, like the 'columns' picker: whatever the cache
+        # holds at click time, with no refresh wiring when upstream re-runs
+        menu.aboutToShow.connect(
+            lambda: self._fill_insert_menu(menu, text))
+        row.addWidget(text, 1)
+        # top-aligned: centred, the button floats halfway down a 90px box
+        # with nothing to relate it to
+        row.addWidget(pick, 0, Qt.AlignTop)
+        host.setMaximumHeight(text.maximumHeight())
+        return host
+
+    def _fill_insert_menu(self, menu: QMenu, text: QPlainTextEdit) -> None:
+        from flograph.engine import upstream_columns
+        menu.clear()
+        columns = (upstream_columns(self._graph, self._cache, self._node_id)
+                   if self._cache is not None and self._node_id else [])
+        if not columns:
+            action = menu.addAction("run upstream nodes to list columns")
+            action.setEnabled(False)
+            return
+        for column in columns:
+            action = menu.addAction(column)
+            action.setData(column)
+            action.triggered.connect(
+                lambda _checked=False, c=column: self._insert_column(text, c))
+
+    @staticmethod
+    def _insert_column(text: QPlainTextEdit, column: str) -> None:
+        text.insertPlainText(column)
+        # carry on typing where the name landed rather than back in the menu
+        text.setFocus()
+
     def _make_date_widget(self, spec: ParamSpec, value: Any):
         """Calendar picker storing an ISO "YYYY-MM-DD" string. A blank param
         is a real state (no date chosen), so the editor stays empty until
@@ -405,7 +502,7 @@ class ParamsPanel(QWidget):
         pick.setText("▾")
         pick.setToolTip("Pick from upstream columns (needs an upstream run)")
         pick.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu(pick)
+        menu = _ColumnsMenu(pick)
         pick.setMenu(menu)
         # built on demand: always reflects the cache at click time, so no
         # refresh wiring is needed when upstream re-runs
@@ -470,15 +567,42 @@ class ParamsPanel(QWidget):
             action = menu.addAction("run upstream nodes to list columns")
             action.setEnabled(False)
             return
+        if spec.multi:
+            # picking six of eight columns is the common case, and doing it
+            # one tick at a time is what the stay-open menu is for; these
+            # two turn the other common case into a single click
+            for label, wanted in (("Select all", columns), ("Select none", [])):
+                action = menu.addAction(label)
+                action.setProperty(_STAYS_OPEN, True)
+                action.triggered.connect(
+                    lambda _checked=False, cols=wanted:
+                    self._set_columns(menu, edit, spec, cols))
+            menu.addSeparator()
         chosen = [c.strip() for c in edit.text().split(",") if c.strip()]
         for column in columns:
             action = menu.addAction(column)
+            action.setData(column)
             if spec.multi:
                 action.setCheckable(True)
                 action.setChecked(column in chosen)
+                action.setProperty(_STAYS_OPEN, True)
             action.triggered.connect(
                 lambda _checked=False, c=column:
                 self._pick_column(edit, spec, c))
+
+    def _set_columns(self, menu: QMenu, edit: QLineEdit, spec: ParamSpec,
+                     columns: list[str]) -> None:
+        """Select all / select none. The menu is still up, so its ticks have
+        to be brought back in line with the value by hand — nothing is going
+        to rebuild them until it is next opened."""
+        text = ", ".join(columns)
+        edit.setText(text)
+        self._commit(spec.name, text)
+        wanted = set(columns)
+        for action in menu.actions():
+            column = action.data()
+            if action.isCheckable() and column is not None:
+                action.setChecked(column in wanted)
 
     def _pick_column(self, edit: QLineEdit, spec: ParamSpec, column: str) -> None:
         if spec.multi:

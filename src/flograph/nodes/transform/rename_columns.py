@@ -11,7 +11,8 @@ NODE = {
 }
 PARAMS = [
     {"name": "mapping", "type": "text", "label": "Renames (old = new)",
-     "default": "", "placeholder": "revenue = revenue_usd\nunits = qty"},
+     "default": "", "placeholder": "revenue = revenue_usd\nunits = qty",
+     "insert_columns": True},
 ]
 
 

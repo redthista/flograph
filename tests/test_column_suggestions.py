@@ -2,7 +2,9 @@
 import pandas as pd
 import pytest
 from PySide6.QtGui import QUndoStack
-from PySide6.QtWidgets import QLineEdit, QMenu
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtWidgets import QLineEdit, QMenu, QPlainTextEdit, QToolButton
 
 from flograph.core import Graph
 from flograph.engine import OutputCache, upstream_columns
@@ -96,6 +98,13 @@ class TestUpstreamColumns:
         assert upstream_columns(graph, cache, "nope") == []
 
 
+def _columns(menu):
+    """The column entries of a picker menu, skipping select all/none and the
+    separator that follows them."""
+    return [a for a in menu.actions()
+            if not a.isSeparator() and a.data() is not None]
+
+
 class TestColumnPicker:
     @pytest.fixture
     def panel(self, qtbot, wired, table):
@@ -114,9 +123,9 @@ class TestColumnPicker:
         panel, _graph, consumer = panel
         menu, edit = QMenu(), QLineEdit()
         panel._fill_columns_menu(menu, edit, self._spec(consumer, "columns"))
-        assert [a.text() for a in menu.actions()] == [
+        assert [a.text() for a in _columns(menu)] == [
             "region", "units", "revenue"]
-        assert all(a.isCheckable() for a in menu.actions())
+        assert all(a.isCheckable() for a in _columns(menu))
 
     def test_menu_placeholder_without_cache(self, panel, wired):
         panel, _graph, consumer = panel
@@ -151,5 +160,5 @@ class TestColumnPicker:
         panel, _graph, consumer = panel
         menu, edit = QMenu(), QLineEdit("units, revenue")
         panel._fill_columns_menu(menu, edit, self._spec(consumer, "columns"))
-        checked = {a.text(): a.isChecked() for a in menu.actions()}
+        checked = {a.text(): a.isChecked() for a in _columns(menu)}
         assert checked == {"region": False, "units": True, "revenue": True}

@@ -4,6 +4,8 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| UI | The column picker stays open while you tick | A `columns` param that takes several columns built its menu out of checkable entries in a plain menu — and a plain menu closes the moment anything in it is clicked, so choosing six columns meant opening the picker six times, each time from the top of the list. The menu now **stays up while you tick**, for mouse and keyboard alike, and closes when you click away or press Escape. **Select all** and **Select none** sit at the head of the list for the two cases that are one click rather than eight, and their ticks update in place so the menu still reads correctly afterwards. A single-column param is unchanged: one pick is the whole interaction there, so it still closes on choosing. |
+| UI | Rename Columns and Expression can list the columns they work on | Both take free text — `old = new` mappings, `new_col = col_a * 2` assignments — so neither could use the column picker, and getting a name right meant flicking back to a table view to copy it. Each box now has the same **▾ button** beside it, listing whatever the upstream nodes have cached and **typing the name in at the cursor** rather than replacing what is there. It is an input aid and nothing more: the value stored is the text you see either way, `${var}` substitution still works in the box, and typing a name by hand is still perfectly fine. Any node script can ask for it with `"insert_columns": True` on a text param. Rename Columns' hint text (*revenue = revenue_usd*) also shows in the empty box now — it had been declared since the node was written and never displayed, because multiline params were the one kind that dropped it. |
 
 ## 0.1.9
 
