@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QUndoStack
+from PySide6.QtGui import QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QSpinBox,
@@ -54,6 +54,40 @@ class _NodeRefCombo(QComboBox):
 # Marks the actions in a column picker that should leave the menu showing
 # when they fire, rather than closing it the way a normal menu entry does.
 _STAYS_OPEN = "flograph_stays_open"
+
+
+def _mapping_key(line: str) -> str:
+    """Which column a `column = value` line is about — what a tick in a
+    mapping picker stands for.
+
+    Blank lines and comments key to nothing, so they match no column and
+    are carried through every edit untouched. A line still being typed
+    (`revenue = `, or just `revenue`) keys the same as a finished one, so
+    the tick is right the moment it is made rather than once the value
+    arrives."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return ""
+    return stripped.partition("=")[0].strip()
+
+
+class _ColumnTextEdit(QPlainTextEdit):
+    """Multiline editor that knows whether its caret is the user's.
+
+    A freshly built editor has its caret at position 0, and that is a real
+    position — indistinguishable from one somebody chose. So "insert at the
+    cursor" put the name *in front of everything already written* until the
+    box had been clicked into, which reads as the picker being broken. Once
+    the box has been focused the caret means something and is honoured.
+    """
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(text, parent)
+        self.caret_placed = False
+
+    def focusInEvent(self, event) -> None:
+        self.caret_placed = True
+        super().focusInEvent(event)
 
 
 class _ColumnsMenu(QMenu):
@@ -307,7 +341,7 @@ class ParamsPanel(QWidget):
             return combo, lambda v: self._silently(combo.setCurrentText, str(v))
 
         if spec.type == "text":
-            text = QPlainTextEdit(str(value or ""))
+            text = _ColumnTextEdit(str(value or ""))
             text.setObjectName(f"param_{name}")
             text.setMaximumHeight(90)
             if spec.placeholder:
@@ -408,22 +442,33 @@ class ParamsPanel(QWidget):
 
         The box holds free text — a rename mapping, a set of expressions —
         so the picker cannot own the value the way a 'columns' param's does.
-        All it does is type the name in at the cursor, which is the part
-        that was sending people back to a table view to copy from."""
+        All it does is type the name in, which is the part that was sending
+        people back to a table view to copy from. Where it lands is the
+        param's own choice (spec.insert_columns), because a line means
+        different things in the two boxes that want this."""
         host = QWidget()
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         pick = QToolButton()
         pick.setObjectName(f"param_{spec.name}_columns")
         pick.setText("▾")
-        pick.setToolTip("Insert an upstream column name (needs an upstream run)")
+        pick.setToolTip(
+            "Tick a column to add its line, untick to remove it "
+            "(needs an upstream run)"
+            if spec.insert_columns == "mapping"
+            else "Insert an upstream column name (needs an upstream run)")
         pick.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu(pick)
+        # a mapping's ticks are toggled several at a time, so it wants the
+        # same stay-open menu the 'columns' picker uses; an inline insert is
+        # one name at a time and closing after it is right
+        menu = (_ColumnsMenu(pick) if spec.insert_columns == "mapping"
+                else QMenu(pick))
         pick.setMenu(menu)
         # built on demand, like the 'columns' picker: whatever the cache
         # holds at click time, with no refresh wiring when upstream re-runs
         menu.aboutToShow.connect(
-            lambda: self._fill_insert_menu(menu, text))
+            lambda: self._fill_insert_menu(menu, text, spec,
+                                           spec.insert_columns))
         row.addWidget(text, 1)
         # top-aligned: centred, the button floats halfway down a 90px box
         # with nothing to relate it to
@@ -431,7 +476,9 @@ class ParamsPanel(QWidget):
         host.setMaximumHeight(text.maximumHeight())
         return host
 
-    def _fill_insert_menu(self, menu: QMenu, text: QPlainTextEdit) -> None:
+    def _fill_insert_menu(self, menu: QMenu, text: QPlainTextEdit,
+                          spec: Optional[ParamSpec] = None,
+                          mode: str = "inline") -> None:
         from flograph.engine import upstream_columns
         menu.clear()
         columns = (upstream_columns(self._graph, self._cache, self._node_id)
@@ -440,15 +487,65 @@ class ParamsPanel(QWidget):
             action = menu.addAction("run upstream nodes to list columns")
             action.setEnabled(False)
             return
+        mapped = ({_mapping_key(line) for line in text.toPlainText().split("\n")}
+                  if mode == "mapping" else set())
         for column in columns:
             action = menu.addAction(column)
             action.setData(column)
-            action.triggered.connect(
-                lambda _checked=False, c=column: self._insert_column(text, c))
+            if mode == "mapping":
+                # a tick means "this column has a line"; the box is the
+                # value, so the state is read back off the text rather than
+                # remembered here
+                action.setCheckable(True)
+                action.setChecked(column in mapped)
+                action.setProperty(_STAYS_OPEN, True)
+                action.triggered.connect(
+                    lambda _checked=False, c=column:
+                    self._toggle_mapping(text, spec, c))
+            else:
+                action.triggered.connect(
+                    lambda _checked=False, c=column:
+                    self._insert_column(text, c))
+
+    def _toggle_mapping(self, text: QPlainTextEdit, spec: ParamSpec,
+                        column: str) -> None:
+        """Tick a column into the mapping, or untick it back out.
+
+        Ticking writes `column = ` and leaves the caret after it, because
+        the half you have to supply is the new name. Unticking takes the
+        whole line away — the point of a tick is that it undoes itself."""
+        body = text.toPlainText()
+        lines = body.split("\n")
+        kept = [line for line in lines if _mapping_key(line) != column]
+        if len(kept) != len(lines):
+            new = "\n".join(kept)
+        else:
+            # a trailing newline is where the user is about to type, not a
+            # line to preserve — otherwise the gap grows with every tick
+            head = body.rstrip("\n")
+            new = f"{head}\n{column} = " if head.strip() else f"{column} = "
+        self._silently(text.setPlainText, new)
+        self._commit(spec.name, new, merge=False)
+        cursor = text.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        text.setTextCursor(cursor)
+        # carry on typing the new name rather than back in the menu
+        text.setFocus()
 
     @staticmethod
     def _insert_column(text: QPlainTextEdit, column: str) -> None:
-        text.insertPlainText(column)
+        cursor = text.textCursor()
+        if not getattr(text, "caret_placed", False):
+            # nobody has put the caret anywhere, so its position 0 is where
+            # the widget was built rather than a choice — inserting there
+            # would push the name in front of everything already written.
+            # Start a fresh line at the end instead, which for both boxes
+            # that use this is the next entry.
+            cursor.movePosition(QTextCursor.End)
+            if cursor.block().text().strip():
+                cursor.insertText("\n")
+        cursor.insertText(column)
+        text.setTextCursor(cursor)
         # carry on typing where the name landed rather than back in the menu
         text.setFocus()
 
@@ -597,7 +694,7 @@ class ParamsPanel(QWidget):
         to rebuild them until it is next opened."""
         text = ", ".join(columns)
         edit.setText(text)
-        self._commit(spec.name, text)
+        self._commit(spec.name, text, merge=False)
         wanted = set(columns)
         for action in menu.actions():
             column = action.data()
@@ -615,7 +712,7 @@ class ParamsPanel(QWidget):
         else:
             text = column
         edit.setText(text)
-        self._commit(spec.name, text)
+        self._commit(spec.name, text, merge=False)
 
     @staticmethod
     def _toggle_password_reveal(edit: QLineEdit, reveal: QToolButton,
@@ -664,7 +761,11 @@ class ParamsPanel(QWidget):
         for name, value in pending.items():
             self._commit(name, value)
 
-    def _commit(self, name: str, value: Any) -> None:
+    def _commit(self, name: str, value: Any, *, merge: bool = True) -> None:
+        """Settle a param. `merge=False` keeps this edit its own undo step,
+        for a discrete click rather than a run of keystrokes — six ticks in
+        a picker are six things the user did, and one Ctrl+Z that took them
+        all back would be a surprise."""
         if self._updating or self._node_id is None:
             return
         # a settled value supersedes a keystroke still waiting on the timer
@@ -673,7 +774,8 @@ class ParamsPanel(QWidget):
         if node.params.get(name) == value:
             return
         self._undo_stack.push(
-            SetParamCommand(self._graph, self._node_id, name, value))
+            SetParamCommand(self._graph, self._node_id, name, value,
+                            merge=merge))
 
     def _commit_label(self, text: str) -> None:
         if self._node_id is None:

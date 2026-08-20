@@ -15,7 +15,7 @@ NODE = {
 PARAMS = [
     {"name": "expressions", "type": "text", "label": "Assignments",
      "default": "", "placeholder": "new_col = col_a * 2",
-     "insert_columns": True},
+     "insert_columns": "inline"},
 ]
 
 
