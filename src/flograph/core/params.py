@@ -46,6 +46,12 @@ class ParamSpec:
     multi: bool = True  # columns only: comma list (True) or single column
     hidden: bool = False  # not shown in the properties panel (edited elsewhere)
     ref_kind: str = ""  # node_ref only: card kind the referenced node must have
+    # text/string only: offer a picker that inserts an upstream column name at
+    # the cursor. For boxes whose content is *about* columns but isn't a list
+    # of them -- a rename mapping, an expression -- where a 'columns' param
+    # can't express the value but the names are still what you're reaching
+    # for. Purely an input aid: the stored value is the text either way.
+    insert_columns: bool = False
     # Show this row only while other params hold certain values:
     # {"format": ["auto", "csv"]} means "visible when format is auto or csv".
     # Several keys are ANDed. A node that reads five file types would
@@ -111,6 +117,7 @@ class ParamSpec:
             multi=bool(d.get("multi", True)),
             hidden=bool(d.get("hidden", False)),
             ref_kind=str(d.get("ref_kind", "")),
+            insert_columns=bool(d.get("insert_columns", False)),
             cosmetic=cosmetic,
             visible_when=visible_when,
         )
