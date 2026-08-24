@@ -1,0 +1,434 @@
+{
+  "flograph_version": "0.1.10",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "n00_intro",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "text": "# Gantt Chart \u2014 a tutorial\n\nThis flow draws the same project four times, adding **one feature at each\nstage**, so you can see exactly what each setting does.\n\n**The table holds no dates for the work itself** \u2014 only how long each task\ntakes and which task waits for which. The Gantt node works the calendar out\nfrom those, which is why changing one duration re-plans everything after it.\n\nThe table is published once as a **Goto** and picked up by a **From** in each\nstage: a wire without the wire, so no line has to cross the whole canvas.\n\nOnly the last chart draws itself when this opens, to keep four browser views\nfrom loading at once. To see an earlier stage, right-click its node \u2192\n**Appearance\u2026** \u2192 tick **Draw this node's contents**.",
+          "width": 460,
+          "height": 300
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "n01_tasks",
+        "type": "flograph.io.table",
+        "pos": [
+          1120,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"id\", \"type\": \"text\"}, {\"name\": \"task\", \"type\": \"text\"}, {\"name\": \"phase\", \"type\": \"text\"}, {\"name\": \"duration\", \"type\": \"integer\"}, {\"name\": \"depends_on\", \"type\": \"text\"}, {\"name\": \"progress\", \"type\": \"integer\"}, {\"name\": \"owner\", \"type\": \"text\"}, {\"name\": \"baseline_start\", \"type\": \"date\"}, {\"name\": \"baseline_finish\", \"type\": \"date\"}], \"rows\": [[\"D1\", \"Kickoff workshop\", \"Discovery\", 2, \"\", 100, \"Ada\", \"2026-09-07\", \"2026-09-09\"], [\"D2\", \"Stakeholder interviews\", \"Discovery\", 4, \"D1\", 100, \"Ada\", \"2026-09-09\", \"2026-09-14\"], [\"D3\", \"Content audit\", \"Discovery\", 5, \"D1\", 80, \"Kwame\", \"2026-09-09\", \"2026-09-15\"], [\"D4\", \"Requirements agreed\", \"Discovery\", 0, \"D2,D3\", 0, \"\", \"2026-09-15\", \"2026-09-15\"], [\"S1\", \"Wireframes\", \"Design\", 5, \"D4\", 60, \"Rosa\", \"2026-09-15\", \"2026-09-22\"], [\"S2\", \"Visual design\", \"Design\", 6, \"S1\", 20, \"Rosa\", \"2026-09-22\", \"2026-09-29\"], [\"S3\", \"Copywriting\", \"Design\", 7, \"D4\", 35, \"Kwame\", \"2026-09-15\", \"2026-09-22\"], [\"S4\", \"Design signed off\", \"Design\", 0, \"S2,S3\", 0, \"\", \"2026-09-29\", \"2026-09-29\"], [\"B1\", \"Page templates\", \"Build\", 8, \"S4\", 0, \"Ada\", \"2026-09-29\", \"2026-10-08\"], [\"B2\", \"CMS setup\", \"Build\", 4, \"S4\", 0, \"Ines\", \"2026-09-29\", \"2026-10-05\"], [\"B3\", \"Content load\", \"Build\", 5, \"B1,B2\", 0, \"Kwame\", \"2026-10-08\", \"2026-10-14\"], [\"B4\", \"QA pass\", \"Build\", 4, \"B3\", 0, \"Ines\", \"2026-10-14\", \"2026-10-19\"], [\"B5\", \"Accessibility fixes\", \"Build\", 3, \"B4\", 0, \"Rosa\", \"2026-10-19\", \"2026-10-21\"], [\"B6\", \"Go live\", \"Build\", 0, \"B5\", 0, \"\", \"2026-10-21\", \"2026-10-21\"]]}",
+          "width": 960,
+          "height": 420
+        },
+        "code": null,
+        "label": "Website Rebuild"
+      },
+      {
+        "id": "n02_goto",
+        "type": "flograph.util.goto",
+        "pos": [
+          2320,
+          200
+        ],
+        "params": {
+          "name": "Task list"
+        },
+        "code": null,
+        "label": "Task list"
+      },
+      {
+        "id": "n10_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          840
+        ],
+        "params": {
+          "text": "## 1 \u00b7 Bars\n\nThree columns is all it takes: **Task**, **Duration** and **Depends on**.\n\nEvery task here waits for another one, so only *Kickoff workshop* has nothing\nin front of it \u2014 and its date comes from **Project start**, not from the\ntable. Every other date is worked out by following the chain.\n\n**Depends on** holds ids from the **Task id** column, comma separated where a\ntask waits for two. *Requirements agreed* waits for both the interviews and\nthe audit, so it starts when the later of the two ends.\n\n**Calendar** is set to working days, so the bars step over weekends. Switch it\nto calendar days and watch the plan close up by a fortnight.",
+          "width": 460,
+          "height": 300
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "n11_from",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          700,
+          960
+        ],
+        "params": {
+          "source": "n02_goto"
+        },
+        "code": null,
+        "label": "Task list"
+      },
+      {
+        "id": "n12_gantt",
+        "type": "flograph.viz.gantt",
+        "pos": [
+          1120,
+          700
+        ],
+        "params": {
+          "task": "task",
+          "task_id": "id",
+          "duration": "duration",
+          "depends_on": "depends_on",
+          "project_start": "2026-09-07",
+          "calendar": "working days (Mon-Fri)",
+          "show_dependencies": false,
+          "width": 720,
+          "height": 560,
+          "title": "Website Rebuild \u2014 bars"
+        },
+        "code": null,
+        "label": "1 \u00b7 Gantt",
+        "preview": false
+      },
+      {
+        "id": "n20_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          1680
+        ],
+        "params": {
+          "text": "## 2 \u00b7 Phases and progress\n\nTwo more columns, and the same chart starts to read like a plan.\n\n**Group by** blocks the tasks under a heading and tints alternate phases, so\nDiscovery, Design and Build read as three bands rather than fourteen bars.\n\n**Color by** is a separate setting on purpose. It follows the grouping column\nunless you tell it otherwise \u2014 point it at **owner** instead and the chart\nanswers \"who is doing what?\" without giving up the phases. Try it.\n\n**Progress** shades the finished part of each bar. It takes 0\u2013100 or 0\u20131;\nthis table is in percentages.",
+          "width": 460,
+          "height": 280
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "n21_from",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          700,
+          1800
+        ],
+        "params": {
+          "source": "n02_goto"
+        },
+        "code": null,
+        "label": "Task list"
+      },
+      {
+        "id": "n22_gantt",
+        "type": "flograph.viz.gantt",
+        "pos": [
+          1120,
+          1540
+        ],
+        "params": {
+          "task": "task",
+          "task_id": "id",
+          "duration": "duration",
+          "depends_on": "depends_on",
+          "project_start": "2026-09-07",
+          "calendar": "working days (Mon-Fri)",
+          "show_dependencies": false,
+          "width": 720,
+          "height": 560,
+          "title": "Website Rebuild \u2014 phases and progress",
+          "group": "phase",
+          "progress": "progress"
+        },
+        "code": null,
+        "label": "2 \u00b7 Gantt",
+        "preview": false
+      },
+      {
+        "id": "n30_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          2520
+        ],
+        "params": {
+          "text": "## 3 \u00b7 Dependencies and milestones\n\n**Show dependencies** draws the links that were there all along. The node has\nbeen scheduling from them since stage 1 \u2014 now you can see them, each arrow\ndropping from the end of one bar to the start of the next.\n\nLook at *Requirements agreed* and *Design signed off*: they are **diamonds,\nnot bars**, because their duration is **0**. That is all it takes to put a\nmilestone on a chart, and two arrows arrive at each \u2014 one per predecessor.\n\nFollow the arrows out of *Design signed off* and two tasks start at once.\n*Page templates* is the longer of the pair, so everything after it is really\nwaiting on that one.",
+          "width": 460,
+          "height": 280
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "n31_from",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          700,
+          2640
+        ],
+        "params": {
+          "source": "n02_goto"
+        },
+        "code": null,
+        "label": "Task list"
+      },
+      {
+        "id": "n32_gantt",
+        "type": "flograph.viz.gantt",
+        "pos": [
+          1120,
+          2380
+        ],
+        "params": {
+          "task": "task",
+          "task_id": "id",
+          "duration": "duration",
+          "depends_on": "depends_on",
+          "project_start": "2026-09-07",
+          "calendar": "working days (Mon-Fri)",
+          "show_dependencies": true,
+          "width": 720,
+          "height": 560,
+          "title": "Website Rebuild \u2014 dependencies",
+          "group": "phase",
+          "progress": "progress"
+        },
+        "code": null,
+        "label": "3 \u00b7 Gantt",
+        "preview": false
+      },
+      {
+        "id": "n40_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          3320
+        ],
+        "params": {
+          "text": "## 4 \u00b7 What you promised, and what happened\n\n**Show baseline** adds the thin grey bar under each task: the dates this\nproject was originally sold on. Where grey runs past colour, the task is\nlate \u2014 by *Go live* the plan has slipped over a week. Hover a grey bar and it\nsays how far.\n\nThe node's second output, **schedule**, is the table on the right: the dates\nit worked out, as ordinary data. Wire it into a filter, a chart or a Write\nExcel like anything else.\n\n### Try it\n\nOpen the **Website Rebuild** table and change *Page templates* from 8 days to\n13. Run the flow. Every task after it moves, both milestones move, Go live\nlands a fortnight later \u2014 and the grey baseline stays exactly where it was,\nwhich is the whole point of having one.",
+          "width": 460,
+          "height": 340
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "n41_from",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          700,
+          3480
+        ],
+        "params": {
+          "source": "n02_goto"
+        },
+        "code": null,
+        "label": "Task list"
+      },
+      {
+        "id": "n42_gantt",
+        "type": "flograph.viz.gantt",
+        "pos": [
+          1120,
+          3220
+        ],
+        "params": {
+          "task": "task",
+          "task_id": "id",
+          "duration": "duration",
+          "depends_on": "depends_on",
+          "project_start": "2026-09-07",
+          "calendar": "working days (Mon-Fri)",
+          "show_dependencies": true,
+          "width": 720,
+          "height": 560,
+          "title": "Website Rebuild \u2014 plan against reality",
+          "group": "phase",
+          "progress": "progress",
+          "show_baseline": true,
+          "baseline_start": "baseline_start",
+          "baseline_finish": "baseline_finish"
+        },
+        "code": null,
+        "label": "4 \u00b7 Gantt",
+        "preview": true
+      },
+      {
+        "id": "n43_schedule",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          2080,
+          3220
+        ],
+        "params": {
+          "width": 520,
+          "height": 560
+        },
+        "code": null,
+        "label": "The dates it worked out"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c00",
+        "src": [
+          "n01_tasks",
+          "table"
+        ],
+        "dst": [
+          "n02_goto",
+          "value"
+        ]
+      },
+      {
+        "id": "c10",
+        "src": [
+          "n11_from",
+          "value"
+        ],
+        "dst": [
+          "n12_gantt",
+          "table"
+        ]
+      },
+      {
+        "id": "c20",
+        "src": [
+          "n21_from",
+          "value"
+        ],
+        "dst": [
+          "n22_gantt",
+          "table"
+        ]
+      },
+      {
+        "id": "c30",
+        "src": [
+          "n31_from",
+          "value"
+        ],
+        "dst": [
+          "n32_gantt",
+          "table"
+        ]
+      },
+      {
+        "id": "c40",
+        "src": [
+          "n41_from",
+          "value"
+        ],
+        "dst": [
+          "n42_gantt",
+          "table"
+        ]
+      },
+      {
+        "id": "c41",
+        "src": [
+          "n42_gantt",
+          "schedule"
+        ],
+        "dst": [
+          "n43_schedule",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f00",
+        "title": "The plan, as data",
+        "rect": [
+          -40,
+          -80,
+          2560,
+          540
+        ],
+        "color": "#3f5e4a"
+      },
+      {
+        "id": "f10",
+        "title": "1 \u00b7 Bars",
+        "rect": [
+          -40,
+          620,
+          1920,
+          680
+        ],
+        "color": "#3d5a80"
+      },
+      {
+        "id": "f20",
+        "title": "2 \u00b7 Phases and progress",
+        "rect": [
+          -40,
+          1460,
+          1920,
+          680
+        ],
+        "color": "#5a4a7d"
+      },
+      {
+        "id": "f30",
+        "title": "3 \u00b7 Dependencies and milestones",
+        "rect": [
+          -40,
+          2300,
+          1920,
+          680
+        ],
+        "color": "#7d5a3d"
+      },
+      {
+        "id": "f40",
+        "title": "4 \u00b7 Plan against reality",
+        "rect": [
+          -40,
+          3140,
+          2680,
+          680
+        ],
+        "color": "#7d3d4a"
+      }
+    ],
+    "pages": [
+      {
+        "id": "p01",
+        "title": "The plan",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t01",
+            "node": "n42_gantt",
+            "port": "figure",
+            "rect": [
+              40,
+              40,
+              1040,
+              560
+            ]
+          },
+          {
+            "id": "t02",
+            "node": "n43_schedule",
+            "port": "table",
+            "rect": [
+              1120,
+              40,
+              520,
+              560
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

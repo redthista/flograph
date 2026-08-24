@@ -28,7 +28,7 @@ work. Optional extras pull in what individual nodes need:
 | Extra | Brings | For |
 | --- | --- | --- |
 | `matplotlib` | matplotlib | Show Plot, Chart per Value |
-| `plotly` | plotly | Show Plotly, Chart per Value (Plotly) |
+| `plotly` | plotly | Show Plotly, Chart per Value (Plotly), Gantt Chart |
 | `excel` | openpyxl, python-calamine | Read File (Excel), Write Excel |
 | `parquet` | pyarrow, fastparquet | Read File (Parquet), Write Parquet |
 | `polars` | polars, fastexcel | the fast **polars** engine on Read File |
@@ -79,15 +79,17 @@ one-file bundle's own `.py` if that's how you started, otherwise
 `-m flograph`. If a project is open it can be baked into the shortcut, so
 double-clicking opens flograph with that flow loaded.
 
-**File > Open Example** ships twelve worked projects — filter-and-visualise, an
+**File > Open Example** ships sixteen worked projects — filter-and-visualise, an
 aggregate dashboard, a custom-script chart, join/group-by comparison, an
 interactive slicer dashboard, a scripted pipeline in a frame, a retail ops
 command centre, two geo/folium maps, an SVG retrofit workbench that diffs
 a redrawn SVG against the page already wired to it, a Goto/From workflow
 that runs a three-branch report off one source prep with no wires crossing
-the page, and a parallel-branches demo whose six independent branches run at
-once — time it, then set *Nodes to run at once* to 1 and time it again.
-They're the fastest way in.
+the page, a parallel-branches demo whose six independent branches run at
+once — time it, then set *Nodes to run at once* to 1 and time it again —
+and walkthroughs of order edges, flow variables, report pages, and the Gantt
+node, which draws one project plan four times, adding a single feature per
+stage. They're the fastest way in.
 
 ---
 
@@ -289,8 +291,12 @@ pan in place), Show Web View (render *anything* that produces HTML: folium
 maps, altair, bokeh, your own template), Card (a Power BI-style KPI number),
 Table Spec (the incoming table's structure), Chart per Value and Chart per
 Value (Plotly) — one chart per distinct value of a column, as a stack, in
-either backend — Slicer, Image (any picture on the canvas, animated GIFs
-included, from a file or a base64 string), Report.
+either backend — Gantt Chart (a project plan that **works its own dates
+out**: give it durations and a depends-on column and it schedules the plan,
+so a task that slips pushes everything after it, with phases, progress,
+milestones, dependency arrows and a baseline to measure the slip against),
+Slicer, Image (any picture on the canvas, animated GIFs included, from a
+file or a base64 string), Report.
 
 Any web-view node has **Open in Browser** on its right-click menu — the same
 document, in a real browser, refreshed in place when the flow re-runs.

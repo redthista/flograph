@@ -54,11 +54,12 @@ class TestBundledExamples:
             "13_order_edges.flograph",
             "14_flow_variables.flograph",
             "15_report_page.flograph",
+            "16_project_gantt.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 15
+        assert len(window._examples_menu.actions()) == 16
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
