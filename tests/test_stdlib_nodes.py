@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from flograph.core import compile_run
+from flograph.core.datatypes import PortType, can_connect
 from tests.conftest import FakeContext
 
 
@@ -606,6 +607,49 @@ class TestIONodes:
                         {"path": str(path), "source": "table",
                          "table": "sales"})
         assert len(back) == len(table)
+
+    def test_write_text_writes_and_passes_through(self, registry, tmp_path):
+        path = tmp_path / "page.html"
+        out = run_node(registry, "flograph.io.write_text",
+                       {"path": str(path)}, text="<html>hi</html>")
+        assert path.read_text(encoding="utf-8") == "<html>hi</html>"
+        assert out == "<html>hi</html>"
+
+    def test_write_text_append_and_trailing_newline(self, registry, tmp_path):
+        path = tmp_path / "log.txt"
+        params = {"path": str(path), "newline_at_end": True}
+        run_node(registry, "flograph.io.write_text", params, text="one")
+        run_node(registry, "flograph.io.write_text",
+                 {**params, "mode": "append"}, text="two")
+        assert path.read_text(encoding="utf-8") == "one\ntwo\n"
+
+    def test_write_text_can_make_the_folder(self, registry, tmp_path):
+        path = tmp_path / "reports" / "2026" / "page.html"
+        run_node(registry, "flograph.io.write_text",
+                 {"path": str(path), "create_dirs": True}, text="x")
+        assert path.read_text(encoding="utf-8") == "x"
+
+    def test_write_text_without_a_path_says_so(self, registry):
+        with pytest.raises(ValueError, match="no output file set"):
+            run_node(registry, "flograph.io.write_text", {}, text="x")
+
+    def test_write_text_refuses_a_table_and_points_at_write_csv(
+            self, registry, table, tmp_path):
+        with pytest.raises(ValueError, match="takes text.*Write CSV"):
+            run_node(registry, "flograph.io.write_text",
+                     {"path": str(tmp_path / "x.txt")}, text=table)
+
+    def test_write_text_takes_html_off_an_object_port(self, registry,
+                                                      tmp_path):
+        # Show Web View emits HTML on an "object" port, which will not flow
+        # into a "string" input — hence this node's input being "any".
+        spec = registry.get("flograph.io.write_text")
+        assert spec.inputs[0].type == PortType.ANY
+        assert can_connect(PortType.OBJECT, spec.inputs[0].type)
+        path = tmp_path / "view.html"
+        run_node(registry, "flograph.io.write_text", {"path": str(path)},
+                 text="<html><body>view</body></html>")
+        assert "view" in path.read_text(encoding="utf-8")
 
 
 class TestScaleIsPresentation:

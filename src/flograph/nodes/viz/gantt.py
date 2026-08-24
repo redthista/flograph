@@ -19,6 +19,12 @@ off" or "go live" on the chart.
 The second output is the schedule it computed — the same tasks with real
 start and finish dates — so the dates can flow on to a table, a filter or a
 spreadsheet like any other data.
+
+**Emit HTML** fills the third output with the whole chart as a standalone
+web page, ready to save as an .html file and send to someone who has no
+flograph. plotly.js travels inside it rather than being linked, so it opens
+offline — which is why it is off by default: the page is around 4.5 MB, and
+a chart you are only reading on the canvas should not pay for one.
 """
 NODE = {
     "label": "Gantt Chart",
@@ -28,7 +34,8 @@ NODE = {
     # port, not a "figure" one: "figure" means a matplotlib Figure.
     "card": "webview",
     "inputs": [("table", "dataframe")],
-    "outputs": [("figure", "object"), ("schedule", "dataframe")],
+    "outputs": [("figure", "object"), ("schedule", "dataframe"),
+                ("html", "string")],
 }
 PARAMS = [
     {"name": "task", "type": "columns", "label": "Task", "multi": False,
@@ -73,6 +80,12 @@ PARAMS = [
      "default": True},
     {"name": "show_today", "type": "bool", "label": "Show today",
      "default": True},
+    # Off by default because it is not free: the page carries plotly.js
+    # inline so it opens anywhere, which is ~4.5 MB held in the run cache
+    # and written into the project's side-car cache on save. Nobody should
+    # pay that for a chart they are only looking at on the canvas.
+    {"name": "emit_html", "type": "bool", "label": "Emit HTML",
+     "default": False},
     {"name": "title", "type": "string", "label": "Title", "default": ""},
     {"name": "width", "type": "int", "label": "Width",
      "default": 560, "min": 260, "max": 1600},
@@ -142,7 +155,18 @@ def run(ctx, table):
     figure = _figure(go, pd, plan, rows, params)
     first, last = plan["start"].min(), plan["finish"].max()
     ctx.log(f"{len(plan)} task(s), {first:%d %b %Y} to {last:%d %b %Y}")
-    return {"figure": figure, "schedule": plan.drop(columns=["_color"])}
+    html = ""
+    if params.get("emit_html"):
+        # The same helper the card and Open in Browser use, so the file on
+        # disk is the page you were looking at rather than something that
+        # merely resembles it. plotly.js rides along inside it — no CDN, so
+        # it opens on a machine with no internet.
+        from flograph.core.html import to_html
+
+        html = to_html(figure) or ""
+        ctx.log(f"HTML page: {len(html) / 1048576:.1f} MB, self-contained")
+    return {"figure": figure, "schedule": plan.drop(columns=["_color"]),
+            "html": html}
 
 
 def _color_key(table, plan, params):

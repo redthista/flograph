@@ -1,5 +1,7 @@
 """The Gantt Chart node: its spec, and which parts of the picture each
 param actually turns on."""
+import re
+
 import pandas as pd
 import pytest
 
@@ -56,10 +58,12 @@ class TestSpec:
             self, registry):
         spec = registry.get(TYPE_ID)
         assert [p.name for p in spec.inputs] == ["table"]
-        assert [p.name for p in spec.outputs] == ["figure", "schedule"]
+        assert [p.name for p in spec.outputs] == ["figure", "schedule",
+                                                  "html"]
         # An "object" port, not a "figure" one: "figure" means matplotlib.
         assert spec.outputs[0].type == PortType.OBJECT
         assert spec.outputs[1].type == PortType.DATAFRAME
+        assert spec.outputs[2].type == PortType.STRING
         assert spec.inputs[0].type == PortType.DATAFRAME
 
     def test_it_carries_the_webview_card_so_the_chart_can_be_panned(
@@ -73,8 +77,8 @@ class TestSpec:
                      "depends_on", "start", "finish", "project_start",
                      "calendar", "group", "color", "progress",
                      "show_baseline", "baseline_start", "baseline_finish",
-                     "sort", "show_dependencies", "show_today", "title",
-                     "width", "height", "scale"):
+                     "sort", "show_dependencies", "show_today", "emit_html",
+                     "title", "width", "height", "scale"):
             assert spec.param(name) is not None, name
 
     def test_the_zoom_is_cosmetic_so_it_never_replots(self, registry):
@@ -197,6 +201,33 @@ class TestWhatEachParamDraws:
         # broken up by the tasks that happen to start around it.
         assert list(out["schedule"]["group"]) == [
             "Delivery", "Delivery", "Delivery", "Discovery"]
+
+
+class TestHtmlOutput:
+    def test_it_is_empty_until_asked_for(self, registry, tasks):
+        # ~4.5 MB a run, cached and saved to the side-car: not something to
+        # produce for a chart nobody is exporting.
+        out, ctx = gantt(registry, tasks)
+        assert out["html"] == ""
+        assert not [line for line in ctx.logs if "HTML" in line]
+
+    def test_it_is_a_whole_page_with_plotly_js_inside_it(self, registry,
+                                                         tasks):
+        out, ctx = gantt(registry, tasks, emit_html=True,
+                         title="Website Rebuild")
+        html = out["html"]
+        assert html.lstrip().startswith("<html>")
+        assert "Website Rebuild" in html
+        assert "Plotly.newPlot" in html
+        assert any("MB, self-contained" in line for line in ctx.logs)
+
+    def test_nothing_in_the_page_is_fetched_from_the_network(self, registry,
+                                                             tasks):
+        # The point of embedding plotly.js: the saved file has to open on a
+        # machine with no internet, so no tag may reach out for anything.
+        out, _ = gantt(registry, tasks, emit_html=True)
+        assert not re.findall(r"<script[^>]*\ssrc=", out["html"])
+        assert not re.findall(r"<link[^>]*\shref=", out["html"])
 
 
 class TestErrors:

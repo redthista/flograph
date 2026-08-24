@@ -271,7 +271,9 @@ per-machine in settings.
 SQLite through one node: pick the **Format** (or leave it on *auto* and let
 the extension decide) and the **Engine** — *polars* parses in Rust and
 releases the GIL, so several readers genuinely run at once. The single-format
-Read nodes are all still there, as are Write CSV/Excel/Parquet/JSON/SQLite;
+Read nodes are all still there, as are Write CSV/Excel/Parquet/JSON/SQLite
+and **Write Text**, which puts a string on disk — an exported chart, a
+report, anything a script built;
 drag a file onto the canvas to get the right reader already configured. **Read
 CSV/Excel/Parquet (Folder)** reads a whole directory as one stacked table, and
 **Read CSV (Folder → Dict)** hands back one table per file. **Table** is a real spreadsheet you edit on the canvas,
@@ -294,7 +296,9 @@ Value (Plotly) — one chart per distinct value of a column, as a stack, in
 either backend — Gantt Chart (a project plan that **works its own dates
 out**: give it durations and a depends-on column and it schedules the plan,
 so a task that slips pushes everything after it, with phases, progress,
-milestones, dependency arrows and a baseline to measure the slip against),
+milestones, dependency arrows and a baseline to measure the slip
+against, and a third output that hands you the whole chart as a
+standalone HTML page), 
 Slicer, Image (any picture on the canvas, animated GIFs included, from a
 file or a base64 string), Report.
 
