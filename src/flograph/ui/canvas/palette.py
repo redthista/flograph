@@ -369,6 +369,15 @@ class LibraryTree(QTreeWidget):
             visible = matched is None or type_id in matched
             item.setHidden(not visible)
             return visible
+        frame_id = item.data(0, FRAME_ID_ROLE)
+        if frame_id:
+            # A component is a leaf with no NodeSpec, so `matched` — built
+            # from a registry search — can never contain one. Match its
+            # display name instead, or it hides itself and its section.
+            visible = (matched is None
+                       or self._last_query.lower() in item.text(0).lower())
+            item.setHidden(not visible)
+            return visible
         any_visible = False
         for i in range(item.childCount()):
             if self._filter_item(item.child(i), matched):
