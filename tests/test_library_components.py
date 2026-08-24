@@ -1,4 +1,4 @@
-"""The User Frames section of the node library.
+"""The Components section of the node library.
 
 A component row is a leaf with no NodeSpec behind it, which the palette's
 filter used to mistake for an empty container and hide -- taking its section
@@ -47,7 +47,7 @@ def tree(qtbot, registry, tmp_path, frames_dir):
 def _frames_section(tree):
     for i in range(tree.topLevelItemCount()):
         top = tree.topLevelItem(i)
-        if top.text(0).endswith(LibraryTree.USER_FRAMES_SECTION):
+        if top.text(0).endswith(LibraryTree.COMPONENTS_SECTION):
             return top
     return None
 

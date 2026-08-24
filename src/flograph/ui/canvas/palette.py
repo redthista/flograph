@@ -25,7 +25,7 @@ NODE_TYPE_MIME = "application/x-flograph-node-type"
 #: an id through the registry that could never resolve.
 FRAME_ID_MIME = "application/x-flograph-frame-id"
 #: Item roles: the type_id a row adds, the section marker, and the component
-#: id for rows in the User Frames section.
+#: id for rows in the Components section.
 TYPE_ID_ROLE = Qt.UserRole
 SECTION_ROLE = Qt.UserRole + 1
 FRAME_ID_ROLE = Qt.UserRole + 2
@@ -141,7 +141,7 @@ class LibraryTree(QTreeWidget):
     on top; Ctrl+Shift+F stars the selected row."""
 
     USER_SECTION = "User Nodes"
-    USER_FRAMES_SECTION = "User Frames"
+    COMPONENTS_SECTION = "Components"
     FAVORITE_SECTION = FAVORITE_SECTION
 
     add_requested = Signal(str)            # type_id
@@ -234,8 +234,8 @@ class LibraryTree(QTreeWidget):
         entries = user_frames.scan(user_frames_dir())
         if not entries:
             return          # no empty section on a canvas that has none
-        top = self._section(self.USER_FRAMES_SECTION)
-        top.setData(0, SECTION_ROLE, self.USER_FRAMES_SECTION)
+        top = self._section(self.COMPONENTS_SECTION)
+        top.setData(0, SECTION_ROLE, self.COMPONENTS_SECTION)
         groups: dict = {}
         for entry in entries:
             groups.setdefault(entry["group"], []).append(entry)
