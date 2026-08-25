@@ -79,21 +79,12 @@ Shipped 2026-08-25; see `ideas_archived.md` #10.
 
 ## H. Property panel — column pickers  (Stu)
 
-Both entries are the same widget, `ParamsPanel._fill_columns_menu` /
-`_make_columns_widget` in `ui/properties/params_panel.py`, so they are one
-sitting.
-
 **H1. Keep the columns menu open while ticking, and add select all / none.**
-A `columns` param with `multi` builds checkable actions in a plain `QMenu`,
-which closes on every pick — so choosing six columns means opening the menu
-six times. Fix is to keep the menu up on a checkable action's trigger and
-add two actions at the top.
+Shipped 2026-08-20; see `ideas_archived.md` #12.
 
-**H2. Let Rename Columns list the columns it could rename.** Its `mapping`
-param is a free-text `old = new` block with no idea what is upstream, so
-renaming means flicking back and forth to a table view to copy names.
-`upstream_columns()` is already what feeds the picker menu elsewhere;
-Rename wants an insert-a-name affordance next to the text box.
+**H2. Let Rename Columns list the columns it could rename.**
+Shipped 2026-08-20; see `ideas_archived.md` #12 (Expression got the inline
+half of it at the same time).
 
 ---
 
