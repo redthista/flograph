@@ -2005,6 +2005,7 @@ class MainWindow(QMainWindow):
     def _show_stats(self) -> None:
         if self._stats_window is None:
             self._stats_window = StatsWindow(self, self)
+            self._stats_window.reveal_requested.connect(self._go_to_node)
         self._stats_window.show()
         self._stats_window.raise_()
         self._stats_window.activateWindow()
@@ -3039,7 +3040,13 @@ class MainWindow(QMainWindow):
         """Select a node and bring the model canvas to it — the Goto/From
         'Go to Connected Node' menu jumps here without the user having to
         hunt for it by eye across a big graph, and so does a hit in the
-        Find Node bar."""
+        Find Node bar or a clicked name in the statistics window.
+
+        Jumping is a model-canvas act, so a dashboard or report page steps
+        aside for it, on the same reasoning as _find_node: the menu item
+        would otherwise appear to do nothing over a hidden canvas."""
+        if self.page_bar.current_page_id() is not None:
+            self.page_bar.select_page(None)
         self.view.go_to_node(node_id)
 
     def _add_view_actions(self, menu: QMenu, node_id: str) -> list:

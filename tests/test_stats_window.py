@@ -5,7 +5,7 @@ they are visible — a widget can report a perfectly good geometry and draw
 nothing at all, which is exactly how an invisible glyph gets shipped.
 """
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
 
 from flograph.core import Graph, NodeRegistry
@@ -13,7 +13,8 @@ from flograph.engine.runstats import NodeRun, RunRecord
 from flograph.engine.scheduler import ExecutionEngine
 from flograph.ui import theme
 from flograph.ui.mainwindow import MainWindow
-from flograph.ui.stats_window import (CanvasTab, FrameStrip, GraphTab, RunTab,
+from flograph.ui.stats_window import (GUTTER, ROW_H, ROW_MAX, CanvasTab,
+                                      FrameStrip, GraphTab, RunTab,
                                       RunTimeline, SortableItem, StatsWindow)
 
 SCRIPT = "flograph.scripting.python_script"
@@ -64,6 +65,17 @@ def sample_record() -> RunRecord:
                     output_bytes=64, summary="int · 4"),
             NodeRun("c", "Export", "failed", started=3.5, wall_time=0.1),
         ])
+
+
+def name_point(timeline: RunTimeline, row: int) -> QPoint:
+    """Where node `row`'s name is painted. The arithmetic mirrors
+    RunTimeline._row_geometry on purpose: if the two ever disagree, a click
+    lands somewhere other than where the eye says it does."""
+    record = timeline._record
+    n = len(record.nodes)
+    row_h = min(ROW_MAX, max(ROW_H, (timeline.height() - 8) / n))
+    top_pad = max(4.0, (timeline.height() - n * row_h) / 2)
+    return QPoint((GUTTER - 8) // 2, int(top_pad + row * row_h + row_h / 2))
 
 
 class TestSortableItem:
@@ -127,6 +139,55 @@ class TestRunTimeline:
                     for y in range(image.height())
                     for x in range(image.width()))
         assert found
+
+    def test_clicking_a_name_emits_that_node(self, qtbot):
+        timeline = RunTimeline()
+        qtbot.addWidget(timeline)
+        timeline.resize(400, 200)
+        timeline.show()
+        timeline.set_record(sample_record())
+        clicked = []
+        timeline.node_clicked.connect(clicked.append)
+        qtbot.mouseClick(timeline, Qt.LeftButton,
+                         pos=name_point(timeline, 1))
+        assert clicked == ["b"]
+
+    def test_clicking_the_track_does_nothing(self, qtbot):
+        """Only the name gutter jumps: the bars answer "when", not "which"."""
+        timeline = RunTimeline()
+        qtbot.addWidget(timeline)
+        timeline.resize(400, 200)
+        timeline.show()
+        timeline.set_record(sample_record())
+        clicked = []
+        timeline.node_clicked.connect(clicked.append)
+        where = name_point(timeline, 0)
+        where.setX(GUTTER + 60)
+        qtbot.mouseClick(timeline, Qt.LeftButton, pos=where)
+        assert clicked == []
+
+    def test_clicking_below_the_rows_does_nothing(self, qtbot):
+        timeline = RunTimeline()
+        qtbot.addWidget(timeline)
+        timeline.resize(400, 60)      # shorter than three rows need
+        timeline.show()
+        timeline.set_record(sample_record())
+        clicked = []
+        timeline.node_clicked.connect(clicked.append)
+        qtbot.mouseClick(timeline, Qt.LeftButton,
+                         pos=QPoint(timeline.width() // 2,
+                                    timeline.height() - 2))
+        assert clicked == []
+
+    def test_clicking_with_nothing_to_show_does_nothing(self, qtbot):
+        timeline = RunTimeline()
+        qtbot.addWidget(timeline)
+        timeline.resize(400, 200)
+        timeline.show()
+        clicked = []
+        timeline.node_clicked.connect(clicked.append)
+        qtbot.mouseClick(timeline, Qt.LeftButton, pos=QPoint(20, 20))
+        assert clicked == []
 
 
 class TestFrameStrip:
@@ -265,6 +326,49 @@ class TestRunTab:
         tab.refresh()
         assert "Cancelled" in tab.summary.text()
 
+    def test_rows_carry_their_node_id(self, qtbot):
+        """The label can lie (two nodes called Sales); the id cannot."""
+        engine = ExecutionEngine(Graph())
+        engine.history.add(sample_record())
+        tab = self._tab(qtbot, engine)
+        tab.refresh()
+        ids = {tab.table.item(r, 0).data(Qt.UserRole) for r in range(3)}
+        assert ids == {"a", "b", "c"}
+
+    def test_clicking_anywhere_in_a_row_jumps_to_the_node(self, qtbot):
+        revealed = []
+        engine = ExecutionEngine(Graph())
+        engine.history.add(sample_record())
+        tab = RunTab(engine, revealed.append)
+        qtbot.addWidget(tab)
+        tab.show()
+        tab.refresh()
+        # a cell well away from the Node column — the whole row jumps
+        rect = tab.table.visualItemRect(tab.table.item(0, 3))
+        qtbot.mouseClick(tab.table.viewport(), Qt.LeftButton,
+                         pos=rect.center())
+        assert revealed == ["a"]
+
+    def test_the_timeline_is_wired_to_reveal_too(self, qtbot):
+        revealed = []
+        engine = ExecutionEngine(Graph())
+        engine.history.add(sample_record())
+        tab = RunTab(engine, revealed.append)
+        qtbot.addWidget(tab)
+        tab.refresh()
+        tab.timeline.node_clicked.emit("c")
+        assert revealed == ["c"]
+
+    def test_clicks_without_a_destination_are_harmless(self, qtbot):
+        """A bare RunTab (no reveal target — as in some embeddings) must
+        not turn a click into an error."""
+        engine = ExecutionEngine(Graph())
+        engine.history.add(sample_record())
+        tab = self._tab(qtbot, engine)
+        tab.refresh()
+        tab.table.cellClicked.emit(0, 0)      # no exception, nothing happens
+        tab._reveal_node(None)                # nor a cell somehow without one
+
 
 class TestGraphTab:
     def test_counts_an_empty_project(self, qtbot):
@@ -319,6 +423,25 @@ class TestGraphTab:
         states = {tab.table.item(r, 0).text(): tab.table.item(r, 3).text()
                   for r in range(tab.table.rowCount())}
         assert "shared" in states["Reroute"]
+
+    def test_clicking_a_cached_node_jumps_to_it(self, qtbot, registry):
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        const = graph.add_node(registry.instantiate("flograph.util.constant"))
+        dot = graph.add_node(registry.instantiate("flograph.util.reroute"))
+        graph.connect(const.id, "value", dot.id, "value")
+        with qtbot.waitSignal(engine.run_finished, timeout=20000):
+            engine.run_all()
+        revealed = []
+        tab = GraphTab(engine, revealed.append)
+        qtbot.addWidget(tab)
+        tab.refresh()
+        expected = tab.table.item(0, 0).data(Qt.UserRole)
+        assert expected in {const.id, dot.id}
+        rect = tab.table.visualItemRect(tab.table.item(0, 1))
+        qtbot.mouseClick(tab.table.viewport(), Qt.LeftButton,
+                         pos=rect.center())
+        assert revealed == [expected]
 
 
 class TestCanvasTab:
@@ -412,3 +535,27 @@ class TestStatsWindow:
         stats.refresh()
         assert stats.run_tab.table.rowCount() == 1
         assert stats.run_tab.table.item(0, 0).text() == "Work"
+
+    def test_a_clicked_name_takes_the_canvas_to_the_node(
+            self, qtbot, window, registry):
+        """The point of G5: reading a name here and finding it there are one
+        gesture. The node is parked far from where the view starts so that
+        centring is provable, not just selection."""
+        node = window.graph.add_node(registry.instantiate(SCRIPT))
+        window.graph.set_code(node.id, source(
+            "Work", "import time\ndef run(ctx):\n    time.sleep(0.05)\n    return 7"))
+        window.graph.move_node(node.id, (4000, 4000))
+        with qtbot.waitSignal(window.engine.run_finished, timeout=20000):
+            window.engine.run_all()
+        window._show_stats()      # wires reveal_requested → _go_to_node
+        stats = window._stats_window
+        qtbot.addWidget(stats)
+        stats.refresh()
+        rect = stats.run_tab.table.visualItemRect(
+            stats.run_tab.table.item(0, 1))     # a non-Node column: row-wide
+        qtbot.mouseClick(stats.run_tab.table.viewport(), Qt.LeftButton,
+                         pos=rect.center())
+        item = window.scene.node_items[node.id]
+        assert item.isSelected()
+        centre = window.view.mapToScene(window.view.viewport().rect().center())
+        assert item.sceneBoundingRect().contains(centre)

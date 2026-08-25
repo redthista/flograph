@@ -14,16 +14,19 @@ different shapes:
   simplification is doing anything.
 
 The window is modeless and refreshes itself while it is open, so it can be
-left on a second monitor during a run. Everything it shows is read from
-structures the engine and the view maintain anyway — it starts no work of
-its own beyond a repaint timer.
+left on a second monitor during a run. A node's name is clickable wherever
+it appears — in either table and on the timeline — and clicking it selects
+the node on the model canvas and brings the view to it, so reading a name
+here and finding it there are one gesture. Everything the window shows is
+read from structures the engine and the view maintain anyway — it starts no
+work of its own beyond a repaint timer.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 import psutil
-from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog,
                                QHBoxLayout, QHeaderView, QLabel, QScrollArea,
@@ -85,18 +88,68 @@ class RunTimeline(QWidget):
     needed no new drawing: one row per node against a wall-clock axis already
     says it. A staircase is a flow running one node at a time; a block is a
     flow running wide.
+
+    A node's name in the gutter is clickable and takes the canvas to it —
+    the timeline is the tab for "what was slow", and the follow-up question
+    is always "where is that one".
     """
+
+    node_clicked = Signal(str)     # node_id
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._record: Optional[RunRecord] = None
         self.setMinimumHeight(ROW_H)
+        # hover feedback needs moves between presses
+        self.setMouseTracking(True)
 
     def set_record(self, record: Optional[RunRecord]) -> None:
         self._record = record
         rows = len(record.nodes) if record else 0
         self.setMinimumHeight(max(ROW_H, rows * ROW_H + 8))
         self.update()
+
+    def _row_geometry(self) -> Optional[tuple[float, float]]:
+        """(top_pad, row_h) as painted, or None with nothing to show.
+
+        Rows share whatever height there is rather than stacking at the top
+        of an empty panel, but only up to a point — three nodes should not
+        get bars a centimetre thick just because the window is tall. Hit
+        testing shares this so a click lands where the eye says it does.
+        """
+        record = self._record
+        if record is None or not record.nodes:
+            return None
+        row_h = min(ROW_MAX, max(ROW_H, (self.height() - 8) / len(record.nodes)))
+        top_pad = max(4.0, (self.height() - len(record.nodes) * row_h) / 2)
+        return top_pad, row_h
+
+    def _node_at(self, pos: QPointF) -> Optional[str]:
+        """The node whose name sits under `pos`, or None.
+
+        Only the name gutter is clickable: the track belongs to the bars,
+        which answer "when", not "which".
+        """
+        geo = self._row_geometry()
+        if geo is None:
+            return None
+        top_pad, row_h = geo
+        nodes = self._record.nodes
+        row = int((pos.y() - top_pad) // row_h)
+        if not 0 <= row < len(nodes) or pos.x() > GUTTER - 8:
+            return None
+        return nodes[row].node_id
+
+    def mousePressEvent(self, event) -> None:
+        node_id = self._node_at(event.position())
+        if node_id is not None:
+            self.node_clicked.emit(node_id)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        on_name = self._node_at(event.position()) is not None
+        self.setCursor(Qt.PointingHandCursor if on_name else Qt.ArrowCursor)
+        super().mouseMoveEvent(event)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -122,10 +175,8 @@ class RunTimeline(QWidget):
         span = max(record.wall_time, 1e-6)
         track_x = GUTTER
         track_w = max(40, self.width() - GUTTER - 70)
-        # Rows share whatever height there is rather than stacking at the top
-        # of an empty panel, but only up to a point — three nodes should not
-        # get bars a centimetre thick just because the window is tall.
-        row_h = min(ROW_MAX, max(ROW_H, (self.height() - 8) / len(record.nodes)))
+        # the row layout the click hit-testing sees too — see _row_geometry
+        top_pad, row_h = self._row_geometry()
 
         font = painter.font()
         small = QFont(font)
@@ -134,10 +185,6 @@ class RunTimeline(QWidget):
         metrics = painter.fontMetrics()
 
         bar_h = min(12.0, row_h - 8)
-        # Centred vertically when the rows do not fill the panel. A short run
-        # otherwise sits clamped to the top of a large void, which reads as
-        # "the rest is loading" rather than "that was the whole run".
-        top_pad = max(4.0, (self.height() - len(record.nodes) * row_h) / 2)
         for row, node in enumerate(record.nodes):
             y = top_pad + row * row_h
             label = metrics.elidedText(node.label, Qt.ElideRight, GUTTER - 12)
@@ -170,9 +217,11 @@ class RunTab(QWidget):
 
     COLUMNS = ("Node", "Result", "Time", "Share", "Peak RAM", "Output", "Produced")
 
-    def __init__(self, engine, parent=None) -> None:
+    def __init__(self, engine, reveal: Optional[Callable[[str], None]] = None,
+                 parent=None) -> None:
         super().__init__(parent)
         self._engine = engine
+        self._reveal = reveal
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(6)
@@ -225,10 +274,12 @@ class RunTab(QWidget):
         # answer. Set once: every later refill re-sorts on whatever indicator
         # is current, so a column the user picked is not overridden.
         self.table.sortByColumn(2, Qt.DescendingOrder)
+        self.table.cellClicked.connect(self._on_cell_clicked)
         table_layout.addWidget(self.table, 1)
 
         hint = QLabel("Click a column to sort — by Time for the slowest step, "
-                      "by Peak RAM for the hungriest. Peak RAM is the whole "
+                      "by Peak RAM for the hungriest. Click a node's name to "
+                      "jump to it on the canvas. Peak RAM is the whole "
                       "process sampled while that node ran, so it includes "
                       "anything else happening at the time.")
         hint.setStyleSheet(_DIM)
@@ -236,6 +287,7 @@ class RunTab(QWidget):
         table_layout.addWidget(hint)
         self.sub_tabs.addTab(table_page, "Table")
 
+        self.timeline.node_clicked.connect(self._reveal_node)
         self._records: list = []
 
     # ------------------------------------------------------------- contents
@@ -330,6 +382,9 @@ class RunTab(QWidget):
                 SortableItem(format_bytes(node.output_bytes), node.output_bytes),
                 SortableItem(node.summary or "—", node.summary),
             )
+            # the id the click hands to the canvas — two nodes can share a
+            # label, and a renamed one must still be findable
+            cells[0].setData(Qt.UserRole, node.node_id)
             for col, cell in enumerate(cells):
                 if col and cell.key == 0 and col in (4, 5):
                     cell.setForeground(theme.NODE_SUBTEXT)
@@ -340,15 +395,26 @@ class RunTab(QWidget):
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
 
+    def _on_cell_clicked(self, row: int, _col: int) -> None:
+        item = self.table.item(row, 0)
+        if item is not None:
+            self._reveal_node(item.data(Qt.UserRole))
+
+    def _reveal_node(self, node_id: Optional[str]) -> None:
+        if node_id and self._reveal is not None:
+            self._reveal(node_id)
+
 
 class GraphTab(QWidget):
     """The project at rest — size, staleness, and what is holding memory."""
 
     COLUMNS = ("Node", "Memory", "Last run", "State")
 
-    def __init__(self, engine, parent=None) -> None:
+    def __init__(self, engine, reveal: Optional[Callable[[str], None]] = None,
+                 parent=None) -> None:
         super().__init__(parent)
         self._engine = engine
+        self._reveal = reveal
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(4)
@@ -371,12 +437,14 @@ class GraphTab(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.sortByColumn(1, Qt.DescendingOrder)   # "Heaviest", as billed
+        self.table.cellClicked.connect(self._on_cell_clicked)
         layout.addWidget(self.table, 1)
 
         hint = QLabel("A node marked “shared” is re-serving the value of the "
                       "node it reads from — a Goto, a From or a Reroute. Its "
                       "size is real but it is not a second copy, and it is "
-                      "counted once in the total.")
+                      "counted once in the total. Click a node's name to "
+                      "jump to it on the canvas.")
         hint.setStyleSheet(_DIM)
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -421,17 +489,29 @@ class GraphTab(QWidget):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for row, (node, entry, state) in enumerate(rows):
-            for col, cell in enumerate((
+            cells = (
                 SortableItem(node.label, node.label.lower()),
                 SortableItem(format_bytes(entry.memory_bytes),
                              entry.memory_bytes),
                 SortableItem(format_seconds(entry.wall_time), entry.wall_time),
                 SortableItem(state, state),
-            )):
+            )
+            # the id a click hands to the canvas — see RunTab._fill_table
+            cells[0].setData(Qt.UserRole, node.id)
+            for col, cell in enumerate(cells):
                 self.table.setItem(row, col, cell)
         self.table.setSortingEnabled(True)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+
+    def _on_cell_clicked(self, row: int, _col: int) -> None:
+        item = self.table.item(row, 0)
+        if item is not None:
+            self._reveal_node(item.data(Qt.UserRole))
+
+    def _reveal_node(self, node_id: Optional[str]) -> None:
+        if node_id and self._reveal is not None:
+            self._reveal(node_id)
 
 
 class FrameStrip(QWidget):
@@ -610,6 +690,10 @@ class CanvasTab(QWidget):
 class StatsWindow(QDialog):
     """Modeless statistics window — run cost, project weight, canvas health."""
 
+    #: a clicked node name in the Run or Graph tab; the owner connects this
+    #: to whatever brings the model canvas to the node
+    reveal_requested = Signal(str)
+
     def __init__(self, window, parent=None) -> None:
         super().__init__(parent or window)
         self.setWindowTitle("Statistics")
@@ -621,8 +705,8 @@ class StatsWindow(QDialog):
         layout.setContentsMargins(6, 6, 6, 6)
 
         self.tabs = QTabWidget()
-        self.run_tab = RunTab(window.engine)
-        self.graph_tab = GraphTab(window.engine)
+        self.run_tab = RunTab(window.engine, self.reveal_requested.emit)
+        self.graph_tab = GraphTab(window.engine, self.reveal_requested.emit)
         self.canvas_tab = CanvasTab(window)
         self.tabs.addTab(self.run_tab, "Run")
         self.tabs.addTab(self.graph_tab, "Graph")

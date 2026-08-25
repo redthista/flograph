@@ -75,10 +75,7 @@ dropping one onto an existing node replaces it, keeping the connections.
 Shipped 2026-08-25; see `ideas_archived.md` #9.
 
 **G5. Click a node's name in the statistics window to jump to it** (Stu).
-Debugging a slow flow currently means reading a name in one window and
-hunting for it in another. The machinery is already written and reusable:
-`ui/canvas/node_search.py` selects and centres a node as you move through
-its results.
+Shipped 2026-08-25; see `ideas_archived.md` #10.
 
 ---
 
