@@ -306,6 +306,31 @@ class HeavyBadge(NodeBadge):
                 QRectF(0.6, 0.8 + i * 3.3, self.W - 1.2, 3.6))
 
 
+class ManualBadge(NodeBadge):
+    """A hollow play triangle: this node runs only when somebody asks it to.
+
+    Deliberately the same family as the freeze badge — one is the pause and
+    one is the press — because the two flags are neighbours in meaning and a
+    person who has met one should be able to guess the other. Hollow rather
+    than filled so it cannot be mistaken for a status light: the LED says
+    what the node is doing now, and this says what it will do next time Run
+    All is pressed.
+    """
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(Qt.NoBrush)
+        pen = QPen(self.colour, 1.3)
+        pen.setJoinStyle(Qt.MiterJoin)   # a sharp nose, not a rounded blob
+        painter.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(1.2, 0.9)
+        path.lineTo(self.W - 1.0, self.H / 2.0)
+        path.lineTo(1.2, self.H - 0.9)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+
 class FreezeBadge(NodeBadge):
     """A pause glyph: this node's output is pinned and it will not re-run.
 
@@ -802,7 +827,16 @@ class NodeItem(QGraphicsObject):
         # painter cannot reach.
         self._lock_badge = LockBadge(self)
         self._freeze_badge = FreezeBadge(self)
+        self._manual_badge = ManualBadge(self)
         self._heavy_badge = HeavyBadge(self)
+        # The node's own two run flags, and the same two as the frames
+        # around it are currently applying — kept apart so the node can be
+        # drawn as the run will treat it without either overwriting the
+        # other. See set_frame_flags.
+        self._own_active = bool(node.active)
+        self._own_manual = bool(node.manual)
+        self._frame_manual = False
+        self._frame_inactive = False
         # The same amber as a stale pin: one colour meaning "worth a look,
         # nothing is broken" across the whole app.
         self._heavy_badge.colour = theme.PIN_STALE
@@ -842,6 +876,7 @@ class NodeItem(QGraphicsObject):
         # and set_locked refreshes the tooltip a second time on purpose.
         self.set_active(node.active)
         self.set_frozen(node.frozen)
+        self.set_manual(node.manual)
         self.set_locked(node.locked)
 
     # ------------------------------------------------------------- geometry
@@ -2572,7 +2607,44 @@ class NodeItem(QGraphicsObject):
         would still miss the embedded widgets, which are real QWidgets drawn
         by Qt, not by us; item opacity dims those too.
         """
-        self.setOpacity(1.0 if active else DEACTIVATED_OPACITY)
+        self._own_active = bool(active)
+        self._apply_run_flags()
+
+    def set_manual(self, manual: bool) -> None:
+        """Show the play triangle: this node sits out every run that did not
+        name it."""
+        self._own_manual = bool(manual)
+        self._apply_run_flags()
+
+    def set_frame_flags(self, manual: bool, inactive: bool) -> None:
+        """What the frames around this node are doing to it.
+
+        A frame carries `active` and `manual` on behalf of whatever is
+        inside it, and the node has no say in that and stores none of it —
+        it is simply drawn as what it will be treated as on the next run.
+        Which is why this is a separate pair of flags rather than a write to
+        the node's own: drag the node out of the frame and it goes back to
+        answering for itself, with nothing to undo.
+        """
+        manual, inactive = bool(manual), bool(inactive)
+        if (manual, inactive) == (self._frame_manual, self._frame_inactive):
+            return
+        self._frame_manual = manual
+        self._frame_inactive = inactive
+        self._apply_run_flags()
+
+    def held_by_frame(self) -> bool:
+        """True when a frame — not the node's own flag — is holding it back."""
+        return self._frame_manual and not self._own_manual
+
+    def _apply_run_flags(self) -> None:
+        """Draw the node as the next run will treat it: its own two flags,
+        and whatever the frames around it add on top."""
+        self._manual_badge.setVisible(self._own_manual or self._frame_manual)
+        self.setOpacity(1.0 if self._own_active and not self._frame_inactive
+                        else DEACTIVATED_OPACITY)
+        self._layout_badges()
+        self._refresh_tooltip()
         self.update()
 
     def set_locked(self, locked: bool) -> None:
@@ -2665,13 +2737,14 @@ class NodeItem(QGraphicsObject):
             y = status.center().y() - NodeBadge.H / 2
             x = self.width / 2 - LED_RADIUS - 6.0 - NodeBadge.W
             for badge in (self._heavy_badge, self._freeze_badge,
-                          self._lock_badge):
+                          self._manual_badge, self._lock_badge):
                 if badge.isVisible():
                     badge.setPos(x, y)
                     x -= NodeBadge.W + 3.0
             return
         x = 1.0
-        for badge in (self._heavy_badge, self._freeze_badge, self._lock_badge):
+        for badge in (self._heavy_badge, self._freeze_badge,
+                      self._manual_badge, self._lock_badge):
             if badge.isVisible():
                 badge.setPos(x, -(NodeBadge.H + 3.0))
                 x += NodeBadge.W + 4.0
@@ -3540,6 +3613,17 @@ class NodeItem(QGraphicsObject):
             self.setToolTip("Frozen — serving its last output and skipped by "
                             "every run. Right-click > Unfreeze to run it "
                             "again.")
+        elif self._frame_inactive and self.node.active:
+            self.setToolTip("Disabled by its frame — nothing in that frame "
+                            "runs, nor anything below it. Right-click the "
+                            "frame > Enable frame.")
+        elif self.held_by_frame():
+            self.setToolTip("Held by its frame — Run All walks past this "
+                            "one. Run the frame, or drag the node out of it.")
+        elif self.node.manual:
+            self.setToolTip("Manual — Run All walks past this one. Run it "
+                            "from the right-click menu, or from an Action "
+                            "Button that names it.")
         elif self.node.status == NodeStatus.ERROR:
             self.setToolTip(self.node.status_message)
         elif self.link_card and not self.node.description:

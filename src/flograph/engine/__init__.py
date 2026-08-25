@@ -8,8 +8,8 @@ from .cache_worker import CacheLoadRunnable, CacheLoadSignals
 from .context import CancellationToken, NodeCancelled, RunContext
 from .errors import NodeError, build_node_error
 from .introspect import upstream_columns
-from .scheduler import (ExecutionEngine, build_plan, default_workers,
-                        is_exclusive)
+from .scheduler import (ExecutionEngine, RunFlags, build_plan,
+                        default_workers, is_exclusive)
 from .worker import NodeRunnable, WorkerSignals
 
 __all__ = [
@@ -17,6 +17,7 @@ __all__ = [
     "CacheLoadRunnable", "CacheLoadSignals",
     "CancellationToken", "NodeCancelled", "RunContext",
     "NodeError", "build_node_error", "upstream_columns",
-    "ExecutionEngine", "build_plan", "default_workers", "is_exclusive",
+    "ExecutionEngine", "RunFlags", "build_plan", "default_workers",
+    "is_exclusive",
     "NodeRunnable", "WorkerSignals",
 ]

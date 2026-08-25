@@ -368,8 +368,9 @@ class TestTiles:
         assert not item._proxy.isVisible()  # no mini-window around it
 
         ran = []
-        monkeypatch.setattr(window.engine, "run_targets",
-                            lambda targets: ran.append(sorted(targets)))
+        monkeypatch.setattr(
+            window.engine, "run_targets",
+            lambda targets, asked=None: ran.append(sorted(targets)))
 
         view = DashboardView(page.scene)
         qtbot.addWidget(view)

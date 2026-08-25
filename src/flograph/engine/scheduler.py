@@ -198,15 +198,84 @@ def _read_only_view(value, _nested: bool = False):
     return value
 
 
+def _aimed_at(targets: Iterable[str],
+              asked: "Optional[Iterable[str]]") -> set:
+    """Which of a run's targets the user actually pointed at.
+
+    Every run carries a list of targets, but they are arrived at two
+    different ways and a manual node has to tell them apart. Run All hands
+    over the whole graph because that is what "all" is, not because anyone
+    named those nodes; Run To This Node, Run Selected and an Action Button's
+    named list are somebody aiming.
+
+    `asked=None` — the default, and every caller that existed before manual
+    nodes did — means the targets *are* the aim, which is true of all of
+    them. Run All and the reactive re-run pass an explicit empty set to say
+    otherwise.
+    """
+    return set(targets) if asked is None else set(asked)
+
+
+class RunFlags:
+    """A node's `active` and `manual` once the frames holding it have had
+    their say.
+
+    A frame carries the same two flags on behalf of its contents, and they
+    are state on the frame rather than a bulk edit of the nodes inside it —
+    so the answer for a given node has to be worked out at the moment a run
+    is built, not written down when the frame was set. That way a node
+    dragged into a held frame is held, and one dragged out is not, with
+    nothing to keep in step.
+
+    `frame_members` is `{frame_id: node_ids}`, supplied by whoever knows
+    which nodes a frame holds. That is the canvas, not the graph: frames do
+    not own their contents, they sit behind them, and the containment rule
+    has to cope with folded frames whose members are nowhere near the
+    rectangle (see MainWindow._nodes_of). Left out — the default, and every
+    caller that has no frames in play — nothing is held and each node
+    answers for itself.
+    """
+
+    def __init__(self, graph: Graph, frame_members=None) -> None:
+        self._graph = graph
+        off: set = set()
+        held: set = set()
+        for frame_id, node_ids in (frame_members or {}).items():
+            frame = graph.frames.get(frame_id)
+            if frame is None:
+                continue
+            if not frame.active:
+                off |= set(node_ids)
+            if frame.manual:
+                held |= set(node_ids)
+        self.off = off
+        self.held = held
+
+    def active(self, node_id: str) -> bool:
+        node = self._graph.nodes.get(node_id)
+        return bool(node and node.active) and node_id not in self.off
+
+    def manual(self, node_id: str) -> bool:
+        node = self._graph.nodes.get(node_id)
+        return bool(node and node.manual) or node_id in self.held
+
+
 def build_plan(graph: Graph, targets: Iterable[str],
-               cache: "Optional[OutputCache]" = None) -> list[str]:
+               cache: "Optional[OutputCache]" = None,
+               asked: "Optional[Iterable[str]]" = None,
+               flags: "Optional[RunFlags]" = None) -> list[str]:
     """The nodes that must execute to satisfy `targets`: every *dirty* node
     among the targets and their ancestors, in topological order. Clean nodes
     are skipped — their outputs come from the cache.
 
-    `cache` is consulted only to tell a frozen node that has something to
-    serve from one that does not; None means "nothing is cached".
+    `cache` is consulted only to tell a frozen or manual node that has
+    something to serve from one that does not; None means "nothing is
+    cached". `asked` is the subset of targets the user aimed at, and only
+    manual nodes read it — see `_aimed_at`. `flags` resolves each node's
+    `active` and `manual` against the frames holding it — see `RunFlags`.
     """
+    flags = flags if flags is not None else RunFlags(graph)
+    aimed = _aimed_at(targets, asked)
     wanted = set(targets)
     for target in list(wanted):
         wanted |= graph.upstream(target)
@@ -217,8 +286,21 @@ def build_plan(graph: Graph, targets: Iterable[str],
     # it is. A node deactivated *downstream* of the targets is not in
     # `wanted` to begin with, so this only ever removes.
     for node_id, node in graph.nodes.items():
-        if not node.active:
+        if not flags.active(node_id):
             wanted -= {node_id} | graph.downstream(node_id)
+        elif flags.manual(node_id) and node_id not in aimed:
+            # Nobody asked for this one, so it does not fire. What happens
+            # below it depends on whether it has anything to give: with a
+            # cached value it behaves exactly like a frozen node, and the
+            # branch runs off the last result it produced. With nothing
+            # cached it behaves like a deactivated one, because there is
+            # nothing for the branch to run on and a row of nodes each
+            # reporting a missing input reads as a broken graph rather than
+            # the deliberate choice it is.
+            if cache is not None and cache.has(node_id):
+                wanted.discard(node_id)
+            else:
+                wanted -= {node_id} | graph.downstream(node_id)
         elif node.frozen and cache is not None and cache.has(node_id):
             # The opposite of deactivating: the node itself is skipped but
             # everything below it stays, running off the value it is
@@ -235,35 +317,50 @@ def build_plan(graph: Graph, targets: Iterable[str],
 
 def skipped_summary(graph: Graph, targets: Iterable[str],
                     cache: "Optional[OutputCache]",
-                    plan: Iterable[str]) -> tuple:
-    """`(clean, frozen, inactive)` — why the nodes this run left out were
-    left out.
+                    plan: Iterable[str],
+                    asked: "Optional[Iterable[str]]" = None,
+                    flags: "Optional[RunFlags]" = None) -> tuple:
+    """`(clean, frozen, inactive, manual)` — why the nodes this run left out
+    were left out.
 
     Walks the same closure build_plan does rather than having build_plan
     hand the numbers back: the plan is what the engine needs and this is
     what the stats panel needs, and keeping them apart leaves build_plan a
     function that returns one thing.
     """
+    flags = flags if flags is not None else RunFlags(graph)
+    aimed = _aimed_at(targets, asked)
     considered = set(targets)
     for target in list(considered):
         considered |= graph.upstream(target)
     blocked: set = set()
+    held: set = set()
     for node_id, node in graph.nodes.items():
-        if not node.active:
+        if not flags.active(node_id):
             blocked |= {node_id} | graph.downstream(node_id)
+        elif flags.manual(node_id) and node_id not in aimed:
+            # The same split build_plan makes: a manual node with nothing to
+            # serve takes its branch with it, and those descendants were
+            # left out on its authority, not their own.
+            if cache is not None and cache.has(node_id):
+                held.add(node_id)
+            else:
+                held |= {node_id} | graph.downstream(node_id)
     running = set(plan)
-    clean = frozen = inactive = 0
+    clean = frozen = inactive = manual = 0
     for node_id in considered - running:
         node = graph.nodes.get(node_id)
         if node is None:
             continue
         if node_id in blocked:
             inactive += 1
+        elif node_id in held:
+            manual += 1
         elif node.frozen and cache is not None and cache.has(node_id):
             frozen += 1
         else:
             clean += 1
-    return clean, frozen, inactive
+    return clean, frozen, inactive, manual
 
 
 class ExecutionEngine(QObject):
@@ -348,6 +445,15 @@ class ExecutionEngine(QObject):
         self._warm_generation = 0
         self._warm_signals: list = []
 
+        # Where the frames' run flags get their membership from: a callable
+        # returning {frame_id: node_ids} for the frames carrying one. The
+        # canvas sets it, because containment is its rule and not the
+        # graph's. Asked once per run — every entry point goes through
+        # run_targets — so no view has to keep the engine informed as things
+        # are dragged about, and a stale answer is impossible by
+        # construction. None, in a headless run or a test, means no frame
+        # holds anything.
+        self.frame_membership = None
         # What runs cost, kept for the session (see engine.runstats).
         self.history = RunHistory()
         # Polling process memory is cheap but not free and not everyone wants
@@ -382,16 +488,31 @@ class ExecutionEngine(QObject):
         return self._active
 
     def run_all(self) -> None:
-        self.run_targets(list(self.graph.nodes))
+        # Every node is a target and none of them was asked for by name,
+        # which is the whole difference between this and Run Selected over a
+        # selection that happens to be everything. Manual nodes read it.
+        self.run_targets(list(self.graph.nodes), asked=())
 
     def run_to(self, node_id: str) -> None:
         self.run_targets([node_id])
 
-    def run_targets(self, targets: list[str]) -> None:
+    def run_flags(self) -> RunFlags:
+        """This moment's answer to "which nodes are held back, and by what".
+
+        Rebuilt per run rather than cached: the frames' flags are fixed but
+        what each frame holds is not, and a node dragged in between two runs
+        has to be held by the second one.
+        """
+        members = self.frame_membership() if self.frame_membership else None
+        return RunFlags(self.graph, members)
+
+    def run_targets(self, targets: list[str],
+                    asked: "Optional[Iterable[str]]" = None) -> None:
         if self._active:
             return
         self._token = CancellationToken()
-        plan = build_plan(self.graph, targets, self.cache)
+        flags = self.run_flags()
+        plan = build_plan(self.graph, targets, self.cache, asked, flags)
         self._plan_total = len(plan)
         self._plan_done = 0
         self._had_failure = False
@@ -405,7 +526,7 @@ class ExecutionEngine(QObject):
         self._poll_pressure()
         self._pressure_timer.start()
         self._seed_readiness(plan)
-        self._open_record(targets, plan)
+        self._open_record(targets, plan, asked, flags)
         for node_id in plan:
             self.graph.set_status(node_id, NodeStatus.QUEUED)
         self.run_started.emit()
@@ -620,8 +741,11 @@ class ExecutionEngine(QObject):
         self._requested.clear()
         if targets:
             # the plan takes over from here: its nodes go QUEUED, which is
-            # what the views paint from once a run is actually under way
-            self.run_targets(targets)
+            # what the views paint from once a run is actually under way.
+            # Nothing here was asked for by name — a slider moved and this
+            # is the subgraph below it — so a manual node in the way stays
+            # where it is rather than being fired by a drag.
+            self.run_targets(targets, asked=())
         self.request_changed.emit()
 
     def cancel(self) -> None:
@@ -960,13 +1084,16 @@ class ExecutionEngine(QObject):
 
     # ----------------------------------------------------------- recording
 
-    def _open_record(self, targets: Iterable[str], plan: list[str]) -> None:
+    def _open_record(self, targets: Iterable[str], plan: list[str],
+                     asked: "Optional[Iterable[str]]" = None,
+                     flags: "Optional[RunFlags]" = None) -> None:
         rss = self._sampler.rss()
         self._record = RunRecord(rss_start=rss, rss_peak=rss,
                                  workers=self.worker_limit())
         (self._record.skipped_clean, self._record.skipped_frozen,
-         self._record.skipped_inactive) = skipped_summary(
-            self.graph, targets, self.cache, plan)
+         self._record.skipped_inactive,
+         self._record.skipped_manual) = skipped_summary(
+            self.graph, targets, self.cache, plan, asked, flags)
         self._run_started = time.perf_counter()
         if self.sampling_enabled:
             self._sample_timer.start()

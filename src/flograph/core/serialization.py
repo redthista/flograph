@@ -61,6 +61,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "active": n.active,
                     "locked": n.locked,
                     "frozen": n.frozen,
+                    "manual": n.manual,
                     "frozen_fingerprint": n.frozen_fingerprint,
                     "exclusive": n.exclusive_override,
                     "preview": n.canvas_preview_enabled,
@@ -91,6 +92,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "rect": list(f.rect),
                     "color": f.color,
                     "z": f.z,
+                    "active": f.active,
+                    "manual": f.manual,
                     "collapsed": f.collapsed,
                     "expanded_size": (list(f.expanded_size)
                                       if f.expanded_size else None),
@@ -194,6 +197,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             active=entry.get("active", True),
             locked=entry.get("locked", False),
             frozen=entry.get("frozen", False),
+            manual=entry.get("manual", False),
             frozen_fingerprint=entry.get("frozen_fingerprint"),
             # absent = follow the script's NODE['exclusive'], which is what
             # every node written before concurrent execution existed wants
@@ -240,6 +244,10 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent before layering existed: add_frame then assigns z in
             # load order, which is exactly the old stacking
             z=entry.get("z"),
+            # absent before a frame carried run flags: a frame that says
+            # nothing holds nothing back, which is how they all behaved
+            active=bool(entry.get("active", True)),
+            manual=bool(entry.get("manual", False)),
             # absent before frames could collapse, which is the old meaning
             collapsed=bool(entry.get("collapsed", False)),
             expanded_size=(tuple(entry["expanded_size"])

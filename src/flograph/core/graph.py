@@ -54,6 +54,22 @@ class Frame:
     rect: tuple[float, float, float, float] = (0.0, 0.0, 300.0, 200.0)
     color: str = "#33415c"
     z: Optional[int] = None   # stacking order among frames; see core.layers
+    # The two run flags a frame carries on behalf of whatever is inside it,
+    # with the same meanings they have on a node: `active=False` takes the
+    # block out of every run, `manual=True` takes it out of every run that
+    # did not name it.
+    #
+    # State on the frame, not a bulk edit of the nodes that happened to be
+    # inside when it was set — which is the difference between a frame that
+    # *is* held back and one that once held back some nodes. A node dragged
+    # in afterwards is held too, a node dragged out stops being held, and
+    # nothing has to be written to either of them for that to be true.
+    #
+    # Which nodes a frame holds is still the canvas's containment rule
+    # rather than anything stored here (see MainWindow._nodes_of): frames
+    # do not own their contents, they sit behind them.
+    active: bool = True
+    manual: bool = False
     # Drawn as a single node-sized square instead of a region, with its
     # contents hidden and the wires crossing its boundary re-routed to pins
     # on the box.
@@ -235,6 +251,20 @@ class Graph:
         node = self.node(node_id)
         node.active = active
         self.events.active_changed.emit(node_id, active)
+
+    def set_manual(self, node_id: str, manual: bool) -> None:
+        """Run this node only when a run names it, or put it back in every
+        run.
+
+        No dirtying either way, unlike set_frozen. Releasing a pin is a
+        request for the expensive thing to happen again and has to leave
+        something for the next run to do; taking a node off manual is only a
+        statement about future runs, and dirtying it here would re-run a step
+        the user had just said they wanted control of.
+        """
+        node = self.node(node_id)
+        node.manual = manual
+        self.events.manual_changed.emit(node_id, manual)
 
     def set_frozen(self, node_id: str, frozen: bool,
                    fingerprint: Optional[str] = None) -> None:
@@ -803,6 +833,24 @@ class Graph:
         frame.members = tuple(members)
         frame.member_frames = tuple(member_frames)
         frame.nudged = tuple(nudged)
+        self.events.frame_changed.emit(frame)
+        return frame
+
+    def set_frame_run_flag(self, frame_id: str, flag: str,
+                           value: bool) -> Frame:
+        """Set `active` or `manual` on the frame itself.
+
+        Deliberately not routed through `update_frame`, for the reason
+        `apply_frame_collapse` is not: that one snapshots and rewrites
+        exactly title/rect/colour, so anything else passing through it would
+        be reverted by an unrelated frame edit.
+        """
+        if flag not in ("active", "manual"):
+            raise GraphError(f"unknown frame run flag {flag!r}")
+        frame = self.frames.get(frame_id)
+        if frame is None:
+            raise GraphError(f"no frame with id {frame_id!r}")
+        setattr(frame, flag, bool(value))
         self.events.frame_changed.emit(frame)
         return frame
 

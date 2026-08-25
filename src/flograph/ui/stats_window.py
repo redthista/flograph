@@ -293,13 +293,14 @@ class RunTab(QWidget):
         if record.peak_growth:
             parts.append(f"peak +{format_bytes(record.peak_growth)}")
         skipped = (record.skipped_clean + record.skipped_frozen
-                   + record.skipped_inactive)
+                   + record.skipped_inactive + record.skipped_manual)
         if skipped:
             detail = ", ".join(
                 f"{n} {name}" for n, name in
                 ((record.skipped_clean, "cached"),
                  (record.skipped_frozen, "frozen"),
-                 (record.skipped_inactive, "deactivated")) if n)
+                 (record.skipped_inactive, "deactivated"),
+                 (record.skipped_manual, "manual")) if n)
             parts.append(f"{skipped} skipped ({detail})")
         text = "  ·  ".join(parts)
         if record.failed:
@@ -386,6 +387,7 @@ class GraphTab(QWidget):
         cached = sum(1 for n in nodes if cache.has(n.id))
         dirty = sum(1 for n in nodes if n.dirty)
         frozen = sum(1 for n in nodes if n.frozen)
+        manual = sum(1 for n in nodes if n.manual)
         inactive = sum(1 for n in nodes if not n.active)
         locked = sum(1 for n in nodes if n.locked)
 
@@ -393,6 +395,7 @@ class GraphTab(QWidget):
             f"<b>{len(nodes)}</b> nodes  ·  {len(graph.connections)} wires  ·  "
             f"{len(graph.links)} links  ·  {len(graph.frames)} frames<br>"
             f"{cached} cached  ·  {dirty} stale  ·  {frozen} frozen  ·  "
+            f"{manual} manual  ·  "
             f"{inactive} deactivated  ·  {locked} locked<br>"
             f"Cached outputs hold <b>{format_bytes(cache.total_bytes())}</b>")
 
@@ -406,6 +409,8 @@ class GraphTab(QWidget):
                 state.append("shared")
             if node.frozen:
                 state.append("frozen")
+            if node.manual:
+                state.append("manual")
             if not node.active:
                 state.append("off")
             if node.dirty:

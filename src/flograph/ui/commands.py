@@ -353,6 +353,68 @@ class SetActiveCommand(QUndoCommand):
         self._graph.set_active(self._node_id, self._old)
 
 
+class SetManualCommand(QUndoCommand):
+    """Take a node out of every run that does not name it, or put it back.
+
+    Nothing is recomputed either way, and nothing is dirtied: this says what
+    future runs should do, and a node that was clean before is still clean.
+    """
+
+    def __init__(self, graph: Graph, node_id: str, manual: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("run node only when asked" if manual
+                         else "run node with the rest", parent)
+        self._graph = graph
+        self._node_id = node_id
+        self._old = graph.node(node_id).manual
+        self._new = manual
+
+    def redo(self) -> None:
+        self._graph.set_manual(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_manual(self._node_id, self._old)
+
+
+class SetFrameFlagCommand(QUndoCommand):
+    """One run flag — `active` or `manual` — set on the frame itself.
+
+    Deliberately not a bulk edit of the nodes inside. A frame does not own
+    its contents, so writing the flag onto whatever happened to be in the
+    rectangle at the time would make it a one-off action wearing a
+    checkbox's clothes: a node dragged in afterwards would run anyway, a
+    node dragged out would stay held, and the frame would have nothing to
+    show for being set. The flag lives on the frame, and which nodes it
+    reaches is worked out afresh each run (see engine.scheduler.RunFlags).
+
+    Nothing is dirtied and nothing is evicted from the cache. Disabling a
+    block of work is a statement about future runs, and quietly throwing
+    away results — which undo could not give back — would be more than was
+    asked for.
+    """
+
+    def __init__(self, graph: Graph, frame_id: str, flag: str, value: bool,
+                 text: str, parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__(text, parent)
+        if flag not in ("active", "manual"):
+            raise ValueError(f"unknown frame run flag {flag!r}")
+        self._graph = graph
+        self._frame_id = frame_id
+        self._flag = flag
+        self._new = bool(value)
+        self._old = bool(getattr(graph.frames[frame_id], flag))
+
+    def _apply(self, value: bool) -> None:
+        if self._frame_id in self._graph.frames:
+            self._graph.set_frame_run_flag(self._frame_id, self._flag, value)
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+
 class SetFrozenCommand(QUndoCommand):
     """Pin a node's output against every subsequent run, or release it.
 

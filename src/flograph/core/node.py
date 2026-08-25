@@ -95,6 +95,18 @@ class NodeInstance:
     # at the top of a flow — a slow read from a remote source — that is
     # already set up and working. Unfreeze to pull it again.
     frozen: bool = False
+    # Runs only in a run that names it: Run All walks past, and so does the
+    # reactive re-run a slider or a typed cell sets off. For the step nobody
+    # wants fired by accident — the write that costs money, the mail that
+    # goes out, the read that takes four minutes.
+    #
+    # Not a third spelling of `active`. A deactivated node takes its whole
+    # branch out of every run; a manual one holds its place, and whatever it
+    # last produced stays available to the nodes below it exactly as a
+    # frozen node's value does. Only when it has produced nothing yet is the
+    # branch below skipped too — there is no input for it to run on, and
+    # skipping it says so more clearly than letting each node fail.
+    manual: bool = False
     # What this node's params and inputs hashed to at the moment it was
     # frozen. Compared after a run to tell a pin that still reflects the
     # graph from one that has been quietly overtaken by an edit upstream;

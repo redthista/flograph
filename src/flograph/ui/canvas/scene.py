@@ -240,6 +240,7 @@ class NodeGraphScene(QGraphicsScene):
         events.active_changed.connect(self._on_active_changed)
         events.locked_changed.connect(self._on_locked_changed)
         events.frozen_changed.connect(self._on_frozen_changed)
+        events.manual_changed.connect(self._on_manual_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
         events.port_labels_changed.connect(self._on_port_labels_changed)
         events.flow_pins_changed.connect(self._on_flow_pins_changed)
@@ -292,6 +293,8 @@ class NodeGraphScene(QGraphicsScene):
         # undoing a delete puts a collapsed frame's contents back; they have
         # to go straight back under the lid rather than appear on top of it
         self._refresh_collapsed_frames()
+        # a node created inside a held frame is held from the start
+        self.refresh_frame_holds()
 
     def _on_restacked(self, kind: str, page_id) -> None:
         """One kind's stacking order changed. Every item of that kind re-reads
@@ -355,6 +358,10 @@ class NodeGraphScene(QGraphicsScene):
         item = self.node_items.get(node_id)
         if item is not None and (item.pos().x(), item.pos().y()) != pos:
             item.setPos(*pos)
+        # it may have just been dragged into — or out of — a frame that is
+        # disabled or held back, which is the whole point of the flag living
+        # on the frame rather than on the nodes
+        self.refresh_frame_holds()
 
     def _on_code_changed(self, node_id: str) -> None:
         item = self.node_items.get(node_id)
@@ -594,6 +601,46 @@ class NodeGraphScene(QGraphicsScene):
             nodes.update({nid: None for nid in self._frame_members(nested)})
             queue.extend(self._frame_member_frames(nested))
         return (list(nodes), frames)
+
+    def flagged_frame_members(self) -> dict:
+        """`{frame_id: node_ids}` for the frames carrying a run flag.
+
+        What the engine asks for when it builds a plan (see
+        ExecutionEngine.frame_membership). Only flagged frames are walked:
+        on a canvas where nobody has disabled or held anything — which is
+        most of them — this is a scan of two booleans per frame and no
+        containment work at all.
+        """
+        out: dict = {}
+        for frame_id, frame in self.graph.frames.items():
+            if frame.active and not frame.manual:
+                continue
+            item = self.frame_items.get(frame_id)
+            if item is None:        # mirrored before the canvas caught up
+                ids = list(frame.members)
+            else:
+                ids, _frames = self.frame_contents(item)
+            out[frame_id] = [nid for nid in ids if nid in self.graph.nodes]
+        return out
+
+    def refresh_frame_holds(self) -> None:
+        """Show which nodes the frames' flags currently reach — the play
+        triangle on a held node, the fade on a disabled one.
+
+        Display only. The run itself resolves this again at the moment a
+        plan is built, so a badge that has not caught up yet is a cosmetic
+        lag rather than a node that runs when it should not.
+        """
+        held: set = set()
+        off: set = set()
+        for frame_id, node_ids in self.flagged_frame_members().items():
+            frame = self.graph.frames[frame_id]
+            if frame.manual:
+                held.update(node_ids)
+            if not frame.active:
+                off.update(node_ids)
+        for node_id, item in self.node_items.items():
+            item.set_frame_flags(node_id in held, node_id in off)
 
     def _grow_enclosing(self, frame_id: str, region: QRectF,
                         landings: list) -> tuple:
@@ -1147,6 +1194,11 @@ class NodeGraphScene(QGraphicsScene):
         if item is not None:
             item.set_frozen(frozen)
 
+    def _on_manual_changed(self, node_id: str, manual: bool) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.set_manual(manual)
+
     def refresh_stale_pins(self, stale: set) -> None:
         """Amber the frozen nodes in `stale`, plain-grey the rest. Called
         after a run, when the answer can have changed."""
@@ -1281,6 +1333,7 @@ class NodeGraphScene(QGraphicsScene):
         # arriving already collapsed (from a file, a paste, or undo) finds
         # everything it needs to fold around right here.
         self._refresh_collapsed_frames()
+        self.refresh_frame_holds()
 
     def _on_frame_removed(self, frame_id: str) -> None:
         item = self.frame_items.pop(frame_id, None)
@@ -1300,6 +1353,7 @@ class NodeGraphScene(QGraphicsScene):
         # leave nothing to reconcile and the nodes would stay hidden.
         self._refresh_collapsed_frames()
         self.removeItem(item)
+        self.refresh_frame_holds()   # whatever it held is free again
 
     def _on_frame_changed(self, frame: Frame) -> None:
         item = self.frame_items.get(frame.id)
@@ -1316,6 +1370,8 @@ class NodeGraphScene(QGraphicsScene):
         # left every other way a frame can move — a nudge, an undo, a paste,
         # a project load — drawing its wires from where the box used to be.
         self.frame_item_moved(frame.id)
+        # its flags may have changed, and so may the region they apply to
+        self.refresh_frame_holds()
 
     # ------------------------------------------------------------- helpers
 

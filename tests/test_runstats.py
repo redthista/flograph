@@ -267,14 +267,14 @@ class TestSkippedSummary:
     def test_an_untouched_graph_skips_nothing(self, registry):
         graph = Graph()
         node = graph.add_node(registry.instantiate(CONST))
-        clean, frozen, inactive = skipped_summary(
+        clean, frozen, inactive, manual = skipped_summary(
             graph, [node.id], None, [node.id])
-        assert (clean, frozen, inactive) == (0, 0, 0)
+        assert (clean, frozen, inactive, manual) == (0, 0, 0, 0)
 
     def test_a_node_out_of_the_plan_counts_as_clean(self, registry):
         graph = Graph()
         node = graph.add_node(registry.instantiate(CONST))
-        assert skipped_summary(graph, [node.id], None, []) == (1, 0, 0)
+        assert skipped_summary(graph, [node.id], None, []) == (1, 0, 0, 0)
 
     def test_deactivation_carries_its_descendants(self, registry):
         graph = Graph()
@@ -282,7 +282,7 @@ class TestSkippedSummary:
         dot = graph.add_node(registry.instantiate(REROUTE))
         graph.connect(const.id, "value", dot.id, "value")
         graph.set_active(const.id, False)
-        assert skipped_summary(graph, [dot.id], None, []) == (0, 0, 2)
+        assert skipped_summary(graph, [dot.id], None, []) == (0, 0, 2, 0)
 
     def test_only_the_targets_ancestry_is_considered(self, registry):
         """Running one node must not report every unrelated node in the
@@ -290,4 +290,5 @@ class TestSkippedSummary:
         graph = Graph()
         wanted = graph.add_node(registry.instantiate(CONST))
         graph.add_node(registry.instantiate(CONST))     # elsewhere entirely
-        assert skipped_summary(graph, [wanted.id], None, [wanted.id]) == (0, 0, 0)
+        assert skipped_summary(
+            graph, [wanted.id], None, [wanted.id]) == (0, 0, 0, 0)

@@ -77,6 +77,7 @@ class RunRecord:
     skipped_clean: int = 0
     skipped_frozen: int = 0
     skipped_inactive: int = 0
+    skipped_manual: int = 0
     rss_start: int = 0
     rss_peak: int = 0
     # The worker limit this run was given, and the most nodes actually in

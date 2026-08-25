@@ -35,7 +35,8 @@ from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
     ReorderPagesCommand, SetPageColorCommand,
-    SetActiveCommand, SetExclusiveCommand, SetFrameSourceCommand,
+    SetActiveCommand, SetExclusiveCommand, SetFrameFlagCommand,
+    SetFrameSourceCommand, SetManualCommand,
     SetFrozenCommand, SetLabelCommand, SetLockedCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
@@ -106,6 +107,11 @@ class MainWindow(QMainWindow):
         # visibility alone once every panel is collapsed.
         self._current_page_id = None
         self.engine = ExecutionEngine(self.graph, parent=self)
+        # A frame's run flags apply to whatever it holds *now*, and only the
+        # canvas can answer that — so the engine asks, once per run, rather
+        # than being told whenever something is dragged. Through a lambda
+        # because opening a project can replace the scene underneath us.
+        self.engine.frame_membership = lambda: self.scene.flagged_frame_members()
         # the scene predates the engine, so it gets the cache handed to it
         self.scene.output_cache = self.engine.cache
         self.settings = QSettings("flograph", "flograph")
@@ -2021,8 +2027,13 @@ class MainWindow(QMainWindow):
         if action == "Show message":
             self._show_button_message(node)
             return
+        # "the whole flow" is Run All under another name, so a manual node
+        # sits it out; a button that names a frame or a list of nodes is
+        # somebody aiming, and fires them.
+        asked = None
         if action == "Run whole flow":
             targets = list(self.graph.nodes)
+            asked = ()
         elif action == "Run frame":
             targets = self._frame_node_ids(node.params.get("frame_title", ""))
         else:
@@ -2033,7 +2044,7 @@ class MainWindow(QMainWindow):
         if node.params.get("clear_cache", True):
             for target_id in targets:
                 self.graph.mark_dirty(target_id)
-        self.engine.run_targets(targets)
+        self.engine.run_targets(targets, asked)
 
     def _on_slicer_changed(self, node_id: str) -> None:
         """A Slicer's ticks changed: re-run it and the visuals that follow.
@@ -2124,6 +2135,14 @@ class MainWindow(QMainWindow):
         targets = self._frame_node_ids_by_id(frame_id)
         if not targets:
             self.show_status("Frame is empty — nothing to run", 4000)
+            return
+        frame = self.graph.frames.get(frame_id)
+        if frame is not None and not frame.active:
+            # the plan would come back empty and the click would look
+            # broken; a disabled frame is a deliberate state, so say so
+            self.show_status(
+                "Frame is disabled — right-click ▸ Enable frame to run it",
+                5000)
             return
         self.engine.run_targets(targets)
 
@@ -2430,6 +2449,27 @@ class MainWindow(QMainWindow):
         if not targets:
             run_action.setToolTip("This frame holds no nodes to run.")
         menu.addSeparator()
+        # The same two run flags the node menu offers, carried by the frame
+        # itself rather than stamped onto the nodes that happen to be inside
+        # it: whatever is in the rectangle when a run is built is what the
+        # flag reaches, so dragging a node in or out is all it takes.
+        frame = self.graph.frames[frame_id]
+        all_off = not frame.active
+        disable_action = menu.addAction("Enable frame" if all_off
+                                        else "Disable frame")
+        disable_action.setToolTip(
+            "Stop everything in this frame running, along with whatever "
+            "they feed. For the corner of a big flow you are not working on."
+            if not all_off else
+            "Put everything in this frame back into the runs it was in.")
+        frame_manual_action = menu.addAction("Run frame only when asked")
+        frame_manual_action.setCheckable(True)
+        frame_manual_action.setChecked(frame.manual)
+        frame_manual_action.setToolTip(
+            "Keep this frame out of Run All. Its nodes still run when you "
+            "run the frame, and everything below them goes on using "
+            "whatever they last produced.")
+        menu.addSeparator()
         state = self._component_state(frame_id)
         update_action = None
         if state is not None and state["stale"]:
@@ -2457,6 +2497,15 @@ class MainWindow(QMainWindow):
                 item.toggle_collapsed()
         elif chosen is run_action:
             self._on_frame_run_requested(frame_id)
+        elif chosen is disable_action:
+            self.undo_stack.push(SetFrameFlagCommand(
+                self.graph, frame_id, "active", all_off,
+                "enable frame" if all_off else "disable frame"))
+        elif chosen is frame_manual_action:
+            self.undo_stack.push(SetFrameFlagCommand(
+                self.graph, frame_id, "manual", not frame.manual,
+                "run frame with the rest" if frame.manual
+                else "run frame only when asked"))
         elif update_action is not None and chosen is update_action:
             self._update_component_instance(frame_id)
         elif chosen is save_component:
@@ -2798,6 +2847,15 @@ class MainWindow(QMainWindow):
         active_action = menu.addAction(
             "Deactivate" if node.active else "Activate")
         freeze_action = menu.addAction("Unfreeze" if node.frozen else "Freeze")
+        manual_action = menu.addAction("Run only when asked")
+        manual_action.setCheckable(True)
+        manual_action.setChecked(node.manual)
+        manual_action.setToolTip(
+            "Keep this node out of Run All and out of the re-runs a slider "
+            "or a typed cell sets off. It runs when you run it — from this "
+            "menu, from Run Selected, or from an Action Button that names "
+            "it — and everything below it goes on using whatever it last "
+            "produced.")
         lock_action = menu.addAction("Unlock" if node.locked else "Lock")
         exclusive_action = menu.addAction("Run on its own")
         exclusive_action.setCheckable(True)
@@ -2911,6 +2969,9 @@ class MainWindow(QMainWindow):
         elif chosen is freeze_action:
             self.undo_stack.push(SetFrozenCommand(
                 self.graph, node_id, not node.frozen))
+        elif chosen is manual_action:
+            self.undo_stack.push(SetManualCommand(
+                self.graph, node_id, not node.manual))
         elif chosen is lock_action:
             self.undo_stack.push(SetLockedCommand(
                 self.graph, node_id, not node.locked))

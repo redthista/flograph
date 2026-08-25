@@ -20,6 +20,9 @@ from .node_item import (COMPACT_MIN_H, COMPACT_NAME_FONT_SIZE, COMPACT_NAME_GAP,
 from .stacking import COLLAPSED_FRAME_Z, FRAME_Z, z_for
 
 TITLE_H = 24.0
+#: How far back a disabled frame's own chrome is faded. The same value the
+#: nodes use, so the block dims as one.
+DISABLED_FRAME_OPACITY = 0.35
 HANDLE = 14.0
 RUN_BTN = 18.0
 #: The chevron that folds the frame down, and folds it back out. Sits at the
@@ -27,6 +30,10 @@ RUN_BTN = 18.0
 #: collapsed — the same disclosure triangle a node uses for its ports.
 TOGGLE_W = 11.0
 TOGGLE_H = 10.0
+#: The run-flag marker in the title bar: a play triangle on a frame that
+#: runs only when asked, a barred circle on a disabled one. Sized to the
+#: node badges it echoes rather than to the title bar.
+MARKER = 11.0
 #: The grid of contained-node indicators drawn inside the collapsed box.
 #: Nine at a time: enough to read a typical frame at a glance, few enough
 #: that each light is still big enough to have a colour.
@@ -212,6 +219,60 @@ class FrameItem(QGraphicsObject):
             return "left"
         return None
 
+    def _marker_rect(self) -> QRectF:
+        """Where the run-flag marker sits: after the chevron in the title
+        bar, ahead of the title, so the frame's state is read before its
+        name. Empty when the frame is carrying neither flag."""
+        if self.frame.active and not self.frame.manual:
+            return QRectF()
+        if self.collapsed:
+            # the folded box has no title bar; the marker takes the top-right
+            # corner, opposite the chevron
+            width, _h = self.display_size()
+            return QRectF(width - MARKER - 3, 3, MARKER, MARKER)
+        left = self._toggle_rect().right() + 6
+        return QRectF(left, TITLE_H / 2 - MARKER / 2, MARKER, MARKER)
+
+    def _paint_marker(self, painter: QPainter) -> None:
+        """Say, on the frame itself, that it is holding its contents back.
+
+        Without this the flag is invisible: the nodes inside show their own
+        state, but a frame someone set weeks ago and a frame nobody has
+        touched look identical, and the only way to tell them apart is to
+        open the menu that set it.
+        """
+        rect = self._marker_rect()
+        if rect.isEmpty():
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(theme.FRAME_TITLE), 1.4)
+        pen.setJoinStyle(Qt.MiterJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        if not self.frame.active:
+            # a barred circle: nothing in here runs at all
+            inset = rect.adjusted(1.5, 1.5, -1.5, -1.5)
+            painter.drawEllipse(inset)
+            painter.drawLine(inset.topLeft(), inset.bottomRight())
+        else:
+            # the same hollow play triangle a manual node wears
+            path = QPainterPath()
+            path.moveTo(rect.left() + 2.5, rect.top() + 1.5)
+            path.lineTo(rect.right() - 1.5, rect.center().y())
+            path.lineTo(rect.left() + 2.5, rect.bottom() - 1.5)
+            path.closeSubpath()
+            painter.drawPath(path)
+        painter.restore()
+
+    def _state_note(self) -> str:
+        """How this frame's run flags read in a tooltip, or "" for neither."""
+        if not self.frame.active:
+            return "disabled — nothing in here runs"
+        if self.frame.manual:
+            return "runs only when asked"
+        return ""
+
     def _run_button_rect(self) -> QRectF:
         """The play glyph in the title bar. Empty while collapsed — 60px of
         square has no room for a title, a chevron and a play button, so the
@@ -272,6 +333,11 @@ class FrameItem(QGraphicsObject):
     # ------------------------------------------------------------- painting
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
+        # A disabled frame is faded like the nodes it is disabling — the
+        # same signal, so a block that is out of the runs reads as one thing
+        # rather than as pale nodes on a normal backdrop.
+        if not self.frame.active:
+            painter.setOpacity(DISABLED_FRAME_OPACITY)
         if self.collapsed:
             self._paint_collapsed(painter)
             return
@@ -293,14 +359,18 @@ class FrameItem(QGraphicsObject):
         painter.drawRoundedRect(QRectF(0, 0, w, TITLE_H), 6, 6)
 
         self._paint_toggle(painter)
+        self._paint_marker(painter)
 
         painter.setPen(QPen(theme.FRAME_TITLE))
         font = painter.font()
         font.setBold(True)
         font.setPointSizeF(9.0)
         painter.setFont(font)
-        # the title starts clear of the chevron now sitting at the left edge
-        text_left = self._toggle_rect().right() + 6
+        # the title starts clear of the chevron now sitting at the left edge,
+        # and of the run-flag marker when the frame is carrying one
+        marker = self._marker_rect()
+        text_left = (marker.right() if not marker.isEmpty()
+                     else self._toggle_rect().right()) + 6
         painter.drawText(QRectF(text_left, 0,
                                 w - text_left - RUN_BTN - 10, TITLE_H),
                          Qt.AlignVCenter | Qt.AlignLeft, self.frame.title)
@@ -368,6 +438,7 @@ class FrameItem(QGraphicsObject):
         painter.drawRoundedRect(body, 6, 6)
 
         self._paint_toggle(painter)
+        self._paint_marker(painter)
         self._paint_matrix(painter, body)
 
         painter.setPen(QPen(theme.NODE_TEXT))
@@ -450,8 +521,9 @@ class FrameItem(QGraphicsObject):
         self.update()
 
     def _refresh_status_tooltip(self) -> None:
+        state = self._state_note()
         if not self.collapsed:
-            self.setToolTip("")
+            self.setToolTip(f"{self.frame.title} — {state}" if state else "")
             return
         counts = self.status_counts()
         total = len(self._members)
@@ -459,7 +531,8 @@ class FrameItem(QGraphicsObject):
             self.setToolTip(f"{self.frame.title} — empty")
             return
         done = counts.get(NodeStatus.DONE, 0)
-        parts = [f"{done} of {total} done"]
+        parts = [state] if state else []
+        parts.append(f"{done} of {total} done")
         for status, word in ((NodeStatus.RUNNING, "running"),
                              (NodeStatus.QUEUED, "queued"),
                              (NodeStatus.ERROR, "failed"),
