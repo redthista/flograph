@@ -167,6 +167,9 @@ class MainWindow(QMainWindow):
             "canvas/reveal_ports_key", canvas_view.DEFAULT_REVEAL_PORTS_KEY,
             type=int))
         self.view.set_reveal_ports_key(self.reveal_ports_key)
+        self.scrollbars_enabled = self.settings.value(
+            "canvas/scrollbars", False, type=bool)
+        self.view.set_scrollbars_enabled(self.scrollbars_enabled)
         self.double_click_action = str(self.settings.value(
             "canvas/double_click_action", "properties"))
         self.tint_soft = self.settings.value(
@@ -672,6 +675,15 @@ class MainWindow(QMainWindow):
         self.reveal_ports_key = int(key)
         self.settings.setValue("canvas/reveal_ports_key", int(key))
         self.view.set_reveal_ports_key(int(key))
+
+    def set_scrollbars_enabled(self, enabled: bool) -> None:
+        """Show the canvas scroll bars, on the main view and every
+        dashboard page's view."""
+        self.scrollbars_enabled = enabled
+        self.settings.setValue("canvas/scrollbars", enabled)
+        views = [self.view] + [page.view for page in self._canvas_pages()]
+        for view in views:
+            view.set_scrollbars_enabled(enabled)
 
     def set_compact_nodes(self, enabled: bool) -> None:
         """Canvas-wide: draw plain nodes as a fixed square with the name
@@ -1447,6 +1459,7 @@ class MainWindow(QMainWindow):
         widget.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         widget.scene.snap_enabled = self.snap_enabled
         widget.scene.grid_step = self.grid_step
+        widget.view.set_scrollbars_enabled(self.scrollbars_enabled)
         self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)

@@ -154,7 +154,7 @@ class NodeGraphView(ZoomPanGraphicsView):
         item.setSelected(True)
         if self.zoom < MIN_REVEAL_ZOOM:
             self.set_zoom(REVEAL_ZOOM)
-        self.centerOn(item)
+        self.center_on_scene(item)
         return True
 
     # ------------------------------------------------------------ keyboard

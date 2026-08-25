@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, Signal
+from PySide6.QtCore import QPointF, QRectF, QTimer, Signal
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
@@ -24,6 +24,7 @@ from ..commands import (
     RemoveSelectionCommand, SetCompactViewCommand, SetLabelCommand,
     SetNodeColorCommand, SetNodeMarkCommand, UpdateFrameCommand,
 )
+from .base_view import SCENE_MARGIN
 from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
 from .node_item import (
@@ -31,7 +32,6 @@ from .node_item import (
 )
 from .stacking import LAYER_LABELS
 
-SCENE_EXTENT = 1_000_000.0
 REROUTE_TYPE = "flograph.util.reroute"
 #: Breathing room left inside a frame that had to stretch to hold a nested
 #: one reopening (see _grow_enclosing) — flush against the parent's edge
@@ -45,6 +45,54 @@ _MIN_FRAME_H = 60.0
 #: way. Landing exactly on the edge is arithmetically correct and looks like
 #: a collision — the node appears stuck to the frame rather than beside it.
 NUDGE_GAP = 20.0
+
+
+class ContentFittedSceneRect:
+    """Keeps `sceneRect` fitted to the content plus a margin, on a debounce.
+
+    The scroll bars map the whole span onto their length, so the old
+    world-sized rect made them hair-triggered: one pixel of bar was
+    thousands of canvas pixels, and the smallest drag sent everything past
+    like a bullet. Fitted to the flow, a bar pixel moves at canvas speed —
+    and the span grows (after a beat) as the flow does. Drag and wheel
+    panning are untouched; this span is only ever what the bars cover.
+    """
+
+    def _install_rect_fit(self) -> None:
+        self._rect_timer = QTimer(self)
+        self._rect_timer.setSingleShot(True)
+        self._rect_timer.setInterval(250)
+        self._rect_timer.timeout.connect(self._fit_scene_rect)
+        self.changed.connect(self._queue_rect_fit)
+
+    def _queue_rect_fit(self, *_regions) -> None:
+        if not self._rect_timer.isActive():
+            self._rect_timer.start()
+
+    def flush_rect_fit(self) -> None:
+        """Refit right now instead of after the debounce. Navigation that
+        centres on a point must do this first: the view cannot scroll
+        outside the span, so a jump to a node the stale span doesn't cover
+        would land short of centre."""
+        if self._rect_timer.isActive():
+            self._rect_timer.stop()
+        self._fit_scene_rect()
+
+    def _fit_scene_rect(self) -> None:
+        target = self.itemsBoundingRect().adjusted(
+            -SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN)
+        # wherever the views are right now stays reachable: Esc-restore,
+        # a minimap click into empty margin, a jump to the far side — none
+        # may be clamped back by the refit that follows them
+        for view in self.views():
+            visible = view.mapToScene(view.viewport().rect()).boundingRect()
+            target = target.united(visible)
+        if target != self.sceneRect():
+            # setSceneRect itself emits changed for the redrawn regions;
+            # the equality check above is what stops that re-queueing us
+            # forever, so nothing here may be blocked — the views still
+            # need sceneRectChanged to retune their scroll ranges
+            self.setSceneRect(target)
 
 
 def plan_nudge(box: QRectF, region: QRectF, units: list,
@@ -125,7 +173,7 @@ def plan_nudge(box: QRectF, region: QRectF, units: list,
     return delta
 
 
-class NodeGraphScene(QGraphicsScene):
+class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     node_double_clicked = Signal(str)   # node_id
     node_window_requested = Signal(str)  # node_id — Ctrl+double-click
     node_rename_requested = Signal(str)  # node_id — header was double-clicked
@@ -218,8 +266,8 @@ class NodeGraphScene(QGraphicsScene):
         # kinds are unaffected — see NodeItem.apply_compact.
         self.compact_nodes = True
 
-        self.setSceneRect(QRectF(-SCENE_EXTENT, -SCENE_EXTENT,
-                                 2 * SCENE_EXTENT, 2 * SCENE_EXTENT))
+        self._install_rect_fit()
+        self._fit_scene_rect()
 
         self._pending: Optional[PendingConnectionItem] = None
         self._drag_detach: Optional[Connection] = None

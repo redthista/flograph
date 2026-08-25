@@ -277,7 +277,8 @@ class TestTheNavTreeAndSearch:
         assert shown == ["GPU-accelerated canvas (experimental)",
                          "Simplify nodes when zoomed out", "Zoom threshold",
                          "Show minimap", "Compact nodes", "Show port names",
-                         "Show flow pins", "Double-click a node opens",
+                         "Show flow pins", "Show scroll bars",
+                         "Double-click a node opens",
                          "Hold to show port names"]
 
     def test_selecting_the_page_shows_all_of_it(self, window):

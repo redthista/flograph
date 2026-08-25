@@ -39,10 +39,10 @@ front of you: they are the same trade-off from opposite sides.
 
 ## G. Canvas interaction
 
-**G1. Pan by holding right-click**, as a setting. Today
-`BaseGraphicsView` pans on middle-drag and on space-drag only
-(`base_view.py`); right-click is the context menu, so this needs a
-press/drag threshold before the menu is given up.
+**G1. Pan by holding right-click**, as a setting.
+Built and tried 2026-08-25, then taken back out the same day at Dan's
+request — see `ideas_archived.md` #14 for what was learned and what
+replaced it (a show-scroll-bars setting).
 
 **G2. Show node names over the flat (low LOD) nodes.**
 

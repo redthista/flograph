@@ -228,7 +228,7 @@ class DashboardView(ZoomPanGraphicsView):
         # at empty canvas with the tile they were just reading off-screen.
         visible = self.mapToScene(self.viewport().rect()).boundingRect()
         if not visible.intersects(item.sceneBoundingRect()):
-            self.centerOn(item.sceneBoundingRect().center())
+            self.center_on_scene(item.sceneBoundingRect().center())
         self.fullscreen_changed.emit(False)
 
     def _layout_fullscreen(self) -> None:

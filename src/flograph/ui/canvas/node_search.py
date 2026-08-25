@@ -150,7 +150,7 @@ class NodeSearchBar(QFrame):
         """Close and put the view back where the search started."""
         if self._home is not None:
             self._view.set_zoom(self._home_zoom)
-            self._view.centerOn(self._home)
+            self._view.center_on_scene(self._home)
         self._close()
 
     def _close(self) -> None:

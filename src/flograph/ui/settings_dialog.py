@@ -583,6 +583,15 @@ class SettingsDialog(QDialog):
                  "hold the reveal key above to see them for a moment, or set "
                  "them per node from its Appearance dialog.")
 
+        bars_check = QCheckBox()
+        bars_check.setObjectName("scrollbars_checkbox")
+        bars_check.setChecked(window.scrollbars_enabled)
+        rows.add("Show scroll bars", bars_check,
+                 "Horizontal and vertical bars along the canvas edges, "
+                 "showing where you are in a large flow and draggable to "
+                 "move around. The canvas pans by drag and wheel either way; "
+                 "this only adds the bars. Applies to dashboard pages too.")
+
         dclick_combo = QComboBox()
         dclick_combo.setObjectName("double_click_action_combo")
         for label, value in (("Properties", "properties"), ("Code", "code"),
@@ -682,6 +691,7 @@ class SettingsDialog(QDialog):
         compact_check.toggled.connect(window.set_compact_nodes)
         ports_check.toggled.connect(window.set_port_labels_enabled)
         flow_check.toggled.connect(window.set_flow_pins_enabled)
+        bars_check.toggled.connect(window.set_scrollbars_enabled)
         reveal_edit.keySequenceChanged.connect(_push_reveal_key)
         dclick_combo.currentIndexChanged.connect(
             lambda index: window.set_double_click_action(

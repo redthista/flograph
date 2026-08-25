@@ -167,12 +167,12 @@ class Minimap(QWidget):
     # ---------------------------------------------------------- interaction
 
     def mousePressEvent(self, event) -> None:
-        self._view.centerOn(self._to_scene(event.position()))
+        self._view.center_on_scene(self._to_scene(event.position()))
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         if event.buttons() & Qt.LeftButton:
-            self._view.centerOn(self._to_scene(event.position()))
+            self._view.center_on_scene(self._to_scene(event.position()))
             event.accept()
 
     def reposition(self) -> None:

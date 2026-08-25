@@ -20,6 +20,7 @@ except ImportError:  # trimmed PySide6 installs ship without QtWebEngine
 
 from .. import theme
 
+
 # How many recent frames the paint timer averages over. A couple of seconds
 # of continuous redraw, so a figure reflects what the canvas is doing now
 # rather than what it did during the last big pan.
@@ -37,6 +38,14 @@ FINE_GRID_LOD = 0.4
 EDGE_SCROLL_MARGIN = 44
 EDGE_SCROLL_SPEED = 14
 EDGE_SCROLL_TICK_MS = 30
+
+# How far past the outermost item the scrollable span reaches, per side.
+# The scroll bars map the whole span onto their length, so this — not a
+# world-sized rect — is what decides how fast they scroll: fitted to the
+# flow, one pixel of bar is one pixel of canvas. (Kept here rather than in
+# scene.py because center_on_scene needs it and scene.py imports this
+# module's neighbours.)
+SCENE_MARGIN = 1200.0
 
 
 def edge_scroll_delta(rect: QRect, pos: QPoint,
@@ -292,6 +301,46 @@ class ZoomPanGraphicsView(QGraphicsView):
         """Pan by viewport pixels — the same motion as a middle-drag pan,
         without needing a mouse move to carry it (edge-scroll ticks)."""
         self.translate(dx / self.zoom, dy / self.zoom)
+
+    def center_on_scene(self, pos) -> None:
+        """Centre the view on a point or an item (centreOn accepts both),
+        first stretching the scrollable span to reach if it must — the view
+        cannot scroll outside its sceneRect, so a jump aimed past it would
+        land short of centre. The debounced refit keeps whatever the views
+        are looking at inside the span, so this stretch holds."""
+        scene = self.scene()
+        if hasattr(scene, "flush_rect_fit"):
+            rect_fn = getattr(pos, "sceneBoundingRect", None)
+            if callable(rect_fn):
+                target = rect_fn().center()
+            else:
+                target = QPointF(pos.x(), pos.y())
+            span = scene.sceneRect()
+            if not span.contains(target):
+                # room to actually centre it — the target plus what the
+                # viewport shows around it, plus a margin's slack so the
+                # exact edge isn't sitting on an integer scroll step
+                pad = SCENE_MARGIN + max(
+                    self.viewport().width(),
+                    self.viewport().height()) / (2 * self.zoom)
+                grown = span.united(QRectF(
+                    target.x() - pad, target.y() - pad, 2 * pad, 2 * pad))
+                scene.setSceneRect(grown)
+        self.centerOn(pos)
+        # refit right away rather than after the debounce: the fit keeps
+        # whatever the views are looking at, and we are looking somewhere
+        # new — this makes the reach above permanent instead of something
+        # a racing refit could clamp back mid-gesture
+        if hasattr(scene, "flush_rect_fit"):
+            scene.flush_rect_fit()
+
+    def set_scrollbars_enabled(self, enabled: bool) -> None:
+        """Show the horizontal and vertical scroll bars. The canvas pans
+        freely by drag and wheel either way; the bars are a where-am-I and
+        a drag handle for people who want one, not the mechanism."""
+        policy = Qt.ScrollBarAsNeeded if enabled else Qt.ScrollBarAlwaysOff
+        self.setHorizontalScrollBarPolicy(policy)
+        self.setVerticalScrollBarPolicy(policy)
 
     # ------------------------------------------------------------ keyboard
 

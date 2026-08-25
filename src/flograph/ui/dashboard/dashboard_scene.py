@@ -20,11 +20,11 @@ from flograph.core import Graph, Tile
 from ..commands import (
     MoveResizeTileCommand, RemoveTileCommand, SetPageMaximizedTileCommand,
 )
-from ..canvas.scene import SCENE_EXTENT
+from ..canvas.scene import ContentFittedSceneRect
 from .tile_item import TileItem
 
 
-class DashboardScene(QGraphicsScene):
+class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
     button_fired = Signal(str)  # node_id — an Action Button tile was clicked
     slicer_changed = Signal(str)  # node_id — a Slicer tile's selection changed
     sheet_edited = Signal(str)  # node_id — a Table tile's cells were edited
@@ -47,8 +47,8 @@ class DashboardScene(QGraphicsScene):
         # added to a view-mode page arrives locked rather than movable.
         self.view_mode = False
 
-        self.setSceneRect(QRectF(-SCENE_EXTENT, -SCENE_EXTENT,
-                                 2 * SCENE_EXTENT, 2 * SCENE_EXTENT))
+        self._install_rect_fit()
+        self._fit_scene_rect()
 
         events = graph.events
         self._event_subs = [
