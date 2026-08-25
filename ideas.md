@@ -95,10 +95,12 @@ Run All, run by right-click → Run or by an Action Button. This is the same
 request from two directions ("only run when called", "don't fire on Run
 All") and one flag answers both. Sits beside the existing `active` /
 `locked` / `frozen` flags on `NodeInstance` and their right-click menu.
+Shipped 2026-08-25; see `ideas_archived.md` #13.
 
 **J2. Disable a frame** — everything inside it stops updating and stops
 being cached. The frame-level counterpart of J1, and the thing that makes a
 big flow workable while you are editing one corner of it.
+Shipped 2026-08-25; see `ideas_archived.md` #13.
 
 **J3. Start a second node while one is running** (Stu). Not an engine limit:
 the scheduler already runs independent nodes on a pool. It is
