@@ -3,10 +3,12 @@ drag & drop, the Tab palette, node keyboard shortcuts, minimap, and the
 node context menu."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer, Signal
+from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
+from PySide6.QtWidgets import QApplication
 
-from .base_view import ZoomPanGraphicsView
+from .base_view import (ZoomPanGraphicsView, edge_scroll_delta,
+                        EDGE_SCROLL_TICK_MS)
 from .file_drop import resolve_dropped_file
 from .scene import NodeGraphScene
 from .stacking import layer_action_for
@@ -48,6 +50,16 @@ class NodeGraphView(ZoomPanGraphicsView):
         self.search_bar = NodeSearchBar(self)
         self.search_bar.reveal_requested.connect(self.go_to_node)
 
+        # Edge-scroll while anything is being dragged (G3): hold a wire, a
+        # node or a frame against a viewport border and the canvas glides
+        # that way until the destination is on screen, so wiring or placing
+        # two things that are not on screen together no longer means letting
+        # go, panning, and starting again.
+        self._edge_timer = QTimer(self)
+        self._edge_timer.setInterval(EDGE_SCROLL_TICK_MS)
+        self._edge_timer.timeout.connect(self._edge_scroll_tick)
+        scene.canvas_drag_changed.connect(self._set_edge_scrolling)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.minimap.reposition()
@@ -57,6 +69,58 @@ class NodeGraphView(ZoomPanGraphicsView):
         super().showEvent(event)
         self.minimap.reposition()
         self.search_bar.reposition()
+
+    # ------------------------------------------------------------ edge scroll
+
+    def _set_edge_scrolling(self, active: bool) -> None:
+        if active:
+            self._edge_timer.start()
+        else:
+            self._edge_timer.stop()
+
+    def _edge_scroll_tick(self) -> None:
+        scene = self.scene()
+        if scene is None or not scene.canvas_drag_active:
+            # a belt for the signal being missed (scene swapped mid-drag)
+            self._edge_timer.stop()
+            return
+        self.edge_scroll_at(QCursor.pos())
+
+    def edge_scroll_at(self, global_pos: QPoint) -> None:
+        """One edge-scroll step as if the cursor were at `global_pos`.
+
+        Split from the timer tick so tests can drive it without moving the
+        real cursor. Scrolling alone would strand what is being dragged:
+        a pan changes which scene point the cursor means, so each branch
+        re-aims at the hand — the wire directly, and a dragged selection by
+        feeding the view a synthetic mouse move (see _ride_selection)."""
+        viewport = self.viewport()
+        cursor = viewport.mapFromGlobal(global_pos)
+        delta = edge_scroll_delta(viewport.rect(), cursor)
+        if delta.isNull():
+            return
+        self.scroll_by(delta.x(), delta.y())
+        scene = self.scene()
+        if scene.wire_drag_active:
+            scene.update_wire_drag(self.mapToScene(cursor))
+        elif scene.group_drag_active:
+            self._ride_selection(cursor)
+
+    def _ride_selection(self, cursor: QPoint) -> None:
+        """Keep a dragged selection under the hand after an edge pan.
+
+        Qt moves a movable item to *press position + total cursor travel*,
+        recomputed from its press anchor on every real move — so panning
+        underneath and nudging the items ourselves would be clobbered (and
+        the selection snap back) by the next mouse move. A synthetic move
+        through the ordinary event path instead lets Qt do the arithmetic
+        with post-pan coordinates: the selection lands where it would have
+        had the mouse really carried it there, snapping, carried contents,
+        group moves and all."""
+        event = QMouseEvent(QEvent.MouseMove,
+                            QPointF(cursor), self.mapToGlobal(cursor),
+                            Qt.NoButton, Qt.LeftButton, Qt.NoModifier)
+        QApplication.sendEvent(self.viewport(), event)
 
     # -------------------------------------------------------------- find/goto
 

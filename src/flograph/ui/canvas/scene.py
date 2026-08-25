@@ -136,6 +136,7 @@ class NodeGraphScene(QGraphicsScene):
     frame_run_requested = Signal(str)   # frame_id — a frame's run glyph was clicked
     tables_kept = Signal(list)          # node_ids — Tables that kept their
                                         # contents as their input was cut
+    canvas_drag_changed = Signal(bool)  # a wire or selection drag started / ended
 
     def __init__(self, graph: Graph, undo_stack: QUndoStack,
                  registry: Optional[NodeRegistry] = None, parent=None) -> None:
@@ -223,6 +224,9 @@ class NodeGraphScene(QGraphicsScene):
         self._pending: Optional[PendingConnectionItem] = None
         self._drag_detach: Optional[Connection] = None
         self._tinted_port: Optional[PortItem] = None
+        # nesting depth of node/frame group drags (begin_group_drag /
+        # commit_group_move), so the view can edge-scroll for them too
+        self._group_drags = 0
         # what a node dragged from the library is currently hovering over,
         # as graphics items — see drop_target_at / set_drop_hint
         self._drop_hint_conn: Optional[ConnectionItem] = None
@@ -1455,6 +1459,9 @@ class NodeGraphScene(QGraphicsScene):
         one delta, but only the pressed item was flagged before), and snapshot
         their start positions for the release commit."""
         starts: dict = {"nodes": {}, "frames": {}, "carried": {}}
+        self._group_drags += 1
+        if self._group_drags == 1:
+            self.canvas_drag_changed.emit(True)
         for item in self._selected_movables():
             item._dragging = True
             if isinstance(item, FrameItem):
@@ -1477,6 +1484,12 @@ class NodeGraphScene(QGraphicsScene):
         """Clear the drag flags and push one undo macro for whatever actually
         moved — node positions and frame rects together, so a mixed-selection
         drag sticks (and undoes) as a single step."""
+        # end the edge-scroll before anything else: a click that never moved
+        # still ends the drag, and the early return below must not skip it
+        if self._group_drags:
+            self._group_drags -= 1
+            if not self._group_drags:
+                self.canvas_drag_changed.emit(False)
         node_moves: dict = {}
         for node_id, old in starts.get("nodes", {}).items():
             item = self.node_items.get(node_id)
@@ -1967,6 +1980,22 @@ class NodeGraphScene(QGraphicsScene):
 
     # ------------------------------------------------------------ wire drag
 
+    @property
+    def wire_drag_active(self) -> bool:
+        """A wire is being dragged right now — the view edge-scrolls while
+        this holds, so the far port can be reached without letting go."""
+        return self._pending is not None
+
+    @property
+    def group_drag_active(self) -> bool:
+        """A node/frame selection is being dragged (see begin_group_drag)."""
+        return self._group_drags > 0
+
+    @property
+    def canvas_drag_active(self) -> bool:
+        """Anything the view should edge-scroll for."""
+        return self.wire_drag_active or self.group_drag_active
+
     def begin_wire_drag(self, port: PortItem) -> None:
         self.cancel_wire_drag()
         fixed = port
@@ -1993,6 +2022,7 @@ class NodeGraphScene(QGraphicsScene):
         self._pending = PendingConnectionItem(fixed)
         self.addItem(self._pending)
         self._pending.update_drag(port.scenePos(), None)
+        self.canvas_drag_changed.emit(True)
 
     def update_wire_drag(self, scene_pos: QPointF) -> None:
         if self._pending is None:
@@ -2048,6 +2078,7 @@ class NodeGraphScene(QGraphicsScene):
         self._cleanup_drag()
 
     def _cleanup_drag(self) -> None:
+        had_pending = self._pending is not None
         self.set_drawing_order_edge(False)
         if self._pending is not None:
             self.removeItem(self._pending)
@@ -2057,6 +2088,10 @@ class NodeGraphScene(QGraphicsScene):
             if item is not None:
                 item.show()
             self._drag_detach = None
+        if had_pending:
+            # only on a real end: cancel_wire_drag also runs at the top of
+            # begin_wire_drag, when nothing is under way to end
+            self.canvas_drag_changed.emit(False)
         self._tint(None, None)
 
     def _tint(self, port: Optional[PortItem], valid: Optional[bool]) -> None:

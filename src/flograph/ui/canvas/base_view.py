@@ -8,7 +8,7 @@ import math
 import time
 from collections import deque
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import (QAbstractScrollArea, QGraphicsProxyWidget,
                                QGraphicsView, QScrollBar, QWidget)
@@ -30,6 +30,40 @@ ZOOM_MAX = 4.0
 GRID_FINE = 20.0
 GRID_COARSE = 100.0
 FINE_GRID_LOD = 0.4
+
+# Edge-scroll: how close to the viewport border something must be held
+# before the canvas starts gliding that way, how fast it moves at the very
+# edge, and how often it moves. ~470 viewport px/s at full tilt.
+EDGE_SCROLL_MARGIN = 44
+EDGE_SCROLL_SPEED = 14
+EDGE_SCROLL_TICK_MS = 30
+
+
+def edge_scroll_delta(rect: QRect, pos: QPoint,
+                      margin: float = EDGE_SCROLL_MARGIN,
+                      speed: float = EDGE_SCROLL_SPEED) -> QPointF:
+    """The pan to apply because `pos` sits in an edge band of `rect`, or a
+    null point from the middle.
+
+    The result is in viewport pixels, ready for scroll_by — the direction
+    the *canvas content* slides, so holding at the left border yields a
+    positive dx (what lay off-screen to the left comes into view). Each axis
+    is decided on its own, so a corner scrolls both ways; deeper into a band
+    scrolls faster, so slowing down is how you stop.
+    """
+    def push(depth: float) -> float:
+        return speed * max(0.0, 1.0 - depth / margin)
+
+    dx = dy = 0.0
+    if pos.x() < margin:
+        dx = push(pos.x())
+    elif rect.width() - pos.x() < margin:
+        dx = -push(rect.width() - pos.x())
+    if pos.y() < margin:
+        dy = push(pos.y())
+    elif rect.height() - pos.y() < margin:
+        dy = -push(rect.height() - pos.y())
+    return QPointF(dx, dy)
 
 
 class PaintStats:
@@ -253,6 +287,11 @@ class ZoomPanGraphicsView(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def scroll_by(self, dx: float, dy: float) -> None:
+        """Pan by viewport pixels — the same motion as a middle-drag pan,
+        without needing a mouse move to carry it (edge-scroll ticks)."""
+        self.translate(dx / self.zoom, dy / self.zoom)
 
     # ------------------------------------------------------------ keyboard
 

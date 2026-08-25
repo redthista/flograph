@@ -66,9 +66,7 @@ press/drag threshold before the menu is given up.
   Worth pairing with F1, which is the same trade-off from the other side.
 
 **G3. Scroll the canvas when a connection is dragged to its edge** (Stu, from
-KNIME). Wiring two nodes that are not on screen together currently means
-letting go, panning, and starting again. Partly answered by Goto/From, but
-only for the pairs a user thought to name in advance.
+KNIME). Shipped 2026-08-25; see `ideas_archived.md` #11.
 
 **G4. Drop a node onto a wire to splice it in** (Stu, from KNIME) — and
 dropping one onto an existing node replaces it, keeping the connections.
