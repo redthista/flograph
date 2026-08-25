@@ -67,6 +67,7 @@ class ConnectionItem(QGraphicsPathItem):
         self._src_anchor = src
         self._dst_anchor = dst
         self._hover = False
+        self._drop_hint = False
         self.setZValue(WIRE_Z)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
@@ -102,6 +103,14 @@ class ConnectionItem(QGraphicsPathItem):
         stroker.setWidth(12)
         return stroker.createStroke(self.path())
 
+    def set_drop_hint(self, on: bool) -> None:
+        """Lit while a dragged node hovers over this wire: letting go here
+        will splice the node into it. Green is the pending wire's valid
+        colour — it answers the same question, "this drop will connect"."""
+        if on != self._drop_hint:
+            self._drop_hint = on
+            self.update()
+
     def paint(self, painter: QPainter, option, widget=None) -> None:
         color = (theme.SELECTION_OUTLINE if self.isSelected()
                  else _color_for(self.src_port, self.dst_port))
@@ -111,6 +120,11 @@ class ConnectionItem(QGraphicsPathItem):
         order = self.is_order
         width = (2.0 if order else 3.0) if (self.isSelected() or self._hover) \
             else (1.4 if order else 2.0)
+        if self._drop_hint:
+            # the splice target outranks selection styling while a node is
+            # over it — this green is what says letting go is safe
+            color = theme.WIRE_VALID
+            width = 3.0 if order else 5.0
         scene = self.scene()
         threshold = getattr(scene, "lod_threshold", DEFAULT_LOD_THRESHOLD)
         lod_enabled = getattr(scene, "lod_enabled", True)

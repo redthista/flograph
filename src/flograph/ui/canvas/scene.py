@@ -21,8 +21,8 @@ from flograph.core.ports import is_flow
 
 from ..commands import (
     AddNodeCommand, ConnectCommand, DisconnectCommand, MoveNodesCommand,
-    RemoveSelectionCommand, SetCompactViewCommand, SetNodeColorCommand,
-    SetNodeMarkCommand, UpdateFrameCommand,
+    RemoveSelectionCommand, SetCompactViewCommand, SetLabelCommand,
+    SetNodeColorCommand, SetNodeMarkCommand, UpdateFrameCommand,
 )
 from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
@@ -223,6 +223,10 @@ class NodeGraphScene(QGraphicsScene):
         self._pending: Optional[PendingConnectionItem] = None
         self._drag_detach: Optional[Connection] = None
         self._tinted_port: Optional[PortItem] = None
+        # what a node dragged from the library is currently hovering over,
+        # as graphics items — see drop_target_at / set_drop_hint
+        self._drop_hint_conn: Optional[ConnectionItem] = None
+        self._drop_hint_node: Optional[NodeItem] = None
 
         events = graph.events
         events.node_added.connect(self._on_node_added)
@@ -1686,6 +1690,280 @@ class NodeGraphScene(QGraphicsScene):
         self.undo_stack.push(ConnectCommand(
             self.graph, node.id, "value", conn.dst_node, conn.dst_port))
         self.undo_stack.endMacro()
+
+    # ------------------------------------------------- node drop targeting
+
+    @staticmethod
+    def _owning_node_item(item) -> Optional[NodeItem]:
+        """The NodeItem an item belongs to: pins and embedded widgets are
+        its children, and a drop on any of them is a drop on the node."""
+        while item is not None:
+            if isinstance(item, NodeItem):
+                return item
+            item = item.parentItem()
+        return None
+
+    def drop_target_at(self, type_id: str,
+                       scene_pos: QPointF) -> Optional[tuple]:
+        """What dropping a node of `type_id` at `scene_pos` would do.
+
+        ("wire", ConnectionItem) splices the new node into that wire;
+        ("node", NodeItem) replaces that node with it; None is an ordinary
+        add. A target only ever comes back when the drop would fully
+        succeed — the highlight the view shows from this answer must never
+        promise something the command cannot deliver.
+
+        Nodes stack above wires, so walking items() front to back answers
+        "the thing you see under the cursor" first. A locked node is
+        transparent here (it refuses replacement) and so is anything hidden
+        inside a collapsed frame.
+        """
+        spec = self.registry.maybe_get(type_id) if self.registry else None
+        if spec is None:
+            return None
+        for raw in self.items(scene_pos):
+            node_item = self._owning_node_item(raw)
+            if node_item is not None:
+                if not node_item.isVisible() or node_item.node.locked:
+                    continue
+                return ("node", node_item)
+            if not isinstance(raw, ConnectionItem):
+                continue
+            if raw.is_order or not raw.isVisible():
+                continue
+            conn = raw.conn
+            src = self.graph.nodes.get(conn.src_node)
+            dst = self.graph.nodes.get(conn.dst_node)
+            if src is None or dst is None:
+                continue
+            out_spec = src.spec.output(conn.src_port)
+            in_spec = dst.spec.input(conn.dst_port)
+            if out_spec is None or in_spec is None:
+                continue
+            # both ends must land somewhere on the new node, or the splice
+            # would cut the flow it was meant to join
+            if not any(can_connect(out_spec.type, p.type) for p in spec.inputs):
+                continue
+            if not any(can_connect(p.type, in_spec.type) for p in spec.outputs):
+                continue
+            return ("wire", raw)
+        return None
+
+    def set_drop_hint(self, target: Optional[tuple]) -> None:
+        """Show the drop affordance for `target` from drop_target_at, and
+        take down whatever it showed before. None clears."""
+        conn_item = target[1] if target and target[0] == "wire" else None
+        node_item = target[1] if target and target[0] == "node" else None
+        if conn_item is self._drop_hint_conn and node_item is self._drop_hint_node:
+            return
+        if self._drop_hint_conn is not None and self._drop_hint_conn is not conn_item:
+            self._drop_hint_conn.set_drop_hint(False)
+            self._drop_hint_conn = None
+        if self._drop_hint_node is not None and self._drop_hint_node is not node_item:
+            self._drop_hint_node.set_drop_hint(False)
+            self._drop_hint_node = None
+        if conn_item is not None:
+            conn_item.set_drop_hint(True)
+            self._drop_hint_conn = conn_item
+        if node_item is not None:
+            node_item.set_drop_hint(True)
+            self._drop_hint_node = node_item
+
+    def clear_drop_hint(self) -> None:
+        self.set_drop_hint(None)
+
+    # ----------------------------------------------------- splice / replace
+
+    def splice_into_wire(self, type_id: str, conn_id: str,
+                         scene_pos: QPointF) -> bool:
+        """Drop-splice: insert a new node of `type_id` into wire `conn_id`,
+        between its source and destination, at `scene_pos`.
+
+        All-or-nothing by design: both ends must find a compatible port on
+        the new node, or nothing happens and the caller falls back to a
+        plain add — half a splice would silently cut the flow it was meant
+        to join. Returns whether the splice happened.
+        """
+        if self.registry is None:
+            return False
+        conn = self.graph.connections.get(conn_id)
+        if conn is None:
+            return False
+        spec = self.registry.maybe_get(type_id)
+        src = self.graph.nodes.get(conn.src_node)
+        dst = self.graph.nodes.get(conn.dst_node)
+        if spec is None or src is None or dst is None:
+            return False
+        out_spec = src.spec.output(conn.src_port)
+        in_spec = dst.spec.input(conn.dst_port)
+        if out_spec is None or in_spec is None:
+            return False
+        port_in = next((p for p in spec.inputs
+                        if can_connect(out_spec.type, p.type)), None)
+        port_out = next((p for p in spec.outputs
+                        if can_connect(p.type, in_spec.type)), None)
+        if port_in is None or port_out is None:
+            return False
+        node = self.registry.instantiate(
+            type_id, pos=(scene_pos.x(), scene_pos.y()))
+        self.undo_stack.beginMacro(f"splice in {spec.label}")
+        self.undo_stack.push(AddNodeCommand(self.graph, node))
+        # free the destination's input before the new wire claims it, so no
+        # connection of the flow's is displaced by its own splice
+        self.undo_stack.push(DisconnectCommand(self.graph, conn.id))
+        self.undo_stack.push(ConnectCommand(
+            self.graph, conn.src_node, conn.src_port, node.id, port_in.name))
+        self.undo_stack.push(ConnectCommand(
+            self.graph, node.id, port_out.name, conn.dst_node, conn.dst_port))
+        self.undo_stack.endMacro()
+        return True
+
+    def replace_node_with(self, type_id: str, node_id: str) -> bool:
+        """Drop-replace: swap the node `node_id` for a new one of `type_id`
+        at the same position, carrying across every wire whose end finds a
+        home on the new node.
+
+        Matching prefers the port of the same name, then any compatible
+        unclaimed one. Wires that cannot be remapped are cut rather than
+        forced; order edges always survive, since every node has the flow
+        ports they run between. A locked node refuses. Returns whether the
+        replacement happened.
+        """
+        old = self.graph.nodes.get(node_id)
+        if old is None or old.locked:
+            return False
+        if self.registry is None:
+            return False
+        spec = self.registry.maybe_get(type_id)
+        if spec is None:
+            return False
+
+        def source_out_type(conn):
+            src = self.graph.nodes.get(conn.src_node)
+            port = src.spec.output(conn.src_port) if src else None
+            return port.type if port else None
+
+        def dest_in_type(conn):
+            dst = self.graph.nodes.get(conn.dst_node)
+            port = dst.spec.input(conn.dst_port) if dst else None
+            return port.type if port else None
+
+        incoming = [c for c in self.graph.connections.values()
+                    if c.dst_node == node_id]
+        outgoing = [c for c in self.graph.connections.values()
+                    if c.src_node == node_id]
+
+        # Where each surviving wire reattaches, as connect() arguments with
+        # the new node standing where the old one did. Order edges need no
+        # matching at all — their ports are the implicit flow pair every
+        # node carries, whatever else the script declares.
+        remap: list[tuple[str, str, str, str]] = []
+        dropped_ids: list[str] = []
+
+        def match(conns, spec_ports, wire_port, forward: bool) -> dict:
+            """Reattach each wire to a port of the new node.
+
+            Two passes, so a fallback can never steal the port another wire
+            is named for: exact name matches are reserved across every wire
+            first, then whatever is left takes the first compatible port in
+            declaration order. Inputs claim exclusively (one wire per input
+            is the graph's own law); outputs share when they must — they fan
+            out freely, so two old outputs may feed one new one rather than
+            see their consumers cut. Returns {conn_id: PortSpec}, and
+            appends the hopeless wires to dropped_ids.
+            """
+            free = list(spec_ports)
+            chosen_by_id: dict[str, object] = {}
+            unmatched: list = []
+            for conn in conns:
+                ptype = source_out_type(conn) if forward else dest_in_type(conn)
+                port = next(
+                    (p for p in free
+                     if p.name == wire_port(conn) and ptype is not None
+                     and (can_connect(ptype, p.type) if forward
+                          else can_connect(p.type, ptype))),
+                    None)
+                if port is not None:
+                    chosen_by_id[conn.id] = port
+                    free.remove(port)
+                else:
+                    unmatched.append(conn)
+            for conn in unmatched:
+                ptype = source_out_type(conn) if forward else dest_in_type(conn)
+                compat = [p for p in free
+                          if ptype is not None and (
+                              can_connect(ptype, p.type) if forward
+                              else can_connect(p.type, ptype))]
+                if compat:
+                    port = compat[0]
+                    free.remove(port)
+                elif not forward:
+                    # an input would silently displace, so nothing shared is
+                    # on offer there; an output already taken still beats a cut
+                    port = next(
+                        (p for p in spec_ports
+                         if ptype is not None and can_connect(p.type, ptype)),
+                        None)
+                else:
+                    port = None
+                if port is None:
+                    dropped_ids.append(conn.id)
+                else:
+                    chosen_by_id[conn.id] = port
+            return chosen_by_id
+
+        data_in = [c for c in incoming if not is_flow(c.dst_port)]
+        data_out = [c for c in outgoing if not is_flow(c.src_port)]
+        in_choice = match(data_in, spec.inputs,
+                          lambda c: c.dst_port, forward=True)
+        out_choice = match(data_out, spec.outputs,
+                           lambda c: c.src_port, forward=False)
+
+        # order edges first, then the remapped data wires — both as plain
+        # connect() arguments with the new node standing where the old was
+        # order edges first, then the remapped data wires — both as plain
+        # connect() arguments with the new node standing where the old was
+        node = self.registry.instantiate(type_id, pos=old.pos)
+        new_id = node.id
+        for conn in incoming:
+            if is_flow(conn.dst_port):
+                remap.append((conn.src_node, conn.src_port,
+                              new_id, conn.dst_port))
+        for conn in outgoing:
+            if is_flow(conn.src_port):
+                remap.append((new_id, conn.src_port,
+                              conn.dst_node, conn.dst_port))
+        for conn in data_in:
+            if conn.id in in_choice:
+                remap.append((conn.src_node, conn.src_port,
+                              new_id, in_choice[conn.id].name))
+        for conn in data_out:
+            if conn.id in out_choice:
+                remap.append((new_id, out_choice[conn.id].name,
+                              conn.dst_node, conn.dst_port))
+
+        kept_ids = [c.id for c in (*incoming, *outgoing)
+                    if c.id not in set(dropped_ids)]
+        self.undo_stack.beginMacro(f"replace {old.label}")
+        # before anything moves: freezing what a linked Table shows needs
+        # the wires still in place to walk upstream through them
+        self._push_orphan_snapshots(conn_ids=dropped_ids)
+        self.undo_stack.push(AddNodeCommand(self.graph, node))
+        if old.label_override is not None:
+            # constructed after the add, so undo sees the fresh node's own
+            # (empty) override as the state to go back to
+            self.undo_stack.push(SetLabelCommand(
+                self.graph, node.id, old.label_override))
+        for conn_id in kept_ids:
+            self.undo_stack.push(DisconnectCommand(self.graph, conn_id))
+        # removes the old node plus exactly the wires still on it — the
+        # dropped ones, since the kept ones went above
+        self.undo_stack.push(RemoveSelectionCommand(self.graph, [node_id]))
+        for src_node, src_port, dst_node, dst_port in remap:
+            self.undo_stack.push(ConnectCommand(
+                self.graph, src_node, src_port, dst_node, dst_port))
+        self.undo_stack.endMacro()
+        return True
 
     # ------------------------------------------------------------ wire drag
 

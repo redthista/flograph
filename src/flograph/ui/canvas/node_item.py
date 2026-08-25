@@ -688,6 +688,33 @@ class PortItem(QGraphicsItem):
         self.scene().finish_wire_drag(event.scenePos())
 
 
+class DropHintOutline(QGraphicsItem):
+    """The dashed ring drawn around a node while it is under a dragged one:
+    letting go here will replace it. A child item rather than a pen choice
+    inside every _paint_* — there are too many node kinds to repeat the
+    rule in each, and a transient hint is not worth that kind of surface."""
+
+    def __init__(self, parent: "NodeItem") -> None:
+        super().__init__(parent)
+        # a hint must never steal a click or a hover from what it rings
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setAcceptHoverEvents(False)
+
+    def boundingRect(self) -> QRectF:
+        item = self.parentItem()
+        pad = 4.0
+        return QRectF(-pad, -pad, item.width + 2 * pad, item.body_height + 2 * pad)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        item = self.parentItem()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(theme.WIRE_VALID, 1.8, Qt.DashLine))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(QRectF(-3.0, -3.0,
+                                       item.width + 6.0, item.body_height + 6.0),
+                                7.0, 7.0)
+
+
 class NodeItem(QGraphicsObject):
     def __init__(self, node: NodeInstance) -> None:
         super().__init__()
@@ -716,6 +743,9 @@ class NodeItem(QGraphicsObject):
         self.from_card = kind == "from"
         self.link_card = self.goto_card or self.from_card
         self._link_partners: set[str] = set()  # highlighted with this node
+        # the replace-target ring while a dragged node hovers over this one
+        # (see DropHintOutline); built lazily, shown for the drag only
+        self._drop_hint_frame: DropHintOutline | None = None
         self.broken = node.spec.broken
         # Draws as an ordinary node — no card kind at all, or an
         # identity-only one (see renders_plain). The only kind the compact
@@ -2234,6 +2264,15 @@ class NodeItem(QGraphicsObject):
         if self.link_card and on != bool(self._link_partners):
             self._link_partners = {"on"} if on else set()
             self.update()
+
+    def set_drop_hint(self, on: bool) -> None:
+        """Ring the body while this node sits under a dragged one: letting
+        go here will replace it. The ring survives LOD flattening — the
+        question "which box would I land on" is asked hardest zoomed out."""
+        if on and self._drop_hint_frame is None:
+            self._drop_hint_frame = DropHintOutline(self)
+        if self._drop_hint_frame is not None:
+            self._drop_hint_frame.setVisible(on)
 
     def _paint_link_card(self, painter: QPainter) -> None:
         rect = QRectF(0, 0, self.width, self.body_height)

@@ -261,10 +261,20 @@ class NodeGraphView(ZoomPanGraphicsView):
         else:
             super().dragEnterEvent(event)
 
+    def dragLeaveEvent(self, event) -> None:
+        self.scene().clear_drop_hint()
+        super().dragLeaveEvent(event)
+
     def dragMoveEvent(self, event) -> None:
         from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
-        if event.mimeData().hasFormat(NODE_TYPE_MIME) \
-                or event.mimeData().hasFormat(FRAME_ID_MIME):
+        if event.mimeData().hasFormat(NODE_TYPE_MIME):
+            # light up what this drop would do, so letting go is never a
+            # guess: a green wire means splice, a ringed node means replace
+            type_id = bytes(event.mimeData().data(NODE_TYPE_MIME)).decode()
+            self.scene().set_drop_hint(self.scene().drop_target_at(
+                type_id, self.mapToScene(event.position().toPoint())))
+            event.acceptProposedAction()
+        elif event.mimeData().hasFormat(FRAME_ID_MIME):
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             if self._matching_dropped_files(event.mimeData()):
@@ -278,8 +288,23 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
         if event.mimeData().hasFormat(NODE_TYPE_MIME):
             type_id = bytes(event.mimeData().data(NODE_TYPE_MIME)).decode()
-            self.node_dropped.emit(
-                type_id, self.mapToScene(event.position().toPoint()))
+            scene_pos = self.mapToScene(event.position().toPoint())
+            scene: NodeGraphScene = self.scene()
+            scene.clear_drop_hint()
+            # Alt drops past the aiming: a plain add exactly where released,
+            # for parking a node on or beside a wire without touching it.
+            target = None if (event.modifiers() & Qt.AltModifier) \
+                else scene.drop_target_at(type_id, scene_pos)
+            handled = False
+            if target is not None:
+                kind, obj = target
+                if kind == "wire":
+                    handled = scene.splice_into_wire(
+                        type_id, obj.conn.id, scene_pos)
+                else:
+                    handled = scene.replace_node_with(type_id, obj.node.id)
+            if not handled:
+                self.node_dropped.emit(type_id, scene_pos)
             event.acceptProposedAction()
         elif event.mimeData().hasFormat(FRAME_ID_MIME):
             frame_id = bytes(event.mimeData().data(FRAME_ID_MIME)).decode()

@@ -137,6 +137,8 @@ can never block a load.
 | --- | --- |
 | Add node | `Tab` (search palette), right-click, or drag from the library |
 | Connect | drag from a port; drop on empty canvas to pick a compatible node |
+| Splice into a wire | drop a library node onto the wire — it lights green while it will take; `Alt` drops without connecting |
+| Replace a node | drop a library node onto it — wires that fit the new node's ports come across |
 | Reroute dot | double-click a wire (double-click the dot again to name it) |
 | Comment frame | `Ctrl+G` around the selection (frames move their contents) |
 | Run all / selected / cancel | `F5` / `F6` / `Esc` |
