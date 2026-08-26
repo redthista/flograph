@@ -2,7 +2,8 @@
 import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QUndoStack
-from PySide6.QtWidgets import QInputDialog
+from PySide6.QtWidgets import (QGraphicsItem, QGraphicsProxyWidget,
+                               QInputDialog, QMenu, QWidget)
 
 from flograph.core import Frame, Graph, NodeRegistry
 from flograph.core.node import NodeStatus
@@ -771,3 +772,76 @@ class TestNodeBoundingRectCoversPins:
         # the flow pins ride the corners, above the body — covered too
         flow = item.flow_ports["input"]
         assert rect.contains(item.mapRectFromItem(flow, flow.boundingRect()))
+
+
+class TestBoundsIgnoreParkedPanels:
+    """A card's bounds must describe the card.
+
+    An embedded widget that owns a popup — the overflow menu of the toolbar
+    inside a plot card — gets a proxy *panel* from Qt the first time that
+    popup is shown, and it stays a child of the card afterwards, parked
+    wherever it was last opened. Qt's childrenBoundingRect is recursive, so
+    a 440x300 plot card reported bounds of 1450x3276: a giant invisible
+    square in the minimap, and — since a card's shape() falls back to its
+    bounding rect — half the canvas dragging a plot that looked normal.
+    """
+
+    def _card_with_a_popup(self, env, registry, park=QPointF(-1000, -3000)):
+        graph, _stack, scene = env
+        node = graph.add_node(registry.instantiate(
+            "flograph.viz.show_table", pos=(0.0, 0.0)))
+        item = scene.node_items[node.id]
+        widget = QWidget()
+        widget.resize(120, 80)
+        menu = QMenu(widget)
+        menu.addAction("something")
+        proxy = QGraphicsProxyWidget(item)
+        proxy.setWidget(widget)
+        # Qt builds the panel the first time the popup is shown, and keeps it
+        menu.show()
+        menu.hide()
+        panels = [c for c in proxy.childItems()
+                  if c.flags() & QGraphicsItem.ItemIsPanel]
+        assert panels, "Qt no longer parks a panel for an embedded popup"
+        panels[0].setPos(park)
+        return item, proxy, panels[0]
+
+    def test_a_parked_panel_does_not_inflate_the_card(self, env, registry):
+        item, _proxy, panel = self._card_with_a_popup(env, registry)
+        # the recursive answer is enormous — that part is Qt's, and stands
+        assert item.childrenBoundingRect().width() > 900
+        rect = item.boundingRect()
+        assert rect.width() < item.width + 200
+        assert rect.height() < item.body_height + 200
+        assert not rect.contains(panel.pos())
+
+    def test_the_shape_is_the_card_too(self, env, registry):
+        """The one that bit: a card's shape() is its bounding rect, so
+        oversized bounds are oversized *clicks*."""
+        item, _proxy, _panel = self._card_with_a_popup(env, registry)
+        shape = item.shape().boundingRect()
+        assert shape.width() < item.width + 200
+        assert not shape.contains(QPointF(-900.0, -2900.0))
+
+    def test_the_cheap_answer_is_still_used_when_it_is_sane(self, env,
+                                                            registry):
+        """No panel, nothing parked: the bounds are exactly Qt's recursive
+        rect united with the body, as they always were."""
+        graph, _stack, scene = env
+        node = graph.add_node(registry.instantiate(
+            "flograph.viz.show_table", pos=(0.0, 0.0)))
+        item = scene.node_items[node.id]
+        expected = QRectF(-2, -2, item.width + 4, item.body_height + 4) \
+            .united(item.childrenBoundingRect())
+        assert item.boundingRect() == expected
+
+    def test_the_card_still_covers_its_own_children(self, env, registry):
+        """The rule may not shrink the damage rect: a pin left outside it
+        smears across the canvas on every drag."""
+        item, proxy, _panel = self._card_with_a_popup(env, registry)
+        rect = item.boundingRect()
+        assert rect.contains(item.mapRectFromItem(proxy, proxy.boundingRect()))
+        for port in list(item.input_ports.values()) + list(
+                item.output_ports.values()):
+            assert rect.contains(
+                item.mapRectFromItem(port, port.boundingRect()))

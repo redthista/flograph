@@ -240,6 +240,10 @@ PORT_LABEL_GAP = 7.0  # horizontal gap between the pin and its pill
 # Floating them wholly outside costs nothing and makes the wire ends read as
 # terminals. Sized so the pin clears the border with a couple of px to spare.
 PORT_EDGE_GAP = 2.5
+#: How far outside its body a card's own children may reasonably reach —
+#: pins, flow pins, name pills. Past this, boundingRect stops trusting Qt's
+#: recursive answer and counts the children itself (see NodeItem.boundingRect).
+CHILD_OVERHANG_MAX = 200.0
 
 
 class NodeBadge(QGraphicsItem):
@@ -2194,8 +2198,39 @@ class NodeItem(QGraphicsObject):
         # skidding across the canvas until a zoom or pan repainted them.
         kids = self.childrenBoundingRect()
         if not kids.isNull():
+            # Qt's rect is recursive, and cached, which is what makes it
+            # cheap enough to ask for on every paint. Recursive also means
+            # descendants nobody here created count towards it: an embedded
+            # widget that owns a popup gets a proxy *panel* from Qt, parked
+            # thousands of pixels away where it waits invisibly to be shown.
+            # One of those — the overflow menu of the toolbar inside a plot
+            # card — gave a 440x300 card bounds of 1450x3276. Since a card's
+            # shape() falls back to its bounding rect, that was a giant
+            # invisible square in the minimap and half the canvas dragging a
+            # plot that looked perfectly normal. So: take the cheap answer
+            # while it is plausible, and count the real children when it is
+            # not.
+            room = base.adjusted(-CHILD_OVERHANG_MAX, -CHILD_OVERHANG_MAX,
+                                 CHILD_OVERHANG_MAX, CHILD_OVERHANG_MAX)
+            if not room.contains(kids):
+                kids = self._own_children_rect()
             base = base.united(kids)
         return base
+
+    def _own_children_rect(self) -> QRectF:
+        """The extent of the children this card actually put on the canvas.
+
+        Each direct child by its *own* rect rather than the recursive one,
+        and no panels — which is exactly the set of things this node draws
+        and moves, and excludes anything an embedded widget's popups leave
+        parked in the scene.
+        """
+        rect = QRectF()
+        for child in self.childItems():
+            if child.flags() & QGraphicsItem.ItemIsPanel:
+                continue
+            rect = rect.united(child.mapRectToParent(child.boundingRect()))
+        return rect
 
     def shape(self) -> QPainterPath:
         """What a click and a rubber band actually catch.
