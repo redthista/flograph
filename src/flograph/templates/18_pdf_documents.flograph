@@ -1,0 +1,317 @@
+{
+  "flograph_version": "0.1.10",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t18_make",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          0,
+          600
+        ],
+        "params": {
+          "folder": "flograph_pdf_demo"
+        },
+        "code": "\"\"\"Make Some PDFs\n\nWrites three small PDF files into a folder next to the project so the rest of\nthis example has something real to read. They are assembled here as bytes \u2014\nabout forty lines of it \u2014 rather than with a library, because a PDF is a text\nformat and this way the example needs nothing installed and works in a\nheadless run as well as in the app.\n\nOutputs the folder it wrote, and the path of the first document, so the\nreaders downstream get their locations from the wire rather than from a path\ntyped into a parameter that would only be right on one machine.\n\"\"\"\nNODE = {\n    \"label\": \"Make Some PDFs\",\n    \"category\": \"Scripting\",\n    \"inputs\": [],\n    \"outputs\": [(\"folder\", \"string\"), (\"first\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"folder\", \"type\": \"string\", \"label\": \"Folder\",\n     \"default\": \"flograph_pdf_demo\",\n     \"placeholder\": \"written relative to the current directory\"},\n]\n\nDOCUMENTS = {\n    \"invoice_a100.pdf\": (\"Invoice A-100\", [\n        [\"INVOICE A-100\", \"Acme Ltd\", \"\", \"Widgets  120.00\", \"Fitting   45.00\",\n         \"Total    165.00\"],\n        [\"Terms: 30 days net.\", \"Late payment attracts interest.\"],\n    ]),\n    \"invoice_b200.pdf\": (\"Invoice B-200\", [\n        [\"INVOICE B-200\", \"Globex Corp\", \"\", \"Consultancy  900.00\",\n         \"Expenses      75.50\", \"Total        975.50\"],\n    ]),\n    \"statement_q1.pdf\": (\"Q1 Statement\", [\n        [\"QUARTERLY STATEMENT\", \"Period: Q1\", \"\", \"Opening   1,200.00\",\n         \"Invoiced  1,140.50\", \"Closing   2,340.50\"],\n        [\"Notes\", \"Two invoices were raised this quarter.\",\n         \"Both remain outstanding at the period end.\"],\n        [\"Prepared for internal review only.\"],\n    ]),\n}\n\n\ndef build_pdf(pages, title=\"\"):\n    \"\"\"A minimal single-font PDF as bytes.\n\n    `pages` is a list of pages, each a list of lines. Everything here is\n    plain PDF syntax: a catalogue, a page tree, one Helvetica font, and a\n    content stream per page that positions text and draws it.\n    \"\"\"\n    def esc(text):\n        return (str(text).replace(\"\\\\\", r\"\\\\\")\n                .replace(\"(\", r\"\\(\").replace(\")\", r\"\\)\"))\n\n    objects, page_ids = [], []\n    objects.append(\"<< /Type /Catalog /Pages 2 0 R >>\")\n    objects.append(None)  # the page tree, filled in once the page ids exist\n    objects.append(\"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\")\n    for lines in pages:\n        content = [\"BT\", \"/F1 16 Tf\", \"24 TL\", \"72 760 Td\"]\n        for line in lines:\n            content.append(f\"({esc(line)}) Tj T*\")\n        content.append(\"ET\")\n        stream = \"\\n\".join(content)\n        objects.append(\n            \"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] \"\n            \"/Resources << /Font << /F1 3 0 R >> >> \"\n            f\"/Contents {len(objects) + 2} 0 R >>\")\n        page_ids.append(len(objects))\n        objects.append(\n            f\"<< /Length {len(stream)} >>\\nstream\\n{stream}\\nendstream\")\n\n    info_ref = 0\n    if title:\n        # An indirect object, not a dictionary written inline in the trailer:\n        # readers follow /Info as a reference and ignore anything else.\n        objects.append(f\"<< /Title ({esc(title)}) >>\")\n        info_ref = len(objects)\n    objects[1] = (\"<< /Type /Pages /Kids [\"\n                  + \" \".join(f\"{i} 0 R\" for i in page_ids)\n                  + f\"] /Count {len(pages)} >>\")\n\n    out = bytearray(b\"%PDF-1.4\\n\")\n    offsets = []\n    for number, body in enumerate(objects, 1):\n        offsets.append(len(out))\n        out += f\"{number} 0 obj\\n{body}\\nendobj\\n\".encode(\"latin-1\")\n    xref_at = len(out)\n    out += f\"xref\\n0 {len(objects) + 1}\\n\".encode(\"latin-1\")\n    out += b\"0000000000 65535 f \\n\"\n    for offset in offsets:\n        out += f\"{offset:010d} 00000 n \\n\".encode(\"latin-1\")\n    info = f\" /Info {info_ref} 0 R\" if info_ref else \"\"\n    out += (f\"trailer\\n<< /Size {len(objects) + 1} /Root 1 0 R{info} >>\\n\"\n            f\"startxref\\n{xref_at}\\n%%EOF\\n\").encode(\"latin-1\")\n    return bytes(out)\n\n\ndef run(ctx):\n    import os\n\n    folder = os.path.abspath(ctx.params[\"folder\"] or \"flograph_pdf_demo\")\n    os.makedirs(folder, exist_ok=True)\n    written = []\n    for name, (title, pages) in sorted(DOCUMENTS.items()):\n        path = os.path.join(folder, name)\n        with open(path, \"wb\") as handle:\n            handle.write(build_pdf(pages, title))\n        written.append(path)\n        ctx.log(f\"wrote {name} ({len(pages)} page(s))\")\n    ctx.log(f\"{len(written)} document(s) in {folder}\")\n    return {\"folder\": folder, \"first\": written[0]}\n",
+        "label": "Make Some PDFs"
+      },
+      {
+        "id": "t18_read_folder",
+        "type": "flograph.io.read_pdf_folder",
+        "pos": [
+          300,
+          300
+        ],
+        "params": {},
+        "code": null,
+        "label": "Read the Folder"
+      },
+      {
+        "id": "t18_read_one",
+        "type": "flograph.io.read_pdf",
+        "pos": [
+          300,
+          900
+        ],
+        "params": {
+          "payload": "Metadata + bytes"
+        },
+        "code": null,
+        "label": "Read One Document"
+      },
+      {
+        "id": "t18_show_docs",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          600,
+          0
+        ],
+        "params": {
+          "width": 420,
+          "height": 320
+        },
+        "code": null,
+        "label": "The Documents"
+      },
+      {
+        "id": "t18_pages_kpi",
+        "type": "flograph.viz.card",
+        "pos": [
+          600,
+          440
+        ],
+        "params": {
+          "column": "page",
+          "aggregation": "Count",
+          "label": "Pages read",
+          "width": 220,
+          "height": 120
+        },
+        "code": null,
+        "label": "Pages"
+      },
+      {
+        "id": "t18_words",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          600,
+          680
+        ],
+        "params": {
+          "by": "file",
+          "agg": "sum",
+          "values": "words"
+        },
+        "code": null,
+        "label": "Words per File"
+      },
+      {
+        "id": "t18_viewer",
+        "type": "flograph.viz.pdf_viewer",
+        "pos": [
+          1260,
+          560
+        ],
+        "params": {
+          "page": 1,
+          "width": 320,
+          "height": 420
+        },
+        "code": null,
+        "label": "The First Invoice"
+      },
+      {
+        "id": "t18_show_words",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1260,
+          60
+        ],
+        "params": {
+          "width": 420,
+          "height": 320
+        },
+        "code": null,
+        "label": "Words per File"
+      },
+      {
+        "id": "t18_title",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -320
+        ],
+        "params": {
+          "text": "# Reading PDFs\n\n**Make Some PDFs** writes three documents to a folder, then the flow reads\nthem back two ways.\n\n**Read PDF (Folder)** turns the whole folder into one row per page, with a\n`file` column \u2014 so Group By, Filter Rows and every other transform work on a\nstack of documents the way they work on a CSV. Its second output lists the\ndocuments themselves: title, page count, and whether each one has a text\nlayer at all.\n\n**Read PDF** does the same for a single file, and **PDF Viewer** shows a page\nof it on the canvas and on the dashboard page.\n",
+          "width": 480,
+          "height": 360
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "t18_payload_note",
+        "type": "flograph.util.note",
+        "pos": [
+          600,
+          900
+        ],
+        "params": {
+          "text": "### Metadata, or metadata + bytes\n\nEvery PDF node asks how much of the document should travel down the wire.\n\n*Metadata only* \u2014 the default \u2014 puts the **path** on it. The document dict\nstays a few hundred bytes however big the file is.\n\n**Read PDF** here is set to *Metadata + bytes*, which adds the file itself\nand a `data_uri` for anything downstream that wants to embed it. Handy, and\nit costs the whole file in memory \u2014 which is why it is a choice and not a\ndefault.\n",
+          "width": 420,
+          "height": 260
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "t18_c1",
+        "src": [
+          "t18_make",
+          "folder"
+        ],
+        "dst": [
+          "t18_read_folder",
+          "path_input"
+        ]
+      },
+      {
+        "id": "t18_c2",
+        "src": [
+          "t18_make",
+          "first"
+        ],
+        "dst": [
+          "t18_read_one",
+          "path_input"
+        ]
+      },
+      {
+        "id": "t18_c3",
+        "src": [
+          "t18_read_folder",
+          "documents"
+        ],
+        "dst": [
+          "t18_show_docs",
+          "table"
+        ]
+      },
+      {
+        "id": "t18_c4",
+        "src": [
+          "t18_read_folder",
+          "pages"
+        ],
+        "dst": [
+          "t18_pages_kpi",
+          "table"
+        ]
+      },
+      {
+        "id": "t18_c5",
+        "src": [
+          "t18_read_folder",
+          "pages"
+        ],
+        "dst": [
+          "t18_words",
+          "table"
+        ]
+      },
+      {
+        "id": "t18_c6",
+        "src": [
+          "t18_words",
+          "aggregated"
+        ],
+        "dst": [
+          "t18_show_words",
+          "table"
+        ]
+      },
+      {
+        "id": "t18_c7",
+        "src": [
+          "t18_read_one",
+          "document"
+        ],
+        "dst": [
+          "t18_viewer",
+          "source"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "t18_f1",
+        "title": "Make PDFs",
+        "rect": [
+          -40,
+          530,
+          140,
+          170
+        ],
+        "color": "#3f3d56"
+      },
+      {
+        "id": "t18_f2",
+        "title": "Read them",
+        "rect": [
+          260,
+          230,
+          140,
+          770
+        ],
+        "color": "#2f4858"
+      },
+      {
+        "id": "t18_f3",
+        "title": "Look at what came out",
+        "rect": [
+          560,
+          -70,
+          1160,
+          1270
+        ],
+        "color": "#33415c"
+      }
+    ],
+    "pages": [
+      {
+        "id": "t18_p1",
+        "title": "Documents",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t18_t1",
+            "node": "t18_pages_kpi",
+            "port": "value",
+            "rect": [
+              40,
+              40,
+              260,
+              160
+            ]
+          },
+          {
+            "id": "t18_t2",
+            "node": "t18_viewer",
+            "port": "document",
+            "rect": [
+              40,
+              240,
+              340,
+              460
+            ]
+          },
+          {
+            "id": "t18_t3",
+            "node": "t18_show_docs",
+            "port": "table",
+            "rect": [
+              420,
+              40,
+              620,
+              300
+            ]
+          },
+          {
+            "id": "t18_t4",
+            "node": "t18_show_words",
+            "port": "table",
+            "rect": [
+              420,
+              380,
+              620,
+              320
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

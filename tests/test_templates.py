@@ -56,11 +56,12 @@ class TestBundledExamples:
             "15_report_page.flograph",
             "16_project_gantt.flograph",
             "17_run_while_running.flograph",
+            "18_pdf_documents.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 17
+        assert len(window._examples_menu.actions()) == 18
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -77,7 +78,7 @@ class TestBundledExamples:
         "14_flow_variables.flograph",
         "15_report_page.flograph",
         "17_run_while_running.flograph",
-        # 13 writes a file, so it runs in a tmp_path of its own below
+        # 13 and 18 write files, so they run in a tmp_path of their own below
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))
@@ -1539,3 +1540,56 @@ class TestSvgRetrofitRunsTheQueryInsteadOfCountingItsParts:
         assert retrofit["_steps"]("rect + path") is None
         # and the ones it does read, it reads properly
         assert retrofit["_steps"]('g[data-name="boxes"] > rect') is not None
+
+
+class TestPdfDocuments:
+    """18_pdf_documents: the read-a-folder-of-PDFs story. It writes the
+    documents it then reads, so it gets a working directory of its own rather
+    than leaving three PDFs in the repo."""
+
+    def test_it_writes_the_pdfs_and_reads_them_back(
+            self, qtbot, window, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        window._open_example(template_path("18_pdf_documents.flograph"))
+        assert wait_run(qtbot, window.engine)
+
+        written = sorted(p.name for p in (tmp_path / "flograph_pdf_demo").iterdir())
+        assert written == ["invoice_a100.pdf", "invoice_b200.pdf",
+                           "statement_q1.pdf"]
+
+        folder = window.graph.nodes["t18_read_folder"]
+        pages = window.engine.cache.outputs_for(folder.id)["pages"]
+        # 2 + 1 + 3 pages, each one row, tagged with the file it came from
+        assert len(pages) == 6
+        assert set(pages["file"]) == set(written)
+        assert "INVOICE A-100" in pages.iloc[0]["text"]
+
+        documents = window.engine.cache.outputs_for(folder.id)["documents"]
+        assert list(documents["title"]) == ["Invoice A-100", "Invoice B-200",
+                                            "Q1 Statement"]
+        assert documents["has_text"].all()
+        # the light payload is the default, so no file is on the wire
+        assert "bytes" not in documents.columns
+
+    def test_the_single_reader_carries_the_bytes_it_was_asked_for(
+            self, qtbot, window, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        window._open_example(template_path("18_pdf_documents.flograph"))
+        assert wait_run(qtbot, window.engine)
+
+        one = window.graph.nodes["t18_read_one"]
+        document = window.engine.cache.outputs_for(one.id)["document"]
+        assert document["pages"] == 2
+        assert document["bytes"] is not None       # set to Metadata + bytes
+        assert document["data_uri"].startswith("data:application/pdf;base64,")
+
+        viewer = window.graph.nodes["t18_viewer"]
+        assert window.engine.cache.outputs_for(viewer.id)["document"]["pages"] == 2
+
+    def test_the_dashboard_page_shows_the_document(self, qtbot, window,
+                                                   monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        window._open_example(template_path("18_pdf_documents.flograph"))
+        page = next(iter(window.graph.pages.values()))
+        assert len(page.tiles) == 4
+        assert any(t.node_id == "t18_viewer" for t in page.tiles.values())

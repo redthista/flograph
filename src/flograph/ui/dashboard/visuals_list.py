@@ -29,6 +29,8 @@ _KIND_GLYPHS = {
     "grid": "▤",
     "kpi": "∑",
     "image": "▣",
+    # a page with a folded corner: a document, not another square
+    "pdf": "◱",
     "report": "☰",
     "slicer": "⑂",
     # not another square: the tables, the sheet and the picture already

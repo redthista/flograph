@@ -1404,7 +1404,9 @@ class MainWindow(QMainWindow):
         came in on the wire — one set in the node's own params is already on
         the card, drawn without any run at all."""
         node = self.graph.nodes.get(node_id)
-        if node is None or card_kind(node) != "image":
+        # A PDF card resolves its source exactly as an image card does — a
+        # path, a data: URI or base64 — so one handler serves both.
+        if node is None or card_kind(node) not in ("image", "pdf"):
             return
         item = self.scene.node_items.get(node_id)
         if item is None:

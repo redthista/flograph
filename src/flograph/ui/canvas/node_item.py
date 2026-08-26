@@ -734,8 +734,13 @@ class NodeItem(QGraphicsObject):
         self.report_card = kind == "report"
         self.kpi_card = kind == "kpi"
         # painted straight onto the item like the KPI card, no proxy widget —
-        # see ui.canvas.image_card for why that matters
-        self.image_card = kind == "image"
+        # see ui.canvas.image_card for why that matters. A PDF card is the
+        # same card with a rendered page where the artwork goes: identical
+        # chrome, geometry, resizing and Appearance sections, so it rides the
+        # image card's flag and differs only where the content is produced
+        # (`_card_image`, `_sync_card_image`, the empty-state hint).
+        self.pdf_card = kind == "pdf"
+        self.image_card = kind == "image" or self.pdf_card
         self.slicer = kind == "slicer"
         self.control = kind == "control"
         # Goto/From: the two ends of a link the canvas doesn't draw
@@ -1828,9 +1833,13 @@ class NodeItem(QGraphicsObject):
         paint(): a project full of image nodes that opens zoomed out (so
         every card is flattened by LOD) never decodes a single pixel.
         """
-        from .image_card import CardImage
         if self._image is None:
-            self._image = CardImage(self.update)
+            if self.pdf_card:
+                from .pdf_card import CardPdf
+                self._image = CardPdf(self.update)
+            else:
+                from .image_card import CardImage
+                self._image = CardImage(self.update)
             self._sync_card_image()
         return self._image
 
@@ -1838,10 +1847,20 @@ class NodeItem(QGraphicsObject):
         """Re-point the artwork at whatever the node's params now say."""
         if self._image is None:
             return
+        params = self.node.params
+        fit = str(params.get("fit", "Fit") or "Fit")
+        if self.pdf_card:
+            # A page rather than a picture: which page and the password
+            # replace the animation flag, and there is nothing to play.
+            self._image.set_source(
+                self._image_source(), fit, self._card_scale(),
+                int(params.get("page", 1) or 1),
+                str(params.get("password", "") or ""),
+            )
+            return
         self._image.set_source(
-            self._image_source(),
-            str(self.node.params.get("fit", "Fit") or "Fit"),
-            bool(self.node.params.get("animate", True)),
+            self._image_source(), fit,
+            bool(params.get("animate", True)),
             self._card_scale(),
         )
         self._image.set_playing(self._image_should_play())
@@ -1911,16 +1930,51 @@ class NodeItem(QGraphicsObject):
         painter.restore()
 
         if image.has_content() and not image.error:
+            if self.pdf_card and self.node.params.get("show_page_number", True):
+                self._paint_page_number(painter, rect, image.page_caption())
             return
         painter.setPen(QPen(theme.NODE_SUBTEXT))
         font = painter.font()
         font.setBold(False)
         font.setPointSizeF(8.5)
         painter.setFont(font)
-        painter.drawText(
-            rect, Qt.AlignCenter | Qt.TextWordWrap,
-            image.error or "Drop an image file here, paste one from the\n"
-                           "clipboard, or pick a file in the properties panel.")
+        if self.pdf_card:
+            from .pdf_card import EMPTY_HINT
+            hint = EMPTY_HINT
+        else:
+            hint = ("Drop an image file here, paste one from the\n"
+                    "clipboard, or pick a file in the properties panel.")
+        painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap,
+                         image.error or hint)
+
+    def _paint_page_number(self, painter: QPainter, rect: QRectF,
+                           caption: str) -> None:
+        """"3 / 12" in the corner of a PDF card.
+
+        Which page you are looking at is the one thing a rendered page does
+        not tell you, and a card showing page 7 of a contract with no way to
+        know it is page 7 is a screenshot, not a viewer.
+        """
+        if not caption:
+            return
+        font = painter.font()
+        font.setBold(False)
+        font.setPointSizeF(7.5)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        width = metrics.horizontalAdvance(caption) + 10
+        pill = QRectF(rect.right() - width - 4,
+                      rect.bottom() - metrics.height() - 6,
+                      width, metrics.height() + 2)
+        if pill.left() < rect.left() or pill.top() < rect.top():
+            return  # too small a card to label without covering the page
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(theme.NODE_BODY)
+        painter.setOpacity(0.85)
+        painter.drawRoundedRect(pill, 4, 4)
+        painter.setOpacity(1.0)
+        painter.setPen(QPen(theme.NODE_SUBTEXT))
+        painter.drawText(pill, Qt.AlignCenter, caption)
 
     def _image_render_ratio(self) -> float:
         """Device pixels per logical pixel for the artwork: screen DPR times

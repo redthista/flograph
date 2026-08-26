@@ -5,6 +5,7 @@ import os
 from typing import Optional
 
 _IMAGE_NODE = "flograph.viz.image"
+_PDF_NODE = "flograph.viz.pdf_viewer"
 
 # Picture formats the bundled Qt image plugins read. Deliberately a fixed
 # list rather than QImageReader.supportedImageFormats(): this module is
@@ -25,6 +26,10 @@ FILE_DROP_TARGETS: dict[str, tuple[str, str]] = {
     ".xls": ("flograph.io.read_excel", "path"),
     ".xlsm": ("flograph.io.read_excel", "path"),
     ".parquet": ("flograph.io.read_parquet", "path"),
+    # A dropped PDF opens in the viewer rather than the reader: a
+    # document you drag onto a canvas is one you want to look at, and
+    # Read PDF is one wire away once you do.
+    ".pdf": (_PDF_NODE, "path"),
     **{ext: (_IMAGE_NODE, "path") for ext in IMAGE_EXTENSIONS},
 }
 

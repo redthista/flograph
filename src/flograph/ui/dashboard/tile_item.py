@@ -33,7 +33,7 @@ from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid",
-    "control", "report", "image"})
+    "control", "report", "image", "pdf"})
 
 
 def is_tile_able(node) -> bool:
@@ -92,7 +92,7 @@ def default_tile_port(node) -> Optional[str]:
     """The output port a tile of this node renders — its first declared output
     ("figure"/"table"/"spec"/"value"/"view", per the node's own ports)."""
     if card_kind(node) in ("webview", "figure", "table_viewer", "kpi", "grid",
-                          "report", "image"):
+                          "report", "image", "pdf"):
         return node.spec.outputs[0].name if node.spec.outputs else None
     # action buttons have no ports; slicer tiles show upstream options, not
     # their own (already filtered) output; a control tile is the input itself
@@ -116,11 +116,12 @@ def default_tile_size(node) -> tuple[float, float]:
         # a column of prose plus a chart or two — taller than wide, like
         # the page it stands in for
         return (480.0, 420.0)
-    if kind == "image":
-        # the Image node's own card size, plus the tile's title bar, so a
-        # picture arrives on the page shaped the way it was on the canvas
+    if kind in ("image", "pdf"):
+        # the node's own card size, plus the tile's title bar, so a picture
+        # or a page arrives on the page shaped the way it was on the canvas
         return (float(node.params.get("width", 320) or 320),
-                float(node.params.get("height", 240) or 240) + TITLE_H)
+                float(node.params.get("height", 240 if kind == "image" else 420)
+                      or 240) + TITLE_H)
     if kind == "control":
         from ..controls import control_size
         width, height = control_size(node.spec.control or "")
@@ -369,6 +370,7 @@ class TileItem(QGraphicsObject):
             "slicer": "slicer",
             "control": "control",
             "image": "image",
+            "pdf": "pdf",
         }.get(card_kind(node), "generic")
 
     def _build_host(self) -> None:
@@ -675,18 +677,19 @@ class TileItem(QGraphicsObject):
             self.update()
             return
 
-        if kind == "image":
+        if kind in ("image", "pdf"):
             # Painted, not widget-backed, exactly like the canvas card — and
-            # like it, drawn from the node's own source, so a picture is on
-            # the page whether or not the flow has been run.
+            # like it, drawn from the node's own source, so a picture or a
+            # page is on the dashboard whether or not the flow has been run.
             self._sync_image()
             image = self._card_image()
             if image.has_content():
                 self._proxy.hide()
             else:
                 self._proxy.show()
+                what = "an image" if kind == "image" else "a PDF"
                 self._placeholder.setText(
-                    image.error or "Set an image on this node to show it here.")
+                    image.error or f"Set {what} on this node to show it here.")
                 self._placeholder.show()
             self.update()
             return
@@ -837,9 +840,13 @@ class TileItem(QGraphicsObject):
         """The tile's artwork, built on first use. Same CardImage the canvas
         card uses, so both decode at display size, pause animations when
         nothing can see them, and agree on what a source string means."""
-        from ..canvas.image_card import CardImage
         if self._image is None:
-            self._image = CardImage(self.update)
+            if self._kind() == "pdf":
+                from ..canvas.pdf_card import CardPdf
+                self._image = CardPdf(self.update)
+            else:
+                from ..canvas.image_card import CardImage
+                self._image = CardImage(self.update)
         return self._image
 
     def _sync_image(self) -> None:
@@ -847,14 +854,22 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if node is None:
             return
-        from ..canvas.image_card import image_source
         entry = self._engine.cache.get(self.tile.node_id)
         payload = (self._engine.cache.outputs_for(self.tile.node_id).get(self.tile.port)
                    if entry is not None and self.tile.port else None)
         image = self._card_image()
+        fit = str(node.params.get("fit", "Fit") or "Fit")
+        if self._kind() == "pdf":
+            from ..canvas.pdf_card import pdf_source
+            image.set_source(
+                pdf_source(node, payload), fit, self._image_scale(node),
+                int(node.params.get("page", 1) or 1),
+                str(node.params.get("password", "") or ""),
+            )
+            return
+        from ..canvas.image_card import image_source
         image.set_source(
-            image_source(node, payload),
-            str(node.params.get("fit", "Fit") or "Fit"),
+            image_source(node, payload), fit,
             bool(node.params.get("animate", True)),
             self._image_scale(node),
         )
@@ -906,9 +921,9 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if kind == "kpi":
             self.update()
-        elif kind == "image":
-            # the picture *is* a param, so picking a different file (or
-            # changing fit/scale) has to redraw without a run
+        elif kind in ("image", "pdf"):
+            # the picture (or the page) *is* a param, so picking a different
+            # file — or changing page/fit/scale — has to redraw without a run
             self.refresh_content()
         elif kind == "sheet" and self._sheet_model is not None:
             # set_sheet no-ops when nothing changed, so the edit that caused
@@ -965,7 +980,7 @@ class TileItem(QGraphicsObject):
         # an image tile draws the node's own source, not a computed output,
         # so a dirty node does not make the picture out of date either
         if node is None or not node.dirty \
-                or self._kind() in ("button", "sheet", "control", "image"):
+                or self._kind() in ("button", "sheet", "control", "image", "pdf"):
             return False
         if self._kind() == "kpi":  # painted, not widget-backed
             return self._kpi_has_value
@@ -1071,7 +1086,7 @@ class TileItem(QGraphicsObject):
             painter.setOpacity(0.45 if updating else 1.0)
             self._paint_kpi_value(painter)
             painter.setOpacity(1.0)
-        elif self._kind() == "image":
+        elif self._kind() in ("image", "pdf"):
             self._paint_image(painter)
 
     def _paint_fullscreen_glyph(self, painter: QPainter) -> None:

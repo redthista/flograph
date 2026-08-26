@@ -286,7 +286,11 @@ and **Write Text**, which puts a string on disk — an exported chart, a
 report, anything a script built;
 drag a file onto the canvas to get the right reader already configured. **Read
 CSV/Excel/Parquet (Folder)** reads a whole directory as one stacked table, and
-**Read CSV (Folder → Dict)** hands back one table per file. **Table** is a real spreadsheet you edit on the canvas,
+**Read CSV (Folder → Dict)** hands back one table per file. **Read PDF** and
+**Read PDF (Folder)** turn documents into a table — one row per page, with the
+text, so Filter Rows and Group By work on a stack of invoices the way they
+work on a CSV, plus a second output listing each document's metadata and
+whether it has a text layer at all. **Table** is a real spreadsheet you edit on the canvas,
 with formulas (`=SUM(A1:A9)`, plus `AVERAGE`, `ROUND`, `POWER`, `CONCAT`,
 `LEFT`/`MID`/`RIGHT`, `AND`/`OR`/`NOT` and the rest of the usual set), fill,
 copy/paste, and an optional linked input that keeps its contents when you
@@ -310,7 +314,9 @@ milestones, dependency arrows and a baseline to measure the slip
 against, and a third output that hands you the whole chart as a
 standalone HTML page), 
 Slicer, Image (any picture on the canvas, animated GIFs included, from a
-file or a base64 string), Report.
+file or a base64 string), PDF Viewer (a page of a document on the canvas or a
+dashboard — rendered at the size it is drawn at, so a 400-page report costs
+one page of pixels), Report.
 
 Any web-view node has **Open in Browser** on its right-click menu — the same
 document, in a real browser, refreshed in place when the flow re-runs.
