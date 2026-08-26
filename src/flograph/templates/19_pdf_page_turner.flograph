@@ -1,0 +1,229 @@
+{
+  "flograph_version": "0.1.10",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t19_title",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -440
+        ],
+        "code": null,
+        "params": {
+          "text": "# Turning the pages\n\n**Make Some PDFs** writes three documents, then **Read PDF** opens the\nlongest of them and hands it to a **PDF Viewer**.\n\nThe viewer draws one page. Which one is a *cosmetic* setting, so the\nchevrons under the page \u2014 `\u2039 2 / 3 \u203a` \u2014 turn it without running anything:\nno node goes stale, nothing downstream recomputes, and the file is read\nfrom disk a page at a time. A 400-page report on the canvas costs one page\nof pixels.\n\nThe second viewer is fed a plain **path** rather than a document, and its\ninvoice has a single page: it gets the caption and no chevrons, because\nthere is nowhere to go.\n",
+          "width": 520,
+          "height": 280
+        }
+      },
+      {
+        "id": "t19_try",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -100
+        ],
+        "code": null,
+        "params": {
+          "text": "## Try it\n\n**Run All**, then:\n\n* click the chevrons under either page \u2014 watch the LEDs stay green,\n* open the **Documents** page and turn the pages there instead: a dashboard\n  is what you hand to somebody, and its reader has no properties panel,\n* page a tile, come back to the canvas, and the card is on the same page.\n  One node, one page \u2014 the tile and the card write the same setting.\n\n**Page** in the properties panel does the same thing by hand, and\n**Show page number** hides caption and chevrons together.\n",
+          "width": 520,
+          "height": 260
+        }
+      },
+      {
+        "id": "t19_make",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          0,
+          300
+        ],
+        "code": "\"\"\"Make Some PDFs\n\nWrites three small PDF files into a folder next to the project so the rest of\nthis example has something real to read. They are assembled here as bytes \u2014\nabout forty lines of it \u2014 rather than with a library, because a PDF is a text\nformat and this way the example needs nothing installed and works in a\nheadless run as well as in the app.\n\nOutputs the folder, then the **longest** document and the **shortest** one,\nbecause that is what this example is about: one of them has pages to turn\nand the other does not. Paths travel down the wire rather than being typed\ninto a parameter that would only be right on one machine.\n\"\"\"\nNODE = {\n    \"label\": \"Make Some PDFs\",\n    \"category\": \"Scripting\",\n    \"inputs\": [],\n    \"outputs\": [(\"folder\", \"string\"), (\"longest\", \"string\"),\n                (\"single\", \"string\")],\n}\nPARAMS = [\n    {\"name\": \"folder\", \"type\": \"string\", \"label\": \"Folder\",\n     \"default\": \"flograph_pdf_demo\",\n     \"placeholder\": \"written relative to the current directory\"},\n]\n\nDOCUMENTS = {\n    \"invoice_a100.pdf\": (\"Invoice A-100\", [\n        [\"INVOICE A-100\", \"Acme Ltd\", \"\", \"Widgets  120.00\", \"Fitting   45.00\",\n         \"Total    165.00\"],\n        [\"Terms: 30 days net.\", \"Late payment attracts interest.\"],\n    ]),\n    \"invoice_b200.pdf\": (\"Invoice B-200\", [\n        [\"INVOICE B-200\", \"Globex Corp\", \"\", \"Consultancy  900.00\",\n         \"Expenses      75.50\", \"Total        975.50\"],\n    ]),\n    \"statement_q1.pdf\": (\"Q1 Statement\", [\n        [\"QUARTERLY STATEMENT\", \"Period: Q1\", \"\", \"Opening   1,200.00\",\n         \"Invoiced  1,140.50\", \"Closing   2,340.50\"],\n        [\"Notes\", \"Two invoices were raised this quarter.\",\n         \"Both remain outstanding at the period end.\"],\n        [\"Prepared for internal review only.\"],\n    ]),\n}\n\n\ndef build_pdf(pages, title=\"\"):\n    \"\"\"A minimal single-font PDF as bytes.\n\n    `pages` is a list of pages, each a list of lines. Everything here is\n    plain PDF syntax: a catalogue, a page tree, one Helvetica font, and a\n    content stream per page that positions text and draws it.\n    \"\"\"\n    def esc(text):\n        return (str(text).replace(\"\\\\\", r\"\\\\\")\n                .replace(\"(\", r\"\\(\").replace(\")\", r\"\\)\"))\n\n    objects, page_ids = [], []\n    objects.append(\"<< /Type /Catalog /Pages 2 0 R >>\")\n    objects.append(None)  # the page tree, filled in once the page ids exist\n    objects.append(\"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\")\n    for lines in pages:\n        content = [\"BT\", \"/F1 16 Tf\", \"24 TL\", \"72 760 Td\"]\n        for line in lines:\n            content.append(f\"({esc(line)}) Tj T*\")\n        content.append(\"ET\")\n        stream = \"\\n\".join(content)\n        objects.append(\n            \"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] \"\n            \"/Resources << /Font << /F1 3 0 R >> >> \"\n            f\"/Contents {len(objects) + 2} 0 R >>\")\n        page_ids.append(len(objects))\n        objects.append(\n            f\"<< /Length {len(stream)} >>\\nstream\\n{stream}\\nendstream\")\n\n    info_ref = 0\n    if title:\n        # An indirect object, not a dictionary written inline in the trailer:\n        # readers follow /Info as a reference and ignore anything else.\n        objects.append(f\"<< /Title ({esc(title)}) >>\")\n        info_ref = len(objects)\n    objects[1] = (\"<< /Type /Pages /Kids [\"\n                  + \" \".join(f\"{i} 0 R\" for i in page_ids)\n                  + f\"] /Count {len(pages)} >>\")\n\n    out = bytearray(b\"%PDF-1.4\\n\")\n    offsets = []\n    for number, body in enumerate(objects, 1):\n        offsets.append(len(out))\n        out += f\"{number} 0 obj\\n{body}\\nendobj\\n\".encode(\"latin-1\")\n    xref_at = len(out)\n    out += f\"xref\\n0 {len(objects) + 1}\\n\".encode(\"latin-1\")\n    out += b\"0000000000 65535 f \\n\"\n    for offset in offsets:\n        out += f\"{offset:010d} 00000 n \\n\".encode(\"latin-1\")\n    info = f\" /Info {info_ref} 0 R\" if info_ref else \"\"\n    out += (f\"trailer\\n<< /Size {len(objects) + 1} /Root 1 0 R{info} >>\\n\"\n            f\"startxref\\n{xref_at}\\n%%EOF\\n\").encode(\"latin-1\")\n    return bytes(out)\n\n\ndef run(ctx):\n    import os\n\n    folder = os.path.abspath(ctx.params[\"folder\"] or \"flograph_pdf_demo\")\n    os.makedirs(folder, exist_ok=True)\n    written = []\n    for name, (title, pages) in sorted(DOCUMENTS.items()):\n        path = os.path.join(folder, name)\n        with open(path, \"wb\") as handle:\n            handle.write(build_pdf(pages, title))\n        written.append((len(pages), path))\n        ctx.log(f\"wrote {name} ({len(pages)} page(s))\")\n    written.sort()\n    ctx.log(f\"{len(written)} document(s) in {folder}\")\n    # Shortest first, longest last \u2014 the two ends are the two viewers.\n    return {\"folder\": folder, \"longest\": written[-1][1],\n            \"single\": written[0][1]}\n",
+        "label": "Make Some PDFs",
+        "params": {
+          "folder": "flograph_pdf_demo"
+        }
+      },
+      {
+        "id": "t19_read",
+        "type": "flograph.io.read_pdf",
+        "pos": [
+          300,
+          300
+        ],
+        "code": null,
+        "label": "Read the Longest",
+        "params": {}
+      },
+      {
+        "id": "t19_kpi",
+        "type": "flograph.viz.card",
+        "pos": [
+          600,
+          0
+        ],
+        "code": null,
+        "label": "Pages",
+        "params": {
+          "column": "page",
+          "aggregation": "Count",
+          "label": "Pages in this document",
+          "width": 220,
+          "height": 120
+        }
+      },
+      {
+        "id": "t19_viewer",
+        "type": "flograph.viz.pdf_viewer",
+        "pos": [
+          600,
+          200
+        ],
+        "code": null,
+        "label": "Three Pages \u2014 Chevrons",
+        "params": {
+          "width": 320,
+          "height": 420,
+          "page": 1
+        }
+      },
+      {
+        "id": "t19_single",
+        "type": "flograph.viz.pdf_viewer",
+        "pos": [
+          600,
+          780
+        ],
+        "code": null,
+        "label": "One Page \u2014 No Chevrons",
+        "params": {
+          "width": 320,
+          "height": 420
+        }
+      }
+    ],
+    "connections": [
+      {
+        "id": "t19_c1",
+        "src": [
+          "t19_make",
+          "longest"
+        ],
+        "dst": [
+          "t19_read",
+          "path_input"
+        ]
+      },
+      {
+        "id": "t19_c2",
+        "src": [
+          "t19_read",
+          "document"
+        ],
+        "dst": [
+          "t19_viewer",
+          "source"
+        ]
+      },
+      {
+        "id": "t19_c3",
+        "src": [
+          "t19_read",
+          "pages"
+        ],
+        "dst": [
+          "t19_kpi",
+          "table"
+        ]
+      },
+      {
+        "id": "t19_c4",
+        "src": [
+          "t19_make",
+          "single"
+        ],
+        "dst": [
+          "t19_single",
+          "source"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "t19_f1",
+        "title": "Make the PDFs",
+        "rect": [
+          -40,
+          230,
+          140,
+          170
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "t19_f2",
+        "title": "Open one",
+        "rect": [
+          260,
+          230,
+          140,
+          170
+        ],
+        "color": "#3c5c41"
+      },
+      {
+        "id": "t19_f3",
+        "title": "Turn the pages",
+        "rect": [
+          560,
+          -70,
+          400,
+          1310
+        ],
+        "color": "#5c4133"
+      }
+    ],
+    "pages": [
+      {
+        "id": "t19_p1",
+        "title": "Documents",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t19_t1",
+            "node": "t19_kpi",
+            "port": "value",
+            "rect": [
+              40,
+              40,
+              260,
+              160
+            ]
+          },
+          {
+            "id": "t19_t2",
+            "node": "t19_viewer",
+            "port": "document",
+            "rect": [
+              40,
+              240,
+              340,
+              460
+            ]
+          },
+          {
+            "id": "t19_t3",
+            "node": "t19_single",
+            "port": "document",
+            "rect": [
+              420,
+              240,
+              340,
+              460
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

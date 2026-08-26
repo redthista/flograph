@@ -57,11 +57,12 @@ class TestBundledExamples:
             "16_project_gantt.flograph",
             "17_run_while_running.flograph",
             "18_pdf_documents.flograph",
+            "19_pdf_page_turner.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 18
+        assert len(window._examples_menu.actions()) == 19
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -78,7 +79,8 @@ class TestBundledExamples:
         "14_flow_variables.flograph",
         "15_report_page.flograph",
         "17_run_while_running.flograph",
-        # 13 and 18 write files, so they run in a tmp_path of their own below
+        # 13, 18 and 19 write files, so they run in a tmp_path of their own
+        # below
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))
@@ -1593,3 +1595,54 @@ class TestPdfDocuments:
         page = next(iter(window.graph.pages.values()))
         assert len(page.tiles) == 4
         assert any(t.node_id == "t18_viewer" for t in page.tiles.values())
+
+
+class TestPdfPageTurner:
+    """19_pdf_page_turner: the viewer's own pager. Writes its documents like
+    18 does, so it gets a working directory of its own too."""
+
+    def open_and_run(self, qtbot, window, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        window._open_example(template_path("19_pdf_page_turner.flograph"))
+        assert not any(n.spec.broken for n in window.graph.nodes.values())
+        assert wait_run(qtbot, window.engine)
+        for node in window.graph.nodes.values():
+            assert node.status == NodeStatus.DONE, node.status_message
+
+    def test_it_runs_clean_and_picks_the_two_ends(
+            self, qtbot, window, monkeypatch, tmp_path):
+        """The writer hands out the longest document and the shortest, which
+        is the whole contrast the example is built on."""
+        self.open_and_run(qtbot, window, monkeypatch, tmp_path)
+        outputs = window.engine.cache.outputs_for("t19_make")
+        assert outputs["longest"].endswith("statement_q1.pdf")   # 3 pages
+        assert outputs["single"].endswith("invoice_b200.pdf")    # 1 page
+
+    def test_the_long_document_gets_chevrons_and_the_short_one_does_not(
+            self, qtbot, window, monkeypatch, tmp_path):
+        self.open_and_run(qtbot, window, monkeypatch, tmp_path)
+        scene = window.scene
+        long_card = scene.node_items["t19_viewer"]._card_image()
+        short_card = scene.node_items["t19_single"]._card_image()
+        assert long_card.page_caption() == "1 / 3"
+        assert short_card.page_caption() == "1 / 1"
+        assert long_card.page_count() == 3
+        assert short_card.page_count() == 1
+
+    def test_paging_the_card_does_not_dirty_the_flow(
+            self, qtbot, window, monkeypatch, tmp_path):
+        """The point of the example: turning the page runs nothing."""
+        self.open_and_run(qtbot, window, monkeypatch, tmp_path)
+        item = window.scene.node_items["t19_viewer"]
+        item._card_image()   # the card is built by its first paint, as here
+        item._step_page(1)
+        assert window.graph.nodes["t19_viewer"].params["page"] == 2
+        assert not any(n.dirty for n in window.graph.nodes.values())
+
+    def test_the_dashboard_carries_both_viewers(
+            self, qtbot, window, monkeypatch, tmp_path):
+        self.open_and_run(qtbot, window, monkeypatch, tmp_path)
+        page = window.graph.pages["t19_p1"]
+        assert page.kind == "dashboard"
+        assert [t.node_id for t in page.tiles.values()] == [
+            "t19_kpi", "t19_viewer", "t19_single"]
