@@ -256,11 +256,19 @@ class CardPdf:
         painter.restore()
 
     def page_caption(self) -> str:
-        """"3 / 12" for the corner of the card, or "" with no document."""
+        """"3 / 12" for the card's pager, or "" with no document."""
         total = self.page_count()
         if not total:
             return ""
-        return f"{self._clamped_page() + 1} / {total}"
+        return f"{self.shown_page()} / {total}"
+
+    def shown_page(self) -> int:
+        """The 1-based page actually on screen, which is not always the page
+        that was asked for — see `_clamped_page`. The card's chevrons step
+        from here rather than from the param, so a page number left past the
+        end of a shorter document steps back into it instead of counting up
+        through pages that aren't there."""
+        return self._clamped_page() + 1
 
     @staticmethod
     def _centred(rect: QRectF, width: float, height: float) -> QRectF:

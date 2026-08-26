@@ -485,6 +485,12 @@ class TestCardPdf:
         assert card.page_caption() == "2 / 2"
         assert not card.error
 
+    def test_shown_page_is_the_clamped_one(self, qapp, invoice):
+        """What the pager steps from — the page on screen, not the number in
+        the param, or a card left on page 99 would count up from there."""
+        assert self._card(invoice, page=99).shown_page() == 2
+        assert self._card(invoice, page=1).shown_page() == 1
+
     def test_the_natural_size_is_the_page_size(self, qapp, invoice):
         assert card_size(self._card(invoice)) == (595, 842)
 
@@ -584,3 +590,199 @@ class TestCanvasIntegration:
         assert default_tile_port(node) == "document"
         width, height = default_tile_size(node)
         assert (width, height) == (320.0, 420.0 + 24.0)
+
+
+# ---------------------------------------------------------------- the pager
+
+def paint_item(item):
+    """Draw a node item once, offscreen. The pager's hit rectangles are
+    established by the paint that draws them, so a test that clicks a
+    chevron has to draw the card first — which is exactly the rule the
+    feature relies on: no chevron on screen, no chevron to click."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem
+    image = QImage(1, 1, QImage.Format_ARGB32)
+    painter = QPainter(image)
+    item.paint(painter, QStyleOptionGraphicsItem(), None)
+    painter.end()
+
+
+def click(item, pos):
+    """A left-click on a node item at `pos`, in item coordinates."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtWidgets import QGraphicsSceneMouseEvent
+    event = QGraphicsSceneMouseEvent(QEvent.GraphicsSceneMousePress)
+    event.setPos(pos)
+    event.setButton(Qt.LeftButton)
+    event.setButtons(Qt.LeftButton)
+    item.mousePressEvent(event)
+
+
+class TestCardPager:
+    """The chevrons either side of "2 / 3" at the bottom of a PDF card.
+
+    Paging is a cosmetic param edit, so a click here turns the page and runs
+    nothing — which is the whole point of the control: a document you have
+    to go and press Run to leaf through is not a document.
+    """
+
+    @pytest.fixture
+    def env(self, qtbot, registry, tmp_path):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.ui.canvas import NodeGraphScene
+        path = tmp_path / "three.pdf"
+        path.write_bytes(build_pdf([["one"], ["two"], ["three"]], "Three"))
+        graph = Graph()
+        stack = QUndoStack()
+        scene = NodeGraphScene(graph, stack, registry=registry)
+        node = graph.add_node(registry.instantiate("flograph.viz.pdf_viewer"))
+        node.params["path"] = str(path)
+        node.dirty = False
+        item = scene.node_items[node.id]
+        paint_item(item)
+        yield graph, node, item, stack
+        stack.clear()
+
+    def test_a_multi_page_document_gets_chevrons(self, env):
+        _graph, _node, item, _stack = env
+        assert item._pager is not None
+        back, forward = item._pager
+        assert back.right() < forward.left()   # one at each end of the pill
+
+    def test_a_single_page_document_gets_none(self, qtbot, registry, invoice,
+                                              tmp_path):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.ui.canvas import NodeGraphScene
+        path = tmp_path / "one.pdf"
+        path.write_bytes(build_pdf([["only page"]], "One"))
+        graph = Graph()
+        stack = QUndoStack()
+        scene = NodeGraphScene(graph, stack, registry=registry)
+        node = graph.add_node(registry.instantiate("flograph.viz.pdf_viewer"))
+        node.params["path"] = str(path)
+        item = scene.node_items[node.id]
+        paint_item(item)
+        # the caption still says which page it is; there is just nowhere to go
+        assert item._card_image().page_caption() == "1 / 1"
+        assert item._pager is None
+        stack.clear()
+
+    def test_clicking_forward_turns_the_page(self, env):
+        graph, node, item, _stack = env
+        click(item, item._pager[1].center())
+        assert node.params["page"] == 2
+        assert item._card_image().page_caption() == "2 / 3"
+
+    def test_clicking_back_turns_it_the_other_way(self, env):
+        graph, node, item, _stack = env
+        graph.set_param(node.id, "page", 3)
+        click(item, item._pager[0].center())
+        assert node.params["page"] == 2
+
+    def test_it_stops_at_the_ends(self, env):
+        graph, node, item, _stack = env
+        click(item, item._pager[0].center())
+        assert node.params["page"] == 1
+        graph.set_param(node.id, "page", 3)
+        click(item, item._pager[1].center())
+        assert node.params["page"] == 3
+
+    def test_it_steps_from_the_page_on_screen(self, env):
+        """A page number left past the end of a shorter document shows the
+        last page — so back from there is the page before that one, not 98."""
+        graph, node, item, _stack = env
+        graph.set_param(node.id, "page", 99)
+        click(item, item._pager[0].center())
+        assert node.params["page"] == 2
+
+    def test_turning_the_page_runs_nothing(self, env):
+        graph, node, item, _stack = env
+        click(item, item._pager[1].center())
+        assert not node.dirty
+
+    def test_it_is_one_undo_step_per_flick(self, env):
+        graph, node, item, stack = env
+        click(item, item._pager[1].center())
+        click(item, item._pager[1].center())
+        assert node.params["page"] == 3
+        stack.undo()
+        assert node.params["page"] == 1   # back where the flick started
+
+    def test_the_rest_of_the_card_does_not_page(self, env):
+        from PySide6.QtCore import QPointF
+        _graph, node, item, _stack = env
+        click(item, QPointF(item.width / 2, item.body_height / 2))
+        assert node.params["page"] == 1
+
+    def test_a_flattened_card_has_nothing_to_click(self, env):
+        """Zoomed far out the card is a coloured slab — the chevrons are not
+        drawn, so the rectangles they left behind must not still fire."""
+        _graph, node, item, _stack = env
+        pos = item._pager[1].center()
+        item._flat = True
+        click(item, pos)
+        assert node.params["page"] == 1
+
+    def test_the_hovered_chevron_lights_up(self, env):
+        from PySide6.QtCore import QEvent, QPointF
+        from PySide6.QtWidgets import QGraphicsSceneHoverEvent
+        _graph, _node, item, _stack = env
+        event = QGraphicsSceneHoverEvent(QEvent.GraphicsSceneHoverMove)
+        event.setPos(item._pager[1].center())
+        item.hoverMoveEvent(event)
+        assert item._pager_hover == 1
+        event.setPos(QPointF(item.width / 2, item.body_height / 2))
+        item.hoverMoveEvent(event)
+        assert item._pager_hover == 0
+
+
+class TestPagingAWiredDocument:
+    """A viewer fed by a wire — Read PDF, or a folder read and filtered down
+    to one row — draws the document its last run resolved. Turning the page
+    must not throw that away: it did once, and the card emptied until the
+    flow was dirtied and run again, which made a cosmetic param look like a
+    data one."""
+
+    @pytest.fixture
+    def env(self, qtbot, registry, tmp_path):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.ui.canvas import NodeGraphScene
+        path = tmp_path / "wired.pdf"
+        path.write_bytes(build_pdf([["one"], ["two"], ["three"]], "Wired"))
+        graph = Graph()
+        stack = QUndoStack()
+        scene = NodeGraphScene(graph, stack, registry=registry)
+        node = graph.add_node(registry.instantiate("flograph.viz.pdf_viewer"))
+        item = scene.node_items[node.id]
+        # no file picked by hand: the source arrived on the wire, which is
+        # what the engine reports when the node has run
+        item.set_image_result(str(path))
+        yield graph, node, item, path, stack
+        stack.clear()
+
+    def test_the_run_source_draws_the_card(self, env):
+        _graph, _node, item, _path, _stack = env
+        assert item._card_image().page_caption() == "1 / 3"
+
+    def test_turning_the_page_keeps_it(self, env):
+        graph, node, item, _path, _stack = env
+        graph.set_param(node.id, "page", 2)
+        assert item._card_image().page_caption() == "2 / 3"
+
+    def test_so_do_the_other_presentation_params(self, env):
+        graph, node, item, _path, _stack = env
+        graph.set_param(node.id, "fit", "Fill")
+        graph.set_param(node.id, "scale", 150)
+        assert item._card_image().has_content()
+
+    def test_picking_a_file_by_hand_still_wins(self, env, tmp_path):
+        """The one param that does replace it — otherwise choosing a file on
+        a node that has run would appear to do nothing."""
+        graph, node, item, _path, _stack = env
+        picked = tmp_path / "picked.pdf"
+        picked.write_bytes(build_pdf([["just the one"]], "Picked"))
+        graph.set_param(node.id, "path", str(picked))
+        assert item._card_image().page_caption() == "1 / 1"

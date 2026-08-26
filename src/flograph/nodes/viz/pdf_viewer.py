@@ -13,10 +13,14 @@ Three ways to get one:
     way: read a folder, filter to the document you care about, show it.
 
 The card draws straight from the source, so a document picked here appears
-without running the graph, and **Page** turns to any page in it without
-running it either — the page is rendered at the size the card is actually
-drawn at, so a 400-page report on the canvas costs one page of pixels and
-reads the file from disk as it needs it.
+without running the graph, and turning the page never runs it either —
+click the chevrons either side of "2 / 12" at the bottom of the card, or set
+**Page** here, whichever is to hand. The page is rendered at the size the
+card is actually drawn at, so a 400-page report on the canvas costs one page
+of pixels and reads the file from disk as it needs it.
+
+**Show page number** is what puts that pager on the card; turn it off for a
+bare page, and turn the pages from **Page**.
 
 Running the node emits the same **document** dict Read PDF produces —
 metadata, page count, and optionally the bytes — so a viewer can sit
@@ -50,7 +54,8 @@ PARAMS = [
     {"name": "path", "type": "file_open", "label": "PDF file", "default": "",
      "placeholder": "file path, data: URI, or base64"},
     # Cosmetic: run() never reads it — the page is rendered by the card, from
-    # the document this node already opened, so turning the page costs no run.
+    # the document this node already opened, so turning the page costs no
+    # run. The card's own chevrons write this same param.
     {"name": "page", "type": "int", "label": "Page", "default": 1, "min": 1,
      "max": 10000, "cosmetic": True},
     {"name": "password", "type": "string", "label": "Password", "default": "",
@@ -60,6 +65,7 @@ PARAMS = [
     # Cosmetic for the same reason as Page.
     {"name": "scale", "type": "int", "label": "Scale %",
      "default": 100, "min": 25, "max": 400, "cosmetic": True},
+    # Also the card's pager: the chevrons live either side of this caption.
     {"name": "show_page_number", "type": "bool", "label": "Show page number",
      "default": True, "cosmetic": True},
     {"name": "background", "type": "bool", "label": "Card background",

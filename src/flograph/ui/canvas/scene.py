@@ -449,7 +449,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     def _on_param_changed(self, node_id: str, name: str, value) -> None:
         item = self.node_items.get(node_id)
         if item is not None:
-            item.on_params_changed()
+            item.on_params_changed(name)
         if item is not None and item.link_card:
             # a Goto's name is shown on every From reading it, not just here
             self._refresh_link_cards()
