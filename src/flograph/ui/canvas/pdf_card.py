@@ -32,12 +32,13 @@ from __future__ import annotations
 import hashlib
 from typing import Callable, Optional
 
-from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QImage, QPainter, QPixmap
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 
 from flograph.core.pdfsource import resolve_source
 from flograph.pdfdoc import MAX_RENDER_PIXELS, PdfDocument, PdfError, budgeted
 
+from .. import theme
 from .image_card import DEFAULT_FIT, FIT_MODES, SCALE_MAX, SCALE_MIN, target_size
 
 # What a card shows before anything has been picked.
@@ -78,6 +79,119 @@ def on_paper(page: QImage) -> QImage:
     painter.drawImage(0, 0, page)
     painter.end()
     return paper
+
+
+# ----------------------------------------------------------------- the pager
+
+# The clickable width of each chevron at the ends of the page pill.
+PAGER_ARROW_W = 17.0
+
+
+def paint_pager(painter: QPainter, rect: QRectF, caption: str, page: int,
+                pages: int, hover: int = 0):
+    """Draw "3 / 12" along the bottom of `rect`, with a chevron either side
+    of it when the document has more than one page. Returns the two chevron
+    rectangles as `(back, forward)`, or None when none were drawn.
+
+    Which page you are looking at is the one thing a rendered page does not
+    tell you, and something showing page 7 of a contract with no way to know
+    it is page 7 is a screenshot, not a viewer. The chevrons are the other
+    half of that: turning the page is what anybody does with a document, and
+    going to the properties panel to type a number in is not turning the
+    page.
+
+    Centred rather than tucked into a corner, which is where a reader puts
+    its page controls and — not by coincidence — the one part of the bottom
+    edge that a resize grip does not already own.
+
+    Shared by the canvas card and the dashboard tile. They live in different
+    scenes with different event plumbing, so each owns its own clicks and
+    its own `hover` (-1 back, +1 forward); what they must not own separately
+    is what the control looks like or where its targets are, or a person who
+    learned it on the canvas would have to learn it again on the dashboard.
+    """
+    if not caption:
+        return None
+    font = painter.font()
+    font.setBold(False)
+    font.setPointSizeF(7.5)
+    painter.setFont(font)
+    metrics = painter.fontMetrics()
+    pager = pages > 1
+    width = metrics.horizontalAdvance(caption) + 10
+    height = metrics.height() + 2
+    if pager:
+        # room for the chevrons, and a little more height so they are a
+        # target rather than a decoration
+        width += 2 * PAGER_ARROW_W
+        height += 4
+    pill = QRectF(rect.center().x() - width / 2.0,
+                  rect.bottom() - height - 6, width, height)
+    if pill.left() < rect.left() or pill.top() < rect.top():
+        return None  # too small to label without covering the page
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(theme.NODE_BODY)
+    painter.setOpacity(0.85)
+    painter.drawRoundedRect(pill, 4, 4)
+    painter.setOpacity(1.0)
+    painter.setPen(QPen(theme.NODE_SUBTEXT))
+    # The chevrons sit one at each end, so the caption is still centred in
+    # what is left between them.
+    painter.drawText(pill, Qt.AlignCenter, caption)
+    if not pager:
+        return None
+    back = QRectF(pill.left(), pill.top(), PAGER_ARROW_W, pill.height())
+    forward = QRectF(pill.right() - PAGER_ARROW_W, pill.top(),
+                     PAGER_ARROW_W, pill.height())
+    for box, step, live in ((back, -1, page > 1), (forward, 1, page < pages)):
+        colour = QColor(theme.NODE_TEXT if live and hover == step
+                        else theme.NODE_SUBTEXT)
+        if not live:
+            colour.setAlpha(70)   # at that end of the document already
+        pen = QPen(colour, 1.4)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        _paint_chevron(painter, box, step > 0)
+    return back, forward
+
+
+def _paint_chevron(painter: QPainter, box: QRectF, forward: bool) -> None:
+    """A > (or <) drawn in the middle of `box`."""
+    arm = 3.0
+    x, y = box.center().x(), box.center().y()
+    tip = arm if forward else -arm
+    path = QPainterPath()
+    path.moveTo(x - tip / 2.0, y - arm)
+    path.lineTo(x + tip / 2.0, y)
+    path.lineTo(x - tip / 2.0, y + arm)
+    painter.drawPath(path)
+
+
+def chevron_at(pager, pos: QPointF) -> int:
+    """-1 or +1 if `pos` is on one of `pager`'s chevrons, 0 if it is not.
+
+    `pager` is whatever `paint_pager` last returned, so a chevron that was
+    not drawn cannot be clicked — which is the rule that keeps a card
+    flattened by zoom, or one too small for the pill, from firing.
+    """
+    if not pager:
+        return 0
+    back, forward = pager
+    if back.contains(pos):
+        return -1
+    if forward.contains(pos):
+        return 1
+    return 0
+
+
+def stepped_page(card, step: int) -> int:
+    """The page `card` lands on when a chevron is clicked — clamped to the
+    document, and counted from the page on *screen* rather than the param,
+    so a number left past the end of a shorter document steps back into it
+    instead of counting up through pages that are not there."""
+    return min(card.page_count(), max(1, card.shown_page() + step))
 
 
 class CardPdf:
@@ -277,4 +391,5 @@ class CardPdf:
                       width, height)
 
 
-__all__ = ["CardPdf", "EMPTY_HINT", "MAX_RENDER_PIXELS", "pdf_source"]
+__all__ = ["CardPdf", "EMPTY_HINT", "MAX_RENDER_PIXELS", "PAGER_ARROW_W",
+           "chevron_at", "paint_pager", "pdf_source", "stepped_page"]

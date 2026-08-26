@@ -350,9 +350,6 @@ class FreezeBadge(NodeBadge):
 
 CARD_SCALE_MIN, CARD_SCALE_MAX = 25.0, 400.0  # "scale" param, in percent
 
-# The clickable width of each chevron at the ends of a PDF card's pager.
-PAGER_ARROW_W = 17.0
-
 def _port_label_font() -> QFont:
     font = QFont()
     font.setPointSizeF(PORT_LABEL_FONT_SIZE)
@@ -1969,88 +1966,19 @@ class NodeItem(QGraphicsObject):
 
     def _paint_page_number(self, painter: QPainter, rect: QRectF,
                            caption: str, page: int, pages: int) -> None:
-        """"3 / 12" along the bottom of a PDF card, with a chevron either
-        side of it when the document has more than one page.
-
-        Which page you are looking at is the one thing a rendered page does
-        not tell you, and a card showing page 7 of a contract with no way to
-        know it is page 7 is a screenshot, not a viewer. The chevrons are
-        the other half of that: turning the page is what anybody does with a
-        document, and going to the properties panel to type a number in is
-        not turning the page.
-
-        Centred rather than tucked into the corner, which is where a reader
-        puts its page controls and - not by coincidence - the one part of
-        the card's bottom edge that the resize grip does not already own.
-        """
-        if not caption:
-            return
-        font = painter.font()
-        font.setBold(False)
-        font.setPointSizeF(7.5)
-        painter.setFont(font)
-        metrics = painter.fontMetrics()
-        pager = pages > 1
-        width = metrics.horizontalAdvance(caption) + 10
-        height = metrics.height() + 2
-        if pager:
-            # room for the chevrons, and a little more height so they are a
-            # target rather than a decoration
-            width += 2 * PAGER_ARROW_W
-            height += 4
-        pill = QRectF(rect.center().x() - width / 2.0,
-                      rect.bottom() - height - 6, width, height)
-        if pill.left() < rect.left() or pill.top() < rect.top():
-            return  # too small a card to label without covering the page
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(theme.NODE_BODY)
-        painter.setOpacity(0.85)
-        painter.drawRoundedRect(pill, 4, 4)
-        painter.setOpacity(1.0)
-        painter.setPen(QPen(theme.NODE_SUBTEXT))
-        # The chevrons sit one at each end, so the caption is still centred
-        # in what is left between them.
-        painter.drawText(pill, Qt.AlignCenter, caption)
-        if not pager:
-            return
-        back = QRectF(pill.left(), pill.top(), PAGER_ARROW_W, pill.height())
-        forward = QRectF(pill.right() - PAGER_ARROW_W, pill.top(),
-                         PAGER_ARROW_W, pill.height())
-        self._pager = (back, forward)
-        for box, step, live in ((back, -1, page > 1), (forward, 1, page < pages)):
-            colour = QColor(theme.NODE_TEXT if live and self._pager_hover == step
-                            else theme.NODE_SUBTEXT)
-            if not live:
-                colour.setAlpha(70)   # at that end of the document already
-            pen = QPen(colour, 1.4)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            self._paint_chevron(painter, box, step > 0)
-
-    @staticmethod
-    def _paint_chevron(painter: QPainter, box: QRectF, forward: bool) -> None:
-        """A > (or <) drawn in the middle of `box`."""
-        arm = 3.0
-        x, y = box.center().x(), box.center().y()
-        tip = arm if forward else -arm
-        path = QPainterPath()
-        path.moveTo(x - tip / 2.0, y - arm)
-        path.lineTo(x + tip / 2.0, y)
-        path.lineTo(x - tip / 2.0, y + arm)
-        painter.drawPath(path)
+        """The page pill and its chevrons, drawn by the shared painter so the
+        canvas card and the dashboard tile cannot drift apart. It hands back
+        where it put the chevrons; that is what a click is tested against."""
+        from .pdf_card import paint_pager
+        self._pager = paint_pager(painter, rect, caption, page, pages,
+                                  self._pager_hover)
 
     def _pager_at(self, pos: QPointF) -> int:
         """-1 or +1 if `pos` is on a page chevron, 0 if it is not."""
-        if self._pager is None or self._flat:
-            return 0
-        back, forward = self._pager
-        if back.contains(pos):
-            return -1
-        if forward.contains(pos):
-            return 1
-        return 0
+        if self._flat:
+            return 0    # flattened by LOD: nothing is drawn, so nothing hits
+        from .pdf_card import chevron_at
+        return chevron_at(self._pager, pos)
 
     def _step_page(self, step: int) -> None:
         """Turn a PDF card's page by a chevron click.
@@ -2064,7 +1992,8 @@ class NodeItem(QGraphicsObject):
         image = self._image
         if scene is None or image is None:
             return
-        page = min(image.page_count(), max(1, image.shown_page() + step))
+        from .pdf_card import stepped_page
+        page = stepped_page(image, step)
         if page == self.node.params.get("page"):
             return
         from ..commands import SetParamCommand

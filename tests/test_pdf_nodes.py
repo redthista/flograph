@@ -786,3 +786,89 @@ class TestPagingAWiredDocument:
         picked.write_bytes(build_pdf([["just the one"]], "Picked"))
         graph.set_param(node.id, "path", str(picked))
         assert item._card_image().page_caption() == "1 / 1"
+
+
+class TestTilePager:
+    """The same pager on a dashboard tile — which is the surface that needs
+    it most: a dashboard is the page somebody is handed, and its reader has
+    no properties panel to type a page number into."""
+
+    @pytest.fixture
+    def env(self, qtbot, registry, tmp_path):
+        from types import SimpleNamespace
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.core.graph import Page, Tile
+        from flograph.engine import ExecutionEngine
+        from flograph.ui.dashboard.dashboard_scene import DashboardScene
+        path = tmp_path / "three.pdf"
+        path.write_bytes(build_pdf([["one"], ["two"], ["three"]], "Three"))
+        graph = Graph()
+        stack = QUndoStack()
+        engine = ExecutionEngine(graph)
+        graph.add_page(Page(id="p1", title="Board"))
+        node = graph.add_node(registry.instantiate("flograph.viz.pdf_viewer"))
+        node.params["path"] = str(path)
+        node.dirty = False
+        graph.add_tile("p1", Tile(id="t1", node_id=node.id, port="document",
+                                  rect=(0.0, 0.0, 320.0, 444.0)))
+        scene = DashboardScene(graph, engine, stack, "p1")
+        item = scene.tile_items["t1"]
+        paint_item(item)
+        yield SimpleNamespace(graph=graph, node=node, item=item, stack=stack)
+        scene.dispose()
+        stack.clear()
+
+    def test_the_tile_draws_chevrons(self, env):
+        assert env.item._pager is not None
+
+    def test_clicking_forward_turns_the_page(self, env):
+        click(env.item, env.item._pager[1].center())
+        assert env.node.params["page"] == 2
+        assert env.item._card_image().page_caption() == "2 / 3"
+
+    def test_clicking_back_turns_it_the_other_way(self, env):
+        env.graph.set_param(env.node.id, "page", 3)
+        click(env.item, env.item._pager[0].center())
+        assert env.node.params["page"] == 2
+
+    def test_it_stops_at_the_ends(self, env):
+        click(env.item, env.item._pager[0].center())
+        assert env.node.params["page"] == 1
+
+    def test_turning_the_page_runs_nothing(self, env):
+        """A slicer tick dirties the subgraph and asks for a re-run; this is
+        a cosmetic param and must do neither."""
+        click(env.item, env.item._pager[1].center())
+        assert not env.node.dirty
+
+    def test_paging_does_not_select_the_tile(self, env):
+        click(env.item, env.item._pager[1].center())
+        assert not env.item.isSelected()
+
+    def test_a_locked_page_still_pages(self, env):
+        """A locked dashboard is the finished one somebody was handed — the
+        one most likely to be read rather than edited."""
+        env.item.set_layout_locked(True)
+        click(env.item, env.item._pager[1].center())
+        assert env.node.params["page"] == 2
+
+    def test_the_canvas_and_the_tile_agree(self, env):
+        """One node, one page: the tile writes the same param the card reads,
+        so a document cannot be on two different pages at once."""
+        from flograph.ui.canvas import NodeGraphScene
+        canvas = NodeGraphScene(env.graph, env.stack)
+        card = canvas.node_items[env.node.id]
+        click(env.item, env.item._pager[1].center())
+        assert card._card_image().page_caption() == "2 / 3"
+
+    def test_the_hovered_chevron_lights_up(self, env):
+        from PySide6.QtCore import QEvent, QPointF
+        from PySide6.QtWidgets import QGraphicsSceneHoverEvent
+        event = QGraphicsSceneHoverEvent(QEvent.GraphicsSceneHoverMove)
+        event.setPos(env.item._pager[1].center())
+        env.item.hoverMoveEvent(event)
+        assert env.item._pager_hover == 1
+        event.setPos(QPointF(10, 60))
+        env.item.hoverMoveEvent(event)
+        assert env.item._pager_hover == 0

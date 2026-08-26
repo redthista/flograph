@@ -153,6 +153,11 @@ class TileItem(QGraphicsObject):
         # toggle moves and resizes the tile out from under the cursor, so the
         # move/release that follow must not be read as a drag of it.
         self._fs_gesture = False
+        # A PDF tile's page chevrons: (back, forward) in item coordinates,
+        # set by the paint that drew them and None when there are none on
+        # screen. See flograph.ui.canvas.pdf_card.paint_pager.
+        self._pager = None
+        self._pager_hover = 0    # -1 back, +1 forward
         x, y, w, h = tile.rect
         self.setPos(x, y)
         self._size = (w, h)
@@ -886,6 +891,7 @@ class TileItem(QGraphicsObject):
     def _paint_image(self, painter: QPainter) -> None:
         w, h = self._size
         rect = QRectF(2, TITLE_H, w - 4, max(0.0, h - TITLE_H - 2))
+        self._pager = None    # re-established below if chevrons get drawn
         if rect.isEmpty():
             return
         image = self._card_image()
@@ -898,6 +904,26 @@ class TileItem(QGraphicsObject):
         painter.setClipPath(clip)
         image.paint(painter, rect, self._image_render_ratio())
         painter.restore()
+        self._paint_page_number(painter, rect, image)
+
+    def _paint_page_number(self, painter: QPainter, rect: QRectF,
+                           image) -> None:
+        """The page pill and its chevrons, on a PDF tile.
+
+        A dashboard is the page somebody is *handed*, so this is the surface
+        that most needs them: the reader of a dashboard has no properties
+        panel, and often no idea there is a graph behind the page at all.
+        Same painter as the canvas card — see pdf_card.paint_pager — so the
+        control is the same control in both places.
+        """
+        node = self._node()
+        if (self._kind() != "pdf" or image.error or node is None
+                or not node.params.get("show_page_number", True)):
+            return
+        from ..canvas.pdf_card import paint_pager
+        self._pager = paint_pager(painter, rect, image.page_caption(),
+                                  image.shown_page(), image.page_count(),
+                                  self._pager_hover)
 
     def _image_render_ratio(self) -> float:
         """Device pixels per logical pixel, so a tile inspected close up (or
@@ -1196,9 +1222,35 @@ class TileItem(QGraphicsObject):
     def _over_fs_button(self, pos: QPointF) -> bool:
         return self.can_fullscreen() and self._fs_button_rect().contains(pos)
 
+    def _pager_at(self, pos: QPointF) -> int:
+        """-1 or +1 if `pos` is on a page chevron, 0 if it is not."""
+        from ..canvas.pdf_card import chevron_at
+        return chevron_at(self._pager, pos)
+
+    def _step_page(self, step: int) -> None:
+        """Turn a PDF tile's page.
+
+        "page" is a cosmetic param, so unlike a slicer tick or a sheet edit
+        this commits and stops — nothing is dirtied and no re-run is asked
+        for, because the page is drawn from a document the tile already has
+        open. It goes through the undo stack all the same, so paging is
+        undoable and the canvas card follows in the same breath.
+        """
+        from ..canvas.pdf_card import stepped_page
+        scene = self.scene()
+        node = self._node()
+        if scene is None or node is None or self._image is None:
+            return
+        page = stepped_page(self._image, step)
+        if page == node.params.get("page"):
+            return
+        from ..commands import SetParamCommand
+        scene.undo_stack.push(
+            SetParamCommand(self._graph, node.id, "page", page))
+
     def _apply_edge_cursor(self, pos: QPointF) -> None:
         edge = self._edge_at(pos)
-        if self._over_fs_button(pos):
+        if self._over_fs_button(pos) or self._pager_at(pos):
             self.setCursor(Qt.PointingHandCursor)
         elif edge == "corner":
             self.setCursor(Qt.SizeFDiagCursor)
@@ -1216,13 +1268,21 @@ class TileItem(QGraphicsObject):
             super().hoverMoveEvent(event)
             return
         self._set_fs_hover(self._over_fs_button(event.pos()))
+        self._set_pager_hover(self._pager_at(event.pos()))
         self._apply_edge_cursor(event.pos())
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
         self._set_fs_hover(False)
+        self._set_pager_hover(0)
         self.unsetCursor()
         super().hoverLeaveEvent(event)
+
+    def _set_pager_hover(self, step: int) -> None:
+        if step == self._pager_hover:
+            return
+        self._pager_hover = step
+        self.update()
 
     def _set_fs_hover(self, hovered: bool) -> None:
         if hovered == self._fs_hover:
@@ -1262,6 +1322,14 @@ class TileItem(QGraphicsObject):
                 self.setSelected(True)
                 event.accept()
                 return
+        if event.button() == Qt.LeftButton and self._pager_at(event.pos()):
+            # Accepted rather than passed on, so paging a document does not
+            # also select the tile — and deliberately before the lock check
+            # below: a locked page is a *finished* dashboard, which is the
+            # one someone is reading and most wants to turn the pages of.
+            self._step_page(self._pager_at(event.pos()))
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._over_fs_button(event.pos()):
             self._fs_gesture = True
             self._press_pos = self.pos()
