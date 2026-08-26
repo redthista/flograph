@@ -8,7 +8,7 @@
         "type": "flograph.util.note",
         "pos": [
           -40,
-          -280
+          -340
         ],
         "params": {
           "text": "## Run a second flow while one is running\n\nClicking Run while a run is in flight **joins** it \u2014 the nodes start as soon as the pool has room, and independent branches run at the same time.\n\n1. Right-click **Table A** \u25b8 **Run To This Node** \u2014 the whole chain runs (~8s).\n2. While it runs, right-click **Table B** \u25b8 **Run To This Node** \u2014 the status bar says **joined**, and Branch B lights up beside Branch A.\n3. Try right-clicking **Shape B** instead: it joins too, but waits for **Slow Build** \u2014 a joined node waits only on the ancestors it actually has.\n4. **Cancel** stops everything, joined nodes included.\n\nWatch the statistics window (the timeline) to see the two branches sharing the floor.",
