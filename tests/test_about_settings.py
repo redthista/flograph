@@ -192,7 +192,7 @@ class TestTheNavTreeAndSearch:
         rows = dict(self.nav_rows(dialog))
         assert rows["Canvas"] == ["Display", "Snapping",
                                   "Custom colour strength"]
-        assert rows["General"] == ["Window", "Execution", "Reset"]
+        assert rows["General"] == ["Window", "Execution", "Saving", "Reset"]
         assert rows["About"] == []          # prose, no settings
 
     def test_clicking_a_group_switches_to_its_page(self, window):

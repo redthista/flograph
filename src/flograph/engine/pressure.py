@@ -29,6 +29,12 @@ LOW_FREE = 1536 * 1024 ** 2       # this little left: tight on any machine
 CRITICAL_FREE = 768 * 1024 ** 2   # this little left: stop making it worse
 FREE_RELIEF = 512 * 1024 ** 2     # hysteresis for the byte thresholds
 
+# Disk, not memory: the drive a project and its cache side-car live on.
+# Same "this little left" figure as memory — one number meaning roughly the
+# same thing in both places beats two numbers to keep in your head.
+LOW_DISK_FREE = 1536 * 1024 ** 2
+DISK_RELIEF = 512 * 1024 ** 2     # hysteresis, for the same reason as above
+
 
 def machine_is_tight(used: int, total: int, available: int,
                      already_warning: bool = False) -> bool:
@@ -83,6 +89,25 @@ def worker_cap(base: int, level: int, explicit: bool = False) -> int:
     if level >= TIGHT and not explicit:
         return max(1, base // 2)
     return base
+
+
+def disk_is_low(free: int, already_warning: bool = False) -> bool:
+    """Is the drive this project lives on running out of room?
+
+    Absolute bytes rather than a fraction, for the same reason the memory
+    policy is: 85% of a 4 TB drive is nothing wrong, and 85% of a small
+    SSD with a cache-hungry flow on it very much is. `free < 0` reads as
+    "could not measure" and answers no — a warning that fires because a
+    network mount went away is a warning nobody can act on.
+
+    Hysteresis via `already_warning`, as everywhere above: free space only
+    moves when somebody writes, but a cache sitting exactly at the line
+    should not flicker the message on every refresh either.
+    """
+    if free < 0:
+        return False
+    slack = DISK_RELIEF if already_warning else 0
+    return free <= LOW_DISK_FREE + slack
 
 
 def read_memory() -> tuple[int, int, int]:

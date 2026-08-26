@@ -9,35 +9,126 @@ its entry. This deliberately does not touch the project file's own
 SCHEMA_VERSION: the .flograph JSON itself is untouched, only a sibling
 directory is added.
 
+Blobs written since CACHE_SCHEMA 3 are zlib-compressed (level 1, from
+measurement — see ideas_archived.md #16), and say so in a per-entry
+"codec" field. Reading never trusts the manifest on this point: the first
+byte of a pickle at protocol 2+ is always 0x80 and a zlib stream's never
+is, so `load_blob` sniffs and decompresses only when it must. That is what
+keeps every era of side-car readable forever — raw pickles from before
+compression existed, compressed blobs from after, and the mixed directory
+a project gets when the setting was off for a while and is on again.
+
 Loading is never fatal: a missing manifest, a schema mismatch, a stale
 fingerprint, or a corrupt/unpicklable blob just means that node is left
 dirty, exactly as if there were no side-car cache at all. Pickling arbitrary
 node outputs (DataFrames, matplotlib Figures, ...) is not guaranteed stable
 across library/Python versions — every read and write of a blob is wrapped
-so one bad node can never block the rest of the save/load.
+so one bad node can never block the rest of the save/load. An *OSError*
+from the write path (the disk filled up) is deliberately not swallowed:
+that failure is the user's to fix, and silent is the worst way to lose
+their work — see save_cache/write_cache_plan and K2.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import pickle
 import shutil
+import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from flograph.core.graph import Graph
 from flograph.core.varlinks import uses_env
 
-from .cache import OutputCache
+from .cache import CacheEntry, OutputCache
 from .frames import normalize_strings
 
-CACHE_SCHEMA = 2
+CACHE_SCHEMA = 3
 # Schema 2 adds "bytes" and "ports" per node, which is what lets a project
 # open without unpickling anything. Schema 1 side-cars are still read: they
 # simply do not know how big an entry is until it is loaded, and discarding
 # somebody's cached work over a missing size would be a poor trade.
-SUPPORTED_SCHEMAS = (1, 2)
+# Schema 3 adds "codec" per entry and starts writing compressed blobs; the
+# reader sniffs rather than trusting it (see the module docstring), so even
+# so the field earns its place by making a side-car self-describing.
+SUPPORTED_SCHEMAS = (1, 2, 3)
+
+# zlib level 1, chosen by measurement over levels 6/9 and lzma: string-heavy
+# frames — most of what caches hold — drop to ~40% of raw for a few percent
+# of the pickle time, float blocks barely shrink for any codec but cost
+# level 9 occasional seconds for nothing, and lzma's ratio edge is paid for
+# with a 4x slower read on every project open. See ideas_archived.md #16.
+CACHE_COMPRESS_LEVEL = 1
+
+
+class _ZlibSink:
+    """A file-object stand-in that pickle.dump can stream compressed into.
+
+    Streaming, not pickle.dumps()-then-compress(): building the whole blob
+    in memory first doubles the cost of the largest thing in the project at
+    the moment it is least affordable — the same reason the raw write was
+    streamed before compression arrived. pickle needs only `.write()` (and
+    calls `.flush()`, which mid-stream has nothing to do); `finish()` emits
+    the compressor's tail once the pickler is done.
+
+    While it goes it tallies what passed through on both sides — `raw_bytes`
+    in, `out_bytes` out — which is how a manifest entry comes to know both
+    its uncompressed and its stored size without anyone ever holding the
+    uncompressed form in memory for the sake of a number.
+    """
+
+    __slots__ = ("_fh", "_compressor", "raw_bytes", "out_bytes")
+
+    def __init__(self, fh: Any) -> None:
+        self._fh = fh
+        self._compressor = zlib.compressobj(CACHE_COMPRESS_LEVEL)
+        self.raw_bytes = 0
+        self.out_bytes = 0
+
+    def write(self, data: Any) -> None:
+        # Protocol-5 pickling hands its out-of-band buffers to write() as
+        # pickle.PickleBuffer — not bytes — and pandas' Arrow-backed string
+        # columns go exactly that way, so every frame with text in it lands
+        # here. A PickleBuffer speaks the buffer protocol but has no len(),
+        # so measure through a memoryview and feed the compressor the same;
+        # anything that cannot even be viewed is a genuine failure and
+        # raises, which the caller treats as one uncacheable node.
+        view = memoryview(data)
+        self.raw_bytes += view.nbytes
+        chunk = self._compressor.compress(view)
+        if chunk:
+            self._fh.write(chunk)
+            self.out_bytes += len(chunk)
+
+    def flush(self) -> None:
+        pass
+
+    def finish(self) -> bytes:
+        tail = self._compressor.flush()
+        if tail:
+            self.out_bytes += len(tail)
+        return tail
+
+
+def save_failure_text(what: str, exc: BaseException) -> str:
+    """One line for a dialog when writing to disk failed.
+
+    A disk-full save is its own sentence: "OSError: [Errno 28] No space
+    left on device" is accurate and still leaves somebody googling whether
+    their flow is broken. Shared by both writers that can fail this way —
+    the project JSON on the GUI thread and the cache blobs on the pool
+    thread — so the wording cannot drift between them.
+    """
+    if isinstance(exc, OSError) and exc.errno in (errno.ENOSPC, errno.EDQUOT):
+        return (f"The disk holding {what} is full. Free some space "
+                f"(Reset Caches releases this project's cached results) "
+                f"and try again.")
+    detail = (exc.strerror if isinstance(exc, OSError) and exc.strerror
+              else str(exc))
+    return f"{what.capitalize()} could not be written: {detail}"
 
 
 def _cache_dir_for(project_path: str | Path) -> Path:
@@ -170,18 +261,22 @@ def is_alias(meta: dict) -> bool:
     return isinstance(meta.get("alias"), dict)
 
 
-def _alias_meta(graph: Graph, node_id: str, entry, manifest: dict):
+def _alias_meta(entry: CacheEntry, manifest: dict, frozen: bool) -> Optional[dict]:
     """How to rebuild `entry` from another node's blob, or None if it has to
     be written out itself.
 
-    The source must already be in the manifest. save_cache walks in
-    topological order, so a link's source has been dealt with by the time the
-    link is reached, and a source that was *skipped* — unpicklable, or
+    The source must already be in the manifest. write_cache_plan walks in
+    topological order, so a link's source has been dealt with by the time
+    the link is reached, and a source that was *skipped* — unpicklable, or
     evicted while a frozen link kept its value alive — correctly falls
     through to the link writing its own blob. A frozen node never aliases
     either: its fingerprint is a constant, so it can come back from cache
     when its source cannot, and it must not depend on a blob that will not
     be there.
+
+    Takes the node's `frozen` flag rather than the graph: by the time this
+    runs the plan has already been snapshotted away from it (see
+    plan_cache_save), and one boolean is all it needed.
     """
     if entry.alias_of is None or entry.alias_port is None:
         return None
@@ -191,7 +286,7 @@ def _alias_meta(graph: Graph, node_id: str, entry, manifest: dict):
     ports = entry.ports()
     if entry.alias_of not in manifest or len(ports) != 1:
         return None
-    if graph.nodes[node_id].frozen:
+    if frozen:
         return None
     return {"node": entry.alias_of, "port": entry.alias_port, "as": ports[0]}
 
@@ -252,16 +347,32 @@ def _carry_blob_over(source_project: str | None, cache_dir: Path,
         return False
 
 
-def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> None:
-    cache_dir = _cache_dir_for(project_path)
+def plan_cache_save(
+    graph: Graph, cache: OutputCache,
+) -> list[tuple[str, CacheEntry, str, bool]]:
+    """The cheap half of saving a cache: walk the graph once on the calling
+    thread and snapshot what each cached entry needs written — its id, its
+    entry object, its fingerprint, and whether its node is frozen.
+
+    Splitting this from write_cache_plan is what lets a long save run off
+    the GUI thread (ui.cache_worker's CacheSaveRunnable hands it a plan):
+    from here on the worker touches only the snapshot and the filesystem,
+    never the graph or the cache, so editing and running continue while the
+    blobs pickle themselves out. Entries are held by reference; their
+    outputs are read-only by contract — the same guarantee serving them to
+    downstream nodes relies on.
+
+    A `${env}` node is left out entirely, for the same reason it always was:
+    see the comment in the loop.
+    """
+    plan: list[tuple[str, CacheEntry, str, bool]] = []
     memo: dict[str, str] = {}
-    manifest: dict[str, Any] = {}
-    keep_files = set()
     for node_id in graph.topo_order():
+        node = graph.nodes[node_id]
         entry = cache.get(node_id)
         if entry is None:
             continue
-        if uses_env(graph.nodes[node_id]):
+        if uses_env(node):
             # A node reading `${env:...}` is never persisted. Its fingerprint
             # cannot include the secret without putting a hash of it in a
             # file beside the project, and leaving the secret out would let a
@@ -269,16 +380,55 @@ def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> No
             # changed. Recomputing it on reopen costs one run and is right
             # both ways.
             continue
-        alias = _alias_meta(graph, node_id, entry, manifest)
+        plan.append((node_id, entry,
+                     node_fingerprint(graph, node_id, memo), node.frozen))
+    return plan
+
+
+def write_cache_plan(project_path: str | Path,
+                     plan: list[tuple[str, CacheEntry, str, bool]],
+                     progress: Any = None,
+                     compress: bool = True) -> int:
+    """The expensive half: pickle every planned blob out and write the
+    manifest. Returns how many entries were recorded.
+
+    Runs wherever the caller put it — the GUI thread through save_cache, or
+    a pool thread through CacheSaveRunnable. Touches nothing but `plan` and
+    the filesystem. `progress(done, total)` fires once per planned entry,
+    whatever became of it — written, carried over, aliased, skipped — so a
+    bar that reaches its end means "looked at everything", not "wrote
+    everything".
+
+    An OSError from the writes propagates: a disk filling up is the user's
+    to fix, and losing their work silently is the worst outcome (see the
+    module docstring). Any other exception while pickling one entry skips
+    just that entry — unpicklable output loads dirty next time, as ever.
+    """
+    total = len(plan)
+    done = 0
+
+    def tick() -> None:
+        nonlocal done
+        done += 1
+        if progress is not None:
+            progress(done, total)
+
+    cache_dir = _cache_dir_for(project_path)
+    manifest: dict[str, Any] = {}
+    keep_files = set()
+    codec = "zlib" if compress else "raw"
+    for node_id, entry, fingerprint, frozen in plan:
+        alias = _alias_meta(entry, manifest, frozen)
         if alias is not None:
             manifest[node_id] = {
-                "fingerprint": node_fingerprint(graph, node_id, memo),
+                "fingerprint": fingerprint,
                 "wall_time": entry.wall_time,
                 "timestamp": entry.timestamp,
                 "bytes": entry.memory_bytes,
                 "ports": list(entry.ports()),
                 "alias": alias,
             }
+            tick()
             continue
 
         blob_name = f"{node_id}.pkl"
@@ -287,53 +437,91 @@ def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> No
             # never the value: reading a blob back only to write out what we
             # just read would undo the whole point of not loading it. The
             # entry must still join keep_files, or the sweep at the end of
-            # this function deletes the blob a live entry depends on.
+            # this function deletes the blob a live entry depends on. Its
+            # bytes are whatever era wrote it — no "codec" here; the reader
+            # sniffs rather than trusting the manifest anyway.
             if not _carry_blob_over(entry.blob, cache_dir, blob_name):
+                tick()
                 continue    # source blob gone — that node loads dirty next time
             keep_files.add(blob_name)
+            # The blob's stored size is one stat away and worth recording —
+            # it feeds the on-disk total in the resource monitor's hover.
+            # Its raw size stays unknown without unpickling, which is the
+            # one thing this save exists to avoid; the entry simply has no
+            # raw_bytes, and totals built from the manifest skip it.
+            try:
+                carried_bytes = (cache_dir / blob_name).stat().st_size
+            except OSError:
+                carried_bytes = 0
             manifest[node_id] = {
-                "fingerprint": node_fingerprint(graph, node_id, memo),
+                "fingerprint": fingerprint,
                 "wall_time": entry.wall_time,
                 "timestamp": entry.timestamp,
                 "bytes": entry.memory_bytes,
                 "ports": list(entry.ports()),
+                "disk_bytes": carried_bytes,
             }
+            tick()
             continue
 
         cache_dir.mkdir(parents=True, exist_ok=True)
         blob_path = cache_dir / blob_name
         tmp_path = cache_dir / f"{blob_name}.tmp"
+        raw_bytes = disk_bytes = 0
         try:
             # Streamed, not pickle.dumps() then write_bytes(): building the
             # whole blob in memory first doubles the cost of the largest
             # thing in the project at the moment it is least affordable.
+            # Compressed goes through _ZlibSink so streaming survives —
+            # and tallies both sizes as a side effect of going by.
             with open(tmp_path, "wb") as fh:
-                pickle.dump(entry.outputs, fh, protocol=pickle.HIGHEST_PROTOCOL)
+                if compress:
+                    sink = _ZlibSink(fh)
+                    try:
+                        pickle.dump(entry.outputs, sink,
+                                    protocol=pickle.HIGHEST_PROTOCOL)
+                    finally:
+                        fh.write(sink.finish())
+                    raw_bytes, disk_bytes = sink.raw_bytes, sink.out_bytes
+                else:
+                    pickle.dump(entry.outputs, fh,
+                                protocol=pickle.HIGHEST_PROTOCOL)
+                    raw_bytes = disk_bytes = fh.tell()
+        except OSError:
+            tmp_path.unlink(missing_ok=True)
+            raise
         except Exception:
             # unpicklable output — skip; that node loads dirty next time
             tmp_path.unlink(missing_ok=True)
+            tick()
             continue
         os.replace(tmp_path, blob_path)
         keep_files.add(blob_name)
         manifest[node_id] = {
-            "fingerprint": node_fingerprint(graph, node_id, memo),
+            "fingerprint": fingerprint,
             "wall_time": entry.wall_time,
             "timestamp": entry.timestamp,
             "bytes": entry.memory_bytes,
             "ports": list(entry.ports()),
+            "codec": codec,
+            "raw_bytes": raw_bytes,
+            "disk_bytes": disk_bytes,
         }
+        tick()
 
     if not manifest:
         # nothing cached (e.g. caches were reset) — drop any stale side-car
         if cache_dir.exists():
             for stale in cache_dir.glob("*.pkl"):
                 stale.unlink(missing_ok=True)
+            for stale in cache_dir.glob("*.pkl.tmp"):
+                stale.unlink(missing_ok=True)
             (cache_dir / "manifest.json").unlink(missing_ok=True)
             try:
                 cache_dir.rmdir()
             except OSError:
                 pass  # not empty (unexpected extra files) — leave it alone
-        return
+        return 0
 
     manifest_path = cache_dir / "manifest.json"
     tmp_manifest = cache_dir / "manifest.json.tmp"
@@ -343,6 +531,22 @@ def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path) -> No
     for stale in cache_dir.glob("*.pkl"):
         if stale.name not in keep_files:
             stale.unlink(missing_ok=True)
+    # A crash mid-write leaves the .tmp behind — the *.pkl sweep above can
+    # never match it, and without this it sits there forever.
+    for stale in cache_dir.glob("*.pkl.tmp"):
+        stale.unlink(missing_ok=True)
+    return len(manifest)
+
+
+def save_cache(graph: Graph, cache: OutputCache, project_path: str | Path,
+               progress: Any = None, compress: bool = True) -> int:
+    """Plan and write in one call, on the calling thread.
+
+    The form tests and headless tools use; the GUI splits the two halves so
+    the expensive one runs off the UI thread with progress to show for it.
+    Returns the number of entries recorded."""
+    return write_cache_plan(project_path, plan_cache_save(graph, cache),
+                            progress=progress, compress=compress)
 
 
 def resolve_entries(
@@ -378,14 +582,56 @@ def resolve_entries(
     return entries
 
 
+def sidecar_stats(project_path: str | Path) -> tuple[int, int]:
+    """How much room the side-car takes and what it held uncompressed.
+
+    Returns `(bytes on disk, raw bytes recorded)`. The disk figure is the
+    size of every blob file — true whatever wrote them; the raw figure sums
+    the manifest's per-entry `raw_bytes`, which only entries this app wrote
+    since compression know, so a carried-over blob counts toward the first
+    number and not the second. The pair is for one line in the resource
+    monitor's hover: what the cache costs on the drive, against what the
+    same values would have cost raw. Anything unreadable reads as zero —
+    a hover line never earns an exception.
+    """
+    cache_dir = _cache_dir_for(project_path)
+    disk = 0
+    for blob in cache_dir.glob("*.pkl"):
+        try:
+            disk += blob.stat().st_size
+        except OSError:
+            continue
+    try:
+        manifest = json.loads((cache_dir / "manifest.json").read_text())
+    except (OSError, ValueError):
+        return disk, 0
+    raw = 0
+    for meta in (manifest.get("nodes") or {}).values():
+        if isinstance(meta, dict):
+            value = meta.get("raw_bytes")
+            if isinstance(value, int) and value > 0:
+                raw += value
+    return disk, raw
+
+
 def load_blob(project_path: str | Path, node_id: str) -> Any:
     """Expensive half: unpickle one node's cached output. This is the part
     that can take a long time for large DataFrames/figures — callers that
     care about UI responsiveness (see flograph.engine.cache_worker) run this
     off the GUI thread, one node at a time. Raises on any failure; the
-    caller decides whether to skip or surface it."""
+    caller decides whether to skip or surface it.
+
+    The first byte says how the blob is stored, so every era reads forever:
+    a pickle at protocol 2+ always starts with 0x80 and a zlib stream never
+    does. Old side-cars written raw before compression existed, compressed
+    blobs since schema 3, and the mixed directory a project accumulates when
+    the setting was toggled — all one code path, and no trust placed in a
+    manifest that may be older or newer than its blobs."""
     cache_dir = _cache_dir_for(project_path)
-    return pickle.loads((cache_dir / f"{node_id}.pkl").read_bytes())
+    data = (cache_dir / f"{node_id}.pkl").read_bytes()
+    if data[:1] != b"\x80":
+        data = zlib.decompress(data)
+    return pickle.loads(data)
 
 
 def load_outputs(project_path: str | Path, node_id: str) -> Any:

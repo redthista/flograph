@@ -77,7 +77,10 @@ class TestSaveOpen:
         path = str(tmp_path / "cached.flograph")
         window._project_path = path
         assert window._save()
-        assert (tmp_path / "cached.flograph.cache" / "manifest.json").exists()
+        # the side-car is written in the background; wait for it to land
+        qtbot.waitUntil(
+            lambda: (tmp_path / "cached.flograph.cache" / "manifest.json").exists(),
+            timeout=5000)
 
         from flograph.core import Graph
         window._replace_graph(Graph())
@@ -102,11 +105,13 @@ class TestSaveOpen:
         path = str(tmp_path / "stale.flograph")
         window._project_path = path
         assert window._save()
+        qtbot.waitUntil(lambda: window._cache_save_signals is None, timeout=5000)
 
         # edit the upstream node's param *after* saving the cache, then save
         # again — its fingerprint (and its downstream's) must now miss
         window.graph.set_param(const.id, "value", "edited")
         assert window._save()
+        qtbot.waitUntil(lambda: window._cache_save_signals is None, timeout=5000)
 
         from flograph.core import Graph
         window._replace_graph(Graph())

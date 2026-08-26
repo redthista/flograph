@@ -237,6 +237,7 @@ class SettingsDialog(QDialog):
             "compact_nodes_checkbox": window.compact_nodes,
             "port_labels_checkbox": window.port_labels_enabled,
             "flow_pins_checkbox": window.flow_pins_enabled,
+            "cache_compression_checkbox": window.cache_compression_enabled,
             "table_autosize_checkbox": autosize_default_enabled(),
             "stats_bar_checkbox": window.stats_bar_enabled,
             "stats_sampling_checkbox": window.stats_sampling_enabled,
@@ -439,6 +440,20 @@ class SettingsDialog(QDialog):
                  "a time, as flograph always did. A node whose code is not "
                  "safe beside others can opt out on its own: right-click it "
                  "and choose Run on its own.")
+
+        rows.add_group("Saving")
+
+        compress_check = QCheckBox("Compress cached results on disk")
+        compress_check.setObjectName("cache_compression_checkbox")
+        compress_check.setChecked(window.cache_compression_enabled)
+        compress_check.toggled.connect(window.set_cache_compression_enabled)
+        rows.add("Compress cache", compress_check,
+                 "Cached results live in a folder beside the project file. "
+                 "Compressed they take a fraction of the room — most for "
+                 "tables with text in them — at the cost of a little extra "
+                 "time when saving. Turn off if you would rather have raw "
+                 "speed; blobs already written either way keep working, and "
+                 "old projects read as they always did.")
 
         rows.add_group("Reset")
 

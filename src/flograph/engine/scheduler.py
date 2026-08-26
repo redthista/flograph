@@ -624,7 +624,13 @@ class ExecutionEngine(QObject):
                     wanted[root] = entry.blob
         if not wanted:
             return False
+        return self._start_warm(wanted)
 
+    def _start_warm(self, wanted: dict[str, str]) -> bool:
+        """Fan a {blob owner: project path} map out to pool threads. Shared
+        by the run path (_warm_plan) and the display path (warm_entries);
+        both need dispatch held until every read is back, which is what the
+        generation bookkeeping does."""
         # Grouped by project because that is what the runnable takes; in
         # practice one engine's cache is one project's.
         by_project: dict[str, list[str]] = {}
@@ -643,6 +649,32 @@ class ExecutionEngine(QObject):
             self.pool.start(
                 CacheWarmRunnable(project, node_ids, signals, generation))
         return True
+
+    def warm_entries(self, node_ids: list[str]) -> bool:
+        """Bring spilled entries back off-thread because something *visible*
+        wants them — a canvas card or dashboard tile that reopened as a
+        placeholder and is waiting for its value.
+
+        Not the whole cache: opening stays lazy on purpose (a side-car of
+        2M-row frames is gigabytes nobody has asked for). Only the entries
+        named here are read, through their blob owners — an alias names its
+        source's blob and resolves in memory once that is resident. True if
+        a read started; completion arrives via `cache.became_resident`, on
+        the GUI thread, whether this warmed for a run or for a card."""
+        wanted: dict[str, str] = {}
+        for node_id in node_ids:
+            entry = self.cache.get(node_id)
+            if entry is None or entry.resident:
+                continue
+            root = self.cache.blob_source(node_id)
+            if root is None or root in wanted:
+                continue
+            root_entry = self.cache.get(root)
+            if root_entry is not None and root_entry.blob:
+                wanted[root] = root_entry.blob
+        if not wanted:
+            return False
+        return self._start_warm(wanted)
 
     def _on_entry_warmed(self, node_id: str, outputs: object) -> None:
         """One spilled entry came back — or didn't."""

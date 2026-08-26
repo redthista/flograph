@@ -110,7 +110,8 @@ as join-the-plan; see `ideas_archived.md` #15.
 ## K. Saving, cache and disk
 
 One chunk because all three are about the same failure: a big flow filling
-or exhausting the disk without saying so.
+or exhausting the disk without saying so. Shipped 2026-08-26 as one commit;
+see `ideas_archived.md` #16.
 
 **K1. Show progress while saving a long flow**, so the app does not look
 hung. Node progress already has a plumbing path

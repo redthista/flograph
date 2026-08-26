@@ -1,11 +1,15 @@
 """Status bar resource monitor: the layered memory bar, the last run's cost,
-and the selected node's."""
+and the selected node's — plus the drive watch that says when the project's
+disk is running out."""
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
 from flograph.core import Graph, NodeRegistry
 from flograph.engine import ExecutionEngine
 from flograph.engine.cache import estimate_size
+from flograph.engine.pressure import DISK_RELIEF, LOW_DISK_FREE, disk_is_low
 from flograph.ui.resource_monitor import (MemoryBar, ResourceMonitorWidget,
                                           format_bytes, format_seconds)
 
@@ -222,3 +226,111 @@ class TestRunReadout:
             engine.run_all()
         widget.set_node(dot.id)
         assert "shared" in widget._node_label.text()
+
+
+class TestDiskIsLow:
+    def test_under_the_line_warns_and_over_it_does_not(self):
+        assert disk_is_low(LOW_DISK_FREE - 1)
+        assert not disk_is_low(LOW_DISK_FREE + 1024 ** 3)
+
+    def test_hysteresis_keeps_the_warning_until_space_returns(self):
+        # just above the line: quiet unless already warning, then still loud
+        assert not disk_is_low(LOW_DISK_FREE + 1024, already_warning=False)
+        assert disk_is_low(LOW_DISK_FREE + 1024, already_warning=True)
+        # past the relief band the warning clears
+        assert not disk_is_low(LOW_DISK_FREE + DISK_RELIEF + 1,
+                               already_warning=True)
+
+    def test_an_unreadable_drive_warns_about_nothing(self):
+        assert not disk_is_low(-1)
+
+
+class TestDiskWatch:
+    """The widget's drive watch: announce once on entering low space, clear
+    on leaving it, stay silent when nothing is watched."""
+
+    def _widget(self, qtbot):
+        engine = ExecutionEngine(Graph())
+        widget = ResourceMonitorWidget(engine)
+        qtbot.addWidget(widget)
+        return widget
+
+    def _watch(self, monkeypatch, usage_box):
+        import flograph.ui.resource_monitor as rm
+        monkeypatch.setattr(
+            rm.shutil, "disk_usage",
+            lambda drive: SimpleNamespace(free=usage_box["free"], total=10 ** 9))
+
+    def test_low_disk_is_announced_once_and_cleared_once(
+            self, qtbot, monkeypatch):
+        usage_box = {"free": LOW_DISK_FREE - 500 * 1024 ** 2}
+        self._watch(monkeypatch, usage_box)
+        widget = self._widget(qtbot)
+        seen = []
+        widget.disk_changed.connect(seen.append)
+
+        # watching a drive that is already low announces immediately
+        with qtbot.waitSignal(widget.disk_changed) as got:
+            widget.set_disk_watch_path("/somewhere/proj.flograph")
+        assert "running out of space" in got.args[0]
+        assert "Reset Caches" in got.args[0]
+
+        # still low: no repeat — nagging gets ignored
+        before = len(seen)
+        widget._refresh()
+        assert len(seen) == before
+
+        with qtbot.waitSignal(widget.disk_changed) as gone:
+            usage_box["free"] = LOW_DISK_FREE * 4
+            widget._refresh()
+        assert gone.args[0] == ""
+
+    def test_nothing_is_watched_without_a_project(self, qtbot, monkeypatch):
+        usage_box = {"free": 100}
+        self._watch(monkeypatch, usage_box)
+        widget = self._widget(qtbot)
+        seen = []
+        widget.disk_changed.connect(seen.append)
+
+        widget.set_disk_watch_path(None)
+        widget._refresh()
+        assert seen == []
+
+    def test_the_tooltip_reports_free_space_when_watching(
+            self, qtbot, monkeypatch):
+        usage_box = {"free": LOW_DISK_FREE * 3}
+        self._watch(monkeypatch, usage_box)
+        widget = self._widget(qtbot)
+        widget.set_disk_watch_path("/somewhere/proj.flograph")
+        assert "free" in widget.toolTip()
+
+        widget.set_disk_watch_path(None)
+        widget._refresh()
+        assert "free" not in widget.toolTip()
+
+    def test_the_tooltip_compares_stored_against_uncompressed(
+            self, qtbot, monkeypatch, registry, tmp_path):
+        """A real side-car on disk: the hover says what it costs stored and
+        what the same values would have cost raw, and by how much."""
+        import pandas as pd
+
+        from flograph.engine.cache import OutputCache
+        from flograph.engine.cache_persistence import save_cache
+
+        graph = Graph()
+        const = graph.add_node(registry.instantiate("flograph.util.constant"))
+        df = pd.DataFrame({"name": [f"row-{i:05d}" for i in range(2000)]})
+        cache = OutputCache()
+        cache.set(const.id, {"value": df}, wall_time=0.01)
+        project = tmp_path / "proj.flograph"
+        save_cache(graph, cache, project)
+
+        usage_box = {"free": LOW_DISK_FREE * 4}
+        self._watch(monkeypatch, usage_box)
+        widget = self._widget(qtbot)
+        widget.set_disk_watch_path(str(project))
+
+        tip = widget.toolTip()
+        assert "Cache on disk" in tip
+        assert "uncompressed" in tip
+        assert "%" in tip

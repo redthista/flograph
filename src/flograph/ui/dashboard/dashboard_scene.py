@@ -143,6 +143,12 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
                 if item.tile.node_id == node_id]
 
     def _on_node_ran(self, node_id: str, *args) -> None:
+        self.refresh_node_tiles(node_id)
+
+    def refresh_node_tiles(self, node_id: str) -> None:
+        """Re-read the cache for every tile bound to this node. The one
+        entry point for late-arriving data: a run finishing and an entry
+        coming back from disk (cache.became_resident) both land here."""
         for item in self._tiles_for(node_id):
             item.refresh_content()
 

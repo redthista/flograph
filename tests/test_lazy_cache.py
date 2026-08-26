@@ -411,3 +411,160 @@ class TestAccounting:
                                port_names=("table", "count"))
         assert cache.get("n1").ports() == ("table", "count")
         assert cache.get("n1").summary("table") == "not loaded"
+
+
+class TestBecameResidentEvent:
+    """The notification lazy-open was missing: cards can only heal if
+    something tells them a value they are showing as a placeholder has
+    actually arrived."""
+
+    def test_fires_once_when_spilled_becomes_resident(self):
+        cache = OutputCache()
+        seen = []
+        cache.became_resident.connect(seen.append)
+
+        cache.set("n1", {"out": 1}, wall_time=0.0)
+        assert seen == []                      # set() is born resident
+        cache.register_spilled("n2", "proj", 0.0)
+        cache.mark_resident("n2", {"out": 2})
+        assert seen == ["n2"]
+
+    def test_repeats_and_gone_entries_stay_silent(self):
+        cache = OutputCache()
+        seen = []
+        cache.became_resident.connect(seen.append)
+        cache.register_spilled("n2", "proj", 0.0)
+
+        cache.mark_resident("n2", {"out": 2})
+        cache.mark_resident("n2", {"out": 2})   # already resident: echo
+        cache.mark_resident("gone", {"out": 3}) # evicted since: nobody home
+        assert seen == ["n2"]
+
+
+class TestWarmEntries:
+    """warm_entries: the display half of warming. Not a run — nothing is
+    dirty, no plan is built; spilled entries come back because something
+    visible wants them."""
+
+    def test_brings_an_entry_back_without_a_run(self, qtbot, registry,
+                                                tmp_path):
+        from flograph.engine import ExecutionEngine
+
+        graph, const, path = saved_project(registry, tmp_path)
+        engine = ExecutionEngine(graph)
+        register_cache(graph, engine.cache, path)
+        assert not engine.cache.is_resident(const.id)
+
+        assert engine.warm_entries([const.id]) is True
+        qtbot.waitUntil(lambda: engine.cache.is_resident(const.id),
+                        timeout=10000)
+        assert engine.cache.outputs_for(const.id) == {"value": "hello"}
+
+    def test_resident_or_absent_entries_need_no_warm(self, registry,
+                                                     tmp_path):
+        from flograph.engine import ExecutionEngine
+
+        graph, const, path = saved_project(registry, tmp_path)
+        engine = ExecutionEngine(graph)
+        register_cache(graph, engine.cache, path)
+        engine.cache.materialize(const.id)
+        assert engine.warm_entries([const.id]) is False     # already here
+        assert engine.warm_entries(["never-existed"]) is False
+
+    def test_an_alias_warms_through_its_owner(self, qtbot, registry,
+                                              tmp_path):
+        """A Reroute re-serving its source owns no blob of its own: warming
+        it must warm the owner, after which the alias resolves in memory."""
+        from flograph.engine import ExecutionEngine
+
+        graph = Graph()
+        const = registry.instantiate("flograph.util.constant", pos=(0, 0))
+        dot = registry.instantiate("flograph.util.reroute", pos=(200, 0))
+        graph.add_node(const)
+        graph.add_node(dot)
+        graph.connect(const.id, "value", dot.id, "value")
+        cache = OutputCache()
+        shared = {"value": "shared object"}
+        cache.set(const.id, shared, wall_time=0.01)
+        cache.set(dot.id, {"value": shared["value"]}, wall_time=0.01,
+                  alias_of=const.id, alias_port="value")
+        path = tmp_path / "alias.flograph"
+        save_cache(graph, cache, path)
+
+        engine = ExecutionEngine(graph)
+        register_cache(graph, engine.cache, path)
+        assert engine.warm_entries([dot.id]) is True
+        qtbot.waitUntil(lambda: engine.cache.is_resident(const.id),
+                        timeout=10000)
+        # the alias itself resolves through the resident owner, no disk
+        assert engine.cache.outputs_for(dot.id)["value"] == "shared object"
+
+
+class TestOpenRestoresWhatCardsShow:
+    """The user-visible contract: reopening a flow finds it how it was
+    left — data-bearing cards populated, no re-run, nothing pressed."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_settings(self, tmp_path, monkeypatch):
+        from PySide6.QtCore import QSettings
+
+        from flograph.ui import mainwindow as mod
+        ini_path = str(tmp_path / "settings.ini")
+        monkeypatch.setattr(
+            mod, "QSettings",
+            lambda *a, **k: QSettings(ini_path, QSettings.IniFormat))
+
+    @pytest.fixture(scope="module")
+    def reg(self, registry):
+        return registry
+
+    def _window(self, qtbot, reg):
+        from flograph.ui import mainwindow as mod
+        win = mod.MainWindow(reg)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def test_reopening_populates_cards_without_a_run(
+            self, qtbot, reg, tmp_path, monkeypatch):
+        from flograph.core import serialization
+        from flograph.engine import ExecutionEngine
+        from flograph.engine.introspect import slicer_options
+
+        csv = tmp_path / "sales.csv"
+        csv.write_text("region,value\n" +
+                       "".join(f"r{i % 3},{i}\n" for i in range(50)))
+
+        # --- session one: run, save, close
+        builder = self._window(qtbot, reg)
+        reader = builder.graph.add_node(
+            reg.instantiate("flograph.io.read_csv"))
+        builder.graph.set_param(reader.id, "path", str(csv))
+        slicer = builder.graph.add_node(
+            reg.instantiate("flograph.viz.slicer"))
+        builder.graph.set_param(slicer.id, "column", "region")
+        builder.graph.connect(reader.id, "table", slicer.id, "table")
+        with qtbot.waitSignal(builder.engine.run_finished, timeout=30000):
+            builder.engine.run_all()
+        project = tmp_path / "leftit.flograph"
+        serialization.save(builder.graph, project)
+        save_cache(builder.graph, builder.engine.cache, project)
+
+        # --- session two: open, and wait — no run, no click
+        reopened = self._window(qtbot, reg)
+        refreshed = []
+        monkeypatch.setattr(reopened, "_on_slicer_node_succeeded",
+                            lambda nid: refreshed.append(nid))
+        assert reopened.open_path(str(project), confirm=False) is True
+
+        engine = reopened.engine
+        qtbot.waitUntil(
+            lambda: (engine.cache.is_resident(reader.id)
+                     and engine.cache.is_resident(slicer.id)),
+            timeout=15000)
+        # the canvas slicer card was told its data arrived
+        assert slicer.id in refreshed
+        # and it can actually answer from the restored upstream value
+        assert slicer_options(reopened.graph, engine.cache, slicer.id)
+        # ...all without anything having executed
+        assert engine.history.latest is None

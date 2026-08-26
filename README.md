@@ -127,8 +127,13 @@ in *your* node script.
 Node output caches are written to a side-car `<project>.flograph.cache/`
 directory keyed by a fingerprint of each node's source, params and
 everything upstream, so reopening a project restores the results you had
-without a re-run. A stale or corrupt entry just leaves that node dirty; it
-can never block a load.
+without a re-run. Blobs are zlib-compressed (a setting turns that off), and
+the reader sniffs each blob rather than trusting the manifest, so side-cars
+from every era — raw, compressed, or a mix — keep loading. A stale or
+corrupt entry just leaves that node dirty; it can never block a load.
+Saving shows its progress on the status line while the cache writes in the
+background, and both the monitor and the save dialog speak up when the disk
+is running low or full.
 
 ---
 
@@ -400,10 +405,10 @@ protected from uninstall.
 ## Settings
 
 `Ctrl+,` opens a searchable two-column settings grid with a navigation tree:
-**General** (window behaviour, resets), **Canvas** (display, snapping, colour
-muting strength, GPU viewport, previews, page-bar position), **Table Node**,
-and **About**. Selecting a group narrows the grid; the search box filters
-across the page.
+**General** (execution, saving, window behaviour, resets), **Canvas**
+(display, snapping, colour muting strength, GPU viewport, previews, page-bar
+position), **Table Node**, and **About**. Selecting a group narrows the
+grid; the search box filters across the page.
 
 ---
 

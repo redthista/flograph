@@ -32,6 +32,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from flograph.core.events import Event
+
 
 @dataclass
 class CacheEntry:
@@ -79,6 +81,13 @@ class OutputCache:
     def __init__(self) -> None:
         self._entries: dict[str, CacheEntry] = {}
         self._loader: Optional[Callable[[str, str], dict[str, Any]]] = None
+        # Fired (node_id) when a spilled entry comes back to life. This is
+        # the notification the whole lazy-open design was missing: cards are
+        # built against a cache where everything is on disk, and without it
+        # nothing ever told them when a value they were showing as a
+        # placeholder had actually arrived. Fired on the GUI thread — every
+        # path that reaches mark_resident ends there.
+        self.became_resident = Event()
 
     def set_loader(
         self, loader: Optional[Callable[[str, str], dict[str, Any]]],
@@ -126,6 +135,8 @@ class OutputCache:
 
         A no-op if the entry has gone or has already been recomputed since the
         load started — the fresh value wins, and the stale one is dropped.
+        Fires `became_resident` only on a real transition, so late arrivals
+        can be told apart from echoes.
         """
         entry = self._entries.get(node_id)
         if entry is None or entry.resident:
@@ -136,6 +147,7 @@ class OutputCache:
         entry.port_names = tuple(outputs)
         if not entry.memory_bytes:
             entry.memory_bytes = sum(estimate_size(v) for v in outputs.values())
+        self.became_resident.emit(node_id)
 
     def get(self, node_id: str) -> Optional[CacheEntry]:
         """The entry as it stands. Never touches the disk — a spilled entry

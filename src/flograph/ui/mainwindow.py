@@ -27,8 +27,10 @@ from flograph.core import dotenv
 from flograph.core import serialization
 from flograph.core import user_nodes
 from flograph.engine import (
-    CacheLoadSignals, ExecutionEngine, cache_persistence, is_exclusive,
+    CacheLoadSignals, CacheSaveRunnable, CacheSaveSignals, ExecutionEngine,
+    cache_persistence, is_exclusive,
 )
+from flograph.engine.cache_persistence import save_failure_text
 from flograph.paths import user_nodes_dir
 
 from .commands import (
@@ -114,6 +116,16 @@ class MainWindow(QMainWindow):
         self.engine.frame_membership = lambda: self.scene.flagged_frame_members()
         # the scene predates the engine, so it gets the cache handed to it
         self.scene.output_cache = self.engine.cache
+        # Late-arriving cache data. Opening registers spilled entries, so
+        # every data-bearing card builds from its placeholder until the
+        # value it shows comes back off disk — and until now nothing told a
+        # card when that had happened. One event, one batched refresh.
+        self._resident_batch: set[str] = set()
+        self._resident_timer = QTimer(self)
+        self._resident_timer.setSingleShot(True)
+        self._resident_timer.setInterval(120)
+        self._resident_timer.timeout.connect(self._flush_resident_batch)
+        self.engine.cache.became_resident.connect(self._on_cache_became_resident)
         self.settings = QSettings("flograph", "flograph")
         # built before _build_actions(): every action registers itself as
         # it is created, and a saved rebind has to be in force from then on
@@ -121,6 +133,10 @@ class MainWindow(QMainWindow):
         self.favorites = Favorites(self.settings, parent=self)
         self._project_path: Optional[str] = None
         self._cache_load_signals: Optional[CacheLoadSignals] = None
+        # The background half of a save: writing the cache side-car. None
+        # when idle; while up, Save/Open-a-second-save and starting a run
+        # wait for it (see _cache_still_writing) rather than racing it.
+        self._cache_save_signals: Optional[CacheSaveSignals] = None
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
@@ -170,6 +186,11 @@ class MainWindow(QMainWindow):
         self.scrollbars_enabled = self.settings.value(
             "canvas/scrollbars", False, type=bool)
         self.view.set_scrollbars_enabled(self.scrollbars_enabled)
+        # zlib on the cache side-car trades a little save-time CPU for a lot
+        # of disk (ideas_archived.md #16). Off writes raw pickles; both eras
+        # read forever either way — load_blob sniffs each blob.
+        self.cache_compression_enabled = self.settings.value(
+            "saving/compress_cache", True, type=bool)
         self.double_click_action = str(self.settings.value(
             "canvas/double_click_action", "properties"))
         self.tint_soft = self.settings.value(
@@ -210,6 +231,8 @@ class MainWindow(QMainWindow):
         # the resource monitor's pressure signal, not by the run — the
         # machine does not stop being full because a run ended.
         self._run_pressure_note = ""
+        # The same treatment for disk space, from the monitor's other signal.
+        self._disk_note = ""
         self._run_prior: Optional[float] = None
         self._run_tick = QTimer(self)
         self._run_tick.setInterval(RUN_TICK_MS)
@@ -256,6 +279,15 @@ class MainWindow(QMainWindow):
         # the left-hand widgets while it is up. Owning the text is what lets
         # the bar live next to it. Everything goes through show_status().
         self.statusBar().addWidget(self._run_bar)
+        # Its twin for saving: how far through writing the cache side-car a
+        # save is. Same shape and parking place, so "the app is doing
+        # something long" always looks the same in this window.
+        self._save_bar = QProgressBar(self)
+        self._save_bar.setRange(0, 100)
+        self._save_bar.setTextVisible(False)
+        self._save_bar.setFixedSize(80, 8)
+        self._save_bar.hide()
+        self.statusBar().addWidget(self._save_bar)
         self._status_label = QLabel(self)
         # Ignored, so a long message clips instead of widening the window's
         # minimum -- the behaviour showMessage() had.
@@ -280,6 +312,7 @@ class MainWindow(QMainWindow):
         self.resource_monitor = ResourceMonitorWidget(self.engine, self)
         self.resource_monitor.clicked.connect(self._show_stats)
         self.resource_monitor.pressure_changed.connect(self._on_memory_pressure)
+        self.resource_monitor.disk_changed.connect(self._on_disk_pressure)
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self._apply_stats_settings()
         self.show_status("Ready")
@@ -685,6 +718,15 @@ class MainWindow(QMainWindow):
         for view in views:
             view.set_scrollbars_enabled(enabled)
 
+    def set_cache_compression_enabled(self, enabled: bool) -> None:
+        """Whether saving zlib-compresses the cache side-car's blobs.
+
+        Read at the moment a save starts, so flipping it mid-session applies
+        to the next save; blobs already on disk keep whatever era wrote them,
+        and load_blob sniffs each one, so nothing needs migrating."""
+        self.cache_compression_enabled = bool(enabled)
+        self.settings.setValue("saving/compress_cache", bool(enabled))
+
     def set_compact_nodes(self, enabled: bool) -> None:
         """Canvas-wide: draw plain nodes as a fixed square with the name
         above, rather than the wide labelled box. Cards keep their size —
@@ -932,6 +974,19 @@ class MainWindow(QMainWindow):
         if message:
             self.show_status(message, 15000)
 
+    def _on_disk_pressure(self, message: str) -> None:
+        """Said once when the project's drive is running out of room.
+
+        Same plumbing as memory pressure — carried on the run line during a
+        run rather than dropped — but with no canvas marks: memory names the
+        nodes to act on, disk has no per-node answer."""
+        self._disk_note = message
+        if self.engine.active:
+            self._update_run_status()
+            return
+        if message:
+            self.show_status(message, 15000)
+
     def _mark_heavy_nodes(self, under_pressure: bool) -> None:
         """Amber the few steps holding the most, or clear every mark.
 
@@ -1012,7 +1067,8 @@ class MainWindow(QMainWindow):
         fraction, what it usually costs) goes with the name: attached to a
         count it would be describing something the line has not identified.
         """
-        if not self._run_node_label and not self._run_pressure_note:
+        if not self._run_node_label and not self._run_pressure_note \
+                and not self._disk_note:
             return
         concurrent = len(self._run_inflight)
         if concurrent > 1:
@@ -1058,6 +1114,8 @@ class MainWindow(QMainWindow):
             # front of the line, but present — this used to be dropped during
             # a run, which is the one time it is worth saying.
             parts.append(self._run_pressure_note)
+        if self._disk_note:
+            parts.append(self._disk_note)
         self.show_status("  ·  ".join(parts))
         self._run_bar.setValue(int(100 * self._run_completion()))
 
@@ -1395,8 +1453,9 @@ class MainWindow(QMainWindow):
     def _refresh_node_card(self, node_id: str) -> None:
         """Push the last-known cached output into this node's embedded
         preview widget — shared by the *_node_succeeded handlers (via
-        engine.node_succeeded) and by re-enabling a disabled preview, so
-        re-enable never forces a re-run."""
+        engine.node_succeeded), by re-enabling a disabled preview, and by
+        the resident-batch refresh, so a card heals no matter who brought
+        its value back."""
         node = self.graph.nodes.get(node_id)
         if node is None:
             return
@@ -1413,6 +1472,37 @@ class MainWindow(QMainWindow):
             self._on_control_node_succeeded(node_id)
         elif kind == "grid":
             self._on_grid_node_succeeded(node_id)
+        elif kind == "kpi":
+            self._on_kpi_node_succeeded(node_id)
+
+    # ------------------------------------------- cache data arriving late
+
+    def _on_cache_became_resident(self, node_id: str) -> None:
+        """One spilled entry is readable again. Batched: an open warms the
+        cards' worth of entries in one breath, and each arrival rebuilding
+        a web view or a table model on its own would thrash."""
+        self._resident_batch.add(node_id)
+        self._resident_timer.start()
+
+    def _flush_resident_batch(self) -> None:
+        batch, self._resident_batch = self._resident_batch, set()
+        if not batch:
+            return
+        # A slicer or control shows what its UPSTREAM entry says, so data
+        # arriving upstream has to refresh the readers below it too.
+        extra = set()
+        for node_id in batch:
+            for downstream_id in self.graph.downstream(node_id):
+                node = self.graph.nodes.get(downstream_id)
+                if node is not None and card_kind(node) in ("slicer",
+                                                            "control"):
+                    extra.add(downstream_id)
+        for node_id in batch | extra:
+            self._refresh_node_card(node_id)
+            for page in self._dashboard_pages.values():
+                scene = getattr(page, "scene", None)
+                if scene is not None:
+                    scene.refresh_node_tiles(node_id)
 
     def _on_control_node_succeeded(self, node_id: str) -> None:
         """Re-read whatever this control's own inputs supplied on that run —
@@ -1970,10 +2060,14 @@ class MainWindow(QMainWindow):
             self._rename_node(items[0].node.id)
 
     def _run_all(self) -> None:
+        if self._cache_still_writing():
+            return
         self._flush_pending_edits()
         self.engine.run_all()
 
     def _run_selected(self) -> None:
+        if self._cache_still_writing():
+            return
         self._flush_pending_edits()
         targets = [item.node.id for item in self.scene.selected_node_items()]
         if targets:
@@ -2044,8 +2138,10 @@ class MainWindow(QMainWindow):
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "button":
             return
-        self._flush_pending_edits()
         action = node.params.get("action", "Run nodes")
+        if action != "Show message" and self._cache_still_writing():
+            return
+        self._flush_pending_edits()
         if action == "Show message":
             self._show_button_message(node)
             return
@@ -2153,6 +2249,8 @@ class MainWindow(QMainWindow):
         return [nid for nid in node_ids if nid in self.graph.nodes]
 
     def _on_frame_run_requested(self, frame_id: str) -> None:
+        if self._cache_still_writing():
+            return
         self._flush_pending_edits()
         targets = self._frame_node_ids_by_id(frame_id)
         if not targets:
@@ -3581,6 +3679,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if not self.confirm_close or self._confirm_discard():
             self._wait_for_cache_load()
+            # "Save them first?" may just have started a background cache
+            # write; see it out or the side-car it was writing is lost.
+            self._wait_for_cache_save()
             self._save_window_state()
             event.accept()
         else:
@@ -3635,6 +3736,7 @@ class MainWindow(QMainWindow):
         dotenv.bind(graph, dotenv.default_path())
         self._replace_graph(graph)
         self._project_path = None
+        self.resource_monitor.set_disk_watch_path(None)
         self._update_title()
 
     def _open_dialog(self) -> None:
@@ -3682,6 +3784,7 @@ class MainWindow(QMainWindow):
             return
         self._replace_graph(loaded)
         self._project_path = None
+        self.resource_monitor.set_disk_watch_path(None)
         self._update_title()
         self.show_status(
             f"Loaded example '{path.stem}' — use Save As to keep it", 4000)
@@ -3698,6 +3801,7 @@ class MainWindow(QMainWindow):
             return False
         self._replace_graph(loaded)
         self._project_path = path
+        self.resource_monitor.set_disk_watch_path(path)
         self._push_recent(path)
         self._update_title()
         saved_page = self.settings.value(f"active_page/{path}", "")
@@ -3727,8 +3831,12 @@ class MainWindow(QMainWindow):
         Now opening reads one manifest. Each node is recorded as cached but
         not loaded, which is all it takes for it to count as clean, and its
         value is fetched when something actually wants it — the engine warms
-        a run's inputs on a pool thread (ExecutionEngine._warm_plan), and the
-        inspector loads a single node's value when asked to show it.
+        a run's inputs on a pool thread (ExecutionEngine._warm_plan), the
+        inspector loads a single node's value when asked to show it, and
+        everything a *card* displays is queued here, so the flow opens
+        looking the way it was left rather than as placeholders waiting for
+        a re-run. Only card-visible values load — not the bulk intermediates,
+        which is what keeps this from being the 4 GB open it used to be.
         """
         registered = cache_persistence.register_cache(
             self.graph, self.engine.cache, path)
@@ -3738,10 +3846,46 @@ class MainWindow(QMainWindow):
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.engine.node_succeeded.emit(node_id)
+        # The emit storm above ran every card handler against an empty
+        # (spilled) entry — that is what placeholders are. Queue what those
+        # cards actually display: their own values, plus whatever upstream
+        # feeds a slicer's or control's options.
+        warm_ids = self._display_warm_ids(registered)
+        if warm_ids:
+            self.engine.warm_entries(warm_ids)
         if not quiet:
             self.show_status(
                 f"Opened {path} — {len(registered)} node(s) restored from cache",
                 4000)
+
+    #: The canvas kinds whose cards render cached data rather than params.
+    _CARD_DATA_KINDS = ("figure", "webview", "table_viewer", "kpi",
+                        "slicer", "control")
+
+    def _display_warm_ids(self, registered: list[str]) -> list[str]:
+        """Which spilled entries the visible cards are waiting on.
+
+        A figure/webview/table/kpi card shows its own output; a slicer or
+        control shows what its wired inputs' entries say (options, bounds),
+        so those nodes' sources come along too. Everything else — bulk
+        intermediates nobody is looking at — stays on disk until asked."""
+        ids: list[str] = []
+        sources: set[str] = set()
+        for node_id in registered:
+            node = self.graph.nodes.get(node_id)
+            if node is None:
+                continue
+            kind = card_kind(node)
+            if kind not in self._CARD_DATA_KINDS:
+                continue
+            ids.append(node_id)
+            if kind in ("slicer", "control"):
+                for port in node.spec.inputs:
+                    conn = self.graph.input_connection(node_id, port.name)
+                    if conn is not None:
+                        sources.add(conn.src_node)
+                sources.update(self.graph.var_sources(node_id))
+        return ids + sorted(sources.difference(ids))
 
     def _replace_graph(self, loaded: Graph) -> None:
         # pages opened in a browser belong to the project being closed; the
@@ -3785,16 +3929,112 @@ class MainWindow(QMainWindow):
     def _save(self) -> bool:
         if self._project_path is None:
             return self._save_as()
-        serialization.save(self.graph, self._project_path)
-        if not self.engine.active:
-            cache_persistence.save_cache(
-                self.graph, self.engine.cache, self._project_path)
+        if self._cache_save_signals is not None:
+            self.show_status(
+                "Still writing cached results for the last save — try again "
+                "in a moment", 4000)
+            return False
+        try:
+            serialization.save(self.graph, self._project_path)
+        except OSError as exc:
+            # A failed save used to escape into the Qt slot and die in a
+            # console nobody was watching. The common way it fails is the
+            # disk filling up, which is exactly when the user needs words.
+            QMessageBox.critical(self, "Save failed", save_failure_text(
+                f'"{self._project_path}"', exc))
+            return False
         self.undo_stack.setClean()
         self._push_recent(self._project_path)
-        self.show_status(f"Saved {self._project_path}", 4000)
+        if not self.engine.active:
+            self._start_cache_save()
+        else:
+            # A run owns the cache; saving mid-run never touched it before
+            # and still doesn't. The JSON half just saved is the news.
+            self.show_status(f"Saved {self._project_path}", 4000)
         return True
 
+    def _start_cache_save(self) -> None:
+        """Write the side-car off the GUI thread, with progress on the line.
+
+        The plan is snapshotted here, cheaply, so the worker never touches
+        graph or cache (see cache_persistence.plan_cache_save). With nothing
+        cached there is no second half at all and the plain Saved message
+        stands. While it runs, _cache_still_writing holds off a second Save,
+        Save As, and starting a run — the last because a run dirties and
+        refills entries this plan is walking."""
+        path = self._project_path
+        plan = cache_persistence.plan_cache_save(self.graph, self.engine.cache)
+        if not plan:
+            self.show_status(f"Saved {path}", 4000)
+            return
+        signals = CacheSaveSignals(parent=self)
+        signals.progressed.connect(self._on_cache_save_progress)
+        signals.finished.connect(self._on_cache_save_finished)
+        self._cache_save_signals = signals
+        self._save_bar.setRange(0, len(plan))
+        self._save_bar.setValue(0)
+        self._save_bar.show()
+        name = Path(path).name
+        self.show_status(f"Saving {name} · cached results 0/{len(plan)}")
+        QThreadPool.globalInstance().start(
+            CacheSaveRunnable(path, plan, signals,
+                              compress=self.cache_compression_enabled))
+
+    def _on_cache_save_progress(self, done: int, total: int) -> None:
+        self._save_bar.setValue(done)
+        name = Path(self._project_path).name if self._project_path else ""
+        self.show_status(f"Saving {name} · cached results {done}/{total}")
+
+    def _on_cache_save_finished(self, error: str) -> None:
+        signals, self._cache_save_signals = self._cache_save_signals, None
+        self._save_bar.hide()
+        if signals is not None:
+            signals.progressed.disconnect()
+            signals.finished.disconnect()
+        if error:
+            QMessageBox.critical(self, "Save failed", error)
+            return
+        if self.engine.active:
+            return      # the run line is speaking; do not talk over it
+        self.show_status(f"Saved {self._project_path}", 4000)
+
+    def _cache_still_writing(self) -> bool:
+        """True while a background cache write from the last Save is going.
+        Starting a run mid-write would dirty and refill the very entries the
+        writer is walking; the honest answer is to wait, briefly."""
+        if self._cache_save_signals is None:
+            return False
+        self.show_status(
+            "Still saving cached results — starting a run waits for it",
+            4000)
+        return True
+
+    def _wait_for_cache_save(self) -> None:
+        """On close: pump events until the background cache write lands.
+
+        Closing right after "Save them first?" would otherwise tear down the
+        window under a runnable that may be halfway through writing blobs —
+        atomic per blob, but a manifest that never gets written throws away
+        the whole side-car's worth of work. Bounded like
+        _wait_for_cache_load, for the same reason."""
+        if self._cache_save_signals is None:
+            return
+        deadline = time.monotonic() + 60
+        while self._cache_save_signals is not None and time.monotonic() < deadline:
+            QApplication.processEvents(QEventLoop.WaitForMoreEvents, 200)
+        signals, self._cache_save_signals = self._cache_save_signals, None
+        if signals is not None:
+            signals.progressed.disconnect()
+            signals.finished.disconnect()
+
     def _save_as(self) -> bool:
+        # Before the dialog and before _project_path moves: refusing after
+        # the switch would leave the project aimed at a file never written.
+        if self._cache_save_signals is not None:
+            self.show_status(
+                "Still writing cached results for the last save — try again "
+                "in a moment", 4000)
+            return False
         path, _ = QFileDialog.getSaveFileName(
             self, "Save project", "untitled.flograph", "flograph projects (*.flograph)")
         if not path:
@@ -3802,6 +4042,7 @@ class MainWindow(QMainWindow):
         if not path.endswith(".flograph"):
             path += ".flograph"
         self._project_path = path
+        self.resource_monitor.set_disk_watch_path(path)
         return self._save()
 
     # --------------------------------------------------------------- recent

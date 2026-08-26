@@ -16,6 +16,8 @@ when it is worth looking closer.
 """
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from typing import Optional
 
 import psutil
@@ -24,9 +26,11 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from flograph.engine import ExecutionEngine
-from flograph.engine.pressure import (COMFORT_FREE, FREE_RELIEF, LOW_FREE,
+from flograph.engine.cache_persistence import sidecar_stats
+from flograph.engine.pressure import (COMFORT_FREE, DISK_RELIEF, FREE_RELIEF,
+                                      LOW_DISK_FREE, LOW_FREE,
                                       PRESSURE_RELIEF, SYSTEM_PRESSURE,
-                                      machine_is_tight)
+                                      disk_is_low, machine_is_tight)
 from flograph.engine.runstats import ProcessSampler
 
 from . import theme
@@ -185,6 +189,10 @@ class ResourceMonitorWidget(QWidget):
     # on every refresh — a status bar line that reappears every two seconds
     # is nagging, and nagging gets ignored.
     pressure_changed = Signal(str)
+    # The same contract for disk space: emitted on entering and leaving
+    # "the drive this project lives on is running out", message when
+    # entering and "" when leaving.
+    disk_changed = Signal(str)
 
     def __init__(self, engine: ExecutionEngine, parent=None) -> None:
         super().__init__(parent)
@@ -192,6 +200,9 @@ class ResourceMonitorWidget(QWidget):
         self._node_id: Optional[str] = None
         self._sampler = ProcessSampler()
         self._warned = False
+        self._disk_path: Optional[str] = None
+        self._disk_drive: Optional[str] = None
+        self._disk_warned = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 8, 0)
@@ -221,6 +232,42 @@ class ResourceMonitorWidget(QWidget):
         self._node_id = node_id
         self._refresh()
 
+    def set_disk_watch_path(self, path: Optional[str]) -> None:
+        """Which drive to keep an eye on: the one the project (and so its
+        cache side-car) lives on. The full path is kept, not a drive letter
+        or root anchor — on Linux the same anchor sits over several
+        filesystems, and asking about the project's own folder is what makes
+        the kernel resolve the mount that actually holds it. None watches
+        nothing — an unsaved project has no disk to fill yet."""
+        self._disk_path = path or None
+        self._disk_drive = self._drive_label(path) if path else None
+        # Re-evaluate now rather than two seconds from now: switching from a
+        # full drive to a roomy one should clear the warning immediately.
+        self._refresh()
+
+    @staticmethod
+    def _drive_label(path: str) -> str:
+        """A short name for what carries this project: its mount point.
+
+        `Path.anchor` says `/` for everything under Unix, which is both
+        useless as a label and wrong as a measurement — /home is frequently
+        its own filesystem (always, on immutable distros like Bazzite, where
+        /home is a bind of /var/home beside the small system root). The
+        mount table picks the longest prefix that actually mounts somewhere,
+        and falls back to the anchor when psutil cannot say.
+        """
+        folder = str(Path(path).parent)
+        best = ""
+        try:
+            for part in psutil.disk_partitions(all=False):
+                mount = part.mountpoint.rstrip("/") or "/"
+                if folder == mount or folder.startswith(mount + "/"):
+                    if len(mount) > len(best):
+                        best = part.mountpoint
+        except Exception:
+            pass
+        return best or Path(path).anchor
+
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
@@ -248,6 +295,23 @@ class ResourceMonitorWidget(QWidget):
                f"flograph process\t{format_bytes(process)}\n"
                f"System\t\t{format_bytes(vm.used)} / {format_bytes(vm.total)}"
                f"  ({vm.percent:.0f}%)")
+        usage = self._disk_usage()
+        if usage is not None:
+            tip += f"\nDrive {self._disk_drive}\t{format_bytes(usage.free)} free"
+            disk, raw = sidecar_stats(self._disk_path)
+            if disk > 0:
+                if raw > 0:
+                    # What the cache costs on the drive against what the same
+                    # values would have cost raw. The disk figure counts
+                    # blobs whose raw size was never recorded (carried over
+                    # from an older save), so a ratio built here can only
+                    # flatter compression slightly — honest enough for a
+                    # hover line.
+                    tip += (f"\nCache on disk\t{format_bytes(disk)} · "
+                            f"{format_bytes(raw)} uncompressed "
+                            f"({100 * disk // raw}%)")
+                else:
+                    tip += f"\nCache on disk\t{format_bytes(disk)}"
         if under_pressure:
             tip += "\n\n" + self._pressure_detail(cache, vm.total)
         self.setToolTip(tip + "\n\nClick for full statistics")
@@ -260,8 +324,47 @@ class ResourceMonitorWidget(QWidget):
             self.pressure_changed.emit(
                 self._pressure_summary(cache, vm.total) if under_pressure else "")
 
+        self._refresh_disk(usage)
+
         self._run_label.setText(self._run_text())
         self._node_label.setText(self._node_text())
+
+    # ---------------------------------------------------------------- disk
+
+    def _disk_usage(self) -> Optional[object]:
+        """Free/total for the filesystem carrying the project, or None when
+        nothing is watched or the drive cannot be read (a network mount gone
+        away, say — an unreadable drive warns about nothing). Asked at the
+        project's own folder so the kernel resolves its real mount; psutil
+        backs shutil up because between them they cover more odd setups."""
+        if not self._disk_path:
+            return None
+        folder = str(Path(self._disk_path).parent)
+        for probe in (shutil.disk_usage, psutil.disk_usage):
+            try:
+                return probe(folder)
+            except OSError:
+                continue
+        return None
+
+    def _refresh_disk(self, usage: Optional[object]) -> None:
+        low = (usage is not None
+               and disk_is_low(usage.free, already_warning=self._disk_warned))
+        if low != self._disk_warned:
+            self._disk_warned = low
+            self.disk_changed.emit(
+                self._disk_summary(usage) if low and usage else "")
+
+    def _disk_summary(self, usage) -> str:
+        """One line for the status bar — how much is left and what to do.
+
+        The advice mirrors the memory pressure line's shape: first the lever
+        that needs no knowledge of this app, then the one only flograph has.
+        """
+        return (f"The drive {self._disk_drive} is running out of space — "
+                f"{format_bytes(usage.free)} free. Free some space "
+                f"(Reset Caches releases this project's cached results), or "
+                f"save the project somewhere with room.")
 
     def _heaviest(self, limit: int = 3) -> list[tuple[str, str]]:
         """(label, size) for the nodes holding the most, largest first."""

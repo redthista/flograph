@@ -89,3 +89,45 @@ class CacheWarmRunnable(QRunnable):
                 outputs = None
             self.signals.warmed.emit(node_id, outputs)
         self.signals.finished.emit(self.generation)
+
+
+class CacheSaveSignals(QObject):
+    # (done, total) after each planned entry, whatever became of it
+    progressed = Signal(int, int)
+    # The failure to show the user, or "" on success. A message rather than
+    # an exception object: the text is chosen where the failure happened,
+    # and a full-disk save has its own sentence (save_failure_text).
+    finished = Signal(str)
+
+
+class CacheSaveRunnable(QRunnable):
+    """Writes a plan from cache_persistence.plan_cache_save off the GUI
+    thread, so saving a flow whose cache holds gigabytes does not look like
+    a hang. The plan was snapshotted before this started, so neither the
+    graph nor the cache is touched here — editing and running go on while
+    the blobs pickle out.
+
+    An OSError — the disk filling up, most commonly — lands in `finished`
+    as its human sentence rather than vanishing: that is K2's whole point.
+    """
+
+    def __init__(self, project_path: str,
+                 plan: list[tuple[str, Any, str, bool]],
+                 signals: CacheSaveSignals, compress: bool = True) -> None:
+        super().__init__()
+        self.project_path = project_path
+        self.plan = plan
+        self.signals = signals
+        self.compress = compress
+
+    def run(self) -> None:  # executes on a pool thread
+        try:
+            cache_persistence.write_cache_plan(
+                self.project_path, self.plan,
+                progress=lambda done, total: self.signals.progressed.emit(done, total),
+                compress=self.compress)
+        except Exception as exc:
+            self.signals.finished.emit(
+                cache_persistence.save_failure_text("the cached results", exc))
+            return
+        self.signals.finished.emit("")
