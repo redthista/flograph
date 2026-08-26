@@ -461,14 +461,14 @@ class TestLockedPageCursor:
         item = self._tile(window)
         page.set_view_mode(True)
         item._apply_edge_cursor(QPointF(120, 6))
-        assert not item.hasCursor()
+        assert item.cursor().shape() == Qt.ArrowCursor
 
     def test_the_body_offers_nothing_either(self, window):
         page = add_page(window)
         item = self._tile(window)
         page.set_view_mode(True)
         item._apply_edge_cursor(QPointF(120, 120))
-        assert not item.hasCursor()
+        assert item.cursor().shape() == Qt.ArrowCursor
 
     def test_the_corner_offers_nothing_once_locked(self, window):
         page = add_page(window)
@@ -476,7 +476,29 @@ class TestLockedPageCursor:
         page.set_view_mode(True)
         w, h = item._size
         item._apply_edge_cursor(QPointF(w - 3, h - 3))
-        assert not item.hasCursor()
+        assert item.cursor().shape() == Qt.ArrowCursor
+
+    def test_a_locked_tile_says_arrow_rather_than_saying_nothing(self,
+                                                                 window):
+        """An item with no cursor of its own shows the viewport's, and the
+        viewport wears the last cursor an item gave it. Saying nothing here
+        is how a stale move cursor ended up on every card of a locked
+        page."""
+        page = add_page(window)
+        item = self._tile(window)
+        page.set_view_mode(True)
+        item._apply_edge_cursor(QPointF(120, 120))
+        assert item.hasCursor()
+
+    def test_locking_takes_the_viewport_s_cursor_back(self, window):
+        """The other half of it: a page locked from the tab menu, with the
+        pointer nowhere near it, never gets the mouse-move that would
+        restore the viewport — so the lock has to do it."""
+        page = add_page(window)
+        self._tile(window)
+        page.view.viewport().setCursor(Qt.SizeAllCursor)   # as a tile left it
+        page.set_view_mode(True)
+        assert page.view.viewport().cursor().shape() == Qt.ArrowCursor
 
     def test_the_maximize_glyph_still_does(self, window):
         """It is still live on a locked page, so it still says so."""

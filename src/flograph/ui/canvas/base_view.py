@@ -387,6 +387,17 @@ class ZoomPanGraphicsView(QGraphicsView):
             self._space_held = False
             self._panning = False
             self.unsetCursor()
+            # And take the viewport's cursor back, which is not the same
+            # thing. An item with a cursor sets it *on the viewport*, and
+            # the viewport only gets it back when the mouse moves off that
+            # item — so locking a page from the tab menu, with the pointer
+            # nowhere near it, leaves whatever the last tile asked for
+            # painted on for good. That was a four-way move cursor over
+            # every card of a locked dashboard, on every part of it that
+            # had no widget of its own to say otherwise.
+            self.viewport().setCursor(Qt.ArrowCursor)
+        else:
+            self.viewport().unsetCursor()
         self._restore_drag_mode()
         self._apply_scrollbar_policy()
 

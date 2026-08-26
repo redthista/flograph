@@ -1259,6 +1259,16 @@ class TileItem(QGraphicsObject):
         locked, so the resize arrows were right, but the four-way move
         cursor still appeared over the top of every card, promising a drag
         that could not happen.
+
+        The plain arrow at the end is deliberate, and was briefly an
+        unsetCursor() instead on the reasoning that the tile should leave
+        the cursor to whatever is under it. It should not: an item with no
+        cursor of its own lets the *viewport's* show through, and the
+        viewport wears the last cursor an item gave it until something
+        takes it back (see DashboardView.set_navigation_locked, which is the
+        other half of this). Embedded widgets are child items with cursors
+        of their own and are unaffected either way — which is why a slicer
+        looked right while every card around it wore a move cursor.
         """
         edge = self._edge_at(pos)
         if self._over_fs_button(pos) or self._pager_at(pos):
@@ -1272,10 +1282,6 @@ class TileItem(QGraphicsObject):
         elif (pos.y() < TITLE_H and not self._fullscreen
                 and not self._layout_locked):
             self.setCursor(Qt.SizeAllCursor)  # the title drag bar
-        elif self._layout_locked:
-            # not an explicit arrow: leave the cursor to whatever is under
-            # it, so an embedded table or web view still shows its own
-            self.unsetCursor()
         else:
             self.setCursor(Qt.ArrowCursor)
 
