@@ -1112,8 +1112,7 @@ class MainWindow(QMainWindow):
             self.action_run.setEnabled(True)
             self.action_run_selected.setEnabled(True)
             self._run_end()
-            message = "Run finished" if ok else "Run finished with errors"
-            # Only pins the graph has moved on from get a mention. A frozen
+            message = "Run finished" if ok else "Run finished with errors"            # Only pins the graph has moved on from get a mention. A frozen
             # source node — which is most of them — never appears here, so
             # this stays a warning worth reading rather than noise.
             stale = self._refresh_stale_pins()
@@ -1127,7 +1126,16 @@ class MainWindow(QMainWindow):
                             f"{names}{more}")
             self.show_status(message, 5000 if not stale else 15000)
 
+        def on_joined(additions: list) -> None:
+            if not additions:
+                return
+            n = len(additions)
+            self.show_status(
+                f"{n} node{'s' if n > 1 else ''} joined the running "
+                "plan", 5000)
+
         engine.run_started.connect(on_started)
+        engine.run_joined.connect(on_joined)
         engine.node_started.connect(on_node_started)
         # Both outcomes take the node off the floor, so the line can go back
         # to naming whoever is left.

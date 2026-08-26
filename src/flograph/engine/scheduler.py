@@ -384,6 +384,10 @@ class ExecutionEngine(QObject):
     # cached value and silently recomputing it look identical from the
     # outside, and only one of them is what happened.
     cache_load_failed = Signal(str)        # node_id
+    # A manual run landing while another is in flight does not wait for it:
+    # its nodes join the plan and run alongside, sharing the pool. Carries
+    # the node ids that joined, for a status line worth reading.
+    run_joined = Signal(list)
 
     def __init__(self, graph: Graph, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -435,13 +439,14 @@ class ExecutionEngine(QObject):
         self._token: Optional[CancellationToken] = None
         self._had_failure = False
         self._active = False
-        # True while a run's spilled inputs are being read back off disk. The
-        # plan is seeded and queued but nothing has started; _dispatch is
-        # called when the last one lands.
-        self._warming = False
-        self._warm_remaining = 0
-        # Bumped per run so a warm still in flight from a cancelled one
-        # cannot decrement the new run's counter and dispatch it early.
+        # A run's spilled inputs are read back off disk before anything
+        # starts; while any warm is outstanding the plan is held. Counted
+        # per generation because a run that gets joined mid-warm starts a
+        # second warm for the additions, and the first one finishing must
+        # not dispatch the plan while the second is still out.
+        self._warm_remaining: dict[int, int] = {}
+        # Bumped per warm so a warm still in flight from a cancelled one
+        # cannot decrement the new one's counter and dispatch it early.
         self._warm_generation = 0
         self._warm_signals: list = []
 
@@ -487,6 +492,11 @@ class ExecutionEngine(QObject):
     def active(self) -> bool:
         return self._active
 
+    @property
+    def _warming(self) -> bool:
+        """True while any run's spilled inputs are still being read back."""
+        return bool(self._warm_remaining)
+
     def run_all(self) -> None:
         # Every node is a target and none of them was asked for by name,
         # which is the whole difference between this and Run Selected over a
@@ -509,6 +519,12 @@ class ExecutionEngine(QObject):
     def run_targets(self, targets: list[str],
                     asked: "Optional[Iterable[str]]" = None) -> None:
         if self._active:
+            # The pool already runs independent branches side by side, so a
+            # second click while one run is going does not wait for it: the
+            # nodes join the plan in flight, waiting only on ancestors that
+            # are genuinely still to finish. Building the plan fresh here
+            # means everything dirtied meanwhile is picked up too.
+            self._join_targets(targets, asked)
             return
         self._token = CancellationToken()
         flags = self.run_flags()
@@ -533,7 +549,50 @@ class ExecutionEngine(QObject):
         if not self._warm_plan(plan):
             self._dispatch()
 
-    def _warm_plan(self, plan: list[str]) -> bool:
+    def _join_targets(self, targets: list[str],
+                      asked: "Optional[Iterable[str]]" = None) -> None:
+        """Add these nodes to the run in flight.
+
+        The plan is built exactly as it would have been had these been the
+        original targets — same closure, same flags, same manual-node rule
+        — and then everything this run already owns is taken back out: a
+        node in flight or already queued stays on its existing course, and
+        a node that already finished is clean, so build_plan had already
+        skipped it. What is left is seeded into the same Kahn bookkeeping,
+        counting predecessors across the *extended* plan, so a joined node
+        whose ancestor is still in flight simply waits for it — the
+        completion that releases its planned successors releases this one
+        too, and a failure upstream prunes it exactly as it would have.
+
+        Warming joins the same way: the additions' spilled inputs are read
+        back under their own generation, and dispatch stays held until
+        every warm is in.
+        """
+        plan = build_plan(self.graph, targets, self.cache, asked,
+                          self.run_flags())
+        busy = self._running.keys() | self._pending
+        additions = [nid for nid in plan if nid not in busy]
+        if not additions:
+            return
+        planned = self._pending | set(self._running) | set(additions)
+        for node_id in additions:
+            remaining = sum(1 for p in self.graph.predecessors(node_id)
+                            if p in planned)
+            self._remaining_preds[node_id] = remaining
+            if remaining == 0:
+                self._ready.append(node_id)
+        # build_plan walked graph.topo_order(), so the additions sit after
+        # everything that could release them and _ready stays ordered
+        self._pending.update(additions)
+        self._plan_total += len(additions)
+        for node_id in additions:
+            self.graph.set_status(node_id, NodeStatus.QUEUED)
+        self.run_joined.emit(list(additions))
+        if not self._warm_plan(additions, planned=planned):
+            self._dispatch()
+
+    def _warm_plan(self, plan: list[str],
+                   planned: "Optional[set[str]]" = None) -> bool:
         """Read back any spilled entries this plan will consume. True if that
         started, in which case _dispatch waits for it.
 
@@ -542,9 +601,12 @@ class ExecutionEngine(QObject):
         node starts, and they must not come back on this thread: _start_node
         runs on the GUI thread, and unpickling a large frame there freezes
         the window. Only inputs from *outside* the plan are warmed — anything
-        inside it is about to be recomputed anyway.
+        inside it is about to be recomputed anyway. `planned` is the whole
+        extended plan when a run has been joined mid-flight: an upstream
+        node already queued or in flight is just as recomputed as one in
+        `plan` itself.
         """
-        planned = set(plan)
+        planned = set(plan) if planned is None else set(planned)
         wanted: dict[str, str] = {}          # blob owner -> project path
         for node_id in plan:
             node = self.graph.nodes.get(node_id)
@@ -570,12 +632,9 @@ class ExecutionEngine(QObject):
             by_project.setdefault(project, []).append(root)
         self._warm_generation += 1
         generation = self._warm_generation
-        self._warming = True
-        self._warm_remaining = len(by_project)
-        # Held for the duration: the runnable is the pool's, but nothing else
-        # owns the signals object, and one collected early is a `finished`
-        # that never arrives and a run that never starts.
-        self._warm_signals = []
+        # A join mid-warm starts its own generation; the flag reads the
+        # dict, so dispatch stays held until every warm is in.
+        self._warm_remaining[generation] = len(by_project)
         for project, node_ids in by_project.items():
             signals = CacheWarmSignals()     # GUI thread, before pool.start
             signals.warmed.connect(self._on_entry_warmed)
@@ -600,12 +659,15 @@ class ExecutionEngine(QObject):
         self.cache.mark_resident(node_id, outputs)
 
     def _on_warm_finished(self, generation: int) -> None:
-        if generation != self._warm_generation:
+        outstanding = self._warm_remaining.get(generation)
+        if outstanding is None:
             return          # left over from a run that was already cancelled
-        self._warm_remaining -= 1
-        if self._warm_remaining > 0:
+        if outstanding > 1:
+            self._warm_remaining[generation] = outstanding - 1
             return
-        self._warming = False
+        del self._warm_remaining[generation]
+        if self._warm_remaining:
+            return          # a joined warm is still out; it dispatches
         # Cancel during warming already finished the run; dispatching now
         # would start a plan nobody asked for any more.
         if self._active:
@@ -1074,7 +1136,8 @@ class ExecutionEngine(QObject):
         # A cancel can land while inputs are still being read back. The run is
         # over either way, and leaving the flag set would make _dispatch a
         # no-op for the *next* run, which would then never start.
-        self._warming = False
+        self._warm_remaining.clear()
+        self._warm_signals.clear()
         self._pressure_timer.stop()
         self._close_record()
         self.run_finished.emit(not self._had_failure)

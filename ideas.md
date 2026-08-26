@@ -102,14 +102,8 @@ being cached. The frame-level counterpart of J1, and the thing that makes a
 big flow workable while you are editing one corner of it.
 Shipped 2026-08-25; see `ideas_archived.md` #13.
 
-**J3. Start a second node while one is running** (Stu). Not an engine limit:
-the scheduler already runs independent nodes on a pool. It is
-`ExecutionEngine.run_targets` being "a no-op while a run is in flight"
-(`engine/scheduler.py`), which the reactive path already works around —
-`request_run` queues instead of dropping. The choice is whether a manual run
-during a run should queue behind the current one (cheap, matches
-`request_run`) or join it when the target shares no ancestry (what the user
-is actually asking for, and where the cache-invalidation questions live).
+**J3. Start a second node while one is running** (Stu). Shipped 2026-08-25
+as join-the-plan; see `ideas_archived.md` #15.
 
 ---
 
