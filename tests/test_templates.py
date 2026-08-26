@@ -55,11 +55,12 @@ class TestBundledExamples:
             "14_flow_variables.flograph",
             "15_report_page.flograph",
             "16_project_gantt.flograph",
+            "17_run_while_running.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 16
+        assert len(window._examples_menu.actions()) == 17
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -75,6 +76,7 @@ class TestBundledExamples:
         "12_parallel_branches.flograph",
         "14_flow_variables.flograph",
         "15_report_page.flograph",
+        "17_run_while_running.flograph",
         # 13 writes a file, so it runs in a tmp_path of its own below
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):

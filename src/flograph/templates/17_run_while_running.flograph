@@ -1,0 +1,156 @@
+{
+  "flograph_version": "0.1.10",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "n_instructions",
+        "type": "flograph.util.note",
+        "pos": [
+          -40,
+          -280
+        ],
+        "params": {
+          "text": "## Run a second flow while one is running\n\nClicking Run while a run is in flight **joins** it \u2014 the nodes start as soon as the pool has room, and independent branches run at the same time.\n\n1. Right-click **Table A** \u25b8 **Run To This Node** \u2014 the whole chain runs (~8s).\n2. While it runs, right-click **Table B** \u25b8 **Run To This Node** \u2014 the status bar says **joined**, and Branch B lights up beside Branch A.\n3. Try right-clicking **Shape B** instead: it joins too, but waits for **Slow Build** \u2014 a joined node waits only on the ancestors it actually has.\n4. **Cancel** stops everything, joined nodes included.\n\nWatch the statistics window (the timeline) to see the two branches sharing the floor.",
+          "width": 520,
+          "height": 280
+        }
+      },
+      {
+        "id": "n_slow_a",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          0,
+          100
+        ],
+        "code": "\"\"\"Slow Import \u2014 stands in for a long-running read (default 8s).\"\"\"\nNODE = {\n    \"label\": \"Slow Import\",\n    \"category\": \"Test\",\n    \"inputs\": [],\n    \"outputs\": [(\"table\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\", \"default\": 8.0},\n]\n\ndef run(ctx):\n    import time\n    import pandas as pd\n    steps = 20\n    for i in range(steps):\n        ctx.check_cancelled()\n        ctx.progress(i / steps)\n        ctx.log(f\"reading step {i + 1}/{steps}\")\n        time.sleep(float(ctx.params[\"seconds\"]) / steps)\n    df = pd.DataFrame({\n        \"region\": [\"north\", \"south\", \"east\", \"west\"],\n        \"units\": [120, 90, 140, 75],\n    })\n    ctx.log(\"import finished\")\n    return {\"table\": df}\n",
+        "label": "Slow Import"
+      },
+      {
+        "id": "n_shape_a",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          300,
+          100
+        ],
+        "code": "\"\"\"Shape A \u2014 a fast transform on top of the import.\"\"\"\nNODE = {\n    \"label\": \"Shape A\",\n    \"category\": \"Test\",\n    \"inputs\": [(\"table\", \"dataframe\")],\n    \"outputs\": [(\"table\", \"dataframe\")],\n}\n\ndef run(ctx, table):\n    out = table.copy()\n    out[\"share\"] = out[\"units\"] / out[\"units\"].sum()\n    return {\"table\": out}\n",
+        "label": "Shape A"
+      },
+      {
+        "id": "n_view_a",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          600,
+          60
+        ],
+        "label": "Table A",
+        "params": {
+          "width": 420,
+          "height": 320
+        }
+      },
+      {
+        "id": "n_slow_b",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          0,
+          700
+        ],
+        "code": "\"\"\"Slow Build \u2014 an independent branch (default 5s).\"\"\"\nNODE = {\n    \"label\": \"Slow Build\",\n    \"category\": \"Test\",\n    \"inputs\": [],\n    \"outputs\": [(\"table\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"seconds\", \"type\": \"float\", \"label\": \"Seconds\", \"default\": 5.0},\n]\n\ndef run(ctx):\n    import time\n    import pandas as pd\n    steps = 10\n    for i in range(steps):\n        ctx.check_cancelled()\n        ctx.progress(i / steps)\n        time.sleep(float(ctx.params[\"seconds\"]) / steps)\n    df = pd.DataFrame({\n        \"product\": [\"widget\", \"gadget\", \"doohickey\"],\n        \"revenue\": [4200.0, 3100.0, 950.0],\n    })\n    return {\"table\": df}\n",
+        "label": "Slow Build"
+      },
+      {
+        "id": "n_shape_b",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          300,
+          700
+        ],
+        "code": "\"\"\"Shape B \u2014 a fast transform on the second branch.\"\"\"\nNODE = {\n    \"label\": \"Shape B\",\n    \"category\": \"Test\",\n    \"inputs\": [(\"table\", \"dataframe\")],\n    \"outputs\": [(\"table\", \"dataframe\")],\n}\n\ndef run(ctx, table):\n    out = table.copy()\n    out[\"margin\"] = (out[\"revenue\"] * 0.3).round(2)\n    return {\"table\": out}\n",
+        "label": "Shape B"
+      },
+      {
+        "id": "n_view_b",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          600,
+          660
+        ],
+        "label": "Table B",
+        "params": {
+          "width": 420,
+          "height": 320
+        }
+      }
+    ],
+    "connections": [
+      {
+        "id": "c01",
+        "src": [
+          "n_slow_a",
+          "table"
+        ],
+        "dst": [
+          "n_shape_a",
+          "table"
+        ]
+      },
+      {
+        "id": "c02",
+        "src": [
+          "n_shape_a",
+          "table"
+        ],
+        "dst": [
+          "n_view_a",
+          "table"
+        ]
+      },
+      {
+        "id": "c03",
+        "src": [
+          "n_slow_b",
+          "table"
+        ],
+        "dst": [
+          "n_shape_b",
+          "table"
+        ]
+      },
+      {
+        "id": "c04",
+        "src": [
+          "n_shape_b",
+          "table"
+        ],
+        "dst": [
+          "n_view_b",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f01",
+        "title": "Branch A \u2014 slow chain",
+        "rect": [
+          -40,
+          -20,
+          1100,
+          440
+        ]
+      },
+      {
+        "id": "f02",
+        "title": "Branch B \u2014 independent",
+        "rect": [
+          -40,
+          580,
+          1100,
+          440
+        ]
+      }
+    ],
+    "pages": []
+  }
+}

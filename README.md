@@ -79,7 +79,7 @@ one-file bundle's own `.py` if that's how you started, otherwise
 `-m flograph`. If a project is open it can be baked into the shortcut, so
 double-clicking opens flograph with that flow loaded.
 
-**File > Open Example** ships sixteen worked projects — filter-and-visualise, an
+**File > Open Example** ships seventeen worked projects — filter-and-visualise, an
 aggregate dashboard, a custom-script chart, join/group-by comparison, an
 interactive slicer dashboard, a scripted pipeline in a frame, a retail ops
 command centre, two geo/folium maps, an SVG retrofit workbench that diffs
@@ -87,9 +87,10 @@ a redrawn SVG against the page already wired to it, a Goto/From workflow
 that runs a three-branch report off one source prep with no wires crossing
 the page, a parallel-branches demo whose six independent branches run at
 once — time it, then set *Nodes to run at once* to 1 and time it again —
-and walkthroughs of order edges, flow variables, report pages, and the Gantt
+and walkthroughs of order edges, flow variables, report pages, the Gantt
 node, which draws one project plan four times, adding a single feature per
-stage. They're the fastest way in.
+stage, and running a second flow while one is already running, which joins
+the first on the pool. They're the fastest way in.
 
 ---
 
