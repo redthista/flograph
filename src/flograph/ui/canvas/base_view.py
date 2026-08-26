@@ -141,6 +141,12 @@ class ZoomPanGraphicsView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
         self.paint_stats = PaintStats()
+        # The view frozen where it stands — no zoom, no pan, no rubber band,
+        # no scroll bars (a locked dashboard page sets this; see
+        # set_navigation_locked). The scene underneath is untouched, so
+        # everything embedded in it still takes input.
+        self.navigation_locked = False
+        self._scrollbars_enabled = False
         self._panning = False
         self._pan_last = QPointF()
         self._space_held = False
@@ -181,6 +187,8 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def set_zoom(self, value: float) -> None:
         """Jump to an absolute zoom factor, keeping the view centre put."""
+        if self.navigation_locked:
+            return
         value = max(ZOOM_MIN, min(ZOOM_MAX, value))
         factor = value / self.zoom
         if math.isclose(factor, 1.0):
@@ -203,6 +211,14 @@ class ZoomPanGraphicsView(QGraphicsView):
             super().wheelEvent(event)
             hbar.setValue(h)
             vbar.setValue(v)
+            event.accept()
+            return
+        if self.navigation_locked:
+            # Swallowed rather than passed up: QGraphicsView's own handler
+            # would scroll the view instead, which is the same accident by a
+            # different route. Note the branch above it, which runs first —
+            # a table or a web view under the cursor still gets its wheel,
+            # because a locked page is one being *used*.
             event.accept()
             return
         factor = 1.15 ** (event.angleDelta().y() / 120.0)
@@ -257,7 +273,7 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def fit_items(self, items) -> None:
         """Fit the given graphics items in view with a margin."""
-        if not items:
+        if not items or self.navigation_locked:
             return
         rect = QRectF()
         for item in items:
@@ -272,7 +288,7 @@ class ZoomPanGraphicsView(QGraphicsView):
     # ------------------------------------------------------------------ pan
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MiddleButton:
+        if event.button() == Qt.MiddleButton and not self.navigation_locked:
             self._panning = True
             self._pan_last = event.position()
             self.setCursor(Qt.ClosedHandCursor)
@@ -338,9 +354,41 @@ class ZoomPanGraphicsView(QGraphicsView):
         """Show the horizontal and vertical scroll bars. The canvas pans
         freely by drag and wheel either way; the bars are a where-am-I and
         a drag handle for people who want one, not the mechanism."""
-        policy = Qt.ScrollBarAsNeeded if enabled else Qt.ScrollBarAlwaysOff
+        self._scrollbars_enabled = bool(enabled)
+        self._apply_scrollbar_policy()
+
+    def _apply_scrollbar_policy(self) -> None:
+        """The setting, minus anything the lock overrules — kept in one
+        place because the two arrive independently: the window pushes the
+        preference at every view whenever it changes, and would otherwise
+        put the bars back on a page that has none to offer."""
+        show = self._scrollbars_enabled and not self.navigation_locked
+        policy = Qt.ScrollBarAsNeeded if show else Qt.ScrollBarAlwaysOff
         self.setHorizontalScrollBarPolicy(policy)
         self.setVerticalScrollBarPolicy(policy)
+
+    def _restore_drag_mode(self) -> None:
+        self.setDragMode(QGraphicsView.NoDrag if self.navigation_locked
+                         else QGraphicsView.RubberBandDrag)
+
+    def set_navigation_locked(self, locked: bool) -> None:
+        """Freeze the view: no zoom, no pan, no rubber band, no scroll bars.
+
+        Not a read-only mode — the *scene* is untouched, so every widget in
+        it still takes input. This is only about the viewport: the surface
+        stops behaving like an infinite canvas and starts behaving like a
+        page, which is what a finished dashboard is. Everything a canvas
+        offers here — zoom to cursor, middle-drag, space-drag, the rubber
+        band, the bars — is a way of rearranging your view of something you
+        are still building, and there is nothing left to build.
+        """
+        self.navigation_locked = bool(locked)
+        if self.navigation_locked:
+            self._space_held = False
+            self._panning = False
+            self.unsetCursor()
+        self._restore_drag_mode()
+        self._apply_scrollbar_policy()
 
     # ------------------------------------------------------------ keyboard
 
@@ -351,6 +399,7 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if (not self._proxy_widget_has_focus()
+                and not self.navigation_locked
                 and event.key() == Qt.Key_Space and not event.isAutoRepeat()):
             self._space_held = True
             self.setDragMode(QGraphicsView.ScrollHandDrag)
@@ -372,7 +421,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         if not self._space_held:
             return
         self._space_held = False
-        self.setDragMode(QGraphicsView.RubberBandDrag)
+        self._restore_drag_mode()
         self.unsetCursor()
 
     def focusOutEvent(self, event) -> None:

@@ -1249,6 +1249,17 @@ class TileItem(QGraphicsObject):
             SetParamCommand(self._graph, node.id, "page", page))
 
     def _apply_edge_cursor(self, pos: QPointF) -> None:
+        """The cursor is a promise: it changes shape only where something
+        will actually happen.
+
+        On a locked page that leaves very little — the maximize glyph and a
+        PDF's page chevrons — because everything else the shapes advertise
+        is layout work that view mode has taken away. The title bar is the
+        one that gave the game away: `_edge_at` already returns None when
+        locked, so the resize arrows were right, but the four-way move
+        cursor still appeared over the top of every card, promising a drag
+        that could not happen.
+        """
         edge = self._edge_at(pos)
         if self._over_fs_button(pos) or self._pager_at(pos):
             self.setCursor(Qt.PointingHandCursor)
@@ -1258,8 +1269,13 @@ class TileItem(QGraphicsObject):
             self.setCursor(Qt.SizeHorCursor)
         elif edge == "bottom":
             self.setCursor(Qt.SizeVerCursor)
-        elif pos.y() < TITLE_H and not self._fullscreen:
+        elif (pos.y() < TITLE_H and not self._fullscreen
+                and not self._layout_locked):
             self.setCursor(Qt.SizeAllCursor)  # the title drag bar
+        elif self._layout_locked:
+            # not an explicit arrow: leave the cursor to whatever is under
+            # it, so an embedded table or web view still shows its own
+            self.unsetCursor()
         else:
             self.setCursor(Qt.ArrowCursor)
 

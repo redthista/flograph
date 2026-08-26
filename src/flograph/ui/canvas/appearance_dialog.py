@@ -14,6 +14,12 @@ already behaved this way from the menu; only the mark picker didn't.
 Each change is its own undoable command, and the mark and colour commands
 merge, so clicking through sixteen marks to find the right one is one step
 back rather than sixteen.
+
+**One node or a whole selection.** Opened from a multi-selection it shows the
+first node's settings and writes every change to all of them, one undo step
+apiece. Each control still only reaches the nodes it means something for: a
+card has no square to mark and no shape to choose, so a mixed selection gets
+its colour and its port names changed and keeps its cards as they were.
 """
 
 from __future__ import annotations
@@ -68,17 +74,24 @@ class _MarkSwatch(QAbstractButton):
 
 
 class AppearanceDialog(QDialog):
-    """How one node looks. Applies live; there is nothing to confirm."""
+    """How a node — or a selection of them — looks. Applies live; there is
+    nothing to confirm."""
 
-    def __init__(self, scene, node_id: str,
+    def __init__(self, scene, node_id,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._scene = scene
         self._graph = scene.graph
-        self._node_id = node_id
+        # one id or a list of them; the first is the anchor, whose settings
+        # the controls open showing and whose kind decides which sections
+        # appear at all
+        self._node_ids = [node_id] if isinstance(node_id, str) else list(node_id)
+        self._node_id = self._node_ids[0]
         self._loading = True
-        node = self._graph.node(node_id)
-        self.setWindowTitle(f"Appearance — {node.label}")
+        node = self._graph.node(self._node_id)
+        self.setWindowTitle(
+            f"Appearance — {node.label}" if len(self._node_ids) == 1
+            else f"Appearance — {len(self._node_ids)} nodes")
 
         # A card's size is its content's and it has no square to mark, so the
         # shape and mark sections are simply absent for one. An identity-only
@@ -283,41 +296,93 @@ class AppearanceDialog(QDialog):
     def _node(self):
         return self._graph.nodes.get(self._node_id)
 
+    # ------------------------------------------------------------ applying
+    #
+    # Every control goes through _apply. It answers the two questions a
+    # selection raises — which of these nodes does this mean anything for,
+    # and how does it come back off the undo stack — in one place, so the
+    # individual push methods below stay one-liners whether they are writing
+    # to one node or to nine.
+
+    def _targets(self, predicate=None) -> list:
+        """The nodes a control reaches: all of them, or the ones a predicate
+        says the setting means something for."""
+        nodes = [(i, self._graph.nodes.get(i)) for i in self._node_ids]
+        return [i for i, node in nodes
+                if node is not None and (predicate is None or predicate(node))]
+
+    def _apply(self, text: str, push, predicate=None) -> None:
+        """Send one change to every node it applies to.
+
+        A single node is pushed bare, exactly as it was before this dialog
+        learned to take a selection — which keeps the mark and colour
+        commands merging, so trying marks on for size stays one step back
+        rather than sixteen. Several become one macro; merging inside a macro
+        is not a thing Qt does, so a selection pays sixteen steps for the same
+        browse. That is the right way round: the undo entry then matches what
+        was actually done to how many nodes.
+        """
+        targets = self._targets(predicate)
+        if not targets:
+            return
+        if len(targets) == 1:
+            push(targets[0])
+            return
+        stack = self._scene.undo_stack
+        stack.beginMacro(f"{text} ({len(targets)})")
+        for node_id in targets:
+            push(node_id)
+        stack.endMacro()
+
     # ------------------------------------------------------------- applying
 
     def _push_shape(self, _index: int) -> None:
         if self._loading:
             return
-        self._scene.push_compact_view(self._node_id,
-                                      self._shape_combo.currentData())
+        value = self._shape_combo.currentData()
+        # a card is drawn at its content's size either way, so the shape is
+        # not a thing it has
+        self._apply("change node view",
+                    lambda i: self._scene.push_compact_view(i, value),
+                    renders_plain)
 
     def _push_port_labels(self, _index: int) -> None:
         if self._loading:
             return
         from ..commands import SetPortLabelsCommand
-        self._scene.undo_stack.push(SetPortLabelsCommand(
-            self._graph, self._node_id, self._labels_combo.currentData()))
+        value = self._labels_combo.currentData()
+        self._apply("change port names", lambda i: self._scene.undo_stack.push(
+            SetPortLabelsCommand(self._graph, i, value)))
 
     def _push_flow_pins(self, _index: int) -> None:
         if self._loading:
             return
         from ..commands import SetFlowPinsCommand
-        self._scene.undo_stack.push(SetFlowPinsCommand(
-            self._graph, self._node_id, self._flow_combo.currentData()))
+        value = self._flow_combo.currentData()
+        self._apply("change flow pins", lambda i: self._scene.undo_stack.push(
+            SetFlowPinsCommand(self._graph, i, value)))
 
     def _push_collapsed(self, collapsed: bool) -> None:
         if self._loading:
             return
         from ..commands import SetPortsCollapsedCommand
-        self._scene.undo_stack.push(SetPortsCollapsedCommand(
-            self._graph, self._node_id, collapsed))
+
+        def collapsible(node) -> bool:
+            item = self._scene.node_items.get(node.id)
+            return item is not None and item.collapsible()
+
+        self._apply("collapse ports", lambda i: self._scene.undo_stack.push(
+            SetPortsCollapsedCommand(self._graph, i, collapsed)), collapsible)
 
     def _push_preview(self, enabled: bool) -> None:
         if self._loading:
             return
         from ..commands import SetPreviewEnabledCommand
-        self._scene.undo_stack.push(SetPreviewEnabledCommand(
-            self._graph, self._node_id, enabled))
+        self._apply(
+            "toggle canvas preview",
+            lambda i: self._scene.undo_stack.push(
+                SetPreviewEnabledCommand(self._graph, i, enabled)),
+            lambda node: card_kind(node) in PREVIEW_TOGGLABLE_KINDS)
 
     def _push_mark(self) -> None:
         """Send whatever the mark controls now say. Merged by the command, so
@@ -328,8 +393,14 @@ class AppearanceDialog(QDialog):
         if node is None:
             return
         chosen = self._current_mark()
-        if chosen != (node.mark, node.mark_text, node.mark_image):
-            self._scene.push_node_mark(self._node_id, *chosen)
+        self._apply(
+            "change node mark",
+            lambda i: self._scene.push_node_mark(i, *chosen),
+            # nothing to draw a mark on, and no point spending an undo step
+            # on a node that already wears this one
+            lambda target: (renders_plain(target)
+                            and chosen != (target.mark, target.mark_text,
+                                           target.mark_image)))
 
     def _current_mark(self) -> tuple[str, str, str]:
         """(mark, mark_text, mark_image) — all empty meaning "the default"."""
@@ -407,11 +478,14 @@ class AppearanceDialog(QDialog):
             theme.NODE_HEADER)
         colour = QColorDialog.getColor(current, self, "Node colour")
         if colour.isValid():
-            self._scene.push_node_color(self._node_id, colour.name())
+            name = colour.name()
+            self._apply("change node colour",
+                        lambda i: self._scene.push_node_color(i, name))
             self._refresh_colour()
 
     def _reset_colour(self) -> None:
-        self._scene.push_node_color(self._node_id, None)
+        self._apply("reset node colour",
+                    lambda i: self._scene.push_node_color(i, None))
         self._refresh_colour()
 
     def _refresh_colour(self) -> None:

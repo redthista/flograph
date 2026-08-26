@@ -116,11 +116,23 @@ class DashboardView(ZoomPanGraphicsView):
     # ----------------------------------------------------------- view mode
 
     def set_view_mode(self, view_mode: bool) -> None:
-        """In view mode the page stops accepting new tiles. Panning and
-        zooming stay — moving *around* a dashboard is reading it, not
-        editing it."""
+        """In view mode there is no canvas left — only the dashboard.
+
+        A locked page is a finished one, and the thing being handed over is
+        the arrangement: these tiles, this size, in this place. So the
+        viewport stops being an infinite canvas and becomes a page. No zoom,
+        no pan, no wheel, no rubber band, no scroll bars, no context menu,
+        and nothing new can be dropped on it.
+
+        What stays is everything *inside* the tiles — slicers, sliders,
+        spreadsheets, web views, reports, a PDF's page chevrons, the
+        maximize glyph. That is the whole distinction: locked is the
+        dashboard, unlocked is the dashboard plus the tools for arranging
+        it.
+        """
         self._view_mode = bool(view_mode)
         self.setAcceptDrops(not self._view_mode)
+        self.set_navigation_locked(self._view_mode)
 
     # --------------------------------------------------------- fullscreen
 
@@ -331,9 +343,20 @@ class DashboardView(ZoomPanGraphicsView):
         first (adding to the selection when Ctrl or Shift is held), so the
         menu always acts on what the user is looking at — and a right-click
         on an Action Button still can't fire it."""
+        if self._view_mode:
+            # A locked page has no layout to act on, so there is no menu to
+            # show — and accepting is the point: passed up, the event walks
+            # the parent chain to the main window, which answers a bare
+            # right-click with its own dock-and-toolbar menu. That is the
+            # menu "of whatever is underneath" appearing over a finished
+            # dashboard.
+            event.accept()
+            return
         item = self._tile_at(event.pos())
         if item is None or self._fs_tile is not None:
-            super().contextMenuEvent(event)
+            # Same reasoning as above: empty page, no menu, and the event
+            # stops here rather than becoming the window's.
+            event.accept()
             return
         if not item.isSelected():
             if not event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):

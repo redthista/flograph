@@ -355,8 +355,16 @@ class MainWindow(QMainWindow):
             self._zoom_indicator.setText(f"{round(zoom * 100)}%")
 
     def _refresh_zoom_indicator(self) -> None:
-        self._zoom_indicator.setText(
-            f"{round(self._active_canvas_view().zoom * 100)}%")
+        view = self._active_canvas_view()
+        self._zoom_indicator.setText(f"{round(view.zoom * 100)}%")
+        # A locked page has no zoom to set, so the one control that would
+        # set it says so rather than sitting there doing nothing when
+        # clicked.
+        locked = bool(getattr(view, "navigation_locked", False))
+        self._zoom_indicator.setEnabled(not locked)
+        self._zoom_indicator.setToolTip(
+            "This page is locked — unlock it to zoom or pan"
+            if locked else "Canvas zoom — click to reset to 100%")
 
     # ---------------------------------------------------------------- docks
 
@@ -1820,6 +1828,9 @@ class MainWindow(QMainWindow):
         if widget is not None and hasattr(widget, "set_view_mode") \
                 and widget.view_mode() != page.view_mode:
             widget.set_view_mode(page.view_mode)
+            # locking a page locks its zoom, and the indicator is the one
+            # place that says so
+            self._refresh_zoom_indicator()
 
     def _set_page_view_mode(self, page_id: str, view_mode: bool) -> None:
         page = self.graph.pages.get(page_id)
@@ -1955,11 +1966,31 @@ class MainWindow(QMainWindow):
                                       center.y() - 160 + offset))
         self.page_bar.select_page(page_id)
 
-    def _add_tile_on_new_page(self, node_id: str) -> None:
+    def _add_tiles_to_page(self, page_id: str, node_ids: list) -> None:
+        """The same, for a selection — one undo step for the lot. Each tile
+        still goes through _add_tile_to_page, so they cascade off each other
+        instead of landing in one pile."""
+        if not node_ids:
+            return
+        if len(node_ids) == 1:
+            self._add_tile_to_page(page_id, node_ids[0])
+            return
+        self.undo_stack.beginMacro(f"add {len(node_ids)} tiles")
+        for node_id in node_ids:
+            self._add_tile_to_page(page_id, node_id)
+        self.undo_stack.endMacro()
+
+    def _add_tile_on_new_page(self, node_ids) -> None:
+        """A page made for whatever was selected. Takes one id or a list."""
+        if isinstance(node_ids, str):
+            node_ids = [node_ids]
+        if not node_ids:
+            return
         self.undo_stack.beginMacro("add to new page")
         page = Page(id=uuid.uuid4().hex, title=self._next_page_title())
         self.undo_stack.push(AddPageCommand(self.graph, page))
-        self._add_tile_to_page(page.id, node_id)
+        for node_id in node_ids:
+            self._add_tile_to_page(page.id, node_id)
         self.undo_stack.endMacro()
 
     def _on_node_failed(self, node_id: str, error) -> None:
@@ -2927,13 +2958,18 @@ class MainWindow(QMainWindow):
         if color.isValid():
             self.scene.push_frame_color(frame_id, color.name())
 
-    def _edit_node_appearance(self, node_id: str) -> None:
-        """Everything about how this node looks, in one place. Applies live,
-        so there is nothing to confirm — see AppearanceDialog."""
-        if node_id not in self.graph.nodes:
+    def _edit_node_appearance(self, node_ids) -> None:
+        """Everything about how these nodes look, in one place. Applies live,
+        so there is nothing to confirm — see AppearanceDialog. Takes one id
+        or a whole selection; the first is the one the dialog opens
+        showing."""
+        if isinstance(node_ids, str):
+            node_ids = [node_ids]
+        node_ids = [i for i in node_ids if i in self.graph.nodes]
+        if not node_ids:
             return
         from .canvas.appearance_dialog import AppearanceDialog
-        AppearanceDialog(self.scene, node_id, self).exec()
+        AppearanceDialog(self.scene, node_ids, self).exec()
 
     def _refresh_stale_pins(self) -> set:
         """Recompute which frozen nodes the graph has moved on from, and
@@ -2946,6 +2982,44 @@ class MainWindow(QMainWindow):
         self.scene.refresh_stale_pins(stale)
         return stale
 
+    def _apply_to_nodes(self, text: str, ids: list, factory) -> None:
+        """Make the same change to every node in a selection, as one step on
+        the undo stack.
+
+        `factory` builds the command for one node, or returns None where the
+        node is already the way it is being asked to be — a selection is
+        usually half-and-half, and an undo step made of no-ops would still
+        have to be pressed through on the way back.
+
+        A single command is pushed on its own rather than wrapped: a macro of
+        one reads as "3 nodes" in the undo list when it was never more than
+        one, and it would also stop the mergeable commands merging.
+        """
+        commands = [c for c in (factory(i) for i in ids) if c is not None]
+        if not commands:
+            return
+        if len(commands) == 1:
+            self.undo_stack.push(commands[0])
+            return
+        self.undo_stack.beginMacro(f"{text} ({len(commands)})")
+        for command in commands:
+            self.undo_stack.push(command)
+        self.undo_stack.endMacro()
+
+    def _set_flag_on(self, ids: list, attr: str, wanted: bool,
+                     command, text: str) -> None:
+        """One of the run flags, set to `wanted` across a selection.
+
+        Set, not toggled: the menu entry read "Freeze" because the node under
+        the cursor was thawed, and the selection ending up half frozen and
+        half not is the one outcome nobody clicking it meant.
+        """
+        self._apply_to_nodes(
+            text, ids,
+            lambda target: (
+                None if getattr(self.graph.nodes[target], attr) == wanted
+                else command(self.graph, target, wanted)))
+
     def _show_node_menu(self, node_id: str, global_pos: QPoint) -> None:
         if node_id not in self.graph.nodes:
             return
@@ -2954,12 +3028,28 @@ class MainWindow(QMainWindow):
             self.scene.clearSelection()
             item.setSelected(True)
         node = self.graph.nodes[node_id]
+        # Right-clicking inside a selection means the selection. Everything
+        # on this menu that *can* be said of several nodes is said of all of
+        # them — the run, the flags, the appearance — and everything that can
+        # only mean one (its code, its name, its own cached output) leaves the
+        # menu rather than quietly acting on whichever one was clicked.
+        ids = [i.node.id for i in self.scene.selected_node_items()]
+        # the clicked node first: its state is what every toggle below reads
+        # its label from, and the rest of the selection is then set to the
+        # value that label promises rather than each being flipped separately
+        ids = [node_id] + [i for i in ids if i != node_id]
+        many = len(ids) > 1
         menu = QMenu(self)
-        run_to = menu.addAction("Run To This Node")
+        if many:
+            menu.addSection(f"{len(ids)} nodes selected")
+        run_to = menu.addAction("Run These Nodes" if many
+                                else "Run To This Node")
         menu.addSeparator()
-        edit_code = menu.addAction("Edit Code")
-        open_window = menu.addAction("Open in Window")
-        rename = menu.addAction("Rename")
+        edit_code = open_window = rename = None
+        if not many:
+            edit_code = menu.addAction("Edit Code")
+            open_window = menu.addAction("Open in Window")
+            rename = menu.addAction("Rename")
         # One entry for colour, mark, shape, port names, port collapsing and
         # the canvas preview. They were six, half of them conditional, so the
         # menu changed shape depending on what you right-clicked.
@@ -2988,11 +3078,11 @@ class MainWindow(QMainWindow):
             "beside anything else.")
         menu.addSeparator()
         import_action = None
-        if (card_kind(node) == "grid"
+        if (not many and card_kind(node) == "grid"
                 and self._table_import_source(node_id) is not None):
             import_action = menu.addAction("Import input into table")
         browser_action = None
-        if self._can_open_in_browser(node_id):
+        if not many and self._can_open_in_browser(node_id):
             browser_action = menu.addAction("Open in Browser")
         # A report *card* has no page, so it has no toolbar, so until these
         # two it had no way of reaching anyone not looking at the canvas.
@@ -3002,7 +3092,7 @@ class MainWindow(QMainWindow):
         # unresolved embed says so in the document rather than failing.
         report_export_action = report_browser_action = None
         report_html_action = None
-        if card_kind(node) == "report":
+        if not many and card_kind(node) == "report":
             report_export_action = menu.addAction("Export PDF…")
             report_html_action = menu.addAction("Save HTML…")
             report_browser_action = menu.addAction("Open in Browser")
@@ -3010,7 +3100,12 @@ class MainWindow(QMainWindow):
         from flograph.core.links import (is_from, is_goto, is_link_node,
                                          link_label, linked_from_nodes,
                                          linked_goto_node)
-        if is_goto(node):
+        if many:
+            # a jump lands on one node, so it is not a thing a selection asks
+            # for
+            targets = []
+            target_text = lambda t: t.label
+        elif is_goto(node):
             # every From here shares one link name (the Goto's), so it's
             # useless for telling them apart — the node's own label is the
             # only thing that can distinguish them
@@ -3045,17 +3140,20 @@ class MainWindow(QMainWindow):
         # do rather than what is currently true.
         lines_action = None
         showing_lines = False
-        if is_link_node(node):
+        if not many and is_link_node(node):
             from .canvas.link_line import SHOW_LINES_PARAM
             showing_lines = bool(node.params.get(SHOW_LINES_PARAM, False))
             noun = "Link Lines" if is_goto(node) else "Link Line"
             lines_action = menu.addAction(
                 f"{'Hide' if showing_lines else 'Show'} {noun}")
         layer_actions = add_layer_menu(menu)
-        view_actions = self._add_view_actions(menu, node_id)
+        # a cached output belongs to one node, so these name a port and stay
+        # off a selection's menu
+        view_actions = [] if many else self._add_view_actions(menu, node_id)
         page_actions: list = []
         new_page_action = None
-        if is_tile_able(self.graph.nodes[node_id]):
+        tile_ids = [i for i in ids if is_tile_able(self.graph.nodes[i])]
+        if tile_ids:
             submenu = menu.addMenu("Add to Page")
             for page in self.graph.pages.values():
                 if page.kind != "dashboard":
@@ -3068,11 +3166,21 @@ class MainWindow(QMainWindow):
         copy_action = menu.addAction("Copy")
         delete = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
+        if chosen is None:
+            # Dismissed. Worth its own line rather than falling through the
+            # chain below: the entries a selection does not get are None
+            # too, and `chosen is edit_code` is true when both of them are.
+            return
         if chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
         elif chosen is run_to:
             self._flush_pending_edits()
-            self.engine.run_to(node_id)
+            if many:
+                # the selection, not a path to it: several nodes have no
+                # single "up to here"
+                self.engine.run_targets(ids)
+            else:
+                self.engine.run_to(node_id)
         elif chosen is edit_code:
             self.editor_panel.set_node(node_id)
             self._reveal_dock(self.editor_dock)
@@ -3082,29 +3190,43 @@ class MainWindow(QMainWindow):
         elif chosen is rename:
             self._rename_node(node_id)
         elif chosen is appearance:
-            self._edit_node_appearance(node_id)
+            self._edit_node_appearance(ids)
         elif chosen is rerun:
-            self.graph.mark_dirty(node_id)
+            for target in ids:
+                self.graph.mark_dirty(target)
         elif chosen is active_action:
-            self.undo_stack.push(SetActiveCommand(
-                self.graph, node_id, not node.active))
+            self._set_flag_on(
+                ids, "active", not node.active, SetActiveCommand,
+                "deactivate nodes" if node.active else "activate nodes")
         elif chosen is freeze_action:
-            self.undo_stack.push(SetFrozenCommand(
-                self.graph, node_id, not node.frozen))
+            self._set_flag_on(
+                ids, "frozen", not node.frozen, SetFrozenCommand,
+                "unfreeze nodes" if node.frozen else "freeze nodes")
         elif chosen is manual_action:
-            self.undo_stack.push(SetManualCommand(
-                self.graph, node_id, not node.manual))
+            self._set_flag_on(
+                ids, "manual", not node.manual, SetManualCommand,
+                "run nodes with the rest" if node.manual
+                else "run nodes only when asked")
         elif chosen is lock_action:
-            self.undo_stack.push(SetLockedCommand(
-                self.graph, node_id, not node.locked))
+            self._set_flag_on(
+                ids, "locked", not node.locked, SetLockedCommand,
+                "unlock nodes" if node.locked else "lock nodes")
         elif chosen is exclusive_action:
             wanted = not is_exclusive(node)
             # Back to None rather than to an explicit copy of the script's own
             # answer: a node pinned to what its code already says would keep
             # saying it after the code was edited to say the other thing.
-            self.undo_stack.push(SetExclusiveCommand(
-                self.graph, node_id,
-                None if wanted == node.spec.exclusive else wanted))
+            # Which means the *value* differs per node even though the
+            # decision is one — hence a factory rather than _set_flag_on.
+            def exclusive_for(target: str):
+                target_node = self.graph.nodes[target]
+                value = None if wanted == target_node.spec.exclusive else wanted
+                if value == target_node.exclusive_override:
+                    return None
+                return SetExclusiveCommand(self.graph, target, value)
+            self._apply_to_nodes(
+                "run nodes on their own" if wanted
+                else "let nodes run beside others", ids, exclusive_for)
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
         elif browser_action is not None and chosen is browser_action:
@@ -3129,11 +3251,11 @@ class MainWindow(QMainWindow):
         elif chosen is delete:
             self.scene.delete_selection()
         elif new_page_action is not None and chosen is new_page_action:
-            self._add_tile_on_new_page(node_id)
+            self._add_tile_on_new_page(tile_ids)
         else:
             page_id = next((p for a, p in page_actions if a is chosen), None)
             if page_id is not None:
-                self._add_tile_to_page(page_id, node_id)
+                self._add_tiles_to_page(page_id, tile_ids)
                 return
             port_name = next((p for a, p in view_actions if a is chosen), None)
             if port_name is not None:
