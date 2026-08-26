@@ -5,13 +5,16 @@ the carry-your-contents behaviour were all untested — so this covers the
 collapse feature and the frame behaviour it leans on.
 """
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QImage, QPainter, QUndoStack
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QImage, QPainter, QPainterPath, QUndoStack
+from PySide6.QtWidgets import (QGraphicsSceneHoverEvent,
+                               QGraphicsSceneMouseEvent)
 
 from flograph.core import Frame, Graph, NodeRegistry
 from flograph.core.node import NodeStatus
 from flograph.core.serialization import graph_from_dict, graph_to_dict
 from flograph.ui.canvas import NodeGraphScene
+from flograph.ui.canvas.frame_item import TITLE_H
 from flograph.ui.canvas.node_item import COMPACT_MIN_H, COMPACT_W
 from flograph.ui.commands import (SetFrameCollapsedCommand,
                                   UpdateFrameCommand)
@@ -589,6 +592,142 @@ class TestMovement:
         scene.frame_item_moved("f1")
         after = scene.connection_items[conn.id].path().pointAtPercent(0.0)
         assert before != after
+
+
+class TestDragHandle:
+    """A frame drags by its title bar and by nothing else.
+
+    It used to drag from anywhere inside its rectangle, which is invisible
+    trouble once a frame is bigger than the viewport: its edges are off
+    screen, so a press on what looks like empty canvas picks the whole box
+    up and slides its contents. Reported on the retail example, where two
+    1042x762 frames cover most of the canvas.
+    """
+
+    def _press(self, item, pos, button=Qt.LeftButton):
+        event = QGraphicsSceneMouseEvent(QEvent.GraphicsSceneMousePress)
+        event.setPos(pos)
+        event.setScenePos(item.mapToScene(pos))
+        event.setButton(button)
+        event.setButtons(button)
+        event.setModifiers(Qt.NoModifier)
+        event.setAccepted(True)      # Qt's own default for a press
+        item.mousePressEvent(event)
+        return event
+
+    def _frame(self, env, rect=(0.0, 0.0, 600.0, 400.0)):
+        graph, _stack, scene = env
+        graph.add_frame(Frame(id="f1", title="Stage", rect=rect))
+        return scene.frame_items["f1"]
+
+    def test_the_title_bar_drags_it(self, env):
+        item = self._frame(env)
+        assert item._drags_from(QPointF(300.0, TITLE_H - 2))
+
+    def test_the_body_does_not(self, env):
+        item = self._frame(env)
+        assert not item._drags_from(QPointF(300.0, 200.0))
+        assert not item._drags_from(QPointF(300.0, TITLE_H + 1))
+
+    def test_a_press_on_the_body_is_passed_on(self, env):
+        """Ignored, not swallowed — that is what lets the rubber band and
+        everything else underneath have it."""
+        item = self._frame(env)
+        event = self._press(item, QPointF(300.0, 200.0))
+        assert not event.isAccepted()
+
+    def test_a_press_on_the_body_starts_no_drag(self, env, registry):
+        graph, _stack, scene = env
+        item = self._frame(env)
+        script_node(graph, registry, "inner", (50.0, 100.0))
+        self._press(item, QPointF(300.0, 200.0))
+        assert item._dragging is False
+        assert item._grabbed == []      # nothing picked up to carry
+
+    def test_a_press_on_the_title_takes_hold(self, env, registry):
+        graph, _stack, scene = env
+        item = self._frame(env)
+        script_node(graph, registry, "inner", (50.0, 100.0))
+        self._press(item, QPointF(300.0, 6.0))
+        assert item._dragging is True
+        assert [n.node.id for n, _offset in item._grabbed] == ["inner"]
+
+    def test_a_right_click_on_the_body_is_passed_on_too(self, env):
+        """The frame no longer takes a press it would do nothing with. Note
+        this is only the press: the context *menu* is a separate event the
+        view routes by itemAt, so right-clicking a frame's body still opens
+        the frame's own menu."""
+        item = self._frame(env)
+        event = self._press(item, QPointF(300.0, 200.0), Qt.RightButton)
+        assert not event.isAccepted()
+
+    def test_the_resize_edges_still_work(self, env):
+        item = self._frame(env)
+        w, h = item._size
+        event = self._press(item, QPointF(w - 2, h - 2))
+        assert event.isAccepted()
+        assert item._resizing is True
+
+    def test_a_collapsed_frame_drags_from_anywhere(self, env, registry):
+        """It is a small square standing in for its contents, with its name
+        above it rather than a title bar inside it — so it drags like the
+        node it is pretending to be."""
+        graph, _stack, scene = env
+        item = self._frame(env)
+        script_node(graph, registry, "inner", (50.0, 100.0))
+        collapse(scene, "f1")
+        assert item._drags_from(QPointF(20.0, 40.0))
+        self._press(item, QPointF(20.0, 40.0))
+        assert item._dragging is True
+
+    def test_the_title_bar_says_it_is_the_handle(self, env):
+        item = self._frame(env)
+        event = QGraphicsSceneHoverEvent(QEvent.GraphicsSceneHoverMove)
+        event.setPos(QPointF(300.0, 6.0))
+        item.hoverMoveEvent(event)
+        assert item.cursor().shape() == Qt.SizeAllCursor
+
+    def test_a_band_inside_a_frame_leaves_the_frame_alone(self, env,
+                                                          registry):
+        """The other half of "the body is canvas": a band drawn inside a
+        frame to pick up two nodes must not come back with the frame, or
+        dragging that selection slides the box off its own contents."""
+        graph, _stack, scene = env
+        self._frame(env)
+        script_node(graph, registry, "a", (60.0, 80.0))
+        script_node(graph, registry, "b", (160.0, 80.0))
+        band = QPainterPath()
+        band.addRect(QRectF(40.0, 60.0, 260.0, 120.0))
+        scene.setSelectionArea(band)
+        selected = {type(i).__name__ for i in scene.selectedItems()}
+        assert "FrameItem" not in selected
+        assert {i.node.id for i in scene.selectedItems()} == {"a", "b"}
+
+    def test_a_band_around_the_whole_frame_does_select_it(self, env):
+        graph, _stack, scene = env
+        self._frame(env)
+        band = QPainterPath()
+        band.addRect(QRectF(-50.0, -50.0, 800.0, 600.0))
+        scene.setSelectionArea(band)
+        assert scene.frame_items["f1"].isSelected()
+
+    def test_a_band_over_part_of_a_node_still_takes_the_node(self, env,
+                                                             registry):
+        """Only frames get the stricter rule — brushing a node still picks
+        it up, which is what a rubber band is for."""
+        graph, _stack, scene = env
+        script_node(graph, registry, "a", (200.0, 200.0))
+        band = QPainterPath()
+        band.addRect(QRectF(190.0, 190.0, 20.0, 20.0))
+        scene.setSelectionArea(band)
+        assert scene.node_items["a"].isSelected()
+
+    def test_the_body_does_not_say_that(self, env):
+        item = self._frame(env)
+        event = QGraphicsSceneHoverEvent(QEvent.GraphicsSceneHoverMove)
+        event.setPos(QPointF(300.0, 200.0))
+        item.hoverMoveEvent(event)
+        assert item.cursor().shape() == Qt.ArrowCursor
 
 
 class TestDelete:

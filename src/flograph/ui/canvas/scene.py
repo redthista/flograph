@@ -1502,6 +1502,27 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     def push_move_command(self, moves: dict) -> None:
         self.undo_stack.push(MoveNodesCommand(self.graph, moves))
 
+    def setSelectionArea(self, path, *args) -> None:
+        """A rubber band takes a frame only when it takes the *whole* frame.
+
+        Qt selects anything the band touches, which was tolerable while a
+        frame's body could not be banded over at all — pressing there
+        dragged the box. Now that the body is canvas (see
+        FrameItem._drags_from), a band drawn inside a frame to pick up two
+        nodes would come back with the frame as well, and dragging that
+        selection would slide the box off everything it contains.
+
+        So a frame joins a band selection only when the band encloses it,
+        which is also the only time the user can see they are choosing it.
+        Nodes are untouched: brushing part of one still selects it.
+        """
+        super().setSelectionArea(path, *args)
+        band = path.boundingRect()
+        for item in list(self.selectedItems()):
+            if isinstance(item, FrameItem) and not band.contains(
+                    item.sceneBoundingRect()):
+                item.setSelected(False)
+
     # ------------------------------------------------------- group drag/move
 
     def _selected_movables(self) -> list:

@@ -193,6 +193,24 @@ class FrameItem(QGraphicsObject):
             return QRectF(3, 3, TOGGLE_W, TOGGLE_H)
         return QRectF(7, TITLE_H / 2 - TOGGLE_H / 2, TOGGLE_W, TOGGLE_H)
 
+    def _drags_from(self, pos: QPointF) -> bool:
+        """Whether a press here takes hold of the frame to move it.
+
+        The title bar, and nothing else. A frame used to drag from anywhere
+        inside its rectangle, which is fine while you can see the whole box
+        and awful the moment you cannot: the big frames in a real flow are
+        far larger than the viewport, so their edges are off-screen and
+        every press on what looks like empty canvas silently picks the frame
+        up and slides its contents. Dan hit it on the retail example —
+        "half the screen only drags the show plot visual" — where the two
+        1042x762 frames on the right cover everything between the nodes.
+
+        A collapsed frame is the exception: it is a small square standing in
+        for its contents, with its name above it rather than a title bar
+        inside it, so it drags like the node it is pretending to be.
+        """
+        return True if self.collapsed else pos.y() < TITLE_H
+
     def _edge_at(self, pos: QPointF) -> str | None:
         """Which resize edge/corner (if any) a point grabs: "right",
         "bottom", "left", "corner" (bottom-right), or None.
@@ -750,6 +768,10 @@ class FrameItem(QGraphicsObject):
                 self.setCursor(Qt.SizeHorCursor)
             elif edge == "bottom":
                 self.setCursor(Qt.SizeVerCursor)
+            elif self._drags_from(event.pos()) and not self.collapsed:
+                # now that the title bar is the only handle, it is the one
+                # part that has to advertise itself
+                self.setCursor(Qt.SizeAllCursor)
             else:
                 self.setCursor(Qt.ArrowCursor)
         super().hoverMoveEvent(event)
@@ -800,6 +822,14 @@ class FrameItem(QGraphicsObject):
             self._resizing = True
             self._resize_edge = edge
             event.accept()
+            return
+        if not self._drags_from(event.pos()):
+            # The body of a frame is canvas. Ignored rather than accepted,
+            # so the press carries on to whatever is under it — a rubber
+            # band over the nodes inside, a click on empty space — instead
+            # of this box quietly taking hold of it. Ignoring also means no
+            # move or release arrives here, so nothing below runs.
+            event.ignore()
             return
         scene = self.scene()
         self._grabbed = []
