@@ -88,6 +88,13 @@ class ConnectCommand(QUndoCommand):
         conn, displaced = self._graph.connect(*self._ends, conn_id=self._conn_id)
         self._conn_id = conn.id  # stable across undo/redo cycles
         self._displaced = displaced
+        # A wire dropped on a spare port grows a permanent one, so the ends
+        # this command was built with may name a port that no longer exists
+        # ("more" — always empty by design). Keep what the graph actually
+        # made, or every later redo would land on the spare and grow again:
+        # one undo/redo cycle per extra ghost port.
+        self._ends = (conn.src_node, conn.src_port,
+                      conn.dst_node, conn.dst_port)
 
     def undo(self) -> None:
         self._graph.disconnect(self._conn_id)

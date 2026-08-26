@@ -17,6 +17,13 @@ class PortSpec:
     type: PortType
     direction: PortDirection
     optional: bool = False  # inputs only: node may run with this port unconnected
+    # inputs only: the trailing "one more slot" of a node that takes an open
+    # ended stack of tables (Concatenate was the first). A wire landing on a
+    # spare promotes it — the connection is rewritten to a fresh permanent
+    # name and a new spare appears below — so there is always exactly one
+    # visible invitation and never a dialog asking how many ports you want.
+    # See Graph._grow_input, which owns the mechanics.
+    spare: bool = False
 
 
 # --------------------------------------------------------------- flow port

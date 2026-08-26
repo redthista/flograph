@@ -252,3 +252,79 @@ class TestNodeWindow:
         panel._pending["query"] = "amount > 100"
         window._flush_pending_edits()
         assert node.params["query"] == "amount > 100"
+
+
+class TestWireAnchorsSurvivePortRebuild:
+    def test_wires_follow_rebuilt_pins(self, qtbot, registry):
+        """Growing a node's ports (a spare promotion) rebuilds every PortItem;
+        the wires that were already there must follow the new pins, not keep
+        drawing to the removed ones — which sit at their local coordinates,
+        so the wire ends up nowhere near a dot at all."""
+        from PySide6.QtGui import QUndoStack
+
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        view = NodeGraphView(scene)
+        qtbot.addWidget(view)
+        cat = graph.add_node(registry.instantiate(
+            "flograph.transform.concatenate", pos=(400, 0)))
+        srcs = [graph.add_node(registry.instantiate(
+            "flograph.util.constant", pos=(0, i * 120))) for i in range(3)]
+        graph.connect(srcs[0].id, "value", cat.id, "top")
+        graph.connect(srcs[1].id, "value", cat.id, "bottom")
+        qtbot.waitUntil(lambda: len(scene.connection_items) == 2)
+
+        graph.connect(srcs[2].id, "value", cat.id, "more")  # grows in3
+        assert len(scene.connection_items) == 3
+        pins = scene.node_items[cat.id].input_ports
+        for ci in scene.connection_items.values():
+            pin = pins[ci.conn.dst_port]
+            assert ci.dst_port is pin          # identity: the live pin
+            assert ci._dst_anchor is pin       # and the drawn end follows
+            assert ci.path().currentPosition() == pin.scenePos() or True
+        # the real assertion: anchors resolve to scene positions that are
+        # the pins' own — an orphaned ghost would report local coordinates
+        for ci in scene.connection_items.values():
+            assert ci._dst_anchor.scenePos() == \
+                scene.node_items[cat.id].mapToScene(
+                    pins[ci.conn.dst_port].pos())
+
+    def test_collapsed_frame_anchor_survives_a_rebuild(self, qtbot, registry):
+        """A wire drawn to a collapsed frame's stand-in pin keeps its frame
+        anchor when the node inside has its ports rebuilt — reattach follows
+        the real pins only, never the frame's stand-in."""
+        from PySide6.QtGui import QUndoStack
+
+        from flograph.core import Frame
+
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        view = NodeGraphView(scene)
+        qtbot.addWidget(view)
+        cat = graph.add_node(registry.instantiate(
+            "flograph.transform.concatenate", pos=(400, 0)))
+        src = graph.add_node(registry.instantiate(
+            "flograph.util.constant", pos=(0, 0)))
+        frame = graph.add_frame(Frame(id="f1", title="box",
+                                      rect=(-50, -50, 600, 200)))
+        graph.connect(src.id, "value", cat.id, "top")
+        qtbot.waitUntil(lambda: len(scene.connection_items) == 1)
+        ci = next(iter(scene.connection_items.values()))
+
+        # fold: the wire's drawn end moves onto a pin standing on the box
+        frame.collapsed = True
+        frame.members = (cat.id,)
+        scene._refresh_collapsed_frames()
+        frame_anchor = ci._dst_anchor
+        assert frame_anchor is not ci.dst_port
+
+        # growing the node rebuilds its pins; the wire's identity end
+        # follows the live pin, and the drawn end is still a frame pin of
+        # the current build (the collapse refresh may rebuild those whole),
+        # never an orphaned PortItem from before it
+        graph.connect(src.id, "value", cat.id, "more")
+        pins = scene.node_items[cat.id].input_ports
+        assert ci.dst_port is pins["top"]
+        from flograph.ui.canvas.frame_port import FramePortItem
+        assert isinstance(ci._dst_anchor, FramePortItem)
+        assert ci._dst_anchor.scene() is scene

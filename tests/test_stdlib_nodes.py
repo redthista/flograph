@@ -112,6 +112,37 @@ class TestEtlNodes:
                        {"columns": "intersection"}, top=table, bottom=other)
         assert list(out.columns) == ["region"]
 
+    def test_concatenate_stacks_every_grown_port_in_order(self, registry,
+                                                          table):
+        parts = [table] + [pd.DataFrame({"region": [f"r{i}"], "units": [i]})
+                           for i in range(4)]
+        out = run_node(registry, "flograph.transform.concatenate", {},
+                       top=parts[0], bottom=parts[1], in3=parts[2],
+                       in4=parts[3], in5=parts[4])
+        assert len(out) == 8
+        assert list(out["units"].dropna().astype(int).tail(4)) == [0, 1, 2, 3]
+        assert out["revenue"].isna().sum() == 4   # grown tables carry none
+
+    def test_concatenate_intersection_means_all_connected_tables(self,
+                                                                 registry,
+                                                                 table):
+        out = run_node(registry, "flograph.transform.concatenate",
+                       {"columns": "intersection"},
+                       top=table, bottom=table,
+                       in3=pd.DataFrame({"extra": [1]}))
+        assert list(out.columns) == []
+
+    def test_concatenate_single_table_comes_back_intact(self, registry, table):
+        out = run_node(registry, "flograph.transform.concatenate", {},
+                       top=table)
+        assert len(out) == len(table)
+        assert list(out.columns) == list(table.columns)
+
+    def test_concatenate_with_nothing_connected_is_a_clear_error(self,
+                                                                 registry):
+        with pytest.raises(ValueError, match="at least one table"):
+            run_node(registry, "flograph.transform.concatenate", {})
+
     def test_missing_values_drop(self, registry):
         t = pd.DataFrame({"a": [1.0, None, 3.0], "b": ["x", "y", None]})
         out = run_node(registry, "flograph.transform.missing_values", {}, table=t)

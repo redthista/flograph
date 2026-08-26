@@ -158,3 +158,97 @@ def test_status_events():
         (node.id, NodeStatus.RUNNING, ""),
         (node.id, NodeStatus.ERROR, "boom"),
     ]
+
+
+# ------------------------------------------------------------- spare ports
+
+SPARE_STACK = """
+NODE = {
+    "label": "Stack",
+    "category": "Test",
+    "inputs": [
+        ("top", "dataframe"),
+        ("more", "dataframe", {"optional": True, "spare": True}),
+    ],
+    "outputs": [("n", "number")],
+}
+def run(ctx, **inputs):
+    return 0
+"""
+
+
+def _spare_pair(graph):
+    src = graph.add_node(make_node())
+    dst = graph.add_node(make_node(SPARE_STACK, "test.stack"))
+    return src, dst
+
+
+def test_wire_on_spare_grows_a_port_and_leaves_a_new_spare():
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    conn, _ = graph.connect(src.id, "value", dst.id, "more")
+    # the wire is recorded under the permanent name it created
+    assert conn.dst_port == "in2"
+    grown = dst.spec.input("in2")
+    assert grown is not None and grown.optional and not grown.spare
+    # and the invitation is back: an unconnected trailing spare, still last
+    spare = dst.spec.input("more")
+    assert spare is not None and spare.spare
+    assert dst.spec.inputs[-1].name == "more"
+    assert graph.input_connection(dst.id, "more") is None
+
+
+def test_second_wire_reuses_no_name_and_grows_again():
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    second_src = graph.add_node(make_node())
+    graph.connect(src.id, "value", dst.id, "more")
+    conn, displaced = graph.connect(second_src.id, "value", dst.id, "more")
+    assert conn.dst_port == "in3"
+    assert displaced is None  # each wire landed on a fresh port
+
+
+def test_refused_wire_does_not_grow_the_node():
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    typed = graph.add_node(make_node(TYPED, "test.typed2"))
+    with pytest.raises(GraphError):
+        graph.connect(typed.id, "n", dst.id, "more")  # number -> dataframe
+    assert [p.name for p in dst.spec.inputs] == ["top", "more"]
+    with pytest.raises(GraphError):
+        graph.connect(dst.id, "n", dst.id, "more")  # cycle
+    assert [p.name for p in dst.spec.inputs] == ["top", "more"]
+
+
+def test_disconnect_leaves_the_grown_port_in_place():
+    """Undo of a connect does not shrink the node back — a leftover empty
+    slot costs nothing and shrinking under the user's cursor would."""
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    conn, _ = graph.connect(src.id, "value", dst.id, "more")
+    graph.disconnect(conn.id)
+    assert dst.spec.input("in2") is not None
+
+
+def test_fork_keeps_grown_ports_and_their_wires():
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    graph.connect(src.id, "value", dst.id, "more")
+    dropped = graph.set_code(
+        dst.id, SPARE_STACK.replace('"Stack"', '"Stack forked"'))
+    assert dropped == []
+    assert dst.spec.input("in2") is not None
+    assert graph.input_connection(dst.id, "in2") is not None
+    assert dst.spec.inputs[-1].name == "more"
+
+
+def test_growing_marks_dirty_and_announces_the_ports_changed():
+    from flograph.core import NodeStatus
+
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    seen = []
+    graph.events.code_changed.connect(seen.append)
+    graph.connect(src.id, "value", dst.id, "more")
+    assert seen == [dst.id]
+    assert dst.dirty and dst.status is NodeStatus.IDLE

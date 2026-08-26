@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen
 from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsItem
 
@@ -80,6 +80,25 @@ class ConnectionItem(QGraphicsPathItem):
         self._dst_anchor = dst if dst is not None else self.dst_port
         self.update_path()
 
+    def reattach(self, src: PortItem, dst: PortItem) -> None:
+        """Point both ends at freshly built port items.
+
+        `NodeItem.rebuild_ports` replaces every PortItem, and a wire holding
+        the old ones would keep drawing to orphaned ghosts — pins removed
+        from the scene report their local coordinates, so the wire lands
+        somewhere near the node's top-left corner instead of on a dot. An
+        anchor that *is* the real port follows the rebuild; a FramePortItem
+        anchor (the node folded inside a collapsed frame) is not the wire's
+        business here — it stands where the frame put it.
+        """
+        if self._src_anchor is self.src_port:
+            self._src_anchor = src
+        if self._dst_anchor is self.dst_port:
+            self._dst_anchor = dst
+        self.src_port = src
+        self.dst_port = dst
+        self.update_path()
+
     @property
     def src_anchor(self) -> PortItem:
         return self._src_anchor
@@ -102,6 +121,14 @@ class ConnectionItem(QGraphicsPathItem):
         stroker = QPainterPathStroker()
         stroker.setWidth(12)
         return stroker.createStroke(self.path())
+
+    def boundingRect(self) -> QRectF:
+        # The inherited answer is the path's own rect, which ignores the
+        # pen — and this wire paints up to 5px wide (hover, selection, the
+        # splice hint) plus antialiasing spread. Fringe pixels outside the
+        # damage region never get repainted when the wire moves: faint
+        # skids across the canvas until a zoom or pan forces a full redraw.
+        return self.path().boundingRect().adjusted(-4, -4, 4, 4)
 
     def set_drop_hint(self, on: bool) -> None:
         """Lit while a dragged node hovers over this wire: letting go here

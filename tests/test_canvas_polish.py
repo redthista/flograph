@@ -88,7 +88,10 @@ class TestRerouteLabel:
 
         assert node.label_override is None
         assert item._reroute_label_rect() is None
-        assert item.boundingRect() == QRectF(-2, -2, item.width + 4, item.body_height + 4)
+        # body plus whatever its pins need — no label extension beyond that
+        expected = QRectF(-2, -2, item.width + 4, item.body_height + 4) \
+            .united(item.childrenBoundingRect())
+        assert item.boundingRect() == expected
 
     def test_label_expands_bounding_rect(self, env, registry):
         graph, stack, scene = env
@@ -698,3 +701,43 @@ class TestOutputPreviewFadesWhileRecomputing:
         touched.clear()
         window.scene.set_requested_nodes({nodes[1].id})   # only one moved
         assert touched == [nodes[0].id]
+
+
+class TestWireBoundingRect:
+    def test_bounding_rect_covers_the_pen(self, env, registry):
+        """The wire paints up to 5px wide (hover/selection/splice hint) plus
+        antialiasing; a bounding rect of the bare path leaves those fringe
+        pixels outside every damage region, so moving a wire leaves faint
+        skids until a zoom or pan forces a full repaint."""
+        graph, _stack, scene = env
+        a = graph.add_node(registry.instantiate("flograph.util.constant"))
+        b = graph.add_node(registry.instantiate(
+            "flograph.scripting.python_script"))
+        graph.connect(a.id, "value", b.id, "in1")
+        ci = next(iter(scene.connection_items.values()))
+        padded = ci.boundingRect()
+        bare = ci.path().boundingRect()
+        assert padded.contains(bare.adjusted(-3.5, -3.5, 3.5, 3.5))
+
+
+class TestNodeBoundingRectCoversPins:
+    def test_pins_live_inside_the_node_damage_rect(self, env, registry):
+        """Pins hang outside the body by design, and the node's bounding
+        rect is what a move damages. A pin outside it kept its old pixels
+        behind on every drag — semi-circle skids until a zoom or pan."""
+        graph, _stack, scene = env
+        cat = graph.add_node(registry.instantiate(
+            "flograph.transform.concatenate", pos=(400, 300)))
+        src = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.connect(src.id, "value", cat.id, "top")
+        graph.connect(src.id, "value", cat.id, "more")   # grows in3
+        item = scene.node_items[cat.id]
+        rect = item.boundingRect()
+        for name in ("top", "bottom", "in3", "more"):
+            pin = item.input_ports[name]
+            assert rect.contains(item.mapRectFromItem(pin, pin.boundingRect()))
+        out = item.output_ports["combined"]
+        assert rect.contains(item.mapRectFromItem(out, out.boundingRect()))
+        # the flow pins ride the corners, above the body — covered too
+        flow = item.flow_ports["input"]
+        assert rect.contains(item.mapRectFromItem(flow, flow.boundingRect()))

@@ -75,6 +75,17 @@ Shipped 2026-08-25; see `ideas_archived.md` #9.
 **G5. Click a node's name in the statistics window to jump to it** (Stu).
 Shipped 2026-08-25; see `ideas_archived.md` #10.
 
+**G3. Bulk operations on a multi-selection** (Dan). Selecting several nodes
+and right-clicking → Run runs only the node under the cursor; it should run
+the whole selection. And the same question hangs off everything else the
+per-node menu offers: freeze/unfreeze, active and manual toggles, colour,
+compact view, mark, port labels. The run side half-exists — Run Selected is
+already a command — so the work is pointing the context menu at the
+selection and giving the appearance/flag ops a one-pass-over-`selectedItems`
+path through the same undo commands the single-node menu uses. Worth
+deciding whether a bulk appearance change belongs directly in the menu or
+behind an "Apply to selection" sub-menu before building it.
+
 ---
 
 ## H. Property panel — column pickers  (Stu)
@@ -148,6 +159,8 @@ stacking five tables is four nodes. Note the constraint learned on
 2026-08-18: ports generated from data were built, worked, and were rejected
 as against the grain — so this wants a fixed set of *optional* ports
 (say 2 visible, up to 8 declared) rather than ports grown at run time.
+Shipped 2026-08-26, in a better shape than this note asked for — the
+always-empty bottom slot — see `ideas_archived.md` #17.
 
 **M2. User forms.** A form with fields and a submit button — one node, or a
 node pair with a retrieval side — writing to a DataFrame, a SQL table, or

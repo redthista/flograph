@@ -161,3 +161,27 @@ class TestPageSerialization:
         restored = graph_from_dict(data, registry)
         assert restored.pages["p1"].tiles["t1"].node_id == "deleted-node"
         assert graph_to_dict(restored) == data
+
+
+def test_grown_spare_ports_survive_round_trip(registry):
+    """A Concatenate wired past its declared ports reloads with both the
+    grown port and its wire — the file carries the extras explicitly."""
+    graph = Graph()
+    a = registry.instantiate("flograph.util.constant", pos=(0, 0))
+    b = registry.instantiate("flograph.util.constant", pos=(0, 100))
+    cat = registry.instantiate("flograph.transform.concatenate", pos=(200, 50))
+    for n in (a, b, cat):
+        graph.add_node(n)
+    graph.connect(a.id, "value", cat.id, "top")
+    conn, _ = graph.connect(b.id, "value", cat.id, "more")
+    assert conn.dst_port == "in3"   # landing on the spare grew a real port
+
+    data = json.loads(json.dumps(graph_to_dict(graph)))
+    restored = graph_from_dict(data, registry)
+    reloaded = next(n for n in restored.nodes.values()
+                    if n.type_id == "flograph.transform.concatenate")
+    assert reloaded.spec.input("in3") is not None
+    assert restored.input_connection(reloaded.id, "in3") is not None
+    # and the invitation came back on the reloaded node too
+    assert reloaded.spec.inputs[-1].name == "more"
+    assert graph_to_dict(restored) == data

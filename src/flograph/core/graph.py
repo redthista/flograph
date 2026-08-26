@@ -5,18 +5,19 @@ QUndoCommands that call these methods; the scene and engine react to
 """
 from __future__ import annotations
 
+import re
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
 from . import links, varlinks
-from .datatypes import can_connect
+from .datatypes import PortType, can_connect
 from .events import GraphEvents
 from .layers import next_z, order_of
 from .node import NodeInstance, NodeStatus, NodeSpec
 from .page_setup import PageSetup
-from .ports import PortDirection, is_flow
+from .ports import PortDirection, PortSpec, is_flow
 
 
 class GraphError(Exception):
@@ -398,6 +399,12 @@ class Graph:
         node = self.node(node_id)
         node.code_override = code_override
         node.spec = spec
+        # the freshly parsed spec knows nothing of ports this instance grew;
+        # put them back before judging connections, so wires into grown
+        # ports survive a fork (and are dropped only if the forked code
+        # genuinely broke them, e.g. changed the port type)
+        if node.extra_inputs:
+            node.adopt_extra_inputs(node.extra_inputs)
         # keep param values that still exist; adopt defaults for new ones
         node.params = {**spec.default_params(),
                        **{k: v for k, v in node.params.items() if spec.param(k)}}
@@ -416,6 +423,8 @@ class Graph:
         node = self.node(node_id)
         node.code_override = code_override
         node.spec = spec
+        if node.extra_inputs:
+            node.adopt_extra_inputs(node.extra_inputs)
         node.params = {**spec.default_params(),
                        **{k: v for k, v in node.params.items() if spec.param(k)}}
         self.events.code_changed.emit(node_id)
@@ -544,6 +553,16 @@ class Graph:
         dst = self.node(dst_node)
         out_spec = src.spec.output(src_port)
         in_spec = dst.spec.input(dst_port)
+        # A wire landing on the trailing spare grows the node first, so the
+        # rest of this method validates against the port that will really
+        # carry it. Only when the wire is otherwise acceptable — the source
+        # port exists, the types agree, no cycle — does the node grow: a
+        # refused drag must not leave a new empty slot behind as litter.
+        if (out_spec is not None and in_spec is not None and in_spec.spare
+                and can_connect(out_spec.type, in_spec.type)
+                and not self.would_cycle(src_node, dst_node)):
+            dst_port = self._grow_input(dst, in_spec.type)
+            in_spec = dst.spec.input(dst_port)
         if out_spec is None:
             raise GraphError(f"node {src.label!r} has no output port {src_port!r}")
         if in_spec is None:
@@ -658,6 +677,33 @@ class Graph:
     def _connections_of(self, node_id: str) -> list[Connection]:
         return [c for c in self.connections.values()
                 if node_id in (c.src_node, c.dst_node)]
+
+    def _grow_input(self, node: NodeInstance, port_type: PortType) -> str:
+        """Turn a wire's landing on the spare into a permanent new port.
+
+        The connection is recorded under the fresh name, the grown port
+        takes its place above the trailing spare, and a new empty spare
+        appears below it — there is always exactly one invitation. Names
+        are `in<N>`, one past whatever this instance has already grown, so
+        they survive save/load, undo of neighbouring wires and forks.
+
+        Emits code_changed because that is the event the canvas already
+        listens to for "this node's ports changed" — rebuild_ports and the
+        wire reattachment come with it, no new UI path.
+        """
+        # continue the script's own numbering: two declared tables make the
+        # first grown port in3, whatever the declaration looks like
+        fixed_count = sum(
+            1 for p in node.spec.inputs
+            if not p.spare and not re.fullmatch(r"in\d+", p.name))
+        used = [int(m.group(1)) for c in node.extra_inputs
+                if (m := re.fullmatch(r"in(\d+)", c.name))]
+        name = f"in{max(used, default=fixed_count) + 1}"
+        node.adopt_extra_inputs(node.extra_inputs + [
+            PortSpec(name, port_type, PortDirection.INPUT, optional=True)])
+        self.events.code_changed.emit(node.id)
+        self.mark_dirty(node.id)
+        return name
 
     def _still_valid(self, conn: Connection) -> bool:
         src = self.nodes.get(conn.src_node)

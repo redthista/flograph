@@ -205,7 +205,10 @@ def _parse_ports(
             name=name,
             type=port_type,
             direction=direction,
-            optional=bool(opts.get("optional", False)),
+            # a spare is by nature unconnected until wired, so optional
+            # comes with it whether the script said so or not
+            optional=bool(opts.get("optional", False)) or bool(opts.get("spare", False)),
+            spare=bool(opts.get("spare", False)),
         ))
     return ports
 

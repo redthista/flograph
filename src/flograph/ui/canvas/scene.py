@@ -424,14 +424,22 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         if item is None:
             return
         item.rebuild_ports()
-        # reattach surviving wires to the freshly built port items
+        # reattach surviving wires to the freshly built port items — through
+        # reattach(), so the drawn anchors follow when they were the real
+        # pins and not a collapsed frame's stand-in
         for ci in self.connection_items.values():
             if ci.conn.src_node == node_id:
-                ci.src_port = item.port_item(ci.conn.src_port, "output")
+                src = item.port_item(ci.conn.src_port, "output")
+            else:
+                src = None
             if ci.conn.dst_node == node_id:
-                ci.dst_port = item.port_item(ci.conn.dst_port, "input")
-            if node_id in (ci.conn.src_node, ci.conn.dst_node):
-                ci.update_path()
+                dst = item.port_item(ci.conn.dst_port, "input")
+            else:
+                dst = None
+            if src is not None or dst is not None:
+                ci.reattach(
+                    src if src is not None else ci.src_port,
+                    dst if dst is not None else ci.dst_port)
         # a frame pin caches the spec it was built from, which has just been
         # replaced — drop them so the rebuild makes fresh ones rather than
         # leaving one pointing at a port that no longer exists

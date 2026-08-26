@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Optional
 
@@ -178,6 +178,12 @@ class NodeInstance:
     # both what a freshly dropped node wants and what a file written before
     # layering existed gets, reproducing its old insertion-order stacking.
     z: Optional[int] = None
+    # Inputs this instance grew past its script (Graph._grow_input: wires
+    # landing on a spare port). The list is the source of truth — `spec` is
+    # replaced wholesale by forks, loads and library resets, so every one of
+    # those paths re-applies these through adopt_extra_inputs() to keep both
+    # the grown ports and their wires alive. Serialized with the node.
+    extra_inputs: list[PortSpec] = field(default_factory=list)
     status: NodeStatus = NodeStatus.IDLE
     status_message: str = ""
     # How far through its own work the running node says it is, 0..1, from
@@ -209,3 +215,19 @@ class NodeInstance:
     @property
     def forked(self) -> bool:
         return self.code_override is not None
+
+    def adopt_extra_inputs(self, extras: list[PortSpec]) -> None:
+        """Grow (or regrow) this instance's inputs by `extras`.
+
+        The trailing spare of the script's own declaration stays last — the
+        empty slot is an invitation, and it belongs at the bottom whatever
+        has been added above it. Replaces `spec` rather than mutating it:
+        the spec object may be the registry's shared one.
+        """
+        self.extra_inputs = list(extras)
+        fixed, spare_tail = self.spec.inputs, []
+        if fixed and fixed[-1].spare:
+            fixed, spare_tail = fixed[:-1], fixed[-1:]
+        self.spec = replace(
+            self.spec,
+            inputs=[*fixed, *self.extra_inputs, *spare_tail])

@@ -198,3 +198,26 @@ def test_set_node_color_undo_redo(env, registry):
     assert node.color is None
     stack.undo()
     assert node.color == "#ff0000"
+
+
+def test_spare_connect_undo_redo_does_not_regrow(env, registry):
+    """Dropping a wire on Concatenate's spare grows one port; undo/redo of
+    that same connect must reconnect to the grown port, not land on the
+    spare again and grow another ghost every cycle."""
+    graph, stack, _scene = env
+    cat = registry.instantiate("flograph.transform.concatenate", pos=(300, 0))
+    stack.push(AddNodeCommand(graph, cat))
+    src = registry.instantiate("flograph.util.constant", pos=(0, 0))
+    stack.push(AddNodeCommand(graph, src))
+
+    stack.push(ConnectCommand(graph, src.id, "value", cat.id, "more"))
+    assert cat.spec.input("in3") is not None
+    names_after_connect = [p.name for p in cat.spec.inputs]
+
+    stack.undo()
+    stack.redo()
+    stack.undo()
+    stack.redo()
+    assert [p.name for p in cat.spec.inputs] == names_after_connect
+    assert graph.input_connection(cat.id, "in3") is not None
+    assert graph.input_connection(cat.id, "more") is None

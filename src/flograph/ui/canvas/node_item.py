@@ -2163,6 +2163,14 @@ class NodeItem(QGraphicsObject):
                       self._status_rect()):
             if extra is not None:
                 base = base.united(extra.adjusted(-2, -2, 2, 2))
+        # The pins hang outside the body on purpose (PORT_EDGE_GAP), the
+        # flow pins above the corners, the name pills further out still.
+        # This rect is what a *move* damages: children sticking out of it
+        # kept their old pixels behind on every drag — faint circles
+        # skidding across the canvas until a zoom or pan repainted them.
+        kids = self.childrenBoundingRect()
+        if not kids.isNull():
+            base = base.united(kids)
         return base
 
     def shape(self) -> QPainterPath:
@@ -2418,6 +2426,10 @@ class NodeItem(QGraphicsObject):
             self.output_ports[spec.name] = PortItem(self, spec)
         self._layout_ports()
         self.refresh_port_connections()
+        # fresh pins are born visible; whatever hid the old ones (LOD
+        # flattening, collapsed ports, flow-pin preference) has to be
+        # re-derived or a rebuild while zoomed out leaves dots behind
+        self._apply_port_visibility()
         self.update()
 
     def _port_x(self) -> tuple[float, float]:
@@ -2434,6 +2446,9 @@ class NodeItem(QGraphicsObject):
         """Pin port items to the current geometry. Cards resize at runtime,
         so this runs again on every width change — output ports (and the
         wires on them) must ride the right edge, not stay where they were."""
+        # pins moving change childrenBoundingRect, which boundingRect now
+        # unions — the old extent must be registered before they move
+        self.prepareGeometryChange()
         self._layout_flow_ports()
         left, right = self._port_x()
         if self.compact or self.link_card:

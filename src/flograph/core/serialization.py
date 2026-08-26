@@ -28,6 +28,7 @@ from .datatypes import PortType
 from .graph import Connection, Frame, Graph, GraphError, Page, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .page_setup import PageSetup
+from .ports import PortDirection, PortSpec
 from .ports import PortDirection, PortSpec, is_flow
 from .registry import NodeRegistry
 from .script import NodeScriptError, parse_spec
@@ -74,6 +75,12 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "mark_text": n.mark_text,
                     "mark_image": n.mark_image,
                     "z": n.z,
+                    # ports grown past the script (spare promotions); absent
+                    # in older files, which never grew any
+                    "extra_inputs": [
+                        {"name": p.name, "type": p.type.value}
+                        for p in n.extra_inputs
+                    ],
                 }
                 for n in graph.nodes.values()
             ],
@@ -221,6 +228,20 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # load order, which is exactly the old stacking
             z=entry.get("z"),
         )
+        # regrow ports this instance had grown past its script, before any
+        # wire references them (connections are applied just below). A
+        # missing type or junk entry is skipped rather than fatal — a grown
+        # port lost to a bad edit costs a dropped wire, not a project.
+        extras = []
+        for p in entry.get("extra_inputs") or []:
+            try:
+                extras.append(PortSpec(
+                    p["name"], PortType(p["type"]),
+                    PortDirection.INPUT, optional=True))
+            except (KeyError, ValueError, TypeError):
+                continue
+        if extras:
+            node.adopt_extra_inputs(extras)
         if spec.broken:
             node.status = NodeStatus.ERROR
             node.status_message = broken_reason or (
