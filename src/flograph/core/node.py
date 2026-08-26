@@ -223,9 +223,19 @@ class NodeInstance:
         empty slot is an invitation, and it belongs at the bottom whatever
         has been added above it. Replaces `spec` rather than mutating it:
         the spec object may be the registry's shared one.
+
+        Regrowing has to start from the script's own ports, not from
+        whatever the last call left behind: the second growth is handed
+        [in3, in4] while `spec` already carries the in3 from the first, and
+        splicing onto that spec listed in3 twice. A duplicate name is worse
+        than untidy — the canvas keys its pins by name, so the two entries
+        collapse into one and the loser is stranded at the node's origin as
+        a pin nothing owns and no rebuild can reach.
         """
+        grown = {p.name for p in self.extra_inputs}
         self.extra_inputs = list(extras)
-        fixed, spare_tail = self.spec.inputs, []
+        fixed = [p for p in self.spec.inputs if p.name not in grown]
+        spare_tail = []
         if fixed and fixed[-1].spare:
             fixed, spare_tail = fixed[:-1], fixed[-1:]
         self.spec = replace(

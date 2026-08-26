@@ -208,6 +208,34 @@ def test_second_wire_reuses_no_name_and_grows_again():
     assert displaced is None  # each wire landed on a fresh port
 
 
+def test_growing_twice_lists_each_port_once():
+    """The second growth is handed [in2, in3] while the spec already
+    carries in2 from the first. Splicing onto the grown spec listed in2
+    twice, and a duplicate name is not merely untidy: the canvas keys its
+    pins by name, so the pair collapsed into one entry and stranded the
+    loser at the node's origin as a stray dot above the node."""
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    for _ in range(4):
+        graph.connect(graph.add_node(make_node()).id, "value",
+                      dst.id, "more")
+    names = [p.name for p in dst.spec.inputs]
+    assert names == ["top", "in2", "in3", "in4", "in5", "more"]
+    assert len(names) == len(set(names))
+
+
+def test_reloading_grown_ports_does_not_double_them():
+    """apply_spec/restore_spec re-adopt the extras onto a freshly parsed
+    spec; re-adopting the same list must be a no-op, not another splice."""
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    graph.connect(src.id, "value", dst.id, "more")
+    before = [p.name for p in dst.spec.inputs]
+    for _ in range(3):
+        dst.adopt_extra_inputs(dst.extra_inputs)
+    assert [p.name for p in dst.spec.inputs] == before
+
+
 def test_refused_wire_does_not_grow_the_node():
     graph = Graph()
     src, dst = _spare_pair(graph)

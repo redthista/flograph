@@ -2391,8 +2391,11 @@ class NodeItem(QGraphicsObject):
     def rebuild_ports(self) -> None:
         """(Re)create port items from the current spec — called at build time
         and again whenever the node's code changes its ports."""
-        for item in (*self.input_ports.values(), *self.output_ports.values(),
-                     *self.flow_ports.values()):
+        # every pin child, not just the ones the dicts still point at: two
+        # ports sharing a name collapse into one dict entry, and the loser
+        # would otherwise stay parented here forever, unlaid-out at the
+        # node's origin and invisible to every later rebuild
+        for item in [c for c in self.childItems() if isinstance(c, PortItem)]:
             if item.scene() is not None:
                 item.scene().removeItem(item)
             item.setParentItem(None)

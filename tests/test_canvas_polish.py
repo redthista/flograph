@@ -720,6 +720,36 @@ class TestWireBoundingRect:
         assert padded.contains(bare.adjusted(-3.5, -3.5, 3.5, 3.5))
 
 
+class TestNoStrayPins:
+    def test_repeated_growth_leaves_no_pin_the_node_has_lost_track_of(
+            self, env, registry):
+        """Every PortItem on a node must be one the node still owns.
+
+        A rebuild only removed the pins its dicts pointed at, so a pin the
+        dict had dropped stayed parented forever — never laid out, so it
+        drew at the node's origin: a connector floating off the top-left
+        corner that no wire could reach and no redraw could clear.
+        """
+        from flograph.ui.canvas.node_item import PortItem
+
+        graph, _stack, scene = env
+        cat = graph.add_node(registry.instantiate(
+            "flograph.transform.concatenate", pos=(400, 300)))
+        src = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.connect(src.id, "value", cat.id, "top")
+        for _ in range(3):
+            graph.connect(src.id, "value", cat.id, "more")
+        item = scene.node_items[cat.id]
+        owned = {id(p) for p in (*item.input_ports.values(),
+                                 *item.output_ports.values(),
+                                 *item.flow_ports.values())}
+        stray = [c for c in item.childItems()
+                 if isinstance(c, PortItem) and id(c) not in owned]
+        assert stray == []
+        # and the pins that are left are the spec's, each once, in order
+        assert list(item.input_ports) == [p.name for p in cat.spec.inputs]
+
+
 class TestNodeBoundingRectCoversPins:
     def test_pins_live_inside_the_node_damage_rect(self, env, registry):
         """Pins hang outside the body by design, and the node's bounding
