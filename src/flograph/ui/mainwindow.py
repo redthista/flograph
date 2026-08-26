@@ -3736,6 +3736,7 @@ class MainWindow(QMainWindow):
         dotenv.bind(graph, dotenv.default_path())
         self._replace_graph(graph)
         self._project_path = None
+        self.engine.history.clear()      # a new project starts unmeasured
         self.resource_monitor.set_disk_watch_path(None)
         self._update_title()
 
@@ -3784,6 +3785,7 @@ class MainWindow(QMainWindow):
             return
         self._replace_graph(loaded)
         self._project_path = None
+        self.engine.history.clear()      # examples open unmeasured
         self.resource_monitor.set_disk_watch_path(None)
         self._update_title()
         self.show_status(
@@ -3815,6 +3817,11 @@ class MainWindow(QMainWindow):
         else:
             self.show_status(f"Opened {path}", 4000)
         self._restore_cache(path, quiet=bool(broken))
+        # The statistics window opens on this project's saved runs rather
+        # than whatever the previous session had in memory.
+        self.engine.history.clear()
+        for record in cache_persistence.load_run_history(path):
+            self.engine.history.add(record)
         return True
 
     def _restore_cache(self, path: str, quiet: bool = False) -> None:
@@ -3945,6 +3952,15 @@ class MainWindow(QMainWindow):
             return False
         self.undo_stack.setClean()
         self._push_recent(self._project_path)
+        try:
+            # Run statistics ride along with the cache: tiny, derived, and
+            # the difference between reopening to a blank stats window and
+            # reopening to the last run. Losing them to a full disk must
+            # not fail a save that already succeeded, so this swallows.
+            cache_persistence.save_run_history(
+                self.engine.history, self._project_path)
+        except OSError:
+            pass
         if not self.engine.active:
             self._start_cache_save()
         else:

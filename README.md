@@ -121,7 +121,9 @@ the node's name in the status bar. Cancellation is cooperative
 paged table view for DataFrames (millions of rows are fine), matplotlib
 figures with a toolbar, pretty-printed objects. Per-node stdout and
 tracebacks land in the Log dock, with the traceback mapped back to the line
-in *your* node script.
+in *your* node script. The statistics window's run history is saved beside
+the cache too, so reopening a project shows its previous runs rather than
+starting from nothing.
 
 **Projects are plain JSON** (`.flograph`) — diffable, reviewable, and small.
 Node output caches are written to a side-car `<project>.flograph.cache/`

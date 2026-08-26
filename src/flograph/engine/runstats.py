@@ -7,12 +7,16 @@ tooltip and not enough to answer "why did that take ninety seconds".
 
 A RunRecord is the missing account: one NodeRun per node the plan actually
 started, in the order they ran, plus what the run left out and why. Records
-are kept in memory for the session and nothing is written beside the project
-— run timings age badly (they describe the machine as much as the flow) and
-are not worth carrying between sittings.
+are kept in memory for the session and, since runs.json arrived, written
+beside the project in its side-car so reopening shows the flow's previous
+runs instead of a blank window. They are still bounded and still honest
+about what they are — timings describe the machine as much as the flow —
+which is why they live in the *cache* side-car rather than the project
+file: derived, regenerable by running again, and not worth polluting a
+diffable JSON document over.
 
-Nothing here imports Qt. The engine owns the timer that drives sampling; this
-module only holds the numbers and the arithmetic over them.
+Nothing here imports Qt. The engine owns the timer that drives sampling;
+this module only holds the numbers and the arithmetic over them.
 """
 from __future__ import annotations
 
@@ -81,11 +85,72 @@ class RunRecord:
     rss_start: int = 0
     rss_peak: int = 0
     # The worker limit this run was given, and the most nodes actually in
-    # flight at once. The second is the interesting one: a limit of eight on a
-    # flow that never got past two says the graph is a chain, not that the
+    # flight at once. The second is the interesting one: a limit of eight on
+    # a flow that never got past two says the graph is a chain, not that the
     # machine is busy.
     workers: int = 1
     peak_concurrency: int = 1
+
+    def to_dict(self) -> dict:
+        return {
+            "when": self.when,
+            "wall_time": self.wall_time,
+            "ok": self.ok,
+            "cancelled": self.cancelled,
+            "skipped_clean": self.skipped_clean,
+            "skipped_frozen": self.skipped_frozen,
+            "skipped_inactive": self.skipped_inactive,
+            "skipped_manual": self.skipped_manual,
+            "rss_start": self.rss_start,
+            "rss_peak": self.rss_peak,
+            "workers": self.workers,
+            "peak_concurrency": self.peak_concurrency,
+            "nodes": [{
+                "node_id": n.node_id,
+                "label": n.label,
+                "outcome": n.outcome,
+                "started": n.started,
+                "wall_time": n.wall_time,
+                "output_bytes": n.output_bytes,
+                "summary": n.summary,
+                "rss_start": n.rss_start,
+                "rss_peak": n.rss_peak,
+                "concurrent": n.concurrent,
+            } for n in self.nodes],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RunRecord":
+        record = cls(
+            when=float(data.get("when") or 0.0),
+            wall_time=float(data.get("wall_time") or 0.0),
+            ok=bool(data.get("ok", True)),
+            cancelled=bool(data.get("cancelled", False)),
+            skipped_clean=int(data.get("skipped_clean") or 0),
+            skipped_frozen=int(data.get("skipped_frozen") or 0),
+            skipped_inactive=int(data.get("skipped_inactive") or 0),
+            skipped_manual=int(data.get("skipped_manual") or 0),
+            rss_start=int(data.get("rss_start") or 0),
+            rss_peak=int(data.get("rss_peak") or 0),
+            workers=int(data.get("workers") or 1),
+            peak_concurrency=int(data.get("peak_concurrency") or 1),
+        )
+        for node in data.get("nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            record.nodes.append(NodeRun(
+                node_id=str(node.get("node_id") or ""),
+                label=str(node.get("label") or ""),
+                outcome=str(node.get("outcome") or "ok"),
+                started=float(node.get("started") or 0.0),
+                wall_time=float(node.get("wall_time") or 0.0),
+                output_bytes=int(node.get("output_bytes") or 0),
+                summary=str(node.get("summary") or ""),
+                rss_start=int(node.get("rss_start") or 0),
+                rss_peak=int(node.get("rss_peak") or 0),
+                concurrent=int(node.get("concurrent") or 1),
+            ))
+        return record
 
     @property
     def node_time(self) -> float:
