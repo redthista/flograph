@@ -67,12 +67,60 @@ def normalise_letter_range(spec: str) -> str:
     return ",".join(parts)
 
 
+def _matches(value: str, pats: Sequence[str]) -> bool:
+    return any(fnmatch.fnmatch(value, pat) for pat in pats)
+
+
+def _dir_matches(rel: str, name: str, pats: Sequence[str]) -> bool:
+    """A folder pattern matches its path below the root, or its own name.
+
+    `fnmatch`'s `*` crosses `/`, so `2023*` covers everything under `2023`,
+    while a bare `q1` matches a folder of that name at any depth.
+    """
+    return _matches(rel, pats) or _matches(name, pats)
+
+
+def _file_matches(rel: str, name: str, pats: Sequence[str]) -> bool:
+    """A file pattern with a `/` in it is about the path; otherwise the name."""
+    return any(fnmatch.fnmatch(rel if "/" in pat else name, pat) for pat in pats)
+
+
+def _walk(folder: str, recursive: bool, skip_prefixes: tuple[str, ...],
+          drop_dirs: Sequence[str]) -> Iterator[tuple[str, list[str]]]:
+    """Yield `(folder relative to the root, file names in it)`.
+
+    The root itself is `"."`. Excluded folders are pruned from `os.walk`'s
+    own list, which is the documented way to skip a whole subtree rather
+    than walking it and throwing the results away.
+    """
+    if not recursive:
+        yield ".", os.listdir(folder)
+        return
+    for root, dirnames, filenames in os.walk(folder):
+        rel = os.path.relpath(root, folder).replace(os.sep, "/")
+        dirnames[:] = sorted(
+            name for name in dirnames
+            if not name.startswith(skip_prefixes)
+            and not (drop_dirs and _dir_matches(
+                name if rel == "." else f"{rel}/{name}", name, drop_dirs)))
+        yield rel, filenames
+
+
 def discover(folder: str, extensions: Sequence[str], include: str = "",
-             exclude: str = "", skip_prefixes: Sequence[str] = ("~",)) -> list[str]:
+             exclude: str = "", skip_prefixes: Sequence[str] = ("~",),
+             recursive: bool = False, include_dirs: str = "",
+             exclude_dirs: str = "") -> list[str]:
     """The files to read, in a stable order.
 
     `skip_prefixes` defaults to Excel's `~$…` lock files, which look like
     real workbooks to a directory listing and fail to open like one.
+
+    With `recursive`, subfolders are searched too. `include_dirs` keeps only
+    the folders that match (blank keeps all of them) and `exclude_dirs`
+    drops a folder together with everything under it; both are matched by
+    `_dir_matches`. The file patterns are unchanged — matched against the
+    file's name, or against its path below the root when the pattern itself
+    contains a `/`.
     """
     if not folder:
         raise ValueError("no folder given")
@@ -80,39 +128,53 @@ def discover(folder: str, extensions: Sequence[str], include: str = "",
         raise ValueError(f"{folder!r} is not a folder")
 
     wanted = tuple(e.lower() for e in extensions)
-    names = [
-        name for name in os.listdir(folder)
-        if os.path.isfile(os.path.join(folder, name))
-        and meaningful_suffix(name) in wanted
-        and not name.startswith(tuple(skip_prefixes))
-    ]
+    skip = tuple(skip_prefixes)
+    keep, drop = patterns(include), patterns(exclude)
+    keep_dirs, drop_dirs = patterns(include_dirs), patterns(exclude_dirs)
 
-    keep = patterns(include)
-    if keep:
-        names = [n for n in names
-                 if any(fnmatch.fnmatch(n, pat) for pat in keep)]
-    drop = patterns(exclude)
-    if drop:
-        names = [n for n in names
-                 if not any(fnmatch.fnmatch(n, pat) for pat in drop)]
+    found = []
+    for rel_dir, names in _walk(folder, recursive, skip, drop_dirs):
+        if keep_dirs and not _dir_matches(rel_dir, os.path.basename(rel_dir)
+                                          or rel_dir, keep_dirs):
+            continue
+        for name in names:
+            rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+            if (meaningful_suffix(name) not in wanted
+                    or name.startswith(skip)
+                    or not os.path.isfile(os.path.join(folder, *rel.split("/")))):
+                continue
+            if keep and not _file_matches(rel, name, keep):
+                continue
+            if drop and _file_matches(rel, name, drop):
+                continue
+            found.append(rel)
 
     # Sorted, so concatenating them is reproducible run to run. A folder
-    # listing is in whatever order the filesystem feels like.
-    names.sort()
-    return [os.path.join(folder, name) for name in names]
+    # listing is in whatever order the filesystem feels like, and sorting on
+    # the relative path keeps each subfolder's files together.
+    found.sort()
+    return [os.path.join(folder, *rel.split("/")) for rel in found]
+
+
+def relative_folder(path: str, folder: str) -> str:
+    """Which folder below the root a file came from; `"."` for the root."""
+    return os.path.relpath(
+        os.path.dirname(os.path.abspath(path)),
+        os.path.abspath(folder)).replace(os.sep, "/")
 
 
 def require_files(files: Sequence[str], folder: str, extensions: Sequence[str],
-                  filtered: bool) -> None:
+                  filtered: bool, recursive: bool = False) -> None:
     """Fail with a message that says which of the two things went wrong."""
     if files:
         return
+    where = f"{folder!r}" + (" or its subfolders" if recursive else "")
     if filtered:
         raise ValueError(
-            f"no files left in {folder!r} after the include/exclude patterns "
+            f"no files left in {where} after the include/exclude patterns "
             f"— looking for {', '.join(extensions)}")
     raise ValueError(
-        f"no {' / '.join(extensions)} files in {folder!r}")
+        f"no {' / '.join(extensions)} files in {where}")
 
 
 def worker_count(requested: Any, engine: str, file_count: int) -> int:

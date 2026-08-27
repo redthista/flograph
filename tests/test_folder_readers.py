@@ -49,6 +49,27 @@ def excel_dir(tmp_path, parts):
 
 
 @pytest.fixture
+def nested_excel_dir(tmp_path, parts):
+    """One workbook at the top and two more down two different branches."""
+    pytest.importorskip("openpyxl")
+    for rel, frame in zip(["a.xlsx", "2023/q1/b.xlsx", "archive/c.xlsx"], parts):
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_excel(target, index=False)
+    return tmp_path
+
+
+@pytest.fixture
+def nested_csv_dir(tmp_path):
+    """Same shape as `nested_excel_dir`, cheap enough for service tests."""
+    for rel in ["a.csv", "2023/q1/b.csv", "archive/c.csv"]:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x\n1\n")
+    return tmp_path
+
+
+@pytest.fixture
 def parquet_dir(tmp_path, parts):
     pytest.importorskip("pyarrow")
     for name, frame in zip(["a.parquet", "b.parquet", "c.parquet"], parts):
@@ -101,6 +122,50 @@ class TestFolderService:
     ])
     def test_degenerate_letter_ranges_collapse(self, spec, expected):
         assert folders.normalise_letter_range(spec) == expected
+
+    def test_a_flat_read_stops_at_the_top_level(self, nested_csv_dir):
+        found = folders.discover(str(nested_csv_dir), (".csv",))
+        assert [f.rsplit("/", 1)[-1] for f in found] == ["a.csv"]
+
+    def test_recursive_finds_every_branch_in_path_order(self, nested_csv_dir):
+        found = folders.discover(str(nested_csv_dir), (".csv",), recursive=True)
+        rel = [f[len(str(nested_csv_dir)) + 1:] for f in found]
+        assert rel == ["2023/q1/b.csv", "a.csv", "archive/c.csv"]
+
+    def test_excluding_a_folder_takes_its_subtree_with_it(self, nested_csv_dir):
+        found = folders.discover(str(nested_csv_dir), (".csv",), recursive=True,
+                                 exclude_dirs="2023*")
+        rel = [f[len(str(nested_csv_dir)) + 1:] for f in found]
+        assert rel == ["a.csv", "archive/c.csv"]
+
+    def test_including_folders_drops_the_root_too(self, nested_csv_dir):
+        found = folders.discover(str(nested_csv_dir), (".csv",), recursive=True,
+                                 include_dirs="2023*")
+        rel = [f[len(str(nested_csv_dir)) + 1:] for f in found]
+        assert rel == ["2023/q1/b.csv"]
+
+    def test_a_folder_pattern_also_matches_a_bare_name(self, nested_csv_dir):
+        found = folders.discover(str(nested_csv_dir), (".csv",), recursive=True,
+                                 include_dirs="q1")
+        rel = [f[len(str(nested_csv_dir)) + 1:] for f in found]
+        assert rel == ["2023/q1/b.csv"]
+
+    def test_a_file_pattern_with_a_slash_is_about_the_path(self, nested_csv_dir):
+        found = folders.discover(str(nested_csv_dir), (".csv",), recursive=True,
+                                 include="2023/*")
+        rel = [f[len(str(nested_csv_dir)) + 1:] for f in found]
+        assert rel == ["2023/q1/b.csv"]
+
+    def test_a_file_pattern_without_one_is_still_about_the_name(self, nested_csv_dir):
+        found = folders.discover(str(nested_csv_dir), (".csv",), recursive=True,
+                                 include="b.csv")
+        rel = [f[len(str(nested_csv_dir)) + 1:] for f in found]
+        assert rel == ["2023/q1/b.csv"]
+
+    def test_relative_folder_names_the_branch(self, nested_csv_dir):
+        root = str(nested_csv_dir)
+        assert folders.relative_folder(f"{root}/a.csv", root) == "."
+        assert folders.relative_folder(f"{root}/2023/q1/b.csv", root) == "2023/q1"
 
 
 class TestReadCsvFolder:
@@ -268,6 +333,62 @@ class TestReadExcelFolder:
             run_folder(registry, EXCEL_FOLDER,
                        {"path": str(excel_dir), "header": False,
                         "header_row": "abc"})
+
+    def test_subfolders_are_left_alone_unless_asked_for(self, registry,
+                                                       nested_excel_dir):
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(nested_excel_dir)})
+        assert len(out) == 3
+
+    def test_recursive_stacks_the_whole_tree(self, registry, nested_excel_dir):
+        out, log = run_folder(registry, EXCEL_FOLDER,
+                              {"path": str(nested_excel_dir), "recursive": True})
+        assert len(out) == 9
+        assert "subfolders included" in log
+
+    def test_folder_column_says_which_branch_each_row_came_from(
+            self, registry, nested_excel_dir):
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(nested_excel_dir), "recursive": True,
+                             "add_folder_column": True})
+        assert list(out.columns)[0] == "source_folder"
+        assert set(out["source_folder"]) == {".", "2023/q1", "archive"}
+
+    def test_folder_and_file_columns_sit_in_a_fixed_order(
+            self, registry, nested_excel_dir):
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(nested_excel_dir), "recursive": True,
+                             "sheet_name": "*", "add_folder_column": True,
+                             "add_source_file": True})
+        assert list(out.columns[:3]) == ["sheet", "source_folder", "source_file"]
+
+    def test_excluding_a_folder_skips_its_workbooks(self, registry,
+                                                    nested_excel_dir):
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(nested_excel_dir), "recursive": True,
+                             "exclude_dirs": "archive"})
+        assert len(out) == 6
+
+    def test_including_folders_keeps_only_those(self, registry, nested_excel_dir):
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(nested_excel_dir), "recursive": True,
+                             "include_dirs": "2023*"})
+        assert len(out) == 3
+
+    def test_folder_patterns_are_inert_on_a_flat_read(self, registry,
+                                                     nested_excel_dir):
+        # left over from a recursive run, they must not empty a flat one
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(nested_excel_dir),
+                             "include_dirs": "2023*", "exclude_dirs": "archive"})
+        assert len(out) == 3
+
+    def test_folder_patterns_matching_nothing_say_why(self, registry,
+                                                      nested_excel_dir):
+        with pytest.raises(ValueError, match="include/exclude"):
+            run_folder(registry, EXCEL_FOLDER,
+                       {"path": str(nested_excel_dir), "recursive": True,
+                        "include_dirs": "zzz*"})
 
     def test_polars_refuses_what_it_cannot_do(self, registry, excel_dir):
         pytest.importorskip("polars")

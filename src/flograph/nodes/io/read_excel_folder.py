@@ -15,8 +15,19 @@ pointed at a different folder per run.
 
 **Include / exclude patterns** are comma-separated globs matched against file
 names: include keeps only what matches (blank = keep everything), exclude
-then drops what matches. **Add source file column** records which workbook
-each row came from.
+then drops what matches. A pattern containing a `/` is matched against the
+file's path below the folder instead, e.g. `2023/*.xlsx`.
+
+**Search subfolders** walks the whole tree below the folder rather than
+reading only its top level. **Include / exclude folders** then narrow that
+walk: they are globs matched against a subfolder's path below the chosen
+folder (`2023/q1`) or against its own name (`q1`), include keeps only the
+folders that match, and exclude drops a folder together with everything
+under it. `*` crosses `/`, so `2023*` covers everything below `2023`.
+
+**Add source file column** records which workbook each row came from, and
+**Add folder column** which subfolder — `.` for the folder itself,
+otherwise a relative path like `2023/q1`.
 
 **Header** — ticked, row 0 holds the column names. Unticked, *Header row*
 names the 0-based row that does; leave it blank for no header at all.
@@ -41,11 +52,21 @@ PARAMS = [
      "placeholder": "folder holding the workbooks"},
     {"name": "sheet_name", "type": "string", "label": "Sheet",
      "default": "0", "placeholder": "name, 0-based index, or * for all"},
+    {"name": "recursive", "type": "bool", "label": "Search subfolders",
+     "default": False},
     {"name": "include_pattern", "type": "string", "label": "Include patterns",
      "default": "", "placeholder": "globs, e.g. sales_*.xlsx, *2023*"},
     {"name": "exclude_pattern", "type": "string", "label": "Exclude patterns",
      "default": "", "placeholder": "globs, e.g. *draft*, *tmp*"},
+    {"name": "include_dirs", "type": "string", "label": "Include folders",
+     "default": "", "placeholder": "globs, e.g. 2023*, */actuals",
+     "visible_when": {"recursive": ["True"]}},
+    {"name": "exclude_dirs", "type": "string", "label": "Exclude folders",
+     "default": "", "placeholder": "globs, e.g. archive*, *_old",
+     "visible_when": {"recursive": ["True"]}},
     {"name": "add_source_file", "type": "bool", "label": "Add source file column",
+     "default": False},
+    {"name": "add_folder_column", "type": "bool", "label": "Add folder column",
      "default": False},
     {"name": "header", "type": "bool", "label": "First row is header",
      "default": True},
@@ -181,15 +202,27 @@ def run(ctx, path_input=None):
             "connect a non-empty string to 'path_input'")
 
     include, exclude = p.get("include_pattern", ""), p.get("exclude_pattern", "")
-    files = folders.discover(folder, EXTENSIONS, include, exclude)
-    folders.require_files(files, folder, EXTENSIONS,
-                          bool(folders.patterns(include) or folders.patterns(exclude)))
+    recursive = bool(p.get("recursive", False))
+    # The folder patterns only mean anything while the walk is on, so a
+    # subfolder rule left behind from a recursive run cannot silently empty
+    # a flat one.
+    include_dirs = p.get("include_dirs", "") if recursive else ""
+    exclude_dirs = p.get("exclude_dirs", "") if recursive else ""
+    files = folders.discover(folder, EXTENSIONS, include, exclude,
+                             recursive=recursive, include_dirs=include_dirs,
+                             exclude_dirs=exclude_dirs)
+    folders.require_files(
+        files, folder, EXTENSIONS,
+        any(folders.patterns(raw)
+            for raw in (include, exclude, include_dirs, exclude_dirs)),
+        recursive)
 
     label, sheet_arg = _sheet(p)
     header_arg, header_row = _header(p)
     dtypes = _mapping(p.get("dtypes"))
     engine = _resolve_engine(p.get("engine", "auto"))
     add_source = p.get("add_source_file", False)
+    add_folder = p.get("add_folder_column", False)
     nrows = int(p.get("nrows", 0) or 0)
     skiprows = int(p.get("skiprows", 0) or 0)
     columns_raw = (p.get("columns") or "").strip()
@@ -274,19 +307,25 @@ def run(ctx, path_input=None):
 
     workers = folders.worker_count(p.get("parallel_files", 0), engine, len(files))
     ctx.log(f"{len(files)} workbook(s), sheet {label!r}, {engine} engine"
-            + (f", {workers} at a time" if workers > 1 else ""))
+            + (f", {workers} at a time" if workers > 1 else "")
+            + (" (subfolders included)" if recursive else ""))
 
     frames = []
     import os
 
     for path, sheets in folders.read_files(ctx, files, read_one, workers):
         name = os.path.basename(path)
+        where = folders.relative_folder(path, folder)
         for sheet_name, frame in sheets:
+            at = 0
             if sheet_name is not None:
-                frame.insert(0, "sheet", sheet_name)
+                frame.insert(at, "sheet", sheet_name)
+                at += 1
+            if add_folder:
+                frame.insert(at, "source_folder", where)
+                at += 1
             if add_source:
-                frame.insert(1 if sheet_name is not None else 0,
-                             "source_file", name)
+                frame.insert(at, "source_file", name)
             frames.append(frame)
 
     table = folders.stack(ctx, frames, files, nrows)
