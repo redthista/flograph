@@ -35,7 +35,17 @@ in **pages**, and the log names it. A folder read that dies on file 340 of
 
 **Include / exclude patterns** are comma-separated globs matched against file
 names: include keeps only what matches (blank = keep everything), exclude
-then drops what matches.
+then drops what matches. A pattern containing a `/` is matched against the
+file's path below the folder instead, e.g. `2026/*.pdf`.
+
+**Search subfolders** walks the whole tree below the folder rather than
+reading only its top level. **Include / exclude folders** then narrow that
+walk: globs matched against a subfolder's path below the chosen folder
+(`2026/signed`) or against its own name (`signed`), where include keeps only
+the folders that match and exclude drops a folder together with everything
+under it. `*` crosses `/`, so `2026*` covers everything below `2026`. With
+the walk on, both tables gain a `folder` column beside `file` saying which
+subfolder each document came from — `.` for the folder itself.
 
 **Max pages per file** caps a runaway document — a 4,000-page appendix in a
 folder of two-page letters — at a number you choose. 0 reads all of them.
@@ -53,10 +63,18 @@ PARAMS = [
      "placeholder": "folder holding the PDF files"},
     {"name": "password", "type": "string", "label": "Password", "default": "",
      "placeholder": "none, or ${pdf_password}"},
+    {"name": "recursive", "type": "bool", "label": "Search subfolders",
+     "default": False},
     {"name": "include_pattern", "type": "string", "label": "Include patterns",
      "default": "", "placeholder": "globs, e.g. invoice_*.pdf, *2026*"},
     {"name": "exclude_pattern", "type": "string", "label": "Exclude patterns",
      "default": "", "placeholder": "globs, e.g. *draft*, *copy*"},
+    {"name": "include_dirs", "type": "string", "label": "Include folders",
+     "default": "", "placeholder": "globs, e.g. 2026*, */signed",
+     "visible_when": {"recursive": ["True"]}},
+    {"name": "exclude_dirs", "type": "string", "label": "Exclude folders",
+     "default": "", "placeholder": "globs, e.g. archive*, *_superseded",
+     "visible_when": {"recursive": ["True"]}},
     {"name": "extract_text", "type": "bool", "label": "Extract text",
      "default": True},
     {"name": "skip_empty", "type": "bool", "label": "Skip pages with no text",
@@ -93,10 +111,20 @@ def run(ctx, path_input=None):
             "connect a non-empty string to 'path_input'")
 
     include, exclude = p.get("include_pattern", ""), p.get("exclude_pattern", "")
-    files = folders.discover(folder, EXTENSIONS, include, exclude)
+    recursive = bool(p.get("recursive", False))
+    # The folder patterns only mean anything while the walk is on, so a
+    # subfolder rule left behind from a recursive run cannot silently empty
+    # a flat one.
+    include_dirs = p.get("include_dirs", "") if recursive else ""
+    exclude_dirs = p.get("exclude_dirs", "") if recursive else ""
+    files = folders.discover(folder, EXTENSIONS, include, exclude,
+                             recursive=recursive, include_dirs=include_dirs,
+                             exclude_dirs=exclude_dirs)
     folders.require_files(
         files, folder, EXTENSIONS,
-        bool(folders.patterns(include) or folders.patterns(exclude)))
+        any(folders.patterns(raw)
+            for raw in (include, exclude, include_dirs, exclude_dirs)),
+        recursive)
 
     password = str(p.get("password", "") or "")
     carry_bytes = p.get("payload", pdfdoc.PAYLOAD_LIGHT) == pdfdoc.PAYLOAD_HEAVY
@@ -108,6 +136,11 @@ def run(ctx, path_input=None):
     def read_one(path):
         """One file -> (page rows, document row). Runs on a worker thread."""
         name = os.path.basename(path)
+        # A `file` column on its own cannot tell two January statements
+        # filed under different clients apart, so a recursive read says
+        # which branch each document came from.
+        where = ({"folder": folders.relative_folder(path, folder)}
+                 if recursive else {})
         try:
             data, resolved = resolve_source(path, need_bytes=carry_bytes)
             with pdfdoc.PdfDocument.open(data, resolved, password) as doc:
@@ -116,7 +149,7 @@ def run(ctx, path_input=None):
                 rows = []
                 for page in wanted:
                     width, height = doc.page_size(page)
-                    row = {"file": name, "page": page + 1,
+                    row = {"file": name, **where, "page": page + 1,
                            "label": doc.page_label(page),
                            "width_pt": round(width, 2),
                            "height_pt": round(height, 2)}
@@ -128,7 +161,7 @@ def run(ctx, path_input=None):
                         row["characters"] = len(text)
                         row["words"] = len(text.split())
                     rows.append(row)
-                record = {"file": name,
+                record = {"file": name, **where,
                           **pdfdoc.document_payload(doc, path, data, carry_bytes),
                           "has_text": doc.has_text(), "error": ""}
                 record.pop("source", None)
@@ -144,13 +177,14 @@ def run(ctx, path_input=None):
             blank.update(dict.fromkeys(
                 ("title", "author", "subject", "keywords", "creator",
                  "producer", "created", "modified"), ""))
-            return [], {"file": name, "path": path, "pages": 0, **blank,
-                        "has_text": False, "error": str(exc)}
+            return [], {"file": name, **where, "path": path, "pages": 0,
+                        **blank, "has_text": False, "error": str(exc)}
 
     workers = folders.worker_count(p.get("parallel_files", 0), "pdfium",
                                    len(files))
     ctx.log(f"{len(files)} PDF(s) in {folder}"
-            + (f", {workers} at a time" if workers > 1 else ""))
+            + (f", {workers} at a time" if workers > 1 else "")
+            + (" (subfolders included)" if recursive else ""))
 
     page_rows, doc_rows, failed = [], [], 0
     for _path, (rows, record) in folders.read_files(ctx, files, read_one,
@@ -162,6 +196,8 @@ def run(ctx, path_input=None):
             ctx.log(f"    skipped: {record['error']}")
 
     page_columns = ["file", "page", "label", "width_pt", "height_pt"]
+    if recursive:
+        page_columns.insert(1, "folder")
     if extract:
         page_columns += ["text", "characters", "words"]
     pages = pd.DataFrame(page_rows, columns=page_columns)

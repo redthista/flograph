@@ -92,6 +92,18 @@ def folder(tmp_path):
     return tmp_path
 
 
+@pytest.fixture
+def nested_folder(tmp_path):
+    """One PDF at the top and one down each of two branches."""
+    (tmp_path / "top.pdf").write_bytes(build_pdf([["top"]], "Top"))
+    for rel, title in [("2026/signed/deal.pdf", "Deal"),
+                       ("archive/2019/old.pdf", "Old")]:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(build_pdf([[title.lower()]], title))
+    return tmp_path
+
+
 def run_node(registry, type_id, params=None, **inputs):
     spec = registry.get(type_id)
     defaults = spec.default_params()
@@ -379,6 +391,37 @@ class TestReadPdfFolder:
         out = run_node(registry, "flograph.io.read_pdf_folder",
                        {"path": str(folder), "exclude_pattern": "d_*"})
         assert "d_broken.pdf" not in set(out["documents"]["file"])
+
+    def test_subfolders_are_left_alone_unless_asked_for(self, registry,
+                                                       nested_folder):
+        out = run_node(registry, "flograph.io.read_pdf_folder",
+                       {"path": str(nested_folder)})
+        assert list(out["pages"]["file"]) == ["top.pdf"]
+        assert "folder" not in out["pages"].columns
+
+    def test_a_recursive_read_says_which_branch_each_page_came_from(
+            self, registry, nested_folder):
+        out = run_node(registry, "flograph.io.read_pdf_folder",
+                       {"path": str(nested_folder), "recursive": True})
+        pages = out["pages"]
+        assert list(pages.columns[:2]) == ["file", "folder"]
+        assert dict(zip(pages["file"], pages["folder"])) == {
+            "top.pdf": ".", "deal.pdf": "2026/signed", "old.pdf": "archive/2019"}
+        assert set(out["documents"]["folder"]) == {".", "2026/signed",
+                                                   "archive/2019"}
+
+    def test_excluding_a_folder_takes_its_subtree(self, registry,
+                                                  nested_folder):
+        out = run_node(registry, "flograph.io.read_pdf_folder",
+                       {"path": str(nested_folder), "recursive": True,
+                        "exclude_dirs": "archive"})
+        assert list(out["pages"]["file"]) == ["deal.pdf", "top.pdf"]
+
+    def test_folder_patterns_are_inert_on_a_flat_read(self, registry,
+                                                     nested_folder):
+        out = run_node(registry, "flograph.io.read_pdf_folder",
+                       {"path": str(nested_folder), "include_dirs": "2026*"})
+        assert list(out["pages"]["file"]) == ["top.pdf"]
 
     def test_max_pages_caps_a_long_document(self, registry, folder):
         out = run_node(registry, "flograph.io.read_pdf_folder",

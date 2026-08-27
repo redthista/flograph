@@ -70,6 +70,28 @@ def nested_csv_dir(tmp_path):
 
 
 @pytest.fixture
+def nested_csv_frames(tmp_path, parts):
+    """`nested_csv_dir`'s shape, but with rows in it the readers can stack."""
+    for rel, frame in zip(["a.csv", "2023/q1/b.csv", "archive/c.csv"], parts):
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(target, index=False)
+    return tmp_path
+
+
+@pytest.fixture
+def nested_parquet_dir(tmp_path, parts):
+    """A partition layout, the shape Parquet folders usually arrive in."""
+    pytest.importorskip("pyarrow")
+    for rel, frame in zip(["part-0.parquet", "year=2023/part-1.parquet",
+                           "_temporary/part-2.parquet"], parts):
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(target, index=False)
+    return tmp_path
+
+
+@pytest.fixture
 def parquet_dir(tmp_path, parts):
     pytest.importorskip("pyarrow")
     for name, frame in zip(["a.parquet", "b.parquet", "c.parquet"], parts):
@@ -185,6 +207,39 @@ class TestReadCsvFolder:
         out, _ = run_folder(registry, CSV_FOLDER,
                             {"path": str(csv_dir), "exclude_pattern": "c.csv"})
         assert len(out) == 6
+
+    def test_subfolders_are_left_alone_unless_asked_for(self, registry,
+                                                       nested_csv_frames):
+        out, _ = run_folder(registry, CSV_FOLDER,
+                            {"path": str(nested_csv_frames)})
+        assert len(out) == 3
+
+    def test_recursive_stacks_the_whole_tree(self, registry, nested_csv_frames):
+        out, log = run_folder(registry, CSV_FOLDER,
+                              {"path": str(nested_csv_frames), "recursive": True})
+        assert len(out) == 9
+        assert "subfolders included" in log
+
+    def test_folder_column_and_file_column_sit_in_a_fixed_order(
+            self, registry, nested_csv_frames):
+        out, _ = run_folder(registry, CSV_FOLDER,
+                            {"path": str(nested_csv_frames), "recursive": True,
+                             "add_folder_column": True, "add_source_file": True})
+        assert list(out.columns[:2]) == ["source_folder", "source_file"]
+        assert set(out["source_folder"]) == {".", "2023/q1", "archive"}
+
+    def test_folder_patterns_narrow_the_walk(self, registry, nested_csv_frames):
+        out, _ = run_folder(registry, CSV_FOLDER,
+                            {"path": str(nested_csv_frames), "recursive": True,
+                             "exclude_dirs": "archive"})
+        assert len(out) == 6
+
+    def test_folder_patterns_are_inert_on_a_flat_read(self, registry,
+                                                     nested_csv_frames):
+        out, _ = run_folder(registry, CSV_FOLDER,
+                            {"path": str(nested_csv_frames),
+                             "include_dirs": "2023*", "exclude_dirs": "archive"})
+        assert len(out) == 3
 
     def test_filters_matching_nothing_say_why(self, registry, csv_dir):
         with pytest.raises(ValueError, match="include/exclude"):
@@ -409,6 +464,24 @@ class TestReadParquetFolder:
         out, _ = run_folder(registry, PARQUET_FOLDER,
                             {"path": str(parquet_dir), "add_source_file": True})
         assert set(out["source_file"]) == {"a.parquet", "b.parquet", "c.parquet"}
+
+    def test_partitions_below_the_folder_need_asking_for(
+            self, registry, nested_parquet_dir):
+        out, _ = run_folder(registry, PARQUET_FOLDER,
+                            {"path": str(nested_parquet_dir)})
+        assert len(out) == 3
+        out, _ = run_folder(registry, PARQUET_FOLDER,
+                            {"path": str(nested_parquet_dir), "recursive": True})
+        assert len(out) == 9
+
+    def test_a_partition_folder_can_be_excluded_and_recorded(
+            self, registry, nested_parquet_dir):
+        out, _ = run_folder(registry, PARQUET_FOLDER,
+                            {"path": str(nested_parquet_dir), "recursive": True,
+                             "exclude_dirs": "_temporary",
+                             "add_folder_column": True})
+        assert len(out) == 6
+        assert set(out["source_folder"]) == {".", "year=2023"}
 
     def test_columns_push_down(self, registry, parquet_dir):
         out, _ = run_folder(registry, PARQUET_FOLDER,

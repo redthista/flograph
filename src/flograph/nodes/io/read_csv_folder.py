@@ -20,6 +20,18 @@ then drops what matches. **Add source file column** records which file each
 row came from — worth having when the file name carries the month or region
 that is not inside the data.
 
+**Search subfolders** walks the whole tree below the folder rather than
+reading only its top level. **Include / exclude folders** then narrow that
+walk: they are globs matched against a subfolder's path below the chosen
+folder (`2023/q1`) or against its own name (`q1`), include keeps only the
+folders that match, and exclude drops a folder together with everything
+under it. `*` crosses `/`, so `2023*` covers everything below `2023`. A file
+pattern containing a `/` is matched against the file's path below the folder
+instead of its name, e.g. `2023/*.csv`.
+
+**Add folder column** records which subfolder each row came from — `.` for
+the folder itself, otherwise a relative path like `2023/q1`.
+
 **Engine**: *polars* reads with a Rust parser and hands back a pandas frame;
 pandas' own *c* parser is already fast and also releases the GIL, so both
 overlap properly across files. *pyarrow* is fastest per file but honours
@@ -37,11 +49,21 @@ PARAMS = [
      "placeholder": "folder holding the CSV files"},
     {"name": "sep", "type": "string", "label": "Separator", "default": ",",
      "placeholder": ", ; \\t or auto"},
+    {"name": "recursive", "type": "bool", "label": "Search subfolders",
+     "default": False},
     {"name": "include_pattern", "type": "string", "label": "Include patterns",
      "default": "", "placeholder": "globs, e.g. sales_*.csv, *2023*"},
     {"name": "exclude_pattern", "type": "string", "label": "Exclude patterns",
      "default": "", "placeholder": "globs, e.g. *draft*, *tmp*"},
+    {"name": "include_dirs", "type": "string", "label": "Include folders",
+     "default": "", "placeholder": "globs, e.g. 2023*, */actuals",
+     "visible_when": {"recursive": ["True"]}},
+    {"name": "exclude_dirs", "type": "string", "label": "Exclude folders",
+     "default": "", "placeholder": "globs, e.g. archive*, *_old",
+     "visible_when": {"recursive": ["True"]}},
     {"name": "add_source_file", "type": "bool", "label": "Add source file column",
+     "default": False},
+    {"name": "add_folder_column", "type": "bool", "label": "Add folder column",
      "default": False},
     {"name": "header", "type": "bool", "label": "First row is header",
      "default": True},
@@ -141,9 +163,20 @@ def run(ctx, path_input=None):
             "connect a non-empty string to 'path_input'")
 
     include, exclude = p.get("include_pattern", ""), p.get("exclude_pattern", "")
-    files = folders.discover(folder, EXTENSIONS, include, exclude)
-    folders.require_files(files, folder, EXTENSIONS,
-                          bool(folders.patterns(include) or folders.patterns(exclude)))
+    recursive = bool(p.get("recursive", False))
+    # The folder patterns only mean anything while the walk is on, so a
+    # subfolder rule left behind from a recursive run cannot silently empty
+    # a flat one.
+    include_dirs = p.get("include_dirs", "") if recursive else ""
+    exclude_dirs = p.get("exclude_dirs", "") if recursive else ""
+    files = folders.discover(folder, EXTENSIONS, include, exclude,
+                             recursive=recursive, include_dirs=include_dirs,
+                             exclude_dirs=exclude_dirs)
+    folders.require_files(
+        files, folder, EXTENSIONS,
+        any(folders.patterns(raw)
+            for raw in (include, exclude, include_dirs, exclude_dirs)),
+        recursive)
 
     separator = (p.get("sep") or ",").replace("\\t", "\t")
     engine = p.get("engine", "auto")
@@ -256,13 +289,20 @@ def run(ctx, path_input=None):
 
     workers = folders.worker_count(p.get("parallel_files", 0), engine, len(files))
     ctx.log(f"{len(files)} file(s), {engine} engine"
-            + (f", {workers} at a time" if workers > 1 else ""))
+            + (f", {workers} at a time" if workers > 1 else "")
+            + (" (subfolders included)" if recursive else ""))
 
     add_source = p.get("add_source_file", False)
+    add_folder = p.get("add_folder_column", False)
     frames = []
     for path, frame in folders.read_files(ctx, files, read_one, workers):
+        at = 0
+        if add_folder:
+            frame.insert(at, "source_folder",
+                         folders.relative_folder(path, folder))
+            at += 1
         if add_source:
-            frame.insert(0, "source_file", os.path.basename(path))
+            frame.insert(at, "source_file", os.path.basename(path))
         frames.append(frame)
 
     table = folders.stack(ctx, frames, files, nrows)
