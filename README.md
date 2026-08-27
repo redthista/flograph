@@ -143,12 +143,13 @@ is running low or full.
 
 | Action | Binding |
 | --- | --- |
-| Add node | `Tab` (search palette), right-click, or drag from the library |
+| Add node | `Tab` or right-click (both open the search palette), or drag from the library |
 | Connect | drag from a port; drop on empty canvas to pick a compatible node |
 | Splice into a wire | drop a library node onto the wire — it lights green while it will take; `Alt` drops without connecting |
 | Replace a node | drop a library node onto it — wires that fit the new node's ports come across |
 | Reroute dot | double-click a wire (double-click the dot again to name it) |
-| Comment frame | `Ctrl+G` around the selection (frames move their contents) |
+| Comment frame | `Ctrl+G` around the selection |
+| Move a frame | drag its **title bar** — its contents come with it |
 | Run all / selected / cancel | `F5` / `F6` / `Esc` |
 | Run to this node | right-click a node |
 | Pan / zoom | middle-drag or `Space`+drag / wheel |
@@ -171,6 +172,12 @@ category default, a different drawn mark, a few characters of your own text,
 or a picture (PNG, SVG or animated GIF, carried inside the project file so it
 travels with the flow). Turn the squares off for the whole canvas under
 Settings → Canvas.
+
+Select several nodes, right-click one of them, and the menu is about the
+**selection**: run them, freeze, lock, deactivate, *Run only when asked*,
+appearance, add them all to a page — one undo step each. The node under the
+cursor decides only what the labels *say*, so an entry reading *Unfreeze*
+leaves the whole selection thawed rather than swapping each node over.
 
 **Hold Q** over the canvas to float every port's name for as long as you hold
 it. **Double-click** a node for its properties (or its code, or a rename —
@@ -224,6 +231,17 @@ and each becomes a tile — the same widget as the canvas card, resizable and
 arrangeable, showing STALE when its node is dirty. Tiles maximise to
 fullscreen; pages can be renamed, recoloured, reordered by dragging, and
 duplicated.
+
+A finished page can be **locked** from its tab menu, and locked it *is* the
+dashboard: the tiles stop moving and resizing, the arranging chrome goes, and
+the page stops behaving like a canvas — no zoom, no wheel, no panning, no
+rubber band, no context menu. What stays is everything inside the tiles,
+which is the whole point of the distinction: slicers still filter, sliders
+still move, spreadsheets still take typing, a PDF still turns its pages, and
+any tile still maximises. **Scale to fit the window** sits beside the lock
+and is independent of it: the page zooms as the window changes size so the
+same tiles stay framed, for when the screen a dashboard is opened on is not
+the screen it was built on. Both travel with the project.
 
 **Input controls** are the other half of that: a whole node category that you
 *set* rather than compute. **Slider**, **Number**, **Text**, **Date**,
@@ -316,7 +334,8 @@ standalone HTML page),
 Slicer, Image (any picture on the canvas, animated GIFs included, from a
 file or a base64 string), PDF Viewer (a page of a document on the canvas or a
 dashboard — rendered at the size it is drawn at, so a 400-page report costs
-one page of pixels), Report.
+one page of pixels, with chevrons under the page number to turn it: paging
+runs nothing and dirties nothing, on a card or a tile alike), Report.
 
 Any web-view node has **Open in Browser** on its right-click menu — the same
 document, in a real browser, refreshed in place when the flow re-runs.
