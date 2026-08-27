@@ -1508,7 +1508,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         Qt selects anything the band touches, which was tolerable while a
         frame's body could not be banded over at all — pressing there
         dragged the box. Now that the body is canvas (see
-        FrameItem._drags_from), a band drawn inside a frame to pick up two
+        FrameItem.chrome_at), a band drawn inside a frame to pick up two
         nodes would come back with the frame as well, and dragging that
         selection would slide the box off everything it contains.
 

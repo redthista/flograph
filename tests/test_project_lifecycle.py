@@ -360,30 +360,28 @@ class TestCopyPaste:
         payload = json.loads(QApplication.clipboard().text())
         assert [n["id"] for n in payload["nodes"]] == [const.id]
 
-    def test_canvas_context_menu_no_paste_without_clipboard(self, window,
-                                                             monkeypatch):
+    def test_canvas_menu_offers_no_paste_without_clipboard(self, window):
+        """Right-clicking the canvas opens the palette now, so Paste is a row
+        in it rather than an entry on a menu — offered on the same terms."""
         from PySide6.QtCore import QPoint, QPointF
         QApplication.clipboard().setText("")
-        seen = {}
-
-        class _Inspector(QMenu):
-            def exec(self, *args):
-                seen["actions"] = [a.text() for a in self.actions()]
-                return None
-        monkeypatch.setattr(mw, "QMenu", _Inspector)
 
         window._show_add_node_menu(QPointF(0, 0), QPoint(0, 0))
 
-        assert "Paste" not in seen["actions"]
+        assert "paste" not in [key for _label, key
+                               in window._palette_popup._extras]
+        window._palette_popup.hide()
 
-    def test_canvas_context_menu_paste_with_clipboard(self, window,
-                                                       monkeypatch):
+    def test_canvas_menu_pastes_where_it_was_opened(self, window):
         from PySide6.QtCore import QPoint, QPointF
         const, _script = build_small_project(window)
         window.scene.node_items[const.id].setSelected(True)
         window._copy_selection()
-        _pick_menu_action(monkeypatch, "Paste")
 
-        window._show_add_node_menu(QPointF(0, 0), QPoint(0, 0))
+        window._show_add_node_menu(QPointF(400, 300), QPoint(0, 0))
+        assert "paste" in [key for _label, key
+                           in window._palette_popup._extras]
+        window._palette_popup.hide()
+        window._palette_extra_chosen("paste")
 
         assert len(window.graph.nodes) == 3

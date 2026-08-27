@@ -207,6 +207,7 @@ class MainWindow(QMainWindow):
         self._palette_scene_pos = QPointF()
         self._pending_wire = None
         self._palette_popup.chosen.connect(self._add_node_from_palette)
+        self._palette_popup.extra_chosen.connect(self._palette_extra_chosen)
 
         # Run status: what is running, how far in, how long it has been, and
         # whether it has gone quiet. Driven by a tick rather than only by
@@ -2529,29 +2530,33 @@ class MainWindow(QMainWindow):
             self.view.mapToGlobal(self.view.mapFromScene(scene_pos)),
             predicate=compatible)
 
-    def _show_add_node_menu(self, scene_pos: QPointF, global_pos: QPoint) -> None:
-        menu = QMenu(self)
-        for category, specs in self.registry.categories().items():
-            submenu = menu.addMenu(category)
-            for spec in specs:
-                action = submenu.addAction(spec.label)
-                action.setData(spec.type_id)
-        menu.addSeparator()
-        frame_action = menu.addAction("Add Frame Here")
-        paste_action = None
+    def _show_add_node_menu(self, scene_pos: QPointF,
+                            global_pos: QPoint) -> None:
+        """Right-clicking empty canvas: the same searchable popup a dropped
+        wire opens, rather than a menu of nested category submenus.
+
+        The submenus held every node in the library behind a category you had
+        to guess first, and they were the one place in the app where finding
+        a node meant reading rather than typing. This is the popup people
+        already like — with the two things on that menu that are not nodes
+        kept as rows of their own, so nothing is lost by the swap.
+        """
+        extras = [("Frame", "frame")]
         if self._clipboard_payload() is not None:
-            menu.addSeparator()
-            paste_action = menu.addAction("Paste")
+            extras.append(("Paste", "paste"))
         elif self._clipboard_has_image():
-            menu.addSeparator()
-            paste_action = menu.addAction("Paste Image")
-        chosen = menu.exec(global_pos)
-        if chosen is frame_action:
-            self._add_frame_at(scene_pos)
-        elif paste_action is not None and chosen is paste_action:
-            self._paste(scene_pos)  # land it where the menu was opened
-        elif chosen is not None and chosen.data():
-            self._add_node_at(chosen.data(), scene_pos)
+            extras.append(("Paste Image", "paste"))
+        self._palette_scene_pos = scene_pos
+        self._pending_wire = None
+        self._palette_popup.popup_at(global_pos, extras=tuple(extras))
+
+    def _palette_extra_chosen(self, key: str) -> None:
+        """A palette row that is not a node. Both land where the popup was
+        opened, like the node rows beside them."""
+        if key == "frame":
+            self._add_frame_at(self._palette_scene_pos)
+        elif key == "paste":
+            self._paste(self._palette_scene_pos)
 
     def _show_order_edge_menu(self, conn_id: str, global_pos: QPoint) -> None:
         """Right-clicking an order edge: what it does to the two nodes it
@@ -3622,7 +3627,12 @@ class MainWindow(QMainWindow):
         return payload
 
     def _clipboard_has_image(self) -> bool:
-        return QApplication.clipboard().mimeData().hasImage()
+        # mimeData() is documented as possibly null and on some platforms
+        # really is — a session with no clipboard owner, a headless run. The
+        # canvas asks this on every right-click now, so a null here would be
+        # a crash where a menu should be. image_paste guards the same way.
+        mime = QApplication.clipboard().mimeData()
+        return mime is not None and mime.hasImage()
 
     def _paste_clipboard_image(self, scene_pos: Optional[QPointF] = None
                                ) -> bool:

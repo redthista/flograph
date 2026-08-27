@@ -29,6 +29,9 @@ FRAME_ID_MIME = "application/x-flograph-frame-id"
 TYPE_ID_ROLE = Qt.UserRole
 SECTION_ROLE = Qt.UserRole + 1
 FRAME_ID_ROLE = Qt.UserRole + 2
+#: Rows in the popup that are not nodes at all — "Frame", "Paste" — carry
+#: their key here instead of a type_id. See NodePalettePopup.popup_at.
+EXTRA_ROLE = Qt.UserRole + 3
 
 # The mark beside each library row: the same glyph the node will wear on the
 # canvas, so a node is recognised in the list by the shape you will then look
@@ -57,9 +60,17 @@ def spec_icon(spec: NodeSpec) -> QIcon:
 
 
 class NodePalettePopup(QFrame):
-    """Blueprint-style Tab popup: fuzzy search, Enter to place."""
+    """Blueprint-style Tab popup: fuzzy search, Enter to place.
 
-    chosen = Signal(str)  # type_id
+    Opened three ways, and the differences are all in what it is given:
+    Tab offers the whole library, dropping a wire offers only the nodes
+    that can take it (a predicate), and right-clicking the canvas offers
+    the library plus the handful of things that are not nodes — a frame,
+    a paste — as `extras`.
+    """
+
+    chosen = Signal(str)        # type_id
+    extra_chosen = Signal(str)  # the key of a non-node row
 
     def __init__(self, registry: NodeRegistry, favorites: Favorites,
                  parent=None) -> None:
@@ -67,6 +78,7 @@ class NodePalettePopup(QFrame):
         self._registry = registry
         self._favorites = favorites
         self._predicate: Optional[Callable[[NodeSpec], bool]] = None
+        self._extras: list[tuple[str, str]] = []
         self._favorites.changed.connect(self._refresh_if_open)
         self.setFixedSize(280, 320)
         self.setFrameShape(QFrame.StyledPanel)
@@ -89,8 +101,12 @@ class NodePalettePopup(QFrame):
             self._refresh(self._search.text())
 
     def popup_at(self, global_pos: QPoint,
-                 predicate: Optional[Callable[[NodeSpec], bool]] = None) -> None:
+                 predicate: Optional[Callable[[NodeSpec], bool]] = None,
+                 extras: tuple = ()) -> None:
+        """Show the popup. `extras` are (label, key) rows that are not nodes;
+        choosing one emits extra_chosen(key) rather than chosen(type_id)."""
         self._predicate = predicate
+        self._extras = list(extras)
         self._search.clear()
         self._refresh("")
         self.move(global_pos)
@@ -99,6 +115,14 @@ class NodePalettePopup(QFrame):
 
     def _refresh(self, query: str) -> None:
         self._list.clear()
+        for label, key in self._extras:
+            if query and query.lower() not in label.lower():
+                continue
+            # the same shape as a node row, so the list reads as one list
+            item = QListWidgetItem(f"{label}    (canvas)")
+            item.setData(EXTRA_ROLE, key)
+            self._list.addItem(item)
+        first_node = self._list.count()
         favorites = self._favorites
         specs = self._registry.search(query)
         favs = [s for s in specs if favorites.contains(s.type_id)]
@@ -112,15 +136,24 @@ class NodePalettePopup(QFrame):
             item.setData(Qt.UserRole, spec.type_id)
             self._list.addItem(item)
         if self._list.count():
-            self._list.setCurrentRow(0)
+            # Start on the first *node*, not on an extra: the popup is here
+            # to add a node, and Enter on an empty search should say so. Type
+            # "fra" and the nodes drop away, leaving the extra selected.
+            self._list.setCurrentRow(
+                first_node if first_node < self._list.count() else 0)
 
     def _accept_current(self) -> None:
         self._accept(self._list.currentItem())
 
     def _accept(self, item: Optional[QListWidgetItem]) -> None:
-        if item is not None:
-            self.hide()
-            self.chosen.emit(item.data(Qt.UserRole))
+        if item is None:
+            return
+        self.hide()
+        extra = item.data(EXTRA_ROLE)
+        if extra:
+            self.extra_chosen.emit(extra)
+            return
+        self.chosen.emit(item.data(TYPE_ID_ROLE))
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self._search and isinstance(event, QKeyEvent) \

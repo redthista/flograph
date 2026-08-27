@@ -622,12 +622,12 @@ class TestDragHandle:
 
     def test_the_title_bar_drags_it(self, env):
         item = self._frame(env)
-        assert item._drags_from(QPointF(300.0, TITLE_H - 2))
+        assert item.chrome_at(QPointF(300.0, TITLE_H - 2))
 
     def test_the_body_does_not(self, env):
         item = self._frame(env)
-        assert not item._drags_from(QPointF(300.0, 200.0))
-        assert not item._drags_from(QPointF(300.0, TITLE_H + 1))
+        assert not item.chrome_at(QPointF(300.0, 200.0))
+        assert not item.chrome_at(QPointF(300.0, TITLE_H + 1))
 
     def test_a_press_on_the_body_is_passed_on(self, env):
         """Ignored, not swallowed — that is what lets the rubber band and
@@ -676,7 +676,7 @@ class TestDragHandle:
         item = self._frame(env)
         script_node(graph, registry, "inner", (50.0, 100.0))
         collapse(scene, "f1")
-        assert item._drags_from(QPointF(20.0, 40.0))
+        assert item.chrome_at(QPointF(20.0, 40.0))
         self._press(item, QPointF(20.0, 40.0))
         assert item._dragging is True
 

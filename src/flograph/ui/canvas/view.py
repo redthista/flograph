@@ -276,9 +276,9 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .frame_item import FrameItem
         from .connection_item import ConnectionItem
         item = self.itemAt(event.pos())
+        scene_pos = self.mapToScene(event.pos())
         if item is None:
-            self.add_node_requested.emit(
-                self.mapToScene(event.pos()), event.globalPos())
+            self.add_node_requested.emit(scene_pos, event.globalPos())
             event.accept()
             return
         if isinstance(item, PortItem):
@@ -294,7 +294,16 @@ class NodeGraphView(ZoomPanGraphicsView):
             event.accept()
             return
         if isinstance(item, FrameItem):
-            self.frame_context_requested.emit(item.frame.id, event.globalPos())
+            # Same split as the drag: the title bar is the frame, the body is
+            # canvas. A frame is usually bigger than the screen, so treating
+            # its whole rectangle as the frame meant that inside one — which
+            # is exactly where you want to add the next node — the canvas
+            # menu was unreachable.
+            if item.chrome_at(item.mapFromScene(scene_pos)):
+                self.frame_context_requested.emit(item.frame.id,
+                                                  event.globalPos())
+            else:
+                self.add_node_requested.emit(scene_pos, event.globalPos())
             event.accept()
             return
         if isinstance(item, ConnectionItem) and item.is_order:

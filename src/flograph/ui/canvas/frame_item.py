@@ -193,8 +193,13 @@ class FrameItem(QGraphicsObject):
             return QRectF(3, 3, TOGGLE_W, TOGGLE_H)
         return QRectF(7, TITLE_H / 2 - TOGGLE_H / 2, TOGGLE_W, TOGGLE_H)
 
-    def _drags_from(self, pos: QPointF) -> bool:
-        """Whether a press here takes hold of the frame to move it.
+    def chrome_at(self, pos: QPointF) -> bool:
+        """Whether this point belongs to the frame itself rather than to the
+        canvas inside it — its title bar, and nothing else.
+
+        Two things ask: a press, which takes hold of the frame to move it,
+        and a right-click, which opens the frame's menu rather than the
+        canvas's.
 
         The title bar, and nothing else. A frame used to drag from anywhere
         inside its rectangle, which is fine while you can see the whole box
@@ -768,7 +773,7 @@ class FrameItem(QGraphicsObject):
                 self.setCursor(Qt.SizeHorCursor)
             elif edge == "bottom":
                 self.setCursor(Qt.SizeVerCursor)
-            elif self._drags_from(event.pos()) and not self.collapsed:
+            elif self.chrome_at(event.pos()) and not self.collapsed:
                 # now that the title bar is the only handle, it is the one
                 # part that has to advertise itself
                 self.setCursor(Qt.SizeAllCursor)
@@ -823,7 +828,7 @@ class FrameItem(QGraphicsObject):
             self._resize_edge = edge
             event.accept()
             return
-        if not self._drags_from(event.pos()):
+        if not self.chrome_at(event.pos()):
             # The body of a frame is canvas. Ignored rather than accepted,
             # so the press carries on to whatever is under it — a rubber
             # band over the nodes inside, a click on empty space — instead
