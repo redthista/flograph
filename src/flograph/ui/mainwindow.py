@@ -1542,6 +1542,8 @@ class MainWindow(QMainWindow):
         self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
         self.page_bar.set_view_mode_requested.connect(self._set_page_view_mode)
+        self.page_bar.set_fit_to_window_requested.connect(
+            self._set_page_fit_to_window)
         self.page_bar.export_page_requested.connect(self._export_report_pdf)
         self.page_bar.page_setup_requested.connect(self._edit_page_setup)
         self.page_bar.export_html_requested.connect(self._export_report_html)
@@ -1822,6 +1824,7 @@ class MainWindow(QMainWindow):
         self.page_bar.set_page_title(page.id, page.title)
         self.page_bar.set_page_color(page.id, page.color)
         self.page_bar.set_page_view_mode(page.id, page.view_mode)
+        self.page_bar.set_page_fit_to_window(page.id, page.fit_to_window)
         # the model is the source of truth for the mode, so undo/redo and a
         # project load drive the widget through here rather than separately
         widget = self._dashboard_pages.get(page.id)
@@ -1831,6 +1834,10 @@ class MainWindow(QMainWindow):
             # locking a page locks its zoom, and the indicator is the one
             # place that says so
             self._refresh_zoom_indicator()
+        if widget is not None and hasattr(widget, "set_fit_to_window") \
+                and widget.fit_to_window() != page.fit_to_window:
+            widget.set_fit_to_window(page.fit_to_window)
+            self._refresh_zoom_indicator()   # scaling holds the zoom too
 
     def _set_page_view_mode(self, page_id: str, view_mode: bool) -> None:
         page = self.graph.pages.get(page_id)
@@ -1839,6 +1846,14 @@ class MainWindow(QMainWindow):
         from .commands import SetPageViewModeCommand
         self.undo_stack.push(
             SetPageViewModeCommand(self.graph, page_id, bool(view_mode)))
+
+    def _set_page_fit_to_window(self, page_id: str, fit: bool) -> None:
+        page = self.graph.pages.get(page_id)
+        if page is None or page.fit_to_window == bool(fit):
+            return
+        from .commands import SetPageFitToWindowCommand
+        self.undo_stack.push(
+            SetPageFitToWindowCommand(self.graph, page_id, bool(fit)))
 
     def _set_visuals_visible(self, visible: bool) -> None:
         """Remember the toggle as the start state for pages made later. Pages

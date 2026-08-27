@@ -121,6 +121,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "color": p.color,
                     "maximized_tile": p.maximized_tile,
                     "view_mode": p.view_mode,
+                    "fit_to_window": p.fit_to_window,
                     # only what the user changed — see PageSetup.to_dict
                     "setup": p.setup.to_dict(),
                     "tiles": [
@@ -294,6 +295,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent in files written before view mode existed — they were
             # all being edited, so that is the right default
             view_mode=bool(entry.get("view_mode", False)),
+            # absent before pages could scale themselves; those pages sat at
+            # whatever zoom the reader left them at, which is False
+            fit_to_window=bool(entry.get("fit_to_window", False)),
             # absent in files written before page setup existed, and absent
             # in any page left at the defaults — both mean "the defaults"
             setup=PageSetup.from_dict(entry.get("setup")),

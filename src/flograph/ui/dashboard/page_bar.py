@@ -46,6 +46,7 @@ class PageTabBar(QTabBar):
     reorder_pages_requested = Signal(list)     # page_ids in their new order
     recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
     set_view_mode_requested = Signal(str, bool)   # page_id, locked
+    set_fit_to_window_requested = Signal(str, bool)   # page_id, scaling
     export_page_requested = Signal(str)           # page_id (locked reports)
     page_setup_requested = Signal(str)            # page_id (locked reports)
     export_html_requested = Signal(str)           # page_id (locked reports)
@@ -67,6 +68,9 @@ class PageTabBar(QTabBar):
         self._drag_locked = False   # press landed on a tab that can't move
         self._reorder_pending = False
         self._colors: dict[str, str] = {}   # page_id -> "#rrggbb"
+        # page_id -> scaling to the window, mirrored for the menu tick the
+        # same way the lock below is
+        self._fits: dict[str, bool] = {}
         # page_id -> locked. Mirrored here only so the context menu can show
         # which mode a page is in; the model stays the source of truth.
         # (Called view_mode in the model — "Locked" is what it says on the
@@ -123,6 +127,7 @@ class PageTabBar(QTabBar):
         self._syncing = False
         self.set_page_color(page.id, page.color)
         self.set_page_view_mode(page.id, page.view_mode)
+        self.set_page_fit_to_window(page.id, page.fit_to_window)
         self._kinds[page.id] = page.kind
 
     def set_page_view_mode(self, page_id: str, view_mode: bool) -> None:
@@ -132,6 +137,13 @@ class PageTabBar(QTabBar):
 
     def page_view_mode(self, page_id: str) -> bool:
         return self._view_modes.get(page_id, False)
+
+    def set_page_fit_to_window(self, page_id: str, fit: bool) -> None:
+        """The same mirror, for the scale-to-window tick."""
+        self._fits[page_id] = bool(fit)
+
+    def page_fit_to_window(self, page_id: str) -> bool:
+        return self._fits.get(page_id, False)
 
     def set_page_color(self, page_id: str, color: Optional[str]) -> None:
         if color:
@@ -150,6 +162,7 @@ class PageTabBar(QTabBar):
         was_current = index == self.currentIndex()
         self._colors.pop(page_id, None)
         self._view_modes.pop(page_id, None)
+        self._fits.pop(page_id, None)
         self._kinds.pop(page_id, None)
         self._syncing = True
         self.removeTab(index)
@@ -317,6 +330,21 @@ class PageTabBar(QTabBar):
             lambda checked: self.set_view_mode_requested.emit(
                 page_id, bool(checked)))
         menu.addAction(lock_action)
+        # Only dashboards: a report already sits on a page of a declared
+        # size, and how that is fitted is the preview's business.
+        if self._kinds.get(page_id) != "report":
+            fit_action = QAction("Scale to fit the window", self)
+            fit_action.setCheckable(True)
+            fit_action.setChecked(self._fits.get(page_id, False))
+            fit_action.setToolTip(
+                "Keep the whole page in view: it zooms as the window "
+                "changes size, so the same tiles stay framed instead of a "
+                "bigger window revealing empty canvas around them. Zooming "
+                "by hand is off while this is on.")
+            fit_action.triggered.connect(
+                lambda checked: self.set_fit_to_window_requested.emit(
+                    page_id, bool(checked)))
+            menu.addAction(fit_action)
         # A locked report has no toolbar left to export from, so the one
         # surface that is always reachable carries it instead — and the
         # same goes for the setup behind the export, since changing the

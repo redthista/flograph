@@ -106,6 +106,7 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
             item.setVisible(False)
         # undoing the delete of a maximized tile brings it back maximized
         self.sync_fullscreen()
+        self.queue_view_fit()
 
     def _on_tile_removed(self, page_id: str, tile_id: str) -> None:
         if page_id != self.page_id:
@@ -120,6 +121,7 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
             # QMovie writing into a deleted document is a crash
             item.dispose()
             self.removeItem(item)
+            self.queue_view_fit()
 
     def set_animations_playing(self, playing: bool) -> None:
         """The page holding this scene was shown or hidden — an animation
@@ -137,6 +139,8 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         item = self.tile_items.get(tile.id)
         if item is not None:
             item.sync_from_model()
+            # a tile moved or resized changes what "the whole page" is
+            self.queue_view_fit()
 
     def _tiles_for(self, node_id: str) -> list[TileItem]:
         return [item for item in self.tile_items.values()
@@ -188,6 +192,15 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
             item.on_param_changed()
 
     # ------------------------------------------------------------- helpers
+
+    def queue_view_fit(self) -> None:
+        """Tell a page that scales itself that its contents moved. Not wired
+        to the scene's `changed` signal on purpose: that fires for every
+        repaint, and a refit changes the transform, which repaints."""
+        for view in self.views():
+            fit = getattr(view, "queue_fit", None)
+            if callable(fit):
+                fit()
 
     def selected_tile_items(self) -> list[TileItem]:
         return [i for i in self.selectedItems() if isinstance(i, TileItem)]

@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import Optional
 
 import shiboken6 as shiboken
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QPalette
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QToolButton,
                                QVBoxLayout, QWidget)
@@ -39,6 +39,12 @@ from .tile_item import TileItem
 from .visuals_list import TILE_NODE_MIME
 
 OVERLAY_TITLE_H = 28
+
+#: Breathing room left around the tiles when a page is scaled to the window.
+FIT_MARGIN = 24.0
+#: Resizing a window delivers a stream of resize events; refit once the
+#: stream stops rather than on every step of it.
+FIT_SETTLE_MS = 40
 
 
 class FullscreenOverlay(QWidget):
@@ -109,6 +115,15 @@ class DashboardView(ZoomPanGraphicsView):
         super().__init__(scene, parent)
         self.setAcceptDrops(True)
         self._view_mode = False
+        self._fit_to_window = False
+        # Coalesces a window drag's worth of resize events into one refit.
+        # Also what makes the first fit land after the layout has settled:
+        # a view asked to fit itself before it has been given its real size
+        # fits to the wrong rectangle.
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(FIT_SETTLE_MS)
+        self._fit_timer.timeout.connect(self._fit_page)
         self._fs_tile: Optional[TileItem] = None
         self._fs_restore: Optional[tuple] = None  # (transform, scene centre)
         self._fs_overlay: Optional[FullscreenOverlay] = None
@@ -132,7 +147,82 @@ class DashboardView(ZoomPanGraphicsView):
         """
         self._view_mode = bool(view_mode)
         self.setAcceptDrops(not self._view_mode)
-        self.set_navigation_locked(self._view_mode)
+        # either mode locks navigation, so unlocking one must not unlock the
+        # other's
+        self.set_navigation_locked(self._view_mode or self._fit_to_window)
+        self.queue_fit()
+
+    # ------------------------------------------------------ scale to window
+
+    def set_fit_to_window(self, fit: bool) -> None:
+        """Keep the whole page in view, whatever size the window is.
+
+        The page zooms on every resize so the same tiles stay framed,
+        instead of a bigger window revealing empty canvas around them —
+        which is what a dashboard handed to somebody else wants, since the
+        screen it lands on is not the screen it was built on.
+
+        Zooming and panning by hand go off while it is on: they would fight
+        the next resize, and the answer to "why did my zoom snap back?" is
+        never satisfying. The same navigation lock a locked page uses, so a
+        page that is both stays locked when this is switched off.
+        """
+        self._fit_to_window = bool(fit)
+        self.set_navigation_locked(self._view_mode or self._fit_to_window)
+        if self._fit_to_window:
+            self.queue_fit()
+
+    def fit_to_window(self) -> bool:
+        return self._fit_to_window
+
+    def queue_fit(self) -> None:
+        """Ask for a refit once things stop moving."""
+        if self._fit_to_window:
+            self._fit_timer.start()
+
+    def _fit_page(self) -> None:
+        """Put every tile in view, with a margin, centred.
+
+        fitInView rather than the fit_items() the canvas uses: that one
+        refuses to magnify past 150% (sensible when you are fitting a
+        single node you double-clicked) and stands down while navigation is
+        locked (sensible when the user is the one asking). Neither applies
+        here — a small dashboard on a big screen *should* fill it, and this
+        fit is the mode working, not somebody's stray keystroke.
+        """
+        if not self._fit_to_window or self._fs_tile is not None:
+            return
+        scene = self.scene()
+        if scene is None:
+            return
+        # The scrollable span is fitted to the content on a debounce, and a
+        # view cannot travel outside it — so a tile just dragged out to the
+        # edge would be fitted to and then not reached, leaving it off
+        # screen on the page that promises to show everything.
+        if hasattr(scene, "flush_rect_fit"):
+            scene.flush_rect_fit()
+        content = scene.itemsBoundingRect()
+        if content.isEmpty():
+            return
+        self.fitInView(content.adjusted(-FIT_MARGIN, -FIT_MARGIN,
+                                        FIT_MARGIN, FIT_MARGIN),
+                       Qt.KeepAspectRatio)
+        # The transform is the only thing fitInView touches, so the zoom
+        # readout and the level-of-detail switch have to be told by hand.
+        self._clamp_fit_zoom()
+        self._zoom_updated()
+
+    def _clamp_fit_zoom(self) -> None:
+        """fitInView answers with whatever ratio the arithmetic gives it,
+        including one no other zoom in the app is allowed to reach. Pull it
+        back inside the same range, about the same centre."""
+        from ..canvas.base_view import ZOOM_MAX, ZOOM_MIN
+        zoom = self.zoom
+        wanted = max(ZOOM_MIN, min(ZOOM_MAX, zoom))
+        if wanted != zoom and zoom > 0:
+            centre = self.mapToScene(self.viewport().rect().center())
+            self.scale(wanted / zoom, wanted / zoom)
+            self.centerOn(centre)
 
     # --------------------------------------------------------- fullscreen
 
@@ -241,6 +331,9 @@ class DashboardView(ZoomPanGraphicsView):
         visible = self.mapToScene(self.viewport().rect()).boundingRect()
         if not visible.intersects(item.sceneBoundingRect()):
             self.center_on_scene(item.sceneBoundingRect().center())
+        # the transform saved on the way in was the fitted one, but the
+        # window may have changed size while a tile filled it
+        self.queue_fit()
         self.fullscreen_changed.emit(False)
 
     def _layout_fullscreen(self) -> None:
@@ -282,6 +375,7 @@ class DashboardView(ZoomPanGraphicsView):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._layout_fullscreen()
+        self.queue_fit()
 
     # --------------------------------------------------- navigation gating
 

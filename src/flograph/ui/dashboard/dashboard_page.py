@@ -86,6 +86,8 @@ class DashboardPage(QWidget):
         self.set_visuals_visible(visuals_visible, notify=False)
         page = graph.pages.get(page_id)
         self.set_view_mode(page.view_mode if page is not None else False)
+        self.set_fit_to_window(
+            page.fit_to_window if page is not None else False)
         # last, so a page saved with a tile maximized opens that way and the
         # chrome it hides is not put back by the lines above
         self.scene.sync_fullscreen()
@@ -133,6 +135,17 @@ class DashboardPage(QWidget):
 
     def view_mode(self) -> bool:
         return self._view_mode
+
+    # ------------------------------------------------------ scale to window
+
+    def set_fit_to_window(self, fit: bool) -> None:
+        """Scale the page to whatever window it lands in — see
+        DashboardView.set_fit_to_window. Independent of view mode: a page
+        being built can scale too."""
+        self.view.set_fit_to_window(fit)
+
+    def fit_to_window(self) -> bool:
+        return self.view.fit_to_window()
 
     def set_visuals_visible(self, visible: bool, notify: bool = True) -> None:
         """The user's preference for the panel. Kept even while view mode or

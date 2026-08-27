@@ -149,6 +149,13 @@ class Page:
     # Saved with the project, so a page handed over in view mode opens that
     # way for whoever opens it next.
     view_mode: bool = False
+    # Scale the whole page to whatever window it lands in: the view zooms on
+    # every resize so the same tiles stay framed, instead of a bigger window
+    # simply revealing more empty canvas around them. Independent of
+    # view_mode — a page being built can scale too — and saved with the
+    # project, because "this dashboard fills the screen it is opened on" is a
+    # property of the dashboard, not of the machine reading it.
+    fit_to_window: bool = False
     # Report pages: how the document sits on the page — size, orientation,
     # margins, cover, running headers and footers. A dashboard ignores it.
     # Its defaults reproduce what reports did before it existed, so a page
@@ -963,6 +970,15 @@ class Graph:
         "edit mode", not "leave unchanged"."""
         page = self.page(page_id)
         page.view_mode = bool(view_mode)
+        self.events.page_changed.emit(page)
+        return page
+
+    def set_page_fit_to_window(self, page_id: str, fit: bool) -> Page:
+        """Turn the page's scale-to-window on or off. Separate from
+        update_page for the same reason as set_page_view_mode: False has to
+        mean "don't scale", not "leave unchanged"."""
+        page = self.page(page_id)
+        page.fit_to_window = bool(fit)
         self.events.page_changed.emit(page)
         return page
 

@@ -886,6 +886,26 @@ class SetPageViewModeCommand(QUndoCommand):
         self._graph.set_page_view_mode(self._page_id, self._old)
 
 
+class SetPageFitToWindowCommand(QUndoCommand):
+    """Turn a page's scale-to-window on or off. Saved with the project, so
+    it goes through the undo stack like the lock beside it."""
+
+    def __init__(self, graph: Graph, page_id: str, fit: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("scale page to the window" if fit
+                         else "stop scaling the page", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).fit_to_window
+        self._new = bool(fit)
+
+    def redo(self) -> None:
+        self._graph.set_page_fit_to_window(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_fit_to_window(self._page_id, self._old)
+
+
 class SetPageSetupCommand(QUndoCommand):
     """Replace a report page's page geometry.
 
