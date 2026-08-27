@@ -12,7 +12,7 @@ them.
 
 Undecided, deliberately-shelved ideas live in `ideas_archived.md`. Ideas for
 *new nodes* live in `node_ideas.md`; only the ones asked for by name are
-repeated here. Status notes were checked against the code on 2026-08-19.
+repeated here. Status notes were checked against the code on 2026-08-27.
 
 ---
 
@@ -75,16 +75,17 @@ Shipped 2026-08-25; see `ideas_archived.md` #9.
 **G5. Click a node's name in the statistics window to jump to it** (Stu).
 Shipped 2026-08-25; see `ideas_archived.md` #10.
 
-**G3. Bulk operations on a multi-selection** (Dan). Selecting several nodes
-and right-clicking → Run runs only the node under the cursor; it should run
-the whole selection. And the same question hangs off everything else the
-per-node menu offers: freeze/unfreeze, active and manual toggles, colour,
-compact view, mark, port labels. The run side half-exists — Run Selected is
-already a command — so the work is pointing the context menu at the
-selection and giving the appearance/flag ops a one-pass-over-`selectedItems`
-path through the same undo commands the single-node menu uses. Worth
-deciding whether a bulk appearance change belongs directly in the menu or
-behind an "Apply to selection" sub-menu before building it.
+**G6. Bulk operations on a multi-selection** (Dan). Carried the id G3 for a
+week by mistake — G3 was already the edge-scroll above — so it is G6 from
+here. Shipped 2026-08-27; the open question in the note (menu entries or an
+"Apply to selection" sub-menu?) answered itself once the menu was pointed at
+the selection: neither, the menu simply *is* about the selection. See
+`ideas_archived.md` #19.
+
+**G7. The canvas's own gestures: what a press and a right-click mean**
+(Dan). A frame dragged from anywhere inside its rectangle, and the canvas's
+right-click was a tree of category submenus. Shipped 2026-08-27 — title-bar
+drags, and the palette on right-click — see `ideas_archived.md` #20.
 
 ---
 
@@ -166,6 +167,19 @@ always-empty bottom slot — see `ideas_archived.md` #17.
 node pair with a retrieval side — writing to a DataFrame, a SQL table, or
 whatever else is useful. The Input category covers single values today;
 this is the "capture a record" shape it cannot express.
+
+---
+
+## N. Dashboard pages
+
+**N1. A locked page is a dashboard, not a canvas** (Dan). Locking stopped
+the tiles moving but left the page behaving like an infinite canvas
+underneath them — zoom, pan, rubber band, and a right-click that reached
+past the page entirely. Shipped 2026-08-27; see `ideas_archived.md` #18.
+
+**N2. Scale a page to fit the window** (Dan). The screen a dashboard is
+opened on is rarely the screen it was built on. Shipped 2026-08-27; see
+`ideas_archived.md` #21.
 
 ---
 
