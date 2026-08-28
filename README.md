@@ -28,7 +28,7 @@ work. Optional extras pull in what individual nodes need:
 | Extra | Brings | For |
 | --- | --- | --- |
 | `matplotlib` | matplotlib | Show Plot, Chart per Value |
-| `plotly` | plotly | Show Plotly, Chart per Value (Plotly), Plotly Style, Gantt Chart |
+| `plotly` | plotly | Show Plotly, Chart per Value (Plotly), Plotly Style, Plotly Table, Gantt Chart |
 | `excel` | openpyxl, python-calamine | Read File (Excel), Write Excel |
 | `parquet` | pyarrow, fastparquet | Read File (Parquet), Write Parquet |
 | `polars` | polars, fastexcel | the fast **polars** engine on Read File |
@@ -79,7 +79,7 @@ one-file bundle's own `.py` if that's how you started, otherwise
 `-m flograph`. If a project is open it can be baked into the shortcut, so
 double-clicking opens flograph with that flow loaded.
 
-**File > Open Example** ships seventeen worked projects — filter-and-visualise, an
+**File > Open Example** ships twenty worked projects — filter-and-visualise, an
 aggregate dashboard, a custom-script chart, join/group-by comparison, an
 interactive slicer dashboard, a scripted pipeline in a frame, a retail ops
 command centre, two geo/folium maps, an SVG retrofit workbench that diffs
@@ -329,7 +329,9 @@ polar and ternary — with the encodings, facets, trendlines, marginals,
 animation frames, bins, palettes and axis settings that go with each, shown
 only for the charts that have them), Plotly Style (restyles any Plotly
 figure — theme, legend, axis titles and tick formats, gridlines, reference
-lines, a note — without touching what it plots), Show Web View (render
+lines, a note — without touching what it plots), Plotly Table (a table drawn
+as a Plotly figure, for when it has to match the charts beside it rather
+than be read — Show Table is the one for reading), Show Web View (render
 *anything* that produces HTML: folium maps, altair, bokeh, your own
 template), Card (a Power BI-style KPI number),
 Table Spec (the incoming table's structure), Chart per Value and Chart per

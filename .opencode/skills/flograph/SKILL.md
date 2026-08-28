@@ -83,7 +83,7 @@ See the `new-node` skill for the authoring template.
 |----------|-------|
 | `io/` | `read_csv`, `read_excel`, `read_json`, `read_parquet`, `read_sqlite`, `table`, `write_csv`, `write_excel`, `write_json`, `write_parquet`, `write_sqlite` |
 | `transform/` | `concatenate`, `convert_types`, `data_profile`, `duplicate_filter`, `expression`, `filter_rows`, `group_by`, `join`, `missing_values`, `pivot`, `rename_columns`, `row_sampling`, `select_columns`, `sort`, `statistics`, `string_manipulation`, `unpivot` |
-| `viz/` | `card`, `chart_per_value`, `chart_per_value_plotly`, `gantt`, `image`, `pdf_viewer`, `plotly_style`, `report_card`, `show_plot`, `show_plotly`, `show_table`, `show_web`, `slicer`, `table_spec` |
+| `viz/` | `card`, `chart_per_value`, `chart_per_value_plotly`, `gantt`, `image`, `pdf_viewer`, `plotly_style`, `plotly_table`, `report_card`, `show_plot`, `show_plotly`, `show_table`, `show_web`, `slicer`, `table_spec` |
 | `input/` | `choice`, `date`, `number`, `slider`, `text`, `toggle` |
 | `util/` | `action_button`, `constant`, `goto`, `goto_from`, `note`, `reroute` |
 | `scripting/` | `control_template`, `node_template`, `python_script` |

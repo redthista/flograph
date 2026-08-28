@@ -1,0 +1,656 @@
+{
+ "flograph_version": "0.1.10",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "n00_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     0
+    ],
+    "params": {
+     "text": "## Every chart Plotly draws\n\nOne table of hardware sales, charted eight ways. Each band below is a\nfamily of chart the **Show Plotly** node now covers, with a note saying\nwhat to look at and which settings made it.\n\nPick any chart node and watch the **Properties** panel: you only ever see\nthe settings the chosen **Kind** actually has. Tick **More options** to\nreveal the rest \u2014 that tick is cosmetic, so nothing re-runs.\n\nPress **F5** to run the whole thing.",
+     "width": 760,
+     "height": 320
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n01_sales",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     420
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"city\", \"type\": \"text\"}, {\"name\": \"category\", \"type\": \"text\"}, {\"name\": \"month\", \"type\": \"date\"}, {\"name\": \"units\", \"type\": \"integer\"}, {\"name\": \"revenue\", \"type\": \"number\"}, {\"name\": \"cost\", \"type\": \"number\"}], \"rows\": [[\"North\", \"Leeds\", \"Tools\", \"2026-01-01\", 122, 2566.13, 1557.28], [\"North\", \"Leeds\", \"Tools\", \"2026-02-01\", 52, 883.22, 563.4], [\"North\", \"Leeds\", \"Paint\", \"2026-01-01\", 133, 1529.85, 1101.7], [\"North\", \"Leeds\", \"Paint\", \"2026-02-01\", 94, 940.29, 578.66], [\"North\", \"York\", \"Tools\", \"2026-01-01\", 57, 1012.49, 649.24], [\"North\", \"York\", \"Tools\", \"2026-02-01\", 55, 1126.08, 616.23], [\"North\", \"York\", \"Paint\", \"2026-01-01\", 97, 1128.52, 731.57], [\"North\", \"York\", \"Paint\", \"2026-02-01\", 55, 631.79, 383.67], [\"South\", \"Bath\", \"Tools\", \"2026-01-01\", 96, 1619.08, 1147.71], [\"South\", \"Bath\", \"Tools\", \"2026-02-01\", 114, 2119.09, 1353.99], [\"South\", \"Bath\", \"Paint\", \"2026-01-01\", 186, 1999.19, 1398.53], [\"South\", \"Bath\", \"Paint\", \"2026-02-01\", 86, 875.77, 565.45], [\"South\", \"Exeter\", \"Tools\", \"2026-01-01\", 88, 1616.77, 1035.55], [\"South\", \"Exeter\", \"Tools\", \"2026-02-01\", 56, 1078.57, 707.74], [\"South\", \"Exeter\", \"Paint\", \"2026-01-01\", 167, 1965.77, 1207.12], [\"South\", \"Exeter\", \"Paint\", \"2026-02-01\", 120, 1341.65, 970.22], [\"East\", \"Norwich\", \"Tools\", \"2026-01-01\", 132, 2380.81, 1654.1], [\"East\", \"Norwich\", \"Tools\", \"2026-02-01\", 218, 4415.96, 2375.82], [\"East\", \"Norwich\", \"Paint\", \"2026-01-01\", 116, 1315.94, 937.65], [\"East\", \"Norwich\", \"Paint\", \"2026-02-01\", 226, 2516.35, 1645.62], [\"East\", \"Ipswich\", \"Tools\", \"2026-01-01\", 58, 997.37, 610.38], [\"East\", \"Ipswich\", \"Tools\", \"2026-02-01\", 233, 4248.06, 3081.2], [\"East\", \"Ipswich\", \"Paint\", \"2026-01-01\", 147, 1471.15, 981.27], [\"East\", \"Ipswich\", \"Paint\", \"2026-02-01\", 235, 2687.16, 1863.82]]}",
+     "width": 620,
+     "height": 360
+    },
+    "code": null,
+    "label": "Sales"
+   },
+   {
+    "id": "n02_goto",
+    "type": "flograph.util.goto",
+    "pos": [
+     860,
+     580
+    ],
+    "params": {
+     "name": "Sales"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n10_note",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     1000
+    ],
+    "params": {
+     "text": "### Parts of a whole\n\n**Treemap** and **pie** were not reachable before \u2014 they take a\n*hierarchy*, or *labels and values*, rather than x and y, which is why\nthose boxes replace X and Y when you pick them.\n\nThe treemap nests city inside region from one **Hierarchy** field. The pie\nis a donut, which is the **Hole** setting.",
+     "width": 760,
+     "height": 240
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n11_from",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     0,
+     1640
+    ],
+    "params": {
+     "source": "n02_goto"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n12_treemap",
+    "type": "flograph.viz.show_plotly",
+    "pos": [
+     400,
+     1340
+    ],
+    "params": {
+     "kind": "treemap",
+     "path": "region,city",
+     "values": "revenue",
+     "color": "revenue",
+     "color_scale": "Blues",
+     "more": true,
+     "title": "Revenue by region and city",
+     "width": 440,
+     "height": 320
+    },
+    "code": null,
+    "label": "Treemap"
+   },
+   {
+    "id": "n13_pie",
+    "type": "flograph.viz.show_plotly",
+    "pos": [
+     400,
+     1820
+    ],
+    "params": {
+     "kind": "pie",
+     "names": "category",
+     "values": "revenue",
+     "hole": 0.45,
+     "title": "Share by category",
+     "width": 440,
+     "height": 320
+    },
+    "code": null,
+    "label": "Donut"
+   },
+   {
+    "id": "n20_note",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     2360
+    ],
+    "params": {
+     "text": "### Distributions\n\nA **box** plot and a **histogram**. Leave the columns blank on either and\nit charts every numeric column \u2014 along X, not up Y, because a histogram\n*of* a column is what the word means.\n\nEach carries settings only it has: **Points** (all / outliers / none) on\nthe box, **Bins** and a **Marginal plot** on the histogram. Both are\nunder More options.",
+     "width": 760,
+     "height": 260
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n21_from",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     0,
+     3020
+    ],
+    "params": {
+     "source": "n02_goto"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n22_box",
+    "type": "flograph.viz.show_plotly",
+    "pos": [
+     400,
+     2720
+    ],
+    "params": {
+     "kind": "box",
+     "x": "category",
+     "y": "revenue",
+     "color": "category",
+     "points": "all",
+     "more": true,
+     "title": "Revenue spread",
+     "width": 440,
+     "height": 320
+    },
+    "code": null,
+    "label": "Box"
+   },
+   {
+    "id": "n23_hist",
+    "type": "flograph.viz.show_plotly",
+    "pos": [
+     400,
+     3200
+    ],
+    "params": {
+     "kind": "histogram",
+     "x": "revenue",
+     "nbins": 8,
+     "marginal": "rug",
+     "more": true,
+     "title": "How revenue is distributed",
+     "width": 440,
+     "height": 320
+    },
+    "code": null,
+    "label": "Histogram"
+   },
+   {
+    "id": "n30_note",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     3740
+    ],
+    "params": {
+     "text": "### Encodings and facets\n\nOne scatter carrying four variables at once: cost across, revenue up,\n**Size by** units and **Color by** category \u2014 then **Facet columns by**\nregion splits it into a panel per region sharing both axes.\n\nSize, symbol, dash, pattern, text and hover columns all live under More\noptions.",
+     "width": 760,
+     "height": 240
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n31_from",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     0,
+     4260
+    ],
+    "params": {
+     "source": "n02_goto"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n32_scatter",
+    "type": "flograph.viz.show_plotly",
+    "pos": [
+     400,
+     4080
+    ],
+    "params": {
+     "kind": "scatter",
+     "x": "cost",
+     "y": "revenue",
+     "size": "units",
+     "color": "category",
+     "facet_col": "region",
+     "more": true,
+     "hover_name": "city",
+     "title": "Cost against revenue, by region",
+     "width": 760,
+     "height": 380
+    },
+    "code": null,
+    "label": "Faceted scatter"
+   },
+   {
+    "id": "n40_note",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     4680
+    ],
+    "params": {
+     "text": "### Style, without touching the chart\n\nThe **bar chart** on the left is plain. Wired into **Plotly Style**, the\nsame figure comes out themed, with the legend on top, thousands separators\nup the Y axis, the regions sorted by total, a dashed **reference line** at\nthe target and a note in the corner.\n\nCompare the two cards. Every setting on the style node has a **keep**\nposition and that is the default, so it changes only what you actually\nset \u2014 which is why it is safe to drop in front of a chart somebody else\nbuilt, a Gantt chart included.",
+     "width": 760,
+     "height": 320
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n41_from",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     0,
+     5260
+    ],
+    "params": {
+     "source": "n02_goto"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n42_bar",
+    "type": "flograph.viz.show_plotly",
+    "pos": [
+     400,
+     5100
+    ],
+    "params": {
+     "kind": "bar",
+     "x": "region",
+     "y": "revenue",
+     "color": "category",
+     "barmode": "group",
+     "title": "Revenue by region",
+     "width": 440,
+     "height": 340
+    },
+    "code": null,
+    "label": "Bar (plain)"
+   },
+   {
+    "id": "n43_style",
+    "type": "flograph.viz.plotly_style",
+    "pos": [
+     1100,
+     5100
+    ],
+    "params": {
+     "template": "plotly_white",
+     "legend_pos": "top",
+     "y_format": ",.0f",
+     "y_title": "Revenue (GBP)",
+     "grid_x": "off",
+     "line_at": "6000",
+     "line_label": "Target",
+     "line_color": "crimson",
+     "category_order": "total descending",
+     "note": "Target is the FY26 regional plan.",
+     "note_pos": "top left",
+     "more": true,
+     "width": 460,
+     "height": 340
+    },
+    "code": null,
+    "label": "Bar (styled)"
+   },
+   {
+    "id": "n50_note",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     5660
+    ],
+    "params": {
+     "text": "### A table that matches the charts\n\nPlotly Express has no table function, so **Plotly Table** is its own node,\nbuilt on `go.Table`. It is not the node for *reading* data \u2014 Show Table is\nfar better at that \u2014 it is for when a table has to look like the charts\nbeside it: same theme, same fonts, and it snapshots into a report or PDF\nthe same way a chart does.\n\n**Number format** takes a d3 format and applies it to the numeric columns\nonly, leaving the words alone.",
+     "width": 760,
+     "height": 300
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n51_from",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     0,
+     6220
+    ],
+    "params": {
+     "source": "n02_goto"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n52_table",
+    "type": "flograph.viz.plotly_table",
+    "pos": [
+     400,
+     6060
+    ],
+    "params": {
+     "columns": "region,city,category,units,revenue",
+     "number_format": ",.0f",
+     "striped": true,
+     "template": "plotly_white",
+     "max_rows": 12,
+     "title": "Sales detail",
+     "width": 560,
+     "height": 340
+    },
+    "code": null,
+    "label": "Plotly Table"
+   },
+   {
+    "id": "n60_note",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     6620
+    ],
+    "params": {
+     "text": "### One chart per value\n\n**Chart per Value (Plotly)** offers the same 28 chart kinds and the same\nsettings as Show Plotly \u2014 it just draws one per distinct value of the\n**Split by** column and returns the whole stack.\n\n**Same Y scale** bounds every panel by the whole table so they can be\ncompared by eye. **Columns**, **Rows** and **Fill** arrange the stack and\nare cosmetic, so re-arranging never re-runs the split.",
+     "width": 760,
+     "height": 280
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n61_from",
+    "type": "flograph.util.goto_from",
+    "pos": [
+     0,
+     7180
+    ],
+    "params": {
+     "source": "n02_goto"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "n62_per_value",
+    "type": "flograph.viz.chart_per_value_plotly",
+    "pos": [
+     400,
+     7000
+    ],
+    "params": {
+     "split_by": "region",
+     "kind": "bar",
+     "x": "category",
+     "y": "revenue",
+     "color": "category",
+     "shared_scale": true,
+     "columns": 3,
+     "direction": "across",
+     "title": "Revenue",
+     "width": 760,
+     "height": 400
+    },
+    "code": null,
+    "label": "One chart per region"
+   }
+  ],
+  "connections": [
+   {
+    "id": "c01",
+    "src": [
+     "n01_sales",
+     "table"
+    ],
+    "dst": [
+     "n02_goto",
+     "value"
+    ]
+   },
+   {
+    "id": "c10",
+    "src": [
+     "n11_from",
+     "value"
+    ],
+    "dst": [
+     "n12_treemap",
+     "table"
+    ]
+   },
+   {
+    "id": "c11",
+    "src": [
+     "n11_from",
+     "value"
+    ],
+    "dst": [
+     "n13_pie",
+     "table"
+    ]
+   },
+   {
+    "id": "c20",
+    "src": [
+     "n21_from",
+     "value"
+    ],
+    "dst": [
+     "n22_box",
+     "table"
+    ]
+   },
+   {
+    "id": "c21",
+    "src": [
+     "n21_from",
+     "value"
+    ],
+    "dst": [
+     "n23_hist",
+     "table"
+    ]
+   },
+   {
+    "id": "c30",
+    "src": [
+     "n31_from",
+     "value"
+    ],
+    "dst": [
+     "n32_scatter",
+     "table"
+    ]
+   },
+   {
+    "id": "c40",
+    "src": [
+     "n41_from",
+     "value"
+    ],
+    "dst": [
+     "n42_bar",
+     "table"
+    ]
+   },
+   {
+    "id": "c41",
+    "src": [
+     "n42_bar",
+     "figure"
+    ],
+    "dst": [
+     "n43_style",
+     "figure"
+    ]
+   },
+   {
+    "id": "c50",
+    "src": [
+     "n51_from",
+     "value"
+    ],
+    "dst": [
+     "n52_table",
+     "table"
+    ]
+   },
+   {
+    "id": "c60",
+    "src": [
+     "n61_from",
+     "value"
+    ],
+    "dst": [
+     "n62_per_value",
+     "table"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "f00",
+    "title": "The data",
+    "rect": [
+     -60,
+     -80,
+     1160,
+     920
+    ],
+    "color": "#3f5b7a"
+   },
+   {
+    "id": "f01",
+    "title": "1 \u00b7 Parts of a whole",
+    "rect": [
+     -60,
+     920,
+     960,
+     1280
+    ],
+    "color": "#4a6741"
+   },
+   {
+    "id": "f02",
+    "title": "2 \u00b7 Distributions",
+    "rect": [
+     -60,
+     2280,
+     960,
+     1280
+    ],
+    "color": "#6a5a3f"
+   },
+   {
+    "id": "f03",
+    "title": "3 \u00b7 Encodings and facets",
+    "rect": [
+     -60,
+     3680,
+     1280,
+     840
+    ],
+    "color": "#4a5f7a"
+   },
+   {
+    "id": "f04",
+    "title": "4 \u00b7 Style, without touching the chart",
+    "rect": [
+     -60,
+     4600,
+     1680,
+     880
+    ],
+    "color": "#6b4a6a"
+   },
+   {
+    "id": "f05",
+    "title": "5 \u00b7 A table drawn as a figure",
+    "rect": [
+     -60,
+     5600,
+     1080,
+     880
+    ],
+    "color": "#3f6a6a"
+   },
+   {
+    "id": "f06",
+    "title": "6 \u00b7 One chart per value",
+    "rect": [
+     -60,
+     6560,
+     1280,
+     920
+    ],
+    "color": "#5a4a7a"
+   }
+  ],
+  "pages": [
+   {
+    "id": "p01",
+    "title": "Sales",
+    "kind": "dashboard",
+    "tiles": [
+     {
+      "id": "t1",
+      "node": "n43_style",
+      "port": "figure",
+      "rect": [
+       40,
+       40,
+       520,
+       360
+      ]
+     },
+     {
+      "id": "t2",
+      "node": "n12_treemap",
+      "port": "figure",
+      "rect": [
+       600,
+       40,
+       520,
+       360
+      ]
+     },
+     {
+      "id": "t3",
+      "node": "n52_table",
+      "port": "figure",
+      "rect": [
+       40,
+       440,
+       520,
+       360
+      ]
+     },
+     {
+      "id": "t4",
+      "node": "n32_scatter",
+      "port": "figure",
+      "rect": [
+       600,
+       440,
+       520,
+       360
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

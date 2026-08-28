@@ -58,11 +58,12 @@ class TestBundledExamples:
             "17_run_while_running.flograph",
             "18_pdf_documents.flograph",
             "19_pdf_page_turner.flograph",
+            "20_plotly_chart_gallery.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 19
+        assert len(window._examples_menu.actions()) == 20
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -79,6 +80,7 @@ class TestBundledExamples:
         "14_flow_variables.flograph",
         "15_report_page.flograph",
         "17_run_while_running.flograph",
+        "20_plotly_chart_gallery.flograph",
         # 13, 18 and 19 write files, so they run in a tmp_path of their own
         # below
     ])

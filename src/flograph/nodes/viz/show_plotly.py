@@ -87,7 +87,9 @@ def run(ctx, table):
     kind = ctx.params.get("kind", "line")
     kwargs, ignored = plotly_spec.build(ctx.params, table, px)
     try:
-        fig = getattr(px, kind)(table, **kwargs)
+        # Building a figure is not thread-safe — see plotly_spec.FIGURE_LOCK.
+        with plotly_spec.FIGURE_LOCK:
+            fig = getattr(px, kind)(table, **kwargs)
     except ImportError as exc:
         # The one px argument with a dependency of its own: a trendline is
         # fitted by statsmodels, which plotly does not install with itself.

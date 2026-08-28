@@ -194,7 +194,12 @@ def run(ctx, table):
         ctx.progress(index / len(groups))
         panel = f"{split_by}: {value}"
         kwargs["title"] = f"{title} — {panel}" if title else panel
-        figure = plot(group, **kwargs)
+        # Per chart rather than around the loop: building is not
+        # thread-safe (see plotly_spec.FIGURE_LOCK), but holding the lock
+        # across a forty-chart split would stall every other plotly node
+        # in the flow for the whole of it.
+        with plotly_spec.FIGURE_LOCK:
+            figure = plot(group, **kwargs)
         if scalable and not shared and pinned:
             # each chart keeps its own scale, but the pinned end holds —
             # measured on this group's rows, since there is no shared

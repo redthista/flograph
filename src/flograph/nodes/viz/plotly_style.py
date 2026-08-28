@@ -246,17 +246,29 @@ def _style(ctx, figure):
     """One figure, restyled onto a copy of itself."""
     import plotly.graph_objects as go
 
+    from flograph.core.plotly_spec import FIGURE_LOCK
+
     if not hasattr(figure, "update_layout"):
         raise TypeError(
             f"the figure input holds a {type(figure).__name__}, not a "
             f"Plotly figure — wire this node to Show Plotly, Chart per "
             f"Value (Plotly), Gantt Chart or a script that makes one")
 
+    with FIGURE_LOCK:
+        return _restyle(go, figure, ctx.params)
+
+
+def _restyle(go, figure, params):
+    """The styling itself, run under the figure lock.
+
+    Setting a theme stamps the shared template singleton onto the figure,
+    which is one half of the race FIGURE_LOCK exists for — the other half
+    being a px node reading that same object to pick a palette.
+    """
     # Nodes treat inputs as read-only: the upstream node's output is
     # cached and may be wired to several nodes at once, so styling the
     # figure in place would restyle somebody else's chart too.
     fig = go.Figure(figure)
-    params = ctx.params
 
     layout = {}
     _theme(params, layout)

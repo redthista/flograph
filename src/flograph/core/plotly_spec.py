@@ -60,9 +60,32 @@ chart.
 """
 from __future__ import annotations
 
+import threading
 from typing import Any, Iterable, Optional
 
 from flograph.core.chart_scale import as_bound
+
+#: Held while a Plotly figure is being *built*. Node bodies share the
+#: process (see the concurrency note in AGENTS.md), and building a figure
+#: is not thread-safe: `px` resolves an unset palette by reading the trace
+#: defaults off the shared template singleton
+#: (`apply_default_cascade` in plotly.express._core), and stamping a
+#: template onto a figure re-parents that same shared object. Two nodes
+#: doing both at once corrupt its parent links, and plotly then fails deep
+#: inside itself with a bare `ValueError: Invalid value` from
+#: `BaseFigure._index_is` — on whichever node happened to lose the race.
+#:
+#: Measured on the chart-gallery example, eight plotly nodes ready at once:
+#: two runs in five failed at the default worker count, none in three at
+#: one worker. Every node that builds a figure takes this lock; it is not
+#: needed to *read* a finished one.
+#:
+#: A lock rather than `NODE["exclusive"] = True` (which is how the
+#: matplotlib nodes handle their own thread-unsafety) because the unsafe
+#: region here is a few milliseconds of figure construction, not the whole
+#: node body — `exclusive` would drain every other node in flight to draw
+#: a bar chart.
+FIGURE_LOCK = threading.Lock()
 
 #: Chart kinds in dropdown order — grouped by family, the everyday ones
 #: first. Each name is the Plotly Express function that draws it, so what

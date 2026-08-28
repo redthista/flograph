@@ -152,7 +152,13 @@ def run(ctx, table):
     plan["_color"] = _color_key(table, plan, params)
     plan = _ordered(plan, params["sort"])
     rows = _rows(plan)
-    figure = _figure(go, pd, plan, rows, params)
+    # Precautionary: building a Plotly figure while another node builds one
+    # is a race (see plotly_spec.FIGURE_LOCK), though this node avoids the
+    # two operations actually shown to corrupt it — it never resolves a
+    # palette off the shared template, and never stamps one on.
+    from flograph.core.plotly_spec import FIGURE_LOCK
+    with FIGURE_LOCK:
+        figure = _figure(go, pd, plan, rows, params)
     first, last = plan["start"].min(), plan["finish"].max()
     ctx.log(f"{len(plan)} task(s), {first:%d %b %Y} to {last:%d %b %Y}")
     html = ""
