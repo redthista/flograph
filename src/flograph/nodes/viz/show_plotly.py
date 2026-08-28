@@ -1,16 +1,60 @@
 """Show Plotly
 
-Interactive Plotly chart rendered directly on the node card — hover,
-zoom and pan in place. Needs the 'plotly' package: install it from
-Tools > Manage Packages if missing. Outputs the plotly Figure object for
-further consumers.
+Every chart Plotly Express draws, on an interactive card — hover, zoom and
+pan in place. Needs the 'plotly' package: install it from Tools > Manage
+Packages if missing. Outputs the plotly Figure for further consumers.
+
+**Kind** picks the chart, and the rest of the panel follows it: only the
+settings that chart actually has appear. Twenty-eight of them, in families:
+
+* **x/y** — line, scatter, bar, area, funnel, timeline
+* **distributions** — histogram, box, violin, strip, ecdf, density_heatmap,
+  density_contour
+* **parts of a whole** — pie, funnel_area, sunburst, treemap, icicle
+* **many variables at once** — scatter_matrix, parallel_coordinates,
+  parallel_categories
+* **three axes** — scatter_3d, line_3d, scatter_polar, line_polar,
+  bar_polar, scatter_ternary, line_ternary
+
+Leave the columns blank and the chart plots every numeric column it can
+find: down the Y axis for most charts, and along X for a distribution,
+since a histogram of a column is what "histogram" means. A chart built from
+columns named some other way — a pie's slices, a treemap's hierarchy — says
+which box it needs instead of guessing.
+
+**More options** opens the rest: encodings (size, symbol, dash, pattern,
+text, hover), facets, animation frames, error bars, trendlines, marginal
+plots, bin and normalisation settings, axis ranges and log scales,
+palettes and colour scales, opacity. Everything hidden behind it is still
+hidden per chart kind, so a box plot never offers a bin count. The tick
+itself is cosmetic — opening the drawer doesn't redraw anything.
+
+Settings that don't apply to the chart you switched to are kept, not
+dropped: switch back and they are as you left them. The node logs the
+ones it passed over, so a setting that appears to do nothing says why.
 
 **Bar mode** only matters for bar and histogram. Plotly stacks multiple
-series on top of each other by default; **group** stands them side by
-side, which is what you want when the point is to compare them. **stack**
-is Plotly's own default, for when the total is the thing being read, and
-**overlay** draws them on top of one another.
+series on top of each other by default; **group** stands them side by side,
+which is what you want when the point is to compare them. **stack** is
+Plotly's own default, for when the total is the thing being read,
+**overlay** draws them on top of one another, and **relative** stacks
+positive and negative away from zero.
+
+**Min/Max Y** and **Min/Max X** pin an axis. Both ends are needed — plotly
+has no way to be told about only one — and on a log axis you still type the
+values you want to see, not their exponents.
+
+For anything about how the finished chart *looks* rather than what it
+shows — legend placement, axis titles, tick formats, gridlines, reference
+lines, a note in the corner — wire it into a **Plotly Style** node, which
+restyles any Plotly figure including this one.
+
+The full parameter set lives in `flograph.core.plotly_spec` and is shared
+with Chart per Value (Plotly), so the two nodes offer the same chart types
+and the same settings.
 """
+from flograph.core import plotly_spec
+
 NODE = {
     "label": "Show Plotly",
     "category": "Viz",
@@ -19,22 +63,7 @@ NODE = {
     "outputs": [("figure", "object")],
 }
 PARAMS = [
-    {"name": "kind", "type": "choice", "label": "Kind",
-     "options": ["line", "scatter", "bar", "area", "histogram", "box",
-                 "violin"],
-     "default": "line"},
-    # Only bar and histogram read this. Plotly Express stacks bars by
-    # default; side by side is nearly always what a comparison chart wants,
-    # so that is the default here rather than Plotly's.
-    {"name": "barmode", "type": "choice", "label": "Bar mode",
-     "options": ["group", "stack", "overlay"], "default": "group"},
-    {"name": "x", "type": "columns", "label": "X column", "multi": False,
-     "default": "", "placeholder": "(index)"},
-    {"name": "y", "type": "columns", "label": "Y columns",
-     "default": "", "placeholder": "comma separated; empty = all numeric"},
-    {"name": "color", "type": "columns", "label": "Color by", "multi": False,
-     "default": "", "placeholder": "optional grouping column"},
-    {"name": "title", "type": "string", "label": "Title", "default": ""},
+    *plotly_spec.params(),
     {"name": "width", "type": "int", "label": "Width",
      "default": 420, "min": 260, "max": 1600},
     {"name": "height", "type": "int", "label": "Height",
@@ -55,32 +84,25 @@ def run(ctx, table):
             "plotly is not installed — add it via Tools > Manage Packages"
         ) from None
 
-    x_col = ctx.params["x"].strip()
-    color = ctx.params["color"].strip()
-    y_raw = ctx.params["y"].strip()
-    if y_raw:
-        y_cols = [c.strip() for c in y_raw.split(",") if c.strip()]
-    else:
-        y_cols = [c for c in table.columns
-                  if table[c].dtype.kind in "biufc"
-                  and c not in (x_col, color)]
-        if not y_cols:
-            raise ValueError("no numeric columns to plot")
-    missing = [c for c in (*y_cols, *filter(None, (x_col, color)))
-               if c not in table.columns]
-    if missing:
-        raise ValueError(f"columns not in table: {missing}")
+    kind = ctx.params.get("kind", "line")
+    kwargs, ignored = plotly_spec.build(ctx.params, table, px)
+    try:
+        fig = getattr(px, kind)(table, **kwargs)
+    except ImportError as exc:
+        # The one px argument with a dependency of its own: a trendline is
+        # fitted by statsmodels, which plotly does not install with itself.
+        # Anything else that fails to import is not ours to explain.
+        if "trendline" not in kwargs:
+            raise
+        raise ImportError(
+            f"a {kwargs['trendline']} trendline needs the 'statsmodels' "
+            f"package — add it via Tools > Manage Packages, or set "
+            f"Trendline back to none ({exc})") from None
+    layout = plotly_spec.layout_updates(ctx.params, kind)
+    if layout:
+        fig.update_layout(**layout)
 
-    kwargs = {"y": y_cols if len(y_cols) > 1 else y_cols[0]}
-    if x_col:
-        kwargs["x"] = x_col
-    if color:
-        kwargs["color"] = color
-    if ctx.params["title"]:
-        kwargs["title"] = ctx.params["title"]
-    kind = ctx.params["kind"]
-    fig = getattr(px, kind)(table, **kwargs)
-    if kind in ("bar", "histogram"):
-        fig.update_layout(barmode=ctx.params.get("barmode", "group"))
-    ctx.log(f"plotted {len(y_cols)} series ({kind})")
+    ctx.log(f"plotted {len(fig.data)} trace(s) ({kind})")
+    if ignored:
+        ctx.log(f"a {kind} chart has no use for: {', '.join(ignored)}")
     return {"figure": fig}

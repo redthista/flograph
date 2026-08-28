@@ -28,7 +28,7 @@ work. Optional extras pull in what individual nodes need:
 | Extra | Brings | For |
 | --- | --- | --- |
 | `matplotlib` | matplotlib | Show Plot, Chart per Value |
-| `plotly` | plotly | Show Plotly, Chart per Value (Plotly), Gantt Chart |
+| `plotly` | plotly | Show Plotly, Chart per Value (Plotly), Plotly Style, Gantt Chart |
 | `excel` | openpyxl, python-calamine | Read File (Excel), Write Excel |
 | `parquet` | pyarrow, fastparquet | Read File (Parquet), Write Parquet |
 | `polars` | polars, fastexcel | the fast **polars** engine on Read File |
@@ -321,11 +321,21 @@ Statistics, Data Profile.
 
 **Viz** — Show Table, Show Plot (matplotlib, live on-canvas), Show Plotly
 (a real interactive plotly.js chart embedded on the canvas — hover, zoom and
-pan in place), Show Web View (render *anything* that produces HTML: folium
-maps, altair, bokeh, your own template), Card (a Power BI-style KPI number),
+pan in place, in **any of the 28 chart types Plotly Express draws**: line,
+scatter, bar, area, funnel, timeline, histogram, box, violin, strip, ecdf,
+density heatmap and contour, pie, funnel area, sunburst, treemap, icicle,
+scatter matrix, parallel coordinates and categories, 3D scatter and line,
+polar and ternary — with the encodings, facets, trendlines, marginals,
+animation frames, bins, palettes and axis settings that go with each, shown
+only for the charts that have them), Plotly Style (restyles any Plotly
+figure — theme, legend, axis titles and tick formats, gridlines, reference
+lines, a note — without touching what it plots), Show Web View (render
+*anything* that produces HTML: folium maps, altair, bokeh, your own
+template), Card (a Power BI-style KPI number),
 Table Spec (the incoming table's structure), Chart per Value and Chart per
 Value (Plotly) — one chart per distinct value of a column, as a stack, in
-either backend — Gantt Chart (a project plan that **works its own dates
+either backend, the Plotly one offering the same 28 chart types as Show
+Plotly from the same shared setting list — Gantt Chart (a project plan that **works its own dates
 out**: give it durations and a depends-on column and it schedules the plan,
 so a task that slips pushes everything after it, with phases, progress,
 milestones, dependency arrows and a baseline to measure the slip

@@ -246,6 +246,24 @@ def run(ctx):
 '''
 
 
+#: Modules a node script may import at the top level: the standard library
+#: pieces small enough not to matter, plus `flograph.core` — the Qt-free,
+#: dependency-free half of the app itself, which the registry doing the
+#: parsing has already imported. A node whose PARAMS are built from a
+#: shared declaration (the two Plotly nodes and `core.plotly_spec`) has to
+#: reach it at module level, since PARAMS is a module-level value.
+#: `flograph.ui` and `flograph.engine` are deliberately not allowed: those
+#: do pull in Qt, at registry-load time, for every node.
+TOP_LEVEL_IMPORTS_OK = ("json", "uuid", "math", "datetime", "re", "os",
+                        "sys", "textwrap", "base64")
+
+
+def _import_is_allowed(name: str) -> bool:
+    if name == "flograph.core" or name.startswith("flograph.core."):
+        return True
+    return name.split(".")[0] in TOP_LEVEL_IMPORTS_OK
+
+
 def test_no_builtin_imports_a_third_party_package_at_top_level():
     """The shipped nodes must load on a bare install — load_builtins raises
     rather than skipping, so one top-level import would be a dead app."""
@@ -265,9 +283,19 @@ def test_no_builtin_imports_a_third_party_package_at_top_level():
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     name = (node.names[0].name if isinstance(node, ast.Import)
                             else (node.module or ""))
-                    if name.split(".")[0] not in ("json", "uuid", "math",
-                                                  "datetime", "re", "os",
-                                                  "sys", "textwrap",
-                                                  "base64"):
+                    if not _import_is_allowed(name):
                         offenders.append(f"{pkg.name}/{entry.name}: {name}")
     assert offenders == []
+
+
+def test_a_node_may_not_reach_the_ui_at_the_top_level():
+    """The allowance above is for `flograph.core` alone — the Qt-free half.
+
+    Importing `flograph.ui` from a node's module level would drag Qt in at
+    registry load, for every node, in a headless run included.
+    """
+    assert _import_is_allowed("flograph.core.plotly_spec")
+    assert not _import_is_allowed("flograph.ui.canvas")
+    assert not _import_is_allowed("flograph.engine")
+    assert not _import_is_allowed("flograph")
+    assert not _import_is_allowed("pandas")
