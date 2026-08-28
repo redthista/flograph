@@ -40,6 +40,12 @@ The input figure is never modified: the node styles a copy, because the
 upstream node's output is cached and shared with anything else wired to
 it.
 
+**This node stands alone.** It imports nothing from flograph that it
+cannot do without, so the file can be copied into a user-nodes folder on an
+older flograph and will work there — including sharing the one figure lock
+with everything else, which it parks in `sys.modules` when there is no
+`core.plotly_spec` to take it from.
+
 Needs the optional 'plotly' extra; install it from Tools > Manage Packages
 if it is missing.
 """
@@ -211,6 +217,57 @@ _NOTE_POS = {
 }
 
 
+def _as_bound(value):
+    """A number typed into a box, or None when it isn't one.
+
+    A copy of `core.chart_scale.as_bound` rather than an import of it, to
+    keep this node self-contained — see the note above `_figure_lock`.
+    Unreadable is the same as blank on purpose: half-typed text in an axis
+    box should leave the figure alone, not fail the run.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _figure_lock():
+    """The process-wide lock that serialises Plotly figure building.
+
+    Stamping a theme onto a figure is not thread-safe and node bodies
+    share the process, so every node that builds or themes one has to take
+    the *same* lock — see `core.plotly_spec.FIGURE_LOCK` for what goes
+    wrong otherwise.
+
+    Prefers flograph's own, so this node queues behind the built-in chart
+    nodes rather than beside them. Falls back to one parked in
+    `sys.modules` when there isn't one, which is what makes this file
+    droppable into an older flograph: node scripts are executed in
+    separate namespaces and so cannot share a module-level lock, but they
+    do share `sys.modules`. `setdefault` is atomic, so two nodes racing to
+    create the fallback still end up holding the same lock.
+    """
+    try:
+        from flograph.core.plotly_spec import FIGURE_LOCK
+        return FIGURE_LOCK
+    except ImportError:
+        import sys
+        import threading
+        import types
+
+        name = "_flograph_plotly_figure_lock"
+        module = sys.modules.get(name)
+        if module is None:
+            candidate = types.ModuleType(name)
+            candidate.lock = threading.Lock()
+            module = sys.modules.setdefault(name, candidate)
+        return module.lock
+
+
 def run(ctx, figure):
     import importlib.util
 
@@ -246,15 +303,13 @@ def _style(ctx, figure):
     """One figure, restyled onto a copy of itself."""
     import plotly.graph_objects as go
 
-    from flograph.core.plotly_spec import FIGURE_LOCK
-
     if not hasattr(figure, "update_layout"):
         raise TypeError(
             f"the figure input holds a {type(figure).__name__}, not a "
             f"Plotly figure — wire this node to Show Plotly, Chart per "
             f"Value (Plotly), Gantt Chart or a script that makes one")
 
-    with FIGURE_LOCK:
+    with _figure_lock():
         return _restyle(go, figure, ctx.params)
 
 
@@ -262,7 +317,7 @@ def _restyle(go, figure, params):
     """The styling itself, run under the figure lock.
 
     Setting a theme stamps the shared template singleton onto the figure,
-    which is one half of the race FIGURE_LOCK exists for — the other half
+    which is one half of the race _figure_lock exists for — the other half
     being a px node reading that same object to pick a palette.
     """
     # Nodes treat inputs as read-only: the upstream node's output is
@@ -349,15 +404,13 @@ def _axes(params, fig) -> None:
     nothing at all on a figure with no cartesian axes — a pie or a
     treemap — rather than failing on one.
     """
-    from flograph.core.chart_scale import as_bound
-
     for axis, update in (("x", fig.update_xaxes), ("y", fig.update_yaxes)):
         settings = {}
         log = params.get(f"log_{axis}", "keep")
         if log != "keep":
             settings["type"] = "log" if log == "on" else "linear"
-        low = as_bound(params.get(f"min_{axis}"))
-        high = as_bound(params.get(f"max_{axis}"))
+        low = _as_bound(params.get(f"min_{axis}"))
+        high = _as_bound(params.get(f"max_{axis}"))
         if low is not None and high is not None:
             # A log axis takes exponents; the boxes take the numbers you
             # want to read off the axis, as they do on Show Plotly.
@@ -377,7 +430,7 @@ def _axes(params, fig) -> None:
         if settings:
             update(**settings)
 
-    angle = as_bound(params.get("tick_angle"))
+    angle = _as_bound(params.get("tick_angle"))
     if angle is not None:
         fig.update_xaxes(tickangle=angle)
     order = params.get("category_order", "keep")
@@ -389,9 +442,7 @@ def _axes(params, fig) -> None:
 
 
 def _reference_line(params, fig) -> None:
-    from flograph.core.chart_scale import as_bound
-
-    at = as_bound(params.get("line_at"))
+    at = _as_bound(params.get("line_at"))
     if at is None:
         return
     line = {"line_dash": params.get("line_dash", "dash")}
@@ -417,7 +468,5 @@ def _note(params, fig) -> None:
 
 def _numbers(text) -> list[float]:
     """A comma-separated list of numbers, or [] if it isn't one."""
-    from flograph.core.chart_scale import as_bound
-
-    parsed = [as_bound(part) for part in str(text or "").split(",")]
+    parsed = [_as_bound(part) for part in str(text or "").split(",")]
     return [] if None in parsed else parsed

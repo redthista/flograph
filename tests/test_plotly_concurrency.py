@@ -184,3 +184,86 @@ class TestBuildingAtTheSameTime:
         for thread in threads:
             thread.join()
         assert errors == []
+
+
+#: The nodes that must keep working when dropped into a user-nodes folder
+#: on a flograph that predates `core.plotly_spec`. Show Plotly and Chart
+#: per Value are deliberately NOT in this list: they share a ~1000-line
+#: generated catalogue, and duplicating it into both is worse than the
+#: module. See the note in `core/plotly_spec.py`.
+STANDALONE = ("flograph.viz.plotly_table", "flograph.viz.plotly_style")
+
+
+class TestStandalone:
+    """These two import nothing from flograph that they cannot do without.
+
+    A node script is executed on its own, so anything it imports has to be
+    installed. These two are meant to be droppable into an older flograph,
+    which means every `from flograph...` has to sit behind a fallback.
+    """
+
+    @pytest.mark.parametrize("type_id", STANDALONE)
+    def test_no_unguarded_flograph_import(self, registry, type_id):
+        import ast
+
+        tree = ast.parse(registry.get(type_id).source)
+        guarded = {node for handler in ast.walk(tree)
+                   if isinstance(handler, ast.Try)
+                   for node in ast.walk(handler.body[0] if handler.body
+                                        else handler)}
+        unguarded = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            name = (node.names[0].name if isinstance(node, ast.Import)
+                    else (node.module or ""))
+            if name.split(".")[0] == "flograph" and node not in guarded:
+                unguarded.append(f"line {node.lineno}: {name}")
+        assert unguarded == []
+
+    @pytest.mark.parametrize("type_id", STANDALONE)
+    def test_it_uses_flographs_lock_when_there_is_one(self, registry,
+                                                      type_id):
+        """Preferred, so these queue behind the built-in chart nodes
+        rather than beside them."""
+        namespace = {}
+        exec(compile(registry.get(type_id).source, type_id, "exec"),
+             namespace)
+        assert namespace["_figure_lock"]() is plotly_spec.FIGURE_LOCK
+
+    @pytest.mark.parametrize("type_id", STANDALONE)
+    def test_the_fallback_is_one_lock_for_everybody(self, registry,
+                                                    monkeypatch, type_id):
+        """The whole point: two node scripts get separate namespaces, so a
+        module-level lock in each would not mutually exclude. The fallback
+        parks one in sys.modules, which they do share."""
+        import sys
+
+        monkeypatch.delitem(sys.modules, "_flograph_plotly_figure_lock",
+                            raising=False)
+        monkeypatch.setitem(sys.modules, "flograph.core.plotly_spec", None)
+
+        locks = []
+        for _ in range(2):                      # two copies of the node
+            namespace = {}
+            exec(compile(registry.get(type_id).source, type_id, "exec"),
+                 namespace)
+            locks.append(namespace["_figure_lock"]())
+        assert locks[0] is locks[1]
+        assert locks[0] is not plotly_spec.FIGURE_LOCK
+
+    def test_the_two_standalone_nodes_share_it_with_each_other(
+            self, registry, monkeypatch):
+        import sys
+
+        monkeypatch.delitem(sys.modules, "_flograph_plotly_figure_lock",
+                            raising=False)
+        monkeypatch.setitem(sys.modules, "flograph.core.plotly_spec", None)
+
+        locks = []
+        for type_id in STANDALONE:
+            namespace = {}
+            exec(compile(registry.get(type_id).source, type_id, "exec"),
+                 namespace)
+            locks.append(namespace["_figure_lock"]())
+        assert locks[0] is locks[1]

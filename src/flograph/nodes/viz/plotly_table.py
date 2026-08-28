@@ -28,6 +28,12 @@ for money. Text columns are left alone.
 **Striped** shades alternate rows. **Header fill**, **Header text** and
 **Font size** cover the rest; leave them blank to follow the theme.
 
+**This node stands alone.** It imports nothing from flograph that it
+cannot do without, so the file can be copied into a user-nodes folder on an
+older flograph and will work there — including sharing the one figure lock
+with everything else, which it parks in `sys.modules` when there is no
+`core.plotly_spec` to take it from.
+
 Needs the optional 'plotly' extra; install it from Tools > Manage Packages
 if it is missing.
 """
@@ -81,6 +87,53 @@ PARAMS = [
 _STRIPE = "rgba(128, 128, 128, 0.12)"
 
 
+def _column_list(value):
+    """A comma-separated columns param as a list, blanks dropped.
+
+    A copy of `core.plotly_spec.column_list` rather than an import of it,
+    to keep this node self-contained — see the note above `_figure_lock`.
+    Six lines is a cheap price for a file that can be dropped into a
+    user-nodes folder and just work.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [c.strip() for c in str(value).split(",") if c.strip()]
+
+
+def _figure_lock():
+    """The process-wide lock that serialises Plotly figure building.
+
+    Building a figure is not thread-safe and node bodies share the
+    process, so every node that builds one has to take the *same* lock —
+    see `core.plotly_spec.FIGURE_LOCK` for what goes wrong otherwise.
+
+    Prefers flograph's own, so this node queues behind the built-in chart
+    nodes rather than beside them. Falls back to one parked in
+    `sys.modules` when there isn't one, which is what makes this file
+    droppable into an older flograph: node scripts are executed in
+    separate namespaces and so cannot share a module-level lock, but they
+    do share `sys.modules`. `setdefault` is atomic, so two nodes racing to
+    create the fallback still end up holding the same lock.
+    """
+    try:
+        from flograph.core.plotly_spec import FIGURE_LOCK
+        return FIGURE_LOCK
+    except ImportError:
+        import sys
+        import threading
+        import types
+
+        name = "_flograph_plotly_figure_lock"
+        module = sys.modules.get(name)
+        if module is None:
+            candidate = types.ModuleType(name)
+            candidate.lock = threading.Lock()
+            module = sys.modules.setdefault(name, candidate)
+        return module.lock
+
+
 def run(ctx, table):
     import importlib.util
 
@@ -92,9 +145,7 @@ def run(ctx, table):
 
     import plotly.graph_objects as go
 
-    from flograph.core.plotly_spec import FIGURE_LOCK, column_list
-
-    picked = column_list(ctx.params.get("columns"))
+    picked = _column_list(ctx.params.get("columns"))
     if picked:
         missing = [c for c in picked if c not in table.columns]
         if missing:
@@ -143,8 +194,8 @@ def run(ctx, table):
         layout["font"] = {"size": int(ctx.params["font_size"])}
 
     # Building a figure, and stamping a theme onto one, are not
-    # thread-safe — see plotly_spec.FIGURE_LOCK.
-    with FIGURE_LOCK:
+    # thread-safe — see _figure_lock.
+    with _figure_lock():
         figure = go.Figure(go.Table(header=header, cells=cells))
         figure.update_layout(**layout)
 
