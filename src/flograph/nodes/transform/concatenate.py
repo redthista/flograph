@@ -11,6 +11,7 @@ keeps only the columns all the connected tables share.
 NODE = {
     "label": "Concatenate",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [
         ("top", "dataframe"),
         ("bottom", "dataframe"),

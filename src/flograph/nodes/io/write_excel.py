@@ -11,6 +11,7 @@ a numbered copy, or overlaying cells onto the existing sheet.
 NODE = {
     "label": "Write Excel",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

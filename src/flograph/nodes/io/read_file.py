@@ -26,6 +26,7 @@ ignored. They are applied while parsing, not after, so a column declared
 NODE = {
     "label": "Read File",
     "category": "IO",
+    "version": "1.0",
     "inputs": [],
     "outputs": [("table", "dataframe")],
 }

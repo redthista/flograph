@@ -6,6 +6,7 @@ columns (or all numeric columns if left empty).
 NODE = {
     "label": "Group By",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("aggregated", "dataframe")],
 }

@@ -29,6 +29,7 @@ JSON array (a comma-separated list also works when editing by hand).
 NODE = {
     "label": "Slicer",
     "category": "Viz",
+    "version": "1.0",
     "card": "slicer",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe"), ("selected", "any")],

@@ -6,6 +6,7 @@ min/max, quartiles — pandas describe() as a table, one row per statistic.
 NODE = {
     "label": "Statistics",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("stats", "dataframe")],
 }

@@ -14,6 +14,7 @@ reduced to its lowest value for "minimum" and its highest for "maximum".
 NODE = {
     "label": "Number",
     "category": "Input",
+    "version": "1.0",
     "card": "control",
     "control": "number",
     "inputs": [("minimum", "any", {"optional": True}),

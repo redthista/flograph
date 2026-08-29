@@ -147,6 +147,15 @@ class ParamsPanel(QWidget):
         self._doc_label.hide()
         layout.addWidget(self._doc_label)
 
+        # Which *edition* of the node type this is -- see NodeSpec.version.
+        # Dimmer than the doc and below it: you only look for it when you are
+        # asking "have I got the new one?", and it should not compete the
+        # rest of the time.
+        self._version_label = QLabel()
+        self._version_label.setStyleSheet("color: #6b7280; font-size: 8pt;")
+        self._version_label.hide()
+        layout.addWidget(self._version_label)
+
         self._placeholder = QLabel("No node selected")
         self._placeholder.setStyleSheet("color: #6b7280;")
         layout.addWidget(self._placeholder)
@@ -220,6 +229,7 @@ class ParamsPanel(QWidget):
         self._clear()
         if self._node_id is None or self._node_id not in self._graph.nodes:
             self._doc_label.hide()
+            self._version_label.hide()
             self._locked_label.hide()
             self._placeholder.show()
             self.tree.hide()
@@ -234,6 +244,16 @@ class ParamsPanel(QWidget):
             self._doc_label.show()
         else:
             self._doc_label.hide()
+
+        if node.spec.version:
+            self._version_label.setText(f"version {node.spec.version}")
+            self._version_label.setToolTip(
+                f"{node.spec.type_id} \N{EN DASH} version "
+                f"{node.spec.version}. Declared by the node's own code as "
+                f"NODE['version'], so it travels with the node.")
+            self._version_label.show()
+        else:
+            self._version_label.hide()
 
         label_edit = QLineEdit(node.label_override or "")
         label_edit.setPlaceholderText(node.spec.label)

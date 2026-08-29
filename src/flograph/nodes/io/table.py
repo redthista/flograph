@@ -36,6 +36,7 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
+    "version": "1.0",
     "card": "grid",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe")],

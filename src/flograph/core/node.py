@@ -51,6 +51,15 @@ class NodeSpec:
     broken: bool = False
     # library sub-section for user-saved nodes; None/"" = ungrouped, top-level
     group: Optional[str] = None
+    # declared by NODE["version"]: the node *type's* own version, bumped by
+    # hand when its params or behaviour change. Not the app's version and not
+    # a schema number -- it answers "is the node in front of me the one I just
+    # edited?", which the package version cannot, since two checkouts of one
+    # release carry the same number. Empty for a node that never declared one,
+    # and that blank is itself informative: it dates the node to before this
+    # existed. Lives in `source`, so a node copied into a user-nodes folder
+    # carries its version with it -- the case a package version cannot cover.
+    version: str = ""
 
     def input(self, name: str) -> Optional[PortSpec]:
         if is_flow(name):

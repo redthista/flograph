@@ -28,6 +28,7 @@ panel, the whole docstring in library tooltips.
 NODE = {
     "label": "<Label>",                    # shown on the canvas
     "category": "<Category>",              # library tree group
+    "version": "1.0",                      # bump on every params/behaviour change
     "inputs":  [("table", "dataframe")],   # (name, type[, {"optional": True}])
     "outputs": [("result", "dataframe")],
 }

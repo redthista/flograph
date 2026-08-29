@@ -40,6 +40,7 @@ if it is missing.
 NODE = {
     "label": "Plotly Table",
     "category": "Viz",
+    "version": "1.0",
     "card": "webview",
     "inputs": [("table", "dataframe")],
     "outputs": [("figure", "object")],

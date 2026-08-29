@@ -42,6 +42,7 @@ because it is pure Python and gains nothing from threads.
 NODE = {
     "label": "Read Excel (Folder)",
     "category": "IO",
+    "version": "1.0",
     # Optional: a required input that nobody has wired up blocks the node
     # from ever running, which is not what a fallback port wants.
     "inputs": [("path_input", "string", {"optional": True})],

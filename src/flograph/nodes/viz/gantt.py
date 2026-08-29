@@ -29,6 +29,7 @@ a chart you are only reading on the canvas should not pay for one.
 NODE = {
     "label": "Gantt Chart",
     "category": "Viz",
+    "version": "1.0",
     # "webview" is what gives this node the embedded browser, so the chart's
     # own pan and zoom work on the card. The figure goes out on an "object"
     # port, not a "figure" one: "figure" means a matplotlib Figure.

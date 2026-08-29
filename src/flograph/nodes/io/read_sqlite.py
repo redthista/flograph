@@ -15,6 +15,7 @@ runs — put a `LIMIT` in the query itself to make the query cheaper too.
 NODE = {
     "label": "Read SQLite",
     "category": "IO",
+    "version": "1.0",
     "inputs": [],
     "outputs": [("table", "dataframe")],
 }

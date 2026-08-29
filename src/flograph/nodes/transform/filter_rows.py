@@ -6,6 +6,7 @@ that don't match come out of the second port.
 NODE = {
     "label": "Filter Rows",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("filtered", "dataframe"), ("rejected", "dataframe")],
 }

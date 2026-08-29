@@ -55,6 +55,7 @@ Connect a string to **path_input** to supply the folder at run time.
 NODE = {
     "label": "Read PDF (Folder)",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("path_input", "string", {"optional": True})],
     "outputs": [("pages", "dataframe"), ("documents", "dataframe")],
 }

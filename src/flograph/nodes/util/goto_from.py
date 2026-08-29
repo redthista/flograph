@@ -10,6 +10,7 @@ passing an empty value downstream.
 NODE = {
     "label": "From",
     "category": "Util",
+    "version": "1.0",
     "card": "from",
     # Not drawn on the canvas: the destination end of the invisible link. It
     # stays required so an unlinked From blocks instead of emitting None.

@@ -17,6 +17,7 @@ failing, which is what you want when the path has a dated folder in it.
 NODE = {
     "label": "Write Text",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("text", "any")],
     "outputs": [("text", "string")],
 }

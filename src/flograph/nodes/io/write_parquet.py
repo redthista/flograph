@@ -16,6 +16,7 @@ Read Parquet node's row filters can then skip entirely.
 NODE = {
     "label": "Write Parquet",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

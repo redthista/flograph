@@ -16,6 +16,7 @@ params and run() body to build whatever you need.
 NODE = {
     "label": "Node Template",
     "category": "Scripting",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

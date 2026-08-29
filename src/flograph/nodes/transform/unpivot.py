@@ -6,6 +6,7 @@ repeat on every row, each value column becomes (variable, value) pairs.
 NODE = {
     "label": "Unpivot",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("long", "dataframe")],
 }

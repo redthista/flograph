@@ -7,6 +7,7 @@ fraction is set above zero.
 NODE = {
     "label": "Row Sampling",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("sample", "dataframe")],
 }

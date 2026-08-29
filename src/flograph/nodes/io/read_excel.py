@@ -11,6 +11,7 @@ Excel letter ranges (e.g. `A:C,F`). Column types take one
 NODE = {
     "label": "Read Excel",
     "category": "IO",
+    "version": "1.0",
     "inputs": [],
     "outputs": [("table", "dataframe")],
 }

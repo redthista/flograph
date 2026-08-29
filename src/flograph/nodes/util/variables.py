@@ -27,6 +27,7 @@ this node never holds them, so they never enter the saved project file.
 NODE = {
     "label": "Variables",
     "category": "Util",
+    "version": "1.0",
     "card": "vars",
     "inputs": [("values", "any", {"optional": True}),
                ("table", "dataframe", {"optional": True})],

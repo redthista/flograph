@@ -6,6 +6,7 @@ Supports on, left_on/right_on, suffixes, indicator, and all join types.
 NODE = {
     "label": "Join",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("left", "dataframe"), ("right", "dataframe")],
     "outputs": [("joined", "dataframe")],
 }

@@ -46,6 +46,7 @@ The polars engine does take one, and pushes it down per file.
 NODE = {
     "label": "Read Parquet (Folder)",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("path_input", "string", {"optional": True})],
     "outputs": [("table", "dataframe")],
 }

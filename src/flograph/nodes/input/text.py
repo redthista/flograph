@@ -14,6 +14,7 @@ North") without putting a value in it that would flow downstream.
 NODE = {
     "label": "Text",
     "category": "Input",
+    "version": "1.0",
     "card": "control",
     "control": "text",
     "inputs": [("placeholder", "any", {"optional": True})],

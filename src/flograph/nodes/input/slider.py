@@ -21,6 +21,7 @@ dashboard moves the slider, the charts follow, and they never see the model.
 NODE = {
     "label": "Slider",
     "category": "Input",
+    "version": "1.0",
     "card": "control",
     "control": "slider",
     "inputs": [("minimum", "any", {"optional": True}),

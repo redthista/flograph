@@ -52,6 +52,7 @@ if it is missing.
 NODE = {
     "label": "Plotly Style",
     "category": "Viz",
+    "version": "1.0",
     "card": "webview",
     "inputs": [("figure", "any")],
     "outputs": [("figure", "any")],

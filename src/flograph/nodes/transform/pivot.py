@@ -7,6 +7,7 @@ aggregated.
 NODE = {
     "label": "Pivot",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("pivoted", "dataframe")],
 }

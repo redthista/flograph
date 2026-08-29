@@ -7,6 +7,7 @@ a duplicate.
 NODE = {
     "label": "Duplicate Row Filter",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("unique", "dataframe"), ("duplicates", "dataframe")],
 }

@@ -10,6 +10,7 @@ one `column = SQLTYPE` per line (e.g. `id = INTEGER`, `name = TEXT`,
 NODE = {
     "label": "Write SQLite",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

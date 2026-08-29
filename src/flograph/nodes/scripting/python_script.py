@@ -15,6 +15,7 @@ one output).
 NODE = {
     "label": "Python Script",
     "category": "Scripting",
+    "version": "1.0",
     "inputs": [("in1", "any", {"optional": True})],
     "outputs": [("out1", "any")],
 }

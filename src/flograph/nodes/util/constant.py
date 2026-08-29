@@ -5,6 +5,7 @@ Emit a constant value, converted to the chosen type.
 NODE = {
     "label": "Constant",
     "category": "Util",
+    "version": "1.0",
     "inputs": [],
     "outputs": [("value", "any")],
 }

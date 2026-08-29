@@ -11,6 +11,7 @@ one `column = dtype` per line; lines starting with # are ignored.
 NODE = {
     "label": "Read JSON",
     "category": "IO",
+    "version": "1.0",
     "inputs": [],
     "outputs": [("table", "dataframe")],
 }

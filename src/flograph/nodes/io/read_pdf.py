@@ -46,6 +46,7 @@ or a base64 blob works there just as a path does.
 NODE = {
     "label": "Read PDF",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("path_input", "string", {"optional": True})],
     "outputs": [("pages", "dataframe"), ("document", "object")],
 }

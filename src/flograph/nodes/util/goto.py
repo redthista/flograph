@@ -11,6 +11,7 @@ never break a link and two links may share a name.
 NODE = {
     "label": "Goto",
     "category": "Util",
+    "version": "1.0",
     "card": "goto",
     "inputs": [("value", "any")],
     # Not drawn on the canvas: this is the source end of the invisible link,

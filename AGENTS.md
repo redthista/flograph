@@ -55,7 +55,8 @@ flograph
 ## Node contract
 
 Every node script must define:
-- `NODE` dict: `label`, `category`, `inputs` (list of `(name, port_type[, opts])`), `outputs`, optional `exclusive` (run with nothing else in flight)
+- `NODE` dict: `label`, `category`, `version`, `inputs` (list of `(name, port_type[, opts])`), `outputs`, optional `exclusive` (run with nothing else in flight)
+- `version` is the node type's own edition, shown in the properties panel and the library tooltip. **Bump it whenever you change a node's params or behaviour.** It is the only way a user can tell the node in front of them from the one it replaced: the package version cannot, since two checkouts of one release carry the same number, and a node file copied into a user-nodes folder carries no package version at all. New nodes start at `"1.0"`; a test fails if a builtin has none.
 - Optional `PARAMS` list of dicts with `name`, `type`, `default`, etc.
 - `def run(ctx, **inputs) -> dict`: returns dict keyed by output port names
 

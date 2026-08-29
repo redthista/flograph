@@ -5,6 +5,7 @@ Keep (or drop) the listed columns.
 NODE = {
     "label": "Select Columns",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

@@ -41,6 +41,7 @@ rather than quietly ignoring it.
 NODE = {
     "label": "Read CSV (Folder)",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("path_input", "string", {"optional": True})],
     "outputs": [("table", "dataframe")],
 }

@@ -5,6 +5,7 @@ Pass a value straight through. Used as a wire organization dot on the canvas.
 NODE = {
     "label": "Reroute",
     "category": "Util",
+    "version": "1.0",
     "card": "reroute",
     "inputs": [("value", "any")],
     "outputs": [("value", "any")],

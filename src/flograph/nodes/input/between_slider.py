@@ -30,6 +30,7 @@ dashboard moves the handles, the charts follow, and they never see the model.
 NODE = {
     "label": "Between",
     "category": "Input",
+    "version": "1.0",
     "card": "control",
     "control": "range",
     "inputs": [("minimum", "any", {"optional": True}),

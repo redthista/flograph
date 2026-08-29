@@ -6,6 +6,7 @@ either fail the node or coerce the offending cells to missing values.
 NODE = {
     "label": "Convert Types",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

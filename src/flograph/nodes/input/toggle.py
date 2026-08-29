@@ -13,6 +13,7 @@ control, so a tick box can name what it is actually filtering.
 NODE = {
     "label": "Toggle",
     "category": "Input",
+    "version": "1.0",
     "card": "control",
     "control": "toggle",
     "inputs": [("text", "any", {"optional": True})],

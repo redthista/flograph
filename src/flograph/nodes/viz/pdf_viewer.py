@@ -44,6 +44,7 @@ want the text as a table.
 NODE = {
     "label": "PDF Viewer",
     "category": "Viz",
+    "version": "1.0",
     "card": "pdf",
     # Optional, and typed 'any' so it takes both a plain path string and the
     # `document` dict Read PDF emits.

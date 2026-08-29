@@ -7,6 +7,7 @@ a per-column mean/median.
 NODE = {
     "label": "Missing Values",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

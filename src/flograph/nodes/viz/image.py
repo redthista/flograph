@@ -37,6 +37,7 @@ full of animations costs nothing while you work elsewhere on it.
 NODE = {
     "label": "Image",
     "category": "Viz",
+    "version": "1.0",
     "card": "image",
     # The optional input lets an upstream node supply the picture: a path it
     # built, or base64 straight out of an API or a blob column.

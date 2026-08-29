@@ -10,6 +10,7 @@ like any other node instead of firing.
 NODE = {
     "label": "Action Button",
     "category": "Util",
+    "version": "1.0",
     "card": "button",
     "inputs": [],
     "outputs": [],

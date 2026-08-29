@@ -7,6 +7,7 @@ can continue. 'lines' writes one JSON object per line (JSONL). A
 NODE = {
     "label": "Write JSON",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

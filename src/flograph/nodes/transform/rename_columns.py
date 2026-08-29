@@ -6,6 +6,7 @@ Lines starting with # are ignored.
 NODE = {
     "label": "Rename Columns",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

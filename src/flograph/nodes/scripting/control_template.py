@@ -37,6 +37,7 @@ flograph/core/script.py. Everything else here stays the same.
 NODE = {
     "label": "Control Template",
     "category": "Scripting",
+    "version": "1.0",
     "card": "control",
     "control": "slider",
     "inputs": [("maximum", "any", {"optional": True})],

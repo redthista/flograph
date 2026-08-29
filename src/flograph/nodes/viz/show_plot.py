@@ -9,6 +9,7 @@ further consumers (e.g. an export node).
 NODE = {
     "label": "Show Plot",
     "category": "Viz",
+    "version": "1.0",
     "card": "figure",
     # matplotlib is not thread-safe, so this node runs on its own rather than
     # beside whatever else the flow could otherwise overlap it with.

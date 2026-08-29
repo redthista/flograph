@@ -298,7 +298,10 @@ class LibraryTree(QTreeWidget):
         child = QTreeWidgetItem([label])
         child.setIcon(0, spec_icon(spec))
         child.setData(0, Qt.UserRole, spec.type_id)
-        child.setToolTip(0, spec.doc or spec.type_id)
+        tip = spec.doc or spec.type_id
+        if spec.version:
+            tip = f"{tip}\n\nversion {spec.version}"
+        child.setToolTip(0, tip)
         return child
 
     def _on_activated(self, item: QTreeWidgetItem, column: int) -> None:

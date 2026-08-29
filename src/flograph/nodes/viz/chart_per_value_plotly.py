@@ -75,6 +75,7 @@ from flograph.core import plotly_spec
 NODE = {
     "label": "Chart per Value (Plotly)",
     "category": "Viz",
+    "version": "2.0",
     "card": "webview",
     "inputs": [("table", "dataframe")],
     "outputs": [("figures", "any")],

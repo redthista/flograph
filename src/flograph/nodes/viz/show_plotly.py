@@ -58,6 +58,7 @@ from flograph.core import plotly_spec
 NODE = {
     "label": "Show Plotly",
     "category": "Viz",
+    "version": "2.0",
     "card": "webview",
     "inputs": [("table", "dataframe")],
     "outputs": [("figure", "object")],

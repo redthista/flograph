@@ -23,6 +23,7 @@ Two of these make a from/to range for filtering a period.
 NODE = {
     "label": "Date",
     "category": "Input",
+    "version": "1.0",
     "card": "control",
     "control": "date",
     "inputs": [("minimum", "any", {"optional": True}),

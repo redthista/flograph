@@ -8,6 +8,7 @@ A node is a Python module-shaped text that declares:
         "inputs":  [("table", "dataframe")],            # (name, type[, opts])
         "outputs": [("filtered", "dataframe")],
         # "exclusive": True,        # run with nothing else in flight
+        # "version": "2.0",         # bump when params or behaviour change
     }
     PARAMS = [  # optional
         {"name": "query", "type": "string", "default": ""},
@@ -250,6 +251,14 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
     if not isinstance(exclusive, bool):
         raise NodeScriptError("NODE['exclusive'] must be True or False")
 
+    # Optional, and a number is accepted as well as a string because "2.0" is
+    # the obvious thing to type and 2.0 is the obvious thing to mistype.
+    version = node_decl.get("version") or ""
+    if not isinstance(version, (str, int, float)):
+        raise NodeScriptError(
+            "NODE['version'] must be a string like '2.0' (or a number)")
+    version = str(version).strip()
+
     inputs = _parse_ports(node_decl.get("inputs", []), PortDirection.INPUT,
                           "NODE['inputs']")
     outputs = _parse_ports(node_decl.get("outputs", []), PortDirection.OUTPUT,
@@ -289,6 +298,7 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         card=card,
         control=control,
         exclusive=exclusive,
+        version=version,
     )
 
 

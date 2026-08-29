@@ -9,6 +9,7 @@ without repeating the header.
 NODE = {
     "label": "Write CSV",
     "category": "IO",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

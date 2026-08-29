@@ -7,6 +7,7 @@ the result in place or into a new column.
 NODE = {
     "label": "String Manipulation",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }

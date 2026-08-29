@@ -39,6 +39,7 @@ embed becomes one chart per region.
 NODE = {
     "label": "Report",
     "category": "Viz",
+    "version": "1.0",
     "card": "report",
     "inputs": [("a", "any", {"optional": True}),
                ("b", "any", {"optional": True}),

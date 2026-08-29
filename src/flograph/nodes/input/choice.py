@@ -20,6 +20,7 @@ option — which is what the dropdown is showing.
 NODE = {
     "label": "Choice",
     "category": "Input",
+    "version": "1.0",
     "card": "control",
     "control": "choice",
     "inputs": [("options", "any", {"optional": True})],

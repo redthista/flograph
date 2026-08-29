@@ -7,6 +7,7 @@ Outputs a DataFrame ready to wire into Show Table (or export).
 NODE = {
     "label": "Data Profile",
     "category": "Transform",
+    "version": "1.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("profile", "dataframe")],
 }

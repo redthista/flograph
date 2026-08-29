@@ -25,6 +25,7 @@ absent.
 NODE = {
     "label": "Show Web View",
     "category": "Viz",
+    "version": "1.0",
     "card": "webview",
     "inputs": [("data", "any", {"optional": True})],
     "outputs": [("view", "object")],

@@ -10,6 +10,7 @@ Column types take one `column = dtype` per line (e.g. `id = int64`,
 NODE = {
     "label": "Read CSV",
     "category": "IO",
+    "version": "1.0",
     "inputs": [],
     "outputs": [("table", "dataframe")],
 }
