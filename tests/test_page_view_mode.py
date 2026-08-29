@@ -31,6 +31,15 @@ def _isolated_settings(tmp_path, monkeypatch):
         lambda *a, **k: QSettings(ini_path, QSettings.IniFormat))
 
 
+@pytest.fixture(autouse=True)
+def _clean_tile_clipboard():
+    """The tile clipboard is a class attribute (so it spans dashboard
+    pages), which means it leaks between tests unless each one clears it."""
+    dashboard_view.DashboardView._tile_clipboard = None
+    yield
+    dashboard_view.DashboardView._tile_clipboard = None
+
+
 @pytest.fixture(scope="module")
 def registry():
     reg = NodeRegistry()
@@ -414,16 +423,19 @@ class TestALockedPageHasNoContextMenu:
         self._right_click(page.view, centre)
         assert not opened
 
-    def test_empty_space_on_an_unlocked_page_shows_nothing_either(
+    def test_empty_space_on_an_unlocked_page_offers_the_paste_menu(
             self, window, monkeypatch):
-        """The same leak, unlocked: there is no page-level menu, so the
-        event must stop here rather than becoming the window's."""
+        """The same leak, unlocked, given somewhere to go: right-clicking
+        empty canvas now shows the paste menu (disabled until something is
+        copied) rather than leaking up to the window's dock-and-toolbar
+        menu."""
         page = self._page(window, locked=False)
         opened = self._watch_menus(monkeypatch)
         # top-left of a view centred on the scene origin, so it is well
         # clear of the tile at (0, 0)
         event = self._right_click(page.view, QPoint(6, 6))
-        assert not opened
+        assert opened
+        assert "Paste" in opened[0]
         assert event.isAccepted()
 
     def test_a_tile_on_an_unlocked_page_still_has_its_menu(self, window,
@@ -434,6 +446,180 @@ class TestALockedPageHasNoContextMenu:
             page.scene.tile_items["t1"].sceneBoundingRect().center())
         self._right_click(page.view, centre)
         assert opened
+
+
+class TestTileContextMenu:
+    """Right-clicking a tile on a dashboard page offers Copy / Paste /
+    Delete alongside the layer actions — the standard item operations, on
+    the surface where the item lives."""
+
+    def _page(self, window):
+        page = add_page(window)
+        node = window.registry.instantiate("flograph.viz.card", pos=(0, 0))
+        window.graph.add_node(node)
+        window.undo_stack.push(AddTileCommand(
+            window.graph, "p1",
+            Tile(id="t1", node_id=node.id, port="value",
+                 rect=(0.0, 0.0, 300.0, 200.0))))
+        page.view.resize(600, 400)
+        return page
+
+    def _recorder(self, monkeypatch, pick=None):
+        """Record what a menu would have shown; when `pick` is a label, make
+        `exec` choose that action so the menu's aftermath actually runs."""
+        shown: list = []
+
+        class _Recorder(QMenu):
+            def exec(self, *args):
+                shown[:] = [(a.text(), a.isEnabled())
+                            for a in self.actions()]
+                if pick is None:
+                    return None
+                for action in self.actions():
+                    if action.text() == pick:
+                        return action
+                return None
+        monkeypatch.setattr(dashboard_view, "QMenu", _Recorder)
+        return shown
+
+    def _right_click(self, page, monkeypatch, pick=None):
+        shown = self._recorder(monkeypatch, pick)
+        centre = page.view.mapFromScene(
+            page.scene.tile_items["t1"].sceneBoundingRect().center())
+        event = QContextMenuEvent(
+            QContextMenuEvent.Mouse, centre,
+            page.view.viewport().mapToGlobal(centre))
+        page.view.contextMenuEvent(event)
+        return shown
+
+    def _right_click_scene(self, page, monkeypatch, scene_pos, pick=None):
+        shown = self._recorder(monkeypatch, pick)
+        pos = page.view.mapFromScene(scene_pos)
+        event = QContextMenuEvent(
+            QContextMenuEvent.Mouse, pos,
+            page.view.viewport().mapToGlobal(pos))
+        page.view.contextMenuEvent(event)
+        return shown
+
+    def _add_tile(self, window, tile_id, rect, node=None):
+        if node is None:
+            node = window.registry.instantiate("flograph.viz.card", pos=(0, 0))
+            window.graph.add_node(node)
+        window.undo_stack.push(AddTileCommand(
+            window.graph, "p1",
+            Tile(id=tile_id, node_id=node.id, port="value", rect=rect)))
+        return window._dashboard_pages["p1"].scene.tile_items[tile_id]
+
+    def test_the_menu_offers_copy_paste_and_delete(self, window,
+                                                   monkeypatch):
+        page = self._page(window)
+        shown = self._right_click(page, monkeypatch)
+        labels = {label for label, _ in shown if label}
+        assert "Copy" in labels
+        assert "Paste" in labels
+        assert "Delete" in labels
+
+    def test_paste_starts_disabled_and_enables_once_something_is_copied(
+            self, window, monkeypatch):
+        page = self._page(window)
+        shown = self._right_click(page, monkeypatch)
+        paste_enabled = [enabled for label, enabled in shown
+                         if label == "Paste"]
+        assert paste_enabled == [False]
+        self._right_click(page, monkeypatch, pick="Copy")
+        shown = self._right_click(page, monkeypatch)
+        paste_enabled = [enabled for label, enabled in shown
+                         if label == "Paste"]
+        assert paste_enabled == [True]
+
+    def test_delete_removes_the_tile(self, window, monkeypatch):
+        page = self._page(window)
+        assert "t1" in page.scene.tile_items
+        self._right_click(page, monkeypatch, pick="Delete")
+        assert "t1" not in page.scene.tile_items
+        # one undo step brings it back
+        window.undo_stack.undo()
+        assert "t1" in page.scene.tile_items
+
+    def test_copy_then_paste_adds_a_tile(self, window, monkeypatch):
+        page = self._page(window)
+        before = set(page.scene.tile_items)
+        self._right_click(page, monkeypatch, pick="Copy")
+        self._right_click(page, monkeypatch, pick="Paste")
+        after = set(page.scene.tile_items)
+        assert len(after) == len(before) + 1
+        new_id = next(iter(after - before))
+        tiles = page.scene.graph.pages["p1"].tiles
+        tile = tiles[new_id]
+        # lands clear of the tile it was copied from
+        x0, y0, w, h = tiles["t1"].rect
+        x1, y1, w2, h2 = tile.rect
+        assert (x1, y1) == (x0 + 30.0, y0 + 30.0)
+        assert (w2, h2) == (w, h)
+        assert tile.node_id == tiles["t1"].node_id
+
+    def test_paste_on_empty_canvas_lands_at_the_cursor(self, window,
+                                                       monkeypatch):
+        """Right-clicking empty canvas shows a paste menu, and pasting puts
+        the copied tile's top-left where the cursor was."""
+        page = self._page(window)
+        self._right_click(page, monkeypatch, pick="Copy")
+        before = set(page.scene.tile_items)
+        scene_pos = QPointF(500.0, 400.0)
+        shown = self._right_click_scene(page, monkeypatch, scene_pos)
+        assert [label for label, _ in shown if label] == ["Paste"]
+        self._right_click_scene(page, monkeypatch, scene_pos, pick="Paste")
+        after = set(page.scene.tile_items)
+        assert len(after) == len(before) + 1
+        new_id = next(iter(after - before))
+        tile = page.scene.graph.pages["p1"].tiles[new_id]
+        assert tile.rect[:2] == (500.0, 400.0)
+
+    def test_paste_on_empty_canvas_is_disabled_with_nothing_copied(
+            self, window, monkeypatch):
+        page = self._page(window)
+        shown = self._right_click_scene(
+            page, monkeypatch, QPointF(500.0, 400.0))
+        assert ("Paste", False) in shown
+
+    def test_copy_takes_the_whole_selection(self, window, monkeypatch):
+        page = self._page(window)
+        self._add_tile(window, "t2", (0.0, 300.0, 300.0, 200.0))
+        page.scene.tile_items["t1"].setSelected(True)
+        page.scene.tile_items["t2"].setSelected(True)
+        before = set(page.scene.tile_items)
+        # copy (selection) then paste onto empty canvas
+        self._right_click(page, monkeypatch, pick="Copy")
+        self._right_click_scene(page, monkeypatch, QPointF(600.0, 600.0),
+                                pick="Paste")
+        after = set(page.scene.tile_items)
+        added = after - before
+        assert len(added) == 2
+        tiles = page.scene.graph.pages["p1"].tiles
+        new_tiles = [tiles[tid] for tid in added]
+        # the copied pair keeps its relative arrangement, pasted at the cursor
+        rects = sorted((t.rect[:2] for t in new_tiles))
+        assert rects[0] == (600.0, 600.0)
+        assert rects[1] == (600.0, 900.0)
+
+    def test_paste_lands_on_the_page_being_viewed(self, window,
+                                                  monkeypatch):
+        """Copy on one dashboard page, paste onto another: the tiles go to
+        the page the user is looking at."""
+        page1 = self._page(window)
+        self._right_click(page1, monkeypatch, pick="Copy")
+        page2 = add_page(window, page_id="p2")
+        page2.view.resize(600, 400)
+        assert page1.scene.page_id == "p1"
+        assert page2.scene.page_id == "p2"
+        self._right_click_scene(page2, monkeypatch, QPointF(100.0, 100.0),
+                                pick="Paste")
+        p2_tiles = window.graph.pages["p2"].tiles
+        assert len(p2_tiles) == 1
+        assert list(p2_tiles.values())[0].node_id == \
+            window.graph.pages["p1"].tiles["t1"].node_id
+        # p1 is untouched by the paste
+        assert "t1" in window.graph.pages["p1"].tiles
 
 
 class TestLockedPageCursor:

@@ -23,6 +23,8 @@ enter/exit here — turning fullscreen on or off is a model edit (see
 DashboardScene)."""
 from __future__ import annotations
 
+import uuid
+
 from typing import Optional
 
 import shiboken6 as shiboken
@@ -45,6 +47,9 @@ FIT_MARGIN = 24.0
 #: Resizing a window delivers a stream of resize events; refit once the
 #: stream stops rather than on every step of it.
 FIT_SETTLE_MS = 40
+#: Where a pasted tile lands relative to the one it was copied from, so it
+#: arrives clear of it instead of exactly on top.
+TILE_PASTE_OFFSET = 30.0
 
 
 class FullscreenOverlay(QWidget):
@@ -110,6 +115,14 @@ class FullscreenOverlay(QWidget):
 class DashboardView(ZoomPanGraphicsView):
     tile_dropped = Signal(str, QPointF)  # node_id, scene pos
     fullscreen_changed = Signal(bool)    # a tile was maximized / restored
+
+    # Tiles copied from a right-click menu, waiting to be pasted. A *class*
+    # attribute on purpose: every page has its own DashboardView, and pasting
+    # onto another page must see what was copied here. Each entry is
+    # (node_id, port, rel_x, rel_y, w, h), where (rel_x, rel_y) is the tile's
+    # position relative to the copied selection's top-left, so a paste on any
+    # page rebuilds the arrangement. None until the user copies something.
+    _tile_clipboard: Optional[tuple] = None
 
     def __init__(self, scene: DashboardScene, parent=None) -> None:
         super().__init__(scene, parent)
@@ -433,10 +446,16 @@ class DashboardView(ZoomPanGraphicsView):
     # --------------------------------------------------------- context menu
 
     def contextMenuEvent(self, event) -> None:
-        """Right-click a tile for its layer actions. Right-click selects
-        first (adding to the selection when Ctrl or Shift is held), so the
-        menu always acts on what the user is looking at — and a right-click
-        on an Action Button still can't fire it."""
+        """Right-click on a dashboard page.
+
+        Over a tile: layer actions plus Copy / Paste / Delete. Copy takes
+        the *selection* (or the clicked tile if it isn't part of one), so a
+        right-click on a multi-selection copies all of it; paste rebuilds
+        the copied arrangement, on this page or any other. On empty canvas:
+        a Paste menu, so a copied selection can land wherever the cursor
+        is. Right-click selects first (adding to the selection when Ctrl or
+        Shift is held), so the menu always acts on what the user is looking
+        at — and a right-click on an Action Button still can't fire it."""
         if self._view_mode:
             # A locked page has no layout to act on, so there is no menu to
             # show — and accepting is the point: passed up, the event walks
@@ -447,10 +466,11 @@ class DashboardView(ZoomPanGraphicsView):
             event.accept()
             return
         item = self._tile_at(event.pos())
-        if item is None or self._fs_tile is not None:
-            # Same reasoning as above: empty page, no menu, and the event
-            # stops here rather than becoming the window's.
+        if self._fs_tile is not None:
             event.accept()
+            return
+        if item is None:
+            self._show_canvas_menu(event)
             return
         if not item.isSelected():
             if not event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):
@@ -463,8 +483,19 @@ class DashboardView(ZoomPanGraphicsView):
         if node is not None:
             menu.addSeparator()
             browser_action = menu.addAction("Open in Browser")
+        menu.addSeparator()
+        copy_action = menu.addAction("Copy")
+        paste_action = menu.addAction("Paste")
+        paste_action.setEnabled(bool(DashboardView._tile_clipboard))
+        delete_action = menu.addAction("Delete")
         chosen = menu.exec(event.globalPos())
-        if chosen in layer_actions:
+        if chosen is copy_action:
+            self._copy_tiles(item)
+        elif chosen is paste_action:
+            self._paste_tiles(anchor=item)
+        elif chosen is delete_action:
+            self.scene().delete_selected_tiles()
+        elif chosen in layer_actions:
             self.scene().restack_selection(layer_actions[chosen])
         elif browser_action is not None and chosen is browser_action:
             from ..browser import open_node_from
@@ -472,6 +503,71 @@ class DashboardView(ZoomPanGraphicsView):
             scene.engine.cache.outputs_for(node.id)   # load it if it was spilled
             open_node_from(self, node, scene.engine.cache.get(node.id))
         event.accept()
+
+    def _show_canvas_menu(self, event) -> None:
+        """Right-click on empty canvas: the paste menu. The one thing an
+        empty page has to offer is putting down what was copied, and it must
+        not leak up to the main window's own menu the way a bare right-click
+        used to."""
+        menu = QMenu(self)
+        paste_action = menu.addAction("Paste")
+        paste_action.setEnabled(bool(DashboardView._tile_clipboard))
+        chosen = menu.exec(event.globalPos())
+        if chosen is paste_action and DashboardView._tile_clipboard:
+            self._paste_tiles(scene_pos=self.mapToScene(event.pos()))
+        event.accept()
+
+    def _copy_tiles(self, anchor: TileItem) -> None:
+        """Copy the selection — or just the clicked tile when it isn't part
+        of one. Positions are stored relative to the selection's top-left so
+        a paste on any page restores the arrangement."""
+        items = self.scene().selected_tile_items()
+        if anchor not in items:
+            items = [anchor]
+        rects = [item.tile.rect for item in items]
+        min_x = min(rect[0] for rect in rects)
+        min_y = min(rect[1] for rect in rects)
+        DashboardView._tile_clipboard = tuple(
+            (item.tile.node_id, item.tile.port,
+             item.tile.rect[0] - min_x, item.tile.rect[1] - min_y,
+             item.tile.rect[2], item.tile.rect[3])
+            for item in items)
+
+    def _paste_tiles(self, scene_pos: Optional[QPointF] = None,
+                     anchor: Optional[TileItem] = None) -> None:
+        """Stamp the clipboard's tiles onto the current page, one undo step
+        for the whole paste.
+
+        `scene_pos` puts the copied arrangement's top-left at the cursor
+        (empty-canvas paste); `anchor` offsets it from the tile that was
+        right-clicked so it arrives clear of it. Either way the tiles go to
+        this view's own page, so a paste lands where the user is looking —
+        even when that is another dashboard page."""
+        clip = DashboardView._tile_clipboard
+        if not clip:
+            return
+        if anchor is not None:
+            base_x, base_y = (anchor.tile.rect[0] + TILE_PASTE_OFFSET,
+                              anchor.tile.rect[1] + TILE_PASTE_OFFSET)
+        elif scene_pos is not None:
+            base_x, base_y = scene_pos.x(), scene_pos.y()
+        else:
+            base_x = base_y = TILE_PASTE_OFFSET
+        from flograph.core import Tile
+
+        from ..commands import AddTileCommand
+        scene = self.scene()
+        scene.undo_stack.beginMacro("paste tiles")
+        for node_id, port, rel_x, rel_y, w, h in clip:
+            tile = Tile(
+                id=uuid.uuid4().hex,
+                node_id=node_id,
+                port=port,
+                rect=(base_x + rel_x, base_y + rel_y, w, h),
+            )
+            scene.undo_stack.push(
+                AddTileCommand(scene.graph, scene.page_id, tile))
+        scene.undo_stack.endMacro()
 
     def _browsable_node(self, item: TileItem):
         """The node behind a webview tile that has something to open, else
