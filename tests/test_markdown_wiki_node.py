@@ -116,6 +116,36 @@ class TestCanvasCard:
         assert item._wiki_view.current_slug() == "setup"
 
 
+class TestObsidianVault:
+    @pytest.fixture
+    def vault(self, tmp_path):
+        from PySide6.QtGui import QImage
+        (tmp_path / "Home.md").write_text(
+            "# Home\n\nSee [[Deep Note]] and ![[pic.png]].\n", encoding="utf-8")
+        (tmp_path / "notes").mkdir()
+        (tmp_path / "notes" / "Deep Note.md").write_text(
+            "# Deep Note\n\n![a chart](../assets/chart.png)\n", encoding="utf-8")
+        (tmp_path / "assets").mkdir()
+        QImage(20, 20, QImage.Format_RGB32).save(str(tmp_path / "pic.png"))
+        QImage(30, 10, QImage.Format_RGB32).save(str(tmp_path / "assets" / "chart.png"))
+        (tmp_path / ".obsidian").mkdir()
+        (tmp_path / ".obsidian" / "app.md").write_text("# ignore\n", encoding="utf-8")
+        return tmp_path
+
+    def test_the_card_shows_a_nested_vault_and_renders_its_images(
+            self, scene_of, registry, vault):
+        graph = Graph()
+        node = graph.add_node(registry.instantiate(WIKI))
+        graph.set_param(node.id, "folder", str(vault))
+        view = scene_of(graph).node_items[node.id]._wiki_view
+
+        assert set(view._slug_items) == {"home", "deep-note"}  # notes/ recursed
+        assert "<img" in view.browser.document().toHtml()      # ![[pic.png]]
+
+        view.browser.show_page("deep-note")
+        assert "<img" in view.browser.document().toHtml()      # ../assets/chart.png
+
+
 class TestDashboardTile:
     def test_the_tile_renders_and_navigates(self, qtbot, registry, notes):
         from flograph.engine import ExecutionEngine

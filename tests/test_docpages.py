@@ -47,11 +47,27 @@ class TestRenderLinks:
         assert out == "look at Nowhere please"
         assert missing == ["Nowhere"]
 
-    def test_embed_syntax_is_left_alone(self):
-        text = "chart: ![[Revenue by Region|table]] and [[Home]]"
-        out, _ = render_links(text, self.cat)
-        assert "![[Revenue by Region|table]]" in out
-        assert "[Home](home.md)" in out
+    def test_obsidian_image_embed_becomes_a_markdown_image(self):
+        out, _ = render_links("![[diagram.png]] ![[shot.png|200]]", self.cat)
+        assert "![diagram.png](diagram.png)" in out
+        assert "![shot.png|200](shot.png)" in out
+
+    def test_obsidian_note_embed_becomes_a_link(self):
+        out, _ = render_links("![[The Canvas]]", self.cat)
+        assert out == "[The Canvas](the-canvas.md)"
+
+    def test_folder_path_link_resolves_by_basename(self):
+        out, _ = render_links("[[reference/The Canvas]]", self.cat)
+        assert out == "[reference/The Canvas](the-canvas.md)"
+
+    def test_syntax_inside_code_is_left_verbatim(self):
+        text = ("Use `![[Label]]` in a report.\n\n"
+                "```\n![[Total Revenue]]\n[[Not A Page]]\n```\n")
+        out, missing = render_links(text, self.cat)
+        assert "`![[Label]]`" in out
+        assert "![[Total Revenue]]" in out
+        assert "[[Not A Page]]" in out
+        assert missing == []
 
 
 class TestCatalog:
@@ -71,6 +87,20 @@ class TestCatalog:
     def test_keyed_by_normalised_slug(self, tmp_path):
         cat = _pages(tmp_path, **{"The-Canvas.md": "# The Canvas\n"})
         assert set(cat) == {"the-canvas"}
+
+    def test_pages_are_found_recursively(self, tmp_path):
+        (tmp_path / "guide").mkdir()
+        (tmp_path / "guide" / "Deep.md").write_text("# Deep\n", encoding="utf-8")
+        (tmp_path / "Top.md").write_text("# Top\n", encoding="utf-8")
+        cat = catalog(tmp_path)
+        assert set(cat) == {"deep", "top"}
+        assert cat["deep"].rel == ("guide",)
+
+    def test_dot_folders_are_skipped(self, tmp_path):
+        (tmp_path / ".obsidian").mkdir()
+        (tmp_path / ".obsidian" / "config.md").write_text("# x\n", encoding="utf-8")
+        (tmp_path / "Real.md").write_text("# Real\n", encoding="utf-8")
+        assert set(catalog(tmp_path)) == {"real"}
 
 
 class TestSidebar:
@@ -111,6 +141,17 @@ class TestSidebar:
         monkey = sidebar(tmp_path)
         assert monkey[0].title == "Home" and monkey[0].slug == "home"
         assert [e.slug for e in monkey] == ["home", "the-canvas"]
+
+    def test_folder_structure_is_the_fallback_tree_for_a_vault(self, tmp_path):
+        (tmp_path / "Home.md").write_text("# Home\n", encoding="utf-8")
+        (tmp_path / "guide").mkdir()
+        (tmp_path / "guide" / "Setup.md").write_text("# Setup\n", encoding="utf-8")
+        (tmp_path / "guide" / "Usage.md").write_text("# Usage\n", encoding="utf-8")
+        tree = sidebar(tmp_path)
+        assert tree[0].slug == "home"                     # root page first
+        section = tree[1]
+        assert section.slug is None and section.title == "guide"
+        assert {c.slug for c in section.children} == {"setup", "usage"}
 
     def test_a_page_missing_from_the_sidebar_is_appended(self, tmp_path):
         (tmp_path / "Home.md").write_text("# Home\n", encoding="utf-8")
