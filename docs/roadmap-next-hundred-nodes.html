@@ -290,7 +290,7 @@ footer .wrap > p { max-width: var(--prose); }
     <span class="eyebrow">Product direction &middot; working document</span>
     <h1>flograph's Next Hundred Nodes</h1>
     <p class="lede">The library is what makes it a tool. Here is what to build, and in what order.</p>
-    <p class="meta">Drafted this session &middot; 16 nodes shipped alongside it &middot; branch <code>worktree-killer-nodes</code></p>
+    <p class="meta">Drafted this session &middot; 20 nodes shipped alongside it &middot; branch <code>worktree-killer-nodes</code></p>
   </div>
 </header>
 
@@ -387,8 +387,8 @@ footer .wrap > p { max-width: var(--prose); }
         <p>An ETL tool that can only read files it was handed is a reshaping tool. <strong>Shipped this session:</strong> SQL (any SQLAlchemy DB), DuckDB, HTTP, REST pagination. <strong>Still open:</strong> Google Sheets, cloud object storage (S3/GCS/Azure), warehouses as first-class (Snowflake/BigQuery auth), message queues, the SaaS long tail (Salesforce, HubSpot, Airtable, Notion, Stripe).</p>
       </div>
       <div class="card sev p0">
-        <h4>Automation &amp; triggers</h4>
-        <p>A flow that only runs when you press play is a notebook. It needs: a <strong>schedule / cron trigger</strong>, a <strong>webhook trigger</strong>, <strong>watch-a-folder</strong> and <strong>wait-for-file</strong>, <strong>notify</strong> (Slack / email / webhook), <strong>shell</strong>, <strong>loop over rows/groups</strong>, and <strong>try / catch</strong> so a bad row does not kill the run. Most are single node scripts; the triggers touch the engine.</p>
+        <h4>Automation &amp; triggers <span class="tag ship">partly shipped</span></h4>
+        <p>A flow that only runs when you press play is a notebook. <strong>Shipped this session:</strong> Notify (Slack / email / webhook / ntfy), Shell Command, Wait for File, List Files. <strong>Still open:</strong> a <strong>schedule / cron trigger</strong> and a <strong>webhook trigger</strong> (these touch the engine), <strong>loop over rows / groups</strong>, and <strong>try / catch</strong> so a bad row does not kill the run.</p>
       </div>
       <div class="card sev p1">
         <h4>Incremental execution</h4>
@@ -486,11 +486,12 @@ footer .wrap > p { max-width: var(--prose); }
     <div class="tablewrap"><table>
       <thead><tr><th>Node</th><th>Does</th><th></th></tr></thead>
       <tbody>
-        <tr><td>Notify</td><td>Slack / Discord / email (SMTP) / generic webhook / ntfy</td><td><span class="tag p0">P0</span> <span class="tag council">council</span></td></tr>
+        <tr><td>Notify</td><td>Slack / Discord / email (SMTP) / generic webhook / ntfy</td><td><span class="tag ship">shipped</span></td></tr>
+        <tr><td>Wait for File / List Files</td><td>Block until a drop lands &amp; is stable; turn a folder into a table</td><td><span class="tag ship">shipped</span></td></tr>
+        <tr><td>Shell Command</td><td>Run a process, capture stdout/stderr/exit, branch on the code</td><td><span class="tag ship">shipped</span></td></tr>
         <tr><td>Schedule Trigger</td><td>A cron source node — the graph downstream runs on the schedule</td><td><span class="tag p0">P0</span> <span class="tag council">council</span></td></tr>
         <tr><td>Webhook Trigger</td><td>An inbound HTTP endpoint that kicks off the flow with a payload</td><td><span class="tag p1">P1</span></td></tr>
-        <tr><td>Watch Folder / Wait for File</td><td>Block until a drop lands and is done being written</td><td><span class="tag p0">P0</span> <span class="tag council">council</span></td></tr>
-        <tr><td>Shell Command</td><td>Run a process, capture stdout/stderr/exit, branch on the code</td><td><span class="tag p1">P1</span> <span class="tag council">council</span></td></tr>
+        <tr><td>Watch Folder</td><td>Poll a directory and emit each file as it appears (engine work)</td><td><span class="tag p1">P1</span> <span class="tag council">council</span></td></tr>
         <tr><td>Loop over Rows / Groups</td><td>Fan the downstream subgraph out once per row or per group</td><td><span class="tag p1">P1</span> <span class="tag council">council</span></td></tr>
         <tr><td>Try / Catch</td><td>Wrap a branch; on failure route to a handler instead of stopping</td><td><span class="tag p1">P1</span></td></tr>
         <tr><td>Retry Policy / Rate Limit</td><td>Attach backoff + a token bucket to any node</td><td><span class="tag p2">P2</span></td></tr>
@@ -625,8 +626,8 @@ footer .wrap > p { max-width: var(--prose); }
   <div class="wrap">
     <span class="eyebrow">07 &mdash; Shipped this session</span>
     <div class="wire-rule"></div>
-    <h2>16 nodes, on the branch, tested</h2>
-    <p class="prose">A down-payment on Horizon 1: the connector spine, the AI category, the data-quality gate, and three "weird &amp; wonderful" nodes. All follow the <code>NODE / PARAMS / run</code> contract, all have headless tests (56 in <code>tests/test_killer_nodes.py</code>), and the full suite stays green — <span class="tnum">4115</span> passing, no regressions.</p>
+    <h2>20 nodes, on the branch, tested</h2>
+    <p class="prose">A down-payment on Horizon 1: the connector spine, the Automation category, the AI category, the data-quality gate, and three "weird &amp; wonderful" nodes. All follow the <code>NODE / PARAMS / run</code> contract, all have headless tests (76 in <code>tests/test_killer_nodes.py</code>), and the full suite stays green — <span class="tnum">4115</span>+ passing, no regressions.</p>
 
     <div class="tablewrap"><table>
       <thead><tr><th>Category</th><th>Node</th><th>One line</th></tr></thead>
@@ -639,6 +640,10 @@ footer .wrap > p { max-width: var(--prose); }
         <tr><td rowspan="3"><strong>AI</strong> <span class="mono">(new)</span></td><td>LLM Enrich</td><td><code>{column}</code>-templated prompt per row &rarr; a new column; de-dupes inputs</td></tr>
         <tr><td>LLM Classify</td><td>Each row into a fixed label set — constrained, defaults to Haiku</td></tr>
         <tr><td>LLM Extract</td><td>Named fields out of a text column, as JSON, spread into columns</td></tr>
+        <tr><td rowspan="4"><strong>Automation</strong> <span class="mono">(new)</span></td><td>Notify</td><td>Slack / Discord / webhook / ntfy push / SMTP email when the flow reaches here</td></tr>
+        <tr><td>Shell Command</td><td>Run an OS command, pipe stdin in, capture stdout / stderr / exit code</td></tr>
+        <tr><td>Wait for File</td><td>Block until a path or glob match exists and has stopped growing</td></tr>
+        <tr><td>List Files</td><td>Folder &rarr; table, one row per file; <code>modified after</code> filter, <code>paths</code> list out</td></tr>
         <tr><td rowspan="5"><strong>Transform</strong></td><td>Data Quality Gate</td><td>Rule list &rarr; <code>passed</code> / <code>report</code> / <code>clean</code>; can raise to block the flow</td></tr>
         <tr><td>Diff Tables</td><td>added / removed / changed / unchanged on key columns</td></tr>
         <tr><td>Window Function</td><td>SQL <code>OVER (PARTITION BY&hellip;)</code> — rank, lag, cumsum, rolling — rows intact</td></tr>
