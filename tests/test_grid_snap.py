@@ -255,6 +255,70 @@ class TestSnapSettingsDialog:
         assert window.scene.grid_step == grid.GRID_PRESETS["Compact"]
 
 
+class TestGridVisible:
+    """G11: hide the background grid without losing snap-to-grid."""
+
+    def test_defaults_to_visible(self, window):
+        assert window.grid_visible is True
+        assert window.scene.grid_visible is True
+
+    def test_toggle_applies_to_all_scenes_and_leaves_snap_alone(self, window):
+        window.set_grid_visible(False)
+        assert window.scene.grid_visible is False
+        assert window.scene.snap_enabled is True  # untouched
+
+        window.undo_stack.push(
+            AddPageCommand(window.graph, Page(id="pp", title="X")))
+        assert window._dashboard_pages["pp"].scene.grid_visible is False
+
+    def test_persists_and_is_read_on_construction(self, qtbot, registry,
+                                                  window):
+        window.set_grid_visible(False)
+        assert window.settings.value("grid/visible", type=bool) is False
+        second = MainWindow(registry)
+        second.confirm_close = False
+        qtbot.addWidget(second)
+        assert second.grid_visible is False
+
+    def test_drawBackground_skips_the_grid_when_hidden(self, window,
+                                                      monkeypatch):
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QImage, QPainter
+        from flograph.ui.canvas import base_view
+
+        drawn = []
+        monkeypatch.setattr(
+            base_view.ZoomPanGraphicsView, "_draw_grid",
+            staticmethod(lambda *a, **k: drawn.append(1)))
+        image = QImage(60, 60, QImage.Format_ARGB32)
+        painter = QPainter(image)
+        try:
+            window.set_grid_visible(True)
+            window.view.drawBackground(painter, QRectF(0, 0, 60, 60))
+            assert drawn
+            drawn.clear()
+            window.set_grid_visible(False)
+            window.view.drawBackground(painter, QRectF(0, 0, 60, 60))
+            assert not drawn
+        finally:
+            painter.end()
+
+    def test_checkbox_reflects_and_toggles(self, window):
+        dlg = SettingsDialog(window, window)
+        checkbox = dlg.findChild(QCheckBox, "grid_visible_checkbox")
+        assert checkbox is not None and checkbox.isChecked() is True
+
+        checkbox.setChecked(False)
+        assert window.grid_visible is False
+        assert window.scene.grid_visible is False
+
+    def test_reset_restores_the_grid(self, window):
+        window.set_grid_visible(False)
+        window.reset_settings()
+        assert window.grid_visible is True
+        assert window.scene.grid_visible is True
+
+
 # ------------------------------------------------------------------- frames
 
 class _FrameDrag:

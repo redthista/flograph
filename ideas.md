@@ -18,7 +18,7 @@ comment still cites them.
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, G11, N3, O1–R1) on 2026-08-30.
+2026-08-27; the entries added since (G10, N3, O1–R1) on 2026-08-30.
 
 ---
 
@@ -83,15 +83,6 @@ the sort, none of it kept between opens. A persistent model, or a memoised
 `registry.all()`, is the lever — but measure on the slow machine first: the
 popup is a fixed 280×320 and ~70 rows should not cost this much, so the real
 cause may be Windows popup/paint behaviour rather than the rebuild.
-
-**G11. Hide the grid without losing snap-to-grid** (Dan). A toggle that stops
-the background grid being drawn while leaving snapping on. The two are
-already independent in the code — `drawBackground` always draws the grid
-with no visibility flag, and snapping is a separate view preference read
-from `scene.snap_enabled` in each item's `itemChange` — so this is a new
-`grid/visible` setting checked in `drawBackground` (canvas and dashboard
-views both), pushed through the same `_apply_snap_settings` path the snap
-toggle uses, with a checkbox in the Snapping group in Settings.
 
 ---
 

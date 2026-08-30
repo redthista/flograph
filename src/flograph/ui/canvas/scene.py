@@ -270,6 +270,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         from .grid import DEFAULT_STEP
         self.snap_enabled = True
         self.grid_step = DEFAULT_STEP
+        # Whether the background grid is drawn — independent of snapping, same
+        # sole writer (MainWindow.set_grid_visible).
+        self.grid_visible = True
 
         # Canvas-wide "float the port names beside the pins" preference; the
         # main window is the sole writer (MainWindow.set_port_labels_enabled).

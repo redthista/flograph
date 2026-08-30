@@ -43,6 +43,9 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         from ..canvas.grid import DEFAULT_STEP
         self.snap_enabled = True
         self.grid_step = DEFAULT_STEP
+        # Whether the background grid is drawn — independent of snapping, same
+        # sole writer (MainWindow.set_grid_visible).
+        self.grid_visible = True
         # Layout locked (view mode). Read by tiles built later, so a tile
         # added to a view-mode page arrives locked rather than movable.
         self.view_mode = False

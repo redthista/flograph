@@ -233,6 +233,7 @@ class SettingsDialog(QDialog):
             "gpu_viewport_checkbox": window.action_gpu_viewport.isChecked(),
             "lod_enabled_checkbox": window.lod_enabled,
             "snap_enabled_checkbox": window.snap_enabled,
+            "grid_visible_checkbox": window.grid_visible,
             "minimap_enabled_checkbox": window.minimap_enabled,
             "compact_nodes_checkbox": window.compact_nodes,
             "port_labels_checkbox": window.port_labels_enabled,
@@ -639,6 +640,14 @@ class SettingsDialog(QDialog):
 
         rows.add_group("Snapping")
 
+        grid_check = QCheckBox()
+        grid_check.setObjectName("grid_visible_checkbox")
+        grid_check.setChecked(window.grid_visible)
+        rows.add("Show grid", grid_check,
+                 "Draw the background grid on the canvas and dashboard pages. "
+                 "Turning it off is purely cosmetic — snapping below is a "
+                 "separate setting and keeps working.")
+
         snap_check = QCheckBox()
         snap_check.setObjectName("snap_enabled_checkbox")
         snap_check.setChecked(window.snap_enabled)
@@ -711,6 +720,7 @@ class SettingsDialog(QDialog):
         dclick_combo.currentIndexChanged.connect(
             lambda index: window.set_double_click_action(
                 dclick_combo.itemData(index)))
+        grid_check.toggled.connect(window.set_grid_visible)
         snap_check.toggled.connect(window.set_snap_enabled)
         snap_check.toggled.connect(grid_combo.setEnabled)
         grid_combo.currentIndexChanged.connect(

@@ -295,7 +295,7 @@ class TestTheNavTreeAndSearch:
         self.select(dialog, "Canvas", "Snapping")
         shown = [item.text(0) for item, _g, _h in grid.settings
                  if not item.isHidden()]
-        assert shown == ["Snap to grid", "Grid resolution"]
+        assert shown == ["Show grid", "Snap to grid", "Grid resolution"]
 
     def test_a_search_reaches_groups_other_than_the_selected_one(self, window):
         """The case the explicit jump-to-first-hit exists for: the selected

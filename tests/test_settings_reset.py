@@ -112,6 +112,7 @@ class TestResetAll:
         window.set_lod_enabled(False)
         window.set_lod_threshold(0.75)
         window.set_snap_enabled(False)
+        window.set_grid_visible(False)
         window.set_minimap_enabled(False)
         window.set_tints(0.9, 0.95)
         from flograph.ui.spreadsheet import (set_autosize_default,
@@ -129,6 +130,7 @@ class TestResetAll:
         assert window.lod_threshold == mod.DEFAULT_LOD_THRESHOLD
         assert window.snap_enabled is True
         assert window.grid_step == grid.DEFAULT_STEP
+        assert window.grid_visible is True
         assert window.minimap_enabled is True
         assert window.tint_soft == theme.DEFAULT_TINT_SOFT
         assert window.tint_strong == theme.DEFAULT_TINT_STRONG

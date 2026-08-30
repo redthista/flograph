@@ -5,6 +5,10 @@ Snapping is a pure view preference: the scene carries `snap_enabled` and
 items round their position/size through the helpers here. Holding the bypass
 modifier while dragging or resizing turns snapping off for that gesture, the way
 Power BI lets you nudge freely off the grid.
+
+Whether the background grid is *drawn* is a separate preference again —
+`grid_visible` on the scene, same sole writer — so the grid can be hidden
+while snapping stays on. `drawBackground` reads it through `grid_visible()`.
 """
 from __future__ import annotations
 
@@ -15,6 +19,9 @@ from PySide6.QtWidgets import QApplication
 # the fine background grid the canvas has always drawn.
 GRID_PRESETS = {"Compact": 10.0, "Normal": 20.0, "Relaxed": 40.0}
 DEFAULT_STEP = 20.0
+
+# The background grid is drawn unless a scene says otherwise.
+DEFAULT_GRID_VISIBLE = True
 
 # How far inside a card's right/bottom border still counts as an edge grab.
 EDGE_MARGIN = 6.0
@@ -36,6 +43,12 @@ def snap_point(x: float, y: float, step: float) -> tuple[float, float]:
 
 def grid_step(scene) -> float:
     return getattr(scene, "grid_step", DEFAULT_STEP)
+
+
+def grid_visible(scene) -> bool:
+    """True when the background grid should be drawn for this scene. Missing
+    or None scene falls back to drawn, matching every scene's own default."""
+    return getattr(scene, "grid_visible", DEFAULT_GRID_VISIBLE)
 
 
 def snapping_active(scene, modifiers=None) -> bool:

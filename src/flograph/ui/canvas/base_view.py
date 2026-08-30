@@ -473,7 +473,9 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
         painter.fillRect(rect, theme.CANVAS_BG)
-        from .grid import grid_step
+        from .grid import grid_step, grid_visible
+        if not grid_visible(self.scene()):
+            return  # grid hidden; snapping (a scene preference) is untouched
         fine = grid_step(self.scene())  # follows the chosen snap resolution
         if self.zoom >= FINE_GRID_LOD:
             self._draw_grid(painter, rect, fine, theme.GRID_FINE)

@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
         self.snap_enabled = self.settings.value("snap/enabled", True, type=bool)
         self.grid_step = float(
             self.settings.value("snap/step", grid.DEFAULT_STEP))
+        self.grid_visible = self.settings.value("grid/visible", True, type=bool)
         self._apply_snap_settings()
         self.minimap_enabled = self.settings.value(
             "canvas/minimap_enabled", True, type=bool)
@@ -686,6 +687,13 @@ class MainWindow(QMainWindow):
         self.settings.setValue("snap/step", step)
         self._apply_snap_settings()
 
+    def set_grid_visible(self, visible: bool) -> None:
+        """Draw (or hide) the background grid on the canvas and every
+        dashboard page. Snapping is a separate setting and is left alone."""
+        self.grid_visible = visible
+        self.settings.setValue("grid/visible", visible)
+        self._apply_snap_settings()
+
     def set_minimap_enabled(self, enabled: bool) -> None:
         self.minimap_enabled = enabled
         self.settings.setValue("canvas/minimap_enabled", enabled)
@@ -764,9 +772,9 @@ class MainWindow(QMainWindow):
         self.page_bar.update()
 
     def _apply_snap_settings(self) -> None:
-        """Push the current snap toggle/step onto every scene and repaint so
-        the grid redraws at the new resolution. Applies to node/frame moves
-        and resizes on the canvas and dashboard tiles."""
+        """Push the current snap toggle/step and grid visibility onto every
+        scene and repaint so the grid redraws at the new resolution. Applies
+        to node/frame moves and resizes on the canvas and dashboard tiles."""
         views = [self.view]
         scenes = [self.scene]
         for page in self._canvas_pages():
@@ -775,6 +783,7 @@ class MainWindow(QMainWindow):
         for scene in scenes:
             scene.snap_enabled = self.snap_enabled
             scene.grid_step = self.grid_step
+            scene.grid_visible = self.grid_visible
         for view in views:
             view.viewport().update()
 
@@ -1570,6 +1579,7 @@ class MainWindow(QMainWindow):
         widget.view.zoom_changed.connect(self._on_canvas_zoom_changed)
         widget.scene.snap_enabled = self.snap_enabled
         widget.scene.grid_step = self.grid_step
+        widget.scene.grid_visible = self.grid_visible
         widget.view.set_scrollbars_enabled(self.scrollbars_enabled)
         self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
         self._canvas_stack.addWidget(widget)
@@ -3523,6 +3533,7 @@ class MainWindow(QMainWindow):
         self.set_lod_threshold(DEFAULT_LOD_THRESHOLD)
         self.set_snap_enabled(True)
         self.set_grid_step(grid.DEFAULT_STEP)
+        self.set_grid_visible(True)
         self.set_minimap_enabled(True)
         self.set_port_labels_enabled(False)
         self.set_flow_pins_enabled(False)
