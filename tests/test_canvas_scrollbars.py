@@ -54,12 +54,34 @@ class TestCanvasScrollbars:
 
 class TestFittedSpan:
     """The clever half: the bars cover the flow plus a margin, so they
-    scroll at canvas speed and grow with it."""
+    scroll at canvas speed and grow with it. Only while the bars are shown —
+    with them off the span stays world-sized so a pan is never walled in."""
+
+    def test_the_span_is_world_sized_until_the_bars_are_shown(self, qtbot,
+                                                              registry):
+        scene = NodeGraphScene(Graph(), QUndoStack(), registry=registry)
+        assert scene.sceneRect().width() > 100_000
+        scene.set_rect_fitted(True)
+        qtbot.waitUntil(lambda: scene.sceneRect().width() < 5000, timeout=2000)
+        scene.set_rect_fitted(False)
+        assert scene.sceneRect().width() > 100_000
+
+    def test_the_setting_drives_the_fit_through_the_view(self, qtbot,
+                                                         registry):
+        scene = NodeGraphScene(Graph(), QUndoStack(), registry=registry)
+        v = NodeGraphView(scene)
+        qtbot.addWidget(v)
+        assert scene.sceneRect().width() > 100_000
+        v.set_scrollbars_enabled(True)
+        qtbot.waitUntil(lambda: scene.sceneRect().width() < 5000, timeout=2000)
+        v.set_scrollbars_enabled(False)
+        assert scene.sceneRect().width() > 100_000
 
     def test_the_span_follows_the_flow_not_the_world(self, qtbot,
                                                       registry):
         graph = Graph()
         scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        scene.set_rect_fitted(True)
         a = registry.instantiate(JOIN, pos=(0, 0))
         b = registry.instantiate(JOIN, pos=(1200, 800))
         graph.add_node(a)
@@ -78,6 +100,7 @@ class TestFittedSpan:
         scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
         view = NodeGraphView(scene)
         view.resize(600, 400)
+        view.set_scrollbars_enabled(True)
         view.show()
         qtbot.addWidget(view)
         node = registry.instantiate(JOIN, pos=(0, 0))

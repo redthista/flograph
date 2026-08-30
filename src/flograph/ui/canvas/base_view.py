@@ -366,6 +366,12 @@ class ZoomPanGraphicsView(QGraphicsView):
         policy = Qt.ScrollBarAsNeeded if show else Qt.ScrollBarAlwaysOff
         self.setHorizontalScrollBarPolicy(policy)
         self.setVerticalScrollBarPolicy(policy)
+        # The span only needs fitting when there are bars to keep proportional;
+        # with them off it stays world-sized so a drag pan is never walled in
+        # at the edge of the flow (see ContentFittedSceneRect.set_rect_fitted).
+        scene = self.scene()
+        if hasattr(scene, "set_rect_fitted"):
+            scene.set_rect_fitted(show)
 
     def _restore_drag_mode(self) -> None:
         self.setDragMode(QGraphicsView.NoDrag if self.navigation_locked

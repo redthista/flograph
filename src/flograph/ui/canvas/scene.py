@@ -32,6 +32,14 @@ from .node_item import (
 )
 from .stacking import LAYER_LABELS
 
+#: The half-extent of the world-sized span used whenever the scroll bars are
+#: hidden. Large enough that a drag pan never reaches an edge, so the canvas
+#: feels infinite — which is the point of it when there are no bars to give
+#: the span a visible meaning.
+SCENE_EXTENT = 1_000_000.0
+_WORLD_RECT = QRectF(-SCENE_EXTENT, -SCENE_EXTENT,
+                     2 * SCENE_EXTENT, 2 * SCENE_EXTENT)
+
 REROUTE_TYPE = "flograph.util.reroute"
 #: Breathing room left inside a frame that had to stretch to hold a nested
 #: one reopening (see _grow_enclosing) — flush against the parent's edge
@@ -48,32 +56,58 @@ NUDGE_GAP = 20.0
 
 
 class ContentFittedSceneRect:
-    """Keeps `sceneRect` fitted to the content plus a margin, on a debounce.
+    """Keeps `sceneRect` fitted to the content plus a margin, on a debounce —
+    but only while the scroll bars are shown.
 
-    The scroll bars map the whole span onto their length, so the old
-    world-sized rect made them hair-triggered: one pixel of bar was
-    thousands of canvas pixels, and the smallest drag sent everything past
-    like a bullet. Fitted to the flow, a bar pixel moves at canvas speed —
-    and the span grows (after a beat) as the flow does. Drag and wheel
-    panning are untouched; this span is only ever what the bars cover.
+    The scroll bars map the whole span onto their length, so a world-sized
+    rect makes them hair-triggered: one pixel of bar is thousands of canvas
+    pixels, and the smallest drag sends everything past like a bullet.
+    Fitted to the flow, a bar pixel moves at canvas speed — and the span
+    grows (after a beat) as the flow does.
+
+    With the bars hidden there is nothing to keep honest, and a fitted span
+    only gets in the way: the view cannot scroll outside its `sceneRect`, so
+    fitting it walls a drag pan in at the edge of the flow. So the span goes
+    back to world-sized and the canvas feels infinite again. The scroll-bar
+    setting drives the switch — see `set_rect_fitted`, called from
+    `ZoomPanGraphicsView._apply_scrollbar_policy`.
     """
 
     def _install_rect_fit(self) -> None:
+        self._rect_fitted = False
         self._rect_timer = QTimer(self)
         self._rect_timer.setSingleShot(True)
         self._rect_timer.setInterval(250)
         self._rect_timer.timeout.connect(self._fit_scene_rect)
         self.changed.connect(self._queue_rect_fit)
+        self.setSceneRect(_WORLD_RECT)
+
+    def set_rect_fitted(self, fitted: bool) -> None:
+        """Fit the span to the flow (so the scroll bars stay proportional) or
+        let it be world-sized (so a pan is never walled in). Driven by the
+        scroll-bar setting: bars on → fitted, bars off → world."""
+        fitted = bool(fitted)
+        if fitted == self._rect_fitted:
+            return
+        self._rect_fitted = fitted
+        if fitted:
+            self._fit_scene_rect()
+        else:
+            self._rect_timer.stop()
+            self.setSceneRect(_WORLD_RECT)
 
     def _queue_rect_fit(self, *_regions) -> None:
-        if not self._rect_timer.isActive():
+        if self._rect_fitted and not self._rect_timer.isActive():
             self._rect_timer.start()
 
     def flush_rect_fit(self) -> None:
         """Refit right now instead of after the debounce. Navigation that
         centres on a point must do this first: the view cannot scroll
         outside the span, so a jump to a node the stale span doesn't cover
-        would land short of centre."""
+        would land short of centre. A no-op while the span is world-sized —
+        it already covers everywhere."""
+        if not self._rect_fitted:
+            return
         if self._rect_timer.isActive():
             self._rect_timer.stop()
         self._fit_scene_rect()
@@ -267,7 +301,6 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self.compact_nodes = True
 
         self._install_rect_fit()
-        self._fit_scene_rect()
 
         self._pending: Optional[PendingConnectionItem] = None
         self._drag_detach: Optional[Connection] = None

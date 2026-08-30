@@ -48,7 +48,6 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         self.view_mode = False
 
         self._install_rect_fit()
-        self._fit_scene_rect()
 
         events = graph.events
         self._event_subs = [
