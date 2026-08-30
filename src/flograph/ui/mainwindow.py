@@ -715,6 +715,8 @@ class MainWindow(QMainWindow):
             self.setMenuWidget(self._title_bar)
             self._frameless = window_frame.FramelessResizer(
                 self, self._title_bar)
+            self._title_bar.set_compact(self.settings.value(
+                "window/titlebar_compact", False, type=bool))
             self._title_bar.refresh_title()
         else:
             toolbar = QToolBar("Main", self)
@@ -737,6 +739,13 @@ class MainWindow(QMainWindow):
         self.settings.setValue("window/custom_frame", bool(enabled))
         self.show_status(
             "Custom window frame — restart flograph to apply", 5000)
+
+    def set_titlebar_compact(self, compact: bool) -> None:
+        """Icon-only title-bar buttons. Applies at once — no restart."""
+        self.settings.setValue("window/titlebar_compact", bool(compact))
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.set_compact(bool(compact))
 
     def set_snap_enabled(self, enabled: bool) -> None:
         self.snap_enabled = enabled

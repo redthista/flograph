@@ -434,6 +434,18 @@ class SettingsDialog(QDialog):
                  "native title bar and a separate toolbar. Takes effect when "
                  "you next start flograph.")
 
+        compact_check = QCheckBox("Show only icons on the title-bar buttons")
+        compact_check.setObjectName("titlebar_compact_checkbox")
+        compact_check.setChecked(
+            window.settings.value("window/titlebar_compact", False, type=bool))
+        compact_check.toggled.connect(window.set_titlebar_compact)
+        compact_check.setEnabled(window._custom_frame)
+        rows.add("Compact title bar", compact_check,
+                 "Drop the text labels from the Run and Save buttons on "
+                 "flograph's title bar, keeping the icons — their tooltips "
+                 "still say what they do. The workflow name stays. Only "
+                 "applies with the custom window frame.")
+
         rows.add_group("Execution")
 
         workers_spin = QSpinBox()

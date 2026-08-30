@@ -16,12 +16,18 @@ cursor. Everything is drawn with ``QPainterPath`` for the same reasons
 """
 from __future__ import annotations
 
+import hashlib
+import re
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap,
+    QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QPainter, QPainterPath,
+    QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QWidget,
+    QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QWidgetAction,
 )
 
 from . import theme
@@ -49,16 +55,15 @@ def _logo(p: QPainter, r: QRectF, color: QColor) -> None:
     the same mark the desktop-shortcut icon uses. Kept blunt: at 18px the
     detail of the real node card just turns to mud."""
     w, h = r.width(), r.height()
-    a = QPointF(r.left() + w * 0.28, r.top() + h * 0.28)
-    b = QPointF(r.left() + w * 0.72, r.top() + h * 0.72)
-    p.setPen(_pen(theme.BUTTON_ACCENT, max(1.3, w * 0.085)))
+    a = QPointF(r.left() + w * 0.30, r.top() + h * 0.32)
+    b = QPointF(r.left() + w * 0.70, r.top() + h * 0.68)
+    p.setPen(_pen(theme.BUTTON_ACCENT, max(1.2, w * 0.10)))
     p.drawLine(a, b)
     p.setPen(Qt.NoPen)
     p.setBrush(theme.BUTTON_ACCENT)
+    radius = w * 0.17
     for c in (a, b):
-        node = QRectF(0, 0, w * 0.42, h * 0.42)
-        node.moveCenter(c)
-        p.drawRoundedRect(node, w * 0.10, w * 0.10)
+        p.drawEllipse(c, radius, radius)
 
 
 def _hamburger(p: QPainter, r: QRectF, color: QColor) -> None:
@@ -137,7 +142,6 @@ _GLYPHS = {
     "min": _min, "max": _max, "restore": _restore, "close": _close,
 }
 
-_SAVED = QColor("#5f636d")
 _UNSAVED = theme.BUTTON_ACCENT
 
 
@@ -179,6 +183,55 @@ def app_icon() -> QIcon:
     return icon
 
 
+# --------------------------------------------------------- initials tile
+
+def initials_for(name: str) -> str:
+    """PyCharm's rule: one letter per word for the first two words, else the
+    first two letters of the single word."""
+    parts = [p for p in re.split(r"[\s._\-]+", name.strip()) if p]
+    if len(parts) >= 2:
+        return (parts[0][:1] + parts[1][:1]).upper()
+    if parts:
+        return parts[0][:2].upper()
+    return "?"
+
+
+def initials_pixmap(name: str, size: int, ratio: float = 1.0) -> QPixmap:
+    text = initials_for(name)
+    digest = int(hashlib.md5(name.encode("utf-8")).hexdigest()[:8], 16)
+    base = QColor.fromHsv(digest % 360, 105, 165)
+    pixels = max(1, round(size * ratio))
+    pm = QPixmap(pixels, pixels)
+    pm.fill(Qt.transparent)
+    pm.setDevicePixelRatio(ratio)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    r = QRectF(0.5, 0.5, size - 1, size - 1)
+    path = QPainterPath()
+    path.addRoundedRect(r, size * 0.22, size * 0.22)
+    p.fillPath(path, base)
+    font = QFont()
+    font.setPixelSize(max(6, round(size * 0.44)))
+    font.setBold(True)
+    p.setFont(font)
+    p.setPen(QColor("#f4f5f7"))
+    p.drawText(QRectF(0, 0, size, size), Qt.AlignCenter, text)
+    p.end()
+    return pm
+
+
+def initials_icon(name: str, size: int = 18) -> QIcon:
+    icon = QIcon()
+    for ratio in (1, 2, 3):
+        icon.addPixmap(initials_pixmap(name, size, ratio))
+    return icon
+
+
+def project_display_name(path) -> str:
+    """The workflow's name with no folder and no .flograph extension."""
+    return Path(path).stem if path else "untitled"
+
+
 # --------------------------------------------------------------- widgets
 
 _BTN_QSS = f"""
@@ -202,6 +255,65 @@ QToolButton#close_btn:hover {{ background: {_CLOSE_HOVER.name()}; }}
 """
 
 
+_RECENT_QSS = """
+QWidget#recent_row { background: transparent; }
+QWidget#recent_row:hover { background: #34363f; }
+QLabel#recent_name { color: #e5e7eb; }
+QLabel#recent_path { color: #8b8f99; }
+"""
+
+
+class _RecentRow(QWidget):
+    """One workflow in the project switcher: its initials tile, its name, and
+    the folder it lives in — the shape PyCharm's recent-projects list uses."""
+
+    def __init__(self, path: str, on_open, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("recent_row")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(_RECENT_QSS)
+        self.setCursor(Qt.PointingHandCursor)
+        self._path = path
+        self._on_open = on_open
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 5, 16, 5)
+        row.setSpacing(9)
+
+        tile = QLabel()
+        tile.setPixmap(initials_pixmap(project_display_name(path), 30))
+        row.addWidget(tile, 0, Qt.AlignVCenter)
+
+        text = QVBoxLayout()
+        text.setSpacing(0)
+        name = QLabel(project_display_name(path))
+        name.setObjectName("recent_name")
+        folder = str(Path(path).parent)
+        home = str(Path.home())
+        if folder.startswith(home):
+            folder = "~" + folder[len(home):]
+        path_label = QLabel()
+        path_label.setObjectName("recent_path")
+        path_label.setFont(_smaller(path_label.font()))
+        path_label.setText(QFontMetrics(path_label.font()).elidedText(
+            folder, Qt.ElideMiddle, 340))
+        text.addWidget(name)
+        text.addWidget(path_label)
+        row.addLayout(text, 1)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self.rect().contains(
+                event.position().toPoint()):
+            self._on_open(self._path)
+        super().mouseReleaseEvent(event)
+
+
+def _smaller(font: QFont) -> QFont:
+    f = QFont(font)
+    f.setPointSizeF(max(6.5, font.pointSizeF() - 1.5))
+    return f
+
+
 class TitleBar(QWidget):
     """The one bar. Owns nothing but layout and the window buttons; the run
     actions and the menu tree are the window's, shown here."""
@@ -222,8 +334,9 @@ class TitleBar(QWidget):
         row.setSpacing(2)
 
         logo = QLabel()
-        logo.setPixmap(frame_icon("logo", pt=20).pixmap(19, 19))
+        logo.setPixmap(frame_icon("logo", pt=32).pixmap(18, 18))
         logo.setContentsMargins(2, 0, 4, 0)
+        logo.setToolTip("flograph")
         row.addWidget(logo)
 
         self._menu_btn = QToolButton()
@@ -238,30 +351,53 @@ class TitleBar(QWidget):
         self._project_btn.setObjectName("project_btn")
         self._project_btn.setPopupMode(QToolButton.InstantPopup)
         self._project_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self._project_btn.setLayoutDirection(Qt.RightToLeft)  # chevron after text
-        self._project_btn.setIcon(frame_icon("chevron"))
+        self._project_btn.setIconSize(QSize(18, 18))
+        self._project_btn.setToolTip("Current workflow — switch or open another")
         self._project_menu = QMenu(self._project_btn)
         self._project_menu.aboutToShow.connect(self._rebuild_project_menu)
         self._project_btn.setMenu(self._project_menu)
         row.addSpacing(4)
         row.addWidget(self._project_btn)
 
+        # Only on screen when it matters: no button while everything is
+        # saved, and its own label ("Unsaved changes") once it appears.
         self._save_btn = QToolButton()
         self._save_btn.setObjectName("save_btn")
-        self._save_btn.setIconSize(QSize(_ICON_PT, _ICON_PT))
+        self._save_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._save_btn.setIcon(frame_icon("save", _UNSAVED))
+        self._save_btn.setText("Unsaved changes")
+        self._save_btn.setToolTip("Save the workflow  (Ctrl+S)")
         self._save_btn.clicked.connect(window._save)
+        self._save_btn.hide()
+        row.addSpacing(4)
         row.addWidget(self._save_btn)
 
         row.addStretch(1)
 
-        self._run_btns: list[QToolButton] = []
-        for action in (window.action_run, window.action_run_selected,
-                       window.action_cancel, window.action_reset_caches):
-            btn = QToolButton()
-            btn.setDefaultAction(action)
-            btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        # Run All doubles as Stop while a run is on — clicking it again, or
+        # Escape, cancels. There is no separate Cancel button.
+        self._run_btn = QToolButton()
+        self._run_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._run_btn.clicked.connect(self._on_run_clicked)
+
+        self._run_sel_btn = QToolButton()
+        self._run_sel_btn.setDefaultAction(window.action_run_selected)
+        self._run_sel_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        window.action_run_selected.setToolTip("Run the selected nodes  (F6)")
+
+        self._reset_btn = QToolButton()
+        self._reset_btn.setDefaultAction(window.action_reset_caches)
+        self._reset_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        window.action_reset_caches.setToolTip(
+            "Discard every cached result — the flow re-runs from scratch")
+
+        self._labelled = [self._run_btn, self._run_sel_btn, self._reset_btn,
+                          self._save_btn]
+        for btn in (self._run_btn, self._run_sel_btn, self._reset_btn):
             row.addWidget(btn)
-            self._run_btns.append(btn)
+        self._set_running(False)
+        window.engine.run_started.connect(lambda: self._set_running(True))
+        window.engine.run_finished.connect(lambda ok: self._set_running(False))
 
         row.addSpacing(6)
 
@@ -301,18 +437,45 @@ class TitleBar(QWidget):
     def _sync_max_button(self) -> None:
         maxed = self._window.isMaximized()
         self._btn_max.setIcon(frame_icon("restore" if maxed else "max"))
-        self._btn_max.setToolTip("Restore" if maxed else "Maximise")
+        self._btn_max.setToolTip(
+            "Restore the window" if maxed else "Maximise the window")
+
+    # -- run / stop -------------------------------------------------
+
+    def _on_run_clicked(self) -> None:
+        if self._window.engine.active:
+            self._window.engine.cancel()
+        else:
+            self._window.action_run.trigger()
+
+    def _set_running(self, running: bool) -> None:
+        if running:
+            self._run_btn.setIcon(toolbar_style.toolbar_icon("cancel"))
+            self._run_btn.setText("Stop")
+            self._run_btn.setToolTip("Stop the running flow  (Esc)")
+        else:
+            self._run_btn.setIcon(toolbar_style.toolbar_icon("run_all"))
+            self._run_btn.setText("Run All")
+            self._run_btn.setToolTip("Run the whole flow  (F5)")
+        self._run_sel_btn.setEnabled(not running)
+
+    # -- compact ---------------------------------------------------
+
+    def set_compact(self, compact: bool) -> None:
+        """Icon-only run/save buttons (their tooltips still explain them);
+        the workflow name always stays."""
+        style = (Qt.ToolButtonIconOnly if compact
+                 else Qt.ToolButtonTextBesideIcon)
+        for btn in self._labelled:
+            btn.setToolButtonStyle(style)
 
     # -- project switcher --------------------------------------------
 
     def refresh_title(self) -> None:
-        from pathlib import Path
         path = getattr(self._window, "_project_path", None)
-        self._project_btn.setText(Path(path).name if path else "untitled")
-        dirty = not self._window.undo_stack.isClean()
-        self._save_btn.setIcon(frame_icon("save", _UNSAVED if dirty else _SAVED))
-        self._save_btn.setToolTip(
-            "Save  (Ctrl+S)" if dirty else "All changes saved")
+        self._project_btn.setText(project_display_name(path))
+        self._project_btn.setIcon(initials_icon(project_display_name(path)))
+        self._save_btn.setVisible(not self._window.undo_stack.isClean())
 
     def _rebuild_project_menu(self) -> None:
         m = self._project_menu
@@ -325,12 +488,16 @@ class TitleBar(QWidget):
         recent = self._window._recent_files_existing()
         if recent:
             m.addSeparator()
+            header = m.addAction("Recent workflows")
+            header.setEnabled(False)
             for p in recent:
-                from pathlib import Path
-                act = m.addAction(Path(p).name)
-                act.setToolTip(p)
-                act.triggered.connect(
-                    lambda checked=False, path=p: self._window.open_path(path))
+                item = QWidgetAction(m)
+                item.setDefaultWidget(_RecentRow(p, self._open_recent))
+                m.addAction(item)
+
+    def _open_recent(self, path: str) -> None:
+        self._project_menu.close()
+        self._window.open_path(path)
 
     # -- drag / double-click ---------------------------------------
 

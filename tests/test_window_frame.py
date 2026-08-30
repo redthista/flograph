@@ -9,6 +9,7 @@ tests here cover the wiring, not the drag.
 import pytest
 from PySide6.QtCore import QEvent, QSettings, Qt
 from PySide6.QtGui import QUndoCommand
+from PySide6.QtWidgets import QToolButton, QWidgetAction
 
 from flograph.core import NodeRegistry
 from flograph.ui import window_frame
@@ -26,7 +27,9 @@ def registry():
 def frame_window(qtbot, registry):
     s = QSettings("flograph", "flograph")
     prior = s.value("window/custom_frame", True, type=bool)
+    prior_compact = s.value("window/titlebar_compact", False, type=bool)
     s.setValue("window/custom_frame", True)
+    s.setValue("window/titlebar_compact", False)
     try:
         win = MainWindow(registry)
         win.confirm_close = False
@@ -35,7 +38,10 @@ def frame_window(qtbot, registry):
         yield win
     finally:
         s.setValue("window/custom_frame", prior)
+        s.setValue("window/titlebar_compact", prior_compact)
 
+
+# -- structure --------------------------------------------------------
 
 def test_the_window_is_frameless(frame_window):
     assert frame_window.windowFlags() & Qt.FramelessWindowHint
@@ -56,58 +62,149 @@ def test_hamburger_holds_the_whole_menu_tree(frame_window):
         "&File", "&Edit", "&Run", "&Tools", "&View", "&Help"]
 
 
-def test_run_actions_are_on_the_bar(frame_window):
-    labels = [b.text() for b in frame_window._title_bar._run_btns]
-    assert labels == ["Run All", "Run Selected", "Cancel", "Reset Caches"]
-    # the buttons drive the window's own actions
-    btn = frame_window._title_bar._run_btns[0]
-    assert btn.defaultAction() is frame_window.action_run
+# -- run / stop ------------------------------------------------------
+
+def test_run_button_is_run_all_when_idle(frame_window):
+    tb = frame_window._title_bar
+    assert tb._run_btn.text() == "Run All"
+    assert "F5" in tb._run_btn.toolTip()
+    assert tb._run_sel_btn.defaultAction() is frame_window.action_run_selected
 
 
-def test_project_switcher_shows_the_workflow_name(frame_window, tmp_path):
+def test_no_cancel_button_on_the_bar(frame_window):
+    tb = frame_window._title_bar
+    texts = {b.text() for b in tb.findChildren(QToolButton)}
+    assert "Cancel" not in texts
+
+
+def test_run_button_becomes_stop_during_a_run(frame_window):
+    tb = frame_window._title_bar
+    frame_window.engine.run_started.emit()
+    assert tb._run_btn.text() == "Stop"
+    assert "Esc" in tb._run_btn.toolTip()
+    assert not tb._run_sel_btn.isEnabled()
+    frame_window.engine.run_finished.emit(True)
+    assert tb._run_btn.text() == "Run All"
+    assert tb._run_sel_btn.isEnabled()
+
+
+def test_clicking_stop_cancels_the_engine(frame_window, monkeypatch):
+    tb = frame_window._title_bar
+    calls = []
+    monkeypatch.setattr(frame_window.engine, "cancel",
+                        lambda: calls.append("cancel"))
+    monkeypatch.setattr(type(frame_window.engine), "active",
+                        property(lambda self: True))
+    tb._on_run_clicked()
+    assert calls == ["cancel"]
+
+
+# -- project switcher ----------------------------------------------
+
+def test_switcher_drops_the_flograph_extension(frame_window, tmp_path):
     tb = frame_window._title_bar
     assert tb._project_btn.text() == "untitled"
     frame_window._project_path = str(tmp_path / "sales.flograph")
     frame_window._update_title()
-    assert tb._project_btn.text() == "sales.flograph"
+    assert tb._project_btn.text() == "sales"
 
 
-def test_project_menu_lists_recent_workflows(frame_window, tmp_path, monkeypatch):
-    p = tmp_path / "old.flograph"
-    p.write_text("{}")
-    monkeypatch.setattr(frame_window, "_recent_files_existing",
-                        lambda: [str(p)])
+def test_switcher_carries_an_initials_tile(frame_window, tmp_path):
     tb = frame_window._title_bar
-    tb._project_menu.aboutToShow.emit()
-    texts = [a.text() for a in tb._project_menu.actions()]
-    assert "old.flograph" in texts
-
-
-def test_save_button_tracks_unsaved_changes(frame_window):
-    tb = frame_window._title_bar
-    assert tb._save_btn.toolTip() == "All changes saved"
-    frame_window.undo_stack.push(QUndoCommand("edit"))
+    frame_window._project_path = str(tmp_path / "sales.flograph")
     frame_window._update_title()
-    assert "Save" in tb._save_btn.toolTip()
+    assert not tb._project_btn.icon().isNull()
 
 
-def test_project_menu_offers_save(frame_window):
+@pytest.mark.parametrize("name, want", [
+    ("sales", "SA"),
+    ("quarterly-report", "QR"),
+    ("Monthly_Close", "MC"),
+    ("q3 numbers final", "QN"),
+    ("x", "X"),
+])
+def test_initials_rule(name, want):
+    assert window_frame.initials_for(name) == want
+
+
+def test_project_menu_offers_save_new_open(frame_window):
     tb = frame_window._title_bar
     tb._project_menu.aboutToShow.emit()
     texts = [a.text() for a in tb._project_menu.actions()]
     assert "&Save" in texts and "Save &As…" in texts
+    assert "&New" in texts and "&Open…" in texts
 
+
+def test_recent_rows_show_name_and_folder(frame_window, tmp_path, monkeypatch):
+    proj = tmp_path / "books" / "ledger.flograph"
+    proj.parent.mkdir()
+    proj.write_text("{}")
+    monkeypatch.setattr(frame_window, "_recent_files_existing",
+                        lambda: [str(proj)])
+    from PySide6.QtWidgets import QLabel
+    tb = frame_window._title_bar
+    tb._project_menu.aboutToShow.emit()
+    rows = [a.defaultWidget() for a in tb._project_menu.actions()
+            if isinstance(a, QWidgetAction)]
+    assert len(rows) == 1
+    texts = [w.text() for w in rows[0].findChildren(QLabel) if w.text()]
+    assert "ledger" in texts
+    assert any("books" in t for t in texts)
+
+
+def test_recent_row_opens_the_workflow(frame_window, tmp_path, monkeypatch):
+    proj = tmp_path / "old.flograph"
+    proj.write_text("{}")
+    opened = []
+    monkeypatch.setattr(frame_window, "open_path",
+                        lambda p, *a, **k: opened.append(p))
+    monkeypatch.setattr(frame_window, "_recent_files_existing",
+                        lambda: [str(proj)])
+    tb = frame_window._title_bar
+    tb._project_menu.aboutToShow.emit()
+    row = next(a.defaultWidget() for a in tb._project_menu.actions()
+               if isinstance(a, QWidgetAction))
+    row._on_open(str(proj))
+    assert opened == [str(proj)]
+
+
+# -- save indicator ----------------------------------------------
+
+def test_save_button_hidden_until_dirty(frame_window):
+    tb = frame_window._title_bar
+    assert not tb._save_btn.isVisibleTo(tb)
+    frame_window.undo_stack.push(QUndoCommand("edit"))
+    frame_window._update_title()
+    assert tb._save_btn.isVisibleTo(tb)
+    assert tb._save_btn.text() == "Unsaved changes"
+
+
+# -- compact ---------------------------------------------------
+
+def test_compact_setting_drops_button_text(frame_window):
+    tb = frame_window._title_bar
+    assert tb._run_btn.toolButtonStyle() == Qt.ToolButtonTextBesideIcon
+    frame_window.set_titlebar_compact(True)
+    assert tb._run_btn.toolButtonStyle() == Qt.ToolButtonIconOnly
+    assert tb._reset_btn.toolButtonStyle() == Qt.ToolButtonIconOnly
+    # the workflow name is not a button label — it stays
+    assert tb._project_btn.text() == "untitled"
+    frame_window.set_titlebar_compact(False)
+    assert tb._run_btn.toolButtonStyle() == Qt.ToolButtonTextBesideIcon
+
+
+# -- window controls ------------------------------------------
 
 def test_maximise_button_tracks_window_state(frame_window):
     tb = frame_window._title_bar
     frame_window.showMaximized()
     frame_window._frameless.eventFilter(
         frame_window, QEvent(QEvent.WindowStateChange))
-    assert tb._btn_max.toolTip() == "Restore"
+    assert "Restore" in tb._btn_max.toolTip()
     frame_window.showNormal()
     frame_window._frameless.eventFilter(
         frame_window, QEvent(QEvent.WindowStateChange))
-    assert tb._btn_max.toolTip() == "Maximise"
+    assert "Maximise" in tb._btn_max.toolTip()
 
 
 def test_eight_resize_grips_exist_and_hide_when_maximised(frame_window):
@@ -121,6 +218,16 @@ def test_eight_resize_grips_exist_and_hide_when_maximised(frame_window):
     assert all(not g.isVisible() for g in fr._grips)
 
 
+def test_every_bar_button_has_a_tooltip(frame_window):
+    tb = frame_window._title_bar
+    for btn in (tb._menu_btn, tb._project_btn, tb._save_btn, tb._run_btn,
+                tb._run_sel_btn, tb._reset_btn, tb._btn_min, tb._btn_max,
+                tb._btn_close):
+        assert btn.toolTip(), btn
+
+
+# -- glyphs ----------------------------------------------------
+
 @pytest.mark.parametrize("kind", ["logo", "hamburger", "chevron", "save",
                                   "min", "max", "restore", "close"])
 def test_frame_glyphs_render(kind):
@@ -130,3 +237,8 @@ def test_frame_glyphs_render(kind):
 
 def test_app_icon_has_sizes():
     assert window_frame.app_icon().availableSizes()
+
+
+def test_initials_pixmap_is_drawn():
+    pm = window_frame.initials_pixmap("sales report", 30)
+    assert not pm.isNull() and pm.width() == 30
