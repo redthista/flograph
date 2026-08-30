@@ -77,6 +77,7 @@ from .stats_window import StatsWindow
 from .settings_dialog import SettingsDialog
 from .docs import DocsWindow
 from . import theme
+from . import toolbar as toolbar_style
 
 MAX_RECENT = 8
 PASTE_OFFSET = 30.0
@@ -519,8 +520,7 @@ class MainWindow(QMainWindow):
 
     def _build_actions(self) -> None:
         toolbar = QToolBar("Main", self)
-        toolbar.setObjectName("toolbar_main")
-        toolbar.setMovable(False)
+        toolbar_style.style_toolbar(toolbar)
         self.addToolBar(toolbar)
 
         # the group each act() below lands in on the Keyboard Shortcuts page;
@@ -592,6 +592,13 @@ class MainWindow(QMainWindow):
         self.action_cancel.setEnabled(False)
         self.action_reset_caches = act("Reset Caches", None, self._reset_caches)
 
+        self.action_run.setIcon(toolbar_style.toolbar_icon("run_all"))
+        self.action_run_selected.setIcon(
+            toolbar_style.toolbar_icon("run_selected"))
+        self.action_cancel.setIcon(toolbar_style.toolbar_icon("cancel"))
+        self.action_reset_caches.setIcon(
+            toolbar_style.toolbar_icon("reset_caches"))
+
         section["name"] = "Tools"
         # --- tools
         self.action_settings = act("&Settings…", QKeySequence("Ctrl+,"),
@@ -608,8 +615,7 @@ class MainWindow(QMainWindow):
                        self.action_cancel):
             toolbar.addAction(action)
         toolbar.addSeparator()
-        toolbar.addAction(self.action_undo)
-        toolbar.addAction(self.action_redo)
+        toolbar.addAction(self.action_reset_caches)
 
         file_menu = self.menuBar().addMenu("&File")
         for action in (self.action_new, self.action_open, self.action_save,
