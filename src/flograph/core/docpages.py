@@ -59,6 +59,13 @@ def link_target(slug: str) -> str:
     return f"{slug}.md"
 
 
+def anchor_slug(heading: str) -> str:
+    """The `#fragment` a heading is reachable by. Shared by `render_links`
+    (which writes `[[Page#Heading]]` as `page.md#<this>`) and the renderer
+    (which tags each heading with an anchor of `<this>`), so the two agree."""
+    return _slug(heading)
+
+
 @dataclass(frozen=True)
 class DocPage:
     slug: str
@@ -287,7 +294,7 @@ def render_links(text: str, pages: dict[str, DocPage]) -> tuple[str, list[str]]:
             return shown  # brackets dropped; reads as plain text, like GitHub
         href = link_target(page.slug)
         if anchor:
-            href += "#" + _slug(anchor)
+            href += "#" + anchor_slug(anchor)
         return f"[{shown}]({href})"
 
     text = _outside_code(text, lambda s: EMBED_RE.sub(embed, s))

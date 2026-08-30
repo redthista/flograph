@@ -6,8 +6,14 @@ sticky-note cards use — pointed at a folder of `*.md` pages (the bundled
 `flograph/docs/` by default). `core.docpages` turns `[[wikilinks]]` and
 Obsidian `![[embeds]]` into ordinary Markdown before the text reaches Qt;
 clicking a link loads that page here, external `http(s)` links open in the
-real browser. Images are loaded from disk and spliced into the HTML, because
-Qt's Markdown reader silently drops them (same note as `report/render.py`).
+real browser.
+
+Every page is rendered Markdown → `toHtml` → fix-ups → `setHtml`, the same
+detour `report/render.py` takes and for the same reasons. `setMarkdown`
+alone drops images, never shades a `` ``` `` code block (the stylesheet's
+`pre` rule doesn't reach it), and gives headings no anchors for a
+`[[Page#heading]]` link to land on. The fix-up pass puts all three back:
+images loaded from disk, `<pre>` / inline `code` styled, headings tagged.
 """
 from __future__ import annotations
 
@@ -18,7 +24,9 @@ from PySide6.QtCore import QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QImage, QTextDocument
 from PySide6.QtWidgets import QTextBrowser
 
-from flograph.core.docpages import catalog, render_links, sidebar
+from flograph.core.docpages import (
+    anchor_slug, catalog, render_links, sidebar,
+)
 
 from .. import theme
 
@@ -32,9 +40,9 @@ h2 {{ font-size: 16px; color: {theme.NODE_TEXT.name()};
       border-bottom: 1px solid {theme.NODE_BORDER.name()}; padding-bottom: 3px; }}
 h3 {{ font-size: 13px; color: {theme.FRAME_TITLE.name()}; }}
 a {{ color: {theme.BUTTON_ACCENT.name()}; }}
-code, pre {{ background: {theme.NODE_HEADER.name()};
+code, pre {{ background-color: {theme.NODE_HEADER.name()};
              color: {theme.NODE_TEXT.name()}; }}
-pre {{ padding: 6px; }}
+pre {{ padding: 8px; border: 1px solid {theme.NODE_BORDER.name()}; }}
 table {{ border: 1px solid {theme.NODE_BORDER.name()};
          border-collapse: collapse; }}
 th, td {{ border: 1px solid {theme.NODE_BORDER.name()}; padding: 3px 8px; }}
@@ -48,6 +56,27 @@ _EMPTY = "# Nothing here\n\nThis folder has no Markdown (`.md`) pages."
 
 _IMAGE_MD_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 _IMAGE_TOKEN = "@@wikiimg-{}@@"
+
+# Qt renders markdown `code` as a bare monospace <span> (no background) and
+# gives headings no anchor. `_fix_up_html` repairs both on the toHtml output.
+_MONO_SPAN_RE = re.compile(
+    r"<span style=\"[^\"]*font-family:'monospace'[^\"]*\">([^<]*)</span>")
+_HEADING_RE = re.compile(r"(<h[1-6][^>]*>)(.*?)(</h[1-6]>)", re.DOTALL)
+_TAGS_RE = re.compile(r"<[^>]+>|&[#0-9a-zA-Z]+;")
+
+
+def _fix_up_html(html: str) -> str:
+    """Monospace spans → `<code>` (so the stylesheet shades them), and an
+    `<a name>` on every heading matching `docpages.anchor_slug`, so an
+    in-page `[[Page#heading]]` link scrolls to it."""
+    html = _MONO_SPAN_RE.sub(r"<code>\1</code>", html)
+
+    def anchored(m: "re.Match[str]") -> str:
+        title = _TAGS_RE.sub("", m.group(2)).strip()
+        return (f'{m.group(1)}<a name="{anchor_slug(title)}"></a>'
+                f'{m.group(2)}{m.group(3)}')
+
+    return _HEADING_RE.sub(anchored, html)
 
 
 class DocsBrowser(QTextBrowser):
@@ -99,16 +128,16 @@ class DocsBrowser(QTextBrowser):
     def show_page(self, slug: str | None, *, anchor: str | None = None,
                   record: bool = True) -> None:
         if not self._catalog:
-            self.setMarkdown(_EMPTY)
+            self._render(_EMPTY)
             self.navigated.emit()
             return
         page = self._catalog.get(slug) if slug else None
         if page is None:
-            self.setMarkdown(_NOT_FOUND.format(name=slug))
+            self._render(_NOT_FOUND.format(name=slug))
         else:
             text, _ = render_links(page.path.read_text(encoding="utf-8"),
                                    self._catalog)
-            self._set_markdown_with_images(text, page.path.parent)
+            self._render(text, page.path.parent)
         if anchor:
             self.scrollToAnchor(anchor)
         else:
@@ -119,15 +148,18 @@ class DocsBrowser(QTextBrowser):
             self._pos = len(self._history) - 1
         self.navigated.emit()
 
-    # ------------------------------------------------------------- images
+    # ---------------------------------------------------------- rendering
 
-    def _set_markdown_with_images(self, text: str, base: Path) -> None:
-        """Qt's Markdown reader silently drops images (same note as
-        report/render.py). Swap each `![alt](src)` for a text token that
-        survives `setMarkdown`, then splice an `<img>` back into the HTML
-        with the picture loaded from disk and registered as a document
-        resource. Remote (`http`) images are left for Qt to ignore."""
+    def _render(self, text: str, base: Path | None = None) -> None:
+        """Render one page: Markdown → `toHtml` → fix-ups → `setHtml`.
+
+        Each `![alt](src)` is swapped for a token that survives `setMarkdown`
+        and, once the picture has loaded from disk and been registered as a
+        document resource, spliced back in as an `<img>` — Qt's Markdown
+        reader drops images outright. `_fix_up_html` then shades code and
+        anchors headings. Remote (`http`) images are left for Qt to ignore."""
         doc = self.document()
+        base = base or Path()
         specs: list[tuple[str, str, int | None]] = []  # token, url, width
 
         def stash(m: "re.Match[str]") -> str:
@@ -148,17 +180,13 @@ class DocsBrowser(QTextBrowser):
             specs.append((token, url, width))
             return token
 
-        staged_md = _IMAGE_MD_RE.sub(stash, text)
-        if not specs:
-            self.setMarkdown(staged_md)
-            return
         staged = QTextDocument()
-        staged.setMarkdown(staged_md)
+        staged.setMarkdown(_IMAGE_MD_RE.sub(stash, text))
         html = staged.toHtml()
         for token, url, width in specs:
             w = f' width="{width}"' if width else ""
             html = html.replace(token, f'<img src="{url}"{w} />')
-        self.setHtml(html)
+        self.setHtml(_fix_up_html(html))
 
     def _load_image(self, src: str, base: Path) -> QImage | None:
         from urllib.parse import unquote

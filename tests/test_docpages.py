@@ -6,8 +6,8 @@ import pytest
 
 from flograph.core import docpages
 from flograph.core.docpages import (
-    DocPage, NavEntry, breadcrumb, catalog, docs_dir, parse_sidebar,
-    render_links, resolve_wiki_dir, sidebar,
+    DocPage, NavEntry, anchor_slug, breadcrumb, catalog, docs_dir,
+    parse_sidebar, render_links, resolve_wiki_dir, sidebar,
 )
 
 
@@ -36,6 +36,8 @@ class TestRenderLinks:
     def test_anchor_is_carried_and_slugged(self):
         out, _ = render_links("[[The Canvas#Order edges]]", self.cat)
         assert out == "[The Canvas § Order edges](the-canvas.md#order-edges)"
+        # the renderer tags the heading with the very same slug
+        assert anchor_slug("Order edges") == "order-edges"
 
     def test_case_and_dashes_are_normalised(self):
         out, missing = render_links("[[the canvas]] [[The-Canvas]]", self.cat)

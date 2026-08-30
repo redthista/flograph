@@ -106,6 +106,31 @@ class TestNavigation:
         assert view.browser.current_slug() == before
 
 
+class TestRendering:
+    """Every page goes Markdown → toHtml → fix-ups → setHtml, so a fenced
+    code block is shaded and indented and a heading carries an anchor."""
+
+    def test_a_fenced_code_block_keeps_its_indentation(self, view):
+        view.browser.show_page("writing-a-node")
+        text = view.browser.toPlainText()
+        # the Anatomy sample is indented Python — the leading spaces survive
+        assert "\n    ctx.log(" in text
+
+    def test_a_code_block_is_monospaced(self, view):
+        view.browser.show_page("flow-variables")
+        assert "monospace" in view.browser.document().toHtml()
+
+    def test_headings_get_an_anchor_for_in_page_links(self, view):
+        view.browser.show_page("the-canvas")
+        html = view.browser.document().toHtml()
+        assert '<a name="order-edges">' in html
+
+    def test_following_a_heading_link_stays_on_the_page(self, view):
+        view.browser.show_page("the-canvas")
+        view.browser._on_anchor(QUrl("the-canvas.md#order-edges"))
+        assert view.browser.current_slug() == "the-canvas"
+
+
 class TestHelpMenuWiring:
     def test_documentation_action_reuses_one_window(self, qtbot, monkeypatch):
         # a constructed-but-never-shown MainWindow is the pattern test_templates
