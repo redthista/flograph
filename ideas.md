@@ -90,7 +90,10 @@ cause may be Windows popup/paint behaviour rather than the rebuild.
 
 **L1. Optional git integration for a project.** Every save is a commit, so a
 workflow gets full configuration history: browse it, diff it, roll back.
-Opt-in per project. Sits well with the `.flograph` file being plain JSON.
+Opt-in per project. The `.flograph` file is now a zip bundle by default, so
+a diffable history wants either *Include cached results in the project file*
+turned off (plain JSON again) or the integration committing `project.json`
+extracted from the bundle rather than the bundle itself.
 
 ---
 

@@ -240,6 +240,7 @@ class SettingsDialog(QDialog):
             "compact_nodes_checkbox": window.compact_nodes,
             "port_labels_checkbox": window.port_labels_enabled,
             "flow_pins_checkbox": window.flow_pins_enabled,
+            "cache_in_project_checkbox": window.save_cache_in_project,
             "cache_compression_checkbox": window.cache_compression_enabled,
             "table_autosize_checkbox": autosize_default_enabled(),
             "stats_bar_checkbox": window.stats_bar_enabled,
@@ -468,6 +469,19 @@ class SettingsDialog(QDialog):
                  "and choose Run on its own.")
 
         rows.add_group("Saving")
+
+        bundle_check = QCheckBox("Include cached results in the project file")
+        bundle_check.setObjectName("cache_in_project_checkbox")
+        bundle_check.setChecked(window.save_cache_in_project)
+        bundle_check.toggled.connect(window.set_save_cache_in_project)
+        rows.add("Save cached results in the file", bundle_check,
+                 "On: a save writes one .flograph file with the graph and "
+                 "its cached results together — hand it to someone and they "
+                 "open it exactly as you left it, no re-running. Off: the "
+                 "file holds the graph alone (plain JSON, smaller, diffable) "
+                 "and reopening re-runs the flow; the next save also removes "
+                 "any cache folder an earlier version left beside it. Read "
+                 "when a save starts; the file opens either way.")
 
         compress_check = QCheckBox("Compress cached results on disk")
         compress_check.setObjectName("cache_compression_checkbox")

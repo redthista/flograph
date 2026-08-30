@@ -35,6 +35,9 @@ Documentation** or **F1**.
 - **Dataflow semantics.** Data flows through typed ports; a run is a
   topological walk of the *dirty* subgraph on background threads, so a re-run
   only recomputes what changed. Independent branches run at the same time.
-- **Projects are plain JSON** (`.flograph`) — diffable and small. Node output
-  caches live in a side-car `<project>.flograph.cache/` folder, so reopening
-  a project restores its results without a re-run.
+- **A project is one file** (`.flograph`). By default it bundles the graph
+  and its node output caches together, so reopening — or handing the file to
+  someone else — restores every result without a re-run. Turn off
+  *Settings ▸ General ▸ Saving ▸ Include cached results in the project file*
+  and it is written as plain JSON instead — the graph alone, diffable and
+  small, re-run on open.

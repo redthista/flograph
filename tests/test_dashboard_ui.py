@@ -1400,6 +1400,7 @@ class TestTileFullscreen:
         add_tile(window, add_show_table(window))
         path = tmp_path / "old.flograph"
         window._project_path = str(path)
+        window.save_cache_in_project = False   # plain JSON, to edit by hand
         assert window._save()
 
         import json

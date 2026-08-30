@@ -12,9 +12,13 @@ and its params and carries the reason, and re-saving writes it back
 untouched.
 
 Cached outputs are never embedded in this JSON. A node loads dirty here
-unless flograph.engine.cache_persistence restores its output from a side-car
-cache directory next to the project file — see that module for the
-save/load flow and its independent versioning.
+unless flograph.engine.cache_persistence restores its output — from the
+``cache/`` tree inside the .flograph bundle, or from a legacy sidecar
+directory next to a plain-JSON project file. See that module for the
+save/load flow and its independent versioning, and `core.container` for
+the bundle format. `load` here reads the graph half whichever way the file
+is stored; `save` writes plain JSON only (the bundle writer, which needs
+the cache too, lives in cache_persistence).
 """
 from __future__ import annotations
 
@@ -364,8 +368,17 @@ def save(graph: Graph, path: str | Path) -> None:
 
 
 def load(path: str | Path, registry: NodeRegistry) -> Graph:
+    from . import container
+    if container.is_bundle(path):
+        with container.BundleReader(path) as reader:
+            text = reader.read_text(container.PROJECT_MEMBER)
+        if text is None:
+            raise GraphError(
+                "not a flograph project: the bundle has no project.json")
+    else:
+        text = Path(path).read_text()
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise GraphError(f"not a flograph project: invalid JSON ({exc})") from exc
     graph = graph_from_dict(data, registry)

@@ -151,6 +151,12 @@ class MainWindow(QMainWindow):
         # when idle; while up, Save/Open-a-second-save and starting a run
         # wait for it (see _cache_still_writing) rather than racing it.
         self._cache_save_signals: Optional[CacheSaveSignals] = None
+        # Set at the start of a bundled save: the undo index the archive
+        # snapshot was taken at (clean is marked only if editing has not
+        # moved past it by the time the write lands), and whether a legacy
+        # side-car folder was there to fold in (for the status message).
+        self._save_clean_index = 0
+        self._folded_sidecar = False
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
@@ -207,6 +213,11 @@ class MainWindow(QMainWindow):
         # read forever either way — load_blob sniffs each blob.
         self.cache_compression_enabled = self.settings.value(
             "saving/compress_cache", True, type=bool)
+        # On by default: a save writes one portable .flograph file with the
+        # cached results inside it. Off writes plain JSON — the graph alone,
+        # re-run on open — and drops any side-car folder.
+        self.save_cache_in_project = self.settings.value(
+            "saving/cache_in_project", True, type=bool)
         self.double_click_action = str(self.settings.value(
             "canvas/double_click_action", "properties"))
         self.tint_soft = self.settings.value(
@@ -853,6 +864,16 @@ class MainWindow(QMainWindow):
         and load_blob sniffs each one, so nothing needs migrating."""
         self.cache_compression_enabled = bool(enabled)
         self.settings.setValue("saving/compress_cache", bool(enabled))
+
+    def set_save_cache_in_project(self, enabled: bool) -> None:
+        """Whether a save bundles the cached results into the .flograph file.
+
+        Read when a save starts. On → one portable file, the graph and its
+        cached results together. Off → plain JSON, the graph alone (re-run
+        on open), and the next save removes any side-car folder. The file
+        opens either way — load sniffs it."""
+        self.save_cache_in_project = bool(enabled)
+        self.settings.setValue("saving/cache_in_project", bool(enabled))
 
     def set_compact_nodes(self, enabled: bool) -> None:
         """Canvas-wide: draw plain nodes as a fixed square with the name
@@ -4253,73 +4274,98 @@ class MainWindow(QMainWindow):
         if loaded.nodes:
             self.view.frame_content()
 
-    def _save(self) -> bool:
+    def _save(self, *, carry_from: "Optional[str]" = None) -> bool:
         if self._project_path is None:
             return self._save_as()
         if self._cache_save_signals is not None:
             self.show_status(
-                "Still writing cached results for the last save — try again "
-                "in a moment", 4000)
+                "Still writing the last save — try again in a moment", 4000)
             return False
-        try:
-            serialization.save(self.graph, self._project_path)
-        except OSError as exc:
-            # A failed save used to escape into the Qt slot and die in a
-            # console nobody was watching. The common way it fails is the
-            # disk filling up, which is exactly when the user needs words.
-            QMessageBox.critical(self, "Save failed", save_failure_text(
-                f'"{self._project_path}"', exc))
-            return False
-        self.undo_stack.setClean()
+
+        if not self.save_cache_in_project:
+            # Plain JSON — the graph alone, re-run on open. Small, so
+            # synchronous; and any side-car folder from an older or a
+            # previously-bundled save is removed.
+            try:
+                serialization.save(self.graph, self._project_path)
+            except OSError as exc:
+                # A failed save used to escape into the Qt slot and die in a
+                # console nobody was watching. The common way it fails is
+                # the disk filling up, which is when the user needs words.
+                QMessageBox.critical(self, "Save failed", save_failure_text(
+                    f'"{self._project_path}"', exc))
+                return False
+            dropped = cache_persistence.discard_sidecar(self._project_path)
+            self.undo_stack.setClean()
+            self._push_recent(self._project_path)
+            had_cache = any(self.engine.cache.has(nid)
+                            for nid in self.graph.nodes)
+            msg = f"Saved {self._project_path}"
+            if dropped or had_cache:
+                msg += " — cached results not saved (graph only)"
+            self.show_status(msg, 4000)
+            return True
+
+        # Bundled: one atomic .flograph file, written off the GUI thread.
         self._push_recent(self._project_path)
-        try:
-            # Run statistics ride along with the cache: tiny, derived, and
-            # the difference between reopening to a blank stats window and
-            # reopening to the last run. Losing them to a full disk must
-            # not fail a save that already succeeded, so this swallows.
-            cache_persistence.save_run_history(
-                self.engine.history, self._project_path)
-        except OSError:
-            pass
-        if not self.engine.active:
-            self._start_cache_save()
-        else:
-            # A run owns the cache; saving mid-run never touched it before
-            # and still doesn't. The JSON half just saved is the news.
-            self.show_status(f"Saved {self._project_path}", 4000)
+        self._start_project_save(carry_from or self._project_path)
         return True
 
-    def _start_cache_save(self) -> None:
-        """Write the side-car off the GUI thread, with progress on the line.
+    def _start_project_save(self, carry_from: str) -> None:
+        """Write the .flograph bundle off the GUI thread, with progress on
+        the line.
 
-        The plan is snapshotted here, cheaply, so the worker never touches
-        graph or cache (see cache_persistence.plan_cache_save). With nothing
-        cached there is no second half at all and the plain Saved message
-        stands. While it runs, _cache_still_writing holds off a second Save,
-        Save As, and starting a run — the last because a run dirties and
-        refills entries this plan is walking."""
+        The snapshot — graph dict, blob plan, run history — is taken here,
+        cheaply, so the worker touches only the filesystem (see
+        cache_persistence.plan_project_save). While it runs, a second Save,
+        Save As and starting a run wait for it. Mid-run the live cache is
+        not walked: every blob is copied from the previous file instead,
+        exactly as the old JSON-only mid-run save persisted nothing new.
+        `carry_from` is the file unchanged blobs are copied from — the same
+        path on a plain Save, the old path on Save As."""
         path = self._project_path
-        plan = cache_persistence.plan_cache_save(self.graph, self.engine.cache)
-        if not plan:
-            self.show_status(f"Saved {path}", 4000)
+        carry_all = self.engine.active
+        plan = cache_persistence.plan_project_save(
+            self.graph, self.engine.cache, self.engine.history,
+            include_cache=True, carry_all=carry_all)
+        self._save_clean_index = self.undo_stack.index()
+        self._folded_sidecar = cache_persistence.has_sidecar(path)
+
+        if not plan.blobs and not carry_all:
+            # No blobs to pickle — the archive is just project.json and a
+            # short manifest. Write it here and now, so a cache-free save
+            # stays instant and starts no background thread.
+            try:
+                cache_persistence.write_project(
+                    path, plan, prev_path=carry_from,
+                    compress=self.cache_compression_enabled)
+            except OSError as exc:
+                QMessageBox.critical(self, "Save failed", save_failure_text(
+                    f'"{path}"', exc))
+                return
+            if self.undo_stack.index() == self._save_clean_index:
+                self.undo_stack.setClean()
+            self._announce_saved()
             return
+
         signals = CacheSaveSignals(parent=self)
         signals.progressed.connect(self._on_cache_save_progress)
         signals.finished.connect(self._on_cache_save_finished)
         self._cache_save_signals = signals
-        self._save_bar.setRange(0, len(plan))
+        self._save_bar.setRange(0, max(1, len(plan.blobs)))
         self._save_bar.setValue(0)
         self._save_bar.show()
-        name = Path(path).name
-        self.show_status(f"Saving {name} · cached results 0/{len(plan)}")
+        self.show_status(f"Saving {Path(path).name}…")
         QThreadPool.globalInstance().start(
             CacheSaveRunnable(path, plan, signals,
-                              compress=self.cache_compression_enabled))
+                              compress=self.cache_compression_enabled,
+                              prev_path=carry_from, carry_all=carry_all))
 
     def _on_cache_save_progress(self, done: int, total: int) -> None:
+        self._save_bar.setRange(0, max(1, total))
         self._save_bar.setValue(done)
         name = Path(self._project_path).name if self._project_path else ""
-        self.show_status(f"Saving {name} · cached results {done}/{total}")
+        self.show_status(f"Saving {name} · {done}/{total}")
 
     def _on_cache_save_finished(self, error: str) -> None:
         signals, self._cache_save_signals = self._cache_save_signals, None
@@ -4330,9 +4376,22 @@ class MainWindow(QMainWindow):
         if error:
             QMessageBox.critical(self, "Save failed", error)
             return
+        # Mark clean only if editing has not moved past the snapshot the
+        # writer just committed — an edit made *during* the write stays
+        # unsaved, as it should.
+        if self.undo_stack.index() == self._save_clean_index:
+            self.undo_stack.setClean()
         if self.engine.active:
             return      # the run line is speaking; do not talk over it
-        self.show_status(f"Saved {self._project_path}", 4000)
+        self._announce_saved()
+
+    def _announce_saved(self) -> None:
+        msg = f"Saved {self._project_path}"
+        if self._folded_sidecar:
+            self._folded_sidecar = False
+            msg += (f" · folded {Path(self._project_path).name}.cache "
+                    f"into the project file")
+        self.show_status(msg, 4000)
 
     def _cache_still_writing(self) -> bool:
         """True while a background cache write from the last Save is going.
@@ -4368,9 +4427,9 @@ class MainWindow(QMainWindow):
         # the switch would leave the project aimed at a file never written.
         if self._cache_save_signals is not None:
             self.show_status(
-                "Still writing cached results for the last save — try again "
-                "in a moment", 4000)
+                "Still writing the last save — try again in a moment", 4000)
             return False
+        old_path = self._project_path
         path, _ = QFileDialog.getSaveFileName(
             self, "Save project", "untitled.flograph", "flograph projects (*.flograph)")
         if not path:
@@ -4379,7 +4438,9 @@ class MainWindow(QMainWindow):
             path += ".flograph"
         self._project_path = path
         self.resource_monitor.set_disk_watch_path(path)
-        return self._save()
+        # carry the cached results across from the old file rather than
+        # re-pickling them (or dropping the ones not in memory)
+        return self._save(carry_from=old_path)
 
     # --------------------------------------------------------------- recent
 

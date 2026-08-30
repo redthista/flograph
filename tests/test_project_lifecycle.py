@@ -77,10 +77,11 @@ class TestSaveOpen:
         path = str(tmp_path / "cached.flograph")
         window._project_path = path
         assert window._save()
-        # the side-car is written in the background; wait for it to land
+        # the bundle is written in the background; wait for it to land
         qtbot.waitUntil(
-            lambda: (tmp_path / "cached.flograph.cache" / "manifest.json").exists(),
-            timeout=5000)
+            lambda: window._cache_save_signals is None, timeout=5000)
+        from flograph.core import container
+        assert container.is_bundle(path)
 
         from flograph.core import Graph
         window._replace_graph(Graph())

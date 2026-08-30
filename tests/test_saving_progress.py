@@ -1,17 +1,19 @@
-"""The GUI half of saving: the JSON write stays synchronous and quick, the
-cache side-car goes to a pool thread behind the status line's second bar,
-a disk-full save says so instead of vanishing, and the drive the project
-lives on is watched for running low (K1/K2).
+"""The GUI half of saving: a cache-free project writes its (small) bundle
+synchronously, a project with cached results writes the whole .flograph
+archive on a pool thread behind the status line's second bar, a disk-full
+save says so instead of vanishing, and the drive the project lives on is
+watched for running low (K1/K2).
 
 Settings kept off the real store -- see test_minimap_settings.py."""
 import errno
+import zlib
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QCheckBox
 
-from flograph.core import Graph, NodeRegistry, serialization
+from flograph.core import Graph, NodeRegistry, container, serialization
 from flograph.ui import mainwindow as mod
 from flograph.ui.settings_dialog import SettingsDialog
 
@@ -49,21 +51,21 @@ def cached_constant(window, registry):
 
 
 class TestBackgroundCacheSave:
-    def test_save_finishes_with_the_side_car_written(self, qtbot, window,
-                                                     cached_constant,
-                                                     tmp_path):
+    def test_save_finishes_with_the_bundle_written(self, qtbot, window,
+                                                   cached_constant,
+                                                   tmp_path):
         path = tmp_path / "proj.flograph"
         window._project_path = str(path)
 
         assert window._save() is True
 
-        # the JSON half is synchronous and already done
-        assert path.exists()
-        # the cache half lands off-thread; wait it out
+        # a project with cached results lands off-thread; wait it out
         qtbot.waitUntil(lambda: window._cache_save_signals is None,
                         timeout=10000)
-        manifest = Path(str(path) + ".cache") / "manifest.json"
-        assert manifest.exists()
+        assert container.is_bundle(path)
+        with container.BundleReader(path) as reader:
+            assert reader.has(container.MANIFEST_MEMBER)
+            assert reader.has(container.blob_member(cached_constant.id))
         assert window._save_bar.isHidden()
         assert window.status_message().startswith("Saved ")
 
@@ -97,13 +99,14 @@ class TestBackgroundCacheSave:
         window._cache_save_signals = None
         assert window._cache_still_writing() is False
 
-    def test_nothing_cached_means_no_background_write(self, qtbot, window,
-                                                      tmp_path):
+    def test_nothing_cached_writes_the_bundle_synchronously(self, qtbot,
+                                                            window, tmp_path):
         path = tmp_path / "empty.flograph"
         window._project_path = str(path)
 
         assert window._save() is True
-        assert window._cache_save_signals is None   # never started
+        assert window._cache_save_signals is None   # no background thread
+        assert container.is_bundle(path)
         assert window.status_message().startswith("Saved ")
 
 
@@ -117,6 +120,10 @@ class TestCompressionSetting:
         assert window.settings.value("saving/compress_cache", True,
                                      type=bool) is True
 
+    def _blob_in_bundle(self, path, node_id):
+        with container.BundleReader(path) as reader:
+            return reader.read_bytes(container.blob_member(node_id))
+
     def test_off_writes_raw_blobs(self, qtbot, window, cached_constant,
                                   registry, tmp_path):
         window.set_cache_compression_enabled(False)
@@ -128,8 +135,7 @@ class TestCompressionSetting:
         qtbot.waitUntil(lambda: window._cache_save_signals is None,
                         timeout=10000)
 
-        blob = (Path(str(path) + ".cache") / f"{const_id}.pkl").read_bytes()
-        assert blob[:1] == b"\x80"
+        assert self._blob_in_bundle(path, const_id)[:1] == b"\x80"
 
     def test_on_writes_zlib_blobs(self, qtbot, window, cached_constant,
                                   tmp_path):
@@ -142,8 +148,9 @@ class TestCompressionSetting:
         qtbot.waitUntil(lambda: window._cache_save_signals is None,
                         timeout=10000)
 
-        blob = (Path(str(path) + ".cache") / f"{const_id}.pkl").read_bytes()
+        blob = self._blob_in_bundle(path, const_id)
         assert blob[:1] != b"\x80"
+        zlib.decompress(blob)   # really a zlib stream
 
     def test_the_settings_dialog_row_round_trips(self, qtbot, window):
         dialog = SettingsDialog(window)
@@ -158,6 +165,8 @@ class TestCompressionSetting:
 class TestDiskFullOnSave:
     def test_a_failed_json_write_names_itself_in_a_dialog(
             self, qtbot, window, monkeypatch, tmp_path):
+        # the plain-JSON path (cache not bundled): serialization.save fails
+        window.set_save_cache_in_project(False)
         window._project_path = str(tmp_path / "proj.flograph")
         seen = {}
 
@@ -175,6 +184,23 @@ class TestDiskFullOnSave:
         assert "full" in seen["text"]
         # and nothing pretended otherwise: no background write was started
         assert window._cache_save_signals is None
+
+    def test_a_failed_bundle_write_reaches_a_dialog(
+            self, qtbot, window, cached_constant, monkeypatch, tmp_path):
+        # the bundle path: the background write fails, and the failure
+        # surfaces in a dialog rather than vanishing on the pool thread
+        target = tmp_path / "proj.flograph"
+        target.mkdir()                       # os.replace onto a dir -> OSError
+        (target / "x").write_text("non-empty")
+        window._project_path = str(target)
+        seen = {}
+        monkeypatch.setattr(mod.QMessageBox, "critical",
+                            lambda p, t, x: seen.setdefault("t", (t, x)))
+
+        assert window._save() is True        # kicks off the background write
+        qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                        timeout=10000)
+        assert seen["t"][0] == "Save failed"
 
 
 class TestDiskWatchWiring:

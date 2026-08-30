@@ -101,33 +101,43 @@ class CacheSaveSignals(QObject):
 
 
 class CacheSaveRunnable(QRunnable):
-    """Writes a plan from cache_persistence.plan_cache_save off the GUI
-    thread, so saving a flow whose cache holds gigabytes does not look like
-    a hang. The plan was snapshotted before this started, so neither the
-    graph nor the cache is touched here — editing and running go on while
-    the blobs pickle out.
+    """Writes a whole .flograph bundle from a cache_persistence.
+    plan_project_save snapshot off the GUI thread, so saving a flow whose
+    cache holds gigabytes does not look like a hang. The snapshot was taken
+    before this started, so neither the graph nor the cache is touched here
+    — editing and running go on while the archive streams out.
+
+    `prev_path` is the file to copy unchanged/spilled blobs from — the same
+    path on a plain Save, the old path on Save As. `carry_all` copies every
+    blob the previous file held and re-pickles nothing (the mid-run save).
 
     An OSError — the disk filling up, most commonly — lands in `finished`
     as its human sentence rather than vanishing: that is K2's whole point.
     """
 
     def __init__(self, project_path: str,
-                 plan: list[tuple[str, Any, str, bool]],
-                 signals: CacheSaveSignals, compress: bool = True) -> None:
+                 plan: "cache_persistence.ProjectSavePlan",
+                 signals: CacheSaveSignals, compress: bool = True,
+                 prev_path: "str | None" = None,
+                 carry_all: bool = False) -> None:
         super().__init__()
         self.project_path = project_path
         self.plan = plan
         self.signals = signals
         self.compress = compress
+        self.prev_path = prev_path
+        self.carry_all = carry_all
 
     def run(self) -> None:  # executes on a pool thread
         try:
-            cache_persistence.write_cache_plan(
+            cache_persistence.write_project(
                 self.project_path, self.plan,
-                progress=lambda done, total: self.signals.progressed.emit(done, total),
-                compress=self.compress)
+                prev_path=self.prev_path, compress=self.compress,
+                carry_all=self.carry_all,
+                progress=lambda done, total: self.signals.progressed.emit(
+                    done, total))
         except Exception as exc:
             self.signals.finished.emit(
-                cache_persistence.save_failure_text("the cached results", exc))
+                cache_persistence.save_failure_text("the project file", exc))
             return
         self.signals.finished.emit("")
