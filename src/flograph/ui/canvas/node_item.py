@@ -120,6 +120,8 @@ PLOTLY_TYPE = "flograph.viz.show_plotly"
 TABLE_VIEWER_TYPES = {"flograph.viz.show_table", "flograph.viz.table_spec"}
 REPORT_MIN_W, REPORT_MAX_W = 240.0, 1600.0
 REPORT_MIN_H, REPORT_MAX_H = 140.0, 2000.0
+WIKI_MIN_W, WIKI_MAX_W = 260.0, 1600.0
+WIKI_MIN_H, WIKI_MAX_H = 160.0, 2000.0
 TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W = 260.0, 1600.0
 TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, 2000.0
 
@@ -736,6 +738,11 @@ class NodeItem(QGraphicsObject):
         self.figure_card = kind == "figure" or self.plotly_card
         self.table_viewer = kind == "table_viewer"
         self.report_card = kind == "report"
+        # a Markdown Wiki card: a QTextBrowser in a proxy, same chrome,
+        # geometry and resizing as the report card — it differs only in the
+        # embedded widget (a WikiView) and that navigating it is a cosmetic
+        # param edit, not a re-render of wired inputs.
+        self.wiki_card = kind == "wiki"
         self.kpi_card = kind == "kpi"
         # painted straight onto the item like the KPI card, no proxy widget —
         # see ui.canvas.image_card for why that matters. A PDF card is the
@@ -790,6 +797,9 @@ class NodeItem(QGraphicsObject):
         elif self.report_card:
             self.width = min(REPORT_MAX_W, max(
                 REPORT_MIN_W, float(node.params.get("width", 460))))
+        elif self.wiki_card:
+            self.width = min(WIKI_MAX_W, max(
+                WIKI_MIN_W, float(node.params.get("width", 520))))
         elif self.kpi_card:
             self.width = min(KPI_MAX_W, max(
                 KPI_MIN_W, float(node.params.get("width", 220))))
@@ -829,6 +839,8 @@ class NodeItem(QGraphicsObject):
         self._report_view = None      # QTextBrowser (report cards only)
         self._report_animator = None  # plays animated images inside it
         self._report_proxy: QGraphicsProxyWidget | None = None
+        self._wiki_view = None        # WikiView (wiki cards only)
+        self._wiki_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_view: "DataTableView | None" = None
         self._table_viewer_proxy: QGraphicsProxyWidget | None = None
         self._table_viewer_placeholder: QLabel | None = None
@@ -909,6 +921,8 @@ class NodeItem(QGraphicsObject):
             self._build_table_viewer_widget()
         if self.report_card:
             self._build_report_widget()
+        if self.wiki_card:
+            self._build_wiki_widget()
         if self.slicer:
             self._build_slicer_widget()
         if self.control:
@@ -963,6 +977,11 @@ class NodeItem(QGraphicsObject):
                 return self._live_height
             fixed = float(self.node.params.get("height", 340) or 340)
             return min(REPORT_MAX_H, max(REPORT_MIN_H, fixed))
+        if self.wiki_card:
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", 380) or 380)
+            return min(WIKI_MAX_H, max(WIKI_MIN_H, fixed))
         if self.kpi_card:
             if self._live_height is not None:
                 return self._live_height
@@ -1064,6 +1083,15 @@ class NodeItem(QGraphicsObject):
                 REPORT_MIN_W, float(self.node.params.get("width", 460))))
             self.refresh_report()
             self._layout_report_proxy()
+            self._ports_follow_width()
+            self.update()
+            return
+        if self.wiki_card:
+            self.prepareGeometryChange()
+            self.width = min(WIKI_MAX_W, max(
+                WIKI_MIN_W, float(self.node.params.get("width", 520))))
+            self.refresh_wiki(name)
+            self._layout_wiki_proxy()
             self._ports_follow_width()
             self.update()
             return
@@ -1688,6 +1716,94 @@ class NodeItem(QGraphicsObject):
                 and self.node.canvas_preview_enabled
                 and self.isVisible())
 
+    # ------------------------------------------------------------- wiki card
+
+    def _wiki_proxy_rect(self) -> QRectF:
+        height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
+        return QRectF(0, HEADER_H, self.width, height)
+
+    def _layout_wiki_proxy(self) -> None:
+        if self._wiki_proxy is not None:
+            self._scale_proxy_into(self._wiki_proxy, self._wiki_proxy_rect())
+
+    def _wiki_folder(self) -> str:
+        """The folder the card shows: a wired string beats the param, blank
+        falls through to the bundled handbook (resolve_wiki_dir handles that)."""
+        wired = self._wired_input_value("folder")
+        if isinstance(wired, str) and wired.strip():
+            return wired
+        return str(self.node.params.get("folder", "") or "")
+
+    def _wired_input_value(self, port: str):
+        """The cached output feeding one of this node's input ports, or None
+        if the port is unconnected or its source has no result yet. Mirrors
+        report/render.by_wired_input's cache guard."""
+        scene = self.scene()
+        graph = getattr(scene, "graph", None)
+        cache = getattr(scene, "output_cache", None)
+        if graph is None or cache is None:
+            return None
+        for conn in graph.connections.values():
+            if conn.dst_node != self.node.id or conn.dst_port != port:
+                continue
+            entry = cache.get(conn.src_node)
+            if entry is None or conn.src_port not in entry.ports():
+                return None
+            return cache.outputs_for(conn.src_node).get(conn.src_port)
+        return None
+
+    def _build_wiki_widget(self) -> None:
+        from ..wiki import WikiView
+        view = WikiView(folder=self._wiki_folder(),
+                        show_nav=bool(self.node.params.get("show_nav", True)))
+        self._wiki_view = view
+        page = str(self.node.params.get("page", "") or "")
+        if page:
+            view.show_page(page)
+        # a navigation is a cosmetic param edit — undoable, no re-run, and the
+        # dashboard tile of the same node follows through the same param
+        view.page_changed.connect(self._wiki_page_changed)
+        view.nav_visibility_changed.connect(self._wiki_nav_changed)
+
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(view)
+        self._wiki_proxy = proxy
+        proxy.setOpacity(0.45 if self._updating else 1.0)
+        self._layout_wiki_proxy()
+
+    def refresh_wiki(self, name: str | None = None) -> None:
+        view = self._wiki_view
+        if view is None:
+            return
+        if name in (None, "folder"):
+            view.set_folder(self._wiki_folder())
+        if name in (None, "show_nav"):
+            view.set_nav_visible(bool(self.node.params.get("show_nav", True)))
+        if name in (None, "page"):
+            page = str(self.node.params.get("page", "") or "")
+            if page:
+                view.show_page(page)
+
+    def _wiki_page_changed(self, slug: str) -> None:
+        if slug == str(self.node.params.get("page", "") or ""):
+            return
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "undo_stack"):
+            return
+        from ..commands import SetParamCommand
+        scene.undo_stack.push(
+            SetParamCommand(scene.graph, self.node.id, "page", slug))
+
+    def _wiki_nav_changed(self, visible: bool) -> None:
+        if bool(visible) == bool(self.node.params.get("show_nav", True)):
+            return
+        scene = self.scene()
+        if scene is None or not hasattr(scene, "undo_stack"):
+            return
+        from ..commands import SetParamCommand
+        scene.undo_stack.push(
+            SetParamCommand(scene.graph, self.node.id, "show_nav", bool(visible)))
+
     # --------------------------------------------------------- table viewer
 
     def _table_viewer_proxy_rect(self) -> QRectF:
@@ -1842,6 +1958,9 @@ class NodeItem(QGraphicsObject):
             self._figure_view.clear()
             self._figure_view.deleteLater()
             self._figure_view = None
+        if self._wiki_view is not None:
+            self._wiki_view.deleteLater()
+            self._wiki_view = None
 
     # ----------------------------------------------------------- image card
 
@@ -2594,7 +2713,7 @@ class NodeItem(QGraphicsObject):
         ordinary node's height is derived from its port count."""
         return bool(self.table or self.figure_card or self.table_viewer
                     or self.kpi_card or self.image_card or self.slicer
-                    or self.control or self.report_card)
+                    or self.control or self.report_card or self.wiki_card)
 
     def collapsible(self) -> bool:
         """Whether offering to collapse this node's ports means anything.
@@ -2741,7 +2860,7 @@ class NodeItem(QGraphicsObject):
         visible = not self._flat and self.node.canvas_preview_enabled
         for proxy in (self._note_editor, self._table_proxy, self._figure_proxy,
                       self._table_viewer_proxy, self._slicer_proxy,
-                      self._control_proxy, self._report_proxy):
+                      self._control_proxy, self._report_proxy, self._wiki_proxy):
             if proxy is not None:
                 proxy.setVisible(visible)
         # The image card has no proxy to hide, but the same two switches say
@@ -3016,7 +3135,7 @@ class NodeItem(QGraphicsObject):
             self._paint_button(painter)
             return
         if self.figure_card or self.table_viewer or self.slicer \
-                or self.control or self.report_card:
+                or self.control or self.report_card or self.wiki_card:
             self._paint_widget_card(painter)
             if not self.node.canvas_preview_enabled:
                 self._paint_preview_disabled_hint(painter)
@@ -3412,6 +3531,8 @@ class NodeItem(QGraphicsObject):
                     TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H)
         if self.report_card:
             return REPORT_MIN_W, REPORT_MAX_W, REPORT_MIN_H, REPORT_MAX_H
+        if self.wiki_card:
+            return WIKI_MIN_W, WIKI_MAX_W, WIKI_MIN_H, WIKI_MAX_H
         if self.kpi_card:
             return KPI_MIN_W, KPI_MAX_W, KPI_MIN_H, KPI_MAX_H
         if self.image_card:
@@ -3441,7 +3562,7 @@ class NodeItem(QGraphicsObject):
         card = bool(self.note or self.table or self.figure_card
                     or self.table_viewer or self.kpi_card or self.image_card
                     or self.slicer
-                    or self.control or self.report_card)
+                    or self.control or self.report_card or self.wiki_card)
         return card and all(self.node.spec.param(name) is not None
                             for name in ("width", "height"))
 
@@ -3669,6 +3790,8 @@ class NodeItem(QGraphicsObject):
                     self._layout_table_viewer_proxy()
                 elif self.report_card:
                     self._layout_report_proxy()
+                elif self.wiki_card:
+                    self._layout_wiki_proxy()
                 elif self.slicer:
                     self._layout_slicer_proxy()
                 elif self.control:
@@ -3750,6 +3873,8 @@ class NodeItem(QGraphicsObject):
                 self._layout_table_viewer_proxy()
             elif self.report_card:
                 self._layout_report_proxy()
+            elif self.wiki_card:
+                self._layout_wiki_proxy()
             elif self.slicer:
                 self._layout_slicer_proxy()
             elif self.control:

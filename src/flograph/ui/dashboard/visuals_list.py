@@ -32,6 +32,8 @@ _KIND_GLYPHS = {
     # a page with a folded corner: a document, not another square
     "pdf": "◱",
     "report": "☰",
+    # a page with a panel down its side — the nav tree beside the article
+    "wiki": "◫",
     "slicer": "⑂",
     # not another square: the tables, the sheet and the picture already
     # carry those, and a fourth would be four marks nobody can tell apart

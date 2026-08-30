@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from .base_view import (ZoomPanGraphicsView, edge_scroll_delta,
                         EDGE_SCROLL_TICK_MS)
-from .file_drop import resolve_dropped_file
+from .file_drop import resolve_dropped_path
 from .scene import NodeGraphScene
 from .stacking import layer_action_for
 
@@ -320,11 +320,11 @@ class NodeGraphView(ZoomPanGraphicsView):
     # ---------------------------------------------------------- drag & drop
 
     def _matching_dropped_files(self, mime) -> list[str]:
-        """Local file paths in `mime` that map to a known reader node."""
+        """Local paths in `mime` — files or folders — that map to a node."""
         if not mime.hasUrls():
             return []
         local_paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
-        return [p for p in local_paths if resolve_dropped_file(p)]
+        return [p for p in local_paths if resolve_dropped_path(p)]
 
     def dragEnterEvent(self, event) -> None:
         from .palette import FRAME_ID_MIME, NODE_TYPE_MIME

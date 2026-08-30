@@ -33,7 +33,7 @@ from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid",
-    "control", "report", "image", "pdf"})
+    "control", "report", "image", "pdf", "wiki"})
 
 
 def is_tile_able(node) -> bool:
@@ -116,6 +116,9 @@ def default_tile_size(node) -> tuple[float, float]:
         # a column of prose plus a chart or two — taller than wide, like
         # the page it stands in for
         return (480.0, 420.0)
+    if kind == "wiki":
+        # room for the nav tree beside the page
+        return (620.0, 440.0)
     if kind in ("image", "pdf"):
         # the node's own card size, plus the tile's title bar, so a picture
         # or a page arrives on the page shaped the way it was on the canvas
@@ -182,6 +185,7 @@ class TileItem(QGraphicsObject):
         # fullscreen_widget). Both are replaced on every re-render.
         self._report_animator = None
         self._report_rendered = None
+        self._wiki_view = None       # WikiView (Markdown Wiki card tiles)
         self._generic_host: Optional[QWidget] = None
         self._generic_child: Optional[QWidget] = None
         self._kpi_value: object = None  # kpi tiles paint, they hold no widget
@@ -348,6 +352,16 @@ class TileItem(QGraphicsObject):
                     clone, rendered.animations, rendered.image_widths,
                     on_frame=view.viewport().update, parent=view))
             return view
+        if kind == "wiki" and self._wiki_view is not None:
+            from ..wiki import WikiView
+            node = self._node()
+            full = WikiView(
+                folder=str((node.params.get("folder", "") if node else "") or ""),
+                show_nav=True)  # a full screen has room for the tree
+            slug = self._wiki_view.current_slug()
+            if slug:
+                full.show_page(slug)
+            return full
         return None
 
     def fullscreen_title(self) -> str:
@@ -370,6 +384,7 @@ class TileItem(QGraphicsObject):
             "table_viewer": "table",
             "grid": "sheet",
             "report": "report",
+            "wiki": "wiki",
             "button": "button",
             "kpi": "kpi",
             "slicer": "slicer",
@@ -400,7 +415,7 @@ class TileItem(QGraphicsObject):
     def _content_widget(self) -> Optional[QWidget]:
         for widget in (self._figure_view, self._plotly_widget,
                        self._table_view, self._sheet_view, self._slicer_widget,
-                       self._control_widget, self._report_view,
+                       self._control_widget, self._report_view, self._wiki_view,
                        self._generic_host):
             if widget is not None:
                 return widget
@@ -432,6 +447,18 @@ class TileItem(QGraphicsObject):
                 f" color: {theme.NODE_TEXT.name()}; border: none;"
                 f" padding: 6px; }}")
             self._report_view = widget
+        elif kind == "wiki":
+            from ..wiki import WikiView
+            node = self._node()
+            widget = WikiView(
+                folder=str((node.params.get("folder", "") if node else "") or ""),
+                show_nav=bool(node.params.get("show_nav", True)) if node else True)
+            page = str((node.params.get("page", "") if node else "") or "")
+            if page:
+                widget.show_page(page)
+            widget.page_changed.connect(self._wiki_page_changed)
+            widget.nav_visibility_changed.connect(self._wiki_nav_changed)
+            self._wiki_view = widget
         elif kind == "sheet":
             widget = self._build_sheet_widget()
         elif kind == "slicer":
@@ -538,6 +565,41 @@ class TileItem(QGraphicsObject):
         self._report_view.setDocument(document)
         self._report_rendered = rendered
         self._start_report_animations(rendered, self._report_view)
+
+    def _render_wiki(self, name: str | None = None) -> None:
+        """Re-point a Markdown Wiki tile at its folder / page — cheap: it
+        renders the `.md` files directly, nothing is pulled from the cache."""
+        view, node = self._wiki_view, self._node()
+        if view is None or node is None:
+            return
+        if name in (None, "folder"):
+            view.set_folder(str(node.params.get("folder", "") or ""))
+        if name in (None, "show_nav"):
+            view.set_nav_visible(bool(node.params.get("show_nav", True)))
+        if name in (None, "page"):
+            page = str(node.params.get("page", "") or "")
+            if page:
+                view.show_page(page)
+
+    def _wiki_page_changed(self, slug: str) -> None:
+        scene, node = self.scene(), self._node()
+        if scene is None or node is None:
+            return
+        if slug == str(node.params.get("page", "") or ""):
+            return
+        from ..commands import SetParamCommand
+        scene.undo_stack.push(
+            SetParamCommand(self._graph, node.id, "page", slug))
+
+    def _wiki_nav_changed(self, visible: bool) -> None:
+        scene, node = self.scene(), self._node()
+        if scene is None or node is None:
+            return
+        if bool(visible) == bool(node.params.get("show_nav", True)):
+            return
+        from ..commands import SetParamCommand
+        scene.undo_stack.push(
+            SetParamCommand(self._graph, node.id, "show_nav", bool(visible)))
 
     def _start_report_animations(self, rendered, view) -> None:
         """Play any animated images the report embeds.
@@ -766,6 +828,11 @@ class TileItem(QGraphicsObject):
             # re-renders on every refresh rather than only on a text edit.
             self._placeholder.hide()
             self._render_report()
+            widget.show()
+        elif kind == "wiki":
+            # nothing to wait for — the card reads its folder itself
+            self._placeholder.hide()
+            self._render_wiki()
             widget.show()
         elif kind == "sheet":
             # a Table node holds its own data, so there is nothing to wait

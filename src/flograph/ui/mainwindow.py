@@ -44,7 +44,7 @@ from .commands import (
     SetFrozenCommand, SetLabelCommand, SetLockedCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
-from .canvas.file_drop import resolve_dropped_file
+from .canvas.file_drop import resolve_dropped_path
 from .canvas import grid
 from .canvas import view as canvas_view
 from .canvas.stacking import add_layer_menu
@@ -2368,7 +2368,7 @@ class MainWindow(QMainWindow):
 
     def _add_reader_nodes_for_files(
             self, paths: list[str], scene_pos: QPointF) -> None:
-        targets = [(p, resolve_dropped_file(p)) for p in paths]
+        targets = [(p, resolve_dropped_path(p)) for p in paths]
         targets = [(p, t) for p, t in targets if t is not None]
         if not targets:
             return

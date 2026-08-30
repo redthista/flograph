@@ -1,12 +1,13 @@
-"""The documentation window: navigation, history, the jump box, and that
-Help ▸ Documentation reuses one instance. Runs on a bare DocsWindow — never a
-shown MainWindow (see the teardown-crash note in the testing memory)."""
+"""The documentation window: the nav tree, navigation, history, breadcrumb,
+and that Help ▸ Documentation reuses one instance. Runs on a bare DocsWindow
+— never a shown MainWindow (see the teardown-crash note in the testing
+memory)."""
 import pytest
 from PySide6.QtCore import Qt, QUrl
 
 from flograph.core import NodeRegistry
 from flograph.ui.docs import DocsWindow
-from flograph.ui.docs import browser as browser_mod
+from flograph.ui.wiki import browser as browser_mod
 
 
 @pytest.fixture
@@ -16,12 +17,17 @@ def win(qtbot):
     return w
 
 
-class TestNavigation:
-    def test_opens_on_home(self, win):
-        assert win.browser.current_slug() == "home"
-        assert "flograph" in win.browser.toPlainText()
+@pytest.fixture
+def view(win):
+    return win.view
 
-    def test_nav_tree_has_sections_and_reaches_every_page(self, win):
+
+class TestNavigation:
+    def test_opens_on_home(self, view):
+        assert view.browser.current_slug() == "home"
+        assert "flograph" in view.browser.toPlainText()
+
+    def test_nav_tree_has_sections_and_reaches_every_page(self, view):
         from flograph.core.docpages import catalog
 
         titles, slugs = [], set()
@@ -35,58 +41,69 @@ class TestNavigation:
                     slugs.add(s)
                 walk(child)
 
-        walk(win.nav.invisibleRootItem())
+        walk(view.nav.invisibleRootItem())
         assert "Basics" in titles  # a section header from _Sidebar.md
         assert slugs == set(catalog())
 
-    def test_clicking_a_nav_item_navigates(self, win):
-        item = win._slug_items["running-headless"]
-        win.nav.setCurrentItem(item)
-        assert win.browser.current_slug() == "running-headless"
+    def test_clicking_a_nav_item_navigates(self, view):
+        view.nav.setCurrentItem(view._slug_items["running-headless"])
+        assert view.browser.current_slug() == "running-headless"
 
-    def test_nav_selection_follows_a_wikilink(self, win):
-        win.browser._on_anchor(QUrl("the-canvas.md"))
-        assert win.nav.currentItem() is win._slug_items["the-canvas"]
+    def test_nav_selection_follows_a_wikilink(self, view):
+        view.browser._on_anchor(QUrl("the-canvas.md"))
+        assert view.nav.currentItem() is view._slug_items["the-canvas"]
 
-    def test_following_a_wikilink_navigates_and_records_history(self, win):
-        win.browser._on_anchor(QUrl("the-canvas.md"))
-        assert win.browser.current_slug() == "the-canvas"
-        assert win.browser.can_go_back() and not win.browser.can_go_forward()
+    def test_breadcrumb_shows_the_trail(self, view):
+        view.browser.show_page("the-canvas")
+        html = view._crumb.text()
+        assert "Basics" in html and "The Canvas" in html
 
-        win.browser.go_back()
-        assert win.browser.current_slug() == "home"
-        assert win.browser.can_go_forward()
+    def test_following_a_wikilink_navigates_and_records_history(self, view):
+        view.browser._on_anchor(QUrl("the-canvas.md"))
+        assert view.browser.current_slug() == "the-canvas"
+        assert view.browser.can_go_back() and not view.browser.can_go_forward()
 
-        win.browser.go_forward()
-        assert win.browser.current_slug() == "the-canvas"
+        view.browser.go_back()
+        assert view.browser.current_slug() == "home"
+        assert view.browser.can_go_forward()
 
-    def test_home_button_returns(self, win):
-        win.browser.show_page("keyboard-shortcuts")
-        win._home.click()
-        assert win.browser.current_slug() == "home"
+        view.browser.go_forward()
+        assert view.browser.current_slug() == "the-canvas"
 
-    def test_toolbar_buttons_track_history(self, win):
-        assert not win._back.isEnabled() and not win._forward.isEnabled()
-        win.browser.show_page("getting-started")
-        assert win._back.isEnabled()
+    def test_nav_toggle_hides_and_shows_the_tree(self, view):
+        assert view.nav_visible()
+        view.set_nav_visible(False)
+        assert not view.nav_visible()
+        view._nav_toggle.setChecked(True)
+        assert view.nav_visible()
 
-    def test_unknown_page_shows_a_message_not_a_crash(self, win):
-        win.browser.show_page("does-not-exist")
-        assert "not found" in win.browser.toPlainText().lower()
+    def test_toolbar_buttons_track_history(self, view):
+        assert not view._back.isEnabled() and not view._forward.isEnabled()
+        view.browser.show_page("getting-started")
+        assert view._back.isEnabled()
 
-    def test_bare_fragment_stays_on_the_page(self, win):
-        win.browser.show_page("the-canvas")
-        win.browser._on_anchor(QUrl("#running"))
-        assert win.browser.current_slug() == "the-canvas"
+    def test_page_changed_signal_fires_on_a_new_destination(self, view, qtbot):
+        with qtbot.waitSignal(view.page_changed, timeout=500) as sig:
+            view.browser.show_page("flow-variables")
+        assert sig.args == ["flow-variables"]
 
-    def test_external_link_opens_the_real_browser(self, win, monkeypatch):
+    def test_unknown_page_shows_a_message_not_a_crash(self, view):
+        view.browser.show_page("does-not-exist")
+        assert "no page called" in view.browser.toPlainText().lower()
+
+    def test_bare_fragment_stays_on_the_page(self, view):
+        view.browser.show_page("the-canvas")
+        view.browser._on_anchor(QUrl("#running"))
+        assert view.browser.current_slug() == "the-canvas"
+
+    def test_external_link_opens_the_real_browser(self, view, monkeypatch):
         opened = []
         monkeypatch.setattr(browser_mod.QDesktopServices, "openUrl",
                             lambda url: opened.append(url.toString()))
-        before = win.browser.current_slug()
-        win.browser._on_anchor(QUrl("https://github.com/redthista/flograph"))
+        before = view.browser.current_slug()
+        view.browser._on_anchor(QUrl("https://github.com/redthista/flograph"))
         assert opened == ["https://github.com/redthista/flograph"]
-        assert win.browser.current_slug() == before
+        assert view.browser.current_slug() == before
 
 
 class TestHelpMenuWiring:

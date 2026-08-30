@@ -6,7 +6,8 @@ import pytest
 
 from flograph.core import docpages
 from flograph.core.docpages import (
-    DocPage, catalog, docs_dir, parse_sidebar, render_links, sidebar,
+    DocPage, NavEntry, breadcrumb, catalog, docs_dir, parse_sidebar,
+    render_links, resolve_wiki_dir, sidebar,
 )
 
 
@@ -118,6 +119,41 @@ class TestSidebar:
         (tmp_path / "_Sidebar.md").write_text(
             "- [[Home]]\n- [[The Canvas]]\n", encoding="utf-8")
         assert "orphan" in {e.slug for e in sidebar(tmp_path)}
+
+
+class TestResolveWikiDir:
+    def test_blank_or_none_is_the_bundled_handbook(self):
+        assert resolve_wiki_dir(None) == docs_dir()
+        assert resolve_wiki_dir("") == docs_dir()
+        assert resolve_wiki_dir("   ") == docs_dir()
+
+    def test_a_missing_folder_falls_back(self, tmp_path):
+        assert resolve_wiki_dir(str(tmp_path / "nope")) == docs_dir()
+
+    def test_a_real_folder_is_used_as_given(self, tmp_path):
+        assert resolve_wiki_dir(str(tmp_path)) == tmp_path
+        assert resolve_wiki_dir(f"  {tmp_path}  ") == tmp_path
+
+
+class TestBreadcrumb:
+    def _tree(self):
+        return [
+            NavEntry("Home", "home"),
+            NavEntry("Basics", None, (
+                NavEntry("Getting Started", "getting-started"),
+                NavEntry("The Canvas", "the-canvas"),
+            )),
+        ]
+
+    def test_trail_includes_the_section_and_the_page(self):
+        trail = breadcrumb("the-canvas", self._tree())
+        assert [e.title for e in trail] == ["Basics", "The Canvas"]
+
+    def test_top_level_page_is_a_one_entry_trail(self):
+        assert [e.title for e in breadcrumb("home", self._tree())] == ["Home"]
+
+    def test_a_page_not_in_the_tree_has_no_trail(self):
+        assert breadcrumb("orphan", self._tree()) == []
 
 
 class TestBundledPages:

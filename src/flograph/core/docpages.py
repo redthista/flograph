@@ -62,6 +62,18 @@ def docs_dir() -> Path:
     return Path(str(importlib.resources.files("flograph.docs")))
 
 
+def resolve_wiki_dir(folder: str | None) -> Path:
+    """Which folder a wiki shows. A real directory path is used as given;
+    blank, whitespace or a missing path falls back to the bundled handbook
+    (`docs_dir()`) — so the Markdown Wiki node with no folder set shows
+    flograph's own docs."""
+    if folder and folder.strip():
+        candidate = Path(folder.strip())
+        if candidate.is_dir():
+            return candidate
+    return docs_dir()
+
+
 def catalog(directory: Path | None = None) -> dict[str, DocPage]:
     """Every `*.md` page, keyed by slug. `_`-prefixed files (`_Sidebar.md`,
     `_Footer.md` — the GitHub-wiki specials) are not pages."""
@@ -155,6 +167,18 @@ def _slugs_in(entries) -> set[str]:
             out.add(e.slug)
         out |= _slugs_in(e.children)
     return out
+
+
+def breadcrumb(slug: str, entries: list[NavEntry]) -> list[NavEntry]:
+    """The trail from a nav-tree root down to `slug` — section headers and
+    the page itself, in order. `[]` if the page is not in the tree."""
+    for entry in entries:
+        if entry.slug == slug:
+            return [entry]
+        below = breadcrumb(slug, list(entry.children))
+        if below:
+            return [entry, *below]
+    return []
 
 
 def render_links(text: str, pages: dict[str, DocPage]) -> tuple[str, list[str]]:

@@ -4,7 +4,9 @@ from PySide6.QtCore import QMimeData, QPointF, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, Qt
 
 from flograph.core import NodeRegistry
-from flograph.ui.canvas.file_drop import resolve_dropped_file
+from flograph.ui.canvas.file_drop import (
+    resolve_dropped_file, resolve_dropped_folder, resolve_dropped_path,
+)
 from flograph.ui.mainwindow import MainWindow
 
 
@@ -39,6 +41,28 @@ class TestResolveDroppedFile:
         assert resolve_dropped_file("/x/data.txt") is None
 
 
+class TestResolveDroppedFolder:
+    def test_a_folder_of_markdown_makes_a_wiki(self, tmp_path):
+        (tmp_path / "Home.md").write_text("# Home\n", encoding="utf-8")
+        assert resolve_dropped_folder(str(tmp_path)) == (
+            "flograph.viz.markdown_wiki", "folder")
+        assert resolve_dropped_path(str(tmp_path)) == (
+            "flograph.viz.markdown_wiki", "folder")
+
+    def test_a_folder_without_markdown_is_left_alone(self, tmp_path):
+        (tmp_path / "data.csv").write_text("a,b\n", encoding="utf-8")
+        assert resolve_dropped_folder(str(tmp_path)) is None
+        assert resolve_dropped_path(str(tmp_path)) is None
+
+    def test_a_file_is_not_a_folder(self, tmp_path):
+        f = tmp_path / "notes.md"
+        f.write_text("# hi\n", encoding="utf-8")
+        assert resolve_dropped_folder(str(f)) is None
+
+    def test_resolve_dropped_path_still_handles_files(self):
+        assert resolve_dropped_path("/x/data.csv") == ("flograph.io.read_csv", "path")
+
+
 class TestAddReaderNodesForFiles:
     def test_single_file_creates_node_with_path(self, window):
         window._add_reader_nodes_for_files(["/fake/data.csv"], QPointF(100, 100))
@@ -62,6 +86,16 @@ class TestAddReaderNodesForFiles:
 
     def test_unsupported_file_is_ignored(self, window):
         window._add_reader_nodes_for_files(["/fake/notes.txt"], QPointF(0, 0))
+        assert len(window.graph.nodes) == 0
+
+    def test_a_markdown_folder_creates_a_wiki_node(self, window, tmp_path):
+        (tmp_path / "Home.md").write_text("# Home\n", encoding="utf-8")
+        window._add_reader_nodes_for_files([str(tmp_path)], QPointF(0, 0))
+        assert len(window.graph.nodes) == 1
+        node = next(iter(window.graph.nodes.values()))
+        assert node.type_id == "flograph.viz.markdown_wiki"
+        assert node.params["folder"] == str(tmp_path)
+        window.undo_stack.undo()
         assert len(window.graph.nodes) == 0
 
 

@@ -18,7 +18,7 @@ comment still cites them.
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, N3, O1, R1) on 2026-08-30.
+2026-08-27; the entries added since (G10, N3, O1, R1, S1) on 2026-08-30.
 
 ---
 
@@ -160,6 +160,31 @@ be at least as wide as its name. For `DataTableView` that means new sizing
 that takes `max(content, header)` over the paged-in rows only (the model is
 lazy); `DataTableView` is shared by node cards and dashboard tiles too, so
 the change lands in four places at once.
+
+---
+
+## S. The Markdown Wiki card
+
+**S1. Edit pages from the Wiki card** (Dan). The Markdown Wiki card
+(`flograph.viz.markdown_wiki`, shipped read-only) shows a folder of `.md`
+files with `[[wikilink]]` navigation — `core/docpages.py` + `ui/wiki/`. It
+is meant to be *written*, not just read: a model developer authoring a user
+guide that ships on the dashboard. What is missing:
+
+  - an **edit toggle** on the card — swap the `DocsBrowser` for a
+    `QPlainTextEdit` on the current page's raw Markdown, **Save** writes the
+    file and re-renders, with a modified indicator and a
+    confirm-on-navigate-away;
+  - **new page** (also offered when a `[[link]]` resolves to nothing),
+    **rename** (rewrites inbound `[[links]]` across the folder), **delete**;
+  - **reorder / regroup** the nav tree, which rewrites `_Sidebar.md`.
+
+  The files are external — not graph state — so writes go straight to disk
+  like the Write Text node, no undo stack. Editing is disabled when the
+  folder is the bundled handbook (read-only in `site-packages` / the
+  one-file temp dir) or otherwise not writable: hide the toggle and say why.
+  All of it lives in `ui/wiki/` and `core/docpages.py`; the card and tile
+  wiring is done.
 
 ---
 

@@ -191,6 +191,10 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
             if item._kind() == "report":
                 item._render_report()
         for item in self._tiles_for(node_id):
+            if item._kind() == "wiki":
+                # cosmetic nav params (page / show_nav) never run the flow,
+                # so on_param_changed alone would not re-point the tile
+                item._render_wiki(name)
             item.on_param_changed()
 
     # ------------------------------------------------------------- helpers

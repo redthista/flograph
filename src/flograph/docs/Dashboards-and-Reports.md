@@ -73,3 +73,15 @@ opens the full embed-syntax reference.
 embedding its own wired inputs. It edits in place on the canvas, has a
 right-click Insert menu listing everything embeddable, and tiles onto a
 dashboard — rich prose on a dashboard, which a chart tile cannot do.
+
+## Markdown Wiki card
+
+**Viz ▸ Markdown Wiki** shows a whole folder of `.md` files as a navigable
+wiki — a nav tree, a breadcrumb, and wiki-style page links — on the canvas
+and as a dashboard tile. Point its **Notes folder** at a directory of notes;
+leave it blank and it shows this handbook. A `_Sidebar.md` in the folder — a
+nested bullet list of page links — becomes the nav tree, the same as it
+would on a GitHub wiki. Navigating is cosmetic — it never re-runs the flow.
+Write your model's user guide once and it ships on the dashboard to whoever
+opens it. Dropping a folder of `.md` files onto the canvas creates the node
+for you.
