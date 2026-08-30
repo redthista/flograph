@@ -68,7 +68,7 @@ class PopupView(QDialog):
         self._current_widget = view_for(value)
         self._layout.addWidget(self._current_widget)
         node = self._graph.nodes.get(self._node_id)
-        stale = bool(node and node.dirty and entry is not None)
+        stale = bool(node and node.dirty and value is not None)
         self.setWindowTitle(
             f"{node.label if node else '?'} — {self._port_name}"
             + ("  [STALE]" if stale else ""))

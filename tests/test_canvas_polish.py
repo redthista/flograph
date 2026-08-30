@@ -333,6 +333,35 @@ class TestPreviewToggle:
         node = graph.add_node(registry.instantiate("flograph.transform.sort"))
         assert scene.node_items[node.id]._fold_toggle_rect() is None
 
+    def test_the_chevron_reads_as_a_click_target_not_a_drag_bar(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
+        item = scene.node_items[node.id]
+        graph.set_preview_enabled(node.id, False)  # fold it
+
+        chevron = item._fold_toggle_rect()
+        assert item._hovering_a_chevron(chevron.center())   # → pointer cursor
+        assert not item._hovering_a_chevron(QPointF(item.width / 2,
+                                                    item.body_height / 2))
+
+    def test_open_preview_is_offered_for_a_run_card(self, qtbot, window, registry, tmp_path):
+        from PySide6.QtWidgets import QMenu
+        csv = tmp_path / "d.csv"
+        csv.write_text("x,y\n1,2\n2,4\n")
+        reader = window.registry.instantiate("flograph.io.read_csv")
+        table = window.registry.instantiate("flograph.viz.show_table")
+        window.graph.add_node(reader)
+        window.graph.add_node(table)
+        window.graph.set_param(reader.id, "path", str(csv))
+        window.graph.connect(reader.id, "table", table.id, "table")
+        with qtbot.waitSignal(window.engine.run_finished, timeout=5000):
+            window.engine.run_all()
+
+        menu = QMenu()
+        entries = window._add_view_actions(menu, table.id)
+        assert [a.text() for a, _ in entries] == ["Open Preview"]
+        assert entries[0][1] == "table"  # the card's rendered port
+
     def test_disabling_clears_held_widget_content(self, env, registry):
         from flograph.ui.commands import SetPreviewEnabledCommand
         graph, stack, scene = env

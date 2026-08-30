@@ -3505,10 +3505,17 @@ class MainWindow(QMainWindow):
         self.view.go_to_node(node_id)
 
     def _add_view_actions(self, menu: QMenu, node_id: str) -> list:
-        """Add 'View Table (port)'/'View Visual (port)' entries for any
-        cached output that's a DataFrame/Series or a matplotlib Figure.
-        Omitted (not grayed out) when nothing is cached yet."""
+        """Ways to pop a cached output into its own live window.
+
+        A card node renders one thing, so it gets a single, plainly-named
+        **Open Preview** — the way to look at a Show Plot / Show Table /
+        Show Plotly that has been folded to an icon without unfolding it.
+        Any other node gets 'View Table (port)' / 'View Visual (port)' per
+        cached output that a window can show. Omitted (not greyed) when
+        nothing is cached yet."""
         import sys
+
+        from .inspector.view_for import is_htmlish
         entry = self.engine.cache.get(node_id)
         if entry is None:
             return []
@@ -3517,13 +3524,28 @@ class MainWindow(QMainWindow):
             return []
         pd = sys.modules.get("pandas")
         figure_cls = getattr(sys.modules.get("matplotlib.figure"), "Figure", None)
+
+        def showable(value) -> bool:
+            return ((pd is not None
+                     and isinstance(value, (pd.DataFrame, pd.Series)))
+                    or (figure_cls is not None and isinstance(value, figure_cls))
+                    or is_htmlish(value))
+
+        if card_kind(node) in ("figure", "webview", "table_viewer", "grid") \
+                and node.spec.outputs:
+            port = node.spec.outputs[0].name
+            if showable(entry.outputs.get(port)):
+                return [(menu.addAction("Open Preview"), port)]
+            return []
+
         actions = []
         for port in node.spec.outputs:
             value = entry.outputs.get(port.name)
             if pd is not None and isinstance(value, (pd.DataFrame, pd.Series)):
                 actions.append((menu.addAction(f"View Table ({port.name})"),
                                 port.name))
-            elif figure_cls is not None and isinstance(value, figure_cls):
+            elif (figure_cls is not None and isinstance(value, figure_cls)) \
+                    or is_htmlish(value):
                 actions.append((menu.addAction(f"View Visual ({port.name})"),
                                 port.name))
         return actions

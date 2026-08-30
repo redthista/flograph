@@ -27,6 +27,18 @@ def is_figure(value: Any) -> bool:
     return figure_cls is not None and isinstance(value, figure_cls)
 
 
+def is_htmlish(value: Any) -> bool:
+    """A value HtmlView can render — a Plotly figure (``to_html``), or
+    anything with the universal ``_repr_html_`` (folium, Altair, a pandas
+    Styler), or a list of them. A cheap structural check, not a render."""
+    def one(v: Any) -> bool:
+        return callable(getattr(v, "to_html", None)) \
+            or callable(getattr(v, "_repr_html_", None))
+    if isinstance(value, (list, tuple)):
+        return bool(value) and all(one(v) for v in value)
+    return one(value)
+
+
 def view_for(value: Any, embed_figures: bool = True) -> QWidget:
     import sys
     pd = sys.modules.get("pandas")
@@ -47,6 +59,17 @@ def view_for(value: Any, embed_figures: bool = True) -> QWidget:
             return label
         view = FigureView()
         view.set_figure(value)
+        return view
+    if is_htmlish(value):
+        if not embed_figures:
+            label = QLabel(FIGURE_ELSEWHERE_MSG)
+            label.setWordWrap(True)
+            label.setAlignment(Qt.AlignCenter)
+            label.setStyleSheet("color: #6b7280; padding: 16px;")
+            return label
+        from .plotly_view import HtmlView
+        view = HtmlView()
+        view.set_content(value)
         return view
     view = ObjectView()
     view.set_value(value)

@@ -3720,6 +3720,10 @@ class NodeItem(QGraphicsObject):
             self.setCursor(Qt.SizeHorCursor)
         elif edge == "bottom":
             self.setCursor(Qt.SizeVerCursor)
+        elif self._hovering_a_chevron(event.pos()):
+            # the fold / gather-ports triangles are click targets, not drag
+            # bars — say so, even on a folded node whose whole body drags
+            self.setCursor(Qt.PointingHandCursor)
         elif self.button and self._button_edit:
             self.setCursor(Qt.SizeAllCursor)  # whole face drags in edit mode
         elif (not self.compact and not self.button
@@ -3728,6 +3732,17 @@ class NodeItem(QGraphicsObject):
         else:
             self.unsetCursor()
         super().hoverMoveEvent(event)
+
+    def _hovering_a_chevron(self, pos: QPointF) -> bool:
+        """Is the cursor over the fold or the gather-ports disclosure
+        triangle — the two header/corner glyphs a click toggles. Same
+        forgiving hit boxes mousePressEvent uses."""
+        fold = self._fold_toggle_rect()
+        if fold is not None and fold.adjusted(-4, -4, 4, 4).contains(pos):
+            return True
+        ports = self._collapse_toggle_rect()
+        return (ports is not None and not self._flat
+                and ports.adjusted(-3, -4, 3, 4).contains(pos))
 
     def hoverLeaveEvent(self, event) -> None:
         self.unsetCursor()
