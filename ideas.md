@@ -163,7 +163,7 @@ the change lands in four places at once.
 
 ---
 
-## S. The Markdown Wiki card
+## S. Editing in the Markdown Wiki card
 
 **S1. Edit pages from the Wiki card** (Dan). The Markdown Wiki card
 (`flograph.viz.markdown_wiki`, shipped read-only) shows a folder of `.md`
