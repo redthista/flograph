@@ -28,10 +28,12 @@ def frame_window(qtbot, registry):
     s = QSettings("flograph", "flograph")
     saved = {k: s.value(k) for k in ("window/custom_frame",
                                      "window/titlebar_compact",
-                                     "window/titlebar_shortcuts")}
+                                     "window/titlebar_shortcuts",
+                                     "favorite_workflows")}
     s.setValue("window/custom_frame", True)
     s.setValue("window/titlebar_compact", False)
     s.setValue("window/titlebar_shortcuts", True)
+    s.remove("favorite_workflows")
     try:
         win = MainWindow(registry)
         win.confirm_close = False
@@ -244,12 +246,72 @@ def test_initials_rule(name, want):
     assert window_frame.initials_for(name) == want
 
 
-def test_project_menu_offers_save_new_open(frame_window):
+def _recent_rows(menu):
+    return [a.defaultWidget() for a in menu.actions()
+            if isinstance(a, QWidgetAction)
+            and isinstance(a.defaultWidget(), window_frame._RecentRow)]
+
+
+def _project_panel(menu):
+    return next(a.defaultWidget() for a in menu.actions()
+                if isinstance(a, QWidgetAction)
+                and isinstance(a.defaultWidget(), window_frame._ProjectPanel))
+
+
+def test_project_menu_header_has_the_file_action_buttons(frame_window):
     tb = frame_window._title_bar
     tb._project_menu.aboutToShow.emit()
-    texts = [a.text() for a in tb._project_menu.actions()]
-    assert "&Save" in texts and "Save &As…" in texts
-    assert "&New" in texts and "&Open…" in texts
+    panel = _project_panel(tb._project_menu)
+    tips = [b.toolTip() for b in panel.findChildren(QToolButton)]
+    assert any(t.startswith("Save  (") for t in tips)
+    assert any(t.startswith("Save As…") for t in tips)
+    assert any(t.startswith("Export Workflow…") for t in tips)
+    assert any(t.startswith("New") for t in tips)
+    assert any(t.startswith("Open…") for t in tips)
+
+
+def test_project_menu_header_button_triggers_the_action(frame_window,
+                                                        monkeypatch):
+    fired = []
+    monkeypatch.setattr(frame_window.action_new, "trigger",
+                        lambda: fired.append("new"))
+    tb = frame_window._title_bar
+    tb._project_menu.aboutToShow.emit()
+    panel = _project_panel(tb._project_menu)
+    new_btn = next(b for b in panel.findChildren(QToolButton)
+                   if b.toolTip().startswith("New"))
+    new_btn.click()
+    assert fired == ["new"]
+
+
+def test_project_panel_reports_the_flow_size(frame_window):
+    _add_two_nodes(frame_window)
+    tb = frame_window._title_bar
+    tb._project_menu.aboutToShow.emit()
+    panel = _project_panel(tb._project_menu)
+    from PySide6.QtWidgets import QLabel
+    text = " ".join(w.text() for w in panel.findChildren(QLabel))
+    assert "2</b> nodes" in text or "2 nodes" in text
+    assert "not saved yet" in text.lower()
+
+
+def test_project_panel_stretches_to_the_menu_width(frame_window, tmp_path,
+                                                   monkeypatch):
+    proj = tmp_path / "a" / "deeply" / "nested" / "folder" / "ledger.flograph"
+    proj.parent.mkdir(parents=True)
+    proj.write_text("{}")
+    monkeypatch.setattr(frame_window, "_recent_files_existing",
+                        lambda: [str(proj)])
+    tb = frame_window._title_bar
+    m = tb._project_menu
+    m.aboutToShow.emit()
+    m.show()
+    try:
+        panel = _project_panel(m)
+        row = _recent_rows(m)[0]
+        assert panel.width() == row.width()
+    finally:
+        m.hide()
 
 
 def test_recent_rows_show_name_and_folder(frame_window, tmp_path, monkeypatch):
@@ -261,8 +323,7 @@ def test_recent_rows_show_name_and_folder(frame_window, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QLabel
     tb = frame_window._title_bar
     tb._project_menu.aboutToShow.emit()
-    rows = [a.defaultWidget() for a in tb._project_menu.actions()
-            if isinstance(a, QWidgetAction)]
+    rows = _recent_rows(tb._project_menu)
     assert len(rows) == 1
     texts = [w.text() for w in rows[0].findChildren(QLabel) if w.text()]
     assert "ledger" in texts
@@ -279,10 +340,58 @@ def test_recent_row_opens_the_workflow(frame_window, tmp_path, monkeypatch):
                         lambda: [str(proj)])
     tb = frame_window._title_bar
     tb._project_menu.aboutToShow.emit()
-    row = next(a.defaultWidget() for a in tb._project_menu.actions()
-               if isinstance(a, QWidgetAction))
+    row = _recent_rows(tb._project_menu)[0]
     row._on_open(str(proj))
     assert opened == [str(proj)]
+
+
+# -- favourites ---------------------------------------------------
+
+def test_star_toggles_a_workflow_into_the_favourites_section(
+        frame_window, tmp_path, monkeypatch):
+    star = tmp_path / "star.flograph"
+    star.write_text("{}")
+    fav_store = []
+    monkeypatch.setattr(frame_window, "_recent_files_existing",
+                        lambda: [str(star)])
+    monkeypatch.setattr(frame_window, "_favorite_workflows_existing",
+                        lambda: [p for p in fav_store if p == str(star)])
+    monkeypatch.setattr(frame_window, "is_favorite_workflow",
+                        lambda p: p in fav_store)
+
+    def toggle(p):
+        if p in fav_store:
+            fav_store.remove(p)
+            return False
+        fav_store.append(p)
+        return True
+    monkeypatch.setattr(frame_window, "toggle_favorite_workflow", toggle)
+
+    tb = frame_window._title_bar
+    tb._project_menu.aboutToShow.emit()
+    texts = [a.text() for a in tb._project_menu.actions()]
+    assert "Favourites" not in texts and "Recent workflows" in texts
+
+    _recent_rows(tb._project_menu)[0]._toggle_star()
+    assert fav_store == [str(star)]
+
+    tb._project_menu.aboutToShow.emit()
+    texts = [a.text() for a in tb._project_menu.actions()]
+    assert "Favourites" in texts
+    # shown once, under Favourites, not duplicated under Recent
+    assert len(_recent_rows(tb._project_menu)) == 1
+
+
+def test_favourite_workflow_round_trips_through_settings(frame_window, tmp_path):
+    p = str(tmp_path / "keep.flograph")
+    try:
+        assert not frame_window.is_favorite_workflow(p)
+        assert frame_window.toggle_favorite_workflow(p) is True
+        assert frame_window.is_favorite_workflow(p)
+        assert frame_window.toggle_favorite_workflow(p) is False
+        assert not frame_window.is_favorite_workflow(p)
+    finally:
+        frame_window.settings.remove("favorite_workflows")
 
 
 # -- save indicator ----------------------------------------------
@@ -346,8 +455,9 @@ def test_every_bar_button_has_a_tooltip(frame_window):
 # -- glyphs ----------------------------------------------------
 
 @pytest.mark.parametrize("kind", ["logo", "hamburger", "chevron", "save",
-                                  "clear_cache", "min", "max", "restore",
-                                  "close"])
+                                  "clear_cache", "star", "star_filled",
+                                  "save_as", "export", "new_doc", "folder",
+                                  "min", "max", "restore", "close"])
 def test_frame_glyphs_render(kind):
     icon = window_frame.frame_icon(kind)
     assert not icon.isNull() and icon.availableSizes()

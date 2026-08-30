@@ -17,10 +17,14 @@ cursor. Everything is drawn with ``QPainterPath`` for the same reasons
 from __future__ import annotations
 
 import hashlib
+import math
 import re
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer, Signal,
+)
 from PySide6.QtGui import (
     QAction, QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence,
     QPainter, QPainterPath, QPen, QPixmap,
@@ -32,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from . import toolbar as toolbar_style
+from .resource_monitor import format_bytes
 
 BAR_HEIGHT = 34
 RESIZE_MARGIN = 6
@@ -156,9 +161,110 @@ def _clear_cache(p: QPainter, r: QRectF, color: QColor) -> None:
     p.drawRoundedRect(node, w * 0.07, w * 0.07)
 
 
+def _star_path(r: QRectF) -> QPainterPath:
+    cx, cy = r.center().x(), r.center().y()
+    outer = min(r.width(), r.height()) * 0.46
+    pts = []
+    for i in range(10):
+        ang = -math.pi / 2 + i * math.pi / 5
+        rad = outer if i % 2 == 0 else outer * 0.40
+        pts.append(QPointF(cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
+    path = QPainterPath(pts[0])
+    for pt in pts[1:]:
+        path.lineTo(pt)
+    path.closeSubpath()
+    return path
+
+
+def _star(p: QPainter, r: QRectF, color: QColor) -> None:
+    """A hollow five-point star — 'not a favourite, click to add'."""
+    p.setPen(_pen(color, max(1.1, r.width() * 0.09)))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(_star_path(r))
+
+
+def _star_filled(p: QPainter, r: QRectF, color: QColor) -> None:
+    """The same star, filled — a starred workflow."""
+    p.setPen(_pen(color, max(1.0, r.width() * 0.06)))
+    p.setBrush(color)
+    p.drawPath(_star_path(r))
+
+
+def _save_as(p: QPainter, r: QRectF, color: QColor) -> None:
+    """The floppy outline with an ellipsis where its label patch would be —
+    "save, but somewhere else"."""
+    w, h = r.width(), r.height()
+    o = QPainterPath(QPointF(r.left() + w * 0.17, r.top() + h * 0.19))
+    o.lineTo(r.left() + w * 0.70, r.top() + h * 0.19)
+    o.lineTo(r.left() + w * 0.83, r.top() + h * 0.32)
+    o.lineTo(r.left() + w * 0.83, r.top() + h * 0.83)
+    o.lineTo(r.left() + w * 0.17, r.top() + h * 0.83)
+    o.closeSubpath()
+    p.setPen(_pen(color, max(1.3, w * 0.085)))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(o)
+    p.setPen(Qt.NoPen)
+    p.setBrush(color)
+    for fx in (0.35, 0.5, 0.65):
+        p.drawEllipse(QPointF(r.left() + w * fx, r.top() + h * 0.60),
+                      w * 0.045, w * 0.045)
+
+
+def _export(p: QPainter, r: QRectF, color: QColor) -> None:
+    """A tray with a document lifting out of it — File ▸ Export Workflow."""
+    w, h = r.width(), r.height()
+    p.setPen(_pen(color, max(1.3, w * 0.085)))
+    p.setBrush(Qt.NoBrush)
+    tray = QPainterPath(QPointF(r.left() + w * 0.18, r.top() + h * 0.54))
+    tray.lineTo(r.left() + w * 0.18, r.top() + h * 0.82)
+    tray.lineTo(r.left() + w * 0.82, r.top() + h * 0.82)
+    tray.lineTo(r.left() + w * 0.82, r.top() + h * 0.54)
+    p.drawPath(tray)
+    cx = r.center().x()
+    p.drawLine(QPointF(cx, r.top() + h * 0.14), QPointF(cx, r.top() + h * 0.58))
+    head = QPainterPath(QPointF(cx - w * 0.15, r.top() + h * 0.30))
+    head.lineTo(cx, r.top() + h * 0.13)
+    head.lineTo(cx + w * 0.15, r.top() + h * 0.30)
+    p.drawPath(head)
+
+
+def _new_doc(p: QPainter, r: QRectF, color: QColor) -> None:
+    """A page with a folded corner and a plus — a fresh workflow."""
+    w, h = r.width(), r.height()
+    p.setPen(_pen(color, max(1.3, w * 0.085)))
+    p.setBrush(Qt.NoBrush)
+    page = QPainterPath(QPointF(r.left() + w * 0.24, r.top() + h * 0.13))
+    page.lineTo(r.left() + w * 0.60, r.top() + h * 0.13)
+    page.lineTo(r.left() + w * 0.77, r.top() + h * 0.30)
+    page.lineTo(r.left() + w * 0.77, r.top() + h * 0.87)
+    page.lineTo(r.left() + w * 0.24, r.top() + h * 0.87)
+    page.closeSubpath()
+    p.drawPath(page)
+    cx, cy, s = r.center().x(), r.top() + h * 0.56, w * 0.13
+    p.drawLine(QPointF(cx - s, cy), QPointF(cx + s, cy))
+    p.drawLine(QPointF(cx, cy - s), QPointF(cx, cy + s))
+
+
+def _folder(p: QPainter, r: QRectF, color: QColor) -> None:
+    """A folder — open another workflow."""
+    w, h = r.width(), r.height()
+    p.setPen(_pen(color, max(1.3, w * 0.085)))
+    p.setBrush(Qt.NoBrush)
+    body = QPainterPath(QPointF(r.left() + w * 0.13, r.top() + h * 0.30))
+    body.lineTo(r.left() + w * 0.40, r.top() + h * 0.30)
+    body.lineTo(r.left() + w * 0.48, r.top() + h * 0.38)
+    body.lineTo(r.left() + w * 0.87, r.top() + h * 0.38)
+    body.lineTo(r.left() + w * 0.87, r.top() + h * 0.79)
+    body.lineTo(r.left() + w * 0.13, r.top() + h * 0.79)
+    body.closeSubpath()
+    p.drawPath(body)
+
+
 _GLYPHS = {
     "logo": _logo, "hamburger": _hamburger, "chevron": _chevron, "save": _save,
-    "clear_cache": _clear_cache,
+    "clear_cache": _clear_cache, "star": _star, "star_filled": _star_filled,
+    "save_as": _save_as, "export": _export, "new_doc": _new_doc,
+    "folder": _folder,
     "min": _min, "max": _max, "restore": _restore, "close": _close,
 }
 
@@ -288,14 +394,22 @@ QWidget#recent_row { background: transparent; }
 QWidget#recent_row:hover { background: #34363f; }
 QLabel#recent_name { color: #e5e7eb; }
 QLabel#recent_path { color: #8b8f99; }
+QToolButton#star_btn { background: transparent; border: none;
+                       border-radius: 4px; padding: 3px; }
+QToolButton#star_btn:hover { background: #3d404a; }
 """
+
+_STAR_OFF = QColor("#7f838d")
 
 
 class _RecentRow(QWidget):
     """One workflow in the project switcher: its initials tile, its name, and
-    the folder it lives in — the shape PyCharm's recent-projects list uses."""
+    the folder it lives in — the shape PyCharm's recent-projects list uses.
+    When ``on_toggle_fav`` is given it also carries a star that adds or
+    removes the workflow from the Favourites section."""
 
-    def __init__(self, path: str, on_open, parent=None) -> None:
+    def __init__(self, path: str, on_open, *, is_fav: bool = False,
+                 on_toggle_fav=None, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("recent_row")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -303,9 +417,11 @@ class _RecentRow(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self._path = path
         self._on_open = on_open
+        self._on_toggle_fav = on_toggle_fav
+        self._fav = bool(is_fav)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 5, 16, 5)
+        row.setContentsMargins(10, 5, 8, 5)
         row.setSpacing(9)
 
         tile = QLabel()
@@ -329,6 +445,26 @@ class _RecentRow(QWidget):
         text.addWidget(path_label)
         row.addLayout(text, 1)
 
+        if on_toggle_fav is not None:
+            self._star_btn = QToolButton(self)
+            self._star_btn.setObjectName("star_btn")
+            self._star_btn.setCursor(Qt.PointingHandCursor)
+            self._star_btn.setIconSize(QSize(16, 16))
+            self._star_btn.clicked.connect(self._toggle_star)
+            self._sync_star()
+            row.addWidget(self._star_btn, 0, Qt.AlignVCenter)
+
+    def _sync_star(self) -> None:
+        self._star_btn.setIcon(frame_icon(
+            "star_filled" if self._fav else "star",
+            theme.BUTTON_ACCENT if self._fav else _STAR_OFF))
+        self._star_btn.setToolTip(
+            "Remove from favourites" if self._fav else "Add to favourites")
+
+    def _toggle_star(self) -> None:
+        self._fav = bool(self._on_toggle_fav(self._path))
+        self._sync_star()
+
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton and self.rect().contains(
                 event.position().toPoint()):
@@ -340,6 +476,256 @@ def _smaller(font: QFont) -> QFont:
     f = QFont(font)
     f.setPointSizeF(max(6.5, font.pointSizeF() - 1.5))
     return f
+
+
+# ------------------------------------------------ project panel (menu header)
+
+# The node-state palette, borrowed from the canvas' status colours so the
+# little bar reads the same way a node does.
+_STATE_COLOURS = {
+    "cached": QColor(toolbar_style.RUN),      # green — has a fresh result
+    "clean": QColor("#4b5563"),               # grey  — fine, nothing cached
+    "stale": QColor(toolbar_style.RESET),     # amber — needs a re-run
+    "frozen": QColor("#5b8def"),              # blue  — pinned, won't re-run
+}
+
+_PANEL_QSS = """
+QWidget#project_panel { background: #2b2d36; border-radius: 8px; }
+QLabel#pp_name { color: #f3f4f6; font-size: 11pt; font-weight: 600; }
+QLabel#pp_folder { color: #8b8f99; }
+QLabel#pp_stat { color: #c7cad2; }
+QLabel#pp_meta { color: #8b8f99; }
+QToolButton#pp_act { background: transparent; border: 1px solid #3a3d47;
+                     border-radius: 6px; padding: 6px; }
+QToolButton#pp_act:hover { background: #3a3d47; }
+QToolButton#pp_act:pressed { background: #43464f; }
+"""
+
+_PANEL_WIDTH = 322
+
+
+def _folder_line(path) -> str:
+    if not path:
+        return "Not saved yet"
+    folder = str(Path(path).parent)
+    home = str(Path.home())
+    if folder.startswith(home):
+        folder = "~" + folder[len(home):]
+    return folder
+
+
+def _humanize_age(seconds: float) -> str:
+    minutes = seconds / 60
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{int(minutes)} min ago"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{int(hours)} h ago"
+    days = hours / 24
+    if days < 7:
+        return f"{int(days)} d ago"
+    if days < 30:
+        return f"{int(days / 7)} wk ago"
+    if days < 365:
+        return f"{int(days / 30)} mo ago"
+    return f"{int(days / 365)} yr ago"
+
+
+def _flow_stats(window) -> dict:
+    """A snapshot of the open project — counts for the panel and the meter.
+    Node state is partitioned (frozen ▸ stale ▸ cached ▸ clean) so the four
+    numbers add up to the node count and the meter segments tile a full bar."""
+    engine = window.engine
+    graph, cache = engine.graph, engine.cache
+    nodes = list(graph.nodes.values())
+    frozen = stale = cached = clean = 0
+    for n in nodes:
+        if n.frozen:
+            frozen += 1
+        elif n.dirty:
+            stale += 1
+        elif cache.has(n.id):
+            cached += 1
+        else:
+            clean += 1
+    return {
+        "nodes": len(nodes), "wires": len(graph.connections),
+        "links": len(graph.links), "frames": len(graph.frames),
+        "cached": cached, "stale": stale, "frozen": frozen, "clean": clean,
+        "memory": cache.total_bytes(),
+    }
+
+
+class _FlowMeter(QWidget):
+    """A 6px rounded bar whose segments are the project's nodes by state —
+    green cached, grey clean, amber stale, blue frozen. Empty track when
+    there are no nodes."""
+
+    _ORDER = ("cached", "clean", "stale", "frozen")
+
+    def __init__(self, stats: dict, parent=None) -> None:
+        super().__init__(parent)
+        self._stats = stats
+        self.setFixedHeight(6)
+        self.setMinimumWidth(120)
+
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(0, 0, self.width(), self.height())
+        radius = r.height() / 2
+        track = QPainterPath()
+        track.addRoundedRect(r, radius, radius)
+        p.fillPath(track, QColor("#1c1d23"))
+        total = sum(self._stats.get(k, 0) for k in self._ORDER)
+        if total <= 0:
+            return
+        p.setClipPath(track)
+        x = 0.0
+        for key in self._ORDER:
+            value = self._stats.get(key, 0)
+            if not value:
+                continue
+            seg = r.width() * value / total
+            p.fillRect(QRectF(x, 0, seg + 0.6, r.height()), _STATE_COLOURS[key])
+            x += seg
+
+
+class _ProjectPanel(QWidget):
+    """The header of the project switcher: the open workflow's tile and path,
+    a row of icon buttons for Save / Save As / Export / New / Open, and a
+    compact readout of the flow — node and wire counts, what is cached or
+    stale, the file's size on disk and when it was last saved."""
+
+    def __init__(self, window, on_action, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("project_panel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(_PANEL_QSS)
+        # No fixed width: QMenu stretches an action widget to the menu's own
+        # width, which the recent-workflow rows below make wider than this
+        # card's natural size — so it should follow, not sit short of the edge.
+        self.setMinimumWidth(_PANEL_WIDTH)
+        self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+
+        path = getattr(window, "_project_path", None)
+        name = project_display_name(path)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(13, 12, 13, 13)
+        outer.setSpacing(11)
+
+        # -- identity ------------------------------------------------
+        ident = QHBoxLayout()
+        ident.setSpacing(10)
+        tile = QLabel()
+        tile.setPixmap(initials_pixmap(name, 38))
+        ident.addWidget(tile, 0, Qt.AlignVCenter)
+        id_col = QVBoxLayout()
+        id_col.setSpacing(1)
+        name_lbl = QLabel(name)
+        name_lbl.setObjectName("pp_name")
+        id_col.addWidget(name_lbl)
+        self._folder_lbl = QLabel()
+        self._folder_lbl.setObjectName("pp_folder")
+        self._folder_lbl.setFont(_smaller(self._folder_lbl.font()))
+        self._folder_lbl.setMinimumWidth(1)
+        self._folder_text = _folder_line(path)
+        self._elide_folder()
+        id_col.addWidget(self._folder_lbl)
+        ident.addLayout(id_col, 1)
+        outer.addLayout(ident)
+
+        # -- action buttons ----------------------------------------
+        acts = QHBoxLayout()
+        acts.setSpacing(6)
+        for glyph, tip, action in (
+                ("save", "Save", window.action_save),
+                ("save_as", "Save As…", window.action_save_as),
+                ("export", "Export Workflow…", window.action_export_workflow),
+                ("new_doc", "New", window.action_new),
+                ("folder", "Open…", window.action_open)):
+            btn = QToolButton()
+            btn.setObjectName("pp_act")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setIcon(frame_icon(glyph))
+            btn.setIconSize(QSize(17, 17))
+            key = action.shortcut().toString(QKeySequence.NativeText)
+            btn.setToolTip(f"{tip}  ({key})" if key else tip)
+            btn.clicked.connect(lambda _=False, a=action: on_action(a))
+            acts.addWidget(btn)
+        acts.addStretch(1)
+        outer.addLayout(acts)
+
+        # -- flow readout -----------------------------------------
+        stats = _flow_stats(window)
+        block = QVBoxLayout()
+        block.setSpacing(4)
+        block.addWidget(_FlowMeter(stats))
+
+        counts = QLabel(self._counts_line(stats))
+        counts.setObjectName("pp_stat")
+        block.addWidget(counts)
+
+        state = QLabel(self._state_line(stats))
+        state.setObjectName("pp_stat")
+        block.addWidget(state)
+
+        meta = QLabel(self._meta_line(path, stats))
+        meta.setObjectName("pp_meta")
+        meta.setFont(_smaller(meta.font()))
+        block.addWidget(meta)
+        outer.addLayout(block)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._elide_folder()
+
+    def _elide_folder(self) -> None:
+        fm = QFontMetrics(self._folder_lbl.font())
+        # panel margins (13+13) + tile (38) + row spacing (10) + a little slack
+        avail = max(60, self.width() - 74)
+        self._folder_lbl.setText(
+            fm.elidedText(self._folder_text, Qt.ElideMiddle, avail))
+
+    @staticmethod
+    def _counts_line(s: dict) -> str:
+        parts = [f"<b>{s['nodes']}</b> node{'' if s['nodes'] == 1 else 's'}",
+                 f"{s['wires']} wire{'' if s['wires'] == 1 else 's'}"]
+        if s["frames"]:
+            parts.append(f"{s['frames']} frame{'' if s['frames'] == 1 else 's'}")
+        if s["links"]:
+            parts.append(f"{s['links']} link{'' if s['links'] == 1 else 's'}")
+        return "  ·  ".join(parts)
+
+    @staticmethod
+    def _state_line(s: dict) -> str:
+        def chip(key: str, label: str) -> str:
+            return (f"<span style='color:{_STATE_COLOURS[key].name()}'>●</span> "
+                    f"{s[key]} {label}")
+        bits = [chip("cached", "cached")]
+        if s["stale"]:
+            bits.append(chip("stale", "stale"))
+        if s["frozen"]:
+            bits.append(chip("frozen", "frozen"))
+        if s["clean"] and not s["stale"] and not s["frozen"]:
+            bits.append(chip("clean", "uncached"))
+        return "&nbsp;&nbsp; ".join(bits)
+
+    @staticmethod
+    def _meta_line(path, s: dict) -> str:
+        parts = []
+        if path and Path(path).exists():
+            st = Path(path).stat()
+            parts.append(f"{format_bytes(st.st_size)} on disk")
+            parts.append(f"saved {_humanize_age(time.time() - st.st_mtime)}")
+        else:
+            parts.append("not saved yet")
+        if s["memory"]:
+            parts.append(f"{format_bytes(s['memory'])} in memory")
+        return "  ·  ".join(parts)
 
 
 class TitleBar(QWidget):
@@ -580,21 +966,46 @@ class TitleBar(QWidget):
     def _rebuild_project_menu(self) -> None:
         m = self._project_menu
         m.clear()
-        m.addAction(self._window.action_save)
-        m.addAction(self._window.action_save_as)
-        m.addAction(self._window.action_export_workflow)
-        m.addSeparator()
-        m.addAction(self._window.action_new)
-        m.addAction(self._window.action_open)
-        recent = self._window._recent_files_existing()
+        w = self._window
+        panel = QWidgetAction(m)
+        panel.setDefaultWidget(_ProjectPanel(w, self._panel_action))
+        m.addAction(panel)
+
+        favs = w._favorite_workflows_existing()
+        if favs:
+            self._add_workflow_section(m, "Favourites", favs)
+
+        recent = [p for p in w._recent_files_existing() if p not in favs]
         if recent:
-            m.addSeparator()
-            header = m.addAction("Recent workflows")
-            header.setEnabled(False)
-            for p in recent:
-                item = QWidgetAction(m)
-                item.setDefaultWidget(_RecentRow(p, self._open_recent))
-                m.addAction(item)
+            self._add_workflow_section(m, "Recent workflows", recent)
+
+    def _add_workflow_section(self, m: QMenu, title: str,
+                              paths: list[str]) -> None:
+        m.addSeparator()
+        header = m.addAction(title)
+        header.setEnabled(False)
+        for p in paths:
+            item = QWidgetAction(m)
+            item.setDefaultWidget(_RecentRow(
+                p, self._open_recent,
+                is_fav=self._window.is_favorite_workflow(p),
+                on_toggle_fav=self._toggle_favorite))
+            m.addAction(item)
+
+    def _toggle_favorite(self, path: str) -> bool:
+        now = self._window.toggle_favorite_workflow(path)
+        # Re-pop the menu so the row jumps between Favourites and Recent right
+        # away — deferred, because clearing the menu deletes the very row whose
+        # click handler we are inside.
+        m = self._project_menu
+        if m.isVisible():
+            pos = m.pos()
+            QTimer.singleShot(0, lambda: (m.hide(), m.popup(pos)))
+        return now
+
+    def _panel_action(self, action: QAction) -> None:
+        self._project_menu.close()
+        action.trigger()
 
     def _open_recent(self, path: str) -> None:
         self._project_menu.close()

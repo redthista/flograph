@@ -4589,3 +4589,32 @@ class MainWindow(QMainWindow):
             action.setToolTip(path)
             action.triggered.connect(
                 lambda checked=False, p=path: self.open_path(p))
+
+    # ------------------------------------------------------------- favourites
+
+    def _favorite_workflows(self) -> list[str]:
+        value = self.settings.value("favorite_workflows", [])
+        if isinstance(value, str):
+            value = [value]
+        return [p for p in (value or []) if p]
+
+    def _favorite_workflows_existing(self) -> list[str]:
+        """Starred workflow paths that still exist — for the title bar's
+        project switcher. A path that no longer resolves is skipped, not
+        pruned: an offline move shouldn't drop the star for good."""
+        return [p for p in self._favorite_workflows() if Path(p).exists()]
+
+    def is_favorite_workflow(self, path: str) -> bool:
+        return path in self._favorite_workflows()
+
+    def toggle_favorite_workflow(self, path: str) -> bool:
+        """Star/unstar a workflow file. Returns True when it is now starred."""
+        favs = self._favorite_workflows()
+        if path in favs:
+            favs.remove(path)
+            added = False
+        else:
+            favs.insert(0, path)
+            added = True
+        self.settings.setValue("favorite_workflows", favs)
+        return added
