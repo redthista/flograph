@@ -11,14 +11,14 @@ holds what is *not* built.
 
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
-reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P and Q)
-are where shipped work used to be. Old numbers are kept as "(was N)" where a code
-comment still cites them.
+reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q and
+R) are where shipped work used to be. Old numbers are kept as "(was N)" where
+a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, N3, O1, R1, S1) on 2026-08-30.
+2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30.
 
 ---
 
@@ -144,22 +144,6 @@ display name, no thumbnail, no last-opened time, so those are derived (name
 and initials from the filename) or newly recorded. The initials tile can
 borrow the `mark_pixmap` / `mark_icon` pattern already used for node marks.
 Pairs well with a thumbnail written on save.
-
----
-
-## R. Data tables
-
-**R1. Fit a column to its header, not just its contents** (Dan). The
-editable Table node and its pop-out editor use `SpreadsheetView`, which
-auto-sizes columns — but `resizeColumnToContents` measures the cells and the
-72px default section size can swallow a longer header. The read-only
-`DataTableView` behind Show Table, the Inspector dock and the column-spec
-view does no auto-sizing at all — `PandasModel` answers no `SizeHintRole`
-and nothing calls a resize. Either way the ask is the same: a column should
-be at least as wide as its name. For `DataTableView` that means new sizing
-that takes `max(content, header)` over the paged-in rows only (the model is
-lazy); `DataTableView` is shared by node cards and dashboard tiles too, so
-the change lands in four places at once.
 
 ---
 

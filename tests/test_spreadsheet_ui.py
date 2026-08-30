@@ -372,6 +372,22 @@ class TestSpreadsheetView:
         qtbot.addWidget(fresh)
         assert fresh.columnWidth(0) == 143
 
+    def test_load_without_autosize_still_fits_a_long_header(self, qtbot,
+                                                            monkeypatch):
+        """R1 — with auto-fit off and no stored width a column sat at the
+        72px default, which swallows a longer header."""
+        from flograph.ui.spreadsheet import view as view_module
+        monkeypatch.setattr(view_module, "autosize_default_enabled",
+                            lambda: False)
+        fresh = SpreadsheetView()
+        model = make_model()
+        model.rename_column(0, "a decidedly long column header")
+        model.setParent(fresh)
+        fresh.setModel(model)
+        qtbot.addWidget(fresh)
+        assert fresh.columnWidth(0) > 72
+        assert model.sheet.columns[0].width in (None, 0)   # not persisted
+
     def test_date_formats_setting_reaches_the_core(self):
         from flograph.core.sheet import extra_date_formats, normalize_date
         from flograph.ui.spreadsheet import (date_formats_setting,

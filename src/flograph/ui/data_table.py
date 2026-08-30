@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication, QKeySequence
+from PySide6.QtGui import QFontMetrics, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QMenu, QMessageBox, QTableView
 
 from .spreadsheet.clipboard import block_to_html, block_to_tsv
@@ -32,6 +32,19 @@ from .spreadsheet.clipboard import block_to_html, block_to_tsv
 # cells is a string of hundreds of megabytes and a noticeable pause, and
 # nobody means to do it by mistake.
 CONFIRM_ROWS = 50_000
+
+# Column-fit bounds for the read-only view. A column is sized to the wider of
+# its header and its visible content, then held between these: MIN keeps a
+# column of short values wide enough to still show its name, MAX stops one
+# long value or a long header from eating the whole viewport.
+MIN_COL_WIDTH = 52
+MAX_COL_WIDTH = 360
+# How many of the paged-in rows the content measure samples. The model is
+# lazy (500-row pages), and measuring every cell through the item delegate
+# costs ~190 ms for a wide frame — far too much to spend on every graph run
+# for every table card. A sample of the first rows sizes a column well
+# enough; a stray wide value further down is a manual drag away.
+FIT_SAMPLE_ROWS = 50
 
 
 def cell_text(index) -> str:
@@ -138,6 +151,40 @@ class DataTableView(QTableView):
         super().__init__(parent)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_menu)
+
+    # ----------------------------------------------------- column widths
+
+    def setModel(self, model) -> None:
+        """Set the model and fit the columns to it.
+
+        A plain QTableView does no auto-sizing at all, so every column here
+        sat at Qt's 100 px default — narrower than many headers, and the
+        header is the thing you most want intact when the table is headed
+        for a spreadsheet. Fitting on setModel is the one place all four
+        callers (node cards, dashboard tiles, the inspector, the spec view)
+        pass through.
+        """
+        super().setModel(model)
+        if model is not None and model.columnCount() > 0:
+            self.fit_columns_to_data()
+
+    def fit_columns_to_data(self) -> None:
+        """Size each column to the wider of its header and its sampled
+        content, clamped to [MIN_COL_WIDTH, MAX_COL_WIDTH]."""
+        model = self.model()
+        if model is None:
+            return
+        header = self.horizontalHeader()
+        metrics = QFontMetrics(self.font())
+        rows = min(model.rowCount(), FIT_SAMPLE_ROWS)
+        for col in range(model.columnCount()):
+            width = header.sectionSizeHint(col)
+            for row in range(rows):
+                text = model.data(model.index(row, col), Qt.DisplayRole)
+                if text:
+                    width = max(width, metrics.horizontalAdvance(str(text)) + 16)
+            self.setColumnWidth(
+                col, max(MIN_COL_WIDTH, min(width, MAX_COL_WIDTH)))
 
     def keyPressEvent(self, event) -> None:
         """Ctrl+C here rather than through a QShortcut.

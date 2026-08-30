@@ -369,9 +369,14 @@ class SpreadsheetView(QTableView):
             return
         self._applying_widths = True
         try:
+            header = self.horizontalHeader()
             for col, spec in enumerate(model.sheet.columns):
-                if spec.width:
-                    self.setColumnWidth(col, int(spec.width))
+                width = int(spec.width) if spec.width \
+                    else header.defaultSectionSize()
+                # never narrower than the column's own name: the 72px
+                # default, and some stored widths, swallow a longer header
+                self.setColumnWidth(
+                    col, max(width, header.sectionSizeHint(col)))
         finally:
             self._applying_widths = False
 

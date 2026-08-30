@@ -12,9 +12,10 @@ import pytest
 from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtGui import QGuiApplication
 
-from flograph.ui.data_table import (CONFIRM_ROWS, DataTableView, cell_text,
-                                    full_row_count, put_on_clipboard,
-                                    selection_block, whole_block)
+from flograph.ui.data_table import (CONFIRM_ROWS, MAX_COL_WIDTH, MIN_COL_WIDTH,
+                                    DataTableView, cell_text, full_row_count,
+                                    put_on_clipboard, selection_block,
+                                    whole_block)
 from flograph.ui.inspector.pandas_model import PAGE_SIZE, PandasModel
 
 FRAME = {"region": ["North", "South", "East"],
@@ -290,3 +291,38 @@ class TestEveryTableIsCopyable:
         from flograph.ui.dashboard import tile_item
         for module in (node_item, tile_item):
             assert "DataTableView()" in inspect.getsource(module)
+
+
+class TestColumnFit:
+    """R1 — a read-only column is at least as wide as its own name. The
+    plain QTableView did no sizing, so every column sat at Qt's 100px
+    default and a longer header was clipped."""
+
+    def test_a_long_header_widens_its_column(self, qtbot):
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"a_decidedly_long_header_that_needs_room": [1, 2],
+                           "x": [1, 2]})
+        table.setModel(PandasModel(df, parent=table))
+        assert table.columnWidth(0) > table.columnWidth(1)
+        assert table.columnWidth(0) > 100   # wider than Qt's old default
+
+    def test_a_narrow_column_still_shows_its_name(self, qtbot):
+        table = DataTableView()
+        qtbot.addWidget(table)
+        table.setModel(PandasModel(pd.DataFrame({"n": [1, 2, 3]}), parent=table))
+        assert table.columnWidth(0) >= MIN_COL_WIDTH
+
+    def test_one_huge_value_cannot_run_the_column_off_the_view(self, qtbot):
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"c": ["x" * 4000, "y"]})
+        table.setModel(PandasModel(df, parent=table))
+        assert table.columnWidth(0) == MAX_COL_WIDTH
+
+    def test_an_empty_result_still_fits_its_headers(self, qtbot):
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"a_decidedly_long_header_that_needs_room": []})
+        table.setModel(PandasModel(df, parent=table))
+        assert table.columnWidth(0) > 100
