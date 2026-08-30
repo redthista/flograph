@@ -677,6 +677,15 @@ class MainWindow(QMainWindow):
         # the label has to say which way the toggle goes, and the panels can
         # be collapsed from their own edge arrows without this ever firing
         view_menu.aboutToShow.connect(self._sync_toggle_panels_action)
+        if self._custom_frame:
+            self.action_titlebar_shortcuts = QAction(
+                "Shortcuts on Title-Bar Buttons", self)
+            self.action_titlebar_shortcuts.setCheckable(True)
+            self.action_titlebar_shortcuts.setChecked(self.settings.value(
+                "window/titlebar_shortcuts", True, type=bool))
+            self.action_titlebar_shortcuts.toggled.connect(
+                self._set_titlebar_shortcuts)
+            view_menu.addAction(self.action_titlebar_shortcuts)
         view_menu.addSeparator()
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
@@ -717,6 +726,8 @@ class MainWindow(QMainWindow):
                 self, self._title_bar)
             self._title_bar.set_compact(self.settings.value(
                 "window/titlebar_compact", False, type=bool))
+            self._title_bar.set_show_shortcuts(self.settings.value(
+                "window/titlebar_shortcuts", True, type=bool))
             self._title_bar.refresh_title()
         else:
             toolbar = QToolBar("Main", self)
@@ -746,6 +757,14 @@ class MainWindow(QMainWindow):
         title_bar = getattr(self, "_title_bar", None)
         if title_bar is not None:
             title_bar.set_compact(bool(compact))
+
+    def _set_titlebar_shortcuts(self, show: bool) -> None:
+        """Show/hide the (F5)/(F6)/(Esc) suffixes on the title-bar run
+        buttons. Applies at once."""
+        self.settings.setValue("window/titlebar_shortcuts", bool(show))
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.set_show_shortcuts(bool(show))
 
     def set_snap_enabled(self, enabled: bool) -> None:
         self.snap_enabled = enabled

@@ -402,25 +402,31 @@ class TitleBar(QWidget):
 
         row.addStretch(1)
 
+        # Whether the run buttons carry their shortcut in brackets — View ▸
+        # Shortcuts on Title-Bar Buttons, applied via set_show_shortcuts.
+        self._show_shortcuts = True
+
         # Run All doubles as Stop while a run is on — clicking it again, or
         # Escape, cancels. There is no separate Cancel button.
         self._run_btn = QToolButton()
         self._run_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._run_btn.clicked.connect(self._on_run_clicked)
 
-        # Run Selected and Clear Cache are a pair — both only on the bar
-        # while at least one node is selected (see on_selection).
+        # Run Selected and Reset Selected Caches are a pair — both only on the
+        # bar while at least one node is selected (see on_selection).
         self._run_sel_btn = QToolButton()
-        self._run_sel_btn.setDefaultAction(window.action_run_selected)
+        self._run_sel_btn.setIcon(toolbar_style.toolbar_icon("run_selected"))
         self._run_sel_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        window.action_run_selected.setToolTip("Run the selected nodes  (F6)")
+        self._run_sel_btn.setToolTip("Run the selected nodes  (F6)")
+        self._run_sel_btn.clicked.connect(window.action_run_selected.trigger)
 
         self._clear_cache_btn = QToolButton()
-        self._clear_cache_btn.setText("Clear Cache")
-        self._clear_cache_btn.setIcon(frame_icon("clear_cache", toolbar_style.RESET))
+        self._clear_cache_btn.setText("Reset Selected Caches")
+        self._clear_cache_btn.setIcon(
+            frame_icon("clear_cache", toolbar_style.RESET))
         self._clear_cache_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._clear_cache_btn.setToolTip(
-            "Discard the cached results for the selected nodes")
+            "Discard the cached results for the selected nodes only")
         self._clear_cache_btn.clicked.connect(
             window._reset_caches_for_selection)
 
@@ -490,19 +496,33 @@ class TitleBar(QWidget):
             self._window.action_run.trigger()
 
     def _set_running(self, running: bool) -> None:
+        self._running = running
         if running:
             self._run_btn.setIcon(toolbar_style.toolbar_icon("cancel"))
-            self._run_btn.setText("Stop")
             self._run_btn.setToolTip("Stop the running flow  (Esc)")
         else:
             self._run_btn.setIcon(toolbar_style.toolbar_icon("run_all"))
-            self._run_btn.setText("Run All")
             self._run_btn.setToolTip("Run the whole flow  (F5)")
         self._run_sel_btn.setEnabled(not running)
+        self._refresh_run_labels()
+
+    def set_show_shortcuts(self, show: bool) -> None:
+        """Whether the run buttons show their key in brackets (View menu)."""
+        self._show_shortcuts = bool(show)
+        self._refresh_run_labels()
+
+    def _refresh_run_labels(self) -> None:
+        def label(text: str, key: str) -> str:
+            return f"{text}  ({key})" if self._show_shortcuts else text
+        if getattr(self, "_running", False):
+            self._run_btn.setText(label("Stop", "Esc"))
+        else:
+            self._run_btn.setText(label("Run All", "F5"))
+        self._run_sel_btn.setText(label("Run Selected", "F6"))
 
     def on_selection(self, count: int) -> None:
-        """Run Selected and Clear Cache are only on the bar while something
-        is selected."""
+        """Run Selected and Reset Selected Caches are only on the bar while
+        something is selected."""
         has = count >= 1
         self._run_sel_btn.setVisible(has)
         self._clear_cache_btn.setVisible(has)

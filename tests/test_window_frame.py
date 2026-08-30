@@ -26,10 +26,12 @@ def registry():
 @pytest.fixture
 def frame_window(qtbot, registry):
     s = QSettings("flograph", "flograph")
-    prior = s.value("window/custom_frame", True, type=bool)
-    prior_compact = s.value("window/titlebar_compact", False, type=bool)
+    saved = {k: s.value(k) for k in ("window/custom_frame",
+                                     "window/titlebar_compact",
+                                     "window/titlebar_shortcuts")}
     s.setValue("window/custom_frame", True)
     s.setValue("window/titlebar_compact", False)
+    s.setValue("window/titlebar_shortcuts", True)
     try:
         win = MainWindow(registry)
         win.confirm_close = False
@@ -37,8 +39,11 @@ def frame_window(qtbot, registry):
         win.show()
         yield win
     finally:
-        s.setValue("window/custom_frame", prior)
-        s.setValue("window/titlebar_compact", prior_compact)
+        for k, v in saved.items():
+            if v is None:
+                s.remove(k)
+            else:
+                s.setValue(k, v)
 
 
 # -- structure --------------------------------------------------------
@@ -66,9 +71,34 @@ def test_hamburger_holds_the_whole_menu_tree(frame_window):
 
 def test_run_button_is_run_all_when_idle(frame_window):
     tb = frame_window._title_bar
-    assert tb._run_btn.text() == "Run All"
+    assert tb._run_btn.text().startswith("Run All")
     assert "F5" in tb._run_btn.toolTip()
-    assert tb._run_sel_btn.defaultAction() is frame_window.action_run_selected
+
+
+def test_run_buttons_show_their_shortcut_by_default(frame_window):
+    tb = frame_window._title_bar
+    assert tb._run_btn.text() == "Run All  (F5)"
+    assert tb._run_sel_btn.text() == "Run Selected  (F6)"
+
+
+def test_view_menu_toggle_hides_the_shortcuts(frame_window):
+    tb = frame_window._title_bar
+    frame_window._set_titlebar_shortcuts(False)
+    assert tb._run_btn.text() == "Run All"
+    assert tb._run_sel_btn.text() == "Run Selected"
+    frame_window.engine.run_started.emit()
+    assert tb._run_btn.text() == "Stop"
+    frame_window.engine.run_finished.emit(True)
+    frame_window._set_titlebar_shortcuts(True)
+    assert tb._run_btn.text() == "Run All  (F5)"
+
+
+def test_titlebar_shortcuts_action_is_in_the_view_menu(frame_window):
+    from PySide6.QtWidgets import QMenu
+    view = next(m for m in frame_window._menu_root.findChildren(QMenu)
+               if m.title() == "&View")
+    assert any("Shortcuts on Title-Bar Buttons" in a.text()
+               for a in view.actions())
 
 
 def test_no_cancel_button_on_the_bar(frame_window):
@@ -101,7 +131,7 @@ def test_selection_buttons_appear_with_a_selection(frame_window):
     frame_window.scene.node_items[nodes[0].id].setSelected(True)
     assert tb._run_sel_btn.isVisibleTo(tb)
     assert tb._clear_cache_btn.isVisibleTo(tb)
-    assert tb._clear_cache_btn.text() == "Clear Cache"
+    assert tb._clear_cache_btn.text() == "Reset Selected Caches"
     frame_window.scene.clearSelection()
     assert not tb._run_sel_btn.isVisibleTo(tb)
     assert not tb._clear_cache_btn.isVisibleTo(tb)
@@ -121,11 +151,11 @@ def test_clear_cache_button_evicts_only_selected_nodes(frame_window):
 def test_run_button_becomes_stop_during_a_run(frame_window):
     tb = frame_window._title_bar
     frame_window.engine.run_started.emit()
-    assert tb._run_btn.text() == "Stop"
+    assert tb._run_btn.text().startswith("Stop")
     assert "Esc" in tb._run_btn.toolTip()
     assert not tb._run_sel_btn.isEnabled()
     frame_window.engine.run_finished.emit(True)
-    assert tb._run_btn.text() == "Run All"
+    assert tb._run_btn.text().startswith("Run All")
     assert tb._run_sel_btn.isEnabled()
 
 
