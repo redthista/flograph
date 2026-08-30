@@ -1,11 +1,11 @@
-"""The main window's top toolbar.
+"""The run actions' home.
 
-It was restyled to a flat, rounded-button look and its contents changed:
-Undo/Redo came off (they stay in the Edit menu, where a toolbar button
-was only ever a shortcut for the keystroke everyone already knows), and
-Reset Caches went on next to the run actions it belongs with.
+With the native OS frame they sit on a flat toolbar (this file). With
+flograph's own title bar they move onto the bar — see test_window_frame.
+Undo/Redo are on neither; they live in the Edit menu.
 """
 import pytest
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QMenu, QToolBar
 
 from flograph.core import NodeRegistry
@@ -21,36 +21,43 @@ def registry():
 
 
 @pytest.fixture
-def window(qtbot, registry):
-    win = MainWindow(registry)
-    win.confirm_close = False
-    qtbot.addWidget(win)
-    return win
+def native_window(qtbot, registry):
+    """A MainWindow forced onto the native OS frame."""
+    s = QSettings("flograph", "flograph")
+    prior = s.value("window/custom_frame", True, type=bool)
+    s.setValue("window/custom_frame", False)
+    try:
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        yield win
+    finally:
+        s.setValue("window/custom_frame", prior)
 
 
 def _main_toolbar(win) -> QToolBar:
     return win.findChild(QToolBar, "toolbar_main")
 
 
-def test_toolbar_carries_run_actions_and_reset_not_undo(window):
-    labels = [a.text() for a in _main_toolbar(window).actions() if a.text()]
+def test_toolbar_carries_run_actions_and_reset_not_undo(native_window):
+    labels = [a.text() for a in _main_toolbar(native_window).actions() if a.text()]
     assert labels == ["Run All", "Run Selected", "Cancel", "Reset Caches"]
 
 
-def test_undo_redo_stay_in_the_edit_menu(window):
-    edit = next(m for m in window.menuBar().findChildren(QMenu)
+def test_undo_redo_stay_in_the_edit_menu(native_window):
+    edit = next(m for m in native_window._menu_root.findChildren(QMenu)
                 if m.title() == "&Edit")
     assert {"Undo", "Redo"} <= {a.text() for a in edit.actions()}
 
 
-def test_run_and_reset_actions_have_icons(window):
+def test_run_and_reset_actions_have_icons(native_window):
     for name in ("action_run", "action_run_selected",
                  "action_cancel", "action_reset_caches"):
-        assert not getattr(window, name).icon().isNull()
+        assert not getattr(native_window, name).icon().isNull()
 
 
-def test_toolbar_is_styled_and_fixed(window):
-    tb = _main_toolbar(window)
+def test_toolbar_is_styled_and_fixed(native_window):
+    tb = _main_toolbar(native_window)
     assert not tb.isMovable() and not tb.isFloatable()
     assert "border-radius" in tb.styleSheet()
 

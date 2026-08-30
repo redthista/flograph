@@ -78,6 +78,7 @@ from .settings_dialog import SettingsDialog
 from .docs import DocsWindow
 from . import theme
 from . import toolbar as toolbar_style
+from . import window_frame
 
 MAX_RECENT = 8
 PASTE_OFFSET = 30.0
@@ -131,6 +132,15 @@ class MainWindow(QMainWindow):
         self._resident_timer.timeout.connect(self._flush_resident_batch)
         self.engine.cache.became_resident.connect(self._on_cache_became_resident)
         self.settings = QSettings("flograph", "flograph")
+        # Our own title bar instead of the OS one. Read here, applied in
+        # _build_actions (menus fold into a hamburger, run actions and the
+        # window buttons go on the bar); a change needs a restart. The flag
+        # has to be set before the window is shown.
+        self._custom_frame = self.settings.value(
+            "window/custom_frame", True, type=bool)
+        self.setWindowIcon(window_frame.app_icon())
+        if self._custom_frame:
+            self.setWindowFlag(Qt.FramelessWindowHint, True)
         # built before _build_actions(): every action registers itself as
         # it is created, and a saved rebind has to be in force from then on
         self.shortcuts = ShortcutRegistry(self.settings, self)
@@ -515,13 +525,19 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
         if old_container is not None:
             old_container.deleteLater()
+        # a fresh central widget stacks above the resize grips — put them back
+        frameless = getattr(self, "_frameless", None)
+        if frameless is not None:
+            frameless.raise_grips()
 
     # -------------------------------------------------------------- actions
 
     def _build_actions(self) -> None:
-        toolbar = QToolBar("Main", self)
-        toolbar_style.style_toolbar(toolbar)
-        self.addToolBar(toolbar)
+        # The menus hang off the real menu bar with a native frame, or off a
+        # plain QMenu (shown from the title bar's hamburger) with ours. Both
+        # answer addMenu()/actions() the same way, so the building code below
+        # does not care which it got — see self._menu_root.
+        self._menu_root = QMenu(self) if self._custom_frame else self.menuBar()
 
         # the group each act() below lands in on the Keyboard Shortcuts page;
         # rebound as the sections go by, so no call has to name its own
@@ -611,13 +627,7 @@ class MainWindow(QMainWindow):
                                       self._show_ai_settings)
         self.action_secrets = act("Sec&rets…", None, self._show_secrets)
 
-        for action in (self.action_run, self.action_run_selected,
-                       self.action_cancel):
-            toolbar.addAction(action)
-        toolbar.addSeparator()
-        toolbar.addAction(self.action_reset_caches)
-
-        file_menu = self.menuBar().addMenu("&File")
+        file_menu = self._menu_root.addMenu("&File")
         for action in (self.action_new, self.action_open, self.action_save,
                        self.action_save_as):
             file_menu.addAction(action)
@@ -629,7 +639,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.action_quit)
 
-        edit_menu = self.menuBar().addMenu("&Edit")
+        edit_menu = self._menu_root.addMenu("&Edit")
         for action in (self.action_undo, self.action_redo):
             edit_menu.addAction(action)
         edit_menu.addSeparator()
@@ -645,12 +655,12 @@ class MainWindow(QMainWindow):
                        self.action_dist_h, self.action_dist_v):
             align_menu.addAction(action)
 
-        run_menu = self.menuBar().addMenu("&Run")
+        run_menu = self._menu_root.addMenu("&Run")
         for action in (self.action_run, self.action_run_selected,
                        self.action_cancel, self.action_reset_caches):
             run_menu.addAction(action)
 
-        tools_menu = self.menuBar().addMenu("&Tools")
+        tools_menu = self._menu_root.addMenu("&Tools")
         tools_menu.addAction(self.action_stats)
         tools_menu.addAction(self.action_settings)
         tools_menu.addSeparator()
@@ -659,7 +669,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.action_secrets)
 
         section["name"] = "View"
-        view_menu = self.menuBar().addMenu("&View")
+        view_menu = self._menu_root.addMenu("&View")
         self.action_toggle_panels = act(
             "Hide All Panels", QKeySequence("Ctrl+Shift+H"),
             self.toggle_all_panels)
@@ -674,7 +684,7 @@ class MainWindow(QMainWindow):
         section["name"] = "Help"
         self.action_docs = act("&Documentation", Qt.Key_F1, self._show_docs)
         self.action_github = act("flograph on &GitHub", None, self._open_github)
-        help_menu = self.menuBar().addMenu("&Help")
+        help_menu = self._menu_root.addMenu("&Help")
         help_menu.addAction(self.action_docs)
         help_menu.addSeparator()
         help_menu.addAction(self.action_github)
@@ -694,6 +704,39 @@ class MainWindow(QMainWindow):
             self.settings.value("canvas/gpu_viewport", False, type=bool))
         self.action_gpu_viewport.toggled.connect(self._on_gpu_viewport_toggled)
         self._apply_gpu_viewport_setting()
+
+        self._build_window_chrome()
+
+    def _build_window_chrome(self) -> None:
+        """The run actions plus (with a custom frame) our title bar. Native
+        frame: a plain toolbar carries the run actions, exactly as before."""
+        if self._custom_frame:
+            self._title_bar = window_frame.TitleBar(self, self._menu_root)
+            self.setMenuWidget(self._title_bar)
+            self._frameless = window_frame.FramelessResizer(
+                self, self._title_bar)
+            self._title_bar.refresh_title()
+        else:
+            toolbar = QToolBar("Main", self)
+            toolbar_style.style_toolbar(toolbar)
+            self.addToolBar(toolbar)
+            for action in (self.action_run, self.action_run_selected,
+                           self.action_cancel):
+                toolbar.addAction(action)
+            toolbar.addSeparator()
+            toolbar.addAction(self.action_reset_caches)
+
+    def _recent_files_existing(self) -> list[str]:
+        """Recent workflow paths that still exist — for the title bar's
+        project switcher and the Open Recent menu."""
+        return [p for p in self._recent_files() if Path(p).exists()][:MAX_RECENT]
+
+    def set_custom_frame(self, enabled: bool) -> None:
+        """Stored now, applied at next launch — swapping the window flags and
+        re-parenting the whole menu tree live is not worth the fragility."""
+        self.settings.setValue("window/custom_frame", bool(enabled))
+        self.show_status(
+            "Custom window frame — restart flograph to apply", 5000)
 
     def set_snap_enabled(self, enabled: bool) -> None:
         self.snap_enabled = enabled
@@ -3852,6 +3895,9 @@ class MainWindow(QMainWindow):
         name = Path(self._project_path).name if self._project_path else "untitled"
         self.setWindowTitle(f"{name}[*] — flograph")
         self.setWindowModified(not self.undo_stack.isClean())
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.refresh_title()
 
     def _confirm_discard(self) -> bool:
         if self.undo_stack.isClean():

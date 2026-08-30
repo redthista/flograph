@@ -234,7 +234,7 @@ def window(qtbot, registry):
 class TestDialog:
     def test_the_file_menu_offers_it(self, window):
         # the QAction has to stay referenced or PySide takes its menu with it
-        menu_actions = window.menuBar().actions()
+        menu_actions = window._menu_root.actions()
         file_action = next(a for a in menu_actions if a.text() == "&File")
 
         entries = [a.text() for a in file_action.menu().actions()]

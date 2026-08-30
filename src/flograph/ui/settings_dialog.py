@@ -423,6 +423,17 @@ class SettingsDialog(QDialog):
         rows.add("Page bar position", page_bar_combo,
                  "Which edge of the window the Model/page tabs live on.")
 
+        frame_check = QCheckBox("Use flograph's own title bar")
+        frame_check.setObjectName("custom_frame_checkbox")
+        frame_check.setChecked(window._custom_frame)
+        frame_check.toggled.connect(window.set_custom_frame)
+        rows.add("Custom window frame", frame_check,
+                 "Replace the operating system's title bar with flograph's — "
+                 "one bar holding the menu, the open workflow, the run "
+                 "actions and the window buttons. Turn off to go back to the "
+                 "native title bar and a separate toolbar. Takes effect when "
+                 "you next start flograph.")
+
         rows.add_group("Execution")
 
         workers_spin = QSpinBox()
