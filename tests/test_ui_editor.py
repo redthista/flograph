@@ -8,7 +8,7 @@ from flograph.core import Graph, NodeRegistry
 from flograph.engine import NodeError
 from flograph.ui.canvas import NodeGraphScene
 from flograph.ui.editor.code_editor import CodeEditor
-from flograph.ui.editor.editor_dock import EditorPanel
+from flograph.ui.editor.editor_dock import MESSAGE_MAX_LINES, EditorPanel
 from flograph.ui.properties.params_panel import ParamsPanel
 
 
@@ -64,6 +64,47 @@ def run(ctx):
         assert "must define" in panel._message.text() \
             or "syntax error" in panel._message.text()
         assert not node.forked
+
+    def test_message_has_its_own_row_above_the_buttons(self, qtbot, env, registry):
+        graph, stack, _ = env
+        node = graph.add_node(registry.instantiate("flograph.scripting.python_script"))
+        panel = self._panel(qtbot, graph, stack, registry)
+        panel.set_node(node.id)
+        panel.resize(420, 480)
+        panel.show()
+        qtbot.addWidget(panel)
+
+        # idle: no message, so the row collapses and only the buttons show
+        assert not panel._message.isVisible()
+
+        panel.editor.setPlainText("def broken(:\n")
+        panel.apply_code()
+        assert panel._message.isVisible()
+        qtbot.waitUntil(lambda: panel._message_area.height() > 0)
+
+        # the message row sits above the buttons, clear of them
+        msg = panel._message_area.mapTo(
+            panel, panel._message_area.rect().bottomLeft())
+        btn = panel._apply_btn.mapTo(panel, panel._apply_btn.rect().topLeft())
+        assert msg.y() <= btn.y()
+
+        line = panel._message.fontMetrics().lineSpacing()
+
+        # a one-line message takes one line — no gap above the buttons
+        panel._show_message("one liner")
+        assert panel._message_area.height() <= 2 * line + 6
+
+        # a long message is capped at MESSAGE_MAX_LINES and then scrolls —
+        # not clipped, not pushing the editor away
+        panel._show_message("\n".join(f"line {i}" for i in range(40)))
+        assert panel._message_area.height() <= MESSAGE_MAX_LINES * line + 6
+        assert panel._message.wordWrap()
+        assert panel._message_area.widget() is panel._message
+
+        # a cleared message hides the row again
+        panel._show_message("")
+        assert not panel._message.isVisible()
+        assert not panel._message_area.isVisible()
 
     def test_reset_to_library(self, qtbot, env, registry):
         graph, stack, _ = env

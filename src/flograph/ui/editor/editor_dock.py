@@ -8,8 +8,8 @@ from typing import Optional
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QInputDialog, QLabel, QPushButton, QVBoxLayout,
-    QWidget,
+    QApplication, QFrame, QHBoxLayout, QInputDialog, QLabel, QPushButton,
+    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph, NodeRegistry, NodeScriptError, parse_spec
@@ -31,6 +31,9 @@ _SYNTAX_LINE = re.compile(r"syntax error on line (\d+)")
 # gives it; the full text is always available as a tooltip. Used only
 # before the label has ever been laid out (width() == 0).
 _TITLE_FALLBACK_WIDTH = 220
+
+# The message row grows with its text up to this many lines, then scrolls.
+MESSAGE_MAX_LINES = 6
 
 
 class _ClickableLabel(QLabel):
@@ -116,13 +119,39 @@ class EditorPanel(QWidget):
             "color: #eab308; font-size: 14px; font-weight: bold;")
         self._unsaved_indicator.hide()
 
-        footer = QHBoxLayout()
-        footer.addWidget(self._message, 1)
-        footer.addWidget(self._unsaved_indicator)
-        footer.addWidget(self._ask_ai_btn)
-        footer.addWidget(self._save_user_btn)
-        footer.addWidget(self._reset_btn)
-        footer.addWidget(self._apply_btn)
+        # The message gets its own row above the buttons: a word-wrapped
+        # traceback from a failed run needs the full width, and sharing the
+        # row with the buttons squeezed both. It sits in a scroll area whose
+        # height is fitted to the text (see _fit_message_row): one line for a
+        # one-line message so there is no gap above the buttons, growing with
+        # the text up to MESSAGE_MAX_LINES and then scrolling — so a long
+        # traceback is all reachable and the editor is never pushed away. A
+        # click still copies the whole thing.
+        self._message.setVisible(False)
+        self._message.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        _msg_sp = self._message.sizePolicy()
+        _msg_sp.setHeightForWidth(True)  # wrap to width, grow in height
+        self._message.setSizePolicy(_msg_sp)
+        self._message_area = QScrollArea()
+        self._message_area.setWidget(self._message)
+        self._message_area.setWidgetResizable(True)
+        self._message_area.setFrameShape(QFrame.NoFrame)
+        self._message_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._message_area.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._message_area.setVisible(False)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(self._unsaved_indicator)
+        buttons.addStretch(1)
+        buttons.addWidget(self._ask_ai_btn)
+        buttons.addWidget(self._save_user_btn)
+        buttons.addWidget(self._reset_btn)
+        buttons.addWidget(self._apply_btn)
+
+        footer = QVBoxLayout()
+        footer.setSpacing(4)
+        footer.addWidget(self._message_area)
+        footer.addLayout(buttons)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -161,6 +190,21 @@ class EditorPanel(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_title()
+        self._fit_message_row()
+
+    def _fit_message_row(self) -> None:
+        """Height the message row to its wrapped text — one line when that is
+        all there is (no gap above the buttons), up to MESSAGE_MAX_LINES, then
+        let it scroll. Re-run whenever the text or the width changes."""
+        if not self._message_area.isVisibleTo(self):
+            return
+        line = self._message.fontMetrics().lineSpacing()
+        width = self._message_area.viewport().width()
+        wrapped = self._message.heightForWidth(width) if width > 0 else line
+        if wrapped <= 0:
+            wrapped = line
+        rows = max(1, min(MESSAGE_MAX_LINES, round(wrapped / line)))
+        self._message_area.setFixedHeight(rows * line + 4)
 
     def _update_title(self) -> None:
         width = self._title.width() or _TITLE_FALLBACK_WIDTH
@@ -373,6 +417,9 @@ class EditorPanel(QWidget):
                       copy_text: Optional[str] = None) -> None:
         self._restore_message = None
         self._message.setText(text)
+        self._message.setVisible(bool(text))
+        self._message_area.setVisible(bool(text))
+        self._fit_message_row()
         # errors are the thing worth lifting out; "Applied." is not
         self._copy_text = copy_text if copy_text is not None \
             else (text if error else "")

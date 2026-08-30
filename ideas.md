@@ -11,14 +11,14 @@ holds what is *not* built.
 
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
-reused once its entry goes. Gaps (A, B, D, E, H, J, K, and most of G) are
+reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, and Q) are
 where shipped work used to be. Old numbers are kept as "(was N)" where a code
 comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, N3, O1–R1) on 2026-08-30.
+2026-08-27; the entries added since (G10, N3, O1, P1, R1) on 2026-08-30.
 
 ---
 
@@ -169,19 +169,6 @@ non-zero if any node failed. What is missing is the front door:
   Mostly plumbing: an argparse dispatch in `app.py` (or a new `cli.py`)
   routing `run` to `engine.headless.main`, plus a thin `flograph.run`
   wrapper.
-
----
-
-## Q. The code editor
-
-**Q1. Give the editor's message its own row** (Dan). In the Code panel the
-apply/error message (`self._message`) shares one horizontal row with the
-Ask AI / Save / Reset / Apply buttons. A short "Applied." fits; a
-word-wrapped traceback from a failed run does not, and wraps into two or
-three lines in the narrow space left beside the buttons, squeezing the row.
-Split the footer into a message row above the button row. The message is a
-`QLabel` (click to copy the full traceback), not a text area — a scrollable
-log view would be a larger change and probably belongs with the Log dock.
 
 ---
 
