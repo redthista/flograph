@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 from .. import theme
 from . import marks
 from .node_item import (
-    PREVIEW_TOGGLABLE_KINDS, card_kind, port_labels_on, renders_plain,
+    port_labels_on, renders_plain,
 )
 
 MARK_TEXT_MAX = 4  # characters; past that nothing legible fits in 60px
@@ -250,9 +250,13 @@ class AppearanceDialog(QDialog):
             form.addRow("Collapse ports", self._collapse_check)
 
         self._preview_check = None
-        if card_kind(node) in PREVIEW_TOGGLABLE_KINDS:
-            self._preview_check = QCheckBox("Draw this node's contents")
+        if item is not None and item.foldable():
+            self._preview_check = QCheckBox("Fold this node down to an icon")
             self._preview_check.setObjectName("appearance_preview_check")
+            self._preview_check.setToolTip(
+                "Show it on the canvas as a plain icon while you build — the "
+                "chart or grid comes back when you unfold it or hand the flow "
+                "a dashboard. The header chevron does the same thing.")
             self._preview_check.toggled.connect(self._push_preview)
             form.addRow("Canvas preview", self._preview_check)
         return group
@@ -291,7 +295,7 @@ class AppearanceDialog(QDialog):
         if self._collapse_check is not None:
             self._collapse_check.setChecked(bool(node.ports_collapsed))
         if self._preview_check is not None:
-            self._preview_check.setChecked(bool(node.canvas_preview_enabled))
+            self._preview_check.setChecked(not node.canvas_preview_enabled)
 
     def _node(self):
         return self._graph.nodes.get(self._node_id)
@@ -374,15 +378,20 @@ class AppearanceDialog(QDialog):
         self._apply("collapse ports", lambda i: self._scene.undo_stack.push(
             SetPortsCollapsedCommand(self._graph, i, collapsed)), collapsible)
 
-    def _push_preview(self, enabled: bool) -> None:
+    def _push_preview(self, folded: bool) -> None:
         if self._loading:
             return
         from ..commands import SetPreviewEnabledCommand
+
+        def foldable(node) -> bool:
+            item = self._scene.node_items.get(node.id)
+            return item is not None and item.foldable()
+
         self._apply(
-            "toggle canvas preview",
+            "fold to an icon" if folded else "unfold",
             lambda i: self._scene.undo_stack.push(
-                SetPreviewEnabledCommand(self._graph, i, enabled)),
-            lambda node: card_kind(node) in PREVIEW_TOGGLABLE_KINDS)
+                SetPreviewEnabledCommand(self._graph, i, not folded)),
+            foldable)
 
     def _push_mark(self) -> None:
         """Send whatever the mark controls now say. Merged by the command, so

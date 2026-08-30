@@ -190,12 +190,12 @@ def renders_plain(node) -> bool:
     return kind is None or kind in IDENTITY_CARDS
 
 
-# Card kinds with a real, expensive embedded widget — the ones the
-# canvas-preview toggle (idea #21) applies to. "kpi" is painted directly with
-# no widget, so it's excluded. "grid" (the Table node) is user *input* rather
-# than a computed preview, but its spreadsheet widget is just as costly to
-# paint with several on screen, so it gets the same toggle — disabling it
-# only hides the interactive widget, never the node's stored data.
+# Card kinds with a real, expensive embedded widget. Kept for the tests that
+# still name it; the live gate on the canvas-preview toggle (idea #21) is now
+# NodeItem.foldable() — switching the preview off folds the whole card down to
+# an icon, and every card with a rendered body bar the KPI can do that. "grid"
+# (the Table node) is user *input* rather than a computed preview, but folding
+# it only hides the spreadsheet widget, never the node's stored data.
 PREVIEW_TOGGLABLE_KINDS = {"figure", "webview", "table_viewer", "slicer", "grid"}
 
 
@@ -768,12 +768,13 @@ class NodeItem(QGraphicsObject):
         # square applies to. Deliberately not called "compact": that name is
         # taken, a few lines up, by the reroute dot.
         self.plain = renders_plain(node)
-        # Whether this plain node is drawing as a square right now. Held on
-        # the item rather than asked of the scene from paint()/boundingRect(),
+        # Whether this node is drawing as a square right now. Held on the
+        # item rather than asked of the scene from paint()/boundingRect(),
         # which Qt calls on every pan and zoom, for an answer that changes
-        # only when the setting does. _apply_compact is the sole writer; it
-        # starts on, matching the shipping default, so an item built outside
-        # a scene (tests, previews) looks like the real thing.
+        # only when the setting does. apply_compact (a plain node's shape)
+        # and _set_folded (a card with its preview switched off) are the
+        # writers; it starts matching the shipping defaults, so an item
+        # built outside a scene (tests, previews) looks like the real thing.
         self._square = self.plain
         self._name_cache: tuple[str, ...] | None = None  # wrapped label
         if self.link_card:
@@ -815,6 +816,17 @@ class NodeItem(QGraphicsObject):
                     "width", self._control_default_size()[0]))))
         else:
             self.width = COMPACT_W if self._square else NODE_WIDTH
+        # A card whose canvas preview is switched off folds down to a plain
+        # icon — the same square a compact node draws — rather than sitting
+        # on the canvas as a full-size empty frame. _expanded_width is the
+        # width to grow back into; _folded drives the square geometry and is
+        # kept in lockstep with node.canvas_preview_enabled (see
+        # set_preview_enabled / _set_folded).
+        self._expanded_width = self.width
+        self._folded = self.foldable() and not node.canvas_preview_enabled
+        if self._folded:
+            self._square = True
+            self.width = COMPACT_W
         self._note_doc: QTextDocument | None = None
         self._resizing_card = False
         self._resize_edge = "corner"  # which edge/corner the drag grabbed
@@ -941,6 +953,8 @@ class NodeItem(QGraphicsObject):
 
     @property
     def body_height(self) -> float:
+        if self._folded:
+            return COMPACT_MIN_H
         if self.link_card:
             return LINK_CARD_H
         if self.compact:
@@ -1040,6 +1054,21 @@ class NodeItem(QGraphicsObject):
         cards need to tell one param from another, and None means "assume
         anything could have".
         """
+        self._params_changed_impl(name)
+        # A folded card holds its square whatever its width param says; the
+        # per-kind branches above wrote the open width, which is exactly the
+        # size to grow back into, so keep it and re-apply the square.
+        if self.foldable():
+            if self._folded:
+                if self.width != COMPACT_W:
+                    self._expanded_width = self.width
+                    self.prepareGeometryChange()
+                    self.width = COMPACT_W
+                    self._ports_follow_width()
+            else:
+                self._expanded_width = self.width
+
+    def _params_changed_impl(self, name: Optional[str]) -> None:
         if self.note:
             self.prepareGeometryChange()
             self.width = min(NOTE_MAX_W, max(
@@ -2707,13 +2736,30 @@ class NodeItem(QGraphicsObject):
     def ports_collapsed(self) -> bool:
         return bool(self.node.ports_collapsed)
 
-    def _card_ports(self) -> bool:
-        """Whether this node lays its ports out along a card edge rather
-        than in labelled rows. Only these can outgrow their node — an
-        ordinary node's height is derived from its port count."""
+    def _has_card_body(self) -> bool:
+        """The card kinds with a real embedded body — a chart, a grid, a
+        rendered document, a KPI. The set that can fold down to an icon,
+        and (while open) the set that runs its ports along its edge."""
         return bool(self.table or self.figure_card or self.table_viewer
                     or self.kpi_card or self.image_card or self.slicer
                     or self.control or self.report_card or self.wiki_card)
+
+    def foldable(self) -> bool:
+        """Whether this node can fold down to a plain icon when its canvas
+        preview is switched off — see _set_folded.
+
+        Every card with a real rendered body, bar the KPI: that one is a
+        painted number already close to icon size, with nothing heavy to
+        put away, so folding it buys nothing.
+        """
+        return bool(self._has_card_body() and not self.kpi_card)
+
+    def _card_ports(self) -> bool:
+        """Whether this node lays its ports out along a card edge rather
+        than in labelled rows. Only these can outgrow their node — an
+        ordinary node's height is derived from its port count. A folded
+        card is a square, and stacks its pins down the edge like one."""
+        return self._has_card_body() and not self._folded
 
     def collapsible(self) -> bool:
         """Whether offering to collapse this node's ports means anything.
@@ -2824,7 +2870,9 @@ class NodeItem(QGraphicsObject):
         __init__, so the setting cannot be read there) and again whenever
         either the canvas-wide setting or the node's own override changes.
         """
-        enabled = bool(enabled) and self.plain
+        if not self.plain:
+            return  # a card's square is _set_folded's business, not this
+        enabled = bool(enabled)
         if enabled == self._square:
             return
         self.prepareGeometryChange()
@@ -2837,6 +2885,38 @@ class NodeItem(QGraphicsObject):
         scene = self.scene()
         if scene is not None:
             scene.node_item_moved(self.node.id)  # wires follow the pins
+
+    def _set_folded(self, folded: bool) -> None:
+        """Fold a card down to its icon, or open it back to full size — the
+        mirror of apply_compact for card kinds. _apply_proxy_visibility has
+        already hidden (or is about to show) the embedded widget; this is
+        purely the geometry and the port layout."""
+        folded = bool(folded) and self.foldable()
+        if folded == self._folded:
+            return
+        self.prepareGeometryChange()
+        self._folded = folded
+        self._square = folded
+        self.width = COMPACT_W if folded else self._expanded_width
+        self._name_cache = None
+        self._layout_ports()
+        self._layout_flow_ports()
+        self._layout_badges()
+        self.update()
+        scene = self.scene()
+        if scene is not None:
+            scene.node_item_moved(self.node.id)  # wires follow the pins
+
+    def toggle_folded(self) -> None:
+        """The header/corner chevron: fold the card to an icon, or open it.
+        Routed through the per-node canvas-preview flag the Appearance
+        dialog also writes, so there is one switch and one undo entry."""
+        scene = self.scene()
+        if scene is None:
+            return
+        from ..commands import SetPreviewEnabledCommand
+        scene.undo_stack.push(SetPreviewEnabledCommand(
+            scene.graph, self.node.id, not self.node.canvas_preview_enabled))
 
     def _ports_follow_width(self) -> None:
         """Re-anchor ports after a width change and re-route their wires."""
@@ -2854,9 +2934,9 @@ class NodeItem(QGraphicsObject):
     def _apply_proxy_visibility(self) -> None:
         """Content-proxy visibility is gated by two independent switches: LOD
         flattening (zoomed out, transient) and the canvas-preview toggle
-        (persisted, per-node). Either one hides the proxy; ports/header are
-        driven by LOD alone (see set_lod), since a preview-disabled node
-        stays full-size and wireable."""
+        (persisted, per-node). Either one hides the proxy; ports stay
+        visible through both (see set_lod / _set_folded), since a folded
+        node is still wireable — it has just shrunk to its icon."""
         visible = not self._flat and self.node.canvas_preview_enabled
         for proxy in (self._note_editor, self._table_proxy, self._figure_proxy,
                       self._table_viewer_proxy, self._slicer_proxy,
@@ -3039,13 +3119,15 @@ class NodeItem(QGraphicsObject):
                 x += NodeBadge.W + 4.0
 
     def set_preview_enabled(self, enabled: bool) -> None:
-        """Show/hide this card's embedded proxy per the canvas-preview
-        toggle. Ports stay visible — only the widget hides. On disable, also
-        clears the widget's held content (matplotlib Figure / table model /
-        slicer options) to actually free memory, not just skip future
-        pushes; the last-known data lives in engine.cache regardless, so
-        re-enabling repopulates it without forcing a re-run (see
+        """Fold this card down to an icon, or open it back to full size, per
+        the canvas-preview toggle. Ports stay visible either way. On fold,
+        also clears the widget's held content (matplotlib Figure / table
+        model / slicer options) to actually free memory, not just skip
+        future pushes; the last-known data lives in engine.cache regardless,
+        so opening it again repopulates it without forcing a re-run (see
         mainwindow._on_preview_enabled_changed)."""
+        if self.foldable():
+            self._set_folded(not enabled)
         self._apply_proxy_visibility()
         if not enabled:
             if self.plotly_card:
@@ -3123,13 +3205,16 @@ class NodeItem(QGraphicsObject):
         if self._flat:
             self._paint_flat(painter)
             return
+        if self._folded:
+            # canvas preview off: draw the card as a plain icon, chevron and
+            # all — the same square a compact node uses
+            self._paint_compact(painter)
+            return
         if self.note:
             self._paint_note(painter)
             return
         if self.table:
             self._paint_table(painter)
-            if not self.node.canvas_preview_enabled:
-                self._paint_preview_disabled_hint(painter)
             return
         if self.button:
             self._paint_button(painter)
@@ -3137,8 +3222,6 @@ class NodeItem(QGraphicsObject):
         if self.figure_card or self.table_viewer or self.slicer \
                 or self.control or self.report_card or self.wiki_card:
             self._paint_widget_card(painter)
-            if not self.node.canvas_preview_enabled:
-                self._paint_preview_disabled_hint(painter)
             return
         if self.kpi_card:
             self._paint_kpi(painter)
@@ -3183,29 +3266,55 @@ class NodeItem(QGraphicsObject):
                     QRectF(NODE_WIDTH / 2 - 12, y, NODE_WIDTH / 2, ROW_H),
                     Qt.AlignVCenter | Qt.AlignRight, spec.name)
 
+    def _fold_toggle_rect(self) -> Optional[QRectF]:
+        """The disclosure control that folds a card down to its icon and
+        opens it again, or None when this node has no card to fold.
+
+        In the header bar while the card is open; tucked into the icon's
+        top-left corner once folded, the way a collapsed frame carries its
+        own re-open control.
+        """
+        if not self.foldable() or self._flat:
+            return None
+        if self._folded:
+            return QRectF(4, 4, 11, 10)
+        return QRectF(7, HEADER_H / 2 - 5, 11, 10)
+
     def _collapse_toggle_rect(self) -> Optional[QRectF]:
         """The chevron in the header that gathers the pins up, or None when
         this node has nothing worth gathering.
 
-        Sits just inside the header's left edge: the first input pin is
-        centred on x=0 and only reaches x=5.5, so there is room before the
-        label without crowding either.
+        Sits just inside the header's left edge — after the fold chevron
+        when the card has one, since every gatherable node is also a card
+        that can fold.
         """
         if not self.collapsible():
             return None
-        return QRectF(7, HEADER_H / 2 - 5, 11, 10)
+        x = 22.0 if self._fold_toggle_rect() is not None else 7.0
+        return QRectF(x, HEADER_H / 2 - 5, 11, 10)
 
     def _paint_collapse_toggle(self, painter: QPainter,
                                rect: QRectF) -> None:
         """A disclosure triangle: pointing down when the pins run down the
         edge, right when they are gathered into the header — it shows which
         way the ports lie, the way a tree view's does."""
+        self._draw_disclosure(painter, rect, pointing_right=self.ports_collapsed)
+
+    def _paint_fold_toggle(self, painter: QPainter, rect: QRectF) -> None:
+        """A disclosure triangle: pointing down while the card is open,
+        right once it has folded to an icon — the same language the ports
+        chevron and a frame's use."""
+        self._draw_disclosure(painter, rect, pointing_right=self._folded)
+
+    @staticmethod
+    def _draw_disclosure(painter: QPainter, rect: QRectF,
+                         *, pointing_right: bool) -> None:
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(theme.NODE_SUBTEXT))
         path = QPainterPath()
-        if self.ports_collapsed:
+        if pointing_right:
             path.moveTo(rect.left() + 1, rect.top())
             path.lineTo(rect.right() - 2, rect.center().y())
             path.lineTo(rect.left() + 1, rect.bottom())
@@ -3230,10 +3339,16 @@ class NodeItem(QGraphicsObject):
         font.setPointSizeF(9.0)
         font.setBold(True)
         painter.setFont(font)
+        fold = self._fold_toggle_rect()
+        if fold is not None:
+            self._paint_fold_toggle(painter, fold)
         toggle = self._collapse_toggle_rect()
         if toggle is not None:
             self._paint_collapse_toggle(painter, toggle)
-        left = 10.0 if toggle is None else toggle.right() + 5
+        left = 10.0
+        for chevron in (fold, toggle):
+            if chevron is not None:
+                left = max(left, chevron.right() + 5)
         label_rect = QRectF(left, 0, width - left - 20, HEADER_H)
         label_text = f"⚠ {self.node.label}" if self.broken else self.node.label
         label = painter.fontMetrics().elidedText(
@@ -3308,6 +3423,11 @@ class NodeItem(QGraphicsObject):
         self._paint_status_led(painter, self.width / 2, mid_y, theme.CANVAS_BG)
         self._paint_temp_edit_dot(
             painter, self.width / 2 + LED_RADIUS + 8, mid_y)
+
+        # a folded card keeps its unfold chevron in the corner
+        fold = self._fold_toggle_rect()
+        if fold is not None:
+            self._paint_fold_toggle(painter, fold)
 
     def _paint_mark(self, painter: QPainter, rect: QRectF) -> None:
         """Whatever the square carries, most specific first: a picture the
@@ -3477,20 +3597,6 @@ class NodeItem(QGraphicsObject):
                     QPointF(handle.right() - i, handle.bottom() - 2),
                     QPointF(handle.right() - 2, handle.bottom() - i))
 
-    def _paint_preview_disabled_hint(self, painter: QPainter) -> None:
-        """Overlay drawn where the (hidden) content proxy would otherwise
-        show through, so a preview-disabled card reads distinctly from one
-        that's merely zoomed out (see set_lod/_flat, painted separately)."""
-        rect = QRectF(4, HEADER_H + 4, self.width - 8,
-                      self.body_height - HEADER_H - 8)
-        painter.setPen(QPen(theme.NODE_SUBTEXT))
-        font = painter.font()
-        font.setBold(False)
-        font.setPointSizeF(8.0)
-        painter.setFont(font)
-        painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap,
-                         "Preview off — right-click to enable")
-
     def _paint_note(self, painter: QPainter) -> None:
         rect = QRectF(0, 0, self.width, self.body_height)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -3559,6 +3665,8 @@ class NodeItem(QGraphicsObject):
         """
         if self.button:
             return bool(self._button_edit)
+        if self._folded:
+            return False  # a folded card is its fixed icon until it opens
         card = bool(self.note or self.table or self.figure_card
                     or self.table_viewer or self.kpi_card or self.image_card
                     or self.slicer
@@ -3682,6 +3790,14 @@ class NodeItem(QGraphicsObject):
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
+        fold = self._fold_toggle_rect()
+        if (event.button() == Qt.LeftButton and fold is not None
+                # generous: an 11x10 glyph is a small target, and a mistaken
+                # fold costs one Ctrl+Z
+                and fold.adjusted(-4, -4, 4, 4).contains(event.pos())):
+            self.toggle_folded()
+            event.accept()
+            return
         toggle = self._collapse_toggle_rect()
         if (event.button() == Qt.LeftButton and toggle is not None
                 and not self._flat
@@ -3815,7 +3931,7 @@ class NodeItem(QGraphicsObject):
             self.start_note_edit()
             event.accept()
             return
-        if self.report_card and event.pos().y() >= HEADER_H:
+        if self.report_card and not self._folded and event.pos().y() >= HEADER_H:
             # body: edit the text in place. The header still renames, and
             # Edit Code is still on the context menu.
             self.start_note_edit()

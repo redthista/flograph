@@ -525,7 +525,7 @@ class TestTheAppearanceDialog:
         card, node, _scene = self._env(registry, "flograph.viz.show_plot")
         qtbot.addWidget(card)
         assert card._preview_check is not None
-        card._preview_check.setChecked(False)
+        card._preview_check.setChecked(True)  # "fold this node down to an icon"
         assert node.canvas_preview_enabled is False
 
     def test_a_node_with_no_preview_toggle_is_not_offered_one(

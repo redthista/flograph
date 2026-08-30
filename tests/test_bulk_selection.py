@@ -335,7 +335,7 @@ class TestBatchAppearance:
         plain = add_nodes(window, 1)[0]
         dialog = self._dialog(window, [c.id for c in cards] + [plain.id])
         assert dialog._preview_check is not None
-        dialog._preview_check.setChecked(False)
+        dialog._preview_check.setChecked(True)  # "fold this node down to an icon"
         assert all(window.graph.nodes[c.id].canvas_preview_enabled is False
                    for c in cards)
         assert window.graph.nodes[plain.id].canvas_preview_enabled is True

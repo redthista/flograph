@@ -268,27 +268,70 @@ class TestZoomLOD:
 
 
 class TestPreviewToggle:
-    """idea #21: a per-node, persisted toggle that hides a card's embedded
-    preview widget on the model canvas (Dashboard tiles are unaffected —
-    they're a separate rendering path) without disturbing wireability."""
+    """idea #21: a per-node, persisted toggle. Switching a card's canvas
+    preview off *folds* it down to a plain icon (COMPACT_W square, category
+    glyph) on the model canvas — Dashboard tiles are a separate rendering
+    path and unaffected — without disturbing wireability."""
 
-    def test_toggle_hides_proxy_but_keeps_ports_and_geometry(self, env, registry):
+    def test_fold_hides_proxy_shrinks_to_icon_but_keeps_ports(self, env, registry):
+        from flograph.ui.canvas.node_item import COMPACT_MIN_H, COMPACT_W
         from flograph.ui.commands import SetPreviewEnabledCommand
         graph, stack, scene = env
         node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
         item = scene.node_items[node.id]
         proxy = item._table_viewer_proxy
         port = next(iter(item.input_ports.values()))
+        open_width = item.width
         assert proxy.isVisible() and node.canvas_preview_enabled
+        assert not item._folded and open_width > COMPACT_W
 
         stack.push(SetPreviewEnabledCommand(graph, node.id, False))
         assert not node.canvas_preview_enabled
         assert not proxy.isVisible()
         assert port.isVisible()  # still wireable, unlike LOD flattening
+        assert item._folded and item._square
+        assert item.width == COMPACT_W and item.body_height == COMPACT_MIN_H
 
         stack.undo()
         assert node.canvas_preview_enabled
         assert proxy.isVisible()
+        assert not item._folded and item.width == open_width
+
+    def test_header_chevron_folds_and_the_corner_chevron_opens(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_plot"))
+        item = scene.node_items[node.id]
+
+        # open: chevron sits in the header bar
+        header_rect = item._fold_toggle_rect()
+        assert header_rect is not None and header_rect.top() < 20
+        item.toggle_folded()
+        assert item._folded and not node.canvas_preview_enabled
+
+        # folded: chevron has moved into the icon's corner, still toggles back
+        corner_rect = item._fold_toggle_rect()
+        assert corner_rect is not None and corner_rect != header_rect
+        item.toggle_folded()
+        assert not item._folded and node.canvas_preview_enabled
+
+        stack.undo()  # one undo entry per toggle
+        assert item._folded
+
+    def test_a_project_saved_folded_opens_folded(self, env, registry):
+        from flograph.ui.canvas.node_item import COMPACT_W
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        graph.set_preview_enabled(node.id, False)
+
+        reloaded = graph_from_dict(graph_to_dict(graph), registry)
+        scene2 = NodeGraphScene(reloaded, QUndoStack(), registry=registry)
+        item = scene2.node_items[next(iter(reloaded.nodes))]
+        assert item._folded and item.width == COMPACT_W
+
+    def test_a_plain_node_has_no_fold_chevron(self, env, registry):
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.transform.sort"))
+        assert scene.node_items[node.id]._fold_toggle_rect() is None
 
     def test_disabling_clears_held_widget_content(self, env, registry):
         from flograph.ui.commands import SetPreviewEnabledCommand
@@ -343,10 +386,11 @@ class TestPreviewToggle:
         graph.set_preview_enabled(node.id, True)
         assert proxy.isVisible()  # zoom is full-detail, preview re-enabled
 
-    def test_kpi_card_has_no_toggle_target(self, registry):
-        from flograph.ui.canvas.node_item import PREVIEW_TOGGLABLE_KINDS, card_kind
-        node = registry.instantiate("flograph.viz.card")
-        assert card_kind(node) not in PREVIEW_TOGGLABLE_KINDS
+    def test_kpi_card_does_not_fold(self, env, registry):
+        # a painted number already near icon size, nothing heavy to hide
+        graph, stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.card"))
+        assert not scene.node_items[node.id].foldable()
 
     def test_table_node_toggle_hides_grid_but_keeps_its_data(self, env, registry):
         """The Table node's spreadsheet is as expensive to paint as a
