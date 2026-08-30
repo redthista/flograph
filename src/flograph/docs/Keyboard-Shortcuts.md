@@ -21,6 +21,7 @@ same page.
 | Undo / Redo | **Ctrl+Z** / **Ctrl+Y** — every graph mutation is on the stack |
 | Cut / Copy / Paste | **Ctrl+X** / **Ctrl+C** / **Ctrl+V** |
 | Duplicate | **Ctrl+D** |
+| Select all | **Ctrl+A** (over the canvas — every node and frame) |
 | Delete | **Del** |
 | Rename node | **F2** |
 | Find node | **Ctrl+F** (over the canvas) |

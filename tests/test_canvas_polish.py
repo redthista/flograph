@@ -937,3 +937,34 @@ class TestBoundsIgnoreParkedPanels:
                 item.output_ports.values()):
             assert rect.contains(
                 item.mapRectFromItem(port, port.boundingRect()))
+
+
+class TestSelectAll:
+    def test_select_all_selects_every_node_and_frame(self, window, registry):
+        a = window.graph.add_node(
+            registry.instantiate("flograph.util.constant", pos=(0.0, 0.0)))
+        b = window.graph.add_node(
+            registry.instantiate("flograph.util.reroute", pos=(400.0, 0.0)))
+        window.graph.add_frame(Frame(id="f1", title="grp",
+                                     rect=(-40.0, -40.0, 300.0, 200.0)))
+
+        window.action_select_all.trigger()
+
+        assert window.scene.node_items[a.id].isSelected()
+        assert window.scene.node_items[b.id].isSelected()
+        assert window.scene.frame_items["f1"].isSelected()
+
+    def test_select_all_has_ctrl_a(self, window):
+        from PySide6.QtGui import QKeySequence
+        assert window.action_select_all.shortcut() == \
+            QKeySequence(QKeySequence.SelectAll)
+
+    def test_select_all_leaves_a_dashboard_page(self, window, registry):
+        window.graph.add_node(
+            registry.instantiate("flograph.util.constant", pos=(0.0, 0.0)))
+        window._add_page("dashboard")
+        assert window.page_bar.current_page_id() is not None
+
+        window.action_select_all.trigger()
+
+        assert window.page_bar.current_page_id() is None

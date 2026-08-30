@@ -610,8 +610,11 @@ class MainWindow(QMainWindow):
                                     self._duplicate)
         self.action_rename = act("Rename Node", Qt.Key_F2, self._rename_selected)
         self.action_select_all = act(
-            "Select All", None,
-            lambda: [i.setSelected(True) for i in self.scene.node_items.values()])
+            "Select All", QKeySequence.SelectAll, self._select_all_nodes)
+        # scoped to the canvas so Ctrl+A keeps selecting text in the code
+        # editor, the data table, and any other focused widget
+        self.action_select_all.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+        self.view.addAction(self.action_select_all)
         self.action_find_node = act("Find Node…", QKeySequence("Ctrl+F"),
                                     self._find_node)
         # scoped to the canvas, the same way the code editor scopes its own
@@ -3479,6 +3482,19 @@ class MainWindow(QMainWindow):
                              None)
             if target_id is not None:
                 self._go_to_node(target_id)
+
+    def _select_all_nodes(self) -> None:
+        """Edit > Select All, and Ctrl+A on the canvas — select every node
+        and frame on the model canvas.
+
+        Selecting is a model-canvas act, so a dashboard or report page steps
+        aside for it, on the same reasoning as _find_node."""
+        if self.page_bar.current_page_id() is not None:
+            self.page_bar.select_page(None)
+        for item in self.scene.node_items.values():
+            item.setSelected(True)
+        for item in self.scene.frame_items.values():
+            item.setSelected(True)
 
     def _find_node(self) -> None:
         """Edit > Find Node…, and Ctrl+F on the canvas.
