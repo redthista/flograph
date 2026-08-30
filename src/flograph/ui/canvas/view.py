@@ -84,6 +84,11 @@ class NodeGraphView(ZoomPanGraphicsView):
             # a belt for the signal being missed (scene swapped mid-drag)
             self._edge_timer.stop()
             return
+        if self._panning:
+            # a middle-drag pan is its own way of reaching the edge; it must
+            # never also trigger the drag-a-thing-to-the-border scroll, even
+            # if some stale drag state left the timer running
+            return
         self.edge_scroll_at(QCursor.pos())
 
     def edge_scroll_at(self, global_pos: QPoint) -> None:

@@ -313,6 +313,14 @@ class ZoomPanGraphicsView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
+    def cancel_pan(self) -> None:
+        """Drop a middle-drag pan that never got its release — the graph
+        being replaced under it, focus lost mid-drag — so the grab cursor
+        doesn't stick. Safe to call when nothing is panning."""
+        if self._panning:
+            self._panning = False
+            self.unsetCursor()
+
     def scroll_by(self, dx: float, dy: float) -> None:
         """Pan by viewport pixels — the same motion as a middle-drag pan,
         without needing a mouse move to carry it (edge-scroll ticks)."""

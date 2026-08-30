@@ -1563,15 +1563,56 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         return [i for i in self.selectedItems()
                 if isinstance(i, (NodeItem, FrameItem))]
 
+    def _bump_group_drags(self, delta: int) -> None:
+        """Raise or lower the drag-nesting count, emitting canvas_drag_changed
+        only on the 0<->1 crossings so the view starts and stops edge-scrolling
+        once per gesture. Shared by begin_group_drag / commit_group_move (a full
+        selection move) and begin_edge_scroll / end_edge_scroll (a lone frame,
+        which commits its own move but still wants the border glide)."""
+        was = self._group_drags > 0
+        self._group_drags = max(0, self._group_drags + delta)
+        now = self._group_drags > 0
+        if now != was:
+            self.canvas_drag_changed.emit(now)
+
+    def begin_edge_scroll(self) -> None:
+        """Edge-scroll for a drag that isn't a group move — a single frame
+        carrying its contents. It commits its own move on release, so it wants
+        the border glide without the selection snapshot begin_group_drag takes.
+        Pair with end_edge_scroll."""
+        self._bump_group_drags(1)
+
+    def end_edge_scroll(self) -> None:
+        self._bump_group_drags(-1)
+
+    def cancel_active_drags(self) -> None:
+        """Drop every in-progress wire / group / frame drag without a commit.
+
+        A drag that ends by something other than a mouse release — Open
+        replacing the graph out from under it, a node deleted mid-move —
+        otherwise leaves _group_drags pinned above zero and _dragging set on
+        an item, and the view goes on edge-scrolling for a drag that is over,
+        including during an ordinary middle-drag pan (the grab cursor sticks
+        too). Called when the graph is replaced."""
+        self.cancel_wire_drag()
+        if self._group_drags:
+            self._group_drags = 0
+            self.canvas_drag_changed.emit(False)
+        for item in self.node_items.values():
+            item._dragging = False
+            item._group_starts = None
+        for item in self.frame_items.values():
+            item._dragging = False
+            item._group_starts = None
+            item._edge_scrolling = False
+
     def begin_group_drag(self) -> dict:
         """Arm every selected node/frame for a group drag: flag each as
         dragging so its own itemChange snaps (Qt moves the whole selection by
         one delta, but only the pressed item was flagged before), and snapshot
         their start positions for the release commit."""
         starts: dict = {"nodes": {}, "frames": {}, "carried": {}}
-        self._group_drags += 1
-        if self._group_drags == 1:
-            self.canvas_drag_changed.emit(True)
+        self._bump_group_drags(1)
         for item in self._selected_movables():
             item._dragging = True
             if isinstance(item, FrameItem):
@@ -1596,10 +1637,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         drag sticks (and undoes) as a single step."""
         # end the edge-scroll before anything else: a click that never moved
         # still ends the drag, and the early return below must not skip it
-        if self._group_drags:
-            self._group_drags -= 1
-            if not self._group_drags:
-                self.canvas_drag_changed.emit(False)
+        self._bump_group_drags(-1)
         node_moves: dict = {}
         for node_id, old in starts.get("nodes", {}).items():
             item = self.node_items.get(node_id)

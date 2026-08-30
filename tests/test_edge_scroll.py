@@ -3,10 +3,11 @@ viewport border and the canvas glides that way until the far port arrives,
 so two nodes that are never on screen together can still be wired without
 letting go, panning, and starting again."""
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QUndoStack
+from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
-from flograph.core import Graph
+from flograph.core import Frame, Graph
 from flograph.ui.canvas import NodeGraphScene, NodeGraphView
 from flograph.ui.canvas.base_view import (EDGE_SCROLL_MARGIN,
                                           edge_scroll_delta)
@@ -15,6 +16,25 @@ JOIN = "flograph.transform.join"
 SCRIPT = "flograph.scripting.python_script"
 
 RECT = QRect(0, 0, 600, 400)
+
+
+def _scene_mouse(item, kind, pos):
+    event = QGraphicsSceneMouseEvent(kind)
+    event.setPos(pos)
+    event.setScenePos(item.mapToScene(pos))
+    event.setButton(Qt.LeftButton)
+    event.setButtons(Qt.LeftButton)
+    event.setModifiers(Qt.NoModifier)
+    event.setAccepted(True)
+    return event
+
+
+def _scene_press(item, pos):
+    return _scene_mouse(item, QEvent.GraphicsSceneMousePress, pos)
+
+
+def _scene_release(item, pos):
+    return _scene_mouse(item, QEvent.GraphicsSceneMouseRelease, pos)
 
 
 @pytest.fixture
@@ -218,3 +238,82 @@ class TestDraggingNodesToTheEdge:
         finally:
             qtbot.mouseRelease(view.viewport(), Qt.LeftButton,
                                pos=vp.center())
+
+
+class TestDraggingAFrameToTheEdge:
+    """A lone frame carrying its contents commits its own move, so it never
+    went through begin_group_drag and the border glide skipped it."""
+
+    def _frame(self, env):
+        graph, scene, _view, *_ = env
+        graph.add_frame(Frame(id="fr", title="Stage", rect=(0, 0, 300, 200)))
+        return scene.frame_items["fr"]
+
+    def test_a_lone_frame_drag_runs_the_edge_scroll_timer(self, env):
+        _graph, scene, view, *_ = env
+        item = self._frame(env)
+        assert not view._edge_timer.isActive()
+        press = _scene_press(item, QPointF(150.0, 6.0))  # title bar
+        item.mousePressEvent(press)
+        assert item._dragging
+        assert scene.canvas_drag_active
+        assert view._edge_timer.isActive()
+        item.mouseReleaseEvent(_scene_release(item, QPointF(150.0, 6.0)))
+        assert not scene.canvas_drag_active
+        assert not view._edge_timer.isActive()
+
+    def test_the_frame_rides_the_pan(self, env, qtbot):
+        _graph, scene, view, *_ = env
+        scene.snap_enabled = False
+        view.show()
+        item = self._frame(env)
+        grab = view.mapFromScene(item.mapToScene(QPointF(150.0, 6.0)))
+        qtbot.mousePress(view.viewport(), Qt.LeftButton, pos=grab)
+        try:
+            assert view._edge_timer.isActive()
+            vp = view.viewport().rect()
+            cursor = QPoint(4, vp.center().y())
+            qtbot.mouseMove(view.viewport(), pos=cursor)
+            before = item.pos()
+            view.edge_scroll_at(view.viewport().mapToGlobal(cursor))
+            after = item.pos()
+            assert after.x() < before.x() - 5
+            assert abs(after.y() - before.y()) < 0.5
+        finally:
+            qtbot.mouseRelease(view.viewport(), Qt.LeftButton, pos=cursor)
+            assert not scene.canvas_drag_active
+
+
+class TestStaleDragState:
+    def test_a_middle_drag_pan_never_edge_scrolls(self, env):
+        """The user's report: a plain middle-drag pan reaching the border
+        should just pan, not also fire the drag-a-thing-to-the-edge scroll."""
+        _graph, scene, view, a, _b = env
+        scene.begin_wire_drag(scene.node_items[a.id].output_ports["joined"])
+        view._panning = True
+        vp = view.viewport().rect()
+        before = view.mapToScene(vp.center()).x()
+        view._edge_scroll_tick()          # _panning set: a no-op
+        assert view.mapToScene(vp.center()).x() == before
+        view._panning = False
+
+    def test_replacing_the_graph_clears_a_stranded_drag(self, env):
+        """A drag interrupted by Open never gets its mouse release;
+        cancel_active_drags is what stops the view edge-scrolling for it."""
+        _graph, scene, view, a, _b = env
+        scene.node_items[a.id].setSelected(True)
+        scene.begin_group_drag()          # a drag with no matching commit
+        assert scene.canvas_drag_active
+        assert view._edge_timer.isActive()
+        scene.cancel_active_drags()
+        assert not scene.canvas_drag_active
+        assert not view._edge_timer.isActive()
+        assert scene.node_items[a.id]._dragging is False
+
+    def test_cancel_also_drops_a_wire_drag(self, env):
+        _graph, scene, _view, a, _b = env
+        scene.begin_wire_drag(scene.node_items[a.id].output_ports["joined"])
+        assert scene.wire_drag_active
+        scene.cancel_active_drags()
+        assert not scene.wire_drag_active
+        assert not scene.canvas_drag_active

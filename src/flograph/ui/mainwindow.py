@@ -4044,6 +4044,13 @@ class MainWindow(QMainWindow):
         return ids + sorted(sources.difference(ids))
 
     def _replace_graph(self, loaded: Graph) -> None:
+        # A wire/node/frame drag or a middle-drag pan in progress when Open
+        # fires never gets its mouse release — the items go away underneath
+        # it. Left alone that pins the edge-scroll on and sticks the grab
+        # cursor, so the next plain pan of the new flow scrolls at the border
+        # and won't let go of the hand. Clear both before the graph churns.
+        self.scene.cancel_active_drags()
+        self.view.cancel_pan()
         # pages opened in a browser belong to the project being closed; the
         # incoming one must not inherit them and start rewriting its files
         from .browser import forget_all

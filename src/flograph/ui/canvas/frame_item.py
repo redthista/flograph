@@ -68,6 +68,7 @@ class FrameItem(QGraphicsObject):
         self._grabbed: list = []  # (node_item, offset)
         self._grabbed_frames: list = []  # (frame_item, offset) — nested
         self._group_starts: dict | None = None  # multi-selection drag snapshot
+        self._edge_scrolling = False  # a lone-frame drag holds the edge-scroll
         self._hover_run = False
         self._run_pressed = False
         self._toggle_pressed = False
@@ -851,6 +852,11 @@ class FrameItem(QGraphicsObject):
         self._grabbed, self._grabbed_frames = self.carried_items()
         if event.button() == Qt.LeftButton:
             self._dragging = True  # snap the frame's position while moving
+            self._edge_scrolling = scene is not None
+            if self._edge_scrolling:
+                # so the canvas glides when the frame reaches a viewport
+                # border, the same as a node drag (the release below ends it)
+                scene.begin_edge_scroll()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -893,6 +899,10 @@ class FrameItem(QGraphicsObject):
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
         self._dragging = False
+        if self._edge_scrolling:
+            self._edge_scrolling = False
+            if scene is not None:
+                scene.end_edge_scroll()
         if self._toggle_pressed:
             self._toggle_pressed = False
             if self._toggle_rect().contains(event.pos()):

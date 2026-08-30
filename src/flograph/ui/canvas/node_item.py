@@ -3791,8 +3791,10 @@ class NodeItem(QGraphicsObject):
         self.update()
 
     def _refresh_tooltip(self) -> None:
-        """Error status always wins the tooltip slot; otherwise fall back to
-        the node's own description (currently only surfaced for reroutes)."""
+        """Error status wins the tooltip slot over the frame-state and manual
+        notes (a padlock or a frozen badge still speaks first, since those
+        stop the node from running at all); otherwise fall back to the node's
+        own description (currently only surfaced for reroutes)."""
         if self.node.locked:
             # The padlock says *that* it is locked; only a tooltip has room
             # to say what that means and how to undo it.
@@ -3802,6 +3804,11 @@ class NodeItem(QGraphicsObject):
             self.setToolTip("Frozen — serving its last output and skipped by "
                             "every run. Right-click > Unfreeze to run it "
                             "again.")
+        elif self.node.status == NodeStatus.ERROR:
+            # Ahead of the frame-hold / manual notes below: a node that ran
+            # and errored has one thing worth saying, and "held by its frame"
+            # over the top of it hides exactly why the last run stopped.
+            self.setToolTip(self.node.status_message)
         elif self._frame_inactive and self.node.active:
             self.setToolTip("Disabled by its frame — nothing in that frame "
                             "runs, nor anything below it. Right-click the "
@@ -3813,8 +3820,6 @@ class NodeItem(QGraphicsObject):
             self.setToolTip("Manual — Run All walks past this one. Run it "
                             "from the right-click menu, or from an Action "
                             "Button that names it.")
-        elif self.node.status == NodeStatus.ERROR:
-            self.setToolTip(self.node.status_message)
         elif self.link_card and not self.node.description:
             kind = "Goto" if self.goto_card else "From"
             self.setToolTip(f"{kind}: {self._link_card_text()}")

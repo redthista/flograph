@@ -133,6 +133,25 @@ class TestRerouteLabel:
         graph.set_status(node.id, NodeStatus.IDLE, "")
         assert item.toolTip() == "splits the value stream"
 
+    def test_an_error_shows_over_the_held_by_frame_note(self, env, registry):
+        """A node held by a "run on ask" frame still errors when the frame is
+        run — the frame-hold note must not take the slot the error needs."""
+        graph, stack, scene = env
+        node = graph.add_node(
+            registry.instantiate("flograph.util.reroute", pos=(60.0, 60.0)))
+        frame = graph.add_frame(
+            Frame(id="f1", title="Block", rect=(0.0, 0.0, 400.0, 300.0)))
+        graph.set_frame_run_flag(frame.id, "manual", True)
+        item = scene.node_items[node.id]
+        assert item.held_by_frame() is True
+        assert "frame" in item.toolTip()          # held, nothing wrong yet
+
+        graph.set_status(node.id, NodeStatus.ERROR, "Column 'x' not found")
+        assert item.toolTip() == "Column 'x' not found"
+
+        graph.set_status(node.id, NodeStatus.IDLE, "")
+        assert "frame" in item.toolTip()          # back to the hold note
+
     def test_label_and_description_round_trip_serialization(self, registry):
         graph = Graph()
         node = graph.add_node(registry.instantiate("flograph.util.reroute"))
