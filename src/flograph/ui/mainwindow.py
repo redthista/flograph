@@ -763,16 +763,26 @@ class MainWindow(QMainWindow):
             "Custom window frame — restart flograph to apply", 5000)
 
     def set_titlebar_compact(self, compact: bool) -> None:
-        """Icon-only title-bar buttons. Applies at once — no restart."""
+        """Icon-only title-bar buttons. Applies at once — no restart.
+        Reached from Settings and the title bar's right-click menu."""
         self.settings.setValue("window/titlebar_compact", bool(compact))
         title_bar = getattr(self, "_title_bar", None)
         if title_bar is not None:
             title_bar.set_compact(bool(compact))
+        if self._settings_dialog is not None and self._settings_dialog.isVisible():
+            QTimer.singleShot(
+                0, lambda: self._settings_dialog.refresh_from(self))
 
     def _set_titlebar_shortcuts(self, show: bool) -> None:
         """Show/hide the (F5)/(F6)/(Esc) suffixes on the title-bar run
-        buttons. Applies at once."""
+        buttons. Reached from the View menu and the title bar's own
+        right-click menu, so it keeps the View action's tick in step."""
         self.settings.setValue("window/titlebar_shortcuts", bool(show))
+        action = getattr(self, "action_titlebar_shortcuts", None)
+        if action is not None and action.isChecked() != bool(show):
+            action.blockSignals(True)
+            action.setChecked(bool(show))
+            action.blockSignals(False)
         title_bar = getattr(self, "_title_bar", None)
         if title_bar is not None:
             title_bar.set_show_shortcuts(bool(show))

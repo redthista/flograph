@@ -22,8 +22,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter,
-    QPainterPath, QPen, QPixmap,
+    QAction, QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence,
+    QPainter, QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -350,6 +350,7 @@ class TitleBar(QWidget):
         super().__init__(window)
         self._window = window
         self._press_pos = None
+        self._compact = False
         self.setObjectName("title_bar")
         self.setFixedHeight(BAR_HEIGHT)
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -543,10 +544,29 @@ class TitleBar(QWidget):
     def set_compact(self, compact: bool) -> None:
         """Icon-only run/save buttons (their tooltips still explain them);
         the workflow name always stays."""
+        self._compact = bool(compact)
         style = (Qt.ToolButtonIconOnly if compact
                  else Qt.ToolButtonTextBesideIcon)
         for btn in self._labelled:
             btn.setToolButtonStyle(style)
+
+    # -- right-click menu -----------------------------------------
+
+    def context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        hide_text = menu.addAction("Hide Button Text")
+        hide_text.setCheckable(True)
+        hide_text.setChecked(self._compact)
+        hide_text.toggled.connect(self._window.set_titlebar_compact)
+        hide_keys = menu.addAction("Hide Shortcut Keys")
+        hide_keys.setCheckable(True)
+        hide_keys.setChecked(not self._show_shortcuts)
+        hide_keys.toggled.connect(
+            lambda hide: self._window._set_titlebar_shortcuts(not hide))
+        return menu
+
+    def contextMenuEvent(self, event) -> None:
+        self.context_menu().exec(event.globalPos())
 
     # -- project switcher --------------------------------------------
 

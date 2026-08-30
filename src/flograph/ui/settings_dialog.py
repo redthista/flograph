@@ -230,6 +230,8 @@ class SettingsDialog(QDialog):
                 window.double_click_action),
         }
         checks = {
+            "titlebar_compact_checkbox": window.settings.value(
+                "window/titlebar_compact", False, type=bool),
             "gpu_viewport_checkbox": window.action_gpu_viewport.isChecked(),
             "lod_enabled_checkbox": window.lod_enabled,
             "snap_enabled_checkbox": window.snap_enabled,

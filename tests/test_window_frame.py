@@ -118,6 +118,27 @@ def test_view_menu_toggle_hides_the_shortcuts(frame_window):
     assert tb._run_btn.text() == "Run All  (F5)"
 
 
+def test_right_click_menu_toggles_text_and_shortcuts(frame_window):
+    tb = frame_window._title_bar
+    menu = tb.context_menu()
+    labels = [a.text() for a in menu.actions()]
+    assert labels == ["Hide Button Text", "Hide Shortcut Keys"]
+    hide_text, hide_keys = menu.actions()
+    assert not hide_text.isChecked() and not hide_keys.isChecked()
+
+    hide_text.trigger()
+    assert tb._run_btn.toolButtonStyle() == Qt.ToolButtonIconOnly
+
+    hide_keys.trigger()
+    assert tb._run_btn.text() == "Run All"
+    # and the View-menu tick followed along
+    assert not frame_window.action_titlebar_shortcuts.isChecked()
+
+    # the menu re-reads state each time it opens
+    fresh = tb.context_menu()
+    assert fresh.actions()[0].isChecked() and fresh.actions()[1].isChecked()
+
+
 def test_titlebar_shortcuts_action_is_in_the_view_menu(frame_window):
     from PySide6.QtWidgets import QMenu
     view = next(m for m in frame_window._menu_root.findChildren(QMenu)
