@@ -92,7 +92,7 @@ def _add_two_nodes(window):
 def test_selection_buttons_hidden_with_no_selection(frame_window):
     tb = frame_window._title_bar
     assert not tb._run_sel_btn.isVisibleTo(tb)
-    assert not tb._clear_sel_btn.isVisibleTo(tb)
+    assert not tb._clear_cache_btn.isVisibleTo(tb)
 
 
 def test_selection_buttons_appear_with_a_selection(frame_window):
@@ -100,21 +100,22 @@ def test_selection_buttons_appear_with_a_selection(frame_window):
     nodes = _add_two_nodes(frame_window)
     frame_window.scene.node_items[nodes[0].id].setSelected(True)
     assert tb._run_sel_btn.isVisibleTo(tb)
-    assert tb._clear_sel_btn.isVisibleTo(tb)
-    assert tb._clear_sel_btn.text() == "Clear Selection"
+    assert tb._clear_cache_btn.isVisibleTo(tb)
+    assert tb._clear_cache_btn.text() == "Clear Cache"
     frame_window.scene.clearSelection()
     assert not tb._run_sel_btn.isVisibleTo(tb)
-    assert not tb._clear_sel_btn.isVisibleTo(tb)
+    assert not tb._clear_cache_btn.isVisibleTo(tb)
 
 
-def test_clear_selection_button_deselects(frame_window):
+def test_clear_cache_button_evicts_only_selected_nodes(frame_window):
     tb = frame_window._title_bar
-    nodes = _add_two_nodes(frame_window)
-    for n in nodes:
-        frame_window.scene.node_items[n.id].setSelected(True)
-    assert len(frame_window.scene.selected_node_items()) == 2
-    tb._clear_sel_btn.click()
-    assert frame_window.scene.selected_node_items() == []
+    a, b = _add_two_nodes(frame_window)
+    for n in (a, b):
+        frame_window.engine.cache.set(n.id, {"value": 1}, 0.0)
+    frame_window.scene.node_items[a.id].setSelected(True)
+    tb._clear_cache_btn.click()
+    assert frame_window.engine.cache.get(a.id) is None
+    assert frame_window.engine.cache.get(b.id) is not None
 
 
 def test_run_button_becomes_stop_during_a_run(frame_window):
@@ -261,15 +262,16 @@ def test_eight_resize_grips_exist_and_hide_when_maximised(frame_window):
 def test_every_bar_button_has_a_tooltip(frame_window):
     tb = frame_window._title_bar
     for btn in (tb._menu_btn, tb._project_btn, tb._save_btn, tb._run_btn,
-                tb._run_sel_btn, tb._reset_btn, tb._btn_min, tb._btn_max,
-                tb._btn_close):
+                tb._run_sel_btn, tb._clear_cache_btn, tb._reset_btn,
+                tb._btn_min, tb._btn_max, tb._btn_close):
         assert btn.toolTip(), btn
 
 
 # -- glyphs ----------------------------------------------------
 
 @pytest.mark.parametrize("kind", ["logo", "hamburger", "chevron", "save",
-                                  "min", "max", "restore", "close"])
+                                  "clear_cache", "min", "max", "restore",
+                                  "close"])
 def test_frame_glyphs_render(kind):
     icon = window_frame.frame_icon(kind)
     assert not icon.isNull() and icon.availableSizes()

@@ -137,21 +137,28 @@ def _close(p: QPainter, r: QRectF, color: QColor) -> None:
                QPointF(r.left() + w * 0.30, r.top() + h * 0.70))
 
 
-def _clear_sel(p: QPainter, r: QRectF, color: QColor) -> None:
-    """Four selection-handle corners — the marquee, meaning 'the selection'."""
-    p.setPen(_pen(color, max(1.2, r.width() * 0.09)))
+def _clear_cache(p: QPainter, r: QRectF, color: QColor) -> None:
+    """The reset circular-arrow wrapped around one node — 'recompute just
+    this', vs the empty ring of the whole-flow Reset Caches."""
     w, h = r.width(), r.height()
-    arm = w * 0.17
-    for cx, cy, dx, dy in ((0.24, 0.24, 1, 1), (0.76, 0.24, -1, 1),
-                           (0.24, 0.76, 1, -1), (0.76, 0.76, -1, -1)):
-        x, y = r.left() + w * cx, r.top() + h * cy
-        p.drawLine(QPointF(x, y), QPointF(x + dx * arm, y))
-        p.drawLine(QPointF(x, y), QPointF(x, y + dy * arm))
+    ring = QRectF(r.left() + w * 0.16, r.top() + h * 0.16, w * 0.68, h * 0.68)
+    p.setPen(_pen(color, max(1.3, w * 0.11)))
+    p.setBrush(Qt.NoBrush)
+    p.drawArc(ring, 70 * 16, 300 * 16)
+    head = QPainterPath(QPointF(r.left() + w * 0.62, r.top() + h * 0.06))
+    head.lineTo(r.left() + w * 0.84, r.top() + h * 0.20)
+    head.lineTo(r.left() + w * 0.58, r.top() + h * 0.34)
+    p.setPen(Qt.NoPen)
+    p.setBrush(color)
+    p.drawPath(head)
+    node = QRectF(0, 0, w * 0.30, h * 0.30)
+    node.moveCenter(r.center())
+    p.drawRoundedRect(node, w * 0.07, w * 0.07)
 
 
 _GLYPHS = {
     "logo": _logo, "hamburger": _hamburger, "chevron": _chevron, "save": _save,
-    "clear_sel": _clear_sel,
+    "clear_cache": _clear_cache,
     "min": _min, "max": _max, "restore": _restore, "close": _close,
 }
 
@@ -401,19 +408,21 @@ class TitleBar(QWidget):
         self._run_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._run_btn.clicked.connect(self._on_run_clicked)
 
-        # Run Selected and Clear Selection are a pair — both only on the bar
+        # Run Selected and Clear Cache are a pair — both only on the bar
         # while at least one node is selected (see on_selection).
         self._run_sel_btn = QToolButton()
         self._run_sel_btn.setDefaultAction(window.action_run_selected)
         self._run_sel_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         window.action_run_selected.setToolTip("Run the selected nodes  (F6)")
 
-        self._clear_sel_btn = QToolButton()
-        self._clear_sel_btn.setText("Clear Selection")
-        self._clear_sel_btn.setIcon(frame_icon("clear_sel"))
-        self._clear_sel_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self._clear_sel_btn.setToolTip("Deselect every node")
-        self._clear_sel_btn.clicked.connect(window.scene.clearSelection)
+        self._clear_cache_btn = QToolButton()
+        self._clear_cache_btn.setText("Clear Cache")
+        self._clear_cache_btn.setIcon(frame_icon("clear_cache", toolbar_style.RESET))
+        self._clear_cache_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._clear_cache_btn.setToolTip(
+            "Discard the cached results for the selected nodes")
+        self._clear_cache_btn.clicked.connect(
+            window._reset_caches_for_selection)
 
         self._reset_btn = QToolButton()
         self._reset_btn.setDefaultAction(window.action_reset_caches)
@@ -421,9 +430,9 @@ class TitleBar(QWidget):
         window.action_reset_caches.setToolTip(
             "Discard every cached result — the flow re-runs from scratch")
 
-        self._labelled = [self._run_btn, self._run_sel_btn, self._clear_sel_btn,
+        self._labelled = [self._run_btn, self._run_sel_btn, self._clear_cache_btn,
                           self._reset_btn, self._save_btn]
-        for btn in (self._run_btn, self._run_sel_btn, self._clear_sel_btn,
+        for btn in (self._run_btn, self._run_sel_btn, self._clear_cache_btn,
                     self._reset_btn):
             row.addWidget(btn)
         self._set_running(False)
@@ -492,11 +501,11 @@ class TitleBar(QWidget):
         self._run_sel_btn.setEnabled(not running)
 
     def on_selection(self, count: int) -> None:
-        """Run Selected and Clear Selection are only on the bar while
-        something is selected."""
+        """Run Selected and Clear Cache are only on the bar while something
+        is selected."""
         has = count >= 1
         self._run_sel_btn.setVisible(has)
-        self._clear_sel_btn.setVisible(has)
+        self._clear_cache_btn.setVisible(has)
 
     # -- compact ---------------------------------------------------
 

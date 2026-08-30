@@ -2228,6 +2228,32 @@ class MainWindow(QMainWindow):
         self.inspector_panel.on_cache_cleared()
         self.show_status("Caches cleared — everything is stale", 4000)
 
+    def _reset_caches_for_selection(self) -> None:
+        """The same as Reset Caches, but only the selected nodes — for
+        freeing the memory a few heavy steps are holding, or forcing just
+        them to recompute, without throwing away the whole run."""
+        ids = [item.node.id for item in self.scene.selected_node_items()]
+        if not ids:
+            return
+        self._flush_pending_edits()
+        for node_id in ids:
+            self.graph.mark_dirty(node_id)
+            self.engine.cache.evict(node_id)
+            item = self.scene.node_items.get(node_id)
+            if item is not None:
+                item.clear_output()
+        wanted = set(ids)
+        for page in self._dashboard_pages.values():
+            scene = getattr(page, "scene", None)
+            if scene is not None:
+                for tile in scene.tile_items.values():
+                    if tile.tile.node_id in wanted:
+                        tile.refresh_content()
+        self.inspector_panel.on_cache_cleared()
+        self.show_status(
+            f"Cleared the cache for {len(ids)} "
+            f"node{'s' if len(ids) > 1 else ''}", 3000)
+
     def _show_packages(self) -> None:
         from .packages_dialog import PackagesDialog
         dialog = getattr(self, "_packages_dialog", None)
