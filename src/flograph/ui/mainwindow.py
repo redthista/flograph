@@ -2097,6 +2097,9 @@ class MainWindow(QMainWindow):
 
     def _on_selection_changed(self) -> None:
         items = self.scene.selected_node_items()
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.on_selection(len(items))
         node_id = items[0].node.id if len(items) == 1 else None
         self.params_panel.set_node(node_id)
         self.editor_panel.set_node(node_id)

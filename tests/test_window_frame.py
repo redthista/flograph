@@ -77,6 +77,46 @@ def test_no_cancel_button_on_the_bar(frame_window):
     assert "Cancel" not in texts
 
 
+# -- selection ------------------------------------------------------
+
+def _add_two_nodes(window):
+    nodes = []
+    for i in range(2):
+        node = window.registry.instantiate("flograph.util.constant",
+                                           pos=(i * 200.0, 0.0))
+        window.graph.add_node(node)
+        nodes.append(node)
+    return nodes
+
+
+def test_selection_buttons_hidden_with_no_selection(frame_window):
+    tb = frame_window._title_bar
+    assert not tb._run_sel_btn.isVisibleTo(tb)
+    assert not tb._clear_sel_btn.isVisibleTo(tb)
+
+
+def test_selection_buttons_appear_with_a_selection(frame_window):
+    tb = frame_window._title_bar
+    nodes = _add_two_nodes(frame_window)
+    frame_window.scene.node_items[nodes[0].id].setSelected(True)
+    assert tb._run_sel_btn.isVisibleTo(tb)
+    assert tb._clear_sel_btn.isVisibleTo(tb)
+    assert tb._clear_sel_btn.text() == "Clear Selection"
+    frame_window.scene.clearSelection()
+    assert not tb._run_sel_btn.isVisibleTo(tb)
+    assert not tb._clear_sel_btn.isVisibleTo(tb)
+
+
+def test_clear_selection_button_deselects(frame_window):
+    tb = frame_window._title_bar
+    nodes = _add_two_nodes(frame_window)
+    for n in nodes:
+        frame_window.scene.node_items[n.id].setSelected(True)
+    assert len(frame_window.scene.selected_node_items()) == 2
+    tb._clear_sel_btn.click()
+    assert frame_window.scene.selected_node_items() == []
+
+
 def test_run_button_becomes_stop_during_a_run(frame_window):
     tb = frame_window._title_bar
     frame_window.engine.run_started.emit()
