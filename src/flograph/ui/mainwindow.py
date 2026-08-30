@@ -131,6 +131,14 @@ class MainWindow(QMainWindow):
         self._resident_timer.setInterval(120)
         self._resident_timer.timeout.connect(self._flush_resident_batch)
         self.engine.cache.became_resident.connect(self._on_cache_became_resident)
+        # A warm that never lands (an unreadable blob that also never fails
+        # cleanly) must not leave the restore busy-bar spinning forever.
+        self._warm_watch_timer = QTimer(self)
+        self._warm_watch_timer.setSingleShot(True)
+        self._warm_watch_timer.timeout.connect(
+            lambda: self._finish_warm_watch(completed=True))
+        self.engine.cache_load_failed.connect(
+            lambda _nid: self._tick_warm_watch())
         self.settings = QSettings("flograph", "flograph")
         # Our own title bar instead of the OS one. Read here, applied in
         # _build_actions (menus fold into a hamburger, run actions and the
@@ -157,6 +165,12 @@ class MainWindow(QMainWindow):
         # side-car folder was there to fold in (for the status message).
         self._save_clean_index = 0
         self._folded_sidecar = False
+        # Nodes whose cached value a just-opened project is still warming for
+        # its cards; while the watch is active the restore busy-bar is up.
+        # The message to show once it drains.
+        self._warm_watch: set[str] = set()
+        self._warm_watch_active = False
+        self._warm_done_message = ""
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
@@ -311,6 +325,15 @@ class MainWindow(QMainWindow):
         self._save_bar.setFixedSize(80, 8)
         self._save_bar.hide()
         self.statusBar().addWidget(self._save_bar)
+        # And a third: the busy bar shown while a just-opened project's
+        # cached results rehydrate behind the window (opening is instant, a
+        # large cached frame filling its cards is not — see _restore_cache).
+        self._restore_bar = QProgressBar(self)
+        self._restore_bar.setRange(0, 0)          # indeterminate
+        self._restore_bar.setTextVisible(False)
+        self._restore_bar.setFixedSize(80, 8)
+        self._restore_bar.hide()
+        self.statusBar().addWidget(self._restore_bar)
         self._status_label = QLabel(self)
         # Ignored, so a long message clips instead of widening the window's
         # minimum -- the behaviour showMessage() had.
@@ -1621,6 +1644,7 @@ class MainWindow(QMainWindow):
         a web view or a table model on its own would thrash."""
         self._resident_batch.add(node_id)
         self._resident_timer.start()
+        self._tick_warm_watch()
 
     def _flush_resident_batch(self) -> None:
         batch, self._resident_batch = self._resident_batch, set()
@@ -4172,6 +4196,7 @@ class MainWindow(QMainWindow):
         a re-run. Only card-visible values load — not the bulk intermediates,
         which is what keeps this from being the 4 GB open it used to be.
         """
+        self._finish_warm_watch()       # drop any watch from a prior open
         registered = cache_persistence.register_cache(
             self.graph, self.engine.cache, path)
         if not registered:
@@ -4185,12 +4210,77 @@ class MainWindow(QMainWindow):
         # cards actually display: their own values, plus whatever upstream
         # feeds a slicer's or control's options.
         warm_ids = self._display_warm_ids(registered)
-        if warm_ids:
-            self.engine.warm_entries(warm_ids)
-        if not quiet:
-            self.show_status(
-                f"Opened {path} — {len(registered)} node(s) restored from cache",
-                4000)
+        done = ("" if quiet else
+                f"Opened {path} — {len(registered)} node(s) restored "
+                f"from cache")
+        if warm_ids and self.engine.warm_entries(warm_ids):
+            self._begin_warm_watch(warm_ids, done)
+        elif done:
+            self.show_status(done, 4000)
+
+    def _begin_warm_watch(self, warm_ids: list[str], done_message: str) -> None:
+        """Put a 'Restoring cached results…' busy-bar on the status line
+        until the card warm a just-opened project kicked off has landed.
+
+        Opening is instant — one manifest, nothing inflated — but a card
+        fed by a large cached frame (a 5M-row table behind a Slicer) can't
+        draw until that frame is decompressed and unpickled on the pool
+        thread, seconds of work with nothing to show for it. Left silent it
+        reads as a hang.
+
+        The watch holds the *blob owners* the warm actually reads off disk
+        — a passthrough card aliases its source's blob, so watching the
+        card id would never clear."""
+        cache = self.engine.cache
+        roots: set[str] = set()
+        for nid in warm_ids:
+            entry = cache.get(nid)
+            if entry is None or entry.resident:
+                continue
+            root = cache.blob_source(nid) or nid
+            root_entry = cache.get(root)
+            if root_entry is not None and not root_entry.resident:
+                roots.add(root)
+        if not roots:
+            if done_message:
+                self.show_status(done_message, 4000)
+            return
+        self._warm_watch = roots
+        self._warm_watch_active = True
+        self._warm_done_message = done_message
+        self._restore_bar.show()
+        self.show_status("Restoring cached results…")
+        self._warm_watch_timer.start(90_000)
+
+    def _tick_warm_watch(self) -> None:
+        """Drop blobs that have arrived (or failed to); finish when the
+        last one is in. Cheap — a set rebuild — and driven by the same
+        became-resident / load-failed events the cards already listen on."""
+        if not self._warm_watch_active:
+            return
+        cache = self.engine.cache
+        self._warm_watch = {
+            r for r in self._warm_watch
+            if (e := cache.get(r)) is not None and not e.resident}
+        if not self._warm_watch:
+            self._finish_warm_watch(completed=True)
+
+    def _finish_warm_watch(self, completed: bool = False) -> None:
+        """Take the busy-bar down. `completed` — the watch drained on its
+        own (or timed out), so the deferred 'Opened…' line is due; a forced
+        reset (a new project is loading) just clears it."""
+        self._warm_watch_timer.stop()
+        was_active = self._warm_watch_active
+        self._warm_watch_active = False
+        self._warm_watch = set()
+        self._restore_bar.hide()
+        message, self._warm_done_message = self._warm_done_message, ""
+        if not (completed and was_active) or self.engine.active:
+            return          # a run owns the status line; don't talk over it
+        if message:
+            self.show_status(message, 4000)
+        elif self.status_message() == "Restoring cached results…":
+            self.show_status("")
 
     #: The canvas kinds whose cards render cached data rather than params.
     _CARD_DATA_KINDS = ("figure", "webview", "table_viewer", "kpi",
@@ -4229,6 +4319,8 @@ class MainWindow(QMainWindow):
         # and won't let go of the hand. Clear both before the graph churns.
         self.scene.cancel_active_drags()
         self.view.cancel_pan()
+        # a warm from the outgoing project is about to be irrelevant
+        self._finish_warm_watch()
         # pages opened in a browser belong to the project being closed; the
         # incoming one must not inherit them and start rewriting its files
         from .browser import forget_all

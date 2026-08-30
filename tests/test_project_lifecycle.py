@@ -1,5 +1,6 @@
 """M6: save/open through the main window, copy/paste/duplicate, dirty title."""
 import json
+import time
 
 import pytest
 from PySide6.QtWidgets import QApplication, QMenu
@@ -96,6 +97,43 @@ class TestSaveOpen:
         assert not reloaded_script.dirty
         assert window.engine.cache.get(const.id) is not None
         assert window.engine.cache.get(script.id) is not None
+
+    def test_reopen_shows_a_restore_indicator_until_cards_warm(
+            self, qtbot, window, tmp_path, monkeypatch):
+        # a Show Table card fed by a Table node — opening warms the card's
+        # cached frame behind the window, and that wait gets an indicator
+        reg = window.registry
+        table = reg.instantiate("flograph.io.table", pos=(0, 0))
+        viewer = reg.instantiate("flograph.viz.show_table", pos=(240, 0))
+        window.graph.add_node(table)
+        window.graph.add_node(viewer)
+        window.graph.set_param(table.id, "data", json.dumps(
+            {"columns": ["region"], "rows": [["north"], ["south"], ["north"]]}))
+        window.graph.connect(table.id, "table", viewer.id, "table")
+        with qtbot.waitSignal(window.engine.run_finished, timeout=20000):
+            window.engine.run_targets([table.id, viewer.id])
+        assert not viewer.dirty
+
+        path = str(tmp_path / "cards.flograph")
+        window._project_path = path
+        assert window._save()
+        qtbot.waitUntil(lambda: window._cache_save_signals is None, timeout=5000)
+
+        # slow the blob read so the indicator is observably up
+        real = mw.cache_persistence.load_outputs
+        monkeypatch.setattr(mw.cache_persistence, "load_outputs",
+                            lambda *a, **k: (time.sleep(0.4), real(*a, **k))[1])
+
+        from flograph.core import Graph
+        window._replace_graph(Graph())
+        assert window.open_path(path, confirm=False)
+
+        assert window._restore_bar.isVisibleTo(window)
+        assert window.status_message() == "Restoring cached results…"
+
+        qtbot.waitUntil(lambda: not window._restore_bar.isVisibleTo(window),
+                        timeout=10000)
+        assert "restored from cache" in window.status_message()
 
     def test_save_reopen_after_param_edit_only_that_chain_dirty(
             self, qtbot, window, tmp_path):
