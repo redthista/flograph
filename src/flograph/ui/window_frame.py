@@ -143,6 +143,9 @@ _GLYPHS = {
 }
 
 _UNSAVED = theme.BUTTON_ACCENT
+# transparent px baked onto the right of the switcher's initials tile, since
+# a QToolButton has no icon-text spacing setting of its own
+_SWITCHER_GAP = 5
 
 
 def frame_icon(kind: str, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
@@ -196,12 +199,17 @@ def initials_for(name: str) -> str:
     return "?"
 
 
-def initials_pixmap(name: str, size: int, ratio: float = 1.0) -> QPixmap:
+def initials_pixmap(name: str, size: int, ratio: float = 1.0,
+                    pad_right: int = 0) -> QPixmap:
+    """The tile is always ``size`` square; ``pad_right`` adds transparent
+    canvas after it, which is how the title-bar switcher buys a gap between
+    the tile and the workflow name (a QToolButton has no icon-text spacing
+    knob)."""
     text = initials_for(name)
     digest = int(hashlib.md5(name.encode("utf-8")).hexdigest()[:8], 16)
     base = QColor.fromHsv(digest % 360, 105, 165)
-    pixels = max(1, round(size * ratio))
-    pm = QPixmap(pixels, pixels)
+    pm = QPixmap(max(1, round((size + pad_right) * ratio)),
+                 max(1, round(size * ratio)))
     pm.fill(Qt.transparent)
     pm.setDevicePixelRatio(ratio)
     p = QPainter(pm)
@@ -220,10 +228,10 @@ def initials_pixmap(name: str, size: int, ratio: float = 1.0) -> QPixmap:
     return pm
 
 
-def initials_icon(name: str, size: int = 18) -> QIcon:
+def initials_icon(name: str, size: int = 18, pad_right: int = 0) -> QIcon:
     icon = QIcon()
     for ratio in (1, 2, 3):
-        icon.addPixmap(initials_pixmap(name, size, ratio))
+        icon.addPixmap(initials_pixmap(name, size, ratio, pad_right))
     return icon
 
 
@@ -351,7 +359,7 @@ class TitleBar(QWidget):
         self._project_btn.setObjectName("project_btn")
         self._project_btn.setPopupMode(QToolButton.InstantPopup)
         self._project_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self._project_btn.setIconSize(QSize(18, 18))
+        self._project_btn.setIconSize(QSize(18 + _SWITCHER_GAP, 18))
         self._project_btn.setToolTip("Current workflow — switch or open another")
         self._project_menu = QMenu(self._project_btn)
         self._project_menu.aboutToShow.connect(self._rebuild_project_menu)
@@ -473,8 +481,9 @@ class TitleBar(QWidget):
 
     def refresh_title(self) -> None:
         path = getattr(self._window, "_project_path", None)
-        self._project_btn.setText(project_display_name(path))
-        self._project_btn.setIcon(initials_icon(project_display_name(path)))
+        name = project_display_name(path)
+        self._project_btn.setText(name)
+        self._project_btn.setIcon(initials_icon(name, pad_right=_SWITCHER_GAP))
         self._save_btn.setVisible(not self._window.undo_stack.isClean())
 
     def _rebuild_project_menu(self) -> None:
