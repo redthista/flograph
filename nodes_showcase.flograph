@@ -1,0 +1,358 @@
+{
+  "flograph_version": "0.1.10",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "t_orders",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          40
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"order_id\", \"type\": \"integer\"}, {\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"amount\", \"type\": \"number\"}, {\"name\": \"status\", \"type\": \"text\"}, {\"name\": \"notes\", \"type\": \"text\"}], \"rows\": [[1001, \"north\", 250.0, \"open\", \"call jo at jo@acme.example\"], [1002, \"south\", 90.0, \"closed\", \"fine\"], [1003, \"north\", 512.5, \"open\", \"ping 555-120-4567\"], [1004, \"south\", -5.0, \"weird\", \"refund?\"], [1005, \"east\", 300.0, \"open\", \"vip\"], [1006, \"east\", 145.0, \"closed\", \"\"]]}",
+          "width": 360,
+          "height": 220
+        },
+        "code": null,
+        "label": "Raw orders"
+      },
+      {
+        "id": "pii",
+        "type": "flograph.transform.pii_scan",
+        "pos": [
+          620,
+          120
+        ],
+        "params": {
+          "action": "redact",
+          "kinds": "email, phone"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "gate",
+        "type": "flograph.transform.data_quality_gate",
+        "pos": [
+          620,
+          260
+        ],
+        "params": {
+          "on_fail": "report only",
+          "rules": "order_id not_null\norder_id unique\nstatus in open | closed\namount >= 0\n@rows >= 1"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "show_clean",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1000,
+          40
+        ],
+        "params": {
+          "width": 420,
+          "height": 300
+        },
+        "code": null,
+        "label": "Clean orders"
+      },
+      {
+        "id": "show_report",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1000,
+          380
+        ],
+        "params": {
+          "width": 420,
+          "height": 220
+        },
+        "code": null,
+        "label": "Quality report"
+      },
+      {
+        "id": "t_regions",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          660
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"manager\", \"type\": \"text\"}, {\"name\": \"target\", \"type\": \"number\"}], \"rows\": [[\"north\", \"Ada\", 1000.0], [\"south\", \"Ben\", 500.0], [\"east\", \"Cy\", 800.0]]}",
+          "width": 320,
+          "height": 180
+        },
+        "code": null,
+        "label": "Regions"
+      },
+      {
+        "id": "rank",
+        "type": "flograph.transform.window_function",
+        "pos": [
+          620,
+          660
+        ],
+        "params": {
+          "function": "rank",
+          "partition_by": "region",
+          "order_by": "amount",
+          "descending": true,
+          "output_column": "rank_in_region"
+        },
+        "code": null,
+        "label": "Rank in region"
+      },
+      {
+        "id": "duck",
+        "type": "flograph.connect.duckdb_query",
+        "pos": [
+          620,
+          840
+        ],
+        "params": {
+          "query": "SELECT a.region, b.manager, sum(a.amount) AS spend, b.target,\n       round(100.0*sum(a.amount)/b.target, 1) AS pct_of_target\nFROM a JOIN b USING (region)\nGROUP BY 1, 2, 4 ORDER BY spend DESC"
+        },
+        "code": null,
+        "label": "Spend vs target"
+      },
+      {
+        "id": "show_rank",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1000,
+          660
+        ],
+        "params": {
+          "width": 460,
+          "height": 300
+        },
+        "code": null,
+        "label": "Ranked"
+      },
+      {
+        "id": "show_spend",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1000,
+          1000
+        ],
+        "params": {
+          "width": 460,
+          "height": 220
+        },
+        "code": null,
+        "label": "Spend vs target"
+      },
+      {
+        "id": "mer",
+        "type": "flograph.viz.mermaid",
+        "pos": [
+          0,
+          1220
+        ],
+        "params": {
+          "mode": "template",
+          "source": "flowchart LR\n  raw[Raw orders] --> pii[PII Scan]\n  pii --> gate[Quality Gate]\n  gate --> rank[Window rank]\n  gate --> duck[DuckDB spend]\n  rank --> db[(SQL Write)]",
+          "width": 480,
+          "height": 320
+        },
+        "code": null,
+        "label": "Pipeline"
+      },
+      {
+        "id": "svg",
+        "type": "flograph.viz.svg_template",
+        "pos": [
+          740,
+          1220
+        ],
+        "params": {
+          "bindings": "label = Orders loaded\nrows = order_id",
+          "svg_source": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 120'><rect width='240' height='120' rx='10' fill='#0f172a'/><text x='20' y='40' fill='#94a3b8' font-family='sans-serif' font-size='13'>{{label}}</text><text x='20' y='90' fill='#e2e8f0' font-family='sans-serif' font-size='40' font-weight='700'>{{rows}}</text></svg>",
+          "width": 300,
+          "height": 200
+        },
+        "code": null,
+        "label": "KPI (SVG)"
+      },
+      {
+        "id": "db",
+        "type": "flograph.connect.sql_write",
+        "pos": [
+          740,
+          1460
+        ],
+        "params": {
+          "url": "sqlite:////home/dc/.claude/jobs/7aef6795/tmp/demo_out.db",
+          "table": "orders_ranked",
+          "if_exists": "replace"
+        },
+        "code": null,
+        "label": "SQL Write"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c00",
+        "src": [
+          "t_orders",
+          "table"
+        ],
+        "dst": [
+          "pii",
+          "table"
+        ]
+      },
+      {
+        "id": "c01",
+        "src": [
+          "pii",
+          "table"
+        ],
+        "dst": [
+          "gate",
+          "table"
+        ]
+      },
+      {
+        "id": "c02",
+        "src": [
+          "gate",
+          "clean"
+        ],
+        "dst": [
+          "show_clean",
+          "table"
+        ]
+      },
+      {
+        "id": "c03",
+        "src": [
+          "gate",
+          "report"
+        ],
+        "dst": [
+          "show_report",
+          "table"
+        ]
+      },
+      {
+        "id": "c04",
+        "src": [
+          "gate",
+          "clean"
+        ],
+        "dst": [
+          "rank",
+          "table"
+        ]
+      },
+      {
+        "id": "c05",
+        "src": [
+          "rank",
+          "table"
+        ],
+        "dst": [
+          "show_rank",
+          "table"
+        ]
+      },
+      {
+        "id": "c06",
+        "src": [
+          "gate",
+          "clean"
+        ],
+        "dst": [
+          "duck",
+          "a"
+        ]
+      },
+      {
+        "id": "c07",
+        "src": [
+          "t_regions",
+          "table"
+        ],
+        "dst": [
+          "duck",
+          "b"
+        ]
+      },
+      {
+        "id": "c08",
+        "src": [
+          "duck",
+          "result"
+        ],
+        "dst": [
+          "show_spend",
+          "table"
+        ]
+      },
+      {
+        "id": "c09",
+        "src": [
+          "rank",
+          "table"
+        ],
+        "dst": [
+          "db",
+          "table"
+        ]
+      },
+      {
+        "id": "c10",
+        "src": [
+          "rank",
+          "table"
+        ],
+        "dst": [
+          "svg",
+          "data"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f1",
+        "title": "1 \u00b7 Ingest & validate",
+        "rect": [
+          -40,
+          -30,
+          1800,
+          660
+        ],
+        "color": "#334155"
+      },
+      {
+        "id": "f2",
+        "title": "2 \u00b7 Enrich & rank",
+        "rect": [
+          -40,
+          590,
+          1800,
+          640
+        ],
+        "color": "#3f3f5e"
+      },
+      {
+        "id": "f3",
+        "title": "3 \u00b7 Ship & report",
+        "rect": [
+          -40,
+          1150,
+          1560,
+          520
+        ],
+        "color": "#3b4252"
+      }
+    ],
+    "pages": []
+  }
+}
