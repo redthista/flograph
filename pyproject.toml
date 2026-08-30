@@ -38,7 +38,7 @@ Repository = "https://github.com/redthista/flograph"
 Issues = "https://github.com/redthista/flograph/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-qt>=4.4"]
+dev = ["pytest>=8", "pytest-qt>=4.4", "pytest-xdist>=3.6"]
 excel = ["openpyxl", "python-calamine"]
 matplotlib = ["matplotlib>=3.8"]
 parquet = ["pyarrow", "fastparquet"]
@@ -73,3 +73,8 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Parallel runs: `pytest -n12 --dist loadfile` takes the ~6-min serial suite to
+# ~1 min. loadfile (not the default per-test split) is required — many modules
+# share a module-scoped Qt fixture and isolate QSettings per file, so a whole
+# module must stay on one worker. Left off by default: a focused single-file
+# run pays ~0.7s per worker to spawn, and the inner dev loop wants that back.

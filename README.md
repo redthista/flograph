@@ -456,7 +456,15 @@ grid; the search box filters across the page.
 ```bash
 uv pip install -p .venv/bin/python -e ".[dev]"
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/ -q
+
+# The full suite is ~6 min serial. Run it in parallel (pytest-xdist, in the
+# dev extra) — ~1 min on a 12-core machine:
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/ -q -n12 --dist loadfile
 ```
+
+`--dist loadfile` is required with `-n`: test modules share a module-scoped Qt
+fixture and isolate `QSettings` per file, so a module must run whole on one
+worker. Past `-n12` it stops scaling — `test_frames.py` is the long pole.
 
 Architecture (src layout):
 
