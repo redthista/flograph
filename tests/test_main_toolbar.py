@@ -41,7 +41,8 @@ def _main_toolbar(win) -> QToolBar:
 
 def test_toolbar_carries_run_actions_and_reset_not_undo(native_window):
     labels = [a.text() for a in _main_toolbar(native_window).actions() if a.text()]
-    assert labels == ["Run All", "Run Selected", "Cancel", "Reset Caches"]
+    assert labels == ["Run All", "Run Selected", "Cancel",
+                      "Reset Selected Caches", "Reset Caches"]
 
 
 def test_undo_redo_stay_in_the_edit_menu(native_window):

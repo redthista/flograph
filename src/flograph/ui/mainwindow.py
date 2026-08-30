@@ -606,13 +606,19 @@ class MainWindow(QMainWindow):
                                        self._run_selected)
         self.action_cancel = act("Cancel", Qt.Key_Escape, self.engine.cancel)
         self.action_cancel.setEnabled(False)
-        self.action_reset_caches = act("Reset Caches", None, self._reset_caches)
+        self.action_reset_caches = act("Reset Caches", QKeySequence("Ctrl+Shift+R"),
+                                       self._reset_caches)
+        self.action_reset_selected_caches = act(
+            "Reset Selected Caches", QKeySequence("Ctrl+R"),
+            self._reset_caches_for_selection)
 
         self.action_run.setIcon(toolbar_style.toolbar_icon("run_all"))
         self.action_run_selected.setIcon(
             toolbar_style.toolbar_icon("run_selected"))
         self.action_cancel.setIcon(toolbar_style.toolbar_icon("cancel"))
         self.action_reset_caches.setIcon(
+            toolbar_style.toolbar_icon("reset_caches"))
+        self.action_reset_selected_caches.setIcon(
             toolbar_style.toolbar_icon("reset_caches"))
 
         section["name"] = "Tools"
@@ -657,7 +663,11 @@ class MainWindow(QMainWindow):
 
         run_menu = self._menu_root.addMenu("&Run")
         for action in (self.action_run, self.action_run_selected,
-                       self.action_cancel, self.action_reset_caches):
+                       self.action_cancel):
+            run_menu.addAction(action)
+        run_menu.addSeparator()
+        for action in (self.action_reset_selected_caches,
+                       self.action_reset_caches):
             run_menu.addAction(action)
 
         tools_menu = self._menu_root.addMenu("&Tools")
@@ -737,6 +747,7 @@ class MainWindow(QMainWindow):
                            self.action_cancel):
                 toolbar.addAction(action)
             toolbar.addSeparator()
+            toolbar.addAction(self.action_reset_selected_caches)
             toolbar.addAction(self.action_reset_caches)
 
     def _recent_files_existing(self) -> list[str]:

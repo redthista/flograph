@@ -22,8 +22,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QPainter, QPainterPath,
-    QPen, QPixmap,
+    QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter,
+    QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -413,28 +413,31 @@ class TitleBar(QWidget):
         self._run_btn.clicked.connect(self._on_run_clicked)
 
         # Run Selected and Reset Selected Caches are a pair — both only on the
-        # bar while at least one node is selected (see on_selection).
+        # bar while at least one node is selected (see on_selection). None of
+        # these four are setDefaultAction buttons: their labels carry the
+        # shortcut suffix, which the action's own text can't (see
+        # _refresh_run_labels).
         self._run_sel_btn = QToolButton()
         self._run_sel_btn.setIcon(toolbar_style.toolbar_icon("run_selected"))
         self._run_sel_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self._run_sel_btn.setToolTip("Run the selected nodes  (F6)")
+        self._run_sel_btn.setToolTip("Run the selected nodes")
         self._run_sel_btn.clicked.connect(window.action_run_selected.trigger)
 
         self._clear_cache_btn = QToolButton()
-        self._clear_cache_btn.setText("Reset Selected Caches")
         self._clear_cache_btn.setIcon(
             frame_icon("clear_cache", toolbar_style.RESET))
         self._clear_cache_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._clear_cache_btn.setToolTip(
             "Discard the cached results for the selected nodes only")
         self._clear_cache_btn.clicked.connect(
-            window._reset_caches_for_selection)
+            window.action_reset_selected_caches.trigger)
 
         self._reset_btn = QToolButton()
-        self._reset_btn.setDefaultAction(window.action_reset_caches)
+        self._reset_btn.setIcon(toolbar_style.toolbar_icon("reset_caches"))
         self._reset_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        window.action_reset_caches.setToolTip(
+        self._reset_btn.setToolTip(
             "Discard every cached result — the flow re-runs from scratch")
+        self._reset_btn.clicked.connect(window.action_reset_caches.trigger)
 
         self._labelled = [self._run_btn, self._run_sel_btn, self._clear_cache_btn,
                           self._reset_btn, self._save_btn]
@@ -507,18 +510,26 @@ class TitleBar(QWidget):
         self._refresh_run_labels()
 
     def set_show_shortcuts(self, show: bool) -> None:
-        """Whether the run buttons show their key in brackets (View menu)."""
+        """Whether the run / cache buttons show their key in brackets
+        (View ▸ Shortcuts on Title-Bar Buttons)."""
         self._show_shortcuts = bool(show)
         self._refresh_run_labels()
 
     def _refresh_run_labels(self) -> None:
-        def label(text: str, key: str) -> str:
-            return f"{text}  ({key})" if self._show_shortcuts else text
+        w = self._window
+
+        def label(text: str, action) -> str:
+            key = action.shortcut().toString(QKeySequence.NativeText)
+            return f"{text}  ({key})" if self._show_shortcuts and key else text
+
         if getattr(self, "_running", False):
-            self._run_btn.setText(label("Stop", "Esc"))
+            self._run_btn.setText(label("Stop", w.action_cancel))
         else:
-            self._run_btn.setText(label("Run All", "F5"))
-        self._run_sel_btn.setText(label("Run Selected", "F6"))
+            self._run_btn.setText(label("Run All", w.action_run))
+        self._run_sel_btn.setText(label("Run Selected", w.action_run_selected))
+        self._clear_cache_btn.setText(
+            label("Reset Selected Caches", w.action_reset_selected_caches))
+        self._reset_btn.setText(label("Reset Caches", w.action_reset_caches))
 
     def on_selection(self, count: int) -> None:
         """Run Selected and Reset Selected Caches are only on the bar while

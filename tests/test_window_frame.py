@@ -77,8 +77,31 @@ def test_run_button_is_run_all_when_idle(frame_window):
 
 def test_run_buttons_show_their_shortcut_by_default(frame_window):
     tb = frame_window._title_bar
-    assert tb._run_btn.text() == "Run All  (F5)"
-    assert tb._run_sel_btn.text() == "Run Selected  (F6)"
+    w = frame_window
+    for btn, action, name in (
+            (tb._run_btn, w.action_run, "Run All"),
+            (tb._run_sel_btn, w.action_run_selected, "Run Selected"),
+            (tb._reset_btn, w.action_reset_caches, "Reset Caches"),
+            (tb._clear_cache_btn, w.action_reset_selected_caches,
+             "Reset Selected Caches")):
+        key = action.shortcut().toString()
+        assert key
+        assert btn.text() == f"{name}  ({key})"
+
+
+def test_cache_actions_have_default_shortcuts(frame_window):
+    reg = frame_window.shortcuts
+    assert reg.entry("reset_caches").default.toString() == "Ctrl+Shift+R"
+    assert reg.entry("reset_selected_caches").default.toString() == "Ctrl+R"
+
+
+def test_reset_caches_shortcut_clears_everything(frame_window):
+    a, b = _add_two_nodes(frame_window)
+    for n in (a, b):
+        frame_window.engine.cache.set(n.id, {"value": 1}, 0.0)
+    frame_window.action_reset_caches.trigger()
+    assert frame_window.engine.cache.get(a.id) is None
+    assert frame_window.engine.cache.get(b.id) is None
 
 
 def test_view_menu_toggle_hides_the_shortcuts(frame_window):
@@ -86,6 +109,8 @@ def test_view_menu_toggle_hides_the_shortcuts(frame_window):
     frame_window._set_titlebar_shortcuts(False)
     assert tb._run_btn.text() == "Run All"
     assert tb._run_sel_btn.text() == "Run Selected"
+    assert tb._reset_btn.text() == "Reset Caches"
+    assert tb._clear_cache_btn.text() == "Reset Selected Caches"
     frame_window.engine.run_started.emit()
     assert tb._run_btn.text() == "Stop"
     frame_window.engine.run_finished.emit(True)
@@ -131,7 +156,7 @@ def test_selection_buttons_appear_with_a_selection(frame_window):
     frame_window.scene.node_items[nodes[0].id].setSelected(True)
     assert tb._run_sel_btn.isVisibleTo(tb)
     assert tb._clear_cache_btn.isVisibleTo(tb)
-    assert tb._clear_cache_btn.text() == "Reset Selected Caches"
+    assert tb._clear_cache_btn.text().startswith("Reset Selected Caches")
     frame_window.scene.clearSelection()
     assert not tb._run_sel_btn.isVisibleTo(tb)
     assert not tb._clear_cache_btn.isVisibleTo(tb)
