@@ -4,15 +4,21 @@ Grouped into chunks that are buildable in one go. Each chunk is meant to be
 picked up whole: the pieces inside it touch the same code and share the same
 decisions, so doing them together costs much less than doing them apart.
 
-Chunk letters are stable — an entry keeps its id for life so notes and
-commit messages that cite one still point at something. Gaps (A, B, D, E)
-are chunks that shipped or moved to `ideas_archived.md`; they are not
-reused. Old numbers are kept as "(was N)" where a code comment still cites
-them.
+**An idea that ships is deleted from here.** `CHANGELOG.md` is the record of
+what the app does and when it started doing it; a list that keeps its own
+copy of that only tells you what someone remembered to tick. So this file
+holds what is *not* built.
 
-Undecided, deliberately-shelved ideas live in `ideas_archived.md`. Ideas for
-*new nodes* live in `node_ideas.md`; only the ones asked for by name are
-repeated here. Status notes were checked against the code on 2026-08-27.
+Chunk letters are stable — an entry keeps its id for life so notes and
+commit messages that cite one still point at something, and an id is never
+reused once its entry goes. Gaps (A, B, D, E, H, J, K, and most of G) are
+where shipped work used to be. Old numbers are kept as "(was N)" where a code
+comment still cites them.
+
+Undecided and declined ideas live in `ideas_archived.md` — also not a done
+list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
+by name are repeated here. Status notes were checked against the code on
+2026-08-27; the entries added since (G10, G11, N3, O1–R1) on 2026-08-30.
 
 ---
 
@@ -65,55 +71,10 @@ replaced it (a show-scroll-bars setting).
   Both are decidable, but they need eyes on a real canvas, not a guess.
   Worth pairing with F1, which is the same trade-off from the other side.
 
-**G3. Scroll the canvas when a connection is dragged to its edge** (Stu, from
-KNIME). Shipped 2026-08-25; see `ideas_archived.md` #11.
-
-**G4. Drop a node onto a wire to splice it in** (Stu, from KNIME) — and
-dropping one onto an existing node replaces it, keeping the connections.
-Shipped 2026-08-25; see `ideas_archived.md` #9.
-
-**G5. Click a node's name in the statistics window to jump to it** (Stu).
-Shipped 2026-08-25; see `ideas_archived.md` #10.
-
-**G6. Bulk operations on a multi-selection** (Dan). Carried the id G3 for a
-week by mistake — G3 was already the edge-scroll above — so it is G6 from
-here. Shipped 2026-08-27; the open question in the note (menu entries or an
-"Apply to selection" sub-menu?) answered itself once the menu was pointed at
-the selection: neither, the menu simply *is* about the selection. See
-`ideas_archived.md` #19.
-
-**G7. The canvas's own gestures: what a press and a right-click mean**
-(Dan). A frame dragged from anywhere inside its rectangle, and the canvas's
-right-click was a tree of category submenus. Shipped 2026-08-27 — title-bar
-drags, and the palette on right-click — see `ideas_archived.md` #20.
-
-**G8. A middle-drag pan must not scroll at the border, or strand the grab
-cursor** (Dan). Panning with the middle button toward a viewport edge crept
-as though a node were being dragged there, and after opening an older flow
-the closed-hand cursor stuck with nothing held — cleared only by a save and
-restart. One fault behind both: `open_path → _replace_graph` swapped the
-graph out from under a live drag or pan, its mouse release never arrived,
-`scene._group_drags` stayed above zero so the edge-scroll timer kept
-ticking, and `_panning` / `ClosedHandCursor` were never unset — the
-middle-mouse path had none of the `focusOut` / `leave` / deactivate recovery
-the space-bar pan already carries. Shipped 2026-08-30 in 0.1.10 (commit
-`d64e954`): `_replace_graph` now cancels any in-progress drag and pan first,
-and `_edge_scroll_tick` ignores the border while a middle-drag pan is what
-is reaching it.
-
-**G9. Dragging a lone frame scrolls the canvas at the edge, like a node**
-(Dan). A node or a multi-frame selection held against a border glides the
-canvas that way (G3); a single frame carried its own move and skipped
-`begin_group_drag`, so it alone stopped dead at the edge. Shipped 2026-08-30
-in 0.1.10 (commit `d64e954`) — a bare `begin_edge_scroll` / `end_edge_scroll`
-pair wired into `FrameItem`'s single-frame press and release, so a lone
-frame now holds the edge-scroll for the drag and rides the pan with its
-contents.
-
 **G10. The right-click palette is slow to open on Windows** (Dan). The node
-palette that opens on a canvas right-click (G7) is noticeably slow on one
-Windows machine. `NodePalettePopup` is built once and reused, but every open
-tears the list down and rebuilds it: `popup_at` calls `_refresh("")`
+palette that opens on a canvas right-click is noticeably slow on one Windows
+machine. `NodePalettePopup` is built once and reused, but every open tears
+the list down and rebuilds it: `popup_at` calls `_refresh("")`
 unconditionally, which does `self._list.clear()` then builds a fresh
 `QListWidgetItem` with an icon for all ~70 specs, and `registry.search("")`
 re-sorts the whole spec dict on every call. Icons are cached and the
@@ -123,76 +84,14 @@ the sort, none of it kept between opens. A persistent model, or a memoised
 popup is a fixed 280×320 and ~70 rows should not cost this much, so the real
 cause may be Windows popup/paint behaviour rather than the rebuild.
 
-**G11. Hide the grid without losing snap-to-grid** (Dan). A toggle that
-stops the background grid being drawn while leaving snapping on. The two are
+**G11. Hide the grid without losing snap-to-grid** (Dan). A toggle that stops
+the background grid being drawn while leaving snapping on. The two are
 already independent in the code — `drawBackground` always draws the grid
 with no visibility flag, and snapping is a separate view preference read
 from `scene.snap_enabled` in each item's `itemChange` — so this is a new
 `grid/visible` setting checked in `drawBackground` (canvas and dashboard
 views both), pushed through the same `_apply_snap_settings` path the snap
 toggle uses, with a checkbox in the Snapping group in Settings.
-
----
-
-## H. Property panel — column pickers  (Stu)
-
-**H1. Keep the columns menu open while ticking, and add select all / none.**
-Shipped 2026-08-20; see `ideas_archived.md` #12.
-
-**H2. Let Rename Columns list the columns it could rename.**
-Shipped 2026-08-20; see `ideas_archived.md` #12 (Expression got the inline
-half of it at the same time).
-
----
-
-## J. Running: what runs, and when
-
-**J1. A node that only runs when asked.** Per-node "manual" flag: skipped by
-Run All, run by right-click → Run or by an Action Button. This is the same
-request from two directions ("only run when called", "don't fire on Run
-All") and one flag answers both. Sits beside the existing `active` /
-`locked` / `frozen` flags on `NodeInstance` and their right-click menu.
-Shipped 2026-08-25; see `ideas_archived.md` #13.
-
-**J2. Disable a frame** — everything inside it stops updating and stops
-being cached. The frame-level counterpart of J1, and the thing that makes a
-big flow workable while you are editing one corner of it.
-Shipped 2026-08-25; see `ideas_archived.md` #13.
-
-**J3. Start a second node while one is running** (Stu). Shipped 2026-08-25
-as join-the-plan; see `ideas_archived.md` #15.
-
-**J4. An errored node in a "run on ask" frame shows the error, not the
-frame note** (Dan). A node held by a frame set to run only when asked wears
-a "Held by its frame…" tooltip, and `_refresh_tooltip`'s `if/elif` chain
-put that branch — and the disabled-frame and manual branches — ahead of the
-`NodeStatus.ERROR` branch, so a node that failed during the frame's run hid
-its error message behind the frame-state text. Shipped 2026-08-30 in 0.1.10
-(commit `d64e954`): the error now takes the tooltip slot ahead of the
-frame-hold and manual notes; `locked` and `frozen` still win, since those
-stop the node running at all.
-
----
-
-## K. Saving, cache and disk
-
-One chunk because all three are about the same failure: a big flow filling
-or exhausting the disk without saying so. Shipped 2026-08-26 as one commit;
-see `ideas_archived.md` #16.
-
-**K1. Show progress while saving a long flow**, so the app does not look
-hung. Node progress already has a plumbing path
-(`engine.node_progress` → the status line); saving has none.
-
-**K2. Warn before and when the disk runs out** — a notification when local
-storage is running low, and a clear message when a save fails for want of
-space rather than a silent or generic failure. Nothing in the codebase
-checks free space today.
-
-**K3. Compress the cache pickles.** Cache files are written raw; a
-compression step trades CPU for disk on flows whose cache dwarfs their data.
-Wants a measurement first — pick a real project, record cache size and warm
-time, then decide the codec.
 
 ---
 
@@ -209,15 +108,6 @@ Opt-in per project. Sits well with the `.flograph` file being plain JSON.
 The broader wishlist is `node_ideas.md`; these are the ones asked for
 directly.
 
-**M1. Concatenate with a user-defined number of inputs** (Stu). Today
-`transform/concatenate.py` is fixed at two ports (`top`, `bottom`), so
-stacking five tables is four nodes. Note the constraint learned on
-2026-08-18: ports generated from data were built, worked, and were rejected
-as against the grain — so this wants a fixed set of *optional* ports
-(say 2 visible, up to 8 declared) rather than ports grown at run time.
-Shipped 2026-08-26, in a better shape than this note asked for — the
-always-empty bottom slot — see `ideas_archived.md` #17.
-
 **M2. User forms.** A form with fields and a submit button — one node, or a
 node pair with a retrieval side — writing to a DataFrame, a SQL table, or
 whatever else is useful. The Input category covers single values today;
@@ -226,15 +116,6 @@ this is the "capture a record" shape it cannot express.
 ---
 
 ## N. Dashboard pages
-
-**N1. A locked page is a dashboard, not a canvas** (Dan). Locking stopped
-the tiles moving but left the page behaving like an infinite canvas
-underneath them — zoom, pan, rubber band, and a right-click that reached
-past the page entirely. Shipped 2026-08-27; see `ideas_archived.md` #18.
-
-**N2. Scale a page to fit the window** (Dan). The screen a dashboard is
-opened on is rarely the screen it was built on. Shipped 2026-08-27; see
-`ideas_archived.md` #21.
 
 **N3. Set the shape a visual takes on a page** (Dan). Asked for as "a wide
 Plotly chart, or a long thin one". The two page kinds answer this
