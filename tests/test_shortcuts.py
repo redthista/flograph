@@ -69,9 +69,10 @@ class TestRegistry:
 
     def test_entries_are_grouped_the_way_the_menus_are(self, window):
         assert window.shortcuts.groups() == [
-            "File", "Edit", "Run", "Tools", "View"]
+            "File", "Edit", "Run", "Tools", "View", "Help"]
         assert window.shortcuts.entry("save").group == "File"
         assert window.shortcuts.entry("hide_all_panels").group == "View"
+        assert window.shortcuts.entry("documentation").group == "Help"
 
     def test_defaults_come_from_the_action_itself(self, window):
         entry = window.shortcuts.entry("hide_all_panels")

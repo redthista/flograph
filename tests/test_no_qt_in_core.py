@@ -10,6 +10,7 @@ CHECK = """
 import sys
 import flograph.core
 import flograph.core.serialization
+import flograph.core.docpages
 
 heavy = [name for name in sys.modules
          if name.split(".")[0] in ("PySide6", "pandas", "matplotlib", "shiboken6")]

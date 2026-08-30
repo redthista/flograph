@@ -112,6 +112,17 @@ node, which draws one project plan four times, adding a single feature per
 stage, and running a second flow while one is already running, which joins
 the first on the pool. They're the fastest way in.
 
+## Documentation
+
+**Help ▸ Documentation** (or **F1**) opens an in-app handbook, laid out like a
+docs site — a nav tree on the left, the page on the right — covering getting
+started, the canvas, the node library, dashboards and reports, flow
+variables, headless runs and the shortcut list. The pages are Markdown under
+`src/flograph/docs/`, written GitHub-wiki compatible (`[[Page]]` links, a
+`_Sidebar.md` for the tree) so the same files can be published to a hosted
+wiki unchanged. This README stays the install-and-overview entry point; the
+handbook is the day-to-day one.
+
 ---
 
 ## The idea

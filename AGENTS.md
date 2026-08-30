@@ -164,6 +164,8 @@ tests/         # pytest + pytest-qt (no display needed)
 ## Key documentation files
 
 - `README.md` — full project docs, canvas bindings, node library catalog
+- `src/flograph/docs/*.md` — the in-app handbook (Help ▸ Documentation / F1);
+  GitHub-wiki-compatible Markdown, edited in the same commit as the feature
 - `issues.md` — tracked bugs
 - `ideas.md` — feature ideas
 - `.opencode/skills/flograph/SKILL.md` — comprehensive workspace reference

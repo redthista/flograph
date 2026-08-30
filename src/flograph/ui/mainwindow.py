@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import (
-    QEventLoop, QPoint, QPointF, QRectF, QSettings, Qt, QThreadPool, QTimer,
+    QEventLoop, QPoint, QPointF, QRectF, QSettings, Qt, QThreadPool, QTimer, QUrl,
 )
-from PySide6.QtGui import QAction, QColor, QKeySequence, QUndoStack
+from PySide6.QtGui import (
+    QAction, QColor, QDesktopServices, QKeySequence, QUndoStack,
+)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QDockWidget, QFileDialog,
@@ -73,6 +75,7 @@ QUIET_NODE_AFTER_S = 10.0
 
 from .stats_window import StatsWindow
 from .settings_dialog import SettingsDialog
+from .docs import DocsWindow
 from . import theme
 
 MAX_RECENT = 8
@@ -142,6 +145,7 @@ class MainWindow(QMainWindow):
         self._gpu_viewport_checked_on_show = False
         self._settings_dialog: Optional[SettingsDialog] = None
         self._stats_window: Optional[StatsWindow] = None
+        self._docs_window: Optional[DocsWindow] = None
         # Floating per-node Properties/Code windows, keyed by node id — one
         # per node, several nodes at once. See ui.node_window.
         self._node_windows: dict = {}
@@ -660,6 +664,14 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         for dock in self.findChildren(QDockWidget):
             view_menu.addAction(dock.toggleViewAction())
+
+        section["name"] = "Help"
+        self.action_docs = act("&Documentation", Qt.Key_F1, self._show_docs)
+        self.action_github = act("flograph on &GitHub", None, self._open_github)
+        help_menu = self.menuBar().addMenu("&Help")
+        help_menu.addAction(self.action_docs)
+        help_menu.addSeparator()
+        help_menu.addAction(self.action_github)
 
         # GPU-Accelerated Canvas lives in Tools > Settings… (SettingsDialog),
         # not directly in a menu — this QAction is just its state/signal
@@ -2190,6 +2202,17 @@ class MainWindow(QMainWindow):
         self._settings_dialog.show()
         self._settings_dialog.raise_()
         self._settings_dialog.activateWindow()
+
+    def _show_docs(self) -> None:
+        """The handbook window — one instance, raised again on repeat opens."""
+        if self._docs_window is None:
+            self._docs_window = DocsWindow(self)
+        self._docs_window.show()
+        self._docs_window.raise_()
+        self._docs_window.activateWindow()
+
+    def _open_github(self) -> None:
+        QDesktopServices.openUrl(QUrl("https://github.com/redthista/flograph"))
 
     # ------------------------------------------------------- action button
 

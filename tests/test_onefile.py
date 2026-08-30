@@ -43,7 +43,12 @@ def test_onefile_bundle_runs_standalone(tmp_path):
         "assert templates, 'no example templates found in bundle'\n"
         "assert all(p.is_file() for p in templates), "
         "'templates must resolve to real files on disk for Open Example to work'\n"
-        "print('OK', len(loaded), len(templates))\n"
+        "docs = [p for p in importlib.resources.files('flograph.docs').iterdir() "
+        "if p.name.endswith('.md')]\n"
+        "assert docs, 'no handbook pages found in bundle'\n"
+        "assert all(p.is_file() for p in docs), "
+        "'docs pages must resolve to real files on disk for the Documentation window'\n"
+        "print('OK', len(loaded), len(templates), len(docs))\n"
     )
     result = subprocess.run(
         [sys.executable, str(probe), str(onefile)],
