@@ -1,13 +1,13 @@
 """A .flograph project file is one of two things on disk:
 
-  * **plain JSON** — the graph alone, byte-identical to what flograph has
-    always written. This is what a save produces when the user has turned
-    *Settings ▸ General ▸ Saving ▸ Include cached results in the project
-    file* off.
   * **a zip bundle** — ``project.json`` plus a ``cache/`` tree (the
     manifest, one pickle blob per cached node, and the run history). This
-    is the default: one file you can hand to someone, cached results and
-    all.
+    is what every ``.flograph`` save writes: one file you can hand to
+    someone, cached results and all.
+  * **plain JSON** — the graph alone, byte-identical to what flograph has
+    always written. Produced by *File ▸ Export Workflow* as a ``.flowf``
+    (for version control), and by every ``.flograph`` written before the
+    bundle format existed.
 
 ``core.serialization.load`` sniffs the first bytes and dispatches; this
 module owns the bundle side. Two properties the sidecar-folder design had

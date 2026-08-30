@@ -163,27 +163,26 @@ class TestCompressionSetting:
 
 
 class TestDiskFullOnSave:
-    def test_a_failed_json_write_names_itself_in_a_dialog(
+    def test_a_failed_workflow_export_names_itself_in_a_dialog(
             self, qtbot, window, monkeypatch, tmp_path):
-        # the plain-JSON path (cache not bundled): serialization.save fails
-        window.set_save_cache_in_project(False)
+        # Export Workflow is a plain serialization.save; a full disk there
+        # must surface as a dialog, not a bare traceback
         window._project_path = str(tmp_path / "proj.flograph")
         seen = {}
 
         def boom(graph, path):
             raise OSError(errno.ENOSPC, "No space left on device")
 
-        def fake_critical(parent, title, text):
-            seen["title"], seen["text"] = title, text
-
         monkeypatch.setattr(mod.serialization, "save", boom)
-        monkeypatch.setattr(mod.QMessageBox, "critical", fake_critical)
+        monkeypatch.setattr(mod.QMessageBox, "critical",
+                            lambda p, t, x: seen.update(title=t, text=x))
+        monkeypatch.setattr(mod.QFileDialog, "getSaveFileName",
+                            staticmethod(lambda *a, **k: (
+                                str(tmp_path / "wf.flowf"), "")))
 
-        assert window._save() is False
-        assert seen["title"] == "Save failed"
+        assert window._export_workflow() is False
+        assert seen["title"] == "Export failed"
         assert "full" in seen["text"]
-        # and nothing pretended otherwise: no background write was started
-        assert window._cache_save_signals is None
 
     def test_a_failed_bundle_write_reaches_a_dialog(
             self, qtbot, window, cached_constant, monkeypatch, tmp_path):
@@ -201,6 +200,58 @@ class TestDiskFullOnSave:
         qtbot.waitUntil(lambda: window._cache_save_signals is None,
                         timeout=10000)
         assert seen["t"][0] == "Save failed"
+
+
+class TestWorkflowExport:
+    def _pick(self, monkeypatch, path):
+        monkeypatch.setattr(mod.QFileDialog, "getSaveFileName",
+                            staticmethod(lambda *a, **k: (str(path), "")))
+
+    def test_export_writes_plain_json_and_leaves_the_project_alone(
+            self, qtbot, window, cached_constant, monkeypatch, tmp_path):
+        window._project_path = str(tmp_path / "proj.flograph")
+        flowf = tmp_path / "wf.flowf"
+        self._pick(monkeypatch, flowf)
+
+        assert window._export_workflow() is True
+        assert flowf.exists()
+        assert not container.is_bundle(flowf)          # plain JSON
+        import json
+        json.loads(flowf.read_text())
+        # the working file is untouched: still aimed at the .flograph, no
+        # background write kicked off
+        assert window._project_path == str(tmp_path / "proj.flograph")
+        assert window._cache_save_signals is None
+        assert "Exported workflow" in window.status_message()
+
+    def test_opening_a_flowf_then_save_routes_to_save_as(
+            self, qtbot, window, registry, monkeypatch, tmp_path):
+        graph = Graph()
+        graph.add_node(registry.instantiate("flograph.util.constant"))
+        flowf = tmp_path / "wf.flowf"
+        serialization.save(graph, flowf)
+
+        assert window.open_path(str(flowf)) is True
+        assert window._project_path == str(flowf)
+
+        # Ctrl+S on an opened .flowf must not write the .flowf — it opens
+        # Save As for a real .flograph
+        target = tmp_path / "adopted.flograph"
+        self._pick(monkeypatch, target)
+        assert window._save() is True
+        qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                        timeout=10000)
+        assert container.is_bundle(target)
+        assert window._project_path == str(target)
+
+    def test_save_as_over_a_flowf_name_yields_a_flograph(
+            self, qtbot, window, monkeypatch, tmp_path):
+        window._project_path = None
+        self._pick(monkeypatch, tmp_path / "typed.flowf")
+        assert window._save_as() is True
+        qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                        timeout=10000)
+        assert window._project_path == str(tmp_path / "typed.flograph")
 
 
 class TestDiskWatchWiring:

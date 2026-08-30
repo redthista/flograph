@@ -213,11 +213,6 @@ class MainWindow(QMainWindow):
         # read forever either way — load_blob sniffs each blob.
         self.cache_compression_enabled = self.settings.value(
             "saving/compress_cache", True, type=bool)
-        # On by default: a save writes one portable .flograph file with the
-        # cached results inside it. Off writes plain JSON — the graph alone,
-        # re-run on open — and drops any side-car folder.
-        self.save_cache_in_project = self.settings.value(
-            "saving/cache_in_project", True, type=bool)
         self.double_click_action = str(self.settings.value(
             "canvas/double_click_action", "properties"))
         self.tint_soft = self.settings.value(
@@ -570,6 +565,8 @@ class MainWindow(QMainWindow):
         self.action_save = act("&Save", QKeySequence.Save, self._save)
         self.action_save_as = act("Save &As…", QKeySequence("Ctrl+Shift+S"),
                                   self._save_as)
+        self.action_export_workflow = act(
+            "&Export Workflow…", None, self._export_workflow)
         self.action_desktop_shortcut = act(
             "Create &Desktop Shortcut…", None, self._create_desktop_shortcut)
         self.action_quit = act("&Quit", QKeySequence.Quit, self.close)
@@ -646,7 +643,7 @@ class MainWindow(QMainWindow):
 
         file_menu = self._menu_root.addMenu("&File")
         for action in (self.action_new, self.action_open, self.action_save,
-                       self.action_save_as):
+                       self.action_save_as, self.action_export_workflow):
             file_menu.addAction(action)
         self._recent_menu = file_menu.addMenu("Open &Recent")
         self._rebuild_recent_menu()
@@ -864,16 +861,6 @@ class MainWindow(QMainWindow):
         and load_blob sniffs each one, so nothing needs migrating."""
         self.cache_compression_enabled = bool(enabled)
         self.settings.setValue("saving/compress_cache", bool(enabled))
-
-    def set_save_cache_in_project(self, enabled: bool) -> None:
-        """Whether a save bundles the cached results into the .flograph file.
-
-        Read when a save starts. On → one portable file, the graph and its
-        cached results together. Off → plain JSON, the graph alone (re-run
-        on open), and the next save removes any side-car folder. The file
-        opens either way — load sniffs it."""
-        self.save_cache_in_project = bool(enabled)
-        self.settings.setValue("saving/cache_in_project", bool(enabled))
 
     def set_compact_nodes(self, enabled: bool) -> None:
         """Canvas-wide: draw plain nodes as a fixed square with the name
@@ -4080,7 +4067,9 @@ class MainWindow(QMainWindow):
         if not self._confirm_discard():
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open project", "", "flograph projects (*.flograph)")
+            self, "Open project", "",
+            "flograph projects (*.flograph *.flowf);;"
+            "flograph workflow (*.flowf);;All files (*)")
         if path:
             self.open_path(path, confirm=False)
 
@@ -4148,6 +4137,10 @@ class MainWindow(QMainWindow):
             self.show_status(
                 f"Opened {path} — {broken} node(s) couldn't be resolved and "
                 f"were loaded as broken placeholders", 6000)
+        elif path.endswith(".flowf"):
+            self.show_status(
+                f"Opened workflow {path} — Save writes a .flograph project; "
+                f"Export updates this file", 6000)
         else:
             self.show_status(f"Opened {path}", 4000)
         self._restore_cache(path, quiet=bool(broken))
@@ -4277,38 +4270,46 @@ class MainWindow(QMainWindow):
     def _save(self, *, carry_from: "Optional[str]" = None) -> bool:
         if self._project_path is None:
             return self._save_as()
+        # A .flowf that was opened is an imported workflow, not a project
+        # file — Save makes a real .flograph for it (Export updates the
+        # .flowf). Anything not ending .flograph goes the same way.
+        if not self._project_path.endswith(".flograph"):
+            return self._save_as()
         if self._cache_save_signals is not None:
             self.show_status(
                 "Still writing the last save — try again in a moment", 4000)
             return False
 
-        if not self.save_cache_in_project:
-            # Plain JSON — the graph alone, re-run on open. Small, so
-            # synchronous; and any side-car folder from an older or a
-            # previously-bundled save is removed.
-            try:
-                serialization.save(self.graph, self._project_path)
-            except OSError as exc:
-                # A failed save used to escape into the Qt slot and die in a
-                # console nobody was watching. The common way it fails is
-                # the disk filling up, which is when the user needs words.
-                QMessageBox.critical(self, "Save failed", save_failure_text(
-                    f'"{self._project_path}"', exc))
-                return False
-            dropped = cache_persistence.discard_sidecar(self._project_path)
-            self.undo_stack.setClean()
-            self._push_recent(self._project_path)
-            had_cache = any(self.engine.cache.has(nid)
-                            for nid in self.graph.nodes)
-            msg = f"Saved {self._project_path}"
-            if dropped or had_cache:
-                msg += " — cached results not saved (graph only)"
-            self.show_status(msg, 4000)
-            return True
-
-        # Bundled: one atomic .flograph file, written off the GUI thread.
+        # One atomic .flograph bundle (graph + cached results), written off
+        # the GUI thread.
         self._push_recent(self._project_path)
         self._start_project_save(carry_from or self._project_path)
+        return True
+
+    def _export_workflow(self) -> bool:
+        """Write the graph alone to a `.flowf` file — no cached results,
+        plain JSON, made to be committed to version control and shared.
+
+        Not the project file: `_project_path` and the unsaved-changes state
+        are untouched, so a Save still writes the `.flograph` bundle. Re-run
+        Export to update the `.flowf`."""
+        stem = (Path(self._project_path).stem if self._project_path
+                else "workflow")
+        start = str((Path(self._project_path).parent if self._project_path
+                     else Path.cwd()) / f"{stem}.flowf")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export workflow", start, "flograph workflow (*.flowf)")
+        if not path:
+            return False
+        if not path.endswith(".flowf"):
+            path += ".flowf"
+        try:
+            serialization.save(self.graph, path)
+        except OSError as exc:
+            QMessageBox.critical(self, "Export failed", save_failure_text(
+                f'"{path}"', exc))
+            return False
+        self.show_status(f"Exported workflow to {path}", 4000)
         return True
 
     def _start_project_save(self, carry_from: str) -> None:
@@ -4327,7 +4328,7 @@ class MainWindow(QMainWindow):
         carry_all = self.engine.active
         plan = cache_persistence.plan_project_save(
             self.graph, self.engine.cache, self.engine.history,
-            include_cache=True, carry_all=carry_all)
+            carry_all=carry_all)
         self._save_clean_index = self.undo_stack.index()
         self._folded_sidecar = cache_persistence.has_sidecar(path)
 
@@ -4430,11 +4431,18 @@ class MainWindow(QMainWindow):
                 "Still writing the last save — try again in a moment", 4000)
             return False
         old_path = self._project_path
+        if old_path:
+            suggested = str(Path(old_path).with_suffix(".flograph"))
+        else:
+            suggested = "untitled.flograph"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save project", "untitled.flograph", "flograph projects (*.flograph)")
+            self, "Save project", suggested,
+            "flograph projects (*.flograph)")
         if not path:
             return False
-        if not path.endswith(".flograph"):
+        if path.endswith(".flowf"):
+            path = path[:-len(".flowf")] + ".flograph"
+        elif not path.endswith(".flograph"):
             path += ".flograph"
         self._project_path = path
         self.resource_monitor.set_disk_watch_path(path)

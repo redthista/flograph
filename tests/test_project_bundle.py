@@ -33,9 +33,8 @@ def _two_node_graph(registry):
 
 
 def _plan_and_write(graph, cache, path, *, prev_path=None, history=None,
-                    include_cache=True, carry_all=False):
+                    carry_all=False):
     plan = cp.plan_project_save(graph, cache, history or RunHistory(),
-                                include_cache=include_cache,
                                 carry_all=carry_all)
     return cp.write_project(path, plan, prev_path=prev_path)
 
@@ -162,33 +161,19 @@ class TestCarryAll:
         assert cp.register_cache(reloaded, fresh, path) == [src.id]
 
 
-class TestWithoutCache:
-    def test_off_writes_plain_json_and_drops_the_sidecar(self, tmp_path,
-                                                         registry):
-        graph, src, _ = _two_node_graph(registry)
-        cache = OutputCache()
-        cache.set(src.id, {"value": "x"}, wall_time=0.01)
-        path = tmp_path / "proj.flograph"
-        _plan_and_write(graph, cache, path)             # bundle first
-        assert container.is_bundle(path)
-
-        # now a save with the box off
-        assert _plan_and_write(graph, cache, path, include_cache=False) == 0
-        assert not container.is_bundle(path)
-        json.loads(path.read_text())                    # it's plain JSON
-        assert cp.register_cache(graph, OutputCache(), path) == []
-
-    def test_off_removes_a_legacy_sidecar_folder(self, tmp_path, registry):
-        graph, src, _ = _two_node_graph(registry)
-        cache = OutputCache()
-        cache.set(src.id, {"value": "x"}, wall_time=0.01)
-        path = tmp_path / "proj.flograph"
-        cp.save_cache(graph, cache, path)               # legacy folder
-        assert (tmp_path / "proj.flograph.cache").is_dir()
-
-        serialization.save(graph, path)
-        _plan_and_write(graph, cache, path, include_cache=False)
-        assert not (tmp_path / "proj.flograph.cache").exists()
+class TestWorkflowExport:
+    def test_flowf_is_plain_json_the_graph_loads_from(self, tmp_path,
+                                                      registry):
+        # Export is a plain serialization.save; a .flowf round-trips the
+        # graph and carries no cache.
+        graph, src, dst = _two_node_graph(registry)
+        p = tmp_path / "wf.flowf"
+        serialization.save(graph, p)
+        assert not container.is_bundle(p)
+        json.loads(p.read_text())
+        reloaded = serialization.load(p, registry)
+        assert set(reloaded.nodes) == {src.id, dst.id}
+        assert cp.register_cache(reloaded, OutputCache(), p) == []
 
 
 class TestFoldsInLegacySidecar:

@@ -582,6 +582,7 @@ class TitleBar(QWidget):
         m.clear()
         m.addAction(self._window.action_save)
         m.addAction(self._window.action_save_as)
+        m.addAction(self._window.action_export_workflow)
         m.addSeparator()
         m.addAction(self._window.action_new)
         m.addAction(self._window.action_open)

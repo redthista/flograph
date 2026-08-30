@@ -1399,9 +1399,10 @@ class TestTileFullscreen:
         add_page(window)
         add_tile(window, add_show_table(window))
         path = tmp_path / "old.flograph"
-        window._project_path = str(path)
-        window.save_cache_in_project = False   # plain JSON, to edit by hand
-        assert window._save()
+        # write plain JSON directly so the fields can be edited by hand,
+        # the way an older flograph wrote the file
+        from flograph.core import serialization
+        serialization.save(window.graph, path)
 
         import json
         payload = json.loads(path.read_text())

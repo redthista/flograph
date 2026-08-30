@@ -10,11 +10,11 @@ node's fingerprint — so any change to a node or anything upstream of it
 invalidates its entry. The cache half has its own CACHE_SCHEMA,
 independent of the project JSON's SCHEMA_VERSION.
 
-When the user turns *Include cached results in the project file* off, the
-project is written as plain JSON instead and no cache is persisted at all.
-And a project saved by an older flograph keeps a legacy **side-car
-directory** ``<project>.flograph.cache/`` with the same manifest + blob
-layout; every reader here takes either shape transparently through
+The graph-only ``.flowf`` export (File ▸ Export Workflow) is a plain
+``serialization.save`` and never comes through here — it carries no cache
+by definition. A project saved by an older flograph keeps a legacy
+**side-car directory** ``<project>.flograph.cache/`` with the same manifest
++ blob layout; every reader here takes either shape transparently through
 `open_cache_source`, and the first bundled save folds an old side-car in
 and removes it.
 
@@ -950,21 +950,19 @@ class ProjectSavePlan:
     """A save snapshotted away from the live graph and cache.
 
     `project` is `graph_to_dict` output; `blobs` is a `plan_cache_save`
-    plan (empty when the cache is not being embedded, or on a mid-run
-    carry-all save); `runs` is the run-history payload. `include_cache`
-    off means "write plain JSON, persist nothing".
+    plan (empty on a mid-run carry-all save); `runs` is the run-history
+    payload. The graph-only export (a `.flowf` file) does not go through
+    here — it is a plain `serialization.save`.
     """
 
     project: dict
     blobs: list[tuple[str, CacheEntry, str, bool]]
     runs: dict
-    include_cache: bool = True
     carry_all: bool = False
 
 
 def plan_project_save(graph: Graph, cache: OutputCache,
                       history: "RunHistory | None" = None, *,
-                      include_cache: bool = True,
                       carry_all: bool = False) -> ProjectSavePlan:
     """The cheap, GUI-thread half of a save. Mirrors `plan_cache_save`,
     which it reuses for the blob half.
@@ -977,39 +975,25 @@ def plan_project_save(graph: Graph, cache: OutputCache,
     if history is not None:
         runs = {"runs": [r.to_dict() for r in reversed(history.all())]}
     blobs: list[tuple[str, CacheEntry, str, bool]] = []
-    if include_cache and not carry_all:
+    if not carry_all:
         blobs = plan_cache_save(graph, cache)
-    return ProjectSavePlan(graph_to_dict(graph), blobs, runs,
-                           include_cache, carry_all)
-
-
-def _write_json_atomic(project_path: str | Path, data: dict) -> None:
-    path = Path(project_path)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        tmp.write_text(json.dumps(data, indent=2))
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    return ProjectSavePlan(graph_to_dict(graph), blobs, runs, carry_all)
 
 
 def write_project(project_path: str | Path, plan: ProjectSavePlan, *,
                   prev_path: "str | Path | None" = None,
                   compress: bool = True, progress: Any = None,
                   carry_all: "bool | None" = None) -> int:
-    """Write the whole .flograph file, atomically. Returns the number of
-    cache entries recorded (0 for a plain-JSON save).
+    """Write the whole .flograph bundle, atomically. Returns the number of
+    cache entries recorded.
 
-      * `include_cache` off → plain JSON at `project_path`, and any legacy
-        side-car folder beside it is removed.
-      * otherwise → a zip bundle: `project.json`, then each planned blob
-        streamed out (spilled and unchanged ones copied verbatim from
-        `prev_path` — the same path on a plain Save, the old path on Save
-        As), then the manifest and run history.
-      * `carry_all` → bundle whose every blob is copied from `prev_path`
-        and nothing is re-pickled: the mid-run save, matching the old
-        JSON-only mid-run behaviour.
+      * `project.json`, then each planned blob streamed out (spilled and
+        unchanged ones copied verbatim from `prev_path` — the same path on
+        a plain Save, the old path on Save As), then the manifest and run
+        history.
+      * `carry_all` → every blob is copied from `prev_path` and nothing is
+        re-pickled: the mid-run save, matching the old JSON-only mid-run
+        behaviour.
 
     An `OSError` from the writes propagates (a full disk is the user's to
     fix — see the module docstring); anything else while pickling one entry
@@ -1017,11 +1001,6 @@ def write_project(project_path: str | Path, plan: ProjectSavePlan, *,
     """
     if carry_all is None:
         carry_all = plan.carry_all
-
-    if not plan.include_cache:
-        _write_json_atomic(project_path, plan.project)
-        discard_sidecar(project_path)
-        return 0
 
     prev = open_cache_source(prev_path) if prev_path is not None else None
     done = 0

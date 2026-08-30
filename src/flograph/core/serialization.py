@@ -17,8 +17,10 @@ unless flograph.engine.cache_persistence restores its output — from the
 directory next to a plain-JSON project file. See that module for the
 save/load flow and its independent versioning, and `core.container` for
 the bundle format. `load` here reads the graph half whichever way the file
-is stored; `save` writes plain JSON only (the bundle writer, which needs
-the cache too, lives in cache_persistence).
+is stored — a ``.flograph`` bundle, an older plain-JSON ``.flograph``, or a
+``.flowf`` workflow export. `save` writes plain JSON only: it backs the
+``.flowf`` export and the pre-bundle era; the bundle writer, which needs
+the cache too, lives in cache_persistence.
 """
 from __future__ import annotations
 
