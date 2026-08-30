@@ -609,3 +609,160 @@ class TestReadHtml:
     def test_no_source(self, registry):
         with pytest.raises(ValueError, match="set 'URL or file'"):
             run_node(registry, "flograph.io.read_html", {})
+
+
+# --------------------------------------------------------------------------
+# Automation
+# --------------------------------------------------------------------------
+class TestNotify:
+    def test_webhook_channel(self, registry, http_server):
+        pytest.importorskip("httpx")
+        out = run_node(registry, "flograph.automation.notify", {
+            "channel": "webhook", "endpoint": f"{http_server}/hook",
+            "subject": "nightly", "message": "12 rows loaded",
+        })
+        assert out["sent"] is True
+
+    def test_slack_channel_and_data_preview(self, registry, http_server):
+        pytest.importorskip("httpx")
+        df = pd.DataFrame({"a": [1, 2]})
+        out = run_node(registry, "flograph.automation.notify", {
+            "channel": "slack", "endpoint": f"{http_server}/hook",
+            "message": "done",
+        }, data=df)
+        assert out["sent"] is True
+
+    def test_send_failure_warn(self, registry):
+        pytest.importorskip("httpx")
+        out = run_node(registry, "flograph.automation.notify", {
+            "channel": "webhook", "endpoint": "http://127.0.0.1:9/nope",
+            "message": "x", "on_error": "warn",
+        })
+        assert out["sent"] is False and out["detail"]
+
+    def test_email_missing_config(self, registry):
+        with pytest.raises(ValueError, match="SMTP host"):
+            run_node(registry, "flograph.automation.notify",
+                     {"channel": "email", "message": "hi"})
+
+    def test_nothing_to_send(self, registry):
+        with pytest.raises(ValueError, match="nothing to send"):
+            run_node(registry, "flograph.automation.notify",
+                     {"channel": "slack", "endpoint": "http://x"})
+
+
+class TestShellCommand:
+    def test_stdout_and_exit(self, registry):
+        out = run_node(registry, "flograph.automation.shell_command",
+                       {"command": "printf 'hello'"})
+        assert out["stdout"] == "hello"
+        assert out["exit_code"] == 0
+
+    def test_stdin_piped(self, registry):
+        out = run_node(registry, "flograph.automation.shell_command",
+                       {"command": "cat"}, stdin="piped text")
+        assert out["stdout"] == "piped text"
+
+    def test_env_and_nonzero_fail(self, registry):
+        with pytest.raises(ValueError, match="exited 3"):
+            run_node(registry, "flograph.automation.shell_command",
+                     {"command": "exit 3"})
+
+    def test_nonzero_allowed(self, registry):
+        out = run_node(registry, "flograph.automation.shell_command",
+                       {"command": "exit 7", "fail_on_nonzero": False})
+        assert out["exit_code"] == 7
+
+    def test_timeout(self, registry):
+        with pytest.raises(ValueError, match="timed out"):
+            run_node(registry, "flograph.automation.shell_command",
+                     {"command": "sleep 5", "timeout": 1.0})
+
+    def test_no_command(self, registry):
+        with pytest.raises(ValueError, match="no command"):
+            run_node(registry, "flograph.automation.shell_command", {})
+
+
+class TestWaitForFile:
+    def test_ready_immediately(self, registry, tmp_path):
+        f = tmp_path / "export.csv"
+        f.write_text("a,b\n1,2\n")
+        out = run_node(registry, "flograph.automation.wait_for_file", {
+            "path": str(f), "stable_for": 0.0, "poll": 0.2,
+        })
+        assert out["ready"] is True
+        assert out["path"] == str(f)
+        assert out["size_bytes"] == f.stat().st_size
+
+    def test_glob_newest(self, registry, tmp_path):
+        import os
+        import time
+        (tmp_path / "a_1.csv").write_text("x")
+        time.sleep(0.02)
+        newer = tmp_path / "a_2.csv"
+        newer.write_text("y")
+        os.utime(newer, (time.time() + 5, time.time() + 5))
+        out = run_node(registry, "flograph.automation.wait_for_file", {
+            "path": str(tmp_path / "a_*.csv"), "stable_for": 0.0,
+        })
+        assert out["path"] == str(newer)
+
+    def test_timeout_not_ready(self, registry, tmp_path):
+        out = run_node(registry, "flograph.automation.wait_for_file", {
+            "path": str(tmp_path / "never.csv"), "timeout": 1.0,
+            "poll": 0.2, "on_timeout": "return not-ready",
+        })
+        assert out["ready"] is False
+
+    def test_timeout_fail(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="timed out"):
+            run_node(registry, "flograph.automation.wait_for_file", {
+                "path": str(tmp_path / "never.csv"), "timeout": 1.0,
+                "poll": 0.2,
+            })
+
+
+class TestListFiles:
+    def _dir(self, tmp_path):
+        (tmp_path / "one.csv").write_text("a")
+        (tmp_path / "two.csv").write_text("bb")
+        (tmp_path / "note.txt").write_text("ccc")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "three.csv").write_text("dddd")
+        return tmp_path
+
+    def test_pattern_and_paths(self, registry, tmp_path):
+        d = self._dir(tmp_path)
+        out = run_node(registry, "flograph.io.list_files",
+                       {"folder": str(d), "pattern": "*.csv"})
+        assert out["count"] == 2
+        assert set(out["files"]["name"]) == {"one.csv", "two.csv"}
+        assert isinstance(out["paths"], list) and len(out["paths"]) == 2
+
+    def test_recurse_and_sort_size(self, registry, tmp_path):
+        d = self._dir(tmp_path)
+        out = run_node(registry, "flograph.io.list_files", {
+            "folder": str(d), "pattern": "*.csv", "recurse": True,
+            "sort": "size", "newest_first": True,
+        })
+        assert out["count"] == 3
+        assert list(out["files"]["name"])[0] == "three.csv"  # largest
+
+    def test_modified_after(self, registry, tmp_path):
+        import os
+        import time
+        d = self._dir(tmp_path)
+        old = d / "one.csv"
+        os.utime(old, (time.time() - 86400, time.time() - 86400))
+        future = time.strftime("%Y-%m-%dT%H:%M",
+                               time.localtime(time.time() - 3600))
+        out = run_node(registry, "flograph.io.list_files", {
+            "folder": str(d), "pattern": "*.csv", "modified_after": future,
+        })
+        assert "one.csv" not in set(out["files"]["name"])
+
+    def test_bad_folder(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="not a folder"):
+            run_node(registry, "flograph.io.list_files",
+                     {"folder": str(tmp_path / "nope")})
