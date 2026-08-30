@@ -45,7 +45,12 @@ parquet = ["pyarrow", "fastparquet"]
 polars = ["polars>=1.0", "fastexcel"]
 plotly = ["plotly"]
 geo = ["geopandas", "folium"]
-ai = ["requests"]
+ai = ["requests", "anthropic>=0.40"]
+sql = ["sqlalchemy>=2.0"]
+duckdb = ["duckdb>=1.0"]
+http = ["httpx>=0.27"]
+fuzzy = ["rapidfuzz>=3.0"]
+scrape = ["lxml", "beautifulsoup4", "html5lib"]
 
 [project.scripts]
 flograph = "flograph.cli:main"
