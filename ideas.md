@@ -11,14 +11,14 @@ holds what is *not* built.
 
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
-reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, and Q) are
-where shipped work used to be. Old numbers are kept as "(was N)" where a code
+reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P and Q)
+are where shipped work used to be. Old numbers are kept as "(was N)" where a code
 comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, N3, O1, P1, R1) on 2026-08-30.
+2026-08-27; the entries added since (G10, N3, O1, R1) on 2026-08-30.
 
 ---
 
@@ -144,31 +144,6 @@ display name, no thumbnail, no last-opened time, so those are derived (name
 and initials from the filename) or newly recorded. The initials tile can
 borrow the `mark_pixmap` / `mark_icon` pattern already used for node marks.
 Pairs well with a thumbnail written on save.
-
----
-
-## P. Running a flow without the app
-
-**P1. A real CLI for headless runs** (Dan). Asked for as: run a `.flograph`
-file end to end from a terminal, or from another tool (a Dataiku recipe, a
-cron job) that has flograph installed. Most of this already works but is
-unadvertised — `python -m flograph.engine.headless project.flograph [--var
-name=value …]` loads the file, applies Variables-node overrides, runs the
-whole graph on a `QCoreApplication` (no widgets, no display) and exits
-non-zero if any node failed. What is missing is the front door:
-
-  - a `flograph run <file>` console entry — today `[project.scripts]` has
-    only the GUI `flograph`, and `python -m flograph` also opens the GUI;
-  - a library call — `src/flograph/__init__.py` is empty, so there is no
-    `flograph.run(path)`;
-  - the caveat, worth stating in the docs: the engine imports Qt
-    (`QCoreApplication`, `QThreadPool`, signals) and needs an event loop, so
-    a headless run still needs PySide6 installed — only `flograph.core` is
-    strictly Qt-free. It does not need a display.
-
-  Mostly plumbing: an argparse dispatch in `app.py` (or a new `cli.py`)
-  routing `run` to `engine.headless.main`, plus a thin `flograph.run`
-  wrapper.
 
 ---
 

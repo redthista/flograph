@@ -48,7 +48,7 @@ geo = ["geopandas", "folium"]
 ai = ["requests"]
 
 [project.scripts]
-flograph = "flograph.app:main"
+flograph = "flograph.cli:main"
 
 [build-system]
 requires = ["hatchling"]

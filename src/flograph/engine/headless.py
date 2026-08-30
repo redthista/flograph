@@ -1,7 +1,8 @@
 """Run a .flograph project without the GUI:
 
-    python -m flograph.engine.headless project.flograph
-    python -m flograph.engine.headless project.flograph --var region=North
+    flograph run project.flograph
+    flograph run project.flograph --var region=North
+    python -m flograph.engine.headless project.flograph   # same thing, longhand
 
 `--var name=value` overrides what the project's Variables node declares, so
 one flow becomes a parameterisable job: the same canvas, run per region or
@@ -82,6 +83,9 @@ def apply_overrides(graph, overrides: dict[str, str]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__.strip())
+        return 0
     try:
         project, overrides = parse_args(argv)
     except ValueError as exc:

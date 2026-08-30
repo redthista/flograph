@@ -89,7 +89,7 @@ def _bootstrap() -> None:
 
 _bootstrap()
 
-from flograph.app import main  # noqa: E402
+from flograph.cli import main  # noqa: E402  (dispatches GUI vs `run` headless)
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -67,8 +67,28 @@ startup. It does not bundle the third-party dependencies themselves.
 flograph                                # after install
 python -m flograph                      # equivalent
 python main.py project.flograph         # open a project from a checkout
-python -m flograph.engine.headless project.flograph   # run it with no GUI
 ```
+
+### Headless runs
+
+```bash
+flograph run project.flograph                       # run it to completion, no GUI
+flograph run project.flograph --var region=North    # override a Variables declaration
+python -m flograph run project.flograph             # equivalent
+```
+
+`flograph run` exits `0` if every node ran clean and `1` otherwise, so a
+scheduler (cron, a Dataiku recipe, CI) can treat a canvas project as a batch
+job. `--var name=value` rewrites what the project's Variables node declares,
+so one flow runs per region or per date with nothing edited in between;
+repeat the flag per variable, and a name the flow does not declare is
+refused rather than ignored.
+
+From Python, `flograph.run("project.flograph", variables={"region": "North"})`
+does the same and raises `RuntimeError` if a node fails.
+
+Either way the engine runs on a Qt event loop, so PySide6 must be installed
+— but no display is needed. Only `flograph.core` is strictly Qt-free.
 
 **File > Create Desktop Shortcut…** writes a desktop shortcut that starts
 flograph the same way it's running right now — a `.lnk` on Windows, a
