@@ -135,15 +135,14 @@ differently today:
 **O1. A start screen, the way PyCharm opens** (Dan). A list of recent
 projects — each with its name, its folder, and a generated initials tile —
 shown when the app has no project open, instead of dropping straight onto an
-empty canvas. Half of it exists: QSettings already keeps `recent_files`
-(the last 8 paths), `_recent_files()` filters them to what still exists, and
-the Open Recent menu is built from exactly that. What is missing is the
-surface to show it on — the window always holds a live canvas, there is no
-"no project" state — and any per-project detail beyond the path: no stored
-display name, no thumbnail, no last-opened time, so those are derived (name
-and initials from the filename) or newly recorded. The initials tile can
-borrow the `mark_pixmap` / `mark_icon` pattern already used for node marks.
-Pairs well with a thumbnail written on save.
+empty canvas. Most of the *row* now exists: the title bar's project switcher
+already draws exactly this (`window_frame.initials_pixmap` /
+`initials_for`, and `_RecentRow` — tile, name without `.flograph`, folder
+below), reading `_recent_files_existing()`. What is still missing is the
+**surface** to show them on — the window always holds a live canvas, there
+is no "no project" state — and any per-project detail beyond the path: no
+stored last-opened time, no thumbnail, so those are derived or newly
+recorded. Pairs well with a thumbnail written on save.
 
 ---
 
