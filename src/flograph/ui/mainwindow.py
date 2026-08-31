@@ -47,6 +47,7 @@ from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
 from .canvas.file_drop import resolve_dropped_path
 from .canvas import grid
 from .canvas import view as canvas_view
+from .canvas import base_view
 from .canvas.stacking import add_layer_menu
 from .canvas.node_item import DEFAULT_LOD_THRESHOLD, IMAGE_TYPE, card_kind
 from .canvas.palette import LibraryPanel, NodePalettePopup
@@ -222,6 +223,13 @@ class MainWindow(QMainWindow):
         self.scrollbars_enabled = self.settings.value(
             "canvas/scrollbars", False, type=bool)
         self.view.set_scrollbars_enabled(self.scrollbars_enabled)
+        self.rubber_band_mode = str(self.settings.value(
+            "canvas/rubber_band_mode", base_view.DEFAULT_RUBBER_BAND_MODE))
+        self.view.set_rubber_band_mode(self.rubber_band_mode)
+        self.rubber_band_invert_key = str(self.settings.value(
+            "canvas/rubber_band_invert_key",
+            base_view.DEFAULT_RUBBER_BAND_INVERT_KEY))
+        self.view.set_rubber_band_invert_key(self.rubber_band_invert_key)
         # zlib on the cache side-car trades a little save-time CPU for a lot
         # of disk (ideas_archived.md #16). Off writes raw pickles; both eras
         # read forever either way — load_blob sniffs each blob.
@@ -878,6 +886,24 @@ class MainWindow(QMainWindow):
         views = [self.view] + [page.view for page in self._canvas_pages()]
         for view in views:
             view.set_scrollbars_enabled(enabled)
+
+    def set_rubber_band_mode(self, mode: str) -> None:
+        """Whether a drag-select catches what it touches or only what it
+        fully contains, on the main view and every dashboard page's view."""
+        self.rubber_band_mode = mode
+        self.settings.setValue("canvas/rubber_band_mode", mode)
+        views = [self.view] + [page.view for page in self._canvas_pages()]
+        for view in views:
+            view.set_rubber_band_mode(mode)
+
+    def set_rubber_band_invert_key(self, name: str) -> None:
+        """Which modifier, held as the drag starts, gets the other mode for
+        that one drag."""
+        self.rubber_band_invert_key = name
+        self.settings.setValue("canvas/rubber_band_invert_key", name)
+        views = [self.view] + [page.view for page in self._canvas_pages()]
+        for view in views:
+            view.set_rubber_band_invert_key(name)
 
     def set_cache_compression_enabled(self, enabled: bool) -> None:
         """Whether saving zlib-compresses the cache side-car's blobs.
@@ -1726,6 +1752,8 @@ class MainWindow(QMainWindow):
         widget.scene.grid_step = self.grid_step
         widget.scene.grid_visible = self.grid_visible
         widget.view.set_scrollbars_enabled(self.scrollbars_enabled)
+        widget.view.set_rubber_band_mode(self.rubber_band_mode)
+        widget.view.set_rubber_band_invert_key(self.rubber_band_invert_key)
         self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)
@@ -3758,6 +3786,8 @@ class MainWindow(QMainWindow):
         self.set_port_labels_enabled(False)
         self.set_flow_pins_enabled(False)
         self.set_reveal_ports_key(canvas_view.DEFAULT_REVEAL_PORTS_KEY)
+        self.set_rubber_band_mode(base_view.DEFAULT_RUBBER_BAND_MODE)
+        self.set_rubber_band_invert_key(base_view.DEFAULT_RUBBER_BAND_INVERT_KEY)
         self.set_double_click_action("properties")
         self.set_compact_nodes(True)
         self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)

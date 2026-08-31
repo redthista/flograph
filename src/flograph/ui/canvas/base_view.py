@@ -9,7 +9,8 @@ import time
 from collections import deque
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import (QKeyEvent, QMouseEvent, QPainter, QPainterPath,
+                           QPen, QWheelEvent)
 from PySide6.QtWidgets import (QAbstractScrollArea, QGraphicsProxyWidget,
                                QGraphicsView, QScrollBar, QWidget)
 
@@ -38,6 +39,50 @@ FINE_GRID_LOD = 0.4
 EDGE_SCROLL_MARGIN = 44
 EDGE_SCROLL_SPEED = 14
 EDGE_SCROLL_TICK_MS = 30
+
+# What a drag-select has to do to an item to catch it.
+#
+# "touch" is Qt's own default (IntersectsItemShape): the band only has to
+# graze an item. "contain" is Qt's ContainsItemShape: only what the band
+# swallows whole. "frames" is the middle one and the default — nodes on a
+# graze, frames only when the band goes right round them.
+#
+# The middle one exists because the two rules want different things. Sweeping
+# a row of nodes wants a band that catches what it brushes; a band drawn
+# inside a frame to pick up the nodes in it does not want the frame as well,
+# since a selected frame drags its whole block along. Frames are the only
+# items big enough for a band to be drawn *inside*, so they are the only ones
+# that need the stricter rule.
+RUBBER_BAND_MODES = ("touch", "frames", "contain")
+DEFAULT_RUBBER_BAND_MODE = "frames"
+
+#: Modifiers that can be held to get the *other* mode for the length of one
+#: drag, keyed by the name the setting stores.
+#:
+#: Ctrl is the default: from the default mode it gives back the band that
+#: catches everything it crosses, which is the behaviour anyone who has used
+#: the canvas already has in their hands. It comes with a rider — Qt reads
+#: Ctrl during a band as "add to the existing selection" too, so a Ctrl-drag
+#: does both at once. That reads as one gesture rather than two ("add
+#: everything I brush"), which is why it can carry both. Alt is the one
+#: modifier with no other job here, for anyone who wants them separate.
+RUBBER_BAND_INVERT_KEYS = {
+    "ctrl": Qt.ControlModifier,
+    "alt": Qt.AltModifier,
+    "shift": Qt.ShiftModifier,
+    "none": Qt.NoModifier,
+}
+DEFAULT_RUBBER_BAND_INVERT_KEY = "ctrl"
+
+#: The key that carries each modifier, so a press or release *during* a drag
+#: can be read as the modifier going down or coming up. A key event's own
+#: modifiers() is no help for the key being pressed — whether it already
+#: counts itself varies — so the key is what says which way this went.
+_MODIFIER_KEYS = {
+    Qt.Key_Control: Qt.ControlModifier,
+    Qt.Key_Alt: Qt.AltModifier,
+    Qt.Key_Shift: Qt.ShiftModifier,
+}
 
 # How far past the outermost item the scrollable span reaches, per side.
 # The scroll bars map the whole span onto their length, so this — not a
@@ -147,6 +192,15 @@ class ZoomPanGraphicsView(QGraphicsView):
         # everything embedded in it still takes input.
         self.navigation_locked = False
         self._scrollbars_enabled = False
+        self._rubber_band_mode = DEFAULT_RUBBER_BAND_MODE
+        self._rubber_band_invert_key = DEFAULT_RUBBER_BAND_INVERT_KEY
+        # a drag running under the held-modifier override, so the release
+        # knows to put the standing mode back
+        self._rubber_band_inverted = False
+        # the frames a band in progress found already selected (see
+        # _drop_grazed_frames); empty between drags
+        self._band_held_frames: frozenset = frozenset()
+        self._apply_rubber_band_mode()
         self._panning = False
         self._pan_last = QPointF()
         self._space_held = False
@@ -294,7 +348,17 @@ class ZoomPanGraphicsView(QGraphicsView):
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
             return
+        banding = (event.button() == Qt.LeftButton
+                   and self.dragMode() == QGraphicsView.RubberBandDrag)
+        if banding:
+            self._sync_rubber_band_override(
+                self._invert_key_held(event.modifiers()))
         super().mousePressEvent(event)
+        if banding:
+            # *after* the press, which is where Qt drops the old selection
+            # unless a modifier says to keep it — so this holds what the band
+            # is adding to, and nothing it is replacing
+            self._band_held_frames = frozenset(self._selected_frames())
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._panning:
@@ -303,7 +367,17 @@ class ZoomPanGraphicsView(QGraphicsView):
             self.translate(delta.x() / self.zoom, delta.y() / self.zoom)
             event.accept()
             return
+        # before the base class: the mode has to be right for the selection
+        # it is about to build, and the modifier may have moved since the
+        # press or since the last move
+        if self.dragMode() == QGraphicsView.RubberBandDrag:
+            self._sync_rubber_band_override(
+                self._invert_key_held(event.modifiers()))
         super().mouseMoveEvent(event)
+        # after it: that is the call that (re)builds the band's selection,
+        # and this drops the part of it the mode does not want
+        if self.effective_rubber_band_mode() == "frames":
+            self._drop_grazed_frames()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MiddleButton and self._panning:
@@ -312,6 +386,12 @@ class ZoomPanGraphicsView(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+        # after the base class, which is the call that turns the band into a
+        # selection — restoring the standing mode first would decide the drag
+        # by the setting rather than by the key that was held for it
+        if event.button() == Qt.LeftButton:
+            self._clear_rubber_band_override()
+            self._band_held_frames = frozenset()
 
     def cancel_pan(self) -> None:
         """Drop a middle-drag pan that never got its release — the graph
@@ -357,6 +437,139 @@ class ZoomPanGraphicsView(QGraphicsView):
         # a racing refit could clamp back mid-gesture
         if hasattr(scene, "flush_rect_fit"):
             scene.flush_rect_fit()
+
+    def set_rubber_band_mode(self, mode: str) -> None:
+        """What a drag-select has to do to an item to catch it — one of
+        RUBBER_BAND_MODES. See the note there for what the three mean."""
+        self._rubber_band_mode = (mode if mode in RUBBER_BAND_MODES
+                                  else DEFAULT_RUBBER_BAND_MODE)
+        self._apply_rubber_band_mode()
+
+    def set_rubber_band_invert_key(self, name: str) -> None:
+        """Which modifier, held as a drag-select starts, gives you the other
+        mode for that one drag. "none" turns the override off."""
+        self._rubber_band_invert_key = (
+            name if name in RUBBER_BAND_INVERT_KEYS
+            else DEFAULT_RUBBER_BAND_INVERT_KEY)
+
+    def effective_rubber_band_mode(self) -> str:
+        """The rule the band in progress is actually going by — the setting,
+        or its opposite while the invert modifier is being held. Holding it
+        means "everything I brush" from either of the two stricter modes, and
+        "only what I go right round" from the loosest."""
+        if not self._rubber_band_inverted:
+            return self._rubber_band_mode
+        return "contain" if self._rubber_band_mode == "touch" else "touch"
+
+    def _apply_rubber_band_mode(self, inverted: bool = False) -> None:
+        self._rubber_band_inverted = inverted
+        # "frames" rides on Qt's touch rule and drops the frames the band
+        # failed to swallow afterwards (see _drop_grazed_frames) — Qt itself
+        # has no per-item-kind setting.
+        self.setRubberBandSelectionMode(
+            Qt.ContainsItemShape
+            if self.effective_rubber_band_mode() == "contain"
+            else Qt.IntersectsItemShape)
+
+    def _selected_frames(self) -> list:
+        scene = self.scene()
+        if scene is None:
+            return []
+        from .frame_item import FrameItem
+
+        return [item for item in scene.selectedItems()
+                if isinstance(item, FrameItem)]
+
+    def _drop_grazed_frames(self) -> None:
+        """Take back the frames the band only grazed, leaving everything else
+        Qt selected alone. Runs after each move of a band in "frames" mode:
+        Qt rebuilds the whole selection on every move, so the last word is
+        always this one's.
+
+        Frames that were already selected when the band started are left
+        alone — a Ctrl-drag adds to a selection, and taking back something
+        the band never claimed would be a deselect nobody asked for."""
+        band = self.rubberBandRect()
+        if band.isNull():
+            return
+        scene = self.scene()
+        if scene is None:
+            return
+        from .frame_item import FrameItem
+
+        area = self.mapToScene(band).boundingRect()
+        for item in scene.selectedItems():
+            if (isinstance(item, FrameItem)
+                    and item not in self._band_held_frames
+                    and not area.contains(item.sceneBoundingRect())):
+                item.setSelected(False)
+
+    def _sync_rubber_band_override(self, held: bool) -> bool:
+        """Point the band at the rule the modifier currently asks for, and
+        say whether that changed anything.
+
+        Tracked for as long as the band is being drawn rather than settled at
+        the press: pressing the key half way through a drag is how you ask to
+        see what the other rule would catch, and letting go is how you take it
+        back, so the band has to answer while you hold it."""
+        if held == self._rubber_band_inverted:
+            return False
+        self._apply_rubber_band_mode(inverted=held)
+        return True
+
+    def _invert_key_held(self, modifiers) -> bool:
+        key = RUBBER_BAND_INVERT_KEYS.get(self._rubber_band_invert_key,
+                                          Qt.NoModifier)
+        return key != Qt.NoModifier and bool(modifiers & key)
+
+    def _band_is_live(self) -> bool:
+        return (self.dragMode() == QGraphicsView.RubberBandDrag
+                and not self.rubberBandRect().isNull())
+
+    def _rebuild_band_selection(self, modifiers) -> None:
+        """Re-decide what the band currently covers, without waiting for the
+        mouse to move.
+
+        Qt only recomputes a rubber band's selection on a mouse move, so a
+        key pressed while the pointer is held still would otherwise do
+        nothing visible until you jiggled the mouse. This is the same call Qt
+        makes from its own move handler — including its rule that Ctrl or
+        Shift adds rather than replaces — so a band that is re-decided by the
+        key and one that is re-decided by the next move agree."""
+        band = self.rubberBandRect()
+        scene = self.scene()
+        if band.isNull() or scene is None:
+            return
+        path = QPainterPath()
+        path.addPolygon(self.mapToScene(band))
+        adding = bool(modifiers & (Qt.ControlModifier | Qt.ShiftModifier))
+        scene.setSelectionArea(
+            path,
+            Qt.AddToSelection if adding else Qt.ReplaceSelection,
+            self.rubberBandSelectionMode(),
+            self.viewportTransform())
+        if self.effective_rubber_band_mode() == "frames":
+            self._drop_grazed_frames()
+
+    def _modifier_changed_mid_band(self, event: QKeyEvent,
+                                   pressed: bool) -> None:
+        """A modifier went down or came up. If it is the invert key and a
+        band is being drawn, flip the rule and re-decide there and then."""
+        modifier = _MODIFIER_KEYS.get(event.key())
+        if modifier is None or not self._band_is_live():
+            return
+        if not self._invert_key_held(modifier):
+            return
+        if self._sync_rubber_band_override(pressed):
+            # the modifiers as they are *after* this key event, which is what
+            # decides add-vs-replace on the rebuild
+            modifiers = event.modifiers() | modifier if pressed \
+                else event.modifiers() & ~modifier
+            self._rebuild_band_selection(modifiers)
+
+    def _clear_rubber_band_override(self) -> None:
+        if self._rubber_band_inverted:
+            self._apply_rubber_band_mode()
 
     def set_scrollbars_enabled(self, enabled: bool) -> None:
         """Show the horizontal and vertical scroll bars. The canvas pans
@@ -430,6 +643,8 @@ class ZoomPanGraphicsView(QGraphicsView):
             self.setDragMode(QGraphicsView.ScrollHandDrag)
             event.accept()
             return
+        if not event.isAutoRepeat():
+            self._modifier_changed_mid_band(event, pressed=True)
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
@@ -437,6 +652,8 @@ class ZoomPanGraphicsView(QGraphicsView):
             self._end_space_pan()
             event.accept()
             return
+        if not event.isAutoRepeat():
+            self._modifier_changed_mid_band(event, pressed=False)
         super().keyReleaseEvent(event)
 
     def _end_space_pan(self) -> None:

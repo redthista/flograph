@@ -6,7 +6,7 @@ collapse feature and the frame behaviour it leans on.
 """
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QImage, QPainter, QPainterPath, QUndoStack
+from PySide6.QtGui import QImage, QPainter, QUndoStack
 from PySide6.QtWidgets import (QGraphicsSceneHoverEvent,
                                QGraphicsSceneMouseEvent)
 
@@ -687,40 +687,13 @@ class TestDragHandle:
         item.hoverMoveEvent(event)
         assert item.cursor().shape() == Qt.SizeAllCursor
 
-    def test_a_band_inside_a_frame_leaves_the_frame_alone(self, env,
-                                                          registry):
-        """The other half of "the body is canvas": a band drawn inside a
-        frame to pick up two nodes must not come back with the frame, or
-        dragging that selection slides the box off its own contents."""
-        graph, _stack, scene = env
-        self._frame(env)
-        script_node(graph, registry, "a", (60.0, 80.0))
-        script_node(graph, registry, "b", (160.0, 80.0))
-        band = QPainterPath()
-        band.addRect(QRectF(40.0, 60.0, 260.0, 120.0))
-        scene.setSelectionArea(band)
-        selected = {type(i).__name__ for i in scene.selectedItems()}
-        assert "FrameItem" not in selected
-        assert {i.node.id for i in scene.selectedItems()} == {"a", "b"}
-
-    def test_a_band_around_the_whole_frame_does_select_it(self, env):
-        graph, _stack, scene = env
-        self._frame(env)
-        band = QPainterPath()
-        band.addRect(QRectF(-50.0, -50.0, 800.0, 600.0))
-        scene.setSelectionArea(band)
-        assert scene.frame_items["f1"].isSelected()
-
-    def test_a_band_over_part_of_a_node_still_takes_the_node(self, env,
-                                                             registry):
-        """Only frames get the stricter rule — brushing a node still picks
-        it up, which is what a rubber band is for."""
-        graph, _stack, scene = env
-        script_node(graph, registry, "a", (200.0, 200.0))
-        band = QPainterPath()
-        band.addRect(QRectF(190.0, 190.0, 20.0, 20.0))
-        scene.setSelectionArea(band)
-        assert scene.node_items["a"].isSelected()
+    # What a rubber band drawn inside a frame comes back with is the other
+    # half of "the body is canvas", and it is tested in
+    # tests/test_rubber_band_selection.py — through a real drag on a view,
+    # which is the only way it can be. The rule used to live in a
+    # NodeGraphScene.setSelectionArea override and was tested by calling that
+    # override; the function is not virtual, so Qt's rubber band never called
+    # it and the tests were the only thing that did.
 
     def test_the_body_does_not_say_that(self, env):
         item = self._frame(env)

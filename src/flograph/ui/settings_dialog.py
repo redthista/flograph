@@ -286,6 +286,19 @@ class SettingsDialog(QDialog):
             finally:
                 grid_combo.blockSignals(blocked)
 
+        for name, value in (
+                ("rubber_band_mode_combo", window.rubber_band_mode),
+                ("rubber_band_invert_key_combo",
+                 window.rubber_band_invert_key)):
+            combo = self.findChild(QComboBox, name)
+            if combo is None:
+                continue
+            blocked = combo.blockSignals(True)
+            try:
+                combo.setCurrentIndex(max(0, combo.findData(value)))
+            finally:
+                combo.blockSignals(blocked)
+
         formats_edit = self.findChild(QLineEdit, "table_date_formats_edit")
         if formats_edit is not None:
             blocked = formats_edit.blockSignals(True)
@@ -663,6 +676,50 @@ class SettingsDialog(QDialog):
                  "ones the canvas already uses (F frames the selection, Tab "
                  "opens the node search, Space pans).")
 
+        rows.add_group("Drag-select")
+
+        band_combo = QComboBox()
+        band_combo.setObjectName("rubber_band_mode_combo")
+        for label, value in (
+                ("Anything the band touches", "touch"),
+                ("Frames only when fully inside", "frames"),
+                ("Only what is fully inside", "contain")):
+            band_combo.addItem(label, value)
+        band_combo.setCurrentIndex(
+            max(0, band_combo.findData(window.rubber_band_mode)))
+        rows.add("Drag-select catches", band_combo,
+                 "How much of an item a rubber band has to cover to select "
+                 "it. Touching takes anything the band grazes, which is the "
+                 "quickest way to sweep up a row of nodes but also means a "
+                 "band drawn inside a frame picks up the frame — and a "
+                 "selected frame drags its whole block along, so the next "
+                 "move is to Ctrl-click it back off. The middle setting "
+                 "keeps the graze for nodes and asks a band to go right "
+                 "round a frame before it counts, which is the only place "
+                 "the difference bites. The last one asks it of everything, "
+                 "so a node half out of the band is left behind too.")
+
+        band_key_combo = QComboBox()
+        band_key_combo.setObjectName("rubber_band_invert_key_combo")
+        for label, value in (("Ctrl", "ctrl"), ("Alt", "alt"),
+                             ("Shift", "shift"), ("Nothing", "none")):
+            band_key_combo.addItem(label, value)
+        band_key_combo.setCurrentIndex(
+            max(0, band_key_combo.findData(window.rubber_band_invert_key)))
+        rows.add("Hold for the other rule", band_key_combo,
+                 "Hold this as you start the drag and that one band goes by "
+                 "the opposite rule: from either of the stricter settings it "
+                 "takes everything it crosses — the way the canvas has "
+                 "always behaved — and from the loosest it takes only what "
+                 "it goes right round. It is live rather than decided at the "
+                 "press: press the key part way through a drag and the frame "
+                 "you are over joins the selection, let go and it drops out "
+                 "again, without moving the mouse. Ctrl and Shift also mean "
+                 "*add to what is already selected* during a drag-select, so "
+                 "holding one does both at once — with Ctrl that is a single "
+                 "gesture, add everything I brush. Alt has no other job "
+                 "here, if you would rather keep the two apart.")
+
         rows.add_group("Snapping")
 
         grid_check = QCheckBox()
@@ -746,6 +803,12 @@ class SettingsDialog(QDialog):
             lambda index: window.set_double_click_action(
                 dclick_combo.itemData(index)))
         grid_check.toggled.connect(window.set_grid_visible)
+        band_combo.currentIndexChanged.connect(
+            lambda index: window.set_rubber_band_mode(
+                band_combo.itemData(index)))
+        band_key_combo.currentIndexChanged.connect(
+            lambda index: window.set_rubber_band_invert_key(
+                band_key_combo.itemData(index)))
         snap_check.toggled.connect(window.set_snap_enabled)
         snap_check.toggled.connect(grid_combo.setEnabled)
         grid_combo.currentIndexChanged.connect(
