@@ -99,7 +99,7 @@ one-file bundle's own `.py` if that's how you started, otherwise
 `-m flograph`. If a project is open it can be baked into the shortcut, so
 double-clicking opens flograph with that flow loaded.
 
-**File > Open Example** ships twenty worked projects — filter-and-visualise, an
+**File > Open Example** ships twenty-one worked projects — filter-and-visualise, an
 aggregate dashboard, a custom-script chart, join/group-by comparison, an
 interactive slicer dashboard, a scripted pipeline in a frame, a retail ops
 command centre, two geo/folium maps, an SVG retrofit workbench that diffs
@@ -110,7 +110,9 @@ once — time it, then set *Nodes to run at once* to 1 and time it again —
 and walkthroughs of order edges, flow variables, report pages, the Gantt
 node, which draws one project plan four times, adding a single feature per
 stage, and running a second flow while one is already running, which joins
-the first on the pool. They're the fastest way in.
+the first on the pool, and a WinDirStat-style storage treemap that lists a
+folder, splits the paths and charts every file sized by bytes. They're the
+fastest way in.
 
 ## Documentation
 

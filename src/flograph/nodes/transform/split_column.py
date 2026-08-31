@@ -5,6 +5,10 @@ does: by a delimiter (at every occurrence, or just the first / last one), by
 a fixed number of characters, or at explicit character positions. The pieces
 land in new columns beside the original, or — with *Split into* set to
 *Rows* — as extra rows with every other value repeated.
+
+*Number of columns* left at 0 makes as many columns as the widest value
+needs; set to N and every row gets exactly N (short ones padded, extra
+pieces dropped) — a stable schema for whatever comes next.
 """
 NODE = {
     "label": "Split Column",
@@ -30,7 +34,7 @@ PARAMS = [
      "default": "", "placeholder": "e.g. 3, 7"},
     {"name": "name_prefix", "type": "string", "label": "New column prefix",
      "default": "", "placeholder": "empty = <column>."},
-    {"name": "max_columns", "type": "int", "label": "Max new columns",
+    {"name": "max_columns", "type": "int", "label": "Number of columns",
      "default": 0, "min": 0, "placeholder": "0 = as many as needed"},
     {"name": "split_into", "type": "choice", "label": "Split into",
      "options": ["Columns", "Rows"], "default": "Columns"},
@@ -136,10 +140,11 @@ def run(ctx, table):
                 f"{len(work)} rows (was {len(result)})")
         return work
 
-    width = max((len(v) for v in lists), default=0)
-    cap = int(p["max_columns"])
-    if cap > 0:
-        width = min(width, cap)
+    fixed = int(p["max_columns"])
+    if fixed > 0:
+        width = fixed  # exactly this many — pad short rows, drop the overflow
+    else:
+        width = max((len(v) for v in lists), default=0)
     if width == 0:
         raise ValueError(f"nothing to split — every value in {column!r} was empty")
 

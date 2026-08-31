@@ -1,0 +1,288 @@
+{
+  "flograph_version": "0.1.10",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "n1_list",
+        "type": "flograph.io.list_files",
+        "pos": [
+          0,
+          -40
+        ],
+        "params": {
+          "folder": "",
+          "pattern": "*",
+          "recurse": true,
+          "sort": "size",
+          "newest_first": true
+        },
+        "code": null,
+        "label": "List Files"
+      },
+      {
+        "id": "n2_label",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          380,
+          -40
+        ],
+        "params": {
+          "path_column": "path",
+          "size_column": "size_bytes",
+          "strip_prefix": ""
+        },
+        "code": "\"\"\"Relative path + size tag\n\nTrims the shared root off every file's path and appends its size in MB to\nthe file name, so a treemap built by splitting the path shows a leaf like\n`window.py  (0.18 MB)` instead of just `window.py`. The root is the longest\nfolder every path has in common (the scanned folder); set **Strip this\nprefix** to override it.\n\"\"\"\nNODE = {\n    \"label\": \"Path + size label\",\n    \"category\": \"Transform\",\n    \"inputs\": [(\"table\", \"dataframe\")],\n    \"outputs\": [(\"table\", \"dataframe\")],\n}\nPARAMS = [\n    {\"name\": \"path_column\", \"type\": \"columns\", \"label\": \"Path column\",\n     \"multi\": False, \"default\": \"path\"},\n    {\"name\": \"size_column\", \"type\": \"columns\", \"label\": \"Size column\",\n     \"multi\": False, \"default\": \"size_bytes\"},\n    {\"name\": \"strip_prefix\", \"type\": \"string\", \"label\": \"Strip this prefix\",\n     \"default\": \"\", \"placeholder\": \"blank = the folders every path shares\"},\n]\n\n\ndef run(ctx, table):\n    import os\n\n    p = ctx.params\n    pc, sc = p[\"path_column\"], p[\"size_column\"]\n    for c in (pc, sc):\n        if c not in table.columns:\n            raise ValueError(f\"column {c!r} not in table\")\n    out = table.copy()\n    paths = [str(x).replace(os.sep, \"/\") for x in out[pc]]\n\n    prefix = p[\"strip_prefix\"].strip().replace(os.sep, \"/\")\n    if not prefix and len(paths) > 1:\n        try:\n            common = os.path.commonpath(paths)\n        except ValueError:\n            common = \"\"\n        if common and common not in (\".\", \"/\"):\n            prefix = common\n    if prefix and not prefix.endswith(\"/\"):\n        prefix += \"/\"\n\n    def relabel(path, size):\n        if prefix and path.startswith(prefix):\n            path = path[len(prefix):]\n        if path.startswith(\"./\"):\n            path = path[2:]\n        mb = float(size) / (1024 * 1024)\n        head, base = path.rsplit(\"/\", 1) if \"/\" in path else (\"\", path)\n        base = f\"{base}  ({mb:,.2f} MB)\"\n        return f\"{head}/{base}\" if head else base\n\n    out[pc] = [relabel(pp, ss) for pp, ss in zip(paths, out[sc])]\n    ctx.log(f\"tagged {len(out)} file name(s); trimmed prefix {prefix or '(none)'!r}\")\n    return {\"table\": out}\n",
+        "label": "Path + size label"
+      },
+      {
+        "id": "n2b_units",
+        "type": "flograph.transform.expression",
+        "pos": [
+          760,
+          -40
+        ],
+        "params": {
+          "expressions": "size_mb = size_bytes / 1048576\nsize_gb = size_bytes / 1073741824"
+        },
+        "code": null,
+        "label": "Bytes -> MB / GB"
+      },
+      {
+        "id": "n3_split",
+        "type": "flograph.transform.split_column",
+        "pos": [
+          1140,
+          -40
+        ],
+        "params": {
+          "column": "path",
+          "split_by": "Delimiter",
+          "delimiter": "/",
+          "split_at": "Each occurrence",
+          "split_into": "Columns",
+          "name_prefix": "L",
+          "max_columns": 8,
+          "keep_original": false
+        },
+        "code": null,
+        "label": "Split path -> L1..L8"
+      },
+      {
+        "id": "n5_tree",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          1520,
+          -320
+        ],
+        "params": {
+          "kind": "treemap",
+          "path": "L1, L2, L3, L4, L5, L6, L7, L8",
+          "values": "size_bytes",
+          "color": "size_bytes",
+          "color_continuous_scale": "Blues",
+          "width": 900,
+          "height": 620
+        },
+        "code": null,
+        "label": "Storage treemap"
+      },
+      {
+        "id": "n6_total",
+        "type": "flograph.viz.card",
+        "pos": [
+          1520,
+          460
+        ],
+        "params": {
+          "column": "size_mb",
+          "aggregation": "Sum",
+          "label": "Total size (MB)",
+          "format": ",.1f",
+          "width": 280,
+          "height": 140
+        },
+        "code": null,
+        "label": "Total size"
+      },
+      {
+        "id": "n7_count",
+        "type": "flograph.viz.card",
+        "pos": [
+          1840,
+          460
+        ],
+        "params": {
+          "column": "size_bytes",
+          "aggregation": "Count",
+          "label": "Files",
+          "format": ",.0f",
+          "width": 280,
+          "height": 140
+        },
+        "code": null,
+        "label": "File count"
+      },
+      {
+        "id": "note1",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -600
+        ],
+        "code": null,
+        "label": null,
+        "params": {
+          "text": "## WinDirStat-style storage treemap\n\nSet **List Files > Folder** to any directory, then Run.\n\n**List Files** (recursive) lists every file with `size_bytes` -> **Path + size label** trims the shared root off `path` and appends ` (N MB)` to each file name -> **Expression** adds `size_mb` and `size_gb` columns -> **Split Column** cuts `path` on `/` into `L1..L8` (short paths pad with blanks, which the treemap ignores) -> **Show Plotly** `treemap`, hierarchy `L1..L8`, size + colour = `size_bytes`.\n\nFolders deeper than 8 aggregate at level 8 -- raise **Split Column > Number of columns** and extend the treemap Hierarchy to go deeper.",
+          "width": 1200,
+          "height": 260
+        }
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1",
+        "src": [
+          "n1_list",
+          "files"
+        ],
+        "dst": [
+          "n2_label",
+          "table"
+        ]
+      },
+      {
+        "id": "c2",
+        "src": [
+          "n2_label",
+          "table"
+        ],
+        "dst": [
+          "n2b_units",
+          "table"
+        ]
+      },
+      {
+        "id": "c3",
+        "src": [
+          "n2b_units",
+          "table"
+        ],
+        "dst": [
+          "n3_split",
+          "table"
+        ]
+      },
+      {
+        "id": "c4",
+        "src": [
+          "n3_split",
+          "table"
+        ],
+        "dst": [
+          "n5_tree",
+          "table"
+        ]
+      },
+      {
+        "id": "c5",
+        "src": [
+          "n3_split",
+          "table"
+        ],
+        "dst": [
+          "n6_total",
+          "table"
+        ]
+      },
+      {
+        "id": "c6",
+        "src": [
+          "n3_split",
+          "table"
+        ],
+        "dst": [
+          "n7_count",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f1",
+        "title": "Scan & shape",
+        "rect": [
+          -60,
+          -160,
+          1380,
+          380
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "f2",
+        "title": "Treemap",
+        "rect": [
+          1440,
+          -420,
+          1060,
+          800
+        ],
+        "color": "#3a5a40"
+      },
+      {
+        "id": "f3",
+        "title": "Totals",
+        "rect": [
+          1440,
+          400,
+          1060,
+          260
+        ],
+        "color": "#4a4a2a"
+      }
+    ],
+    "pages": [
+      {
+        "id": "p1",
+        "title": "Storage",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t1",
+            "node": "n5_tree",
+            "port": "figure",
+            "rect": [
+              40,
+              40,
+              940,
+              620
+            ]
+          },
+          {
+            "id": "t2",
+            "node": "n6_total",
+            "port": "value",
+            "rect": [
+              1020,
+              40,
+              280,
+              180
+            ]
+          },
+          {
+            "id": "t3",
+            "node": "n7_count",
+            "port": "value",
+            "rect": [
+              1020,
+              260,
+              280,
+              180
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -59,11 +59,12 @@ class TestBundledExamples:
             "18_pdf_documents.flograph",
             "19_pdf_page_turner.flograph",
             "20_plotly_chart_gallery.flograph",
+            "21_storage_treemap.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 20
+        assert len(window._examples_menu.actions()) == 21
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -81,8 +82,8 @@ class TestBundledExamples:
         "15_report_page.flograph",
         "17_run_while_running.flograph",
         "20_plotly_chart_gallery.flograph",
-        # 13, 18 and 19 write files, so they run in a tmp_path of their own
-        # below
+        # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
+        # own below
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))
@@ -1648,3 +1649,62 @@ class TestPdfPageTurner:
         assert page.kind == "dashboard"
         assert [t.node_id for t in page.tiles.values()] == [
             "t19_kpi", "t19_viewer", "t19_single"]
+
+
+class TestStorageTreemap:
+    """21_storage_treemap: List Files -> label -> Expression -> Split Column
+    -> Plotly treemap, the WinDirStat story. List Files opens with no folder
+    set; the test points it at a tree it lays down in tmp_path."""
+
+    @staticmethod
+    def _make_tree(tmp_path):
+        tree = {
+            "app/main.py": 42_000,
+            "app/ui/window.py": 180_000,
+            "app/ui/icons/raster/splash.png": 120_000,
+            "app/core/engine.py": 95_000,
+            "assets/hero.jpg": 880_000,
+            "build/bundle.js.map": 2_400_000,
+            "README.md": 4_000,
+        }
+        for rel, size in tree.items():
+            f = tmp_path / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(b"x" * size)
+        return tree
+
+    def test_it_charts_a_folder_as_a_treemap(self, qtbot, window, tmp_path):
+        self._make_tree(tmp_path)
+        window._open_example(template_path("21_storage_treemap.flograph"))
+        assert not any(n.spec.broken for n in window.graph.nodes.values())
+        window.graph.set_param("n1_list", "folder", str(tmp_path))
+
+        assert wait_run(qtbot, window.engine)
+        for node in window.graph.nodes.values():
+            assert node.status == NodeStatus.DONE, node.status_message
+
+        split = window.engine.cache.outputs_for("n3_split")["table"]
+        # bytes converted to MB and GB columns, kept alongside size_bytes
+        assert {"size_bytes", "size_mb", "size_gb"} <= set(split.columns)
+        row = split.iloc[0]
+        assert row["size_mb"] == pytest.approx(row["size_bytes"] / 1048576)
+        assert row["size_gb"] == pytest.approx(row["size_bytes"] / 1073741824)
+        # the shared root is trimmed, the path split into a fixed L1..L8, and
+        # the leaf name carries its size
+        assert [f"L{i}" for i in range(1, 9)] == [
+            c for c in split.columns if c.startswith("L")]
+        splash = split.loc[split["L1"] == "app"]
+        splash = splash.loc[splash["L5"].fillna("").str.startswith("splash.png")]
+        assert len(splash) == 1
+        assert "MB)" in splash.iloc[0]["L5"]
+
+        fig = window.engine.cache.outputs_for("n5_tree")["figure"]
+        assert fig.data[0].type == "treemap"
+
+    def test_the_dashboard_pairs_the_treemap_with_totals(
+            self, qtbot, window):
+        window._open_example(template_path("21_storage_treemap.flograph"))
+        page = next(iter(window.graph.pages.values()))
+        assert page.kind == "dashboard"
+        assert [t.node_id for t in page.tiles.values()] == [
+            "n5_tree", "n6_total", "n7_count"]

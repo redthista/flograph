@@ -302,6 +302,15 @@ class TestEtlNodes:
                         "positions": "1, 4"}, table=df)
         assert out.iloc[0].tolist() == ["A", "BCD", "EFG"]
 
+    def test_split_column_fixed_width_pads_and_truncates(self, registry):
+        df = pd.DataFrame({"p": ["a/b/c/d", "x", "m/n"]})
+        out = run_node(registry, "flograph.transform.split_column",
+                       {"column": "p", "delimiter": "/", "max_columns": 3}, table=df)
+        assert list(out.columns) == ["p.1", "p.2", "p.3"]
+        assert out["p.1"].tolist() == ["a", "x", "m"]
+        assert out["p.3"].iloc[0] == "c"  # "d" dropped
+        assert out["p.3"].iloc[1:].isna().all()  # short rows padded
+
     def test_split_column_missing_column(self, registry, table):
         with pytest.raises(ValueError, match="not in table"):
             run_node(registry, "flograph.transform.split_column",
