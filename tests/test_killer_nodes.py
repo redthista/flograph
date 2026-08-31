@@ -847,3 +847,36 @@ class TestListFiles:
         auto = run_node(registry, "flograph.io.list_files", {**base, "workers": 0})
         forced = run_node(registry, "flograph.io.list_files", {**base, "workers": 4})
         assert auto["paths"] == forced["paths"]
+
+    def test_recurse_logs_a_heartbeat(self, registry, tmp_path):
+        self._dir(tmp_path)
+        out = run_node(registry, "flograph.io.list_files",
+                       {"folder": str(tmp_path), "pattern": "*", "recurse": True})
+        assert out["count"] >= 4  # sanity: it walked the subtree
+
+    @pytest.mark.parametrize("workers", [1, 4])
+    def test_cancellation_between_folders(self, registry, tmp_path, workers):
+        for i in range(40):
+            sub = tmp_path / f"d{i}" / "nested"
+            sub.mkdir(parents=True)
+            (sub / "x.csv").write_text("x")
+
+        spec = registry.get("flograph.io.list_files")
+        params = spec.default_params()
+        params.update({"folder": str(tmp_path), "pattern": "*.csv",
+                       "recurse": True, "workers": workers})
+        run = compile_run(spec.source, "test-cancel")
+
+        class Boom(Exception):
+            pass
+
+        class CancelAfter(FakeContext):
+            calls = 0
+
+            def check_cancelled(self):
+                self.calls += 1
+                if self.calls > 12:
+                    raise Boom()
+
+        with pytest.raises(Boom):
+            run(CancelAfter(params=params))
