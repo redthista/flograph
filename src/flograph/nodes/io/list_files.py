@@ -9,11 +9,19 @@ load pipeline.
 on walks subfolders). **Modified after** keeps only files changed since an
 ISO date/time — the poor-man's "new since". **Sort** and **Newest first**
 order the result; wire the `paths` output (a list) into a Loop node.
+
+Recursive scans probe the first few folders: a fast local disk is walked on
+one thread (thread hand-off would only cost more), a slow one — a network
+mount, a cold cache — fans the remaining subtree out across a thread pool so
+directories are read in parallel instead of one blocking `stat` at a time.
+**Workers** forces the pool size; 0 auto-picks per the probe.
 """
+import os
+
 NODE = {
     "label": "List Files",
     "category": "IO",
-    "version": "1.0",
+    "version": "1.1",
     "inputs": [("folder", "any", {"optional": True})],
     "outputs": [("files", "dataframe"), ("paths", "object"), ("count", "number")],
 }
@@ -30,13 +38,120 @@ PARAMS = [
      "options": ["modified", "name", "size"], "default": "modified"},
     {"name": "newest_first", "type": "bool", "label": "Newest / largest first",
      "default": True},
+    {"name": "workers", "type": "int", "label": "Workers (0 = auto)",
+     "default": 0, "min": 0, "max": 128},
 ]
+
+
+def _scan_dir(path, matcher, keep, out, subdirs):
+    """Scan one directory: append matching (path, name, stat) to *out*,
+    append child directories to *subdirs*. Never raises."""
+    try:
+        it = os.scandir(path)
+    except OSError:
+        return
+    with it:
+        for entry in it:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    subdirs.append(entry.path)
+                    continue
+                if not matcher(entry.name):
+                    continue
+                if not entry.is_file():  # follows symlinks, like os.path.isfile
+                    continue
+                st = entry.stat()
+            except OSError:
+                continue
+            if keep(st):
+                out.append((entry.path, entry.name, st))
+
+
+def _drain_parallel(pending, rows, matcher, keep, workers):
+    """Walk every directory in *pending* (and their subtrees) across a thread
+    pool, extending *rows* in place. Returns *rows*."""
+    import queue
+    import threading
+
+    dirq = queue.Queue()
+    for d in pending:
+        dirq.put(d)
+    lock = threading.Lock()
+
+    def worker():
+        while True:
+            path = dirq.get()
+            try:
+                if path is None:
+                    return
+                local, subdirs = [], []
+                _scan_dir(path, matcher, keep, local, subdirs)
+                if local:
+                    with lock:
+                        rows.extend(local)
+                for sub in subdirs:
+                    dirq.put(sub)
+            finally:
+                dirq.task_done()
+
+    threads = [threading.Thread(target=worker, daemon=True)
+               for _ in range(workers)]
+    for t in threads:
+        t.start()
+    dirq.join()
+    for _ in threads:
+        dirq.put(None)
+    for t in threads:
+        t.join()
+    return rows
+
+
+# Above this per-directory scan cost (seconds) the filesystem is latency-bound
+# and a thread pool pays off; below it, one thread is fastest.
+_SLOW_DIR_SECONDS = 5e-4
+
+
+def _walk(root, matcher, keep, workers):
+    """Recursively collect (path, name, stat) tuples under *root*. Probes the
+    first handful of directories, then stays single-threaded on a fast disk or
+    fans the rest out across *workers* threads on a slow one (workers<=0 =
+    auto)."""
+    import time
+
+    rows = []
+    pending = [root]
+    probe_time = 0.0
+    probe_n = 0
+    while pending and probe_n < 8:
+        d = pending.pop()
+        subdirs = []
+        t0 = time.perf_counter()
+        _scan_dir(d, matcher, keep, rows, subdirs)
+        probe_time += time.perf_counter() - t0
+        probe_n += 1
+        pending.extend(subdirs)
+
+    if not pending:
+        return rows
+
+    if workers <= 0:
+        slow = probe_time / probe_n > _SLOW_DIR_SECONDS
+        workers = min(32, (os.cpu_count() or 4) * 4) if slow else 1
+
+    if workers <= 1:
+        while pending:
+            subdirs = []
+            _scan_dir(pending.pop(), matcher, keep, rows, subdirs)
+            pending.extend(subdirs)
+        return rows
+
+    return _drain_parallel(pending, rows, matcher, keep, workers)
 
 
 def run(ctx, folder=None):
     import datetime as dt
     import fnmatch
-    import os
+    import re
 
     import pandas as pd
 
@@ -49,6 +164,12 @@ def run(ctx, folder=None):
         raise ValueError(f"not a folder: {root}")
 
     pattern = p.get("pattern") or "*"
+    # fnmatch.fnmatch recompiles + case-folds on every call; do it once.
+    _rx = re.compile(fnmatch.translate(os.path.normcase(pattern))).match
+
+    def matcher(name):
+        return _rx(os.path.normcase(name)) is not None
+
     after = None
     raw_after = (p.get("modified_after") or "").strip()
     if raw_after:
@@ -59,29 +180,27 @@ def run(ctx, folder=None):
                              f"{raw_after!r}")
     min_bytes = int(p.get("min_bytes", 0))
 
-    rows = []
-    walker = (os.walk(root) if p.get("recurse")
-              else [(root, [], os.listdir(root))])
-    for dirpath, _dirs, names in walker:
-        for name in names:
-            if not fnmatch.fnmatch(name, pattern):
-                continue
-            full = os.path.join(dirpath, name)
-            if not os.path.isfile(full):
-                continue
-            st = os.stat(full)
-            if st.st_size < min_bytes:
-                continue
-            if after is not None and st.st_mtime < after:
-                continue
-            rows.append({
-                "path": full,
-                "name": name,
-                "ext": os.path.splitext(name)[1].lstrip("."),
-                "size_bytes": st.st_size,
-                "modified": dt.datetime.fromtimestamp(
-                    st.st_mtime).isoformat(timespec="seconds"),
-            })
+    def keep(st):
+        if st.st_size < min_bytes:
+            return False
+        if after is not None and st.st_mtime < after:
+            return False
+        return True
+
+    if bool(p.get("recurse")):
+        found = _walk(root, matcher, keep, int(p.get("workers") or 0))
+    else:
+        found = []
+        _scan_dir(root, matcher, keep, found, [])
+
+    rows = [{
+        "path": full,
+        "name": name,
+        "ext": os.path.splitext(name)[1].lstrip("."),
+        "size_bytes": st.st_size,
+        "modified": dt.datetime.fromtimestamp(
+            st.st_mtime).isoformat(timespec="seconds"),
+    } for full, name, st in found]
 
     key = {"modified": "modified", "name": "name", "size": "size_bytes"}[p["sort"]]
     rev = bool(p.get("newest_first", True))

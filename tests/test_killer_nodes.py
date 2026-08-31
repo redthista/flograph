@@ -821,3 +821,29 @@ class TestListFiles:
         with pytest.raises(ValueError, match="not a folder"):
             run_node(registry, "flograph.io.list_files",
                      {"folder": str(tmp_path / "nope")})
+
+    def test_deep_tree_forced_workers(self, registry, tmp_path):
+        # a wide/deep tree, walked with the thread pool forced on: every
+        # matching file across every subtree must show up exactly once.
+        expected = set()
+        for d in range(12):
+            sub = tmp_path / f"d{d}" / f"n{d}"
+            sub.mkdir(parents=True)
+            for f in range(8):
+                (sub / f"f{d}_{f}.csv").write_text("x")
+                expected.add(str(sub / f"f{d}_{f}.csv"))
+                (sub / f"f{d}_{f}.txt").write_text("x")
+        out = run_node(registry, "flograph.io.list_files", {
+            "folder": str(tmp_path), "pattern": "*.csv", "recurse": True,
+            "workers": 8,
+        })
+        assert out["count"] == len(expected)
+        assert set(out["paths"]) == expected
+
+    def test_workers_zero_matches_serial(self, registry, tmp_path):
+        d = self._dir(tmp_path)
+        base = {"folder": str(d), "pattern": "*.csv", "recurse": True,
+                "sort": "name", "newest_first": False}
+        auto = run_node(registry, "flograph.io.list_files", {**base, "workers": 0})
+        forced = run_node(registry, "flograph.io.list_files", {**base, "workers": 4})
+        assert auto["paths"] == forced["paths"]
