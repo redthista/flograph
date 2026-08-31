@@ -394,27 +394,50 @@ def _source_ns(registry, type_id):
 
 
 @pytest.fixture
-def fake_anthropic(monkeypatch):
-    """Patch anthropic.Anthropic with a scripted client. `set(fn)` decides
-    what .messages.create returns given the create kwargs."""
-    import types
+def llm_server():
+    """A localhost server that answers both wire formats — Anthropic
+    (`/v1/messages`) and OpenAI (`/v1/chat/completions`). `state["reply"]`
+    maps the user message to the assistant text; `state["status"]` forces an
+    error response."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    pytest.importorskip("anthropic")
-    state = {"reply": lambda kw: "ok"}
+    state = {"reply": lambda user: "ok", "status": None, "seen": []}
 
-    class _Msgs:
-        def create(self, **kw):
-            text = state["reply"](kw)
-            return types.SimpleNamespace(
-                content=[types.SimpleNamespace(type="text", text=text)])
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
 
-    class _Client:
-        def __init__(self, **kw):
-            self.api_key = kw.get("api_key")
-            self.messages = _Msgs()
+        def _json(self, code, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
 
-    monkeypatch.setattr("anthropic.Anthropic", _Client)
-    return state
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            req = json.loads(raw or b"{}")
+            state["seen"].append({
+                "path": self.path,
+                "headers": {k.lower(): v for k, v in self.headers.items()},
+                "body": req})
+            if state["status"]:
+                self._json(state["status"], {"error": {"message": "nope"}})
+                return
+            user = req["messages"][-1]["content"]
+            text = state["reply"](user)
+            if self.path.endswith("/messages"):
+                self._json(200, {"content": [{"type": "text", "text": text}]})
+            else:
+                self._json(200, {"choices": [{"message": {"content": text}}]})
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    state["url"] = f"http://127.0.0.1:{server.server_port}"
+    yield state
+    server.shutdown()
 
 
 class TestLlmEnrich:
@@ -428,24 +451,44 @@ class TestLlmEnrich:
         assert list(out["llm_output"]) == [
             "Say hi to alpha", "Say hi to beta", "Say hi to alpha"]
 
-    def test_calls_model_and_dedupes(self, registry, fake_anthropic):
-        calls = []
-        fake_anthropic["reply"] = lambda kw: (
-            calls.append(kw["messages"][0]["content"])
-            or f"[{kw['messages'][0]['content']}]")
+    def test_calls_model_and_dedupes(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: f"[{user}]"
         out = run_node(registry, "flograph.ai.llm_enrich", {
             "prompt": "x {text}", "api_key": "sk-test", "output_column": "y",
+            "base_url": llm_server["url"],
         }, table=self._t())
         assert list(out["y"]) == ["[x alpha]", "[x beta]", "[x alpha]"]
-        assert len(calls) == 2  # 'alpha' sent once
+        assert len(llm_server["seen"]) == 2  # 'alpha' sent once
+        assert llm_server["seen"][0]["path"].endswith("/v1/messages")
+
+    def test_openai_format(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: "SUMMARY"
+        out = run_node(registry, "flograph.ai.llm_enrich", {
+            "prompt": "x {text}", "provider": "openai", "model": "gpt-4o-mini",
+            "base_url": llm_server["url"], "api_key": "sk-test",
+        }, table=self._t())
+        assert set(out["llm_output"]) == {"SUMMARY"}
+        assert llm_server["seen"][0]["path"].endswith("/v1/chat/completions")
+        assert llm_server["seen"][0]["headers"]["authorization"] == "Bearer sk-test"
+
+    def test_api_error_surfaces(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["status"] = 429
+        with pytest.raises(RuntimeError, match="429"):
+            run_node(registry, "flograph.ai.llm_enrich", {
+                "prompt": "x {text}", "base_url": llm_server["url"],
+                "api_key": "k",
+            }, table=self._t())
 
     def test_missing_column_in_template(self, registry):
         with pytest.raises(ValueError, match="not in the table"):
             run_node(registry, "flograph.ai.llm_enrich",
                      {"prompt": "{nope}", "dry_run": True}, table=self._t())
 
-    def test_no_api_key(self, registry):
-        pytest.importorskip("anthropic")
+    def test_no_api_key_anthropic(self, registry, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(ValueError, match="no API key"):
             run_node(registry, "flograph.ai.llm_enrich",
                      {"prompt": "hi {text}"}, table=self._t())
@@ -455,20 +498,22 @@ class TestLlmClassify:
     def _t(self):
         return pd.DataFrame({"body": ["love it", "hate it", "love it"]})
 
-    def test_classifies(self, registry, fake_anthropic):
-        fake_anthropic["reply"] = lambda kw: (
-            "positive" if "love" in kw["messages"][0]["content"] else "negative")
+    def test_classifies(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: (
+            "positive" if "love" in user else "negative")
         out = run_node(registry, "flograph.ai.llm_classify", {
             "text_column": "body", "labels": "positive | negative",
-            "api_key": "sk-test",
+            "api_key": "sk-test", "base_url": llm_server["url"],
         }, table=self._t())
         assert list(out["label"]) == ["positive", "negative", "positive"]
 
-    def test_constrains_to_label_set(self, registry, fake_anthropic):
-        fake_anthropic["reply"] = lambda kw: "I think it is quite POSITIVE overall"
+    def test_constrains_to_label_set(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: "I think it is quite POSITIVE overall"
         out = run_node(registry, "flograph.ai.llm_classify", {
             "text_column": "body", "labels": "positive | negative",
-            "api_key": "sk-test",
+            "api_key": "sk-test", "base_url": llm_server["url"],
         }, table=self._t())
         assert set(out["label"]) == {"positive"}
 
@@ -488,17 +533,27 @@ class TestLlmExtract:
     def _t(self):
         return pd.DataFrame({"blurb": ["ACME pays 50k", "no info"]})
 
-    def test_extracts_fields(self, registry, fake_anthropic):
-        fake_anthropic["reply"] = lambda kw: (
-            '{"company": "ACME", "pay": 50000}'
-            if "ACME" in kw["messages"][0]["content"]
+    def test_extracts_fields(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: (
+            '{"company": "ACME", "pay": 50000}' if "ACME" in user
             else '{"company": null, "pay": null}')
         out = run_node(registry, "flograph.ai.llm_extract", {
             "text_column": "blurb", "fields": "company: name\npay: salary",
-            "api_key": "sk-test", "prefix": "x_",
+            "api_key": "sk-test", "prefix": "x_", "base_url": llm_server["url"],
         }, table=self._t())
         assert out["x_company"].iloc[0] == "ACME" and pd.isna(out["x_company"].iloc[1])
         assert out["x_pay"].iloc[0] == 50000 and pd.isna(out["x_pay"].iloc[1])
+
+    def test_endpoint_helper(self, registry):
+        ns = _source_ns(registry, "flograph.ai.llm_enrich")
+        # _llm is imported lazily inside run(); exercise it directly
+        from flograph.nodes.ai import _llm
+        assert _llm.endpoint("anthropic", "") == "https://api.anthropic.com/v1/messages"
+        assert _llm.endpoint("openai", "") == "https://api.openai.com/v1/chat/completions"
+        assert _llm.endpoint("openai", "http://localhost:11434/v1") == \
+            "http://localhost:11434/v1/chat/completions"
+        assert ns  # source compiled
 
     def test_parse_json_helper(self, registry):
         _pj = _source_ns(registry, "flograph.ai.llm_extract")["_parse_json"]

@@ -472,7 +472,7 @@ footer .wrap > p { max-width: var(--prose); }
     <div class="tablewrap"><table>
       <thead><tr><th>Node</th><th>Does</th><th></th></tr></thead>
       <tbody>
-        <tr><td>LLM Enrich / Classify / Extract</td><td>Row-wise Claude calls: prompt&rarr;column, constrained labels, JSON fields</td><td><span class="tag ship">shipped</span></td></tr>
+        <tr><td>LLM Enrich / Classify / Extract</td><td>Row-wise LLM calls (Anthropic <em>or</em> OpenAI format, any base URL): prompt&rarr;column, constrained labels, JSON fields</td><td><span class="tag ship">shipped</span></td></tr>
         <tr><td>Embed Text</td><td>Column &rarr; vector column (local model or API); feeds the two below</td><td><span class="tag p0">P0</span></td></tr>
         <tr><td>Semantic Dedupe / Cluster</td><td>Group near-duplicate records by meaning, not edit distance</td><td><span class="tag p1">P1</span></td></tr>
         <tr><td>Semantic Join / RAG Retrieve</td><td>Join two tables on meaning; or pull the top-k context rows for a query</td><td><span class="tag p1">P1</span></td></tr>
@@ -662,8 +662,8 @@ footer .wrap > p { max-width: var(--prose); }
 
     <h3>Notes for review</h3>
     <ul class="clean">
-      <li><strong>Deps.</strong> New optional extras in <code>pyproject.toml</code>: <code>sql</code>, <code>duckdb</code>, <code>http</code>, <code>fuzzy</code>, <code>scrape</code>; <code>anthropic</code> added to <code>ai</code>. Core stays <code>PySide6 + pandas + jedi + psutil</code>.</li>
-      <li><strong>LLM nodes</strong> default the key to <code>${env:ANTHROPIC_API_KEY}</code> and have a <em>Preview (no API call)</em> mode. Classify defaults to Claude Haiku, Enrich/Extract to Sonnet — a per-row batch node should not silently default to the most expensive model.</li>
+      <li><strong>Deps.</strong> New optional extras in <code>pyproject.toml</code>: <code>sql</code>, <code>duckdb</code>, <code>http</code>, <code>fuzzy</code>, <code>scrape</code>; <code>ai</code> is now <code>requests</code> + <code>httpx</code> (no vendor SDK). Core stays <code>PySide6 + pandas + jedi + psutil</code>.</li>
+      <li><strong>LLM nodes</strong> take an <code>anthropic</code> / <code>openai</code> <em>API format</em> plus a base URL and a free-text model — the hosted APIs, Azure, a local Ollama / vLLM server, or a gateway all work. Key from the node field or <code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code> in <code>.env</code>; a local server needs none. Each has a <em>Preview (no API call)</em> mode.</li>
       <li><strong>Not done</strong> (waiting on your test + sign-off): <code>node_ideas.md</code> / <code>ideas.md</code> entries left untouched; CHANGELOG rows added but adjust freely.</li>
       <li><strong>Env caveat.</strong> The scratch venv setup briefly installed a few of these deps into the main checkout's <code>.venv</code> as well — harmless additions, no removals. A separate pre-existing test (<code>test_gantt_node</code>) breaks under Plotly 7 vs the locked 6.x; unrelated to this work.</li>
     </ul>

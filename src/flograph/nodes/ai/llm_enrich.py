@@ -10,19 +10,23 @@ The prompt is a template — `{column}` is replaced with that row's value:
 Good for summarising, rewriting, translating, drafting, tagging free text —
 the "I'd write a loop and call an API" jobs, as one node.
 
+**API format** picks the wire protocol — `anthropic` or `openai` — and
+**Base URL** points it anywhere that speaks one of them: the hosted APIs,
+Azure OpenAI, a local Ollama / vLLM / LM Studio server, an OpenRouter or
+LiteLLM gateway. **Model** is free text (`claude-sonnet-5`, `gpt-4o-mini`,
+`llama3.1`, …). Leave **API key** blank to pick up `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` from the environment, type one in, or use a `${env:NAME}`
+project secret; a local server needs none.
+
 Identical prompts are sent once and the answer reused, so enriching a column
 with 10k rows and 40 distinct values costs 40 calls. Rows run **Concurrency**
 at a time. **Preview (no API call)** fills the column with the rendered
-prompt instead of calling the model — use it to check the template before
-spending anything.
-
-Put the key in a `.env` file: the default **API key** is
-`${env:ANTHROPIC_API_KEY}`. Needs the `anthropic` package.
+prompt so you can check the template before spending anything. Needs `httpx`.
 """
 NODE = {
     "label": "LLM Enrich",
     "category": "AI",
-    "version": "1.0",
+    "version": "2.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }
@@ -33,9 +37,17 @@ PARAMS = [
      "default": "", "placeholder": "optional — sets the model's role/voice"},
     {"name": "output_column", "type": "string", "label": "Output column",
      "default": "llm_output"},
-    {"name": "model", "type": "choice", "label": "Model",
-     "options": ["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"],
-     "default": "claude-sonnet-5"},
+    {"name": "provider", "type": "choice", "label": "API format",
+     "options": ["anthropic", "openai"], "default": "anthropic"},
+    {"name": "model", "type": "string", "label": "Model",
+     "default": "claude-sonnet-5",
+     "placeholder": "claude-sonnet-5 / gpt-4o-mini / llama3.1 …"},
+    {"name": "base_url", "type": "string", "label": "Base URL",
+     "default": "",
+     "placeholder": "blank = provider default; e.g. http://localhost:11434/v1"},
+    {"name": "api_key", "type": "password", "label": "API key",
+     "default": "",
+     "placeholder": "blank = the provider's env var; ${env:NAME} for a project secret; unset for a local server"},
     {"name": "max_tokens", "type": "int", "label": "Max tokens",
      "default": 512, "min": 1, "max": 8192},
     {"name": "concurrency", "type": "int", "label": "Concurrency",
@@ -44,8 +56,6 @@ PARAMS = [
      "options": ["fail", "blank"], "default": "fail"},
     {"name": "dry_run", "type": "bool", "label": "Preview (no API call)",
      "default": False},
-    {"name": "api_key", "type": "password", "label": "API key",
-     "default": "${env:ANTHROPIC_API_KEY}"},
 ]
 
 
@@ -61,57 +71,44 @@ def _render(template, row):
                                 for k, v in row.items()})
 
 
-def _client(api_key):
-    import anthropic
-
-    key = (api_key or "").strip()
-    if not key or key.startswith("${"):
-        raise ValueError(
-            "no API key — set 'API key' (or put ANTHROPIC_API_KEY in the "
-            "project's .env file and use ${env:ANTHROPIC_API_KEY})")
-    return anthropic.Anthropic(api_key=key)
-
-
-def _complete(client, model, system, prompt, max_tokens):
-    kwargs = {"model": model, "max_tokens": max_tokens,
-              "messages": [{"role": "user", "content": prompt}]}
-    if system.strip():
-        kwargs["system"] = system
-    resp = client.messages.create(**kwargs)
-    return "".join(b.text for b in resp.content if b.type == "text").strip()
-
-
 def run(ctx, table):
     from concurrent.futures import ThreadPoolExecutor
+
+    from flograph.nodes.ai import _llm
 
     p = ctx.params
     template = (p.get("prompt") or "").strip()
     if not template:
         raise ValueError("no prompt — set 'Prompt template'")
     out_col = (p.get("output_column") or "llm_output").strip()
-    dry = bool(p.get("dry_run"))
 
     rows = table.to_dict("records")
     prompts = [_render(template, r) for r in rows]
 
-    if dry:
+    if bool(p.get("dry_run")):
         result = table.copy(deep=False)
         result[out_col] = prompts
         ctx.log(f"preview: rendered {len(prompts)} prompts, no API call")
         return result
 
-    unique = list(dict.fromkeys(prompts))
-    client = _client(p.get("api_key"))
-    model = p["model"]
+    provider = p.get("provider", "anthropic")
+    key = _llm.resolve_key(provider, p.get("api_key"))
+    base = p.get("base_url") or ""
+    model = (p.get("model") or "").strip()
+    if not model:
+        raise ValueError("no model — set 'Model'")
     system = p.get("system") or ""
     max_tokens = int(p.get("max_tokens", 512))
     on_error = p.get("on_error", "fail")
+
+    unique = list(dict.fromkeys(prompts))
     answers = {}
     done = [0]
 
     def one(prompt):
         try:
-            return prompt, _complete(client, model, system, prompt, max_tokens)
+            return prompt, _llm.chat(provider, base, key, model, system,
+                                     prompt, max_tokens, 120.0)
         except Exception as exc:  # noqa: BLE001 - surfaced per on_error
             if on_error == "fail":
                 raise
@@ -127,6 +124,6 @@ def run(ctx, table):
 
     result = table.copy(deep=False)
     result[out_col] = [answers.get(pr) for pr in prompts]
-    ctx.log(f"enriched {len(rows)} rows with {len(unique)} model call(s) "
+    ctx.log(f"enriched {len(rows)} rows with {len(unique)} {provider} call(s) "
             f"→ column {out_col!r}")
     return result

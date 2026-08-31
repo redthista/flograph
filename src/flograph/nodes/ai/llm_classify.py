@@ -8,17 +8,20 @@ set you defined (nothing invented).
     Labels:       positive | neutral | negative
     Instruction:  Judge the sentiment about the product, ignore shipping.
 
-Defaults to Claude Haiku — classification is the kind of short, high-volume
-call it's built for. Identical inputs are classified once. **Multi-label**
-allows several labels per row (returned comma-joined); **Allow "other"** lets
-a row fall outside the set instead of being forced.
+**API format** (`anthropic` / `openai`) plus **Base URL** and **Model** point
+this at any endpoint that speaks one of those protocols — the hosted APIs,
+Azure, a local Ollama / vLLM server, a gateway. Leave **API key** blank to
+use `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from the environment, or type one
+in / use `${env:NAME}`.
 
-Key: `${env:ANTHROPIC_API_KEY}` by default. Needs the `anthropic` package.
+Identical inputs are classified once. **Multi-label** allows several labels
+per row (comma-joined); **Allow "other"** lets a row fall outside the set.
+Needs `httpx`.
 """
 NODE = {
     "label": "LLM Classify",
     "category": "AI",
-    "version": "1.0",
+    "version": "2.0",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }
@@ -35,34 +38,29 @@ PARAMS = [
      "default": False},
     {"name": "allow_other", "type": "bool", "label": 'Allow "other"',
      "default": False},
-    {"name": "model", "type": "choice", "label": "Model",
-     "options": ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"],
-     "default": "claude-haiku-4-5"},
+    {"name": "provider", "type": "choice", "label": "API format",
+     "options": ["anthropic", "openai"], "default": "anthropic"},
+    {"name": "model", "type": "string", "label": "Model",
+     "default": "claude-haiku-4-5",
+     "placeholder": "claude-haiku-4-5 / gpt-4o-mini / llama3.1 …"},
+    {"name": "base_url", "type": "string", "label": "Base URL",
+     "default": "",
+     "placeholder": "blank = provider default; e.g. http://localhost:11434/v1"},
+    {"name": "api_key", "type": "password", "label": "API key",
+     "default": "",
+     "placeholder": "blank = the provider's env var; ${env:NAME} for a project secret; unset for a local server"},
     {"name": "concurrency", "type": "int", "label": "Concurrency",
      "default": 8, "min": 1, "max": 32},
     {"name": "on_error", "type": "choice", "label": "On row error",
      "options": ["fail", "blank"], "default": "fail"},
     {"name": "dry_run", "type": "bool", "label": "Preview (no API call)",
      "default": False},
-    {"name": "api_key", "type": "password", "label": "API key",
-     "default": "${env:ANTHROPIC_API_KEY}"},
 ]
 
 
 def _labels(raw):
     parts = [p.strip() for p in (raw or "").replace(",", "|").split("|")]
     return [p for p in parts if p]
-
-
-def _client(api_key):
-    import anthropic
-
-    key = (api_key or "").strip()
-    if not key or key.startswith("${"):
-        raise ValueError(
-            "no API key — set 'API key' (or ANTHROPIC_API_KEY in the "
-            "project's .env and use ${env:ANTHROPIC_API_KEY})")
-    return anthropic.Anthropic(api_key=key)
 
 
 def _match(answer, labels, multi, allow_other):
@@ -80,6 +78,8 @@ def _match(answer, labels, multi, allow_other):
 
 def run(ctx, table):
     from concurrent.futures import ThreadPoolExecutor
+
+    from flograph.nodes.ai import _llm
 
     p = ctx.params
     col = (p.get("text_column") or "").strip()
@@ -107,26 +107,28 @@ def run(ctx, table):
         + (f"\n\nHow to decide: {instruction}" if instruction else "")
     )
 
-    if p.get("dry_run"):
+    if bool(p.get("dry_run")):
         result = table.copy(deep=False)
         result[out_col] = [f"[preview] would classify: {t[:40]}" for t in texts]
         ctx.log("preview: no API call")
         return result
 
-    unique = list(dict.fromkeys(texts))
-    client = _client(p.get("api_key"))
-    model = p["model"]
+    provider = p.get("provider", "anthropic")
+    key = _llm.resolve_key(provider, p.get("api_key"))
+    base = p.get("base_url") or ""
+    model = (p.get("model") or "").strip()
+    if not model:
+        raise ValueError("no model — set 'Model'")
     on_error = p.get("on_error", "fail")
+
+    unique = list(dict.fromkeys(texts))
     answers = {}
     done = [0]
 
     def one(text):
         try:
-            resp = client.messages.create(
-                model=model, max_tokens=32, system=system,
-                messages=[{"role": "user", "content": text or "(empty)"}])
-            raw = "".join(b.text for b in resp.content
-                          if b.type == "text").strip()
+            raw = _llm.chat(provider, base, key, model, system,
+                            text or "(empty)", 64, 60.0)
             return text, _match(raw, labels, multi, allow_other)
         except Exception as exc:  # noqa: BLE001
             if on_error == "fail":
@@ -144,5 +146,5 @@ def run(ctx, table):
     result = table.copy(deep=False)
     result[out_col] = [answers.get(t) for t in texts]
     ctx.log(f"classified {len(texts)} rows into {len(labels)} label(s) with "
-            f"{len(unique)} call(s)")
+            f"{len(unique)} {provider} call(s)")
     return result
