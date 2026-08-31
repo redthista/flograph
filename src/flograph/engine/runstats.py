@@ -194,6 +194,118 @@ class RunRecord:
                       reverse=True)[:limit]
 
 
+@dataclass
+class NodePair:
+    """One node across two runs — either side may be missing.
+
+    `after` is the run under the picker; `before` is the baseline it is
+    being read against. A node that only ran in one of them is still a pair,
+    with the other side ``None``: "this step is new" and "this step is gone"
+    are both things the comparison is meant to show.
+    """
+    node_id: str
+    label: str
+    after: Optional[NodeRun] = None
+    before: Optional[NodeRun] = None
+
+    @property
+    def status(self) -> str:
+        if self.after is not None and self.before is None:
+            return "added"
+        if self.before is not None and self.after is None:
+            return "removed"
+        if self.time_delta > 5e-4:
+            return "slower"
+        if self.time_delta < -5e-4:
+            return "faster"
+        return "same"
+
+    def _pick(self, side: Optional[NodeRun], attr: str) -> float:
+        return float(getattr(side, attr)) if side is not None else 0.0
+
+    @property
+    def time_delta(self) -> float:
+        return (self._pick(self.after, "wall_time")
+                - self._pick(self.before, "wall_time"))
+
+    @property
+    def rss_delta(self) -> float:
+        return (self._pick(self.after, "rss_growth")
+                - self._pick(self.before, "rss_growth"))
+
+    @property
+    def output_delta(self) -> float:
+        return (self._pick(self.after, "output_bytes")
+                - self._pick(self.before, "output_bytes"))
+
+    @property
+    def outcome_changed(self) -> bool:
+        return (self.after is not None and self.before is not None
+                and self.after.outcome != self.before.outcome)
+
+
+class RunComparison:
+    """Two runs, paired node by node.
+
+    Nodes are matched on their id, positionally where an id occurs more than
+    once in a run (a node that ran twice pairs with the other run's first
+    and second turn in order). Everything else is arithmetic over the pairs
+    and over the two RunRecords' own totals.
+    """
+
+    def __init__(self, after: RunRecord, before: RunRecord) -> None:
+        self.after = after
+        self.before = before
+        self.pairs = self._pair()
+
+    def _pair(self) -> list[NodePair]:
+        buckets: dict[str, deque] = {}
+        for node in self.before.nodes:
+            buckets.setdefault(node.node_id, deque()).append(node)
+        pairs: list[NodePair] = []
+        for node in self.after.nodes:
+            bucket = buckets.get(node.node_id)
+            other = bucket.popleft() if bucket else None
+            pairs.append(NodePair(node.node_id, node.label, node, other))
+        for node_id, bucket in buckets.items():
+            for node in bucket:
+                pairs.append(NodePair(node_id, node.label, None, node))
+        return pairs
+
+    @property
+    def wall_delta(self) -> float:
+        return self.after.wall_time - self.before.wall_time
+
+    @property
+    def node_time_delta(self) -> float:
+        return self.after.node_time - self.before.node_time
+
+    @property
+    def peak_growth_delta(self) -> float:
+        return float(self.after.peak_growth - self.before.peak_growth)
+
+    @property
+    def added(self) -> list[NodePair]:
+        return [p for p in self.pairs if p.status == "added"]
+
+    @property
+    def removed(self) -> list[NodePair]:
+        return [p for p in self.pairs if p.status == "removed"]
+
+    @property
+    def axis_span(self) -> float:
+        """Longest single node time on either side — the scale a duration
+        bar chart of the pairs shares."""
+        times = [p._pick(p.after, "wall_time") for p in self.pairs]
+        times += [p._pick(p.before, "wall_time") for p in self.pairs]
+        return max([*times, 1e-6])
+
+    def movers(self) -> list[NodePair]:
+        """Pairs ordered by how much their time moved, biggest first —
+        added and removed nodes sort by their one-sided time."""
+        return sorted(self.pairs, key=lambda p: abs(p.time_delta), reverse=True)
+
+
 class RunHistory:
     """The last few runs, newest last. Session-only and bounded."""
 

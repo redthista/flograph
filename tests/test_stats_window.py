@@ -370,6 +370,110 @@ class TestRunTab:
         tab._reveal_node(None)                # nor a cell somehow without one
 
 
+class TestRunTabCompare:
+    def _two_runs(self, engine):
+        engine.history.add(RunRecord(wall_time=2.0, nodes=[
+            NodeRun("a", "Read CSV", "ok", wall_time=1.0, output_bytes=100),
+            NodeRun("c", "Old export", "ok", wall_time=0.4)]))
+        engine.history.add(RunRecord(wall_time=5.0, nodes=[
+            NodeRun("a", "Read CSV", "ok", wall_time=4.0, output_bytes=300),
+            NodeRun("b", "New tidy", "ok", wall_time=0.6)]))
+
+    def _tab(self, qtbot):
+        engine = ExecutionEngine(Graph())
+        self._two_runs(engine)
+        tab = RunTab(engine)
+        qtbot.addWidget(tab)
+        tab.show()
+        tab.refresh()
+        return tab
+
+    def test_the_baseline_picker_is_hidden_until_compare_is_ticked(self, qtbot):
+        tab = self._tab(qtbot)
+        assert not tab.baseline_picker.isVisible()
+        tab.compare_check.setChecked(True)
+        assert tab.baseline_picker.isVisible()
+        assert tab.baseline_picker.currentIndex() == 1      # the run before latest
+
+    def test_the_table_switches_to_delta_columns(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        headers = [tab.table.horizontalHeaderItem(i).text()
+                   for i in range(tab.table.columnCount())]
+        assert headers == list(RunTab.COMPARE_COLUMNS)
+
+    def test_rows_cover_every_node_from_either_run(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        labels = {tab.table.item(r, 0).text()
+                  for r in range(tab.table.rowCount())}
+        assert labels == {"Read CSV", "New tidy", "Old export"}
+
+    def test_a_node_only_in_one_run_is_flagged(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        by_label = {tab.table.item(r, 0).text(): tab.table.item(r, 1).text()
+                    for r in range(tab.table.rowCount())}
+        assert by_label["New tidy"] == "new"
+        assert by_label["Old export"] == "gone"
+
+    def test_the_delta_column_reads_after_minus_before(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        row = next(r for r in range(tab.table.rowCount())
+                   if tab.table.item(r, 0).text() == "Read CSV")
+        assert tab.table.item(row, 3).text() == "+3.0 s"
+
+    def test_the_slowest_mover_is_the_first_row(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        assert tab.table.item(0, 0).text() == "Read CSV"
+
+    def test_the_summary_reports_the_wall_time_change(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        text = tab.summary.text()
+        assert "+3.0 s" in text and "1 new" in text and "1 gone" in text
+
+    def test_the_timeline_draws_in_compare_mode(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        tab.timeline.resize(500, 200)
+        assert tab.timeline._comparison is not None
+        assert ink(tab.timeline) > 200
+
+    def test_picking_the_same_run_on_both_sides_asks_for_two(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        tab.baseline_picker.setCurrentIndex(tab.picker.currentIndex())
+        assert "two different runs" in tab.summary.text()
+        assert tab.table.rowCount() == 0
+
+    def test_unticking_compare_returns_to_the_single_run_view(self, qtbot):
+        tab = self._tab(qtbot)
+        tab.compare_check.setChecked(True)
+        tab.compare_check.setChecked(False)
+        headers = [tab.table.horizontalHeaderItem(i).text()
+                   for i in range(tab.table.columnCount())]
+        assert headers == list(RunTab.COLUMNS)
+        assert tab.table.rowCount() == 2          # the latest run's nodes
+        assert tab.timeline._comparison is None
+
+    def test_clicking_a_compared_row_still_jumps_to_the_node(self, qtbot):
+        revealed = []
+        engine = ExecutionEngine(Graph())
+        self._two_runs(engine)
+        tab = RunTab(engine, revealed.append)
+        qtbot.addWidget(tab)
+        tab.show()
+        tab.refresh()
+        tab.compare_check.setChecked(True)
+        row = next(r for r in range(tab.table.rowCount())
+                   if tab.table.item(r, 0).text() == "Read CSV")
+        tab.table.cellClicked.emit(row, 3)
+        assert revealed == ["a"]
+
+
 class TestGraphTab:
     def test_counts_an_empty_project(self, qtbot):
         tab = GraphTab(ExecutionEngine(Graph()))

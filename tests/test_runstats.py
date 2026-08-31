@@ -10,7 +10,8 @@ import time
 import pytest
 
 from flograph.core import Graph, NodeRegistry
-from flograph.engine.runstats import (HISTORY_LIMIT, NodeRun, ProcessSampler,
+from flograph.engine.runstats import (HISTORY_LIMIT, NodePair, NodeRun,
+                                      ProcessSampler, RunComparison,
                                       RunHistory, RunRecord)
 from flograph.engine.scheduler import ExecutionEngine, skipped_summary
 
@@ -95,6 +96,67 @@ class TestRecordArithmetic:
                                   NodeRun("b", "B", outcome="failed"),
                                   NodeRun("c", "C", outcome="cancelled")])
         assert [n.label for n in record.failed] == ["B"]
+
+
+class TestRunComparison:
+    def _after(self):
+        return RunRecord(wall_time=5.0, rss_start=0, rss_peak=3000, nodes=[
+            NodeRun("a", "Read", "ok", wall_time=4.0, output_bytes=200,
+                    rss_start=0, rss_peak=1000),
+            NodeRun("b", "Tidy", "ok", wall_time=1.0, output_bytes=50),
+            NodeRun("d", "New step", "ok", wall_time=0.5),
+        ])
+
+    def _before(self):
+        return RunRecord(wall_time=3.0, rss_start=0, rss_peak=1000, nodes=[
+            NodeRun("a", "Read", "ok", wall_time=2.0, output_bytes=200,
+                    rss_start=0, rss_peak=400),
+            NodeRun("b", "Tidy", "failed", wall_time=1.0, output_bytes=50),
+            NodeRun("c", "Old step", "ok", wall_time=0.7),
+        ])
+
+    def test_pairs_matched_nodes_and_flags_the_odd_ones_out(self):
+        comp = RunComparison(self._after(), self._before())
+        by_id = {p.node_id: p.status for p in comp.pairs}
+        assert by_id == {"a": "slower", "b": "same", "d": "added", "c": "removed"}
+
+    def test_deltas_are_after_minus_before(self):
+        comp = RunComparison(self._after(), self._before())
+        read = next(p for p in comp.pairs if p.node_id == "a")
+        assert read.time_delta == 2.0
+        assert read.rss_delta == 600.0
+        assert comp.wall_delta == 2.0
+        assert comp.peak_growth_delta == 2000.0
+
+    def test_a_one_sided_node_carries_its_whole_time_as_the_delta(self):
+        comp = RunComparison(self._after(), self._before())
+        added = next(p for p in comp.pairs if p.node_id == "d")
+        removed = next(p for p in comp.pairs if p.node_id == "c")
+        assert added.time_delta == 0.5
+        assert removed.time_delta == -0.7
+
+    def test_outcome_change_is_reported_only_when_both_sides_ran(self):
+        comp = RunComparison(self._after(), self._before())
+        tidy = next(p for p in comp.pairs if p.node_id == "b")
+        added = next(p for p in comp.pairs if p.node_id == "d")
+        assert tidy.outcome_changed is True       # failed -> ok
+        assert added.outcome_changed is False
+
+    def test_movers_are_ordered_by_absolute_time_change(self):
+        comp = RunComparison(self._after(), self._before())
+        assert [p.node_id for p in comp.movers()][0] == "a"
+
+    def test_axis_span_is_the_longest_bar_on_either_side(self):
+        comp = RunComparison(self._after(), self._before())
+        assert comp.axis_span == 4.0
+
+    def test_duplicate_ids_pair_positionally(self):
+        after = RunRecord(nodes=[NodeRun("a", "A", wall_time=1.0),
+                                 NodeRun("a", "A", wall_time=2.0)])
+        before = RunRecord(nodes=[NodeRun("a", "A", wall_time=5.0),
+                                  NodeRun("a", "A", wall_time=6.0)])
+        comp = RunComparison(after, before)
+        assert [p.time_delta for p in comp.pairs] == [-4.0, -4.0]
 
 
 class TestHistory:

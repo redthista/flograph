@@ -28,12 +28,13 @@ from typing import Callable, Optional
 import psutil
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
                                QHBoxLayout, QHeaderView, QLabel, QScrollArea,
                                QTableWidget, QTableWidgetItem, QTabWidget,
                                QVBoxLayout, QWidget)
 
-from flograph.engine.runstats import NodeRun, RunRecord
+from flograph.engine.runstats import (NodePair, NodeRun, RunComparison,
+                                      RunRecord)
 
 from . import theme
 from .resource_monitor import format_bytes, format_seconds
@@ -54,6 +55,30 @@ def _outcome_color(outcome: str) -> QColor:
     if outcome == "cancelled":
         return theme.NODE_SUBTEXT
     return theme.SELECTION_OUTLINE
+
+
+# In a comparison a rise is a regression and a fall is a win, whichever
+# quantity moved — time, memory, output size all read the same way.
+_WORSE = theme.WIRE_INVALID       # red
+_BETTER = theme.WIRE_VALID        # green
+
+
+def _delta_seconds(delta: float) -> str:
+    if abs(delta) < 5e-4:
+        return "—"
+    return ("+" if delta > 0 else "−") + format_seconds(abs(delta))
+
+
+def _delta_bytes(delta: float) -> str:
+    if abs(delta) < 1:
+        return "—"
+    return ("+" if delta > 0 else "−") + format_bytes(abs(delta))
+
+
+def _delta_color(delta: float) -> Optional[QColor]:
+    if abs(delta) < 1e-9:
+        return None
+    return _WORSE if delta > 0 else _BETTER
 
 
 class SortableItem(QTableWidgetItem):
@@ -99,15 +124,40 @@ class RunTimeline(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._record: Optional[RunRecord] = None
+        self._comparison: Optional[RunComparison] = None
         self.setMinimumHeight(ROW_H)
         # hover feedback needs moves between presses
         self.setMouseTracking(True)
 
     def set_record(self, record: Optional[RunRecord]) -> None:
         self._record = record
+        self._comparison = None
         rows = len(record.nodes) if record else 0
         self.setMinimumHeight(max(ROW_H, rows * ROW_H + 8))
         self.update()
+
+    def set_comparison(self, comparison: Optional[RunComparison]) -> None:
+        """Draw two runs, one duration bar pair per node, instead of one run.
+
+        The axis stops being wall-clock — the two runs did not start
+        together and their start offsets are not comparable — and becomes a
+        plain duration scale the pairs share, so a bar that grew is a step
+        that got slower.
+        """
+        self._comparison = comparison
+        self._record = None
+        rows = len(comparison.pairs) if comparison else 0
+        self.setMinimumHeight(max(ROW_H, rows * ROW_H + 8))
+        self.update()
+
+    def _rows(self) -> list:
+        """The things drawn one per line — NodeRuns, or NodePairs when
+        comparing. Both carry `node_id` and `label`."""
+        if self._comparison is not None:
+            return self._comparison.pairs
+        if self._record is not None:
+            return list(self._record.nodes)
+        return []
 
     def _row_geometry(self) -> Optional[tuple[float, float]]:
         """(top_pad, row_h) as painted, or None with nothing to show.
@@ -117,11 +167,11 @@ class RunTimeline(QWidget):
         get bars a centimetre thick just because the window is tall. Hit
         testing shares this so a click lands where the eye says it does.
         """
-        record = self._record
-        if record is None or not record.nodes:
+        rows = self._rows()
+        if not rows:
             return None
-        row_h = min(ROW_MAX, max(ROW_H, (self.height() - 8) / len(record.nodes)))
-        top_pad = max(4.0, (self.height() - len(record.nodes) * row_h) / 2)
+        row_h = min(ROW_MAX, max(ROW_H, (self.height() - 8) / len(rows)))
+        top_pad = max(4.0, (self.height() - len(rows) * row_h) / 2)
         return top_pad, row_h
 
     def _node_at(self, pos: QPointF) -> Optional[str]:
@@ -134,11 +184,11 @@ class RunTimeline(QWidget):
         if geo is None:
             return None
         top_pad, row_h = geo
-        nodes = self._record.nodes
+        rows = self._rows()
         row = int((pos.y() - top_pad) // row_h)
-        if not 0 <= row < len(nodes) or pos.x() > GUTTER - 8:
+        if not 0 <= row < len(rows) or pos.x() > GUTTER - 8:
             return None
-        return nodes[row].node_id
+        return rows[row].node_id
 
     def mousePressEvent(self, event) -> None:
         node_id = self._node_at(event.position())
@@ -159,6 +209,10 @@ class RunTimeline(QWidget):
         # changes legibility with the surface it is dropped on is a chart
         # waiting to become invisible.
         painter.fillRect(self.rect(), theme.CANVAS_BG)
+        if self._comparison is not None:
+            self._paint_comparison(painter)
+            painter.end()
+            return
         record = self._record
         if record is None or not record.nodes:
             painter.setPen(QPen(theme.NODE_SUBTEXT))
@@ -211,17 +265,81 @@ class RunTimeline(QWidget):
                 Qt.AlignLeft | Qt.AlignVCenter, format_seconds(node.wall_time))
         painter.end()
 
+    def _paint_comparison(self, painter: QPainter) -> None:
+        """One row per node, two stacked duration bars — the selected run on
+        top, the baseline below — on a shared duration scale, with the time
+        delta in the right margin. A node missing from one run draws only
+        the bar it has, so a gap on the top line is "this step is gone" and
+        a gap on the bottom is "this step is new"."""
+        comparison = self._comparison
+        pairs = comparison.pairs
+        if not pairs:
+            painter.setPen(QPen(theme.NODE_SUBTEXT))
+            painter.drawText(self.rect(), Qt.AlignCenter, "Nothing ran in either run")
+            return
+
+        span = comparison.axis_span
+        track_x = GUTTER
+        track_w = max(40, self.width() - GUTTER - 88)
+        top_pad, row_h = self._row_geometry()
+
+        font = painter.font()
+        small = QFont(font)
+        small.setPointSizeF(max(6.5, font.pointSizeF() - 1.5))
+        painter.setFont(small)
+        metrics = painter.fontMetrics()
+
+        sub_h = min(6.0, (row_h - 8) / 2)
+        for row, pair in enumerate(pairs):
+            y = top_pad + row * row_h
+            label = metrics.elidedText(pair.label, Qt.ElideRight, GUTTER - 12)
+            painter.setPen(QPen(theme.NODE_TEXT))
+            painter.drawText(QRectF(0, y, GUTTER - 8, row_h),
+                             Qt.AlignRight | Qt.AlignVCenter, label)
+
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.GRID_COARSE)
+            painter.drawRoundedRect(
+                QRectF(track_x, y + (row_h - sub_h * 2 - 2) / 2,
+                       track_w, sub_h * 2 + 2), 2, 2)
+
+            gap = (row_h - sub_h * 2 - 2) / 2
+            for i, side in enumerate((pair.after, pair.before)):
+                if side is None:
+                    continue
+                top = y + gap + i * (sub_h + 2)
+                w = max(2.0, track_w * (side.wall_time / span))
+                colour = QColor(_outcome_color(side.outcome))
+                if i == 1:            # the baseline reads as the fainter one
+                    colour.setAlpha(120)
+                painter.setBrush(colour)
+                painter.drawRoundedRect(
+                    QRectF(track_x, top, min(w, track_w), sub_h), 1, 1)
+
+            delta = pair.time_delta
+            colour = _delta_color(delta) or theme.NODE_SUBTEXT
+            painter.setPen(QPen(colour))
+            painter.drawText(
+                QRectF(track_x + track_w + 6, y, 80, row_h),
+                Qt.AlignLeft | Qt.AlignVCenter, _delta_seconds(delta))
+
 
 class RunTab(QWidget):
-    """The last run (or an earlier one from this session), in two views."""
+    """The last run (or an earlier one from this session), in two views —
+    or two runs read against each other when Compare is on."""
 
     COLUMNS = ("Node", "Result", "Time", "Share", "Peak RAM", "Output", "Produced")
+    #: what the table shows in compare mode — the selected run's own figure
+    #: next to how far it moved from the baseline
+    COMPARE_COLUMNS = ("Node", "Change", "Time", "Δ Time",
+                       "Peak RAM", "Δ RAM", "Output", "Δ Output")
 
     def __init__(self, engine, reveal: Optional[Callable[[str], None]] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self._engine = engine
         self._reveal = reveal
+        self._comparing = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(6)
@@ -232,6 +350,19 @@ class RunTab(QWidget):
         self.picker.setMinimumWidth(220)
         self.picker.currentIndexChanged.connect(lambda _: self._show_selected())
         picker_row.addWidget(self.picker)
+        picker_row.addSpacing(14)
+
+        # Off by default: the tab's first job is still "read one run". The
+        # baseline picker only appears once there is a comparison to make.
+        self.compare_check = QCheckBox("Compare with")
+        self.compare_check.toggled.connect(self._on_compare_toggled)
+        picker_row.addWidget(self.compare_check)
+        self.baseline_picker = QComboBox()
+        self.baseline_picker.setMinimumWidth(200)
+        self.baseline_picker.setVisible(False)
+        self.baseline_picker.currentIndexChanged.connect(
+            lambda _: self._show_selected())
+        picker_row.addWidget(self.baseline_picker)
         picker_row.addStretch(1)
         layout.addLayout(picker_row)
 
@@ -277,15 +408,12 @@ class RunTab(QWidget):
         self.table.cellClicked.connect(self._on_cell_clicked)
         table_layout.addWidget(self.table, 1)
 
-        hint = QLabel("Click a column to sort — by Time for the slowest step, "
-                      "by Peak RAM for the hungriest. Click a node's name to "
-                      "jump to it on the canvas. Peak RAM is the whole "
-                      "process sampled while that node ran, so it includes "
-                      "anything else happening at the time.")
-        hint.setStyleSheet(_DIM)
-        hint.setWordWrap(True)
-        table_layout.addWidget(hint)
+        self.hint = QLabel()
+        self.hint.setStyleSheet(_DIM)
+        self.hint.setWordWrap(True)
+        table_layout.addWidget(self.hint)
         self.sub_tabs.addTab(table_page, "Table")
+        self._set_hint()
 
         self.timeline.node_clicked.connect(self._reveal_node)
         self._records: list = []
@@ -299,25 +427,95 @@ class RunTab(QWidget):
             self._reload_picker(records)
         self._show_selected()
 
-    def _reload_picker(self, records: list) -> None:
-        self._records = records
-        keep = self.picker.currentIndex()
-        blocked = self.picker.blockSignals(True)
-        self.picker.clear()
-        for i, record in enumerate(records):
-            when = "latest" if i == 0 else f"{i} run{'s' if i > 1 else ''} ago"
-            note = "" if record.ok else "  ·  errors"
-            self.picker.addItem(
-                f"{when}  ·  {format_seconds(record.wall_time)}"
+    @staticmethod
+    def _label_for(index: int, record: RunRecord) -> str:
+        when = "latest" if index == 0 else f"{index} run{'s' if index > 1 else ''} ago"
+        note = "" if record.ok else "  ·  errors"
+        return (f"{when}  ·  {format_seconds(record.wall_time)}"
                 f"  ·  {len(record.nodes)} node"
                 f"{'s' if len(record.nodes) != 1 else ''}{note}")
-        self.picker.blockSignals(blocked)
-        # a new run arrives at index 0 and the view should follow it, but a
-        # deliberate look back at an older one should not be yanked away
-        self.picker.setCurrentIndex(0 if keep <= 0 else min(keep + 1,
-                                                            len(records) - 1))
+
+    def _reload_picker(self, records: list) -> None:
+        self._records = records
+        for picker, follow_latest, default in (
+                (self.picker, True, 0), (self.baseline_picker, False, 1)):
+            keep = picker.currentIndex()
+            blocked = picker.blockSignals(True)
+            picker.clear()
+            for i, record in enumerate(records):
+                picker.addItem(self._label_for(i, record))
+            picker.blockSignals(blocked)
+            if keep < 0:
+                # first fill: the baseline defaults to the run before latest
+                # so ticking Compare has something to say straight away
+                picker.setCurrentIndex(min(default, max(0, len(records) - 1)))
+            elif follow_latest and keep == 0:
+                # a new run arrives at index 0 and the selected view follows
+                # it; a deliberate look back is not yanked away
+                picker.setCurrentIndex(0)
+            else:
+                # every other run shifts down one as the new one is prepended
+                picker.setCurrentIndex(min(keep + 1, len(records) - 1))
+
+    def _comparison(self) -> Optional[RunComparison]:
+        """The comparison the pickers currently describe, or None — Compare
+        off, fewer than two runs, or both pickers on the same run."""
+        if not self._comparing:
+            return None
+        a, b = self.picker.currentIndex(), self.baseline_picker.currentIndex()
+        if not (0 <= a < len(self._records) and 0 <= b < len(self._records)):
+            return None
+        if a == b:
+            return None
+        return RunComparison(self._records[a], self._records[b])
+
+    def _on_compare_toggled(self, on: bool) -> None:
+        self._comparing = on
+        self.baseline_picker.setVisible(on)
+        self._set_hint()
+        self._set_table_columns()
+        # open on Δ Time when comparing (biggest regression up top), back to
+        # Time when not
+        self.table.sortByColumn(3 if on else 2, Qt.DescendingOrder)
+        self._show_selected()
+
+    def _set_hint(self) -> None:
+        if self._comparing:
+            self.hint.setText(
+                "Rows are the nodes that ran in either run, sorted by how far "
+                "their time moved — the biggest change is on top. A red Δ is "
+                "slower or heavier in the selected run, green is faster or "
+                "lighter. “new” ran only in the selected run, “gone” only in "
+                "the baseline. Click a node's name to jump to it on the canvas.")
+        else:
+            self.hint.setText(
+                "Click a column to sort — by Time for the slowest step, by "
+                "Peak RAM for the hungriest. Click a node's name to jump to it "
+                "on the canvas. Peak RAM is the whole process sampled while "
+                "that node ran, so it includes anything else happening at the "
+                "time.")
+
+    def _set_table_columns(self) -> None:
+        columns = self.COMPARE_COLUMNS if self._comparing else self.COLUMNS
+        self.table.setColumnCount(len(columns))
+        self.table.setHorizontalHeaderLabels(columns)
 
     def _show_selected(self) -> None:
+        if self._comparing:
+            comparison = self._comparison()
+            if comparison is None:
+                self.timeline.set_comparison(None)
+                self.table.setRowCount(0)
+                self.summary.setText(
+                    "Pick two different runs above to compare them."
+                    if len(self._records) >= 2 else
+                    "Only one run so far this session — nothing to compare it "
+                    "with yet.")
+                return
+            self.timeline.set_comparison(comparison)
+            self._fill_summary_compare(comparison)
+            self._fill_table_compare(comparison)
+            return
         index = self.picker.currentIndex()
         record = (self._records[index]
                   if 0 <= index < len(self._records) else None)
@@ -391,6 +589,97 @@ class RunTab(QWidget):
                 if node.outcome == "failed":
                     cell.setForeground(theme.WIRE_INVALID)
                 self.table.setItem(row, col, cell)
+        self.table.setSortingEnabled(True)
+        self.table.resizeColumnsToContents()
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+
+    # --------------------------------------------------------- compare mode
+
+    def _fill_summary_compare(self, comp: RunComparison) -> None:
+        after, before = comp.after, comp.before
+
+        def line(delta: float, fmt) -> str:
+            colour = _delta_color(delta)
+            body = fmt(delta)
+            if colour is None:
+                return body
+            return f"<span style='color:{colour.name()}'>{body}</span>"
+
+        parts = [
+            f"<b>{format_seconds(after.wall_time)}</b> total "
+            f"({line(comp.wall_delta, _delta_seconds)})",
+            f"{format_seconds(after.node_time)} in nodes "
+            f"({line(comp.node_time_delta, _delta_seconds)})",
+        ]
+        if after.peak_growth or before.peak_growth:
+            parts.append(f"peak +{format_bytes(after.peak_growth)} "
+                         f"({line(comp.peak_growth_delta, _delta_bytes)})")
+        text = "  ·  ".join(parts)
+
+        moved = [p for p in comp.pairs if p.status in ("slower", "faster")]
+        detail = []
+        if comp.added:
+            detail.append(f"{len(comp.added)} new "
+                          f"({', '.join(p.label for p in comp.added[:3])})")
+        if comp.removed:
+            detail.append(f"{len(comp.removed)} gone "
+                          f"({', '.join(p.label for p in comp.removed[:3])})")
+        if moved:
+            worst = max(moved, key=lambda p: p.time_delta)
+            best = min(moved, key=lambda p: p.time_delta)
+            if worst.time_delta > 5e-4:
+                detail.append(f"slowest mover {worst.label} "
+                              f"{_delta_seconds(worst.time_delta)}")
+            if best.time_delta < -5e-4 and best is not worst:
+                detail.append(f"biggest win {best.label} "
+                              f"{_delta_seconds(best.time_delta)}")
+        if detail:
+            text += ("<br><span style='color:#9ca3af'>"
+                     + "  ·  ".join(detail) + "</span>")
+
+        outcome_changes = [p for p in comp.pairs if p.outcome_changed]
+        if outcome_changes:
+            names = ", ".join(f"{p.label} {p.before.outcome}→{p.after.outcome}"
+                              for p in outcome_changes[:3])
+            text += ("<br><span style='color:#ef4444'>result changed: "
+                     f"{names}</span>")
+
+        self.summary.setText(
+            f"Selected vs baseline — {self.picker.currentText()} vs "
+            f"{self.baseline_picker.currentText()}<br>" + text)
+
+    def _fill_table_compare(self, comp: RunComparison) -> None:
+        self.table.setSortingEnabled(False)
+        pairs = comp.pairs
+        self.table.setRowCount(len(pairs))
+        status_label = {"added": "new", "removed": "gone",
+                        "slower": "slower", "faster": "faster", "same": "—"}
+        for row, pair in enumerate(pairs):
+            a = pair.after
+            time_now = a.wall_time if a else 0.0
+            rss_now = a.rss_growth if a else 0
+            out_now = a.output_bytes if a else 0
+            cells = (
+                SortableItem(pair.label, pair.label.lower()),
+                SortableItem(status_label[pair.status], pair.status),
+                SortableItem(format_seconds(time_now) if a else "—", time_now),
+                SortableItem(_delta_seconds(pair.time_delta), pair.time_delta),
+                SortableItem(
+                    f"+{format_bytes(rss_now)}" if rss_now > 0 else "—", rss_now),
+                SortableItem(_delta_bytes(pair.rss_delta), pair.rss_delta),
+                SortableItem(format_bytes(out_now) if a else "—", out_now),
+                SortableItem(_delta_bytes(pair.output_delta), pair.output_delta),
+            )
+            cells[0].setData(Qt.UserRole, pair.node_id)
+            for col, cell in enumerate(cells):
+                self.table.setItem(row, col, cell)
+            for col, delta in ((3, pair.time_delta), (5, pair.rss_delta),
+                               (7, pair.output_delta)):
+                colour = _delta_color(delta)
+                if colour is not None:
+                    self.table.item(row, col).setForeground(colour)
+            if pair.status in ("added", "removed"):
+                self.table.item(row, 1).setForeground(theme.SELECTION_OUTLINE)
         self.table.setSortingEnabled(True)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
