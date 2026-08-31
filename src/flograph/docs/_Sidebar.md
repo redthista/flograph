@@ -8,6 +8,7 @@
   - [[Flow Variables]]
 - **Building nodes**
   - [[Writing a Node]]
+  - [[Node Cookbook]]
 - **Sharing results**
   - [[Dashboards and Reports]]
   - [[Running Headless]]

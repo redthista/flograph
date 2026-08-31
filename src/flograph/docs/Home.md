@@ -18,6 +18,8 @@ Documentation** or **F1**.
   optional-extra packages.
 - **[[Writing a Node]]** — the full node contract: `NODE`, params, the `run`
   context, cards, where node files live.
+- **[[Node Cookbook]]** — complete nodes to copy, what `run` may return, and
+  a checklist and error table for when one won't load.
 - **[[Dashboards and Reports]]** — turning a flow into a dashboard for
   someone else, or a report that prints to PDF.
 - **[[Flow Variables]]** — `${name}` settings, the Variables node, and

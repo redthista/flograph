@@ -3,7 +3,8 @@
 Every node — the shipped library included — is one Python module loaded as
 text. Double-click any node to read or fork its code in the built-in editor
 (syntax highlighting, jedi completion, find/replace, error markers on the
-failing line). This page is the full contract.
+failing line). This page is the full contract; the [[Node Cookbook]] has
+complete nodes to copy, a checklist, and what each load error means.
 
 ## Anatomy
 
@@ -97,7 +98,7 @@ Extra keys, all optional:
 | `default` | any | Starting value. |
 | `placeholder` | text-like | Grey hint shown when empty. |
 | `options` | `choice` | The dropdown values. May also be supplied at runtime by wiring a column into the node. |
-| `minimum` / `maximum` | `int`, `float` | Spin-box bounds. |
+| `min` / `max` | `int`, `float` | Spin-box bounds. |
 | `multi` | `columns` | `False` = pick one column instead of a list. |
 | `ref_kind` | `node_ref` | Restrict the dropdown to nodes with this card kind. |
 | `visible_when` | any | `{"format": ["csv", "auto"]}` — show this row only while another param holds one of those values. Presentational only: `run` still gets every param. |
@@ -192,7 +193,8 @@ placeholder** that keeps its code and params — install the package, re-apply
 the code, and it repairs itself.
 
 Fork **Node Template** or **Control Template** (Scripting category) for a
-commented starting point.
+commented starting point, or copy a finished one from the
+[[Node Cookbook]].
 
 ## Editing with AI (optional)
 
