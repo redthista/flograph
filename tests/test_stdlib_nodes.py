@@ -269,6 +269,49 @@ class TestEtlNodes:
             run_node(registry, "flograph.transform.string_manipulation",
                      {"column": "region", "operation": "replace"}, table=table)
 
+    def test_split_column_delimiter(self, registry):
+        df = pd.DataFrame({"name": ["Ada Lovelace", "Alan Turing"], "id": [1, 2]})
+        out = run_node(registry, "flograph.transform.split_column",
+                       {"column": "name", "delimiter": " "}, table=df)
+        assert list(out.columns) == ["name.1", "name.2", "id"]
+        assert out["name.1"].tolist() == ["Ada", "Alan"]
+        assert out["name.2"].tolist() == ["Lovelace", "Turing"]
+        assert df["name"].iloc[0] == "Ada Lovelace"  # input untouched
+
+    def test_split_column_leftmost_keeps_original(self, registry):
+        df = pd.DataFrame({"path": ["a/b/c", "x/y"]})
+        out = run_node(registry, "flograph.transform.split_column",
+                       {"column": "path", "delimiter": "/",
+                        "split_at": "Left-most", "keep_original": True}, table=df)
+        assert list(out.columns) == ["path", "path.1", "path.2"]
+        assert out["path.2"].tolist() == ["b/c", "y"]
+
+    def test_split_column_into_rows(self, registry):
+        df = pd.DataFrame({"tags": ["red;green;blue", "solo"], "n": [1, 2]})
+        out = run_node(registry, "flograph.transform.split_column",
+                       {"column": "tags", "delimiter": ";",
+                        "split_into": "Rows"}, table=df)
+        assert list(out.columns) == ["tags", "n"]
+        assert out["tags"].tolist() == ["red", "green", "blue", "solo"]
+        assert out["n"].tolist() == [1, 1, 1, 2]
+
+    def test_split_column_by_positions(self, registry):
+        df = pd.DataFrame({"code": ["ABCDEFG"]})
+        out = run_node(registry, "flograph.transform.split_column",
+                       {"column": "code", "split_by": "Positions",
+                        "positions": "1, 4"}, table=df)
+        assert out.iloc[0].tolist() == ["A", "BCD", "EFG"]
+
+    def test_split_column_missing_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flograph.transform.split_column",
+                     {"column": "nope"}, table=table)
+
+    def test_split_column_empty_delimiter(self, registry, table):
+        with pytest.raises(ValueError, match="Delimiter"):
+            run_node(registry, "flograph.transform.split_column",
+                     {"column": "region", "delimiter": ""}, table=table)
+
     def test_statistics(self, registry, table):
         out = run_node(registry, "flograph.transform.statistics", {}, table=table)
         assert "statistic" in out.columns
