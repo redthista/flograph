@@ -33,8 +33,13 @@ work. Optional extras pull in what individual nodes need:
 | `parquet` | pyarrow, fastparquet | Read File (Parquet), Write Parquet |
 | `polars` | polars, fastexcel | the fast **polars** engine on Read File |
 | `geo` | geopandas, folium | maps in a web-view node |
-| `ai` | requests | the local-LLM node assistant |
-| `dev` | pytest, pytest-qt | running the test suite |
+| `ai` | requests, httpx | LLM Enrich / Classify / Extract, and the node assistant |
+| `sql` | sqlalchemy | SQL Query, SQL Write |
+| `duckdb` | duckdb | DuckDB SQL |
+| `http` | httpx | HTTP Request, REST Paginate |
+| `fuzzy` | rapidfuzz | Fuzzy Join |
+| `scrape` | lxml, beautifulsoup4, html5lib | Read HTML Tables |
+| `dev` | pytest, pytest-qt, pytest-xdist | running the test suite |
 
 ```bash
 pip install "flograph[matplotlib,plotly,excel]"
@@ -158,17 +163,21 @@ in *your* node script. The statistics window's run history is saved beside
 the cache too, so reopening a project shows its previous runs rather than
 starting from nothing.
 
-**Projects are plain JSON** (`.flograph`) — diffable, reviewable, and small.
-Node output caches are written to a side-car `<project>.flograph.cache/`
-directory keyed by a fingerprint of each node's source, params and
-everything upstream, so reopening a project restores the results you had
-without a re-run. Blobs are zlib-compressed (a setting turns that off), and
-the reader sniffs each blob rather than trusting the manifest, so side-cars
-from every era — raw, compressed, or a mix — keep loading. A stale or
-corrupt entry just leaves that node dirty; it can never block a load.
-Saving shows its progress on the status line while the cache writes in the
-background, and both the monitor and the save dialog speak up when the disk
-is running low or full.
+**A project is one file** (`.flograph`) — a zip bundle holding the graph as
+JSON plus every node's output cache, keyed by a fingerprint of each node's
+source, params and everything upstream, so reopening a project (or handing it
+to someone else) restores the results you had without a re-run. Nothing is
+inflated until something asks for it, and the archive is written to a sibling
+`.tmp` and swapped in atomically, so a crash mid-write leaves the previous
+file intact. Cache blobs are zlib-compressed (a setting turns that off), and
+the reader sniffs each blob rather than trusting the manifest, so bundles from
+every era keep loading. A stale or corrupt entry just leaves that node dirty;
+it can never block a load. Saving shows its progress on the status line while
+the cache writes in the background, and both the monitor and the save dialog
+speak up when the disk is running low or full.
+
+**File > Export Workflow** writes the graph *alone* to a `.flowf` file — plain
+JSON, no cached results, small and diffable — made to be committed to git.
 
 ---
 
