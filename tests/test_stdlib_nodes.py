@@ -327,6 +327,235 @@ class TestEtlNodes:
         mean_row = out[out["statistic"] == "mean"]
         assert mean_row["units"].iloc[0] == 25.0
 
+    # ---- Power Query parity batch ----
+
+    def test_fill_down(self, registry):
+        df = pd.DataFrame({"region": ["N", None, None, "S", None],
+                           "v": [1, 2, 3, 4, 5]})
+        out = run_node(registry, "flograph.transform.fill",
+                       {"direction": "Down", "columns": "region"}, table=df)
+        assert out["region"].tolist() == ["N", "N", "N", "S", "S"]
+        assert df["region"].isna().sum() == 3  # input untouched
+
+    def test_fill_up_and_blank_strings(self, registry):
+        df = pd.DataFrame({"x": ["a", "  ", "b", ""]})
+        out = run_node(registry, "flograph.transform.fill",
+                       {"direction": "Up"}, table=df)
+        vals = out["x"].tolist()
+        assert vals[:3] == ["a", "b", "b"]
+        assert pd.isna(vals[3])  # nothing below to fill from
+
+    def test_fill_missing_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flograph.transform.fill",
+                     {"columns": "nope"}, table=table)
+
+    def test_promote_headers(self, registry):
+        df = pd.DataFrame({"a": ["name", "Ada", "Bob"], "b": ["age", "30", "40"]})
+        out = run_node(registry, "flograph.transform.promote_headers",
+                       {"mode": "Promote first row"}, table=df)
+        assert list(out.columns) == ["name", "age"]
+        assert out["name"].tolist() == ["Ada", "Bob"]
+
+    def test_promote_headers_skip_rows(self, registry):
+        df = pd.DataFrame({"a": ["title", "name", "Ada"],
+                           "b": ["junk", "age", "30"]})
+        out = run_node(registry, "flograph.transform.promote_headers",
+                       {"mode": "Promote first row", "skip_rows": 1}, table=df)
+        assert list(out.columns) == ["name", "age"]
+        assert out.iloc[0].tolist() == ["Ada", "30"]
+
+    def test_demote_headers_round_trips(self, registry):
+        df = pd.DataFrame({"name": ["Ada"], "age": [30]})
+        out = run_node(registry, "flograph.transform.promote_headers",
+                       {"mode": "Demote to first row"}, table=df)
+        assert list(out.columns) == ["Column1", "Column2"]
+        assert out.iloc[0].tolist() == ["name", "age"]
+
+    def test_promote_headers_empty(self, registry):
+        with pytest.raises(ValueError, match="nothing left to promote"):
+            run_node(registry, "flograph.transform.promote_headers",
+                     {"skip_rows": 5}, table=pd.DataFrame({"a": [1, 2]}))
+
+    def test_index_column(self, registry, table):
+        out = run_node(registry, "flograph.transform.index_column",
+                       {"name": "row", "start": 1, "step": 1}, table=table)
+        assert list(out.columns)[0] == "row"
+        assert out["row"].tolist() == [1, 2, 3, 4]
+
+    def test_index_column_last_and_step(self, registry, table):
+        out = run_node(registry, "flograph.transform.index_column",
+                       {"name": "id", "start": 0, "step": 10,
+                        "position": "Last"}, table=table)
+        assert list(out.columns)[-1] == "id"
+        assert out["id"].tolist() == [0, 10, 20, 30]
+
+    def test_index_column_name_clash(self, registry, table):
+        with pytest.raises(ValueError, match="already exists"):
+            run_node(registry, "flograph.transform.index_column",
+                     {"name": "units"}, table=table)
+
+    def test_date_part_extract(self, registry):
+        df = pd.DataFrame({"d": pd.to_datetime(["2026-01-15", "2026-11-02"])})
+        out = run_node(registry, "flograph.transform.date_part",
+                       {"column": "d", "part": "quarter",
+                        "label_format": "%Y-Q%q"}, table=df)
+        assert out["d.quarter"].tolist() == [1, 4]
+        assert out["d.quarter.label"].tolist() == ["2026-Q1", "2026-Q4"]
+
+    def test_date_part_start_of_month(self, registry):
+        df = pd.DataFrame({"d": pd.to_datetime(["2026-08-31", "2026-02-14"])})
+        out = run_node(registry, "flograph.transform.date_part",
+                       {"column": "d", "part": "start of month",
+                        "output_column": "month"}, table=df)
+        assert list(out["month"].dt.day) == [1, 1]
+        assert list(out["month"].dt.month) == [8, 2]
+
+    def test_date_part_unparseable(self, registry):
+        df = pd.DataFrame({"d": ["not", "a", "date"]})
+        with pytest.raises(ValueError, match="parse as dates"):
+            run_node(registry, "flograph.transform.date_part",
+                     {"column": "d", "part": "year"}, table=df)
+
+    def test_conditional_column(self, registry):
+        df = pd.DataFrame({"score": [95, 82, 71, 40]})
+        out = run_node(registry, "flograph.transform.conditional_column",
+                       {"output_column": "grade",
+                        "rules": "score >= 90 => A\nscore >= 80 => B\n"
+                                 "score >= 70 => C\n=> F"}, table=df)
+        assert out["grade"].tolist() == ["A", "B", "C", "F"]
+
+    def test_conditional_column_contains_and_ref(self, registry):
+        df = pd.DataFrame({"email": ["a@corp.com", "b@gmail.com"],
+                           "name": ["A", "B"]})
+        out = run_node(registry, "flograph.transform.conditional_column",
+                       {"output_column": "who",
+                        "rules": "email contains @corp => @name\n=> external"},
+                       table=df)
+        assert out["who"].tolist() == ["A", "external"]
+
+    def test_conditional_column_no_operator(self, registry, table):
+        with pytest.raises(ValueError, match="no operator"):
+            run_node(registry, "flograph.transform.conditional_column",
+                     {"rules": "region north => x"}, table=table)
+
+    def test_merge_columns(self, registry):
+        df = pd.DataFrame({"first": ["Ada", "Alan"], "last": ["Lovelace", None]})
+        out = run_node(registry, "flograph.transform.merge_columns",
+                       {"columns": "first, last", "separator": " ",
+                        "output_column": "full"}, table=df)
+        assert list(out.columns) == ["full"]
+        assert out["full"].tolist() == ["Ada Lovelace", "Alan "]
+
+    def test_merge_columns_skip_blanks_keep_source(self, registry):
+        df = pd.DataFrame({"a": ["x", ""], "b": ["y", "z"]})
+        out = run_node(registry, "flograph.transform.merge_columns",
+                       {"columns": "a, b", "separator": "-", "skip_blanks": True,
+                        "keep_source": True, "output_column": "k"}, table=df)
+        assert out["k"].tolist() == ["x-y", "z"]
+        assert "a" in out.columns and "b" in out.columns
+
+    def test_merge_columns_needs_two(self, registry, table):
+        with pytest.raises(ValueError, match="at least two"):
+            run_node(registry, "flograph.transform.merge_columns",
+                     {"columns": "region"}, table=table)
+
+    def test_text_extract_after_delimiter(self, registry):
+        df = pd.DataFrame({"email": ["ada@x.com", "no-at-sign"]})
+        out = run_node(registry, "flograph.transform.text_extract",
+                       {"column": "email", "mode": "Text after delimiter",
+                        "delimiter": "@"}, table=df)
+        assert out["email.extract"].tolist()[0] == "x.com"
+        assert pd.isna(out["email.extract"].tolist()[1])
+
+    def test_text_extract_between_and_last(self, registry):
+        df = pd.DataFrame({"s": ["file.tar.gz"]})
+        out = run_node(registry, "flograph.transform.text_extract",
+                       {"column": "s", "mode": "Text after delimiter",
+                        "delimiter": ".", "from_end": True}, table=df)
+        assert out["s.extract"].iloc[0] == "gz"
+
+    def test_text_extract_first_chars(self, registry):
+        df = pd.DataFrame({"s": ["abcdef", "gh"]})
+        out = run_node(registry, "flograph.transform.text_extract",
+                       {"column": "s", "mode": "First characters", "count": 3},
+                       table=df)
+        assert out["s.extract"].tolist() == ["abc", "gh"]
+
+    def test_text_extract_empty_delimiter(self, registry):
+        df = pd.DataFrame({"s": ["abc"]})
+        with pytest.raises(ValueError, match="Delimiter"):
+            run_node(registry, "flograph.transform.text_extract",
+                     {"column": "s", "mode": "Text before delimiter",
+                      "delimiter": ""}, table=df)
+
+    def test_transpose_with_header_column(self, registry):
+        df = pd.DataFrame({"metric": ["rev", "cost"], "q1": [10, 5],
+                           "q2": [20, 8]})
+        out = run_node(registry, "flograph.transform.transpose",
+                       {"header_column": "metric"}, table=df)
+        assert list(out.columns) == ["name", "rev", "cost"]
+        assert out["name"].tolist() == ["q1", "q2"]
+        assert out["rev"].tolist() == [10, 20]
+
+    def test_transpose_positional(self, registry):
+        df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+        out = run_node(registry, "flograph.transform.transpose",
+                       {"keep_headers": False}, table=df)
+        assert list(out.columns) == ["Column1", "Column2"]
+        assert out.iloc[0].tolist() == [1, 2]
+
+    def test_transpose_non_unique_headers(self, registry):
+        df = pd.DataFrame({"k": ["x", "x"], "v": [1, 2]})
+        with pytest.raises(ValueError, match="not unique"):
+            run_node(registry, "flograph.transform.transpose",
+                     {"header_column": "k"}, table=df)
+
+    def test_replace_values_whole_cell(self, registry):
+        df = pd.DataFrame({"country": ["USA", "U.S.A.", "United States"]})
+        out = run_node(registry, "flograph.transform.replace_values",
+                       {"match": "Whole cell",
+                        "pairs": "U.S.A. = USA\nUnited States = USA"}, table=df)
+        assert out["country"].tolist() == ["USA", "USA", "USA"]
+
+    def test_replace_values_numeric_keeps_dtype(self, registry):
+        df = pd.DataFrame({"n": [1, 2, 3]})
+        out = run_node(registry, "flograph.transform.replace_values",
+                       {"match": "Whole cell", "columns": "n", "pairs": "2 = 99"},
+                       table=df)
+        assert out["n"].tolist() == [1, 99, 3]
+        assert str(out["n"].dtype).startswith("int")
+
+    def test_replace_values_substring_to_na(self, registry):
+        df = pd.DataFrame({"x": ["N/A", "ok", "N/A tail"]})
+        out = run_node(registry, "flograph.transform.replace_values",
+                       {"match": "Substring", "pairs": "N/A = <NA>"}, table=df)
+        assert out["x"].tolist()[1] == "ok"
+        assert pd.isna(out["x"].tolist()[0])
+
+    def test_replace_values_no_pairs(self, registry, table):
+        with pytest.raises(ValueError, match="no replacements"):
+            run_node(registry, "flograph.transform.replace_values",
+                     {"pairs": "   "}, table=table)
+
+    def test_explode_list_column(self, registry):
+        df = pd.DataFrame({"id": [1, 2], "tags": [["a", "b", "c"], ["d"]]})
+        out = run_node(registry, "flograph.transform.explode_column",
+                       {"column": "tags"}, table=df)
+        assert out["tags"].tolist() == ["a", "b", "c", "d"]
+        assert out["id"].tolist() == [1, 1, 1, 2]
+
+    def test_explode_splits_strings(self, registry):
+        df = pd.DataFrame({"id": [1, 2], "tags": ["a;b", "c"]})
+        out = run_node(registry, "flograph.transform.explode_column",
+                       {"column": "tags", "split_on": ";"}, table=df)
+        assert out["tags"].tolist() == ["a", "b", "c"]
+
+    def test_explode_missing_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flograph.transform.explode_column",
+                     {"column": "nope"}, table=table)
+
 
 class TestIONodes:
     def test_write_then_read_round_trip(self, registry, table, tmp_path):
