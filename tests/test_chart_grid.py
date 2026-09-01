@@ -353,8 +353,12 @@ class TestLayoutIsNotData:
 
     def test_params_are_not_cosmetic_unless_they_say_so(self, env):
         _graph, node = env
+        # split_by re-splits the data, so it must still dirty the node
         assert not node.spec.param("split_by").cosmetic
-        assert not node.spec.param("width").cosmetic
+        # width/height only size the card on the canvas — run() never reads
+        # them, so a resize must not re-run a slow split
+        assert node.spec.param("width").cosmetic
+        assert node.spec.param("height").cosmetic
 
 
 class TestScaleZoomsTheStack:

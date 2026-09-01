@@ -15,9 +15,9 @@ NODE = {
 }
 PARAMS = [
     {"name": "width", "type": "int", "label": "Width",
-     "default": 420, "min": 260, "max": 1600},
+     "default": 420, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 240, "min": 200, "max": 2000},
+     "default": 240, "min": 200, "max": 2000, "cosmetic": True},
     # Cosmetic: run() never reads it — the zoom is applied to the card, to
     # the spec this node already produced.
     {"name": "scale", "type": "int", "label": "Scale %",

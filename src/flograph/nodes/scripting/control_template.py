@@ -76,9 +76,9 @@ PARAMS = [
     # store one and shows no grip at all. Same numbers as the built-in
     # Slider, which is what this template is a copy of.
     {"name": "width", "type": "int", "label": "Width",
-     "default": 240, "min": 140, "max": 600},
+     "default": 240, "min": 140, "max": 600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 96, "min": 60, "max": 400},
+     "default": 96, "min": 60, "max": 400, "cosmetic": True},
 ]
 
 

@@ -26,9 +26,9 @@ PARAMS = [
      "default": "Enabled", "placeholder": "Shown beside the tick box"},
     {"name": "value", "type": "bool", "label": "Ticked", "default": False},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 200, "min": 120, "max": 600},
+     "default": 200, "min": 120, "max": 600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 76, "min": 48, "max": 400},
+     "default": 76, "min": 48, "max": 400, "cosmetic": True},
 ]
 
 

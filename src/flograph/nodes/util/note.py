@@ -17,9 +17,9 @@ PARAMS = [
      "default": "## Note\n\nDouble-click to edit.",
      "placeholder": "# Title\n\nSome *markdown* text…"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 280, "min": 120, "max": 1600},
+     "default": 280, "min": 120, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height (0 = fit text)",
-     "default": 0, "min": 0, "max": 2000},
+     "default": 0, "min": 0, "max": 2000, "cosmetic": True},
 ]
 
 

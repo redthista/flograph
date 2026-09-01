@@ -44,10 +44,13 @@ PARAMS = [
                                    "— blank keeps every row"},
     {"name": "values", "type": "text", "label": "Values (one per line)",
      "default": "", "placeholder": "Used only when no table is connected"},
+    # Card size only — run() never reads either. Dirtying on a resize would
+    # re-filter the table and re-run every visual downstream to produce the
+    # exact same rows.
     {"name": "width", "type": "int", "label": "Width",
-     "default": 200, "min": 140, "max": 600},
+     "default": 200, "min": 140, "max": 600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 240, "min": 120, "max": 2000},
+     "default": 240, "min": 120, "max": 2000, "cosmetic": True},
 ]
 
 

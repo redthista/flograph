@@ -37,9 +37,9 @@ PARAMS = [
      "default": "", "placeholder": "Which column of a connected table "
                                    "(blank = the first)"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 220, "min": 140, "max": 600},
+     "default": 220, "min": 140, "max": 600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 84, "min": 56, "max": 400},
+     "default": 84, "min": 56, "max": 400, "cosmetic": True},
 ]
 
 

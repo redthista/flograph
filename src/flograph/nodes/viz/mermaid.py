@@ -55,9 +55,9 @@ PARAMS = [
      "default": "flowchart TD\n  A[Start] --> B{OK?}\n  B -->|yes| C[Done]\n  B -->|no| A",
      "visible_when": {"mode": "template"}},
     {"name": "width", "type": "int", "label": "Width", "default": 460,
-     "min": 200, "max": 1600},
+     "min": 200, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height", "default": 360,
-     "min": 120, "max": 2000},
+     "min": 120, "max": 2000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]

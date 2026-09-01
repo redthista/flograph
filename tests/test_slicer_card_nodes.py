@@ -71,6 +71,26 @@ class TestSlicerCard:
         assert item._slicer_list is not None
         assert item._slicer_list.isHidden()  # placeholder until a run
 
+    def test_card_size_params_are_cosmetic(self, registry):
+        """Resizing the card must not re-filter the table or re-run the
+        visuals downstream — run() never reads width/height."""
+        spec = registry.get("flograph.viz.slicer")
+        assert spec.param("width").cosmetic
+        assert spec.param("height").cosmetic
+
+    def test_a_resize_does_not_dirty_the_slicer(self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        assert not win.graph.nodes[slicer.id].dirty
+
+        win.graph.set_param(slicer.id, "width", 360)
+        win.graph.set_param(slicer.id, "height", 500)
+
+        assert not win.graph.nodes[slicer.id].dirty
+        assert not win.graph.nodes[shown.id].dirty
+
     def test_options_populate_after_a_run(self, qtbot, window):
         win = window
         _source, slicer, _shown = _add_sliced_flow(win)

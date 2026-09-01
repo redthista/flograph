@@ -26,9 +26,9 @@ PARAMS = [
      "default": "", "placeholder": "comma separated; empty = all numeric"},
     {"name": "title", "type": "string", "label": "Title", "default": ""},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 420, "min": 260, "max": 1600},
+     "default": 420, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 320, "min": 200, "max": 2000},
+     "default": 320, "min": 200, "max": 2000, "cosmetic": True},
     # Cosmetic: run() never reads it — the zoom is applied to the card, to
     # the figure this node already produced. Dirtying on it would re-run the
     # plot, and everything downstream, to arrive at the same figure.

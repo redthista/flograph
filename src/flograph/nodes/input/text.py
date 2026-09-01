@@ -29,9 +29,9 @@ PARAMS = [
     {"name": "multiline", "type": "bool", "label": "Multiline",
      "default": False},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 240, "min": 140, "max": 800},
+     "default": 240, "min": 140, "max": 800, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 84, "min": 56, "max": 600},
+     "default": 84, "min": 56, "max": 600, "cosmetic": True},
 ]
 
 

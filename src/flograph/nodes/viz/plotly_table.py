@@ -73,9 +73,9 @@ PARAMS = [
      "default": "default"},
     {"name": "title", "type": "string", "label": "Title", "default": ""},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 460, "min": 260, "max": 1600},
+     "default": 460, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 320, "min": 200, "max": 2000},
+     "default": 320, "min": 200, "max": 2000, "cosmetic": True},
     # Cosmetic: the zoom is the embedded browser's own, applied to the
     # figure this node already produced.
     {"name": "scale", "type": "int", "label": "Scale %",

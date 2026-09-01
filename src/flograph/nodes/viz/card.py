@@ -26,9 +26,9 @@ PARAMS = [
     {"name": "format", "type": "string", "label": "Format",
      "default": "", "placeholder": "Python format spec, e.g. ,.2f"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 220, "min": 140, "max": 800},
+     "default": 220, "min": 140, "max": 800, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 120, "min": 80, "max": 500},
+     "default": 120, "min": 80, "max": 500, "cosmetic": True},
 ]
 
 

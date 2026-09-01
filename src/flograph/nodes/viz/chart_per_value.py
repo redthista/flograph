@@ -47,10 +47,10 @@ nodes: below 100 the charts are drawn smaller and more of the stack fits
 on the card, above 100 they are drawn larger and you scroll. It changes
 how much you see, not how big the card is — Width and Height do that.
 
-Scale, Columns, Rows and Fill are all marked `"cosmetic": True`, so
-changing one re-arranges or re-zooms the charts without marking the node
-dirty — re-running a slow split just to show it in two columns would be
-absurd.
+Scale, Width, Height, Columns, Rows and Fill are all marked
+`"cosmetic": True`, so resizing the card or re-arranging the charts
+never marks the node dirty — re-running a slow split just to show it
+smaller, or in two columns, would be absurd.
 
 "Max charts" is a guard, not a preference: splitting on a high-cardinality
 column by accident would otherwise build thousands of figures and hang the
@@ -100,9 +100,9 @@ PARAMS = [
     {"name": "direction", "type": "choice", "label": "Fill",
      "options": ["down", "across"], "default": "down", "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 460, "min": 260, "max": 1600},
+     "default": 460, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 380, "min": 200, "max": 2000},
+     "default": 380, "min": 200, "max": 2000, "cosmetic": True},
     # Cosmetic here, unlike the single-chart nodes: zooming the card is
     # presentation, and re-running a slow split to show it smaller would be
     # as absurd as re-running it to show it in two columns.

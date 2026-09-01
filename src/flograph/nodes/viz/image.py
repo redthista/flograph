@@ -63,9 +63,9 @@ PARAMS = [
     {"name": "background", "type": "bool", "label": "Card background",
      "default": True},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 320, "min": 60, "max": 1600},
+     "default": 320, "min": 60, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 240, "min": 60, "max": 1600},
+     "default": 240, "min": 60, "max": 1600, "cosmetic": True},
 ]
 
 

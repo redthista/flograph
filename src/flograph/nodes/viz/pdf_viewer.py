@@ -75,9 +75,9 @@ PARAMS = [
      "options": ["Metadata only", "Metadata + bytes"],
      "default": "Metadata only"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 320, "min": 60, "max": 1600},
+     "default": 320, "min": 60, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 420, "min": 60, "max": 1600},
+     "default": 420, "min": 60, "max": 1600, "cosmetic": True},
 ]
 
 

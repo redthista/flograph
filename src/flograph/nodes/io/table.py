@@ -51,9 +51,9 @@ PARAMS = [
          "rows": [["", ""], ["", ""]],
      })},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 320, "min": 220, "max": 1600},
+     "default": 320, "min": 220, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 220, "min": 140, "max": 2000},
+     "default": 220, "min": 140, "max": 2000, "cosmetic": True},
 ]
 
 _TRUTHY = {"TRUE": True, "FALSE": False, "YES": True, "NO": False,

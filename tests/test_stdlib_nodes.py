@@ -1,5 +1,7 @@
 """Every shipped node executed headless through the contract, including error
 paths."""
+import re
+
 import pandas as pd
 import pytest
 
@@ -994,6 +996,38 @@ class TestScaleIsPresentation:
             body = spec.source.split("def run(", 1)[-1]
             assert '"scale"' not in body, spec.type_id
             assert "'scale'" not in body, spec.type_id
+
+
+class TestCardSizeIsPresentation:
+    """"Width" / "Height" set a widget card's size on the canvas — the
+    Slicer, the Notes, the Show * cards, the Input controls. No node's
+    run() reads either, so dragging a card's edge cannot change what the
+    node produced; dirtying on it would re-filter/re-plot the node and
+    everything downstream to land on exactly the cached output.
+
+    Swept across the registry like "Scale %", so a card node added later
+    has to make the same decision deliberately.
+    """
+
+    def sized_nodes(self, registry):
+        return [spec for spec in registry.all()
+                if spec.param("width") is not None]
+
+    def test_there_are_some_to_check(self, registry):
+        assert len(self.sized_nodes(registry)) >= 20
+
+    def test_every_card_size_param_is_cosmetic(self, registry):
+        for spec in self.sized_nodes(registry):
+            assert spec.param("width").cosmetic, spec.type_id
+            assert spec.param("height").cosmetic, spec.type_id
+
+    def test_no_node_run_reads_them(self, registry):
+        # "width"/"height" show up in plotly styling dicts (line={"width": 0}),
+        # so check for the param being *consulted*, not merely the word
+        pat = re.compile(r"""params(?:\.get\(|\[)\s*['"](?:width|height)['"]""")
+        for spec in self.sized_nodes(registry):
+            body = spec.source.split("def run(", 1)[-1]
+            assert not pat.search(body), spec.type_id
 
 
 class TestVizNodes:

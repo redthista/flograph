@@ -37,9 +37,9 @@ PARAMS = [
     {"name": "minimum", "type": "date", "label": "Earliest", "default": ""},
     {"name": "maximum", "type": "date", "label": "Latest", "default": ""},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 200, "min": 140, "max": 600},
+     "default": 200, "min": 140, "max": 600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 84, "min": 56, "max": 400},
+     "default": 84, "min": 56, "max": 400, "cosmetic": True},
 ]
 
 

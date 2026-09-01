@@ -89,9 +89,9 @@ PARAMS = [
      "default": False},
     {"name": "title", "type": "string", "label": "Title", "default": ""},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 560, "min": 260, "max": 1600},
+     "default": 560, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 360, "min": 200, "max": 2000},
+     "default": 360, "min": 200, "max": 2000, "cosmetic": True},
     # Cosmetic: run() never reads it — the zoom is the embedded browser's
     # own, applied to the figure this node already produced. Dirtying on it
     # would re-run the plot, and everything downstream, for the same figure.

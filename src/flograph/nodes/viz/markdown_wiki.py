@@ -34,9 +34,9 @@ PARAMS = [
     {"name": "show_nav", "type": "bool", "label": "Show nav panel",
      "default": True, "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 520, "min": 260, "max": 1600},
+     "default": 520, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 380, "min": 160, "max": 2000},
+     "default": 380, "min": 160, "max": 2000, "cosmetic": True},
 ]
 
 

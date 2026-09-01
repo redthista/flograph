@@ -53,9 +53,9 @@ PARAMS = [
                  "it with `![[a]]`.\n\n![[a]]\n"),
      "placeholder": "Markdown, with ![[a]] to place a wired input"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 460, "min": 240, "max": 1600},
+     "default": 460, "min": 240, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 340, "min": 140, "max": 2000},
+     "default": 340, "min": 140, "max": 2000, "cosmetic": True},
 ]
 
 
