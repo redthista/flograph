@@ -1406,9 +1406,9 @@ class NodeItem(QGraphicsObject):
         layout.setSpacing(3)
 
         toolbar = QWidget()
-        # a flow layout, not a row: the buttons wrap onto a second line when
+        # a flow layout, not a row: the buttons wrap onto another line when
         # the card is dragged narrow rather than clipping off its edge
-        trow = FlowLayout(toolbar, spacing=3)
+        trow = FlowLayout(toolbar, spacing=2)
         add_row = QToolButton(text="+Row")
         del_row = QToolButton(text="-Row")
         add_col = QToolButton(text="+Col")
@@ -1422,6 +1422,9 @@ class NodeItem(QGraphicsObject):
             "if nothing is selected")
         expand = QToolButton(text="⛶")
         expand.setToolTip("Open the full spreadsheet editor")
+        # compact enough that the whole row fits a default-width card on one
+        # line — it only wraps once the card is genuinely narrow
+        toolbar.setStyleSheet("QToolButton { font-size: 8pt; padding: 1px 3px; }")
         for button in (add_row, del_row, add_col, del_col, fit, copy_headers,
                        expand):
             button.setAutoRaise(True)
