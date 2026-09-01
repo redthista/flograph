@@ -4171,19 +4171,23 @@ class MainWindow(QMainWindow):
         self._examples_menu = file_menu.addMenu("Open &Example")
         try:
             root = importlib.resources.files("flograph.templates")
-            paths = sorted(
-                (entry for entry in root.iterdir()
-                 if entry.name.endswith(".flograph")),
-                key=lambda entry: entry.name,
-            )
+            entries = [entry for entry in root.iterdir()
+                       if entry.name.endswith(".flograph")]
         except (ModuleNotFoundError, FileNotFoundError):
-            paths = []
-        self._examples_menu.setEnabled(bool(paths))
-        for entry in paths:
-            title = entry.name[:-len(".flograph")]
-            if title[:2].isdigit() and "_" in title:
-                title = title.split("_", 1)[1]
-            title = title.replace("_", " ").title()
+            entries = []
+
+        def _title(name: str) -> str:
+            stem = name[:-len(".flograph")]
+            if stem[:2].isdigit() and "_" in stem:
+                stem = stem.split("_", 1)[1]
+            return stem.replace("_", " ").title()
+
+        items = sorted(
+            ((_title(entry.name), entry) for entry in entries),
+            key=lambda item: item[0].casefold(),
+        )
+        self._examples_menu.setEnabled(bool(items))
+        for title, entry in items:
             action = self._examples_menu.addAction(title)
             action.triggered.connect(
                 lambda checked=False, p=Path(str(entry)): self._open_example(p))
