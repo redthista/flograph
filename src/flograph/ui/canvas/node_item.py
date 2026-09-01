@@ -3,15 +3,18 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QVariantAnimation
+from PySide6.QtCore import (
+    QEvent, QPointF, QRect, QRectF, Qt, QTimer, QUrl, QVariantAnimation,
+)
 from PySide6.QtGui import (
-    QAbstractTextDocumentLayout, QBrush, QColor, QFont, QFontMetrics, QPainter,
-    QPainterPath, QPalette, QPen, QTextCursor, QTextDocument,
+    QAbstractTextDocumentLayout, QBrush, QColor, QDesktopServices, QFont,
+    QFontMetrics, QPainter, QPainterPath, QPalette, QPen, QTextCursor,
+    QTextDocument,
 )
 from PySide6.QtWidgets import (
-    QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout,
-    QLabel, QMenu, QPlainTextEdit, QStyleOptionGraphicsItem, QTableView,
-    QToolButton, QVBoxLayout, QWidget,
+    QApplication, QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget,
+    QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QStyleOptionGraphicsItem,
+    QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import NodeInstance, PortSpec, PortType
@@ -839,6 +842,7 @@ class NodeItem(QGraphicsObject):
         self._note_editor: QGraphicsProxyWidget | None = None
         self._note_editor_widget: QPlainTextEdit | None = None
         self._closing_note_edit = False
+        self._note_link_press: QPointF | None = None  # link hit on press
         self._table_widget = None   # SpreadsheetView (grid cards only)
         self._table_model = None    # SheetModel (grid cards only)
         self._table_buttons: tuple = ()
@@ -1040,6 +1044,26 @@ class NodeItem(QGraphicsObject):
             doc.setTextWidth(self.width - 2 * NOTE_PAD)
             self._note_doc = doc
         return self._note_doc
+
+    def note_link_at(self, pos: QPointF) -> str:
+        """The href of the Markdown link under `pos` (item coordinates), or
+        "" if there is none. The document is painted inset by NOTE_PAD, so
+        that offset comes back off before the layout hit-test."""
+        if not self.note or self._note_editor is not None:
+            return ""
+        local = QPointF(pos.x() - NOTE_PAD, pos.y() - NOTE_PAD)
+        return self._note_document().documentLayout().anchorAt(local)
+
+    def _open_note_link(self, href: str) -> None:
+        """Open a Note card's link in the system browser. Deferred past the
+        double-click window by the caller, so a double-click that lands on a
+        link edits the card instead of firing the browser."""
+        if not href or self._note_editor is not None:
+            return
+        url = QUrl(href)
+        if not url.scheme():
+            url = QUrl.fromUserInput(href)  # bare "example.com", "./file.pdf"
+        QDesktopServices.openUrl(url)
 
     def apply_stacking(self) -> None:
         """Take the node's place in the stacking order — its band sits above
@@ -3613,6 +3637,7 @@ class NodeItem(QGraphicsObject):
                                    self.body_height - 2 * NOTE_PAD))
         context = QAbstractTextDocumentLayout.PaintContext()
         context.palette.setColor(QPalette.Text, theme.NODE_TEXT)
+        context.palette.setColor(QPalette.Link, theme.SELECTION_OUTLINE)
         self._note_document().documentLayout().draw(painter, context)
         painter.restore()
 
@@ -3724,6 +3749,8 @@ class NodeItem(QGraphicsObject):
             # the fold / gather-ports triangles are click targets, not drag
             # bars — say so, even on a folded node whose whole body drags
             self.setCursor(Qt.PointingHandCursor)
+        elif self.note and self.note_link_at(event.pos()):
+            self.setCursor(Qt.PointingHandCursor)  # a clickable Markdown link
         elif self.button and self._button_edit:
             self.setCursor(Qt.SizeAllCursor)  # whole face drags in edit mode
         elif (not self.compact and not self.button
@@ -3811,6 +3838,15 @@ class NodeItem(QGraphicsObject):
                 # fold costs one Ctrl+Z
                 and fold.adjusted(-4, -4, 4, 4).contains(event.pos())):
             self.toggle_folded()
+            event.accept()
+            return
+        if (self.note and event.button() == Qt.LeftButton
+                and not event.modifiers()
+                and self.note_link_at(event.pos())):
+            # A link on a Note card: swallow the press so it neither selects
+            # nor drags the card; mouseReleaseEvent opens it if the cursor
+            # did not travel (and it was not a double-click to edit).
+            self._note_link_press = QPointF(event.pos())
             event.accept()
             return
         toggle = self._collapse_toggle_rect()
@@ -3982,6 +4018,18 @@ class NodeItem(QGraphicsObject):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._note_link_press is not None:
+            press, self._note_link_press = self._note_link_press, None
+            href = self.note_link_at(event.pos())
+            if href and (event.pos() - press).manhattanLength() <= 4:
+                # Defer past the double-click window: a double-click on a
+                # link should edit the card, not also launch the browser.
+                # _open_note_link bails if the editor opened in between.
+                QTimer.singleShot(
+                    QApplication.doubleClickInterval(),
+                    lambda h=href: self._open_note_link(h))
+            event.accept()
+            return
         if self._resizing_card:
             self._resizing_card = False
             width = int(self.width)

@@ -1,6 +1,9 @@
 """The markdown Note card: port-less display node with special rendering."""
 import pytest
+from PySide6.QtCore import QPointF
 from PySide6.QtGui import QUndoStack
+
+from flograph.ui.canvas.node_item import NOTE_PAD
 
 from flograph.core import Graph, NodeRegistry
 from flograph.ui.canvas import NodeGraphScene
@@ -120,6 +123,106 @@ def test_note_inline_edit_escape_cancels(env, registry):
     item._finish_note_edit(commit=False)
     assert graph.node(note.id).params["text"] == before
     assert stack.count() == 0  # nothing pushed
+
+
+def test_note_link_hit_testing(env, registry):
+    """note_link_at() reports the href under a point, "" where there is none."""
+    graph, stack, scene = env
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
+    item = scene.node_items[note.id]
+    graph.set_param(note.id, "text",
+                    "[docs](https://example.com/page)\n\nplain tail line")
+
+    on_link = QPointF(NOTE_PAD + 10, NOTE_PAD + 12)
+    assert item.note_link_at(on_link) == "https://example.com/page"
+
+    off_link = QPointF(NOTE_PAD + 3, item.body_height - NOTE_PAD - 4)
+    assert item.note_link_at(off_link) == ""
+
+
+def test_note_link_opens_in_browser(env, registry, monkeypatch):
+    graph, stack, scene = env
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
+    item = scene.node_items[note.id]
+    graph.set_param(note.id, "text", "[docs](https://example.com)")
+
+    opened = []
+    monkeypatch.setattr(
+        "flograph.ui.canvas.node_item.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()))
+
+    item._open_note_link("https://example.com")
+    assert opened == ["https://example.com"]
+
+    # a double-click landing on the link opens the editor instead — the
+    # deferred open must then do nothing
+    opened.clear()
+    item.start_note_edit()
+    item._open_note_link("https://example.com")
+    assert opened == []
+
+
+class _FakeMouse:
+    """Enough of QGraphicsSceneMouseEvent for the Note link handlers."""
+
+    def __init__(self, pos):
+        self._pos = pos
+
+    def pos(self):
+        return self._pos
+
+    def scenePos(self):
+        return self._pos
+
+    def button(self):
+        from PySide6.QtCore import Qt
+        return Qt.LeftButton
+
+    def modifiers(self):
+        from PySide6.QtCore import Qt
+        return Qt.NoModifier
+
+    def accept(self):
+        pass
+
+
+def test_note_single_click_opens_link_double_click_edits(env, registry,
+                                                         monkeypatch):
+    graph, stack, scene = env
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
+    item = scene.node_items[note.id]
+    graph.set_param(note.id, "text", "[docs](https://example.com)")
+
+    deferred = []
+    monkeypatch.setattr("flograph.ui.canvas.node_item.QTimer.singleShot",
+                        lambda _ms, cb: deferred.append(cb))
+    opened = []
+    monkeypatch.setattr(
+        "flograph.ui.canvas.node_item.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()))
+
+    on_link = QPointF(NOTE_PAD + 10, NOTE_PAD + 12)
+
+    # single click: press + release, then the deferred open fires
+    item.mousePressEvent(_FakeMouse(on_link))
+    assert item._note_link_press is not None
+    item.mouseReleaseEvent(_FakeMouse(on_link))
+    assert item._note_link_press is None
+    assert len(deferred) == 1
+    deferred.pop()()
+    assert opened == ["https://example.com"]
+
+    # double click on the link: the editor opens and the (still-deferred)
+    # open must be a no-op
+    opened.clear()
+    item.mousePressEvent(_FakeMouse(on_link))
+    item.mouseReleaseEvent(_FakeMouse(on_link))
+    item.mouseDoubleClickEvent(_FakeMouse(on_link))
+    assert item._note_editor is not None
+    for cb in deferred:
+        cb()
+    assert opened == []
+    item._finish_note_edit(commit=False)
 
 
 def test_params_panel_text_keeps_cursor_while_typing(qtbot, env, registry):
