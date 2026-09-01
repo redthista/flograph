@@ -4,8 +4,8 @@ on the canvas)."""
 import json
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QUndoStack
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QResizeEvent, QUndoStack
 from PySide6.QtWidgets import QApplication
 
 from flograph.core import Graph, NodeRegistry, Page, Tile
@@ -15,6 +15,10 @@ from flograph.ui.mainwindow import MainWindow
 
 REGIONS = {"columns": ["region", "units"],
            "rows": [["north", "10"], ["south", "20"], ["north", "30"]]}
+
+
+def _resize_event(w: int, h: int) -> QResizeEvent:
+    return QResizeEvent(QSize(w, h), QSize(w, h))
 
 
 @pytest.fixture(scope="module")
@@ -246,6 +250,25 @@ class TestSlicerCard:
         assert toolbar._select_all.isHidden()
         toolbar.set_mode("multi")
         assert not toolbar._select_all.isHidden()
+
+    def test_toolbar_wraps_the_buttons_under_the_search_when_narrow(self, qtbot):
+        """Reported: the card can be dragged narrower than "Search  All  None"
+        fits on one row, clipping the buttons. Below the threshold they drop
+        onto a second row instead so the card stays usable at small sizes."""
+        from flograph.ui.slicer_list import SlicerListWidget, SlicerToolbar
+        toolbar = SlicerToolbar(SlicerListWidget())
+        qtbot.addWidget(toolbar)
+        row_of = lambda w: toolbar._grid.getItemPosition(
+            toolbar._grid.indexOf(w))[0]
+
+        toolbar.setFixedWidth(400)
+        toolbar.resizeEvent(_resize_event(400, 30))
+        assert toolbar._wrapped is False
+        assert row_of(toolbar._search) == row_of(toolbar._clear)  # same row
+
+        toolbar.resizeEvent(_resize_event(150, 60))
+        assert toolbar._wrapped is True
+        assert row_of(toolbar._search) < row_of(toolbar._clear)  # dropped below
 
     def test_mode_syncs_to_card_after_a_run(self, qtbot, window):
         win = window

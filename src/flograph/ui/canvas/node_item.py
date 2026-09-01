@@ -1078,7 +1078,17 @@ class NodeItem(QGraphicsObject):
         cards need to tell one param from another, and None means "assume
         anything could have".
         """
+        # A width/height edit shrinks the card; prepareGeometryChange in the
+        # per-kind branch damages the *new* rect, but the pixels the card
+        # (and its embedded proxy widget) used to cover are outside it and
+        # stay on the canvas as a smear. A resize used to also flip the node
+        # dirty, whose status repaint cleaned that up by accident; now that
+        # Width/Height are cosmetic nothing does, so damage the union here.
+        before = self.sceneBoundingRect()
         self._params_changed_impl(name)
+        scene = self.scene()
+        if scene is not None:
+            scene.update(before.united(self.sceneBoundingRect()))
         # A folded card holds its square whatever its width param says; the
         # per-kind branches above wrote the open width, which is exactly the
         # size to grow back into, so keep it and re-apply the square.

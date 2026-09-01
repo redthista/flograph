@@ -7,7 +7,7 @@ import json
 
 from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QApplication, QGridLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QStyle, QStyleOptionButton, QStyleOptionViewItem, QStyledItemDelegate,
     QToolButton, QWidget,
 )
@@ -279,36 +279,46 @@ class SlicerToolbar(QWidget):
     dashboard tile) can lay it out above their list without the list itself
     changing shape."""
 
+    #: below this widget width the All/None/count row drops under the search
+    #: box instead of sitting beside it — so the card can be made narrow
+    #: without the buttons clipping off the edge
+    WRAP_BELOW = 190
+
     def __init__(self, target: SlicerListWidget, parent=None) -> None:
         super().__init__(parent)
         self._target = target
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 2)
-        layout.setSpacing(2)
+        # A grid rather than a box: the same four widgets are re-placed into
+        # one row or two by _relayout as the card is resized.
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 2)
+        self._grid.setHorizontalSpacing(2)
+        self._grid.setVerticalSpacing(2)
+        self._wrapped: bool | None = None
 
         search = QLineEdit()
         search.setPlaceholderText("Search…")
         search.setClearButtonEnabled(True)
+        search.setMinimumWidth(0)
         search.textChanged.connect(target.set_filter)
-        layout.addWidget(search, 1)
+        self._search = search
 
         select_all = QToolButton()
         select_all.setText("All")
         select_all.setToolTip("Select every visible value")
         select_all.clicked.connect(target.select_all)
-        layout.addWidget(select_all)
         self._select_all = select_all
 
         clear = QToolButton()
         clear.setText("None")
         clear.setToolTip("Clear the selection")
         clear.clicked.connect(target.clear_all)
-        layout.addWidget(clear)
+        self._clear = clear
 
         count = QLabel("")
         count.setToolTip("Values ticked, of the total on this column")
-        layout.addWidget(count)
         self._count = count
+
+        self._relayout(wrapped=False)
 
         self.setStyleSheet(
             f"QLineEdit {{ background: {theme.NODE_BODY.name()};"
@@ -319,6 +329,29 @@ class SlicerToolbar(QWidget):
             f"QLabel {{ color: {theme.NODE_SUBTEXT.name()}; font-size: 8pt; }}")
 
         target.selection_committed.connect(lambda _v: self.refresh_summary())
+
+    def _relayout(self, wrapped: bool) -> None:
+        """Place the four widgets in one row (wide) or two (narrow)."""
+        if wrapped == self._wrapped:
+            return
+        self._wrapped = wrapped
+        for w in (self._search, self._select_all, self._clear, self._count):
+            self._grid.removeWidget(w)
+        if wrapped:
+            self._grid.addWidget(self._search, 0, 0, 1, 3)
+            self._grid.addWidget(self._select_all, 1, 0)
+            self._grid.addWidget(self._clear, 1, 1)
+            self._grid.addWidget(self._count, 1, 2)
+        else:
+            self._grid.addWidget(self._search, 0, 0)
+            self._grid.addWidget(self._select_all, 0, 1)
+            self._grid.addWidget(self._clear, 0, 2)
+            self._grid.addWidget(self._count, 0, 3)
+        self._grid.setColumnStretch(0, 1)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._relayout(wrapped=event.size().width() < self.WRAP_BELOW)
 
     def set_mode(self, mode: str) -> None:
         """Select All is meaningless once only one value can be picked."""

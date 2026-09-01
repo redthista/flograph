@@ -1397,8 +1397,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         if item is not None:
             item.refresh_compact()
 
-    @staticmethod
-    def _repaint_ports(item) -> None:
+    def _repaint_ports(self, item) -> None:
         if item is None:
             return
         for port in (*item.input_ports.values(), *item.output_ports.values()):
@@ -1407,6 +1406,14 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             # does change and Qt's index has to be told
             port.prepareGeometryChange()
             port.update()
+        # The label-visibility flag has already flipped by the time we get
+        # here, so boundingRect (and the update above) only ever sees the
+        # post-flip extent — a pill that just *vanished* sits outside it and
+        # smears until something else repaints that strip. Every caller is a
+        # one-shot user toggle (a canvas preference, a per-node override, the
+        # held reveal key), never a per-frame path, so damage the whole
+        # scene; Qt coalesces the repeats into one repaint.
+        self.update()
 
     def _on_color_changed(self, node_id: str) -> None:
         item = self.node_items.get(node_id)

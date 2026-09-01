@@ -198,6 +198,28 @@ class TestFloatingPortNames:
         assert (item.output_ports["text"]._label_rect().width()
                 > item.input_ports["a"]._label_rect().width())
 
+    def test_hiding_the_labels_repaints_the_canvas(self, scene, registry):
+        """The pill vanishing shrinks the pin's bounding rect; the flag is
+        already flipped by the time the pins are re-indexed, so nothing
+        damages the strip the pill used to cover unless the scene is told
+        to. Left un-repainted it smears (reported for the held reveal key)."""
+        _graph, sc = scene
+        report_card(scene, registry)
+        sc.set_port_labels_enabled(True)
+        calls = []
+        sc.update = lambda *a: calls.append(a)  # type: ignore[assignment]
+        sc.set_port_labels_enabled(False)
+        assert calls, "hiding the labels left the canvas un-repainted"
+
+    def test_ending_a_reveal_repaints_the_canvas(self, scene, registry):
+        _graph, sc = scene
+        report_card(scene, registry)
+        sc.set_revealing_port_labels(True)
+        calls = []
+        sc.update = lambda *a: calls.append(a)  # type: ignore[assignment]
+        sc.set_revealing_port_labels(False)
+        assert calls
+
 
 # -------------------------------------------------------- the per-node bit
 
