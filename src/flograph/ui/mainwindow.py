@@ -1594,6 +1594,39 @@ class MainWindow(QMainWindow):
             "Input copied into the table — the cells are yours to edit now, "
             "though a run will refresh the input's columns again", 5000)
 
+    def _image_node_links_a_file(self, node_id: str) -> bool:
+        """Whether this Image node points at a picture *on disk* — the case
+        where 'Embed Image in the File' has something to do. A data: URI,
+        base64 blob, empty or missing path all answer no. Kept cheap (a stat,
+        not a read): the node menu asks this on every right-click."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or node.type_id != IMAGE_TYPE:
+            return False
+        source = str(node.params.get("path", "") or "").strip()
+        if not source or source[:5].lower() == "data:":
+            return False
+        try:
+            return Path(source).expanduser().is_file()
+        except (OSError, ValueError):
+            return False
+
+    def _embed_node_image(self, node_id: str) -> None:
+        """Replace an Image node's file path with the picture itself, as a
+        base64 data: URI, so the flow carries it. One undoable step."""
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return
+        from flograph.core.images import embed_source
+        uri = embed_source(str(node.params.get("path", "") or ""))
+        if not uri.startswith("data:"):
+            self.show_status("Could not read that image to embed it", 6000)
+            return
+        self.undo_stack.push(SetParamCommand(
+            self.graph, node_id, "path", uri, merge=False))
+        self.show_status(
+            f"Image embedded ({len(uri) * 3 // 4 >> 10} KB) — it now travels "
+            f"with the flow", 5000)
+
     def _on_image_node_succeeded(self, node_id: str) -> None:
         """Show what the run actually loaded. Only matters when the source
         came in on the wire — one set in the node's own params is already on
@@ -3337,6 +3370,13 @@ class MainWindow(QMainWindow):
         if (not many and card_kind(node) == "grid"
                 and self._table_import_source(node_id) is not None):
             import_action = menu.addAction("Import input into table")
+        embed_image_action = None
+        if not many and self._image_node_links_a_file(node_id):
+            embed_image_action = menu.addAction("Embed Image in the File")
+            embed_image_action.setToolTip(
+                "Store the picture itself inside the project so the flow "
+                "carries it when you share the file. The link to the original "
+                "file is replaced by the image data.")
         browser_action = None
         if not many and self._can_open_in_browser(node_id):
             browser_action = menu.addAction("Open in Browser")
@@ -3485,6 +3525,8 @@ class MainWindow(QMainWindow):
                 else "let nodes run beside others", ids, exclusive_for)
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
+        elif embed_image_action is not None and chosen is embed_image_action:
+            self._embed_node_image(node_id)
         elif browser_action is not None and chosen is browser_action:
             self._open_in_browser(node_id)
         elif (report_export_action is not None
@@ -3915,14 +3957,13 @@ class MainWindow(QMainWindow):
         This is also the whole of "screen grab": every OS screenshot key
         already puts its result on the clipboard, so there is nothing for
         flograph to capture itself.
+
+        The picture goes into the node as a base64 `data:` URI, so the flow
+        carries it — a pasted image is portable the moment it lands.
         """
-        from .image_paste import save_clipboard_image
-        try:
-            path = save_clipboard_image(QApplication.clipboard().mimeData())
-        except OSError as exc:
-            self.show_status(f"Could not save the image: {exc}", 8000)
-            return False
-        if path is None:
+        from .image_paste import clipboard_image_source
+        source = clipboard_image_source(QApplication.clipboard().mimeData())
+        if source is None:
             return False
         if scene_pos is None:
             scene_pos = self.view.mapToScene(
@@ -3932,13 +3973,17 @@ class MainWindow(QMainWindow):
         self.undo_stack.beginMacro("paste image")
         self.undo_stack.push(AddNodeCommand(self.graph, node))
         self.undo_stack.push(
-            SetParamCommand(self.graph, node.id, "path", path))
+            SetParamCommand(self.graph, node.id, "path", source))
         self.undo_stack.endMacro()
         self.scene.clearSelection()
         item = self.scene.node_items.get(node.id)
         if item is not None:
             item.setSelected(True)
-        self.show_status("Pasted image from the clipboard", 4000)
+        big = len(source) > 12_000_000
+        self.show_status(
+            "Pasted image — it is stored in the flow, which makes the "
+            "project file large" if big
+            else "Pasted image from the clipboard", 6000 if big else 4000)
         return True
 
     def _paste(self, scene_pos: Optional[QPointF] = None) -> None:

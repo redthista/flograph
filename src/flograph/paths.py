@@ -40,16 +40,3 @@ def user_frames_dir() -> Path:
     """
     return user_data_dir() / "frames"
 
-
-def user_images_dir() -> Path:
-    """Store for images pasted onto the canvas from the clipboard.
-
-    A clipboard image has no file of its own, so it needs somewhere to live
-    before an Image node can point a path at it. Keeping it here rather than
-    inline in the .flograph file matches how every other file-backed node
-    works (Read CSV stores a path, not the CSV) and keeps a project holding
-    a screenshot from carrying megabytes of base64 through every save and
-    every undo entry. Files are named by content hash, so pasting the same
-    screenshot twice costs one file.
-    """
-    return user_data_dir() / "images"

@@ -18,6 +18,12 @@ image that arrives as base64 out of a REST call, a database blob column or
 a Python Script node can be plugged straight in without being written to
 disk first. A wired source wins over the typed one.
 
+**Sharing the flow.** A pasted picture is stored inside the project
+automatically — it is held as base64 in "Image file", so the image travels
+with the .flograph (or an exported .flowf). A picture chosen from or dragged
+in as a *file* stays a link to that file; to carry a copy inside the project
+instead, right-click the node and pick **Embed Image in the File**.
+
 The card draws straight from the source, so a picture set here appears
 without running the graph. Running the node emits it on the "image" port so
 it can feed other nodes — `data_uri` slots directly into Plotly, HTML or a

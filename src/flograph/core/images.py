@@ -179,3 +179,19 @@ def resolve_source(source: str) -> tuple[bytes, str, Optional[str]]:
 def to_data_uri(data: bytes, mime: str) -> str:
     """The form nearly every consumer wants — Plotly, HTML, a report embed."""
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def embed_source(value: str) -> str:
+    """A file path -> its `data:` URI, so the picture travels inside the flow.
+
+    A `data:` URI, a bare base64 blob, an empty string, or a path that does
+    not resolve to a readable file all come back unchanged — the caller can
+    tell nothing happened by the result still not starting with ``data:``.
+    """
+    if not value or value.lstrip()[:5].lower() == "data:":
+        return value
+    try:
+        data, mime, path = resolve_source(value)
+    except (ValueError, FileNotFoundError, OSError):
+        return value
+    return to_data_uri(data, mime) if path else value

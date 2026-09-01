@@ -1,4 +1,4 @@
-"""Turning a clipboard image into a file an Image node can point at.
+"""Turning a clipboard image into a `data:` URI an Image node can point at.
 
 Screen grabbing is deliberately not implemented here. Every OS this runs on
 already has a screenshot key that puts the result on the clipboard — and on
@@ -6,21 +6,23 @@ Wayland an application cannot grab the screen itself anyway without going
 through the desktop portal — so the whole feature is "paste what the OS
 already gave you", which works identically on Windows, macOS and Linux.
 
-Files land in a content-addressed store (`paths.user_images_dir`) rather
-than inside the .flograph file. See that function for why.
+A pasted picture goes straight into the node's ``path`` param as a base64
+``data:`` URI, so the flow carries the image with it — hand the .flograph
+(or an exported .flowf) to someone else and the picture is still there. A
+still is re-encoded to whichever *lossless* format is smallest (PNG or, when
+the Qt build can write it, WebP); an animation is kept byte-for-byte because
+Qt has no animation writer.
 """
 from __future__ import annotations
 
-import hashlib
-from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QMimeData
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QImageReader, QImageWriter
 
-from flograph.paths import user_images_dir
+from flograph.core.images import sniff_mime, to_data_uri
 
-# Clipboard flavours worth taking verbatim, best first. Saving the bytes the
+# Clipboard flavours worth taking verbatim, best first. Taking the bytes the
 # clipboard already holds beats re-encoding the decoded QImage: it keeps an
 # animated GIF animated, and keeps a PNG's exact pixels rather than paying a
 # decode/encode round trip. Anything else falls back to encoding as PNG.
@@ -68,31 +70,65 @@ def clipboard_image_bytes(mime: QMimeData) -> Optional[tuple[bytes, str]]:
     return (data, ".png") if data else None
 
 
-def save_image_bytes(data: bytes, suffix: str,
-                     directory: Optional[Path] = None) -> str:
-    """Write `data` into the image store under its content hash.
+def _is_animation(data: bytes) -> bool:
+    store = QByteArray(data)
+    buffer = QBuffer(store)
+    buffer.open(QIODevice.ReadOnly)
+    reader = QImageReader(buffer)
+    return reader.supportsAnimation() and reader.imageCount() > 1
 
-    Content addressing means pasting the same screenshot into five nodes
-    costs one file, and re-pasting after an undo costs none.
+
+def _encode_lossless_webp(image: QImage) -> Optional[bytes]:
+    """`image` as a lossless WebP, or None if this Qt build can't write one."""
+    if b"webp" not in {bytes(f) for f in QImageWriter.supportedImageFormats()}:
+        return None
+    store = QByteArray()
+    buffer = QBuffer(store)
+    buffer.open(QIODevice.WriteOnly)
+    writer = QImageWriter(buffer, b"webp")
+    writer.setQuality(100)  # 100 selects lossless in Qt's WebP plugin
+    ok = writer.write(image)
+    buffer.close()
+    if not ok or not store.size():
+        return None
+    blob = bytes(store)
+    # Trust nothing: a plugin that claims WebP support but writes garbage
+    # would otherwise become the "smallest" candidate and paste a broken URI.
+    return blob if not QImage.fromData(QByteArray(blob)).isNull() else None
+
+
+def _smallest_lossless(data: bytes) -> tuple[bytes, str]:
+    """The clipboard bytes re-encoded to whichever lossless form is smallest.
+
+    An animation is returned untouched — re-encoding it would need a writer
+    Qt does not have. A still is compared against a fresh PNG and a lossless
+    WebP; the original is kept if neither beats it (a clipboard PNG is often
+    already about as small as it gets).
     """
-    directory = Path(directory) if directory is not None else user_images_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(data).hexdigest()[:32]
-    path = directory / f"{digest}{suffix}"
-    if not path.exists():
-        # Write-then-rename so a crash mid-write can't leave a truncated file
-        # sitting at the name its own hash promises is intact.
-        temporary = path.with_suffix(path.suffix + ".part")
-        temporary.write_bytes(data)
-        temporary.replace(path)
-    return str(path)
+    if _is_animation(data):
+        return data, sniff_mime(data)
+    image = QImage.fromData(QByteArray(data))
+    if image.isNull():
+        return data, sniff_mime(data)
+    candidates: list[tuple[bytes, str]] = [(data, sniff_mime(data))]
+    png = _encode_png(image)
+    if png and not QImage.fromData(QByteArray(png)).isNull():
+        candidates.append((png, "image/png"))
+    webp = _encode_lossless_webp(image)
+    if webp:
+        candidates.append((webp, "image/webp"))
+    return min(candidates, key=lambda pair: len(pair[0]))
 
 
-def save_clipboard_image(mime: QMimeData,
-                         directory: Optional[Path] = None) -> Optional[str]:
-    """Path to a saved copy of the clipboard's image, or None if it has none."""
+def clipboard_image_source(mime: QMimeData) -> Optional[str]:
+    """The clipboard's picture as a base64 `data:` URI, or None if it has none.
+
+    This is also the whole of "screen grab": every OS screenshot key already
+    puts its result on the clipboard, so there is nothing to capture here.
+    """
     found = clipboard_image_bytes(mime)
     if found is None:
         return None
-    data, suffix = found
-    return save_image_bytes(data, suffix, directory)
+    data, _suffix = found
+    best, mime_type = _smallest_lossless(data)
+    return to_data_uri(best, mime_type)

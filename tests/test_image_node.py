@@ -507,29 +507,68 @@ class TestClipboardImageBytes:
         assert clipboard_image_bytes(mime) is None
 
 
-class TestSaveImageBytes:
-    def test_is_content_addressed(self, tmp_path):
-        from flograph.ui.image_paste import save_image_bytes
-        first = save_image_bytes(b"abc", ".png", tmp_path)
-        second = save_image_bytes(b"abc", ".png", tmp_path)
-        assert first == second                       # same bytes, same file
-        assert len(list(tmp_path.iterdir())) == 1    # written once
+class TestClipboardImageSource:
+    def test_returns_a_data_uri_that_round_trips(self):
+        from PySide6.QtCore import QMimeData
+        from flograph.core.images import resolve_source
+        from flograph.ui.image_paste import clipboard_image_source
+        mime = QMimeData()
+        mime.setImageData(_solid(20, 20))
+        uri = clipboard_image_source(mime)
+        assert uri.startswith("data:image/")
+        data, mime_type, path = resolve_source(uri)
+        assert path is None and mime_type.startswith("image/")
+        assert not QImage.fromData(data).isNull()
 
-    def test_different_bytes_get_different_files(self, tmp_path):
-        from flograph.ui.image_paste import save_image_bytes
-        assert (save_image_bytes(b"abc", ".png", tmp_path)
-                != save_image_bytes(b"xyz", ".png", tmp_path))
+    def test_picks_a_lossless_encoding_no_bigger_than_the_source(self):
+        from PySide6.QtCore import QMimeData
+        from flograph.core.images import decode_base64
+        from flograph.ui.image_paste import clipboard_image_bytes, clipboard_image_source
+        mime = QMimeData()
+        mime.setImageData(_solid(400, 400))
+        source_len = len(clipboard_image_bytes(mime)[0])
+        uri = clipboard_image_source(mime)
+        encoded = decode_base64(uri.split(",", 1)[1])
+        assert len(encoded) <= source_len
+        assert not QImage.fromData(encoded).isNull()
 
-    def test_leaves_no_partial_file_behind(self, tmp_path):
-        from flograph.ui.image_paste import save_image_bytes
-        save_image_bytes(ANIMATED_GIF, ".gif", tmp_path)
-        assert not list(tmp_path.glob("*.part"))
+    def test_keeps_an_animation_byte_for_byte(self):
+        from PySide6.QtCore import QByteArray, QMimeData
+        from flograph.core.images import decode_base64
+        from flograph.ui.image_paste import clipboard_image_source
+        mime = QMimeData()
+        mime.setData("image/gif", QByteArray(ANIMATED_GIF))
+        uri = clipboard_image_source(mime)
+        assert decode_base64(uri.split(",", 1)[1]) == ANIMATED_GIF
+
+    def test_no_image_returns_none(self):
+        from PySide6.QtCore import QMimeData
+        from flograph.ui.image_paste import clipboard_image_source
+        mime = QMimeData()
+        mime.setText("just some text")
+        assert clipboard_image_source(mime) is None
+
+
+class TestEmbedSource:
+    def test_a_file_becomes_a_data_uri(self, png_file):
+        from flograph.core.images import embed_source
+        assert embed_source(png_file).startswith("data:image/png;base64,")
+
+    def test_leaves_a_data_uri_untouched(self):
+        from flograph.core.images import embed_source
+        uri = "data:image/png;base64,iVBORw0KGgo="
+        assert embed_source(uri) == uri
+
+    def test_leaves_a_missing_path_and_empty_string_alone(self, tmp_path):
+        from flograph.core.images import embed_source
+        assert embed_source("") == ""
+        ghost = str(tmp_path / "absent.png")
+        assert embed_source(ghost) == ghost
 
 
 class TestPasteOntoCanvas:
     @pytest.fixture
     def window(self, qtbot, registry, tmp_path, monkeypatch):
-        # never touch the real profile: the paste path writes files
         monkeypatch.setenv("FLOGRAPH_USER_DIR", str(tmp_path / "profile"))
         from flograph.ui.mainwindow import MainWindow
         win = MainWindow(registry)
@@ -544,14 +583,16 @@ class TestPasteOntoCanvas:
         mime.setImageData(_solid(20, 20))
         QApplication.clipboard().setMimeData(mime)
 
-    def test_paste_creates_an_image_node_pointing_at_a_saved_file(self, window):
-        import os
+    def test_paste_creates_an_image_node_holding_a_data_uri(self, window):
         self._put_image_on_clipboard()
         assert window._paste_clipboard_image() is True
         assert len(window.graph.nodes) == 1
         node = next(iter(window.graph.nodes.values()))
         assert node.type_id == IMAGE_TYPE
-        assert os.path.isfile(node.params["path"])
+        assert node.params["path"].startswith("data:image/")
+        item = window.scene.node_items[node.id]
+        _render(item)
+        assert not item._card_image().error
 
     def test_paste_is_one_undo_step(self, window):
         self._put_image_on_clipboard()
@@ -576,3 +617,38 @@ class TestPasteOntoCanvas:
         types = {n.type_id for n in window.graph.nodes.values()}
         assert types == {"flograph.io.read_csv"}
         assert len(window.graph.nodes) == 2
+
+
+class TestEmbedImageMenu:
+    @pytest.fixture
+    def window(self, qtbot, registry, tmp_path, monkeypatch):
+        monkeypatch.setenv("FLOGRAPH_USER_DIR", str(tmp_path / "profile"))
+        from flograph.ui.mainwindow import MainWindow
+        win = MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+        return win
+
+    def _image_node(self, window, path):
+        from flograph.ui.commands import AddNodeCommand
+        node = window.registry.instantiate(IMAGE_TYPE, pos=(0, 0))
+        node.params["path"] = path
+        window.undo_stack.push(AddNodeCommand(window.graph, node))
+        return node
+
+    def test_offered_only_for_a_linked_file(self, window, png_file):
+        assert window._image_node_links_a_file(
+            self._image_node(window, png_file).id)
+        assert not window._image_node_links_a_file(
+            self._image_node(window, "").id)
+        assert not window._image_node_links_a_file(
+            self._image_node(window, "data:image/png;base64,iVBORw0KGgo=").id)
+        assert not window._image_node_links_a_file(
+            self._image_node(window, "/no/such/file.png").id)
+
+    def test_embed_converts_the_path_and_undoes(self, window, png_file):
+        node = self._image_node(window, png_file)
+        window._embed_node_image(node.id)
+        assert node.params["path"].startswith("data:image/png;base64,")
+        window.undo_stack.undo()
+        assert node.params["path"] == png_file
