@@ -1915,7 +1915,6 @@ class NodeItem(QGraphicsObject):
 
         view = DataTableView()
         theme.style_scroll_area(view, theme.grid_stylesheet())
-        view.setSortingEnabled(True)
         view.hide()
         layout.addWidget(view, 1)
         self._table_viewer_view = view

@@ -85,6 +85,17 @@ class SpreadsheetView(QTableView):
         # double-click a column border: Qt fits that column; when it's part
         # of a multi-column selection, fit the whole selection
         header.sectionHandleDoubleClicked.connect(self._autosize_from_handle)
+
+        # click a header to sort it (asc -> desc -> clear); the cycler's
+        # own timer keeps a sort click apart from a rename double-click
+        from ..table_sort import HeaderSortCycler
+        self._presort_rows: Optional[list[list[str]]] = None
+        self._sorting = False
+        self._sort_cycler = HeaderSortCycler(
+            header, can_sort=lambda: (self.sheet_model() is not None
+                                      and not self.sheet_model().read_only))
+        self._sort_cycler.sortRequested.connect(self._header_sort)
+
         rows = self.verticalHeader()
         rows.setContextMenuPolicy(Qt.CustomContextMenu)
         rows.customContextMenuRequested.connect(self._row_menu)
@@ -115,15 +126,59 @@ class SpreadsheetView(QTableView):
         if old is not None:
             old.modelReset.disconnect(self._sync_column_widths)
             old.dataChanged.disconnect(self._maybe_autofit)
+            old.modelReset.disconnect(self._forget_sort)
+            old.sheet_edited.disconnect(self._forget_sort)
         super().setModel(model)
+        self._forget_sort()
         if isinstance(model, SheetModel):
             model.modelReset.connect(self._sync_column_widths)
             model.dataChanged.connect(self._maybe_autofit)
+            model.modelReset.connect(self._forget_sort)
+            model.sheet_edited.connect(self._forget_sort)
             self._sync_column_widths()
 
     def sheet_model(self) -> Optional[SheetModel]:
         model = self.model()
         return model if isinstance(model, SheetModel) else None
+
+    # ------------------------------------------------------- header sort
+
+    def _header_sort(self, col: int, mode: str) -> None:
+        """A header click resolved to a sort. asc/desc reorder the rows
+        (one undo step each); clear restores the order captured before the
+        first sort of this run."""
+        model = self.sheet_model()
+        if model is None or model.read_only:
+            return
+        self._sorting = True
+        try:
+            if mode == "clear":
+                if self._presort_rows is not None:
+                    model.restore_order(self._presort_rows)
+                self._presort_rows = None
+            else:
+                if self._presort_rows is None:
+                    self._presort_rows = [list(r) for r in model.sheet.rows]
+                model.sort_by(col, mode == "asc")
+        finally:
+            self._sorting = False
+
+    def _forget_sort(self, *_) -> None:
+        """Drop the saved pre-sort order and the header indicator — any
+        change to the rows we did not make ourselves invalidates it."""
+        if self._sorting:
+            return
+        self._presort_rows = None
+        self._sort_cycler.reset()
+
+    def clear_sort(self) -> None:
+        """Menu entry point: restore the pre-sort row order."""
+        self._header_sort(0, "clear")
+        self._sort_cycler.reset()
+
+    @property
+    def has_active_sort(self) -> bool:
+        return self._presort_rows is not None
 
     def dataChanged(self, top_left, bottom_right, roles=()) -> None:
         """Refresh the changed cells, but leave the one being typed into
@@ -537,8 +592,12 @@ class SpreadsheetView(QTableView):
         menu.addAction("Resize all columns to content",
                        lambda: self.autosize_columns())
         menu.addSeparator()
-        menu.addAction("Sort ascending", lambda: model.sort_by(col, True))
-        menu.addAction("Sort descending", lambda: model.sort_by(col, False))
+        menu.addAction("Sort ascending",
+                       lambda: self._header_sort(col, "asc"))
+        menu.addAction("Sort descending",
+                       lambda: self._header_sort(col, "desc"))
+        clear = menu.addAction("Clear sort", self.clear_sort)
+        clear.setEnabled(self.has_active_sort)
         menu.exec(self.horizontalHeader().mapToGlobal(pos))
 
     def _row_menu(self, pos) -> None:

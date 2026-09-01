@@ -63,6 +63,49 @@ def normalize_date(text) -> Optional[str]:
     return None
 
 
+_TRUEISH = {"true", "1", "yes", "y", "t"}
+_FALSEISH = {"false", "0", "no", "n", "f", ""}
+
+
+def _sort_key(text: str, col_type: str) -> tuple[bool, int, float, str]:
+    """Sort key for one cell: ``(present, rank, number, text)``.
+
+    ``present`` is False for blank/unparseable cells (they sort last).
+    ``rank`` only matters for ``auto`` columns, where it keeps numbers
+    before dates before text.
+    """
+    if text == "":
+        return (False, 0, 0.0, "")
+
+    if col_type in ("number", "integer"):
+        try:
+            return (True, 0, float(text), "")
+        except ValueError:
+            return (False, 0, 0.0, "")
+    if col_type == "bool":
+        low = text.casefold()
+        if low in _TRUEISH:
+            return (True, 0, 1.0, "")
+        if low in _FALSEISH:
+            return (True, 0, 0.0, "")
+        return (False, 0, 0.0, "")
+    if col_type == "date":
+        iso = normalize_date(text)
+        return (True, 0, 0.0, iso) if iso else (False, 0, 0.0, "")
+    if col_type == "text":
+        return (True, 0, 0.0, text.casefold())
+
+    # auto: sort each value as whatever it looks like
+    try:
+        return (True, 0, float(text), "")
+    except ValueError:
+        pass
+    iso = normalize_date(text)
+    if iso:
+        return (True, 1, 0.0, iso)
+    return (True, 2, 0.0, text.casefold())
+
+
 def is_formula(text) -> bool:
     """A cell holds a formula when it starts with "=" (a lone "=" is text)."""
     return isinstance(text, str) and text.startswith("=") and text != "="
@@ -154,23 +197,32 @@ class Sheet:
         if self.n_rows < n_rows:
             self.insert_rows(self.n_rows, n_rows - self.n_rows)
 
+    def set_rows(self, rows: list[list[str]]) -> None:
+        """Replace every row wholesale — used to undo a sort back to a
+        stored order. Caller guarantees the shape matches."""
+        self.rows = [list(row) for row in rows]
+
     def sort_by(self, col: int, ascending: bool = True) -> None:
-        """Reorder rows by a column, numbers before text, blanks last.
+        """Reorder rows by a column, aware of the column's type.
+
+        A ``date`` column sorts chronologically, ``number``/``integer``
+        numerically, ``bool`` false-before-true, ``text`` case-insensitive;
+        an ``auto`` column sorts each value as whatever it parses as
+        (numbers, then dates, then text). Blank and unparseable cells sort
+        last in either direction.
 
         Formula references are NOT rewritten — like a plain Excel sort,
         formulas keep pointing at the same cell addresses.
         """
         if not 0 <= col < self.n_cols:
             return
+        col_type = self.columns[col].type
 
         def key(row: list[str]):
-            text = row[col].strip()
-            if text == "":
-                return (2, 0.0, "")
-            try:
-                return (0, float(text), "")
-            except ValueError:
-                return (1, 0.0, text.casefold())
+            present, rank, number, text = _sort_key(row[col].strip(), col_type)
+            # `present != ascending` keeps blanks/unparseable at the bottom
+            # whichever way round the list gets reversed.
+            return (present != ascending, rank, number, text)
 
         self.rows.sort(key=key, reverse=not ascending)
 

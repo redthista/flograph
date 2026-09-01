@@ -56,6 +56,10 @@ class PandasModel(QAbstractTableModel):
     def __init__(self, df: pd.DataFrame, parent=None) -> None:
         super().__init__(parent)
         self._df = df
+        # The frame as it arrived. sort() reorders a *copy* off this, so
+        # ascending/descending/clear all work from a fixed base and the
+        # source (and anything downstream sharing it) is never touched.
+        self._source = df
         self._loaded = min(PAGE_SIZE, len(df))
 
     def dataframe(self) -> pd.DataFrame:
@@ -66,6 +70,32 @@ class PandasModel(QAbstractTableModel):
         its way there.
         """
         return self._df
+
+    # ------------------------------------------------------------- sorting
+
+    def sort(self, column: int, order=Qt.AscendingOrder) -> None:
+        """Reorder the view by one column.
+
+        ``order`` of ``None`` clears the sort and restores the frame's
+        original row order. Detection of numbers/dates stored as text
+        lives in :func:`flograph.ui.table_sort.pandas_sort_key`; real
+        dtypes sort natively.
+        """
+        if not 0 <= column < len(self._source.columns):
+            return
+        from ..table_sort import pandas_sort_key
+
+        self.beginResetModel()
+        if order is None:
+            self._df = self._source
+        else:
+            col = self._source.columns[column]
+            ascending = order == Qt.AscendingOrder
+            self._df = self._source.sort_values(
+                by=col, key=pandas_sort_key, ascending=ascending,
+                kind="stable", na_position="last")
+        self._loaded = min(PAGE_SIZE, len(self._df))
+        self.endResetModel()
 
     # ------------------------------------------------------------- shape
 

@@ -770,3 +770,69 @@ class TestExternalSyncKeepsYourPlace:
         model.set_sheet(self.sheet([["1", "20"], ["30", "40"]]))
         assert changed                                  # the view was told
         assert model.index(1, 1).data(Qt.DisplayRole) == "40"
+
+
+class TestHeaderClickSort:
+    def _view(self, qtbot, columns=None, rows=None, types=None):
+        model = make_model(columns=columns, rows=rows, types=types)
+        view = SpreadsheetView()
+        model.setParent(view)
+        view.setModel(model)
+        qtbot.addWidget(view)
+        return view, model
+
+    def _rows(self, model):
+        return [list(r) for r in model.sheet.rows]
+
+    def test_header_click_cycle_sorts_then_restores(self, qtbot):
+        view, model = self._view(
+            qtbot, columns=["A", "B"],
+            rows=[["10", "x"], ["2", "y"], ["30", "z"]])
+        edits = []
+        model.sheet_edited.connect(lambda d: edits.append(d))
+        header = view.horizontalHeader()
+
+        with qtbot.waitSignal(view._sort_cycler.sortRequested):
+            header.sectionClicked.emit(0)
+        assert [r[0] for r in self._rows(model)] == ["2", "10", "30"]
+        with qtbot.waitSignal(view._sort_cycler.sortRequested):
+            header.sectionClicked.emit(0)
+        assert [r[0] for r in self._rows(model)] == ["30", "10", "2"]
+        with qtbot.waitSignal(view._sort_cycler.sortRequested):
+            header.sectionClicked.emit(0)                # clear
+        assert [r[0] for r in self._rows(model)] == ["10", "2", "30"]
+        assert len(edits) == 3          # every step is its own undo commit
+
+    def test_date_column_sorts_chronologically_not_lexically(self, qtbot):
+        view, model = self._view(
+            qtbot, columns=["When"], types=["date"],
+            rows=[["5 Jan 2024"], ["12 Mar 2023"], ["1 Feb 2024"]])
+        view._header_sort(0, "asc")
+        # rows reordered chronologically; the cell text is left as typed
+        assert [r[0] for r in self._rows(model)] == [
+            "12 Mar 2023", "5 Jan 2024", "1 Feb 2024"]
+
+    def test_clear_sort_menu_entry_reverses_a_menu_sort(self, qtbot):
+        view, model = self._view(
+            qtbot, columns=["A"], rows=[["3"], ["1"], ["2"]])
+        view._header_sort(0, "asc")
+        assert [r[0] for r in self._rows(model)] == ["1", "2", "3"]
+        assert view.has_active_sort
+        view.clear_sort()
+        assert [r[0] for r in self._rows(model)] == ["3", "1", "2"]
+        assert not view.has_active_sort
+
+    def test_read_only_grid_ignores_header_sort(self, qtbot):
+        view, model = self._view(
+            qtbot, columns=["A"], rows=[["3"], ["1"], ["2"]])
+        model.set_read_only(True)
+        view._header_sort(0, "asc")
+        assert [r[0] for r in self._rows(model)] == ["3", "1", "2"]
+
+    def test_an_edit_between_sorts_drops_the_restore_point(self, qtbot):
+        view, model = self._view(
+            qtbot, columns=["A", "B"], rows=[["3", ""], ["1", ""], ["2", ""]])
+        view._header_sort(0, "asc")
+        assert view.has_active_sort
+        model.setData(model.index(0, 1), "edited", Qt.EditRole)
+        assert not view.has_active_sort

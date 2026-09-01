@@ -97,8 +97,41 @@ class TestStructuralOps:
         sheet = Sheet([ColumnSpec("A")], [["banana"], ["10"], [""], ["2"]])
         sheet.sort_by(0)
         assert [r[0] for r in sheet.rows] == ["2", "10", "banana", ""]
+        # blanks/unparseable stay at the bottom whichever way round
         sheet.sort_by(0, ascending=False)
-        assert [r[0] for r in sheet.rows] == ["", "banana", "10", "2"]
+        assert [r[0] for r in sheet.rows] == ["banana", "10", "2", ""]
+
+    def test_sort_date_column_is_chronological_not_lexical(self):
+        sheet = Sheet(
+            [ColumnSpec("When", "date")],
+            [["5 Jan 2024"], ["12/03/2023"], ["1 Feb 2024"], [""]])
+        sheet.sort_by(0)
+        assert [r[0] for r in sheet.rows] == [
+            "12/03/2023", "5 Jan 2024", "1 Feb 2024", ""]
+
+    def test_sort_number_column_is_numeric_not_lexical(self):
+        sheet = Sheet([ColumnSpec("N", "number")],
+                      [["10"], ["9"], ["100"], ["2"]])
+        sheet.sort_by(0)
+        assert [r[0] for r in sheet.rows] == ["2", "9", "10", "100"]
+
+    def test_sort_auto_column_buckets_numbers_then_dates_then_text(self):
+        sheet = Sheet(
+            [ColumnSpec("Mixed")],
+            [["apple"], ["2024-06-01"], ["3"], ["1"]])
+        sheet.sort_by(0)
+        assert [r[0] for r in sheet.rows] == [
+            "1", "3", "2024-06-01", "apple"]
+
+    def test_set_rows_replaces_and_deep_copies(self):
+        sheet = Sheet([ColumnSpec("A")], [["1"], ["2"]])
+        snapshot = [list(r) for r in sheet.rows]
+        sheet.sort_by(0, ascending=False)
+        assert [r[0] for r in sheet.rows] == ["2", "1"]
+        sheet.set_rows(snapshot)
+        assert [r[0] for r in sheet.rows] == ["1", "2"]
+        snapshot[0][0] = "mutated"
+        assert sheet.rows[0][0] == "1"
 
     def test_copy_is_deep(self):
         sheet = self.make()

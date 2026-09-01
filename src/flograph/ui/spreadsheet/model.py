@@ -398,6 +398,17 @@ class SheetModel(QAbstractTableModel):
             return
         self._structural(lambda sheet: sheet.sort_by(col, ascending))
 
+    def sort(self, column: int, order=Qt.AscendingOrder) -> None:
+        """Header-click entry point (Qt calls it 'sort'). Routes through
+        the same undoable structural path as the context menu."""
+        self.sort_by(column, order == Qt.AscendingOrder)
+
+    def restore_order(self, rows: list[list[str]]) -> None:
+        """Put a stored row order back — the 'clear sort' step."""
+        if self._read_only or not rows:
+            return
+        self._structural(lambda sheet: sheet.set_rows(rows))
+
     def promote_row_to_header(self, row: int) -> None:
         """Use a row's values as the column names and remove the row —
         for pasted data that arrived with its headers in row 1. Blank

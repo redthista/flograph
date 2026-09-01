@@ -152,6 +152,18 @@ class DataTableView(QTableView):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_menu)
 
+        from .table_sort import HeaderSortCycler
+        self._sort_cycler = HeaderSortCycler(self.horizontalHeader())
+        self._sort_cycler.sortRequested.connect(self._sort_requested)
+
+    def _sort_requested(self, column: int, mode: str) -> None:
+        model = self.model()
+        if model is None:
+            return
+        model.sort(column, None if mode == "clear"
+                   else (Qt.AscendingOrder if mode == "asc"
+                         else Qt.DescendingOrder))
+
     # ----------------------------------------------------- column widths
 
     def setModel(self, model) -> None:
@@ -165,6 +177,7 @@ class DataTableView(QTableView):
         pass through.
         """
         super().setModel(model)
+        self._sort_cycler.reset()
         if model is not None and model.columnCount() > 0:
             self.fit_columns_to_data()
 

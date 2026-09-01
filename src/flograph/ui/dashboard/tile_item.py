@@ -329,7 +329,6 @@ class TileItem(QGraphicsObject):
                 return None
             view = DataTableView()
             theme.style_scroll_area(view, theme.grid_stylesheet())
-            view.setSortingEnabled(True)
             view.setModel(model)
             return view
         if kind == "report" and self._report_view is not None:
@@ -436,7 +435,6 @@ class TileItem(QGraphicsObject):
         elif kind == "table":
             widget = DataTableView()
             theme.style_scroll_area(widget, theme.grid_stylesheet())
-            widget.setSortingEnabled(True)
             self._table_view = widget
         elif kind == "report":
             from PySide6.QtWidgets import QTextBrowser
