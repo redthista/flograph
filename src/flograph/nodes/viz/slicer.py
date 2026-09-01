@@ -50,7 +50,7 @@ PARAMS = [
     {"name": "width", "type": "int", "label": "Width",
      "default": 200, "min": 140, "max": 600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 240, "min": 120, "max": 2000, "cosmetic": True},
+     "default": 240, "min": 150, "max": 2000, "cosmetic": True},
 ]
 
 

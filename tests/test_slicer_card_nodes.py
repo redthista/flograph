@@ -82,6 +82,18 @@ class TestSlicerCard:
         assert spec.param("width").cosmetic
         assert spec.param("height").cosmetic
 
+    def test_the_value_list_is_clipped_to_the_card(self, env, registry):
+        """Reported: dragging the card short let the bottom rows paint out
+        through its edge — a QListWidget won't shrink past its own minimum,
+        so the proxy has to clip it."""
+        from PySide6.QtWidgets import QGraphicsItem
+        graph, _stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.slicer"))
+        item = scene.node_items[node.id]
+        assert item._slicer_proxy.flags() & QGraphicsItem.ItemClipsToShape
+        graph.set_param(node.id, "height", 10)   # clamped to the floor
+        assert item.body_height >= 150
+
     def test_a_resize_does_not_dirty_the_slicer(self, qtbot, window):
         win = window
         _source, slicer, shown = _add_sliced_flow(win)

@@ -136,6 +136,31 @@ def test_table_resize_updates_width_and_height(env, registry):
     assert item.width == 220.0
 
 
+def test_table_card_keeps_its_grid_inside_the_frame_when_short(env, registry):
+    """Reported: dragging Table (or Show Table) short let the grid and the
+    +Row/+Col buttons spill out through the card's edge."""
+    from PySide6.QtWidgets import QGraphicsItem
+    graph, _stack, scene = env
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
+    item = scene.node_items[node.id]
+    assert item._table_proxy.flags() & QGraphicsItem.ItemClipsToShape
+    graph.set_param(node.id, "height", 10)   # clamped to the floor
+    assert item.body_height >= 160
+
+
+def test_table_toolbar_wraps_rather_than_clipping(env, registry):
+    from flograph.ui.flow_layout import FlowLayout
+    graph, _stack, scene = env
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
+    item = scene.node_items[node.id]
+    toolbar = item._table_expand.parent()
+    layout = toolbar.layout()
+    assert isinstance(layout, FlowLayout)
+    assert layout.hasHeightForWidth()
+    # narrow enough that the seven buttons cannot share one row
+    assert layout.heightForWidth(120) > layout.heightForWidth(1000)
+
+
 def test_table_serialization_round_trip(env, registry):
     from flograph.core.serialization import graph_from_dict, graph_to_dict
     graph, stack, scene = env

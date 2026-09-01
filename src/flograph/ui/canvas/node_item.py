@@ -93,7 +93,9 @@ NOTE_MIN_H, NOTE_MAX_H = 60.0, 2000.0
 
 TABLE_TYPE = "flograph.io.table"
 TABLE_MIN_W, TABLE_MAX_W = 220.0, 1600.0
-TABLE_MIN_H, TABLE_MAX_H = 140.0, 2000.0
+# Floor leaves room for the header, the +Row/+Col button toolbar (which
+# wraps to two lines when narrow) and a couple of grid rows.
+TABLE_MIN_H, TABLE_MAX_H = 160.0, 2000.0
 
 REROUTE_LABEL_FONT_SIZE = 8.0
 REROUTE_LABEL_PAD_X = 6.0
@@ -134,7 +136,9 @@ KPI_MIN_H, KPI_MAX_H = 80.0, 500.0
 
 SLICER_TYPE = "flograph.viz.slicer"
 SLICER_MIN_W, SLICER_MAX_W = 140.0, 600.0
-SLICER_MIN_H, SLICER_MAX_H = 120.0, 2000.0
+# Floor leaves room for the header, the (possibly wrapped) search/All/None
+# row and a couple of value rows — below this the list is all scrollbar.
+SLICER_MIN_H, SLICER_MAX_H = 150.0, 2000.0
 
 IMAGE_TYPE = "flograph.viz.image"
 IMAGE_MIN_W, IMAGE_MAX_W = 60.0, 2400.0
@@ -835,6 +839,11 @@ class NodeItem(QGraphicsObject):
         self._resize_edge = "corner"  # which edge/corner the drag grabbed
         self._resize_start = (0.0, 0.0, 0.0, 0.0)  # scene x/y, width/height
         self._live_height: float | None = None  # transient, while drag-resizing
+        # Last scene rect this card actually painted at. body_height reads the
+        # height param live, so by the time on_params_changed runs on an undo
+        # the param — and boundingRect — have already shrunk; this is the only
+        # record of the bigger rect that needs its vacated pixels repainted.
+        self._painted_scene_rect: QRectF | None = None
         self._dragging = False  # a header-bar move is in progress (snap gate)
         self._move_suppressed = False  # body press cleared ItemIsMovable
         self._button_edit = False  # button in edit mode (right-click to enter)
@@ -1084,11 +1093,16 @@ class NodeItem(QGraphicsObject):
         # stay on the canvas as a smear. A resize used to also flip the node
         # dirty, whose status repaint cleaned that up by accident; now that
         # Width/Height are cosmetic nothing does, so damage the union here.
-        before = self.sceneBoundingRect()
+        # _painted_scene_rect, not sceneBoundingRect(): on an undo the height
+        # param is already back to its old (smaller) value before we get
+        # here, so boundingRect has shrunk and the tall strip to repaint is
+        # only in the *previously* painted rect.
+        before = self._painted_scene_rect or self.sceneBoundingRect()
         self._params_changed_impl(name)
+        self._painted_scene_rect = self.sceneBoundingRect()
         scene = self.scene()
         if scene is not None:
-            scene.update(before.united(self.sceneBoundingRect()))
+            scene.update(before.united(self._painted_scene_rect))
         # A folded card holds its square whatever its width param says; the
         # per-kind branches above wrote the open width, which is exactly the
         # size to grow back into, so keep it and re-apply the square.
@@ -1383,6 +1397,7 @@ class NodeItem(QGraphicsObject):
             self._table_proxy.setGeometry(self._table_proxy_rect())
 
     def _build_table_widget(self) -> None:
+        from ..flow_layout import FlowLayout
         from ..spreadsheet import SheetModel, SpreadsheetView
 
         host = QWidget()
@@ -1391,9 +1406,9 @@ class NodeItem(QGraphicsObject):
         layout.setSpacing(3)
 
         toolbar = QWidget()
-        trow = QHBoxLayout(toolbar)
-        trow.setContentsMargins(0, 0, 0, 0)
-        trow.setSpacing(3)
+        # a flow layout, not a row: the buttons wrap onto a second line when
+        # the card is dragged narrow rather than clipping off its edge
+        trow = FlowLayout(toolbar, spacing=3)
         add_row = QToolButton(text="+Row")
         del_row = QToolButton(text="-Row")
         add_col = QToolButton(text="+Col")
@@ -1407,12 +1422,10 @@ class NodeItem(QGraphicsObject):
             "if nothing is selected")
         expand = QToolButton(text="⛶")
         expand.setToolTip("Open the full spreadsheet editor")
-        for button in (add_row, del_row, add_col, del_col, fit, copy_headers):
+        for button in (add_row, del_row, add_col, del_col, fit, copy_headers,
+                       expand):
             button.setAutoRaise(True)
             trow.addWidget(button)
-        trow.addStretch(1)
-        expand.setAutoRaise(True)
-        trow.addWidget(expand)
         layout.addWidget(toolbar)
 
         grid = SpreadsheetView()
@@ -1434,8 +1447,7 @@ class NodeItem(QGraphicsObject):
         expand.clicked.connect(self._open_table_editor)
         model.sheet_edited.connect(self._commit_table_data)
 
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(host)
+        proxy = self._card_proxy(host)
         self._table_proxy = proxy
         self._table_widget = grid
         self._table_model = model
@@ -1548,6 +1560,18 @@ class NodeItem(QGraphicsObject):
             pct = 100.0
         return min(CARD_SCALE_MAX, max(CARD_SCALE_MIN, pct)) / 100.0
 
+    def _card_proxy(self, widget: QWidget) -> QGraphicsProxyWidget:
+        """A proxy that keeps its widget inside the card. Embedded views
+        (a table, a list, a web view) won't shrink past their own minimum
+        size, so on a card dragged short the last rows would otherwise paint
+        out through the bottom edge; ItemClipsToShape cuts them at the card.
+        """
+        widget.setMinimumSize(0, 0)
+        proxy = QGraphicsProxyWidget(self)
+        proxy.setWidget(widget)
+        proxy.setFlag(QGraphicsItem.ItemClipsToShape, True)
+        return proxy
+
     def _scale_proxy_into(self, proxy: QGraphicsProxyWidget,
                           rect: QRectF) -> None:
         """Fit a proxied widget into rect at the card's content scale: the
@@ -1615,8 +1639,7 @@ class NodeItem(QGraphicsObject):
         self._figure_view.hide()
         layout.addWidget(self._figure_view, 1)
 
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(host)
+        proxy = self._card_proxy(host)
         self._figure_proxy = proxy
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_figure_proxy()
@@ -1661,8 +1684,7 @@ class NodeItem(QGraphicsObject):
         self._plotly_widget = widget
         self._figure_placeholder = widget.placeholder
 
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(widget)
+        proxy = self._card_proxy(widget)
         self._figure_proxy = proxy  # reuses the figure card's resize plumbing
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_figure_proxy()
@@ -1724,8 +1746,7 @@ class NodeItem(QGraphicsObject):
         view.installEventFilter(self)
         view.viewport().installEventFilter(self)
 
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(view)
+        proxy = self._card_proxy(view)
         self._report_proxy = proxy
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_report_proxy()
@@ -1828,8 +1849,7 @@ class NodeItem(QGraphicsObject):
         view.page_changed.connect(self._wiki_page_changed)
         view.nav_visibility_changed.connect(self._wiki_nav_changed)
 
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(view)
+        proxy = self._card_proxy(view)
         self._wiki_proxy = proxy
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_wiki_proxy()
@@ -1897,8 +1917,7 @@ class NodeItem(QGraphicsObject):
         layout.addWidget(view, 1)
         self._table_viewer_view = view
 
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(host)
+        proxy = self._card_proxy(host)
         self._table_viewer_proxy = proxy
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_table_viewer_proxy()
@@ -2233,8 +2252,7 @@ class NodeItem(QGraphicsObject):
         self._slicer_toolbar = toolbar
         self._slicer_list = values
 
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(host)
+        proxy = self._card_proxy(host)
         self._slicer_proxy = proxy
         self._layout_slicer_proxy()
 
@@ -2319,8 +2337,7 @@ class NodeItem(QGraphicsObject):
             return
         widget.sync(self.node.params)
         widget.value_committed.connect(self._on_control_committed)
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(widget)
+        proxy = self._card_proxy(widget)
         self._control_widget = widget
         self._control_proxy = proxy
         self._layout_control_proxy()
@@ -3974,6 +3991,7 @@ class NodeItem(QGraphicsObject):
                 elif self.control:
                     self._layout_control_proxy()
                 self.update()
+                self._painted_scene_rect = self.sceneBoundingRect()
             event.accept()
             return
         super().mouseMoveEvent(event)
