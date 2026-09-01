@@ -183,7 +183,6 @@ guide that ships on the dashboard. What is missing:
 
 NEW: 
 - when i resize a sicer it makes it dirty? 
-- sorting bia headers on table columns?
 - have flograph check for updates? settings -> check for updates?
 - cant click hyperlinks on markdown note nodes? 
 - when pictures are saved to flow they need to be in the flograph file as b64 not local system stored. so the flo is transportable.
