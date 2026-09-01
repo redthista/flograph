@@ -6,12 +6,20 @@ when it is installed into the environment of the interpreter running flograph
 and build the installer command lines the Packages dialog executes: pip
 when the interpreter has it, `uv pip` pointed at this interpreter as the
 fallback (uv-created venvs ship without pip).
+
+The update-check helpers at the bottom (`update_status`, `upgrade_hint`) are
+strictly read-only: they ask an index what versions exist and compare, never
+installing or writing anything. They have to work — or fail quietly — in a
+locked-down environment that installs from a private mirror (JFrog,
+Artifactory, devpi) and may have no route to pypi.org at all.
 """
 from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import os
 import shutil
+import subprocess
 import sys
 
 # Uninstalling these would break the running app; the dialog refuses.
@@ -141,3 +149,123 @@ def build_command(action: str, packages: list[str]) -> list[str]:
         "no installer found: this interpreter has no pip module and 'uv' is "
         "not on PATH — run 'python -m ensurepip' in flograph's venv or install uv"
     )
+
+
+# --------------------------------------------------------- update checking
+
+PYPI_JSON_URL = "https://pypi.org/pypi/flograph/json"
+GITHUB_RELEASES_URL = "https://github.com/redthista/flograph/releases"
+
+
+def installed_version() -> str:
+    """The running flograph's version, or "0" if it isn't installed as a
+    distribution (a source checkout run in place). "0" compares below every
+    real release, so such a build is simply never told it is behind."""
+    try:
+        return importlib.metadata.version("flograph")
+    except importlib.metadata.PackageNotFoundError:
+        return "0"
+
+
+def _parse_pip_index_output(text: str) -> list[str]:
+    """The version list out of `pip index versions` output. The relevant
+    line reads: ``Available versions: 0.1.12, 0.1.11, 0.1.10``."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("available versions:"):
+            rest = stripped.split(":", 1)[1]
+            return [v.strip() for v in rest.split(",") if v.strip()]
+    return []
+
+
+def _pip_index_versions(name: str = "flograph", timeout: float = 8.0) -> list[str]:
+    """Ask pip which versions of `name` its configured index carries.
+
+    `pip index versions` talks to whatever index this environment installs
+    from — a private JFrog / Artifactory / devpi mirror included — so in a
+    locked-down setup it answers the question that actually matters: what
+    can I install *here*. Read-only. Returns [] on any failure: no pip, pip
+    too old for the subcommand (added 21.2), no network, a mirror that
+    refuses the request.
+    """
+    if importlib.util.find_spec("pip") is None:
+        return []
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", "index", "versions", name],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, "PIP_DISABLE_PIP_VERSION_CHECK": "1"})
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return _parse_pip_index_output(proc.stdout)
+
+
+def _pypi_latest_version(timeout: float = 6.0) -> "str | None":
+    """The newest flograph version on PyPI, or None if PyPI can't be
+    reached. Only consulted when pip's own index lookup came back empty —
+    an environment pinned to a private mirror generally can't reach this
+    and simply gets None."""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(PYPI_JSON_URL, timeout=timeout) as resp:
+            data = json.load(resp)
+    except Exception:
+        return None
+    return (data.get("info") or {}).get("version") or None
+
+
+def latest_available_version() -> "str | None":
+    """Newest flograph version this environment could install, or None when
+    that can't be determined (offline, blocked index, ancient pip).
+
+    Purely read-only — queries an index, installs nothing, writes nothing.
+    """
+    # pandas vendors packaging's Version; used elsewhere in this file too,
+    # and packaging itself is not a direct dependency
+    from pandas.util.version import InvalidVersion, Version
+
+    parsed = []
+    for raw in _pip_index_versions():
+        try:
+            parsed.append(Version(raw))
+        except InvalidVersion:
+            continue
+    if parsed:
+        return str(max(parsed))
+    return _pypi_latest_version()
+
+
+def update_status() -> "tuple[str, str | None, bool]":
+    """(installed version, latest available or None, latest is newer).
+
+    Never raises — a checker calling this on a background thread wants an
+    answer or a shrug, not an exception to marshal back to the UI thread.
+    """
+    # pandas vendors packaging's Version; used elsewhere in this file too,
+    # and packaging itself is not a direct dependency
+    from pandas.util.version import InvalidVersion, Version
+
+    current = installed_version()
+    try:
+        latest = latest_available_version()
+    except Exception:
+        latest = None
+    if latest is None:
+        return current, None, False
+    try:
+        newer = Version(latest) > Version(current)
+    except InvalidVersion:
+        newer = False
+    return current, latest, newer
+
+
+def upgrade_hint() -> str:
+    """What to show a user who wants the newer version — a command they run
+    themselves, or a page to visit. flograph never runs this; the in-app
+    route is Tools ▸ Manage Packages, which the notice also names."""
+    if getattr(sys, "frozen", False):
+        return f"Download the latest release from {GITHUB_RELEASES_URL}"
+    if installer_kind() == "uv":
+        return "uv pip install --upgrade flograph"
+    return "pip install --upgrade flograph"

@@ -232,6 +232,8 @@ class SettingsDialog(QDialog):
         checks = {
             "titlebar_compact_checkbox": window.settings.value(
                 "window/titlebar_compact", False, type=bool),
+            "update_notify_checkbox": window.settings.value(
+                "updates/notify", False, type=bool),
             "gpu_viewport_checkbox": window.action_gpu_viewport.isChecked(),
             "lod_enabled_checkbox": window.lod_enabled,
             "snap_enabled_checkbox": window.snap_enabled,
@@ -322,6 +324,15 @@ class SettingsDialog(QDialog):
         """The top-level nav entries, in order."""
         return [self._nav.topLevelItem(i).text(0)
                 for i in range(self._nav.topLevelItemCount())]
+
+    def show_page(self, name: str) -> None:
+        """Select `name` in the nav — for opening Settings straight onto a
+        particular page (the update notice jumps to About this way)."""
+        names = self.page_names()
+        if name not in names:
+            return
+        self._search.clear()
+        self._nav.setCurrentItem(self._nav.topLevelItem(names.index(name)))
 
     def _scope(self) -> tuple:
         """(page name, group or None) for whatever the nav has selected."""
@@ -493,6 +504,24 @@ class SettingsDialog(QDialog):
                  "time when saving. Turn off if you would rather have raw "
                  "speed; blobs already written either way keep working, and "
                  "old projects read as they always did.")
+
+        rows.add_group("Updates")
+
+        notify_check = QCheckBox("Tell me when a new version is available")
+        notify_check.setObjectName("update_notify_checkbox")
+        notify_check.setChecked(
+            window.settings.value("updates/notify", False, type=bool))
+        notify_check.toggled.connect(
+            lambda on: window.settings.setValue("updates/notify", bool(on)))
+        rows.add("Check for updates", notify_check,
+                 "Once a day when flograph starts, check your package index "
+                 "for a newer flograph and show a small notice in the corner "
+                 "if there is one. Off by default. The check only reads "
+                 "version numbers — it never installs anything — and it asks "
+                 "the same index you already install from, so it works "
+                 "behind a private mirror and stays silent when there is no "
+                 "connection. You can also check on demand from the About "
+                 "page.")
 
         rows.add_group("Reset")
 
@@ -998,6 +1027,10 @@ class SettingsDialog(QDialog):
 
     @staticmethod
     def _build_about_page() -> QWidget:
+        from flograph import packages
+
+        from . import update_check
+
         page = QWidget()
         layout = QVBoxLayout(page)
 
@@ -1013,6 +1046,42 @@ class SettingsDialog(QDialog):
         layout.addWidget(SettingsDialog._hint(
             "Visual node-based Python programming environment "
             "(flow-based dataflow, Blueprint-style canvas)."))
+
+        layout.addSpacing(12)
+        check_btn = QPushButton("Check for updates")
+        check_btn.setObjectName("check_updates_button")
+        layout.addWidget(check_btn, 0, Qt.AlignLeft)
+
+        result = QLabel("")
+        result.setObjectName("update_result_label")
+        result.setWordWrap(True)
+        result.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(result)
+
+        def on_result(current: str, latest, newer: bool) -> None:
+            try:
+                check_btn.setEnabled(True)
+                if latest is None:
+                    result.setText("Couldn't check for updates — no answer "
+                                   "from the package index.")
+                elif newer:
+                    result.setText(
+                        f"flograph {latest} is available (you have "
+                        f"{current}).\n{packages.upgrade_hint()}\n"
+                        "— or use Tools ▸ Manage Packages. Restart "
+                        "flograph afterwards.")
+                else:
+                    result.setText(
+                        f"You're on the latest version ({current}).")
+            except RuntimeError:
+                pass                     # dialog closed before the probe ended
+
+        def do_check() -> None:
+            check_btn.setEnabled(False)
+            result.setText("Checking…")
+            update_check.run_probe(on_result)
+
+        check_btn.clicked.connect(do_check)
 
         layout.addSpacing(16)
         layout.addWidget(SettingsDialog._hint(

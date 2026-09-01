@@ -79,6 +79,7 @@ from .settings_dialog import SettingsDialog
 from .docs import DocsWindow
 from . import theme
 from . import toolbar as toolbar_style
+from . import update_check
 from . import window_frame
 
 MAX_RECENT = 8
@@ -175,6 +176,7 @@ class MainWindow(QMainWindow):
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
+        self._update_checked_on_show = False
         self._settings_dialog: Optional[SettingsDialog] = None
         self._stats_window: Optional[StatsWindow] = None
         self._docs_window: Optional[DocsWindow] = None
@@ -980,6 +982,11 @@ class MainWindow(QMainWindow):
             self._gpu_viewport_checked_on_show = True
             if self.action_gpu_viewport.isChecked():
                 self._verify_gpu_viewport_soon()
+        if not self._update_checked_on_show:
+            self._update_checked_on_show = True
+            # deferred so it never competes with the first paint; the check
+            # itself is opt-in and no-ops unless a day has passed
+            QTimer.singleShot(4000, lambda: update_check.maybe_check_on_startup(self))
 
     def _apply_gpu_viewport_setting(self) -> None:
         """Push the GPU-viewport toggle onto every canvas view (modeling
@@ -2392,6 +2399,12 @@ class MainWindow(QMainWindow):
         self._settings_dialog.show()
         self._settings_dialog.raise_()
         self._settings_dialog.activateWindow()
+
+    def show_update_details(self) -> None:
+        """Open Settings ▸ About, where the version and the update
+        instructions live. The update-check toast calls this when clicked."""
+        self._show_settings()
+        self._settings_dialog.show_page("About")
 
     def _show_docs(self) -> None:
         """The handbook window — one instance, raised again on repeat opens."""
