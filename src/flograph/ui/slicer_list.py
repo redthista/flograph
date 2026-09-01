@@ -14,7 +14,15 @@ from PySide6.QtWidgets import (
 
 from . import theme
 
-MAX_OPTIONS = 500  # checkbox rows shown before truncating
+# How many checkbox rows to *build at once*. Not a cap on the column: the
+# full value list is held in the widget and every value is reachable through
+# the search box, which re-renders to the matches. QListWidget builds one
+# child per row, so materialising tens of thousands of them at once locks the
+# UI up while it works and scrolls badly afterwards — this bounds that cost
+# without bounding what the slicer can filter on. Ticks on values outside the
+# rendered window are kept (they live in `_selected`, not in the rows) and
+# reported, so nothing is lost by a value not currently having a row.
+RENDER_BUDGET = 500
 MODES = ("multi", "single")
 
 
@@ -91,6 +99,9 @@ class SlicerListWidget(QListWidget):
         self._syncing = False
         self._mode = "multi"
         self._filter_text = ""
+        # the full picture, independent of which rows are currently built:
+        self._all_values: list[str] = []
+        self._selected: set[str] = set()
         self._delegate = _IndicatorDelegate(self)
         self.setItemDelegate(self._delegate)
         self.itemChanged.connect(self._on_item_changed)
@@ -121,30 +132,53 @@ class SlicerListWidget(QListWidget):
         super().mouseReleaseEvent(event)
 
     def set_options(self, values: list[str], selected: set[str]) -> None:
-        """Rebuild the checkbox rows from a column's unique values, ticking
-        those in `selected`. Every tick re-runs the slicer and lands back
-        here (the options come from the freshly-cached upstream table), so
-        an active search filter is re-applied — otherwise the list would
-        silently reset to "everything visible" mid-search on the first
-        tick."""
+        """Take a column's unique values and the ticked set, then render the
+        rows. Every tick re-runs the slicer and lands back here (the options
+        come from the freshly-cached upstream table), so the current search
+        filter is preserved — otherwise the list would silently reset to
+        "everything visible" mid-search on the first tick."""
+        self._all_values = list(values)
+        present = set(self._all_values)
+        self._selected = {v for v in selected if v in present}
+        self._rebuild_rows()
+
+    def _matching_values(self) -> list[str]:
+        """The values that pass the current search filter, in column order.
+        No filter → every value."""
+        needle = self._filter_text.lower()
+        if not needle:
+            return list(self._all_values)
+        return [v for v in self._all_values if needle in v.lower()]
+
+    def _rebuild_rows(self) -> None:
+        """Build QListWidgetItems for the values worth showing right now:
+        the search matches, plus any ticked value (so a tick always has a
+        visible row), capped at RENDER_BUDGET with a trailing note for the
+        remainder. `_selected` — not the rows — is the record of what's
+        ticked, so values past the cap keep their state."""
+        needle = self._filter_text.lower()
+        visible = [v for v in self._all_values
+                   if (not needle or needle in v.lower()
+                       or v in self._selected)]
+        shown, hidden = visible[:RENDER_BUDGET], visible[RENDER_BUDGET:]
         self._syncing = True
         try:
             self.clear()
-            for value in values[:MAX_OPTIONS]:
+            for value in shown:
                 item = QListWidgetItem(value)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
                 item.setCheckState(
-                    Qt.Checked if value in selected else Qt.Unchecked)
+                    Qt.Checked if value in self._selected else Qt.Unchecked)
                 self.addItem(item)
-            if len(values) > MAX_OPTIONS:
-                extra = QListWidgetItem(
-                    f"… {len(values) - MAX_OPTIONS:,} more values")
-                extra.setFlags(Qt.NoItemFlags)
-                self.addItem(extra)
+            if hidden:
+                note = QListWidgetItem(
+                    f"… {len(hidden):,} more — search to narrow the list"
+                    if not needle
+                    else f"… {len(hidden):,} more match — refine the search")
+                note.setFlags(Qt.NoItemFlags)
+                self.addItem(note)
         finally:
             self._syncing = False
-        if self._filter_text:
-            self._apply_filter(self._filter_text)
 
     def set_mode(self, mode: str) -> None:
         """"multi" (any number of ticks) or "single" (radio-style: ticking
@@ -161,95 +195,77 @@ class SlicerListWidget(QListWidget):
             self._trim_to_single_selection()
 
     def _trim_to_single_selection(self) -> None:
-        checked = [i for i in range(self.count())
-                  if self.item(i).flags() & Qt.ItemIsUserCheckable
-                  and self.item(i).checkState() == Qt.Checked]
-        if len(checked) <= 1:
+        if len(self._selected) <= 1:
             return
-        self._syncing = True
-        try:
-            for i in checked[1:]:
-                self.item(i).setCheckState(Qt.Unchecked)
-        finally:
-            self._syncing = False
+        first = next((v for v in self._all_values if v in self._selected), None)
+        self._selected = {first} if first is not None else set()
+        self._rebuild_rows()
         self._commit()
 
     def sync_checks(self, selected: set[str]) -> None:
-        """Re-apply check states without re-emitting — for when the param
+        """Re-apply the ticked set without re-emitting — for when the param
         changes elsewhere (properties panel, undo)."""
-        self._syncing = True
-        try:
-            for i in range(self.count()):
-                item = self.item(i)
-                if item.flags() & Qt.ItemIsUserCheckable:
-                    item.setCheckState(Qt.Checked if item.text() in selected
-                                       else Qt.Unchecked)
-        finally:
-            self._syncing = False
+        present = set(self._all_values)
+        self._selected = {v for v in selected if v in present}
+        self._rebuild_rows()
 
     def set_filter(self, text: str) -> None:
-        """Hide rows that don't match `text` (case-insensitive substring).
-        Rows are hidden, never removed, so ticks on values outside the
-        current search are never lost. Remembered and re-applied by
-        `set_options`, so a tick mid-search doesn't reset the list."""
+        """Narrow the list to values matching `text` (case-insensitive
+        substring). Ticked values stay listed whether or not they match, and
+        ticks on values with no row still count — `_selected` holds them, not
+        the rows. Remembered and re-applied by `set_options`, so a tick
+        mid-search doesn't reset the list."""
         self._filter_text = text.strip()
-        self._apply_filter(self._filter_text)
-
-    def _apply_filter(self, needle: str) -> None:
-        needle = needle.lower()
-        for i in range(self.count()):
-            item = self.item(i)
-            if item.flags() & Qt.ItemIsUserCheckable:
-                item.setHidden(bool(needle) and needle not in item.text().lower())
-            else:
-                item.setHidden(bool(needle))  # the "N more values" note
+        self._rebuild_rows()
 
     def select_all(self) -> None:
-        """Tick every visible (unfiltered) row — a no-op in single mode."""
+        """Tick every value matching the current search — a no-op in single
+        mode. Reaches matches with no row too, not just the ones on screen."""
         if self._mode == "single":
             return
-        self._set_visible_checks(Qt.Checked)
+        self._selected |= set(self._matching_values())
+        self._rebuild_rows()
+        self._commit()
 
     def clear_all(self) -> None:
-        """Untick every visible (unfiltered) row."""
-        self._set_visible_checks(Qt.Unchecked)
-
-    def _set_visible_checks(self, state) -> None:
-        self._syncing = True
-        try:
-            for i in range(self.count()):
-                item = self.item(i)
-                if item.flags() & Qt.ItemIsUserCheckable and not item.isHidden():
-                    item.setCheckState(state)
-        finally:
-            self._syncing = False
+        """Untick every value matching the current search."""
+        self._selected -= set(self._matching_values())
+        self._rebuild_rows()
         self._commit()
 
     def selected_values(self) -> list[str]:
-        return [self.item(i).text() for i in range(self.count())
-                if self.item(i).checkState() == Qt.Checked]
+        """The ticked values, in column order — including any whose row is
+        outside the render window or the current search."""
+        return [v for v in self._all_values if v in self._selected]
 
     def selection_summary(self) -> str:
         """"N/M" ticked-of-total for a compact status label; "" when there
-        are no rows yet."""
-        total = sum(1 for i in range(self.count())
-                    if self.item(i).flags() & Qt.ItemIsUserCheckable)
+        are no values yet."""
+        total = len(self._all_values)
         if not total:
             return ""
-        return f"{len(self.selected_values())}/{total}"
+        return f"{len(self._selected)}/{total}"
 
     def _on_item_changed(self, item) -> None:
         if self._syncing:
             return
-        if self._mode == "single" and item.checkState() == Qt.Checked:
+        value = item.text()
+        checked = item.checkState() == Qt.Checked
+        if self._mode == "single" and checked:
+            self._selected = {value}
             self._syncing = True
             try:
                 for i in range(self.count()):
                     other = self.item(i)
-                    if other is not item and other.flags() & Qt.ItemIsUserCheckable:
+                    if other is not item \
+                            and other.flags() & Qt.ItemIsUserCheckable:
                         other.setCheckState(Qt.Unchecked)
             finally:
                 self._syncing = False
+        elif checked:
+            self._selected.add(value)
+        else:
+            self._selected.discard(value)
         self._commit()
 
     def _commit(self) -> None:

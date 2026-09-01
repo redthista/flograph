@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| UI | The Slicer is no longer capped at 500 values | The Slicer card built at most 500 checkbox rows and rolled the rest into a dead "… N more values" line — a column with more distinct values than that could not be fully filtered from the card. It now holds the **whole** value list: it still only *builds* 500 rows at once (a `QListWidget` with tens of thousands of live checkboxes locks the UI up), but every value is reachable through the search box, which re-renders to the matches — including matches past the 500th. A tick on a value with no current row is kept and reported (selection lives in the widget's model, not in the rows), so nothing is lost by scrolling or searching away from it, and **All** / **None** now act on every value the search matches rather than only the ones on screen. The "… N more" note now reads "search to narrow the list". |
 
 ## 0.1.11
 

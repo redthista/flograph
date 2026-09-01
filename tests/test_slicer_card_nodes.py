@@ -151,7 +151,8 @@ class TestSlicerCard:
         filtered = win.engine.cache.get(shown.id).outputs["table"]
         assert list(filtered["region"]) == ["north", "north"]
 
-    def test_search_filter_hides_without_dropping_ticks(self, qtbot, window):
+    def test_search_filter_keeps_ticks_on_non_matching_values(
+            self, qtbot, window):
         win = window
         _source, slicer, _shown = _add_sliced_flow(win)
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
@@ -163,18 +164,25 @@ class TestSlicerCard:
             widget.item(0).setCheckState(Qt.Checked)  # tick "north"
 
         widget.set_filter("south")
-        assert widget.item(0).isHidden()  # "north" is filtered out…
-        assert widget.item(0).checkState() == Qt.Checked  # …but still ticked
-        assert widget.selected_values() == ["north"]  # hidden rows still count
+        # "north" doesn't match, but a ticked value always keeps a row so the
+        # tick stays visible and un-losable
+        rows = {widget.item(i).text(): widget.item(i)
+                for i in range(widget.count())}
+        assert rows["north"].checkState() == Qt.Checked
+        assert widget.selected_values() == ["north"]
+
+        # a search matching neither value still doesn't drop the tick
+        widget.set_filter("zzz")
+        assert widget.selected_values() == ["north"]
 
         widget.set_filter("")
-        assert not widget.item(0).isHidden()
+        assert widget.selected_values() == ["north"]
 
     def test_filter_survives_the_rerun_a_tick_triggers(self, qtbot, window):
         """Ticking a value re-runs the slicer, which repopulates the list
         from the freshly-cached upstream table (set_slicer_options ->
-        set_options -> clear() + rebuild) — an active search must not be
-        silently dropped by that rebuild."""
+        set_options -> rebuild) — an active search must not be silently
+        dropped by that rebuild."""
         win = window
         _source, slicer, _shown = _add_sliced_flow(win)
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
@@ -182,13 +190,13 @@ class TestSlicerCard:
 
         widget = win.scene.node_items[slicer.id]._slicer_list
         widget.set_filter("north")
-        assert widget.item(1).isHidden()  # "south" filtered out
+        assert [widget.item(i).text() for i in range(widget.count())] == ["north"]
 
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             widget.item(0).setCheckState(Qt.Checked)  # tick "north" (visible)
 
         # the rebuild the tick triggered must not have cleared the filter
-        assert widget.item(1).isHidden()
+        assert [widget.item(i).text() for i in range(widget.count())] == ["north"]
         assert widget.item(0).checkState() == Qt.Checked
 
     def test_select_all_and_clear_all_respect_the_filter(self, qtbot, window):
@@ -347,21 +355,52 @@ class TestSlicerCard:
                              pos=widget.visualItemRect(widget.item(1)).center())
         assert widget.selected_values() == ["south"]
 
-    def test_clicking_the_truncation_note_does_nothing(self, qtbot):
-        from flograph.ui.slicer_list import MAX_OPTIONS, SlicerListWidget
+    def test_clicking_the_more_values_note_does_nothing(self, qtbot):
+        from flograph.ui.slicer_list import RENDER_BUDGET, SlicerListWidget
         widget = SlicerListWidget()
         qtbot.addWidget(widget)
         widget.resize(220, 80)
-        widget.set_options([str(i) for i in range(MAX_OPTIONS + 5)], set())
+        widget.set_options([str(i) for i in range(RENDER_BUDGET + 5)], set())
         widget.show()
         qtbot.waitExposed(widget)
 
+        # RENDER_BUDGET rows built + one non-interactive "… N more" note
+        assert widget.count() == RENDER_BUDGET + 1
         note = widget.item(widget.count() - 1)
         assert not (note.flags() & Qt.ItemIsUserCheckable)
         widget.scrollToItem(note)
         qtbot.mouseClick(widget.viewport(), Qt.LeftButton,
                          pos=widget.visualItemRect(note).center())
         assert widget.selected_values() == []
+
+    def test_values_past_the_render_budget_stay_filterable_and_tickable(
+            self, qtbot):
+        """The budget bounds how many rows are built, not the column: a
+        value with no row is still reachable through the search box, and
+        ticking it commits and survives clearing the search."""
+        from flograph.ui.slicer_list import RENDER_BUDGET, SlicerListWidget
+        widget = SlicerListWidget()
+        qtbot.addWidget(widget)
+        widget.resize(220, 120)
+        values = [f"v{i:05d}" for i in range(RENDER_BUDGET + 200)]
+        widget.set_options(values, set())
+        widget.show()
+        qtbot.waitExposed(widget)
+
+        target = values[-1]  # well past the budget, no row yet
+        assert all(widget.item(i).text() != target
+                   for i in range(widget.count()))
+
+        widget.set_filter(target)
+        row = widget.item(0)
+        assert row.text() == target
+        with qtbot.waitSignal(widget.selection_committed):
+            row.setCheckState(Qt.Checked)
+        assert widget.selected_values() == [target]
+
+        widget.set_filter("")  # tick survives the rebuild
+        assert widget.selected_values() == [target]
+        assert widget.selection_summary() == f"1/{len(values)}"
 
     def test_mode_syncs_the_delegate_from_the_param(self, qtbot, window):
         win = window
