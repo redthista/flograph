@@ -325,6 +325,16 @@ wheels = [
 ]
 
 [[package]]
+name = "dataiku-api-client"
+version = "15.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/24/f0dbb68b3150f2b5d56939ca48479224fe0576dc678f8e7fa830551374f9/dataiku_api_client-15.0.0.tar.gz", hash = "sha256:3524d7714f24b94934f7a75080b4a5847d5b1aef3b34a493d23616894a218108", size = 433699, upload-time = "2026-08-14T16:21:49.08Z" }
+
+[[package]]
 name = "duckdb"
 version = "1.5.5"
 source = { registry = "https://pypi.org/simple" }
@@ -464,7 +474,7 @@ wheels = [
 
 [[package]]
 name = "flograph"
-version = "0.1.10"
+version = "0.1.12"
 source = { editable = "." }
 dependencies = [
     { name = "jedi" },
@@ -477,6 +487,9 @@ dependencies = [
 ai = [
     { name = "httpx" },
     { name = "requests" },
+]
+dataiku = [
+    { name = "dataiku-api-client" },
 ]
 dev = [
     { name = "pytest" },
@@ -526,6 +539,7 @@ sql = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'scrape'" },
+    { name = "dataiku-api-client", marker = "extra == 'dataiku'", specifier = ">=12.0" },
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.0" },
     { name = "fastexcel", marker = "extra == 'polars'" },
     { name = "fastparquet", marker = "extra == 'parquet'" },
@@ -552,7 +566,7 @@ requires-dist = [
     { name = "requests", marker = "extra == 'ai'" },
     { name = "sqlalchemy", marker = "extra == 'sql'", specifier = ">=2.0" },
 ]
-provides-extras = ["dev", "excel", "matplotlib", "parquet", "polars", "plotly", "geo", "ai", "sql", "duckdb", "http", "fuzzy", "scrape"]
+provides-extras = ["dev", "excel", "matplotlib", "parquet", "polars", "plotly", "geo", "ai", "sql", "duckdb", "http", "dataiku", "fuzzy", "scrape"]
 
 [[package]]
 name = "folium"

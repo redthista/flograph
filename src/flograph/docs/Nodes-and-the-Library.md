@@ -25,6 +25,17 @@ directory as one stacked table; **Read PDF** turns documents into a table,
 one row per page. **Table** is a real spreadsheet you edit on the canvas,
 with formulas.
 
+**Connect** — SQL Query and SQL Write (any database SQLAlchemy reaches),
+DuckDB SQL, HTTP Request and REST Paginate, and the **Dataiku** trio:
+**Dataiku Source** (read a DSS dataset, run SQL on a DSS connection, list a
+project's objects, or download a managed-folder file), **Dataiku Upload**
+(replace a file in a DSS flow — overwrite one path in a managed folder, or
+add to an uploaded-files dataset — then pass the table on), and **Dataiku
+Action** (run a scenario, build a dataset or folder, or set a project
+variable, on an order edge after the upload). Each Dataiku node has one
+**Operation** dropdown that shows only the fields that operation needs; leave
+**API key** blank to read `$DKU_API_KEY`. Needs `dataiku-api-client`.
+
 **Transform** — Select Columns, Filter Rows, Sort, Join, Group By,
 Expression, Concatenate, Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,

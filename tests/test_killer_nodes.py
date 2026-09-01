@@ -880,3 +880,359 @@ class TestListFiles:
 
         with pytest.raises(Boom):
             run(CancelAfter(params=params))
+
+
+# --------------------------------------------------------------------------
+# Dataiku connector (Source / Upload / Action) — fake dataikuapi, no network
+# --------------------------------------------------------------------------
+class _FakeSchema(dict):
+    pass
+
+
+class _FakeDataset:
+    def __init__(self, rec):
+        self._rec = rec
+        self.added = []
+        self.autodetect_saved = False
+
+    def get_schema(self):
+        return {"columns": [{"name": c} for c in self._rec["columns"]]}
+
+    def iter_rows(self, columns=None):
+        cols = columns or self._rec["columns"]
+        idx = [self._rec["columns"].index(c) for c in cols]
+        for row in self._rec["rows"]:
+            yield [row[i] for i in idx]
+
+    def uploaded_list_files(self):
+        return self._rec.setdefault("files", [])
+
+    def uploaded_remove_file(self, fid):
+        self._rec["files"] = [f for f in self._rec.get("files", [])
+                              if f["id"] != fid]
+
+    def uploaded_add_file(self, fp, filename):
+        self.added.append((filename, fp.read()))
+        self._rec.setdefault("files", []).append({"id": filename})
+
+    def autodetect_settings(self, *a, **k):
+        ds = self
+
+        class _S:
+            def save(self_inner):
+                ds.autodetect_saved = True
+        return _S()
+
+
+class _FakeResp:
+    def __init__(self, data):
+        self.content = data
+        self.raw = self
+
+    def read(self):
+        return self.content
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeFolder:
+    def __init__(self, rec):
+        self._rec = rec  # {"contents": {path: bytes}}
+
+    def list_contents(self):
+        return {"items": [{"path": p, "size": len(b)}
+                          for p, b in self._rec["contents"].items()]}
+
+    def delete_file(self, path):
+        self._rec["contents"].pop(path, None)
+
+    def put_file(self, path, f):
+        self._rec["contents"][path] = f.read()
+
+    def get_file(self, path):
+        return _FakeResp(self._rec["contents"][path])
+
+
+class _FakeScenarioRun:
+    id = "run-1"
+
+    def __init__(self, outcome):
+        self.outcome = outcome
+
+
+class _FakeScenario:
+    def __init__(self, rec):
+        self._rec = rec
+
+    def run_and_wait(self, params=None, no_fail=False):
+        self._rec["ran"] = params
+        return _FakeScenarioRun(self._rec.get("outcome", "SUCCESS"))
+
+    def run(self, params=None):
+        self._rec["ran"] = params
+        return object()
+
+
+class _FakeJob:
+    id = "job-1"
+
+    def __init__(self, state):
+        self._state = state
+
+    def get_status(self):
+        return {"baseStatus": {"state": self._state}}
+
+
+class _FakeJobBuilder:
+    def __init__(self, rec, job_type):
+        self._rec = rec
+        self._rec["job_type"] = job_type
+        self._rec["outputs"] = []
+
+    def with_output(self, name, object_type=None, **k):
+        self._rec["outputs"].append((name, object_type))
+        return self
+
+    def start(self):
+        return _FakeJob("RUNNING")
+
+    def start_and_wait(self, no_fail=False):
+        return _FakeJob(self._rec.get("job_state", "DONE"))
+
+
+class _FakeSQLQuery:
+    def __init__(self, rec):
+        self._rec = rec
+
+    def get_schema(self):
+        return [{"name": c} for c in self._rec["columns"]]
+
+    def iter_rows(self):
+        return iter(self._rec["rows"])
+
+    def verify(self):
+        pass
+
+
+class _FakeProject:
+    def __init__(self, state):
+        self.s = state
+
+    def get_dataset(self, name):
+        return _FakeDataset(self.s["datasets"][name])
+
+    def get_managed_folder(self, fid):
+        return _FakeFolder(self.s["folders"][fid])
+
+    def get_scenario(self, sid):
+        return _FakeScenario(self.s.setdefault("scenarios", {}).setdefault(sid, {}))
+
+    def new_job(self, job_type="NON_RECURSIVE_FORCED_BUILD"):
+        return _FakeJobBuilder(self.s.setdefault("job", {}), job_type)
+
+    def update_variables(self, variables, type="standard"):
+        self.s.setdefault("vars", {})[type] = variables
+
+    def list_datasets(self):
+        return [dict(name=n, type="Filesystem", tags=["a"])
+                for n in self.s["datasets"]]
+
+    def list_managed_folders(self):
+        return [dict(id=i, name=i, type="Filesystem") for i in self.s["folders"]]
+
+    def list_scenarios(self):
+        return [dict(id="S1", name="nightly", type="step_based", active=True)]
+
+    def list_recipes(self):
+        return [dict(name="compute_x", type="python")]
+
+    def list_jobs(self):
+        return [{"def": {"id": "j1", "initiator": "me"}, "state": "DONE"}]
+
+
+class _FakeClient:
+    def __init__(self, host, api_key, no_check_certificate=False):
+        _FakeClient.last = dict(host=host, api_key=api_key,
+                                insecure=no_check_certificate)
+        self._state = _FakeClient.state
+
+    def get_project(self, key):
+        _FakeClient.last["project_key"] = key
+        return _FakeProject(self._state)
+
+    def sql_query(self, query, connection=None, dataset_full_name=None,
+                  project_key=None, **k):
+        _FakeClient.last["sql"] = dict(query=query, connection=connection,
+                                       dataset_full_name=dataset_full_name)
+        return _FakeSQLQuery(self._state["sql"])
+
+
+@pytest.fixture
+def dku(monkeypatch):
+    """Install a fake `dataikuapi` and a shared mutable DSS state dict."""
+    import sys
+    import types
+
+    state = {
+        "datasets": {
+            "sales": {"columns": ["id", "region"],
+                      "rows": [[1, "EU"], [2, "US"], [3, "EU"]]},
+        },
+        "folders": {"fld1": {"contents": {"/old.csv": b"stale"}}},
+        "sql": {"columns": ["n"], "rows": [[10], [20]]},
+    }
+    _FakeClient.state = state
+    fake = types.ModuleType("dataikuapi")
+    fake.DSSClient = _FakeClient
+    monkeypatch.setitem(sys.modules, "dataikuapi", fake)
+    monkeypatch.setenv("DKU_API_KEY", "envkey")
+    return state
+
+
+_CONN = {"host": "https://dss:11200", "project_key": "PK"}
+
+
+class TestDataikuSource:
+    def test_import_dataset(self, registry, dku):
+        df = run_node(registry, "flograph.connect.dataiku_source",
+                      {**_CONN, "operation": "import dataset",
+                       "dataset_name": "sales", "limit": 0})
+        assert list(df.columns) == ["id", "region"]
+        assert len(df) == 3
+        assert _FakeClient.last["api_key"] == "envkey"  # env fallback
+
+    def test_import_column_subset_and_limit(self, registry, dku):
+        df = run_node(registry, "flograph.connect.dataiku_source",
+                      {**_CONN, "operation": "import dataset",
+                       "dataset_name": "sales", "columns": "region",
+                       "limit": 2})
+        assert list(df.columns) == ["region"]
+        assert len(df) == 2
+
+    def test_sql_query(self, registry, dku):
+        df = run_node(registry, "flograph.connect.dataiku_source",
+                      {"host": _CONN["host"], "operation": "SQL query",
+                       "query": "select 1", "connection": "pg"})
+        assert list(df["n"]) == [10, 20]
+
+    def test_sql_query_needs_target(self, registry, dku):
+        with pytest.raises(ValueError, match="Connection name"):
+            run_node(registry, "flograph.connect.dataiku_source",
+                     {"host": _CONN["host"], "operation": "SQL query",
+                      "query": "select 1"})
+
+    def test_list_objects(self, registry, dku):
+        df = run_node(registry, "flograph.connect.dataiku_source",
+                      {**_CONN, "operation": "list objects",
+                       "what": "scenarios"})
+        assert list(df["name"]) == ["nightly"]
+
+    def test_download_file(self, registry, dku):
+        dku["folders"]["fld1"]["contents"]["/d.csv"] = b"a,b\n1,2\n3,4\n"
+        df = run_node(registry, "flograph.connect.dataiku_source",
+                      {**_CONN, "operation": "download file",
+                       "folder_id": "fld1", "path": "/d.csv", "parse": "csv"})
+        assert df.shape == (2, 2)
+
+    def test_missing_host(self, registry, dku):
+        with pytest.raises(ValueError, match="DSS URL is required"):
+            run_node(registry, "flograph.connect.dataiku_source",
+                     {"operation": "import dataset", "dataset_name": "sales"})
+
+    def test_missing_api_key(self, registry, dku, monkeypatch):
+        monkeypatch.delenv("DKU_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="no API key"):
+            run_node(registry, "flograph.connect.dataiku_source",
+                     {**_CONN, "operation": "import dataset",
+                      "dataset_name": "sales"})
+
+
+class TestDataikuUpload:
+    def _t(self):
+        return pd.DataFrame({"id": [1, 2], "region": ["EU", "US"]})
+
+    def test_managed_folder_overwrite_passthrough(self, registry, dku):
+        t = self._t()
+        out = run_node(registry, "flograph.connect.dataiku_upload",
+                       {**_CONN, "target": "managed folder",
+                        "folder_id": "fld1", "path": "/incoming/data.csv",
+                        "format": "csv"}, table=t)
+        assert out is t  # pass-through
+        contents = dku["folders"]["fld1"]["contents"]
+        assert "/incoming/data.csv" in contents
+        assert b"EU" in contents["/incoming/data.csv"]
+        assert "/old.csv" in contents  # not cleared
+
+    def test_managed_folder_clear_first(self, registry, dku):
+        run_node(registry, "flograph.connect.dataiku_upload",
+                 {**_CONN, "target": "managed folder", "folder_id": "fld1",
+                  "path": "/new.csv", "replace": "clear first"},
+                 table=self._t())
+        contents = dku["folders"]["fld1"]["contents"]
+        assert set(contents) == {"/new.csv"}
+
+    def test_uploaded_dataset_add_and_detect(self, registry, dku):
+        dku["datasets"]["up"] = {"columns": [], "rows": [], "files": []}
+        run_node(registry, "flograph.connect.dataiku_upload",
+                 {**_CONN, "target": "uploaded dataset", "dataset_name": "up",
+                  "format": "json"}, table=self._t())
+        assert dku["datasets"]["up"]["files"] == [{"id": "flograph-upload.json"}]
+
+    def test_local_file_source(self, registry, dku, tmp_path):
+        f = tmp_path / "payload.bin"
+        f.write_bytes(b"raw-bytes")
+        run_node(registry, "flograph.connect.dataiku_upload",
+                 {**_CONN, "target": "managed folder", "folder_id": "fld1",
+                  "path": "/p.bin", "source": "a local file",
+                  "file": str(f)}, table=self._t())
+        assert dku["folders"]["fld1"]["contents"]["/p.bin"] == b"raw-bytes"
+
+    def test_missing_folder_path(self, registry, dku):
+        with pytest.raises(ValueError, match="File path in folder"):
+            run_node(registry, "flograph.connect.dataiku_upload",
+                     {**_CONN, "target": "managed folder", "folder_id": "fld1"},
+                     table=self._t())
+
+
+class TestDataikuAction:
+    def test_run_scenario_success(self, registry, dku):
+        out = run_node(registry, "flograph.connect.dataiku_action",
+                       {**_CONN, "operation": "run scenario",
+                        "scenario_id": "S1"})
+        assert out["ok"] is True
+        assert out["report"].iloc[0]["outcome"] == "SUCCESS"
+
+    def test_run_scenario_failure_warn(self, registry, dku):
+        dku.setdefault("scenarios", {})["S1"] = {"outcome": "FAILED"}
+        out = run_node(registry, "flograph.connect.dataiku_action",
+                       {**_CONN, "operation": "run scenario",
+                        "scenario_id": "S1", "on_failure": "warn"})
+        assert out["ok"] is False
+
+    def test_build_dataset(self, registry, dku):
+        out = run_node(registry, "flograph.connect.dataiku_action",
+                       {**_CONN, "operation": "build", "object_id": "sales",
+                        "object_type": "dataset"})
+        assert out["ok"] is True
+        assert dku["job"]["outputs"] == [("sales", "DATASET")]
+
+    def test_set_variables_from_param(self, registry, dku):
+        run_node(registry, "flograph.connect.dataiku_action",
+                 {**_CONN, "operation": "set variables", "var_key": "day",
+                  "var_value": '"2026-09-01"'})
+        assert dku["vars"]["standard"] == {"day": "2026-09-01"}
+
+    def test_set_variables_from_trigger_input(self, registry, dku):
+        run_node(registry, "flograph.connect.dataiku_action",
+                 {**_CONN, "operation": "set variables", "var_key": "n"},
+                 trigger=42)
+        assert dku["vars"]["standard"] == {"n": 42}
+
+    def test_set_variables_no_value(self, registry, dku):
+        with pytest.raises(ValueError, match="no value"):
+            run_node(registry, "flograph.connect.dataiku_action",
+                     {**_CONN, "operation": "set variables", "var_key": "x"})
