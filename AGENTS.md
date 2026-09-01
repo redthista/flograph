@@ -4,6 +4,21 @@
 
 The folder is `flopy/` (legacy), the package is **`flograph`**. All imports, the CLI, and the pip package use `flograph`. `src/flopy/` is stale pre-rename code — never import from it. Always use `from flograph import ...`.
 
+## Git identity (before first public push)
+
+The current git identity is the author's personal address (`dconrancpw@gmail.com`)
+and it is baked into the existing history. Before the repo goes public, switch to
+the project-appropriate identity and scrub history if anything personal has
+already been listed; an author email in git history is public forever.
+
+- License holder: **redthista** (matches LICENSE, the GitHub org, and git name).
+- Public email is **flograph@pm.me** — set `git config user.email "flograph@pm.me"`
+  **before** any future commits.
+- Verify with `git log --format='%an <%ae>'` before pushing that no commit
+  carries the personal address.
+- Ask before rewriting history (rebase/filter-branch/filter-repo); it changes
+  commit hashes and invalidates existing clones.
+
 ## Dev commands
 
 ```bash

@@ -179,3 +179,12 @@ guide that ships on the dashboard. What is missing:
 - **Metanodes / subfolders / collapsible frames** (Stu, and a recurring
   ask). Already written up as `ideas_archived.md` #4, where it is parked as
   LARGE and undecided — decide it there rather than forking a second note.
+
+
+NEW: 
+- when i resize a sicer it makes it dirty? 
+- sorting bia headers on table columns?
+- have flograph check for updates? settings -> check for updates?
+- cant click hyperlinks on markdown note nodes? 
+- when pictures are saved to flow they need to be in the flograph file as b64 not local system stored. so the flo is transportable.
+- can we create nodes that is its own flow? 
