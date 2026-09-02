@@ -1,20 +1,35 @@
-"""The two Plotly nodes offer every chart kind, from one shared set.
+"""The two Plotly nodes offer every chart kind, from two identical copies.
 
-`test_plotly_spec.py` covers the parameter set itself. This is about the
-nodes that use it: that both really do offer all of it, that they behave
-the same way where they should, and that Chart per Value's shared Y scale
-still means what it meant when it was the only thing those boxes did.
+`test_plotly_spec.py` covers each node's own copy of the parameter set
+(and checks the two agree). This is about the nodes that use it: that both
+really do offer all of it, that they behave the same way where they
+should, and that Chart per Value's shared Y scale still means what it
+meant when it was the only thing those boxes did.
 """
 import pandas as pd
 import pytest
 
-from flograph.core import NodeRegistry, compile_run, plotly_spec
+from flograph.core import NodeRegistry, compile_run
 from tests.conftest import FakeContext
 
 pytest.importorskip("plotly")
 
 SHOW = "flograph.viz.show_plotly"
 PER_VALUE = "flograph.viz.chart_per_value_plotly"
+
+#: A copy of the dropdown order both nodes' own `_KINDS` are checked
+#: against — see `TestBothNodesAgree` in `test_plotly_spec.py` for the
+#: check that the two nodes' copies agree with *each other*.
+KINDS = (
+    "line", "scatter", "bar", "area", "funnel", "timeline",
+    "histogram", "box", "violin", "strip", "ecdf",
+    "density_heatmap", "density_contour",
+    "pie", "funnel_area", "sunburst", "treemap", "icicle",
+    "scatter_matrix", "parallel_coordinates", "parallel_categories",
+    "scatter_3d", "line_3d",
+    "scatter_polar", "line_polar", "bar_polar",
+    "scatter_ternary", "line_ternary",
+)
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +62,7 @@ class TestBothNodesShareTheSameSettings:
     @pytest.mark.parametrize("type_id", [SHOW, PER_VALUE])
     def test_every_chart_kind_is_offered(self, registry, type_id):
         kinds = registry.get(type_id).param("kind").options
-        assert kinds == list(plotly_spec.KINDS)
+        assert kinds == list(KINDS)
         assert len(kinds) == 28
 
     @pytest.mark.parametrize("type_id", [SHOW, PER_VALUE])
@@ -261,7 +276,7 @@ class TestThePropertiesPanel:
         assert "Symbol by" in many and "Symbol by" not in few
 
     def test_no_kind_shows_everything_at_once(self, qtbot, registry):
-        for kind in plotly_spec.KINDS:
+        for kind in KINDS:
             rows = self._rows(self._panel(qtbot, registry, kind, more=True))
             assert len(rows) < 50, kind
 

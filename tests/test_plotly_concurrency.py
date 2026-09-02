@@ -161,7 +161,7 @@ class TestBuildingAtTheSameTime:
         source = registry.get(
             "flograph.viz.chart_per_value_plotly").source
         body = source[source.index("for index, (value, group)"):]
-        assert "with plotly_spec.FIGURE_LOCK:" in body
+        assert "with _figure_lock():" in body
 
         split = self._runner(registry,
                              "flograph.viz.chart_per_value_plotly",
@@ -187,11 +187,15 @@ class TestBuildingAtTheSameTime:
 
 
 #: The nodes that must keep working when dropped into a user-nodes folder
-#: on a flograph that predates `core.plotly_spec`. Show Plotly and Chart
-#: per Value are deliberately NOT in this list: they share a ~1000-line
-#: generated catalogue, and duplicating it into both is worse than the
-#: module. See the note in `core/plotly_spec.py`.
-STANDALONE = ("flograph.viz.plotly_table", "flograph.viz.plotly_style")
+#: on a flograph that predates `core.plotly_spec`. All four plotly-drawing
+#: nodes are self-contained this way — Show Plotly and Chart per Value
+#: (Plotly) each carry their own ~1000-line copy of the chart-kind
+#: catalogue rather than sharing it, on the reasoning in the note above
+#: `_figure_lock` in either file: a node script is meant to be readable
+#: without a trip to `core/`. `test_plotly_spec.py` is what keeps the two
+#: copies from drifting apart instead.
+STANDALONE = ("flograph.viz.show_plotly", "flograph.viz.chart_per_value_plotly",
+             "flograph.viz.plotly_table", "flograph.viz.plotly_style")
 
 
 class TestStandalone:

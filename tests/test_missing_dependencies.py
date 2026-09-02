@@ -249,13 +249,12 @@ def run(ctx):
 #: Modules a node script may import at the top level: the standard library
 #: pieces small enough not to matter, plus `flograph.core` — the Qt-free,
 #: dependency-free half of the app itself, which the registry doing the
-#: parsing has already imported. A node whose PARAMS are built from a
-#: shared declaration (the two Plotly nodes and `core.plotly_spec`) has to
-#: reach it at module level, since PARAMS is a module-level value.
-#: `flograph.ui` and `flograph.engine` are deliberately not allowed: those
-#: do pull in Qt, at registry-load time, for every node.
+#: parsing has already imported. `typing` and `__future__` cover a node
+#: whose module-level PARAMS-building code (Show Plotly, Chart per Value
+#: (Plotly)) is typed. `flograph.ui` and `flograph.engine` are deliberately
+#: not allowed: those do pull in Qt, at registry-load time, for every node.
 TOP_LEVEL_IMPORTS_OK = ("json", "uuid", "math", "datetime", "re", "os",
-                        "sys", "textwrap", "base64")
+                        "sys", "textwrap", "base64", "typing", "__future__")
 
 
 def _import_is_allowed(name: str) -> bool:
