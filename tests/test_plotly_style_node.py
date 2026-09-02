@@ -216,6 +216,14 @@ class TestOtherShapes:
                                "grid_y": "off"}, figure=pie)
         assert out.layout.template is not None
 
+    def test_a_reference_line_on_a_pie_is_skipped_not_a_crash(self, registry):
+        import plotly.express as px
+        pie = px.pie(pd.DataFrame({"r": ["n", "s"], "v": [1, 2]}),
+                     names="r", values="v")
+        out = style(registry, {"line_at": "1", "note": "ok"}, figure=pie)
+        assert out.layout.shapes == ()
+        assert out.layout.annotations[0].text == "ok"
+
     def test_nothing_wired_in_says_so(self, registry):
         with pytest.raises(ValueError, match="nothing on the figure input"):
             style(registry, {}, figure=None)

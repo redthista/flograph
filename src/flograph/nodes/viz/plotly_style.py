@@ -544,10 +544,15 @@ def _reference_line(params, fig) -> None:
         line["line_color"] = params["line_color"]
     if params.get("line_label"):
         line["annotation_text"] = params["line_label"]
-    if params.get("line_axis", "y") == "y":
-        fig.add_hline(y=at, **line)
-    else:
-        fig.add_vline(x=at, **line)
+    try:
+        if params.get("line_axis", "y") == "y":
+            fig.add_hline(y=at, **line)
+        else:
+            fig.add_vline(x=at, **line)
+    except ValueError:
+        # a pie, treemap or other domain-type plot has no cartesian axis to
+        # pin a line to — the setting just doesn't apply, like a gridline
+        pass
 
 
 def _note(params, fig) -> None:

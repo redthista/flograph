@@ -44,10 +44,21 @@ positive and negative away from zero.
 has no way to be told about only one — and on a log axis you still type the
 values you want to see, not their exponents.
 
-For anything about how the finished chart *looks* rather than what it
-shows — legend placement, axis titles, tick formats, gridlines, reference
-lines, a note in the corner — wire it into a **Plotly Style** node, which
-restyles any Plotly figure including this one.
+**Styling options** is the second drawer, for how the finished chart
+*looks* rather than what it shows: the legend (show/hide, one of seven
+positions, a column or a row, fine X/Y placement, what a click does,
+order, marker and text size, background and border), axis titles,
+gridlines, d3 tick formats, tick angle, category sorting, a range slider,
+a horizontal or vertical **reference line** with a label, a **note** in
+any corner, fonts, text colour, plot and card backgrounds, margins. Every
+one has a **keep**/blank default, so the drawer is inert until used. What
+plotly express already expresses — theme, palette, axis range, log scale,
+the title — stays with the settings above and isn't repeated in the
+drawer.
+
+The standalone **Plotly Style** node does the same job on a figure this
+node did not draw — a Gantt chart, a figure built in a Python Script, or a
+whole Chart per Value stack styled from one node.
 
 **This node stands alone.** Every chart kind, every setting and the logic
 that turns them into a `px.<kind>()` call live directly below rather than
@@ -57,13 +68,14 @@ one figure lock with everything else, which it parks in `sys.modules` when
 there is no `core.plotly_spec` to take it from.
 
 **Chart per Value (Plotly)** carries an identical copy of everything below
-this line — the two nodes offer the same 28 chart kinds and the same
-settings by construction, not by sharing code, so a chart type added here
-has to be added there too. That trade was deliberate: importing this from
-a shared module used to be exactly how these nodes worked, and it kept the
-two in lockstep automatically — see `tests/test_plotly_kinds.py`, which
-still checks the two copies agree, and `tests/test_plotly_spec.py`, which
-checks each copy's `KIND_ARGS` table against the plotly actually installed.
+this line — the same 28 chart kinds, the same settings, and the same
+`_STYLE_ROWS` / `_apply_styling` styling block — by construction, not by
+sharing code, so anything added here has to be added there too. That trade
+was deliberate: importing this from a shared module used to be exactly how
+these nodes worked, and it kept the two in lockstep automatically — see
+`tests/test_plotly_kinds.py` and `tests/test_plotly_styling.py`, which
+check the two copies agree, and `tests/test_plotly_spec.py`, which checks
+each copy's `KIND_ARGS` table against the plotly actually installed.
 """
 from __future__ import annotations
 
@@ -1140,8 +1152,359 @@ def _figure_lock():
         return module.lock
 
 
+# ----------------------------------------------------------------------------
+# The styling pass — "how the figure looks", the whole Plotly Style node
+# folded in so this one node masters what plotly offers. It runs after px
+# has drawn the figure: everything here is figure *layout* that Plotly
+# Express has no argument for — a legend's position, a gridline, a tick
+# format, a reference line, a corner note. Overlapping settings that px
+# *does* express — theme, palette, axis range, log scale, the title — stay
+# with the px arguments above and are not repeated here.
+#
+# Every row has a "keep"/blank default, so the whole Styling drawer is
+# inert until touched, and a graph saved before this node grew loads with
+# every one of them at its keep position.
+#
+# The standalone **Plotly Style** node still exists, for styling a figure
+# this node did not draw — a Gantt chart, a Python Script's figure, or a
+# whole Chart per Value stack from one node. This block and that node's
+# body are kept in step by hand; `tests/test_plotly_styling.py` checks the
+# two plotly nodes carry an identical copy.
+_KEEP = "keep"
+
+#: Where a legend sits, as the plotly anchoring that puts it there. The
+#: inside positions float it over the plot area, which buys back the width
+#: a right-hand legend costs on a narrow card.
+_LEGEND_POS: dict[str, dict[str, Any]] = {
+    "right": {"orientation": "v", "yanchor": "auto", "y": 1,
+              "xanchor": "left", "x": 1.02},
+    "top": {"orientation": "h", "yanchor": "bottom", "y": 1.02,
+            "xanchor": "right", "x": 1},
+    "bottom": {"orientation": "h", "yanchor": "top", "y": -0.2,
+               "xanchor": "center", "x": 0.5},
+    "inside top left": {"orientation": "v", "yanchor": "top", "y": 0.98,
+                        "xanchor": "left", "x": 0.02},
+    "inside top right": {"orientation": "v", "yanchor": "top", "y": 0.98,
+                         "xanchor": "right", "x": 0.98},
+    "inside bottom left": {"orientation": "v", "yanchor": "bottom",
+                           "y": 0.02, "xanchor": "left", "x": 0.02},
+    "inside bottom right": {"orientation": "v", "yanchor": "bottom",
+                            "y": 0.02, "xanchor": "right", "x": 0.98},
+}
+
+#: A legend click toggles the entry and a double-click isolates it, by
+#: default. "isolate one" swaps that round; "off" freezes the legend,
+#: which is what a dashboard handed to someone who shouldn't be hiding
+#: series by accident wants. Values are (itemclick, itemdoubleclick).
+_LEGEND_CLICK: dict[str, tuple] = {
+    "toggle one": ("toggle", "toggleothers"),
+    "isolate one": ("toggleothers", "toggle"),
+    "off": (False, False),
+}
+_LEGEND_ORDER = {"reversed grouped": "reversed+grouped"}
+_LEGEND_ITEM_SIZE = {"from the trace": "trace", "uniform": "constant"}
+
+#: A note's paper-coordinate anchor for each corner: (x, y, xanchor, yanchor).
+_NOTE_POS: dict[str, tuple] = {
+    "top left": (0.01, 0.99, "left", "top"),
+    "top right": (0.99, 0.99, "right", "top"),
+    "bottom left": (0.01, 0.01, "left", "bottom"),
+    "bottom right": (0.99, 0.01, "right", "bottom"),
+}
+
+#: Every styling row hangs off the one "Styling options" tick, the way the
+#: chart rows hang off "More options". Two drawers: what the chart is, and
+#: how it looks.
+_WHEN_STYLING = {"styling": ["True"]}
+
+_STYLE_ROWS: list[dict[str, Any]] = [
+    {"name": "styling", "type": "bool", "label": "Styling options",
+     "default": False, "cosmetic": True},
+
+    {"name": "title_align", "type": "choice", "label": "Title position",
+     "options": [_KEEP, "left", "center", "right"], "default": _KEEP,
+     "visible_when": _WHEN_STYLING},
+    {"name": "x_title", "type": "string", "label": "X axis title",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "y_title", "type": "string", "label": "Y axis title",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "legend_title", "type": "string", "label": "Legend title",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "colorbar_title", "type": "string", "label": "Color bar title",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+
+    {"name": "legend", "type": "choice", "label": "Legend",
+     "options": [_KEEP, "show", "hide"], "default": _KEEP,
+     "visible_when": _WHEN_STYLING},
+    {"name": "legend_pos", "type": "choice", "label": "Legend position",
+     "options": [_KEEP, "right", "top", "bottom", "inside top left",
+                 "inside top right", "inside bottom left",
+                 "inside bottom right"],
+     "default": _KEEP, "visible_when": _WHEN_STYLING},
+    {"name": "legend_orientation", "type": "choice", "label": "Legend layout",
+     "options": [_KEEP, "vertical", "horizontal"], "default": _KEEP,
+     "visible_when": _WHEN_STYLING},
+    {"name": "legend_click", "type": "choice", "label": "Legend clicks",
+     "options": [_KEEP, "toggle one", "isolate one", "off"], "default": _KEEP,
+     "visible_when": _WHEN_STYLING},
+    {"name": "legend_x", "type": "string", "label": "Legend X", "default": "",
+     "placeholder": "0 left – 1 right (1.02 = just outside)",
+     "visible_when": _WHEN_STYLING},
+    {"name": "legend_y", "type": "string", "label": "Legend Y", "default": "",
+     "placeholder": "0 bottom – 1 top", "visible_when": _WHEN_STYLING},
+    {"name": "legend_order", "type": "choice", "label": "Legend order",
+     "options": [_KEEP, "normal", "reversed", "grouped", "reversed grouped"],
+     "default": _KEEP, "visible_when": _WHEN_STYLING},
+    {"name": "legend_item_size", "type": "choice", "label": "Legend marker size",
+     "options": [_KEEP, "from the trace", "uniform"], "default": _KEEP,
+     "visible_when": _WHEN_STYLING},
+    {"name": "legend_font_size", "type": "int", "label": "Legend text size",
+     "default": 0, "min": 0, "max": 36, "visible_when": _WHEN_STYLING},
+    {"name": "legend_bg", "type": "string", "label": "Legend background",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "legend_border", "type": "string", "label": "Legend border",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "legend_border_width", "type": "int", "label": "Legend border width",
+     "default": 0, "min": 0, "max": 10, "visible_when": _WHEN_STYLING},
+
+    {"name": "hovermode", "type": "choice", "label": "Hover",
+     "options": [_KEEP, "closest", "x", "y", "x unified", "y unified", "off"],
+     "default": _KEEP, "visible_when": _WHEN_STYLING},
+
+    {"name": "grid_x", "type": "choice", "label": "X gridlines",
+     "options": [_KEEP, "on", "off"], "default": _KEEP,
+     "visible_when": _WHEN_STYLING},
+    {"name": "grid_y", "type": "choice", "label": "Y gridlines",
+     "options": [_KEEP, "on", "off"], "default": _KEEP,
+     "visible_when": _WHEN_STYLING},
+    {"name": "x_format", "type": "string", "label": "X tick format",
+     "default": "", "placeholder": ",.0f  or  %b %Y",
+     "visible_when": _WHEN_STYLING},
+    {"name": "y_format", "type": "string", "label": "Y tick format",
+     "default": "", "placeholder": ",.0f  or  .1%",
+     "visible_when": _WHEN_STYLING},
+    {"name": "tick_angle", "type": "string", "label": "X tick angle",
+     "default": "", "placeholder": "degrees, e.g. -45",
+     "visible_when": _WHEN_STYLING},
+    {"name": "category_order", "type": "choice", "label": "Sort categories",
+     "options": [_KEEP, "as plotted", "category ascending",
+                 "category descending", "total ascending",
+                 "total descending"],
+     "default": _KEEP, "visible_when": _WHEN_STYLING},
+    {"name": "range_slider", "type": "bool", "label": "Range slider",
+     "default": False, "visible_when": _WHEN_STYLING},
+
+    {"name": "line_at", "type": "string", "label": "Reference line",
+     "default": "", "placeholder": "a value, e.g. 0 or 100",
+     "visible_when": _WHEN_STYLING},
+    {"name": "line_axis", "type": "choice", "label": "Reference line on",
+     "options": ["y", "x"], "default": "y", "visible_when": _WHEN_STYLING},
+    {"name": "line_label", "type": "string", "label": "Reference label",
+     "default": "", "placeholder": "e.g. Target", "visible_when": _WHEN_STYLING},
+    {"name": "line_color", "type": "string", "label": "Reference color",
+     "default": "", "placeholder": "e.g. crimson or #b00",
+     "visible_when": _WHEN_STYLING},
+    # Not "line_dash": that name is already a column-encoding row on these
+    # nodes ("Dash by"). Plotly Style, which has no encoding rows, calls the
+    # same setting line_dash.
+    {"name": "ref_dash", "type": "choice", "label": "Reference style",
+     "options": ["dash", "solid", "dot", "dashdot"], "default": "dash",
+     "visible_when": _WHEN_STYLING},
+
+    {"name": "note", "type": "text", "label": "Note", "default": "",
+     "placeholder": "text to place on the chart", "visible_when": _WHEN_STYLING},
+    {"name": "note_pos", "type": "choice", "label": "Note position",
+     "options": ["top left", "top right", "bottom left", "bottom right"],
+     "default": "top left", "visible_when": _WHEN_STYLING},
+
+    {"name": "font_family", "type": "string", "label": "Font", "default": "",
+     "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "font_size", "type": "int", "label": "Font size", "default": 0,
+     "min": 0, "max": 48, "visible_when": _WHEN_STYLING},
+    {"name": "font_color", "type": "string", "label": "Text color",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "plot_color", "type": "string", "label": "Plot background",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "paper_color", "type": "string", "label": "Card background",
+     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+    {"name": "margin", "type": "string", "label": "Margins", "default": "",
+     "placeholder": "left,right,top,bottom in pixels",
+     "visible_when": _WHEN_STYLING},
+]
+
+
+def _apply_styling(fig, params: dict[str, Any]) -> None:
+    """The "how it looks" pass — everything px has no argument for.
+
+    Mirrors the Plotly Style node. Runs after px has built the figure and
+    after `_layout_updates`, and mutates `fig` in place — safe, because it
+    is the figure this node just made and nothing else holds it yet. Every
+    setting has a keep/blank default, so this is a no-op until the Styling
+    drawer is used. Theme, palette, axis range, log scale and the title are
+    px's job above and are not touched here.
+    """
+    layout: dict[str, Any] = {}
+    _style_titles(params, layout)
+    _style_legend(params, layout)
+    _style_fonts(params, layout)
+    if params.get("hovermode", _KEEP) != _KEEP:
+        mode = params["hovermode"]
+        layout["hovermode"] = False if mode == "off" else mode
+    if layout:
+        fig.update_layout(**layout)
+
+    _style_axes(params, fig)
+    _style_reference_line(params, fig)
+    _style_note(params, fig)
+    if params.get("colorbar_title"):
+        fig.update_coloraxes(colorbar_title_text=params["colorbar_title"])
+
+
+def _style_titles(params, layout) -> None:
+    align = params.get("title_align", _KEEP)
+    if align != _KEEP:
+        layout["title_x"] = {"left": 0.0, "center": 0.5, "right": 1.0}[align]
+        layout["title_xanchor"] = align
+    if params.get("legend_title"):
+        layout["legend_title_text"] = params["legend_title"]
+
+
+def _style_legend(params, layout) -> None:
+    legend = params.get("legend", _KEEP)
+    if legend != _KEEP:
+        layout["showlegend"] = legend == "show"
+
+    # Everything below lands in one legend dict. update_layout merges it
+    # into whatever the figure already had, so a position preset and a
+    # single tweak on top of it both take.
+    spec: dict[str, Any] = {}
+    position = params.get("legend_pos", _KEEP)
+    if position != _KEEP:
+        spec.update(_LEGEND_POS[position])
+    orientation = params.get("legend_orientation", _KEEP)
+    if orientation != _KEEP:
+        spec["orientation"] = "h" if orientation == "horizontal" else "v"
+    x = _as_bound(params.get("legend_x"))
+    if x is not None:
+        spec["x"] = x
+    y = _as_bound(params.get("legend_y"))
+    if y is not None:
+        spec["y"] = y
+    order = params.get("legend_order", _KEEP)
+    if order != _KEEP:
+        spec["traceorder"] = _LEGEND_ORDER.get(order, order)
+    item_size = params.get("legend_item_size", _KEEP)
+    if item_size != _KEEP:
+        spec["itemsizing"] = _LEGEND_ITEM_SIZE[item_size]
+    click = params.get("legend_click", _KEEP)
+    if click != _KEEP:
+        spec["itemclick"], spec["itemdoubleclick"] = _LEGEND_CLICK[click]
+    size = int(params.get("legend_font_size") or 0)
+    if size:
+        spec["font"] = {"size": size}
+    if params.get("legend_bg"):
+        spec["bgcolor"] = params["legend_bg"]
+    if params.get("legend_border"):
+        spec["bordercolor"] = params["legend_border"]
+    width = int(params.get("legend_border_width") or 0)
+    if width:
+        spec["borderwidth"] = width
+    if spec:
+        layout["legend"] = spec
+
+
+def _style_fonts(params, layout) -> None:
+    font: dict[str, Any] = {}
+    if params.get("font_family"):
+        font["family"] = params["font_family"]
+    if int(params.get("font_size") or 0):
+        font["size"] = int(params["font_size"])
+    if params.get("font_color"):
+        font["color"] = params["font_color"]
+    if font:
+        layout["font"] = font
+    if params.get("plot_color"):
+        layout["plot_bgcolor"] = params["plot_color"]
+    if params.get("paper_color"):
+        layout["paper_bgcolor"] = params["paper_color"]
+    margin = _style_numbers(params.get("margin"))
+    if len(margin) == 4:
+        left, right, top, bottom = margin
+        layout["margin"] = {"l": left, "r": right, "t": top, "b": bottom}
+
+
+def _style_axes(params, fig) -> None:
+    """The axis *look* — titles, gridlines, tick formats, category order.
+
+    Log scale and pinned ranges are px arguments on this node, so they are
+    not repeated here. `update_xaxes` walks every x axis the figure has, so
+    a faceted grid is styled whole, and it does nothing on a figure with no
+    cartesian axes rather than failing on one.
+    """
+    for axis, update in (("x", fig.update_xaxes), ("y", fig.update_yaxes)):
+        settings: dict[str, Any] = {}
+        title = params.get(f"{axis}_title")
+        if title:
+            settings["title_text"] = title
+        grid = params.get(f"grid_{axis}", _KEEP)
+        if grid != _KEEP:
+            settings["showgrid"] = grid == "on"
+        fmt = params.get(f"{axis}_format")
+        if fmt:
+            settings["tickformat"] = fmt
+        if settings:
+            update(**settings)
+
+    angle = _as_bound(params.get("tick_angle"))
+    if angle is not None:
+        fig.update_xaxes(tickangle=angle)
+    order = params.get("category_order", _KEEP)
+    if order != _KEEP:
+        fig.update_xaxes(
+            categoryorder="trace" if order == "as plotted" else order)
+    if params.get("range_slider"):
+        fig.update_xaxes(rangeslider_visible=True)
+
+
+def _style_reference_line(params, fig) -> None:
+    at = _as_bound(params.get("line_at"))
+    if at is None:
+        return
+    line = {"line_dash": params.get("ref_dash", "dash")}
+    if params.get("line_color"):
+        line["line_color"] = params["line_color"]
+    if params.get("line_label"):
+        line["annotation_text"] = params["line_label"]
+    try:
+        if params.get("line_axis", "y") == "y":
+            fig.add_hline(y=at, **line)
+        else:
+            fig.add_vline(x=at, **line)
+    except ValueError:
+        # a pie, treemap or other domain-type plot has no cartesian axis to
+        # pin a line to — the setting just doesn't apply, like a gridline
+        pass
+
+
+def _style_note(params, fig) -> None:
+    text = str(params.get("note") or "").strip()
+    if not text:
+        return
+    x, y, xanchor, yanchor = _NOTE_POS[params.get("note_pos", "top left")]
+    fig.add_annotation(text=text.replace("\n", "<br>"), showarrow=False,
+                       xref="paper", yref="paper", x=x, y=y,
+                       xanchor=xanchor, yanchor=yanchor, align="left")
+
+
+def _style_numbers(text) -> list:
+    """A comma-separated list of numbers, or [] if it isn't cleanly one."""
+    parsed = [_as_bound(part) for part in str(text or "").split(",")]
+    return [] if None in parsed else parsed
+
+
 PARAMS = [
     *_params(),
+    *_STYLE_ROWS,
     {"name": "width", "type": "int", "label": "Width",
      "default": 420, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
@@ -1181,6 +1544,7 @@ def run(ctx, table):
     layout = _layout_updates(ctx.params, kind)
     if layout:
         fig.update_layout(**layout)
+    _apply_styling(fig, ctx.params)
 
     ctx.log(f"plotted {len(fig.data)} trace(s) ({kind})")
     if ignored:
