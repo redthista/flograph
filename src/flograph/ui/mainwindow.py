@@ -80,6 +80,7 @@ from .docs import DocsWindow
 from . import theme
 from . import toolbar as toolbar_style
 from . import update_check
+from . import win_frame
 from . import window_frame
 
 MAX_RECENT = 8
@@ -778,6 +779,12 @@ class MainWindow(QMainWindow):
             self.setMenuWidget(self._title_bar)
             self._frameless = window_frame.FramelessResizer(
                 self, self._title_bar)
+            # Windows only: hand snapping / tiling back to the OS. Qt's
+            # frameless window drops the styles the DWM needs to offer it,
+            # so the edge-drag / drag-to-top / Snap-Assist gestures do
+            # nothing until we put them back. No-op elsewhere.
+            self._win_snap = win_frame.enable_windows_snap(
+                self, self._title_bar, window_frame.RESIZE_MARGIN)
             self._title_bar.set_compact(self.settings.value(
                 "window/titlebar_compact", False, type=bool))
             self._title_bar.set_show_shortcuts(self.settings.value(
