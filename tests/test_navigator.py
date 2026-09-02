@@ -1,7 +1,7 @@
 """The Navigator dock: the canvas layout as a tree, its orderings, and the
 jump-to-canvas a clicked row triggers."""
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QDockWidget
 
@@ -225,15 +225,44 @@ class TestLiveUpdates:
 class TestWindowWiring:
     @pytest.fixture
     def window(self, qtbot):
-        win = MainWindow(REG)
-        win.confirm_close = False
-        qtbot.addWidget(win)
-        return win
+        # a real saved layout would place the docks by objectName and mask
+        # what _build_docks sets up (the whole point of these tests)
+        s = QSettings("flograph", "flograph")
+        saved = {k: s.value(k) for k in ("dock_state", "window_geometry")}
+        s.remove("dock_state")
+        s.remove("window_geometry")
+        try:
+            win = MainWindow(REG)
+            win.confirm_close = False
+            win._save_window_state = lambda: None  # don't touch real settings
+            qtbot.addWidget(win)
+            win.show()
+            qtbot.waitExposed(win)
+            yield win
+        finally:
+            for k, v in saved.items():
+                s.setValue(k, v) if v is not None else s.remove(k)
 
     def test_the_dock_exists_and_is_titled_navigator(self, window):
         docks = {d.objectName(): d for d in window.findChildren(QDockWidget)}
         assert "dock_navigator" in docks
         assert docks["dock_navigator"].windowTitle() == "Navigator"
+
+    def test_it_is_closed_by_default(self, window):
+        assert window.navigator_dock.isHidden()
+        assert window.navigator_dock not in window._docks_open_on_model_page
+
+    def test_it_opens_into_the_properties_and_code_tab_group(self, window, qtbot):
+        window.navigator_dock.toggleViewAction().trigger()  # View ▸ Navigator
+        qtbot.wait(10)
+        group = window._dock_host.tabifiedDockWidgets(window.properties_dock)
+        assert window.navigator_dock in group
+        assert window.editor_dock in group  # i.e. Properties/Code/Log group
+
+    def test_a_layout_reset_leaves_it_closed(self, window):
+        window.navigator_dock.show()
+        window.reset_window_layout()
+        assert window.navigator_dock.isHidden()
 
     def test_it_has_a_show_hide_toggle_wired_to_the_view_menu(self, window):
         # MainWindow adds every dock's toggleViewAction to the View menu

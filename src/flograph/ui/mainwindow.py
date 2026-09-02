@@ -478,19 +478,6 @@ class MainWindow(QMainWindow):
         self.library_tree.delete_user_frame_requested.connect(
             self._delete_user_frame)
 
-        # -------------------------------------------------------- navigator
-        # a tree of the canvas layout — frames as groups. Tabbed under the
-        # library on the left: both are "find your way around the graph"
-        # panels, and the library is the one you want in front by default.
-        self.navigator_panel = NavigatorPanel(self.graph, self.scene, self.engine)
-        self.navigator_panel.navigate_requested.connect(self._navigate_to)
-        self.navigator_dock = QDockWidget("Navigator", host)
-        self.navigator_dock.setObjectName("dock_navigator")
-        self.navigator_dock.setWidget(self.navigator_panel)
-        host.addDockWidget(Qt.LeftDockWidgetArea, self.navigator_dock)
-        host.tabifyDockWidget(self.library_dock, self.navigator_dock)
-        self.library_dock.raise_()
-
         # ----------------------------------------------- properties/code/log
         # one tab group: all three answer "what is this node doing", and the
         # right-hand column is the only place tall enough for a code editor
@@ -520,6 +507,26 @@ class MainWindow(QMainWindow):
         self.properties_dock.raise_()
         host.resizeDocks([self.properties_dock], [420], Qt.Horizontal)
 
+        # -------------------------------------------------------- navigator
+        # a tree of the canvas layout — frames as groups. Rides in the same
+        # right-hand tab group as Properties/Code/Log (the other "what is
+        # this node / where is it" panels) and starts closed: it is an
+        # occasional orientation aid, not part of the default working set.
+        # View ▸ Navigator, or the right edge's reveal arrow, brings it up.
+        self.navigator_panel = NavigatorPanel(self.graph, self.scene, self.engine)
+        self.navigator_panel.navigate_requested.connect(self._navigate_to)
+        self.navigator_dock = QDockWidget("Navigator", host)
+        self.navigator_dock.setObjectName("dock_navigator")
+        self.navigator_dock.setWidget(self.navigator_panel)
+        host.addDockWidget(Qt.RightDockWidgetArea, self.navigator_dock)
+        # show it before tabifying, or the tab relationship does not take on a
+        # dock that has never been visible and the first View ▸ Navigator
+        # opens it as a loose pane instead of into the group
+        self.navigator_dock.show()
+        host.tabifyDockWidget(self.log_dock, self.navigator_dock)
+        self.properties_dock.raise_()
+        self.navigator_dock.hide()
+
         # ------------------------------------------------------ inspector
         # on its own at the bottom: it is a wide, table-shaped panel, so it
         # wants the window's full width rather than a 420px column
@@ -533,12 +540,18 @@ class MainWindow(QMainWindow):
         # every dock that belongs to the model canvas alone, in the order a
         # reset should put them back
         self._model_docks = [
-            self.library_dock, self.navigator_dock, self.properties_dock,
-            self.editor_dock, self.log_dock, self.inspector_dock,
+            self.library_dock, self.properties_dock, self.editor_dock,
+            self.log_dock, self.navigator_dock, self.inspector_dock,
         ]
+        # docks that start closed on a fresh install (no saved layout) and
+        # stay closed through a layout reset -- an occasional aid, not the
+        # default working set
+        self._docks_closed_by_default = [self.navigator_dock]
         # which of them to restore on the way back from a dashboard page --
         # switching pages must not reopen what someone deliberately closed
-        self._docks_open_on_model_page = list(self._model_docks)
+        self._docks_open_on_model_page = [
+            dock for dock in self._model_docks
+            if dock not in self._docks_closed_by_default]
 
         # the edge strips go inside the dock ring, so takeCentralWidget()
         # first: setCentralWidget() deletes whatever it replaces, and the
@@ -3884,7 +3897,11 @@ class MainWindow(QMainWindow):
         # dock comes back whatever state it was left in
         for dock in self._model_docks:
             dock.show()
-        self._docks_open_on_model_page = list(self._model_docks)
+        for dock in self._docks_closed_by_default:
+            dock.hide()
+        self._docks_open_on_model_page = [
+            dock for dock in self._model_docks
+            if dock not in self._docks_closed_by_default]
         self.properties_dock.raise_()
         self.show_status("Window layout reset.", 4000)
 

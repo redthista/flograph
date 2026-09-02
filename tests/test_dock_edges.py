@@ -327,6 +327,8 @@ class TestHideAllPanels:
 
         assert window.all_panels_hidden() is False
         for dock in window._model_docks:
+            if dock in window._docks_closed_by_default:
+                continue  # was closed before the gesture, stays closed after
             assert dock.isHidden() is False
 
     def test_a_partly_collapsed_layout_hides_the_rest(self, window):
@@ -529,7 +531,8 @@ class TestResetAndPersistence:
 
         window.reset_window_layout()
 
-        assert all(not dock.isHidden() for dock in window._model_docks)
+        assert all(dock.isHidden() is (dock in window._docks_closed_by_default)
+                   for dock in window._model_docks)
         for strip in window._edge_strips.values():
             assert strip.is_collapsed() is False
 
