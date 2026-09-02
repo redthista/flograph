@@ -273,3 +273,36 @@ class TestThePanelStillGates:
                                                             registry):
         rows = self._rows(qtbot, registry, more=True, styling=True)
         assert len(rows) < 100
+
+    def _combo(self, qtbot, registry, label):
+        from PySide6.QtGui import QUndoStack
+
+        from flograph.core import Graph
+        from flograph.ui.properties.params_panel import ParamsPanel
+
+        graph = Graph()
+        node = graph.add_node(registry.instantiate(SHOW))
+        graph.set_param(node.id, "kind", "bar")
+        graph.set_param(node.id, "styling", True)
+        panel = ParamsPanel(graph, QUndoStack())
+        qtbot.addWidget(panel)
+        panel.set_node(node.id)
+        tree = panel.tree
+        for i in range(tree.topLevelItemCount()):
+            if tree.topLevelItem(i).text(0) == label:
+                return graph, node, tree.itemWidget(tree.topLevelItem(i), 1)
+        raise AssertionError(f"no {label!r} row")
+
+    def test_a_keep_dropdown_reads_as_default_not_keep(self, qtbot, registry):
+        _, _, combo = self._combo(qtbot, registry, "Legend position")
+        shown = {combo.itemText(i) for i in range(combo.count())}
+        assert "keep" not in shown
+        assert "default" in shown
+        # the value behind it is still the real sentinel
+        assert combo.itemData(combo.findText("default")) == "keep"
+
+    def test_picking_a_real_option_stores_the_real_value(self, qtbot,
+                                                        registry):
+        graph, node, combo = self._combo(qtbot, registry, "Legend position")
+        combo.setCurrentIndex(combo.findText("bottom"))
+        assert graph.node(node.id).params["legend_pos"] == "bottom"

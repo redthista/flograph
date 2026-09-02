@@ -57,6 +57,11 @@ class ParamSpec:
     label: str = ""
     default: Any = None
     options: list[str] = field(default_factory=list)  # choice only
+    # choice only: a friendlier label for the option that means "leave this
+    # alone" (by convention the default). The stored value is unchanged —
+    # this only stops a bare sentinel like "keep" reading as a real choice
+    # in the dropdown. "" leaves every option shown as written.
+    unset_label: str = ""
     placeholder: str = ""
     minimum: Optional[float] = None
     maximum: Optional[float] = None
@@ -138,6 +143,7 @@ class ParamSpec:
             label=d.get("label", name.replace("_", " ").capitalize()),
             default=default,
             options=options,
+            unset_label=str(d.get("unset_label", "")),
             placeholder=d.get("placeholder", ""),
             minimum=d.get("min"),
             maximum=d.get("max"),

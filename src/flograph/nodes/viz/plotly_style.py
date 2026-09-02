@@ -250,6 +250,14 @@ PARAMS = [
      "default": 100, "min": 25, "max": 400, "cosmetic": True},
 ]
 
+# Every dropdown here keeps a "leave it alone" option — that is what makes
+# the node inert until asked — but the bare word reads like a real choice.
+# Show it as "default" instead; the stored value is untouched, so a graph
+# saved before this still loads.
+for _row in PARAMS:
+    if _row.get("type") == "choice" and _row.get("default") == _KEEP:
+        _row["unset_label"] = "default"
+
 #: Where a legend sits, as the plotly anchoring that puts it there. The
 #: inside positions float it over the plot area, which is worth doing on a
 #: narrow card: a right-hand legend can take a third of the width.

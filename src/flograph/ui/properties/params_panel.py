@@ -375,11 +375,21 @@ class ParamsPanel(QWidget):
 
         if spec.type == "choice":
             combo = QComboBox()
-            combo.addItems([str(o) for o in spec.options])
-            if value is not None and str(value) in spec.options:
-                combo.setCurrentText(str(value))
-            combo.currentTextChanged.connect(lambda v: self._commit(name, v))
-            return combo, lambda v: self._silently(combo.setCurrentText, str(v))
+            # Carry the real value as item data so a sentinel option can be
+            # shown under a friendlier label (spec.unset_label) without the
+            # stored value changing.
+            for option in spec.options:
+                option = str(option)
+                label = (spec.unset_label
+                         if spec.unset_label and option == str(spec.default)
+                         else option)
+                combo.addItem(label, option)
+            if value is not None and combo.findData(str(value)) >= 0:
+                combo.setCurrentIndex(combo.findData(str(value)))
+            combo.currentIndexChanged.connect(
+                lambda _i, c=combo: self._commit(name, c.currentData()))
+            return combo, lambda v: self._silently(
+                combo.setCurrentIndex, combo.findData(str(v)))
 
         if spec.type == "text":
             text = _ColumnTextEdit(str(value or ""))

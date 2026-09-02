@@ -1426,6 +1426,13 @@ _STYLE_ROWS: list[dict[str, Any]] = [
      "visible_when": _WHEN_STYLING},
 ]
 
+# Every styling dropdown keeps a "leave it alone" option — that is what
+# makes the drawer inert until used — but the bare word reads like a real
+# choice. Show it as "default" instead; the stored value is untouched.
+for _row in _STYLE_ROWS:
+    if _row.get("type") == "choice" and _row.get("default") == _KEEP:
+        _row["unset_label"] = "default"
+
 
 def _apply_styling(fig, params: dict[str, Any]) -> None:
     """The "how it looks" pass — everything px has no argument for.
