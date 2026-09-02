@@ -187,20 +187,46 @@ class TestStayOpenMenu:
         menu.popup(QPoint(0, 0))
         try:
             at = menu.actionGeometry(_columns(menu)[0]).center()
-            menu.mouseReleaseEvent(QMouseEvent(
-                QMouseEvent.MouseButtonRelease, at, menu.mapToGlobal(at),
-                Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+            qtbot.mouseClick(menu, Qt.LeftButton, pos=at)
             assert edit.text() == "region"
             assert menu.isVisible()
             # ...and a second tick lands without reopening anything
             at = menu.actionGeometry(_columns(menu)[2]).center()
-            menu.mouseReleaseEvent(QMouseEvent(
-                QMouseEvent.MouseButtonRelease, at, menu.mapToGlobal(at),
-                Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+            qtbot.mouseClick(menu, Qt.LeftButton, pos=at)
             assert edit.text() == "region, revenue"
             assert menu.isVisible()
         finally:
             menu.close()
+
+    def _release_on(self, menu, action):
+        at = menu.actionGeometry(action).center()
+        menu.mouseReleaseEvent(QMouseEvent(
+            QMouseEvent.MouseButtonRelease, at, menu.mapToGlobal(at),
+            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+    def test_the_release_that_opened_the_menu_does_not_tick(self, panel):
+        # a wide table's menu is tall enough that Qt shifts it to fit the
+        # screen, landing an item under the cursor; the button-release that
+        # ends the click that opened the menu then arrives on that item. Our
+        # override must not tick it -- with no press of its own to complete,
+        # the release falls through to QMenu, which ignores it.
+        panel, _graph, node = panel
+        menu, _edit = self._built(panel, node, "columns")
+        assert menu._press_seen is False              # nothing pressed here yet
+        seen = []
+        menu._stays_open = lambda a: seen.append(a) is not None
+        self._release_on(menu, _columns(menu)[0])
+        assert seen == []                             # branch never entered
+
+    def test_a_press_first_arms_the_stay_open_branch(self, panel):
+        panel, _graph, node = panel
+        menu, edit = self._built(panel, node, "columns")
+        at = menu.actionGeometry(_columns(menu)[0]).center()
+        menu.mousePressEvent(QMouseEvent(
+            QMouseEvent.MouseButtonPress, at, menu.mapToGlobal(at),
+            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+        self._release_on(menu, _columns(menu)[0])
+        assert edit.text() == "region"
 
     def test_space_ticks_without_closing(self, panel, qtbot):
         panel, _graph, node = panel

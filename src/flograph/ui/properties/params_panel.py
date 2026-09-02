@@ -101,17 +101,38 @@ class _ColumnsMenu(QMenu):
     whole interaction.
     """
 
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        # Was there a press *inside* the menu that this release completes?
+        # A tall menu (a wide table has many columns) gets nudged by Qt so it
+        # fits on screen, which can drop an item right under the cursor. The
+        # button-release that ends the click that opened the menu then lands
+        # on that item. Qt's own QMenu guards this by only acting on a release
+        # whose press it also saw; our override has to do the same or the
+        # first click ticks a column instead of just opening the list.
+        self._press_seen = False
+
+    def showEvent(self, event) -> None:
+        self._press_seen = False
+        super().showEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        self._press_seen = True
+        super().mousePressEvent(event)
+
     @staticmethod
     def _stays_open(action) -> bool:
         return (action is not None and action.isEnabled()
                 and bool(action.property(_STAYS_OPEN)))
 
     def mouseReleaseEvent(self, event) -> None:
-        action = self.actionAt(event.position().toPoint())
-        if self._stays_open(action):
-            action.trigger()
-            event.accept()
-            return
+        press_seen, self._press_seen = self._press_seen, False
+        if press_seen:
+            action = self.actionAt(event.position().toPoint())
+            if self._stays_open(action):
+                action.trigger()
+                event.accept()
+                return
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event) -> None:
