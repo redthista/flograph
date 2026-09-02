@@ -31,37 +31,60 @@ from PySide6.QtWidgets import QApplication, QHeaderView
 _DETECT_THRESHOLD = 0.9
 _DETECT_SAMPLE = 1000
 
+# Above this row count an object column of date-like text sorts lexically
+# rather than chronologically: parsing the whole column with
+# ``format="mixed"`` is a per-element Python loop that would freeze the UI
+# thread for seconds. Numeric coercion stays on at any size — it is
+# vectorised C and cheap. (ISO dates sort correctly lexically anyway.)
+_MAX_TEXT_DATE_ROWS = 200_000
+
+
+def _text_key(series):
+    """Case-insensitive string key — the fallback for anything not sniffed
+    as a number or a date, and for a column too large to date-parse."""
+    return series.astype("string").str.casefold()
+
 
 def pandas_sort_key(series):
     """The series pandas should actually order when sorting ``series``.
 
-    Passed as ``key=`` to :meth:`DataFrame.sort_values`. Same shape out as
-    in; NaT/NaN survive so ``na_position`` still applies.
+    Same shape out as in (usable as ``key=`` to
+    :meth:`Series.sort_values`); NaT/NaN survive so ``na_position`` still
+    applies. Never raises: a sniff or parse that fails falls back to a
+    plain string key, because this runs inside the Qt slot that reorders
+    the view.
     """
     import pandas as pd
     from pandas.api import types as pdt
 
-    # Numbers, datetimes, timedeltas, bools and categoricals already order
-    # correctly; only string / object / mixed columns need sniffing.
-    if (pdt.is_numeric_dtype(series)
-            or pdt.is_datetime64_any_dtype(series)
-            or pdt.is_timedelta64_dtype(series)
-            or isinstance(series.dtype, pd.CategoricalDtype)):
-        return series
+    try:
+        # Numbers, datetimes, timedeltas, bools and categoricals already
+        # order correctly; only string / object / mixed columns need sniffing.
+        if (pdt.is_numeric_dtype(series)
+                or pdt.is_datetime64_any_dtype(series)
+                or pdt.is_timedelta64_dtype(series)
+                or isinstance(series.dtype, pd.CategoricalDtype)):
+            return series
 
-    sample = series.dropna().astype(str).head(_DETECT_SAMPLE)
-    if sample.empty:
-        return series
+        sample = series.dropna().astype(str).head(_DETECT_SAMPLE)
+        if sample.empty:
+            return series
 
-    as_num = pd.to_numeric(sample, errors="coerce")
-    if as_num.notna().mean() >= _DETECT_THRESHOLD:
-        return pd.to_numeric(series, errors="coerce")
+        as_num = pd.to_numeric(sample, errors="coerce")
+        if as_num.notna().mean() >= _DETECT_THRESHOLD:
+            return pd.to_numeric(series, errors="coerce")
 
-    as_dt = pd.to_datetime(sample, errors="coerce", format="mixed")
-    if as_dt.notna().mean() >= _DETECT_THRESHOLD:
-        return pd.to_datetime(series, errors="coerce", format="mixed")
+        if len(series) <= _MAX_TEXT_DATE_ROWS:
+            as_dt = pd.to_datetime(sample, errors="coerce", format="mixed")
+            if as_dt.notna().mean() >= _DETECT_THRESHOLD:
+                return pd.to_datetime(series, errors="coerce", format="mixed")
 
-    return series.astype("string").str.casefold()
+        return _text_key(series)
+    except Exception:
+        try:
+            return _text_key(series)
+        except Exception:
+            return series
 
 
 class HeaderSortCycler(QObject):

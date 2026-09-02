@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from PySide6.QtCore import Qt
 
+from flograph.ui import table_sort
 from flograph.ui.data_table import DataTableView
 from flograph.ui.inspector.pandas_model import PandasModel
 from flograph.ui.table_sort import HeaderSortCycler, pandas_sort_key
@@ -85,6 +86,47 @@ class TestPandasModelSort:
         assert _column(model, 0)[-1] == "NaN"
         model.sort(0, Qt.DescendingOrder)
         assert _column(model, 0)[-1] == "NaN"
+
+    def test_duplicate_column_labels_do_not_crash_the_sort(self):
+        # a bad join/concat can leave two columns called the same thing;
+        # sort_values(by="x") raises on that, so we sort by position.
+        df = pd.DataFrame([[3, "a"], [1, "c"], [2, "b"]])
+        df.columns = ["x", "x"]
+        model = PandasModel(df)
+        model.sort(0, Qt.AscendingOrder)
+        assert _column(model, 0) == ["1", "2", "3"]
+        assert _column(model, 1) == ["c", "b", "a"]   # column 1 rode along
+
+    def test_a_failing_sort_key_leaves_the_rows_untouched(self, monkeypatch):
+        df = pd.DataFrame({"v": ["10", "9", "100", "2"]})
+        model = PandasModel(df)
+        monkeypatch.setattr(
+            "flograph.ui.table_sort.pandas_sort_key",
+            lambda s: (_ for _ in ()).throw(RuntimeError("boom")))
+        model.sort(0, Qt.AscendingOrder)          # must not raise
+        assert _column(model, 0) == ["10", "9", "100", "2"]
+
+    def test_huge_text_date_column_sorts_lexically_not_by_parsing(
+            self, monkeypatch):
+        monkeypatch.setattr(table_sort, "_MAX_TEXT_DATE_ROWS", 3)
+        df = pd.DataFrame(
+            {"d": ["2024-01-02", "2024-01-01", "2024-01-03", "2024-01-04"]})
+        key = pandas_sort_key(df["d"])
+        # a plain string key, not a per-element datetime64 parse
+        assert not pd.api.types.is_datetime64_any_dtype(key)
+        assert pd.api.types.is_string_dtype(key)
+        model = PandasModel(df)
+        model.sort(0, Qt.AscendingOrder)
+        assert _column(model, 0) == [           # ISO text still orders right
+            "2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"]
+
+    def test_pandas_sort_key_never_raises(self, monkeypatch):
+        def blow_up(*a, **k):
+            raise ValueError("format='mixed' can do this on some pandas")
+        monkeypatch.setattr(pd, "to_datetime", blow_up)
+        s = pd.Series(["5 Jan 2024", "12 Mar 2023", "1 Feb 2024"])
+        key = pandas_sort_key(s)                  # falls back, no exception
+        assert list(key) == ["5 jan 2024", "12 mar 2023", "1 feb 2024"]
 
 
 class TestHeaderSortCycler:

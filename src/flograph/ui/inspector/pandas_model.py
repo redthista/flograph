@@ -80,20 +80,31 @@ class PandasModel(QAbstractTableModel):
         original row order. Detection of numbers/dates stored as text
         lives in :func:`flograph.ui.table_sort.pandas_sort_key`; real
         dtypes sort natively.
+
+        The column is addressed by position, not label — a frame with two
+        columns of the same name (a bad join/concat result) is common
+        enough, and ``sort_values(by="X")`` raises on it. Any failure in
+        the key computation or the reorder leaves the rows as they were
+        rather than escaping into the Qt slot that called this.
         """
         if not 0 <= column < len(self._source.columns):
             return
         from ..table_sort import pandas_sort_key
 
         self.beginResetModel()
-        if order is None:
+        try:
+            if order is None:
+                self._df = self._source
+            else:
+                ascending = order == Qt.AscendingOrder
+                key = pandas_sort_key(
+                    self._source.iloc[:, column]).reset_index(drop=True)
+                positions = key.sort_values(
+                    ascending=ascending, kind="stable",
+                    na_position="last").index.to_numpy()
+                self._df = self._source.take(positions)
+        except Exception:
             self._df = self._source
-        else:
-            col = self._source.columns[column]
-            ascending = order == Qt.AscendingOrder
-            self._df = self._source.sort_values(
-                by=col, key=pandas_sort_key, ascending=ascending,
-                kind="stable", na_position="last")
         self._loaded = min(PAGE_SIZE, len(self._df))
         self.endResetModel()
 
