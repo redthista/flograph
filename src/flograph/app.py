@@ -15,6 +15,7 @@ def main(argv: list[str] | None = None) -> int:
         matplotlib.use("QtAgg")  # before any pyplot import, GUI-safe backend
 
     from PySide6.QtCore import Qt
+    from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
 
     from flograph.core import NodeRegistry
@@ -28,7 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("flograph")
     app.setOrganizationName("flograph")
-    apply_theme(app)
+    theme_pref = QSettings("flograph", "flograph").value(
+        "appearance/theme", "dark", type=str)
+    apply_theme(app, theme_pref)
 
     registry = NodeRegistry()
     registry.load_builtins()

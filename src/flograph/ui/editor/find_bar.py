@@ -64,7 +64,7 @@ class FindBar(QWidget):
         next_btn.clicked.connect(lambda: self.find_next())
 
         self._count = QLabel("")
-        self._count.setStyleSheet("color: #9ca3af;")
+        self._count.setStyleSheet("color: palette(mid);")
         self._count.setToolTip("Current match of the total in this file")
 
         close_btn = QToolButton()

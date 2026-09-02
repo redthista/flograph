@@ -164,7 +164,7 @@ class ParamsPanel(QWidget):
 
         self._doc_label = QLabel()
         self._doc_label.setWordWrap(True)
-        self._doc_label.setStyleSheet("color: #9ca3af; font-size: 8pt;")
+        self._doc_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
         self._doc_label.hide()
         layout.addWidget(self._doc_label)
 
@@ -173,18 +173,18 @@ class ParamsPanel(QWidget):
         # asking "have I got the new one?", and it should not compete the
         # rest of the time.
         self._version_label = QLabel()
-        self._version_label.setStyleSheet("color: #6b7280; font-size: 8pt;")
+        self._version_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
         self._version_label.hide()
         layout.addWidget(self._version_label)
 
         self._placeholder = QLabel("No node selected")
-        self._placeholder.setStyleSheet("color: #6b7280;")
+        self._placeholder.setStyleSheet("color: palette(mid);")
         layout.addWidget(self._placeholder)
 
         self._locked_label = QLabel(
             "\N{LOCK} Locked — right-click the node and choose Unlock to edit.")
         self._locked_label.setWordWrap(True)
-        self._locked_label.setStyleSheet("color: #9ca3af; font-size: 8pt;")
+        self._locked_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
         self._locked_label.hide()
         layout.addWidget(self._locked_label)
 

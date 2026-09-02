@@ -61,7 +61,7 @@ class PlotlyView(QWidget):
         placeholder = QLabel(RUN_PROMPT)
         placeholder.setAlignment(Qt.AlignCenter)
         placeholder.setWordWrap(True)
-        placeholder.setStyleSheet("color: #6b7280;")
+        placeholder.setStyleSheet("color: palette(mid);")
         layout.addWidget(placeholder, 1)
         self.placeholder = placeholder
 

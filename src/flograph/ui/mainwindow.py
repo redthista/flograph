@@ -143,6 +143,19 @@ class MainWindow(QMainWindow):
         self.engine.cache_load_failed.connect(
             lambda _nid: self._tick_warm_watch())
         self.settings = QSettings("flograph", "flograph")
+        # Light / dark / system chrome. app.py already themed the app from
+        # this value at startup; we keep it so Settings can show and change
+        # it, and re-apply on an OS scheme change while it is "system".
+        # Dark by default — the canvas is dark and the chrome matching it is
+        # flograph's own look; "system" is opt-in.
+        self.theme_pref = self.settings.value(
+            "appearance/theme", "dark", type=str)
+        if self.theme_pref not in theme.THEME_PREFS:
+            self.theme_pref = "dark"
+        app = QApplication.instance()
+        if app is not None:
+            app.styleHints().colorSchemeChanged.connect(
+                self._on_system_color_scheme_changed)
         # Our own title bar instead of the OS one. Read here, applied in
         # _build_actions (menus fold into a hamburger, run actions and the
         # window buttons go on the bar); a change needs a restart. The flag
@@ -930,6 +943,31 @@ class MainWindow(QMainWindow):
         self.compact_nodes = enabled
         self.settings.setValue("canvas/compact_nodes", enabled)
         self.scene.set_compact_nodes(enabled)
+
+    def set_theme_pref(self, pref: str) -> None:
+        """Switch the chrome between light, dark and following the OS.
+
+        Live: the app palette and stylesheet are re-applied and Qt
+        re-polishes every open widget. The canvas stays dark regardless.
+        """
+        if pref not in theme.THEME_PREFS:
+            return
+        self.theme_pref = pref
+        self.settings.setValue("appearance/theme", pref)
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply_theme(app, pref)
+        label = {"system": "following the system",
+                 "light": "light", "dark": "dark"}[pref]
+        self.show_status(f"Theme: {label}.", 3000)
+
+    def _on_system_color_scheme_changed(self, _scheme=None) -> None:
+        """The OS flipped light/dark. Only act if we are meant to follow it."""
+        if self.theme_pref != "system":
+            return
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply_theme(app, "system")
 
     def set_tints(self, soft: float, strong: float) -> None:
         """Retune how strongly user-picked colours are muted against the
@@ -3834,6 +3872,7 @@ class MainWindow(QMainWindow):
         # clear() drops the stored rebinds but leaves them applied to the
         # live actions, so the keys would keep working until a restart
         self.shortcuts.reset_all()
+        self.set_theme_pref("dark")
         self.set_page_bar_position("top")
         self.set_stats_bar_enabled(True)
         self.set_stats_sampling_enabled(True)

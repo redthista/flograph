@@ -223,6 +223,9 @@ class SettingsDialog(QDialog):
         from .spreadsheet import autosize_default_enabled, date_formats_setting
 
         combo_values = {
+            "theme_pref_combo": ["system", "light", "dark"].index(
+                window.theme_pref if window.theme_pref
+                in ("system", "light", "dark") else "dark"),
             "page_bar_position_combo": ["bottom", "top"].index(
                 window.page_bar_position),
             "double_click_action_combo": ["properties", "code",
@@ -436,6 +439,25 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(page)
         rows = SettingsGrid()
         layout.addWidget(rows, 1)
+
+        rows.add_group("Appearance")
+
+        theme_combo = QComboBox()
+        theme_combo.setObjectName("theme_pref_combo")
+        theme_prefs = ["system", "light", "dark"]
+        theme_combo.addItems(["Follow the system", "Light", "Dark"])
+        theme_combo.setCurrentIndex(
+            theme_prefs.index(window.theme_pref)
+            if window.theme_pref in theme_prefs else theme_prefs.index("dark"))
+        theme_combo.currentIndexChanged.connect(
+            lambda index: window.set_theme_pref(theme_prefs[index]))
+        rows.add("Theme", theme_combo,
+                 "Light or dark chrome — the window frame, panels, dialogs, "
+                 "menus and tables. \"Follow the system\" tracks your "
+                 "desktop's light/dark setting and switches with it. The "
+                 "node canvas itself stays dark either way, the way a "
+                 "Blueprints-style workspace does. Takes effect straight "
+                 "away.")
 
         rows.add_group("Window")
 

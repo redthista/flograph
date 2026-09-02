@@ -42,7 +42,7 @@ class DashboardPage(QWidget):
         side_layout.addWidget(header)
         side_layout.addWidget(self.visuals, 1)
         hint = QLabel("Drag a visual onto the page.")
-        hint.setStyleSheet("color: #6b7280; font-size: 8pt;")
+        hint.setStyleSheet("color: palette(mid); font-size: 8pt;")
         hint.setWordWrap(True)
         side_layout.addWidget(hint)
 

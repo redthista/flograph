@@ -1,5 +1,11 @@
-"""All colors and the application-wide dark theme live here — the single
-place where core's hex strings become QColors."""
+"""All colors and the application-wide theme live here — the single place
+where core's hex strings become QColors.
+
+The *canvas* is always dark: it is a Blueprints-style workspace and every
+constant in the "canvas" block below is fixed, whatever the app theme. The
+switchable part is the chrome around it — docks, panels, dialogs, menus,
+tables — which follows a light/dark/system preference through `apply_theme`.
+"""
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt
@@ -10,6 +16,8 @@ from flograph.core import WIRE_COLORS, PortType
 from flograph.core.node import NodeStatus
 
 # ------------------------------------------------------------------ canvas
+#
+# Fixed. The canvas never changes with the app theme — see module docstring.
 
 CANVAS_BG = QColor("#1b1c20")
 GRID_FINE = QColor("#232429")
@@ -106,40 +114,167 @@ def status_color(status: NodeStatus) -> QColor:
 
 
 # ------------------------------------------------------------------- app
+#
+# The chrome theme: light, dark, or "system" (follow the OS). The canvas
+# above is untouched by any of this. Painting code that wants the chrome
+# colour of something must read `theme.APP_MODE` (or a `palette(...)` role
+# in a stylesheet) at paint time, never a copy taken at import — a live
+# switch moves this module state and re-polishes, it does not restart.
 
-def apply_theme(app: QApplication) -> None:
-    app.setStyle("Fusion")
+#: Allowed values for the stored preference.
+THEME_PREFS = ("system", "light", "dark")
+
+#: The *resolved* mode currently in force — "light" or "dark", never
+#: "system". Set by `apply_theme`; defaults to dark so a module imported
+#: before the app is themed still gets sane colours.
+APP_MODE = "dark"
+
+
+def is_dark() -> bool:
+    return APP_MODE != "light"
+
+
+# Every visual role, spelled out. An unset QPalette role is resolved from
+# the *system* palette, which is how a light desktop leaked pale text into
+# flograph's dark theme — some colours flograph's, some the OS's. Nothing
+# below is left unset, and Active / Inactive / Disabled are all filled, so
+# the theme looks the same on a light desktop, a dark one, and an
+# unfocused window.
+_DARK = {
+    "window": "#24262b", "window_text": "#e5e7eb",
+    "base": "#1e2024", "alt_base": "#202226",
+    "text": "#e5e7eb", "button": "#24262b", "button_text": "#e5e7eb",
+    "bright_text": "#f87171",
+    "light": "#3a3d47", "midlight": "#2f323b", "dark": "#141517",
+    # `mid` is Fusion's bevel-shadow colour *and*, by long convention, the
+    # "secondary text" colour dim labels pull with `color: palette(mid)`.
+    # Kept light enough to read on `base`, dark enough not to glow as a bevel.
+    "mid": "#8b929e", "shadow": "#0c0d0f",
+    "placeholder": "#7f8694",
+    "tooltip_bg": "#1e2024", "tooltip_text": "#e5e7eb",
+    "tooltip_border": "#3a3d46",
+    "highlight": "#3b82f6", "highlighted_text": "#ffffff",
+    "link": "#60a5fa", "link_visited": "#a78bfa", "accent": "#60a5fa",
+    "disabled_text": "#6b7280", "disabled_base": "#1b1d21",
+    "disabled_button": "#24262b",
+    "dock_title": "#2a2c33", "tab": "#24262b", "tab_selected": "#33363e",
+    "statusbar": "#202226",
+}
+
+_LIGHT = {
+    "window": "#f3f4f6", "window_text": "#111827",
+    "base": "#ffffff", "alt_base": "#eef0f2",
+    "text": "#111827", "button": "#e8eaed", "button_text": "#111827",
+    "bright_text": "#b91c1c",
+    "light": "#ffffff", "midlight": "#f6f7f8", "dark": "#b4b9c1",
+    "mid": "#616a77", "shadow": "#9aa0aa",
+    "placeholder": "#8a909c",
+    "tooltip_bg": "#111827", "tooltip_text": "#f3f4f6",
+    "tooltip_border": "#111827",
+    "highlight": "#3b82f6", "highlighted_text": "#ffffff",
+    "link": "#2563eb", "link_visited": "#7c3aed", "accent": "#2563eb",
+    "disabled_text": "#a3a8b2", "disabled_base": "#f0f1f3",
+    "disabled_button": "#e8eaed",
+    "dock_title": "#e4e6ea", "tab": "#e4e6ea", "tab_selected": "#ffffff",
+    "statusbar": "#e4e6ea",
+}
+
+#: (QPalette role, key in the colour dict) for every role we set in all
+#: three state groups. `mid` doubles as the "secondary text" colour that
+#: dim labels pull with `color: palette(mid)`.
+_PALETTE_ROLES = (
+    (QPalette.Window, "window"), (QPalette.WindowText, "window_text"),
+    (QPalette.Base, "base"), (QPalette.AlternateBase, "alt_base"),
+    (QPalette.ToolTipBase, "tooltip_bg"), (QPalette.ToolTipText, "tooltip_text"),
+    (QPalette.PlaceholderText, "placeholder"),
+    (QPalette.Text, "text"), (QPalette.Button, "button"),
+    (QPalette.ButtonText, "button_text"), (QPalette.BrightText, "bright_text"),
+    (QPalette.Light, "light"), (QPalette.Midlight, "midlight"),
+    (QPalette.Dark, "dark"), (QPalette.Mid, "mid"),
+    (QPalette.Shadow, "shadow"),
+    (QPalette.Highlight, "highlight"),
+    (QPalette.HighlightedText, "highlighted_text"),
+    (QPalette.Link, "link"), (QPalette.LinkVisited, "link_visited"),
+)
+
+_GROUPS = (QPalette.Active, QPalette.Inactive, QPalette.Disabled)
+
+
+def _make_palette(c: dict) -> QPalette:
     palette = QPalette()
-    window = QColor("#24262b")
-    base = QColor("#1e2024")
-    text = QColor("#e5e7eb")
-    disabled = QColor("#6b7280")
-    highlight = QColor("#3b82f6")
+    for group in _GROUPS:
+        for role, key in _PALETTE_ROLES:
+            palette.setColor(group, role, QColor(c[key]))
+    accent = getattr(QPalette, "Accent", None)     # Qt 6.6+
+    if accent is not None:
+        for group in _GROUPS:
+            palette.setColor(group, accent, QColor(c["accent"]))
+    # Disabled: dimmer text, sunk fills — a real state, not an OS artefact.
+    for role, key in (
+            (QPalette.WindowText, "disabled_text"),
+            (QPalette.Text, "disabled_text"),
+            (QPalette.ButtonText, "disabled_text"),
+            (QPalette.HighlightedText, "disabled_text"),
+            (QPalette.Base, "disabled_base"),
+            (QPalette.Button, "disabled_button"),
+            (QPalette.Highlight, "disabled_button")):
+        palette.setColor(QPalette.Disabled, role, QColor(c[key]))
+    return palette
 
-    palette.setColor(QPalette.Window, window)
-    palette.setColor(QPalette.WindowText, text)
-    palette.setColor(QPalette.Base, base)
-    palette.setColor(QPalette.AlternateBase, window)
-    palette.setColor(QPalette.ToolTipBase, base)
-    palette.setColor(QPalette.ToolTipText, text)
-    palette.setColor(QPalette.Text, text)
-    palette.setColor(QPalette.Button, window)
-    palette.setColor(QPalette.ButtonText, text)
-    palette.setColor(QPalette.BrightText, QColor("#f87171"))
-    palette.setColor(QPalette.Link, highlight)
-    palette.setColor(QPalette.Highlight, highlight)
-    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
-    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
-        palette.setColor(QPalette.Disabled, role, disabled)
-    app.setPalette(palette)
 
-    app.setStyleSheet("""
-        QToolTip { background: #1e2024; color: #e5e7eb; border: 1px solid #3a3d46; }
-        QDockWidget::title { background: #2a2c33; padding: 4px 8px; }
-        QTabBar::tab { background: #24262b; padding: 5px 12px; border: none; }
-        QTabBar::tab:selected { background: #33363e; }
-        QStatusBar { background: #202226; }
-    """)
+def _app_stylesheet(c: dict) -> str:
+    return f"""
+        QToolTip {{ background: {c['tooltip_bg']}; color: {c['tooltip_text']};
+                    border: 1px solid {c['tooltip_border']}; }}
+        QDockWidget::title {{ background: {c['dock_title']}; padding: 4px 8px; }}
+        QTabBar::tab {{ background: {c['tab']}; padding: 5px 12px; border: none; }}
+        QTabBar::tab:selected {{ background: {c['tab_selected']}; }}
+        QStatusBar {{ background: {c['statusbar']}; }}
+    """
+
+
+def resolve_theme_pref(app: QApplication, pref: str) -> str:
+    """Turn a stored preference into the mode to actually apply."""
+    if pref in ("light", "dark"):
+        return pref
+    scheme = app.styleHints().colorScheme()
+    return "light" if scheme == Qt.ColorScheme.Light else "dark"
+
+
+def apply_theme(app: QApplication, pref: str = "dark") -> None:
+    """Style the whole application for `pref` ("system" | "light" | "dark").
+
+    Re-callable: a live theme switch just calls this again, and Qt's own
+    StyleChange / ApplicationPaletteChange propagation re-polishes every
+    open widget. The canvas is unaffected either way.
+    """
+    global APP_MODE
+    if pref not in THEME_PREFS:
+        pref = "system"
+
+    # Pin the scheme when the user chose one outright, so a platform theme
+    # (GTK on this user's Fedora, say) stops pushing its own palette values
+    # back over ours — the cause of dark-on-dark text on a light desktop.
+    # In "system" mode we unset it *first*, so the resolve below reads the
+    # OS scheme and not a value we pinned on a previous call.
+    hints = app.styleHints()
+    try:
+        if pref == "light":
+            hints.setColorScheme(Qt.ColorScheme.Light)
+        elif pref == "dark":
+            hints.setColorScheme(Qt.ColorScheme.Dark)
+        else:
+            hints.unsetColorScheme()
+    except AttributeError:
+        pass                       # Qt < 6.8 — palette alone still applies
+
+    mode = resolve_theme_pref(app, pref)
+    APP_MODE = mode
+    colors = _LIGHT if mode == "light" else _DARK
+
+    app.setStyle("Fusion")
+    app.setPalette(_make_palette(colors))
+    app.setStyleSheet(_app_stylesheet(colors))
 
 
 class _BackgroundFiller(QObject):

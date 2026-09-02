@@ -30,7 +30,7 @@ class SaveUserNodeDialog(QDialog):
             self._group.addItem(g)
         self._group.setCurrentIndex(0)
         self._preview = QLabel()
-        self._preview.setStyleSheet("color: #9ca3af;")
+        self._preview.setStyleSheet("color: palette(mid);")
 
         form = QFormLayout()
         form.addRow("Name", self._name)

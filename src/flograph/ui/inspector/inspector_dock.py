@@ -25,7 +25,7 @@ class InspectorPanel(QWidget):
         self._port_filter: Optional[str] = None  # set when inspecting a wire
 
         self._header = QLabel("Nothing selected")
-        self._header.setStyleSheet("color: #9ca3af;")
+        self._header.setStyleSheet("color: palette(mid);")
         self._stale = QLabel("STALE — re-run to refresh")
         self._stale.setStyleSheet(
             "color: #eab308; font-weight: bold; padding: 0 8px;")
@@ -98,7 +98,7 @@ class InspectorPanel(QWidget):
             for port in ports:
                 placeholder = QLabel("Run the graph to see this output.")
                 placeholder.setAlignment(Qt.AlignCenter)
-                placeholder.setStyleSheet("color: #6b7280;")
+                placeholder.setStyleSheet("color: palette(mid);")
                 self._tabs.addTab(placeholder, port.name)
             return
 
@@ -116,7 +116,8 @@ class InspectorPanel(QWidget):
             host_layout = QVBoxLayout(host)
             host_layout.setContentsMargins(0, 2, 0, 0)
             meta = QLabel(f"{port.type.value} · {summarize(value)}")
-            meta.setStyleSheet("color: #6b7280; font-size: 8pt; padding: 0 4px;")
+            meta.setStyleSheet(
+                "color: palette(mid); font-size: 8pt; padding: 0 4px;")
             host_layout.addWidget(meta)
             if is_tabular(value):
                 # table values get a column spec next to the data
@@ -149,7 +150,7 @@ class InspectorPanel(QWidget):
         placeholder = QLabel("Spec loads when this tab is opened —\n"
                               "can be slow for very large tables.")
         placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setStyleSheet("color: #6b7280;")
+        placeholder.setStyleSheet("color: palette(mid);")
         spec_host = QWidget()
         spec_layout = QVBoxLayout(spec_host)
         spec_layout.setContentsMargins(0, 0, 0, 0)
