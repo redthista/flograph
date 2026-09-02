@@ -3,6 +3,10 @@
 Pivot a long table into a wide one: rows grouped by the index
 columns, one output column per distinct value of the pivot column, cells
 aggregated.
+
+With a single value column the output columns are the bare pivot values
+(no value-name prefix). List more than one value column and each output
+column is prefixed with its value name to keep them apart.
 """
 NODE = {
     "label": "Pivot",
@@ -43,8 +47,17 @@ def run(ctx, table):
     pivoted = table.pivot_table(index=index, columns=columns, values=values,
                                 aggfunc=ctx.params["agg"])
     if hasattr(pivoted.columns, "levels"):
-        pivoted.columns = ["_".join(str(part) for part in col)
-                           for col in pivoted.columns]
+        # Drop any column level carrying a single distinct label - the
+        # value-column name when only one value is pivoted - so the output
+        # columns stay as bare pivot values with no forced prefix.
+        while pivoted.columns.nlevels > 1 and \
+                pivoted.columns.get_level_values(0).nunique() == 1:
+            pivoted.columns = pivoted.columns.droplevel(0)
+        if pivoted.columns.nlevels > 1:
+            pivoted.columns = ["_".join(str(part) for part in col)
+                               for col in pivoted.columns]
+        else:
+            pivoted.columns = [str(c) for c in pivoted.columns]
     pivoted = pivoted.reset_index()
     ctx.log(f"{len(table)} rows -> {len(pivoted)} x {len(pivoted.columns)}")
     return pivoted

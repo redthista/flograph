@@ -209,10 +209,10 @@ class TestBundledExamples:
         assert set(sliced["segment"]) == {"Enterprise", "SMB"}
 
         # pivot fans category rows out to one revenue column per region
+        # (one value column -> bare region names, no "revenue_" prefix)
         pivoted = cache.outputs_for("t7pivot")["pivoted"]
         assert list(pivoted.columns) == [
-            "category", "revenue_East", "revenue_North",
-            "revenue_South", "revenue_West"]
+            "category", "East", "North", "South", "West"]
 
         # ABC classification script: Pareto classes in rank order
         abc = cache.outputs_for("t7script_abc")["out1"]

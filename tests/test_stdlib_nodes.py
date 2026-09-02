@@ -208,6 +208,14 @@ class TestEtlNodes:
                        {"index": "region", "columns": "units",
                         "values": "revenue"}, table=table)
         assert len(out) == 2 and "region" in out.columns
+        # one value column -> bare pivot values, no "revenue_" prefix
+        assert list(out.columns) == ["region", "10", "20", "30", "40"]
+
+    def test_pivot_multi_value_keeps_prefix(self, registry, table):
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "units",
+                        "values": "revenue, units"}, table=table)
+        assert "revenue_10" in out.columns and "units_10" in out.columns
 
     def test_pivot_requires_index(self, registry, table):
         with pytest.raises(ValueError, match="no index columns"):
