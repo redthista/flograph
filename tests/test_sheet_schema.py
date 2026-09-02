@@ -115,6 +115,23 @@ class TestStructuralOps:
         sheet.sort_by(0)
         assert [r[0] for r in sheet.rows] == ["2", "9", "10", "100"]
 
+    def test_sort_number_column_treats_nan_and_inf_as_unparseable(self):
+        # float("nan") / float("inf") in the sort key break total ordering
+        # and scramble the whole column, so they sort last like other junk.
+        sheet = Sheet([ColumnSpec("N", "number")],
+                      [["3"], ["nan"], ["1"], ["inf"], ["1e999"], ["2"]])
+        sheet.sort_by(0)
+        assert [r[0] for r in sheet.rows] == [
+            "1", "2", "3", "nan", "inf", "1e999"]
+        sheet.sort_by(0, ascending=False)
+        assert [r[0] for r in sheet.rows][:3] == ["3", "2", "1"]
+        assert set([r[0] for r in sheet.rows][3:]) == {"nan", "inf", "1e999"}
+
+    def test_sort_auto_column_nan_text_is_not_a_number(self):
+        sheet = Sheet([ColumnSpec("Mixed")], [["nan"], ["3"], ["1"]])
+        sheet.sort_by(0)
+        assert [r[0] for r in sheet.rows] == ["1", "3", "nan"]
+
     def test_sort_auto_column_buckets_numbers_then_dates_then_text(self):
         sheet = Sheet(
             [ColumnSpec("Mixed")],

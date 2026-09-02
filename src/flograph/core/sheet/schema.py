@@ -15,6 +15,7 @@ and arbitrary junk, falling back to a minimal empty grid.
 from __future__ import annotations
 
 import json
+import math
 import string
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -67,6 +68,18 @@ _TRUEISH = {"true", "1", "yes", "y", "t"}
 _FALSEISH = {"false", "0", "no", "n", "f", ""}
 
 
+def _finite_float(text: str) -> float:
+    """``float(text)`` but ``nan`` / ``inf`` / ``1e999`` count as unparseable.
+
+    A non-finite sort key breaks ``list.sort``'s total ordering and scrambles
+    the whole column, so those cells are treated like any other non-number.
+    """
+    value = float(text)  # raises ValueError on non-numeric text
+    if not math.isfinite(value):
+        raise ValueError(text)
+    return value
+
+
 def _sort_key(text: str, col_type: str) -> tuple[bool, int, float, str]:
     """Sort key for one cell: ``(present, rank, number, text)``.
 
@@ -79,7 +92,7 @@ def _sort_key(text: str, col_type: str) -> tuple[bool, int, float, str]:
 
     if col_type in ("number", "integer"):
         try:
-            return (True, 0, float(text), "")
+            return (True, 0, _finite_float(text), "")
         except ValueError:
             return (False, 0, 0.0, "")
     if col_type == "bool":
@@ -97,7 +110,7 @@ def _sort_key(text: str, col_type: str) -> tuple[bool, int, float, str]:
 
     # auto: sort each value as whatever it looks like
     try:
-        return (True, 0, float(text), "")
+        return (True, 0, _finite_float(text), "")
     except ValueError:
         pass
     iso = normalize_date(text)

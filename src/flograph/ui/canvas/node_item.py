@@ -90,6 +90,11 @@ NOTE_TYPE = "flograph.util.note"
 NOTE_PAD = 12.0
 NOTE_MIN_W, NOTE_MAX_W = 120.0, 1600.0
 NOTE_MIN_H, NOTE_MAX_H = 60.0, 2000.0
+# Schemes a Note-card link may open. A .flograph / .flowf from someone else
+# can carry the link text, so file://, smb://, UNC (\\host\share) and the
+# like — which would open a local file or leak credentials on one click —
+# are never followed.
+NOTE_LINK_SCHEMES = {"http", "https", "mailto"}
 
 TABLE_TYPE = "flograph.io.table"
 TABLE_MIN_W, TABLE_MAX_W = 220.0, 1600.0
@@ -1066,12 +1071,16 @@ class NodeItem(QGraphicsObject):
     def _open_note_link(self, href: str) -> None:
         """Open a Note card's link in the system browser. Deferred past the
         double-click window by the caller, so a double-click that lands on a
-        link edits the card instead of firing the browser."""
+        link edits the card instead of firing the browser.
+
+        Only web and mail links are followed — see ``NOTE_LINK_SCHEMES``."""
         if not href or self._note_editor is not None:
             return
         url = QUrl(href)
         if not url.scheme():
             url = QUrl.fromUserInput(href)  # bare "example.com", "./file.pdf"
+        if url.scheme().lower() not in NOTE_LINK_SCHEMES:
+            return
         QDesktopServices.openUrl(url)
 
     def apply_stacking(self) -> None:

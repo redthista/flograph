@@ -162,6 +162,31 @@ def test_note_link_opens_in_browser(env, registry, monkeypatch):
     assert opened == []
 
 
+def test_note_link_only_web_and_mail_schemes(env, registry, monkeypatch):
+    """A shared .flograph can carry a hostile link — file://, smb://, a UNC
+    path — and a single click must not open a local file or leak creds."""
+    graph, stack, scene = env
+    note = graph.add_node(registry.instantiate("flograph.util.note"))
+    item = scene.node_items[note.id]
+
+    opened = []
+    monkeypatch.setattr(
+        "flograph.ui.canvas.node_item.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()))
+
+    for bad in ("file:///home/me/.ssh/id_rsa", "smb://attacker/share",
+                r"\\attacker\share", "ftp://host/x", "./secret.pdf",
+                "javascript:alert(1)"):
+        item._open_note_link(bad)
+    assert opened == []
+
+    for ok in ("https://example.com", "http://example.com/page",
+               "mailto:me@example.com", "example.com"):
+        item._open_note_link(ok)
+    assert len(opened) == 4
+    assert opened[-1].startswith("http")  # bare host promoted to a web URL
+
+
 class _FakeMouse:
     """Enough of QGraphicsSceneMouseEvent for the Note link handlers."""
 
