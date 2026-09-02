@@ -19,10 +19,11 @@ way on the canvas, on a dashboard and in a report.
 the encodings, facets, trendlines, bins, palettes and axis settings, each
 one appearing only for the chart kinds that have it, the deeper ones behind
 **More options**, and the whole **Styling options** drawer — legend, axis
-titles, gridlines, tick formats, a reference line, a note, fonts and
-backgrounds — applied to every panel in the stack. A setting added to one
-node has to be added to the other by hand — see the note above
-`_figure_lock` below for why.
+titles, gridlines, tick formats, a reference line, a note, fonts,
+backgrounds, and the **Layout / Traces / Interactivity (JSON)** escape
+hatches that reach the rest of plotly — applied to every panel in the
+stack. A setting added to one node has to be added to the other by hand —
+see the note above `_figure_lock` below for why.
 
 **Bar mode** only matters for bar and histogram. Plotly stacks multiple
 series on top of each other by default; **group** stands them side by
@@ -92,6 +93,7 @@ if it is missing.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable, Optional
 
 NODE = {
@@ -1289,13 +1291,17 @@ _STYLE_ROWS: list[dict[str, Any]] = [
      "options": [_KEEP, "left", "center", "right"], "default": _KEEP,
      "visible_when": _WHEN_STYLING},
     {"name": "x_title", "type": "string", "label": "X axis title",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted",
+     "visible_when": _WHEN_STYLING},
     {"name": "y_title", "type": "string", "label": "Y axis title",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted",
+     "visible_when": _WHEN_STYLING},
     {"name": "legend_title", "type": "string", "label": "Legend title",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted",
+     "visible_when": _WHEN_STYLING},
     {"name": "colorbar_title", "type": "string", "label": "Color bar title",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted",
+     "visible_when": _WHEN_STYLING},
 
     {"name": "legend", "type": "choice", "label": "Legend",
      "options": [_KEEP, "show", "hide"], "default": _KEEP,
@@ -1325,9 +1331,10 @@ _STYLE_ROWS: list[dict[str, Any]] = [
     {"name": "legend_font_size", "type": "int", "label": "Legend text size",
      "default": 0, "min": 0, "max": 36, "visible_when": _WHEN_STYLING},
     {"name": "legend_bg", "type": "string", "label": "Legend background",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #f5f5f5 or rgba(0,0,0,.05)",
+     "visible_when": _WHEN_STYLING},
     {"name": "legend_border", "type": "string", "label": "Legend border",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #ccc", "visible_when": _WHEN_STYLING},
     {"name": "legend_border_width", "type": "int", "label": "Legend border width",
      "default": 0, "min": 0, "max": 10, "visible_when": _WHEN_STYLING},
 
@@ -1382,17 +1389,40 @@ _STYLE_ROWS: list[dict[str, Any]] = [
      "default": "top left", "visible_when": _WHEN_STYLING},
 
     {"name": "font_family", "type": "string", "label": "Font", "default": "",
-     "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "placeholder": "e.g. Georgia, Inter, sans-serif",
+     "visible_when": _WHEN_STYLING},
     {"name": "font_size", "type": "int", "label": "Font size", "default": 0,
      "min": 0, "max": 48, "visible_when": _WHEN_STYLING},
     {"name": "font_color", "type": "string", "label": "Text color",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #333 or slategray",
+     "visible_when": _WHEN_STYLING},
     {"name": "plot_color", "type": "string", "label": "Plot background",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #fff or rgba(0,0,0,0)",
+     "visible_when": _WHEN_STYLING},
     {"name": "paper_color", "type": "string", "label": "Card background",
-     "default": "", "placeholder": "(keep)", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #fff", "visible_when": _WHEN_STYLING},
     {"name": "margin", "type": "string", "label": "Margins", "default": "",
      "placeholder": "left,right,top,bottom in pixels",
+     "visible_when": _WHEN_STYLING},
+
+    # The escape hatch. Everything above is a shortcut for a setting people
+    # reach for; these three boxes are the rest of plotly, verbatim. A JSON
+    # object here goes straight into plotly with nothing in between — the
+    # whole layout reference, every trace property, the render config — so
+    # there is nothing plotly can do that this node can't.
+    {"name": "layout_json", "type": "text", "label": "Layout (JSON)",
+     "default": "", "placeholder":
+     '{"bargap": 0.25, "barmode": "overlay"}  —  plotly.com/python/reference'
+     "/layout",
+     "visible_when": _WHEN_STYLING},
+    {"name": "traces_json", "type": "text", "label": "Traces (JSON)",
+     "default": "", "placeholder":
+     '{"marker_line_width": 1, "textposition": "outside"}  —  applied to '
+     "every trace",
+     "visible_when": _WHEN_STYLING},
+    {"name": "config_json", "type": "text", "label": "Interactivity (JSON)",
+     "default": "", "placeholder":
+     '{"scrollZoom": true, "displayModeBar": false, "staticPlot": false}',
      "visible_when": _WHEN_STYLING},
 ]
 
@@ -1422,6 +1452,49 @@ def _apply_styling(fig, params: dict[str, Any]) -> None:
     _style_note(params, fig)
     if params.get("colorbar_title"):
         fig.update_coloraxes(colorbar_title_text=params["colorbar_title"])
+    _apply_raw(params, fig)
+
+
+def _apply_raw(params, fig) -> None:
+    """The escape hatch: the three JSON boxes, straight into plotly.
+
+    Runs last, so an explicit override always wins over a toggle above it.
+    `layout_json` is merged with `update_layout` (which merges, so it lands
+    on top of everything set so far), `traces_json` with `update_traces`
+    across every trace, and `config_json` is stashed for the web-view card
+    to hand to plotly.js. Between them they reach all of plotly's layout,
+    trace and config surface — the node is not limited to the rows above.
+    """
+    layout = _raw_dict(params.get("layout_json"), "Layout (JSON)")
+    if layout:
+        fig.update_layout(**layout)
+    traces = _raw_dict(params.get("traces_json"), "Traces (JSON)")
+    if traces:
+        fig.update_traces(**traces)
+    config = _raw_dict(params.get("config_json"), "Interactivity (JSON)")
+    if config:
+        fig._flograph_config = {**getattr(fig, "_flograph_config", {}),
+                                **config}
+
+
+def _raw_dict(text, what: str) -> dict:
+    """A JSON object from one of the escape-hatch boxes, or {} if blank.
+
+    A typo should say what is wrong, not draw a broken chart, so bad JSON
+    or a value that is not an object raises with the box named.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"{what}: not valid JSON — {exc}") from None
+    if not isinstance(value, dict):
+        raise ValueError(
+            f'{what}: expected a JSON object like {{"bargap": 0.3}}, got '
+            f"{type(value).__name__}")
+    return value
 
 
 def _style_titles(params, layout) -> None:

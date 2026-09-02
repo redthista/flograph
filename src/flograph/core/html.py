@@ -38,7 +38,8 @@ def to_html(obj, columns: int = 0, rows: int = 0,
         try:
             return render(full_html=True, include_plotlyjs=True,
                           default_width="100%", default_height="100%",
-                          config={"responsive": True})
+                          config={"responsive": True,
+                                  **getattr(obj, "_flograph_config", {})})
         except TypeError:
             return wrap(render())
     # folium / branca objects: _repr_html_() wraps the map in an <iframe
@@ -78,7 +79,8 @@ def _fragment(obj, first: bool) -> "str | None":
         try:
             return render(full_html=False, include_plotlyjs=bool(first),
                           default_width="100%", default_height="100%",
-                          config={"responsive": True})
+                          config={"responsive": True,
+                                  **getattr(obj, "_flograph_config", {})})
         except TypeError:
             return render()
     render = getattr(obj, "_repr_html_", None)

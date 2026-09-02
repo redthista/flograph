@@ -74,7 +74,8 @@ class TestTheTwoCopiesAgree:
                      "grid_x", "grid_y", "x_format", "tick_angle",
                      "category_order", "range_slider", "line_at", "ref_dash",
                      "note", "note_pos", "font_family", "paper_color",
-                     "margin", "hovermode", "colorbar_title"):
+                     "margin", "hovermode", "colorbar_title",
+                     "layout_json", "traces_json", "config_json"):
             assert spec.param(name) is not None, name
 
     @both
@@ -181,6 +182,65 @@ class TestTheStylingPass:
                       {"title": "Sales", "title_align": "right"}, table)
         assert figure.layout.title.text == "Sales"
         assert figure.layout.title.xanchor == "right"
+
+
+class TestTheEscapeHatch:
+    """The three JSON boxes reach everything the toggles don't."""
+
+    @both
+    def test_layout_json_reaches_the_whole_layout_schema(self, registry,
+                                                         type_id, table):
+        figure = _fig(registry, type_id,
+                      {"layout_json": '{"bargap": 0.4, "barmode": "overlay"}'},
+                      table)
+        assert figure.layout.bargap == 0.4
+        assert figure.layout.barmode == "overlay"
+
+    @both
+    def test_traces_json_is_applied_to_every_trace(self, registry, type_id,
+                                                   table):
+        figure = _fig(registry, type_id,
+                      {"traces_json": '{"marker_line_width": 3}'}, table)
+        assert all(t.marker.line.width == 3 for t in figure.data)
+
+    @both
+    def test_config_json_rides_along_on_the_figure(self, registry, type_id,
+                                                   table):
+        figure = _fig(registry, type_id,
+                      {"config_json": '{"scrollZoom": true}'}, table)
+        assert figure._flograph_config == {"scrollZoom": True}
+
+    @both
+    def test_a_raw_override_wins_over_a_toggle(self, registry, type_id, table):
+        """grid_y off, then layout_json turns the same gridline back on —
+        the JSON runs last."""
+        figure = _fig(registry, type_id,
+                      {"grid_y": "off",
+                       "layout_json": '{"yaxis": {"showgrid": true}}'}, table)
+        assert figure.layout.yaxis.showgrid is True
+
+    def test_bad_json_names_the_box_and_does_not_draw(self, registry, table):
+        with pytest.raises(ValueError, match="Layout \\(JSON\\): not valid"):
+            _fig(registry, SHOW, {"layout_json": "{nope}"}, table)
+
+    def test_a_json_list_is_rejected_it_has_to_be_an_object(self, registry,
+                                                            table):
+        with pytest.raises(ValueError, match="expected a JSON object"):
+            _fig(registry, SHOW, {"traces_json": "[1, 2, 3]"}, table)
+
+    def test_the_card_hands_the_config_to_plotly_js(self, registry, table):
+        from flograph.core.html import to_html
+
+        figure = _fig(registry, SHOW,
+                      {"config_json": '{"scrollZoom": true}'}, table)
+        page = to_html(figure)
+        assert '"scrollZoom": true' in page
+
+    def test_a_plain_figure_still_renders_with_no_config(self, registry,
+                                                         table):
+        from flograph.core.html import to_html
+
+        assert to_html(_fig(registry, SHOW, {}, table))
 
 
 class TestThePanelStillGates:

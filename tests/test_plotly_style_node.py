@@ -195,6 +195,26 @@ class TestSettings:
         out = style(registry, {"margin": "10,20"}, figure=figure)
         assert out.layout.margin.l is None
 
+    def test_the_json_escape_hatch(self, registry, figure):
+        out = style(registry, {"layout_json": '{"bargap": 0.5}',
+                               "traces_json": '{"marker_line_width": 2}',
+                               "config_json": '{"scrollZoom": true}'},
+                    figure=figure)
+        assert out.layout.bargap == 0.5
+        assert out.data[0].marker.line.width == 2
+        assert out._flograph_config == {"scrollZoom": True}
+
+    def test_a_json_override_runs_after_a_setting_above_it(self, registry,
+                                                          figure):
+        out = style(registry, {"grid_y": "off",
+                               "layout_json": '{"yaxis": {"showgrid": true}}'},
+                    figure=figure)
+        assert out.layout.yaxis.showgrid is True
+
+    def test_bad_json_says_which_box(self, registry, figure):
+        with pytest.raises(ValueError, match="Traces \\(JSON\\): not valid"):
+            style(registry, {"traces_json": "{oops}"}, figure=figure)
+
 
 class TestOtherShapes:
     def test_a_list_of_figures_is_styled_one_by_one(self, registry, figure):

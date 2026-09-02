@@ -42,6 +42,12 @@ descending" is the one that turns an unordered bar chart into a ranking.
 target, a budget, a threshold — with an optional label on it. **Note**
 puts text in a corner of the chart.
 
+**Layout (JSON)**, **Traces (JSON)** and **Interactivity (JSON)** are the
+escape hatch: a JSON object in any of them is handed straight to
+`update_layout`, `update_traces` or the render config with nothing in
+between. The settings above are shortcuts for what people reach for; these
+three cover the rest of plotly, and apply last so an override here wins.
+
 A list of figures is styled one by one and comes out as a list, so a Chart
 per Value stack can be restyled in one node.
 
@@ -217,6 +223,23 @@ PARAMS = [
      "placeholder": "left,right,top,bottom in pixels",
      "visible_when": {"more": ["True"]}},
 
+    # The escape hatch. Everything above is a shortcut for a setting people
+    # reach for; these three boxes are the rest of plotly, verbatim — a JSON
+    # object handed straight to update_layout, update_traces and the render
+    # config, so a Style node is not limited to the rows above.
+    {"name": "layout_json", "type": "text", "label": "Layout (JSON)",
+     "default": "", "placeholder":
+     '{"bargap": 0.25, "barmode": "overlay"}  —  plotly.com/python/reference'
+     "/layout", "visible_when": {"more": ["True"]}},
+    {"name": "traces_json", "type": "text", "label": "Traces (JSON)",
+     "default": "", "placeholder":
+     '{"marker_line_width": 1}  —  applied to every trace',
+     "visible_when": {"more": ["True"]}},
+    {"name": "config_json", "type": "text", "label": "Interactivity (JSON)",
+     "default": "", "placeholder":
+     '{"scrollZoom": true, "displayModeBar": false}',
+     "visible_when": {"more": ["True"]}},
+
     {"name": "width", "type": "int", "label": "Width",
      "default": 460, "min": 260, "max": 1600, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
@@ -379,7 +402,45 @@ def _restyle(go, figure, params):
     _note(params, fig)
     if params.get("colorbar_title"):
         fig.update_coloraxes(colorbar_title_text=params["colorbar_title"])
+    _raw(params, fig)
     return fig
+
+
+def _raw(params, fig) -> None:
+    """The escape hatch: the three JSON boxes, straight into plotly.
+
+    Runs last, so an explicit override wins over a setting above it.
+    `layout_json` merges via `update_layout`, `traces_json` via
+    `update_traces` across every trace, and `config_json` is stashed for
+    the web-view card to hand to plotly.js. Between them they reach all of
+    plotly's layout, trace and config surface.
+    """
+    import json
+
+    def parsed(text, what):
+        text = str(text or "").strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except ValueError as exc:
+            raise ValueError(f"{what}: not valid JSON — {exc}") from None
+        if not isinstance(value, dict):
+            raise ValueError(
+                f'{what}: expected a JSON object like {{"bargap": 0.3}}, got '
+                f"{type(value).__name__}")
+        return value
+
+    layout = parsed(params.get("layout_json"), "Layout (JSON)")
+    if layout:
+        fig.update_layout(**layout)
+    traces = parsed(params.get("traces_json"), "Traces (JSON)")
+    if traces:
+        fig.update_traces(**traces)
+    config = parsed(params.get("config_json"), "Interactivity (JSON)")
+    if config:
+        fig._flograph_config = {**getattr(fig, "_flograph_config", {}),
+                                **config}
 
 
 def _theme(params, layout) -> None:
