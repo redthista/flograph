@@ -176,6 +176,71 @@ class TestWorkflowExport:
         assert cp.register_cache(reloaded, OutputCache(), p) == []
 
 
+class TestUserNodeCache:
+    """A project that carries a custom node's script inside it (see
+    `serialization._portable_code`) still restores that node's cached
+    output — the cache fingerprint is over the node's source, and the
+    embedded copy is byte-identical to the library it came from."""
+
+    SAMPLE = (
+        'NODE = {"label": "Read CSV", "category": "IO", "inputs": [],\n'
+        '        "outputs": [("value", "string")]}\n'
+        'PARAMS = [{"name": "value", "type": "string", "default": "x"}]\n'
+        'def run(ctx):\n    return ctx.params["value"]\n'
+    )
+
+    def _graph_with_cached_user_node(self, reg, type_id):
+        graph = Graph()
+        node = reg.instantiate(type_id)
+        graph.add_node(node)
+        cache = OutputCache()
+        cache.set(node.id, {"value": "computed once"}, wall_time=0.03)
+        return graph, node, cache
+
+    def test_cache_survives_on_a_machine_that_has_the_user_node(
+            self, tmp_path, registry):
+        from flograph.core import user_nodes
+        nodes_dir = tmp_path / "nodes"
+        nodes_dir.mkdir()
+        type_id = user_nodes.write_user_node(
+            nodes_dir, "grp", "My Node", self.SAMPLE)
+        reg = NodeRegistry()
+        reg.load_builtins()
+        reg.load_user_nodes(nodes_dir)
+
+        graph, node, cache = self._graph_with_cached_user_node(reg, type_id)
+        path = tmp_path / "proj.flograph"
+        assert _plan_and_write(graph, cache, path) == 1
+
+        reloaded = serialization.load(path, reg)
+        assert not reloaded.node(node.id).forked  # relinked to the library
+        fresh = OutputCache()
+        assert cp.register_cache(reloaded, fresh, path) == [node.id]
+        assert fresh.outputs_for(node.id) == {"value": "computed once"}
+
+    def test_cache_survives_to_a_machine_without_the_user_node(
+            self, tmp_path, registry):
+        from flograph.core import user_nodes
+        nodes_dir = tmp_path / "nodes"
+        nodes_dir.mkdir()
+        type_id = user_nodes.write_user_node(
+            nodes_dir, "grp", "My Node", self.SAMPLE)
+        author = NodeRegistry()
+        author.load_builtins()
+        author.load_user_nodes(nodes_dir)
+
+        graph, node, cache = self._graph_with_cached_user_node(author, type_id)
+        path = tmp_path / "proj.flograph"
+        _plan_and_write(graph, cache, path)
+
+        recipient = NodeRegistry()
+        recipient.load_builtins()  # no load_user_nodes
+        reloaded = serialization.load(path, recipient)
+        fresh = OutputCache()
+        assert cp.register_cache(reloaded, fresh, path) == [node.id]
+        assert fresh.outputs_for(node.id) == {"value": "computed once"}
+
+
 class TestFoldsInLegacySidecar:
     def test_first_bundled_save_absorbs_and_removes_the_folder(self, tmp_path,
                                                               registry):

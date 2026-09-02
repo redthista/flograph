@@ -1,11 +1,16 @@
 """Graph <-> JSON (.flograph project files).
 
 Versioned via an integer `schema` and a MIGRATIONS chain. Builtin nodes
-serialize by type_id only; a non-null "code" means the instance was forked
-(or is a user script node) and its spec is re-parsed from that code on load.
-A builtin type_id the registry no longer knows (missing plugin, renamed/
-removed stdlib node) becomes a broken placeholder node instead of failing
-the whole load — see `_broken_spec`. So does a forked node whose script
+serialize by type_id only; a non-null "code" means the instance carries a
+script — a fork the user edited, or (see `_portable_code`) the library
+text of a `user.*` node, embedded so a project that uses custom nodes is
+one self-contained file. On load that script is re-parsed, except when
+the type_id resolves to a user node this machine already has and the
+embedded text matches it exactly: then the instance relinks to the
+library and is not treated as a fork. A builtin type_id the registry no
+longer knows (missing plugin, renamed/removed stdlib node) becomes a
+broken placeholder node instead of failing the whole load — see
+`_broken_spec`. So does a forked node whose script
 won't load here at all: a top-level `import` of a package this machine
 lacks must not cost you the rest of the project, so the node keeps its code
 and its params and carries the reason, and re-saving writes it back
@@ -38,6 +43,7 @@ from .ports import PortDirection, PortSpec
 from .ports import PortDirection, PortSpec, is_flow
 from .registry import NodeRegistry
 from .script import NodeScriptError, parse_spec
+from .user_nodes import USER_PREFIX
 
 try:  # stamp saved files with the installed distribution version (single source)
     FLOGRAPH_VERSION = _pkg_version("flograph")
@@ -51,6 +57,34 @@ MIGRATIONS: dict[int, Callable[[dict], dict]] = {
 }
 
 
+def _portable_code(node: NodeInstance) -> "str | None":
+    """What goes in a node's serialized ``code`` slot.
+
+    A forked instance emits its override, exactly as before. An unforked
+    instance of a ``user.*`` node emits the library script's text as well,
+    so a project that uses custom nodes travels as one self-contained
+    file: open it on a machine that has never seen that user node and it
+    still loads and runs. It rides the same ``code`` mechanism a fork uses
+    — only filled in from the library rather than from a hand edit — so
+    ``load`` needs almost no new logic: it relinks the instance to the
+    real user node when this machine has it (``code`` equal to the
+    registry's source) and otherwise keeps the embedded copy as a local
+    fork, the way any code-carrying node with no matching type already
+    behaves.
+
+    Builtin and plugin nodes still emit ``None``: the type_id is enough,
+    a builtin ships with every install and a plugin is distributed as its
+    own package rather than pasted into each project file. A broken
+    placeholder emits ``None`` too — there is no real source to carry.
+    """
+    if node.code_override is not None:
+        return node.code_override
+    if (node.type_id.startswith(USER_PREFIX + ".")
+            and not node.spec.builtin and not node.spec.broken):
+        return node.spec.source
+    return None
+
+
 def graph_to_dict(graph: Graph) -> dict[str, Any]:
     return {
         "flograph_version": FLOGRAPH_VERSION,
@@ -62,7 +96,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "type": n.type_id,
                     "pos": [n.pos[0], n.pos[1]],
                     "params": dict(n.params),
-                    "code": n.code_override,
+                    "code": _portable_code(n),
                     "label": n.label_override,
                     "description": n.description,
                     "active": n.active,
@@ -179,14 +213,26 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
         code = entry.get("code")
         broken_reason = None
         if code is not None:
-            try:
-                spec = parse_spec(code, type_id, builtin=False)
-            except NodeScriptError as exc:
-                # the file is still worth opening: one node that can't load
-                # here (a missing package, most often) must not take the
-                # other fifty with it
-                broken_reason = str(exc)
-                spec = None
+            reg_spec = registry.maybe_get(type_id)
+            if (type_id.startswith(USER_PREFIX + ".") and reg_spec is not None
+                    and not reg_spec.builtin and code == reg_spec.source):
+                # A user node whose script the file carried a copy of (see
+                # `_portable_code`), and this machine has the real one: use
+                # it and drop `code`, so the instance stays linked to the
+                # library rather than becoming a fork of an identical
+                # script. A genuine fork's `code` differs from the source,
+                # so it falls through to the parse below.
+                spec = reg_spec
+                code = None
+            else:
+                try:
+                    spec = parse_spec(code, type_id, builtin=False)
+                except NodeScriptError as exc:
+                    # the file is still worth opening: one node that can't
+                    # load here (a missing package, most often) must not
+                    # take the other fifty with it
+                    broken_reason = str(exc)
+                    spec = None
         else:
             # left with no reason on purpose: an unresolvable type_id keeps
             # its own long-standing wording below

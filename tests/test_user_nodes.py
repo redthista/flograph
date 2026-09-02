@@ -2,6 +2,8 @@
 and the save -> reload -> serialize round trip."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from flograph.core import NodeRegistry, parse_spec, serialization
@@ -217,16 +219,90 @@ class TestRoundTrip:
         graph = Graph()
         node = reg.instantiate(type_id)
         graph.add_node(node)
-        assert not node.forked  # referenced by type_id, not embedded
+        assert not node.forked  # linked to the library spec, not a fork
 
         project = tmp_path / "p.flograph"
         serialization.save(graph, project)
-        assert '"code": null' in project.read_text()
+        # the library script travels inside the file for portability...
+        assert "def run(ctx)" in project.read_text()
 
+        # ...but on a machine that has the user node, the instance relinks
+        # to the library rather than loading as a fork of an identical script
         loaded = serialization.load(project, reg)
         loaded_node = next(iter(loaded.nodes.values()))
         assert loaded_node.type_id == type_id
         assert not loaded_node.spec.broken
+        assert not loaded_node.forked
+        assert loaded_node.spec is reg.get(type_id)
+
+    def test_user_node_travels_to_a_machine_without_it(self, tmp_path):
+        """The whole point: a project using a custom node opens and runs on
+        someone else's machine, where that user node was never installed."""
+        nodes_dir = tmp_path / "nodes"
+        nodes_dir.mkdir()
+        type_id = user_nodes.write_user_node(nodes_dir, "grp", "My Node", SAMPLE)
+
+        author = NodeRegistry()
+        author.load_builtins()
+        author.load_user_nodes(nodes_dir)
+        graph = Graph()
+        graph.add_node(author.instantiate(type_id))
+        project = tmp_path / "p.flograph"
+        serialization.save(graph, project)
+
+        recipient = NodeRegistry()
+        recipient.load_builtins()  # but no load_user_nodes
+        loaded = serialization.load(project, recipient)
+        node = next(iter(loaded.nodes.values()))
+        assert not node.spec.broken
+        assert node.type_id == type_id
+        assert node.label == "My Node"  # write_user_node stamps the name in
+        assert node.spec.param("value") is not None
+        # kept as a local copy the recipient can inspect / adopt
+        assert node.forked
+        # and re-saving keeps carrying it
+        again = tmp_path / "again.flograph"
+        serialization.save(loaded, again)
+        assert "def run(ctx)" in again.read_text()
+
+    def test_pre_feature_file_without_embedded_code_still_breaks(self, tmp_path):
+        """A .flograph written before this feature has "code": null for its
+        user nodes. On a machine without the node there is nothing to fall
+        back to, so it must still open as a broken placeholder, not crash."""
+        legacy = {
+            "schema": serialization.SCHEMA_VERSION,
+            "graph": {"nodes": [{"id": "n1", "type": "user.grp.gone",
+                                 "pos": [0, 0], "params": {}, "code": None}],
+                      "connections": [], "frames": [], "pages": []},
+        }
+        project = tmp_path / "legacy.flograph"
+        project.write_text(json.dumps(legacy))
+        loaded = serialization.load(project, NodeRegistry())
+        assert next(iter(loaded.nodes.values())).spec.broken
+
+    def test_diverged_fork_is_not_relinked(self, tmp_path):
+        """A user node placed, then hand-edited on the canvas: its embedded
+        code differs from the library, so it stays a fork even where the
+        library node exists."""
+        nodes_dir = tmp_path / "nodes"
+        nodes_dir.mkdir()
+        type_id = user_nodes.write_user_node(nodes_dir, None, "Thing", SAMPLE)
+        reg = NodeRegistry()
+        reg.load_builtins()
+        reg.load_user_nodes(nodes_dir)
+
+        graph = Graph()
+        node = reg.instantiate(type_id)
+        graph.add_node(node)
+        graph.set_code(node.id, SAMPLE.replace('"Read CSV"', '"Edited"'))
+
+        project = tmp_path / "p.flograph"
+        serialization.save(graph, project)
+        loaded = serialization.load(project, reg)
+        loaded_node = next(iter(loaded.nodes.values()))
+        assert loaded_node.forked
+        assert loaded_node.label == "Edited"
+
 
 class TestSaveFlowIntegration:
     def test_save_as_user_node_from_window(self, qtbot, tmp_path, monkeypatch):
@@ -264,18 +340,23 @@ class TestSaveFlowIntegration:
                  for i in range(tree.topLevelItemCount())]
         assert "User Nodes" in roots
 
-    def test_missing_user_node_becomes_broken(self, tmp_path):
-        nodes_dir = tmp_path / "nodes"
-        nodes_dir.mkdir()
-        type_id = user_nodes.write_user_node(nodes_dir, None, "Gone", SAMPLE)
-        reg = NodeRegistry()
-        reg.load_user_nodes(nodes_dir)
-        graph = Graph()
-        graph.add_node(reg.instantiate(type_id))
+    def test_embedded_code_that_wont_parse_here_stays_openable(self, tmp_path):
+        """If the embedded copy itself won't load on the recipient's machine
+        (a missing import, most often), the node holds its code and the
+        reason — the rest of the project still opens, and re-saving writes
+        the code back untouched."""
         project = tmp_path / "p.flograph"
-        serialization.save(graph, project)
-
-        # a registry without the user node -> broken placeholder, not a crash
-        bare = NodeRegistry()
-        loaded = serialization.load(project, bare)
-        assert next(iter(loaded.nodes.values())).spec.broken
+        project.write_text(json.dumps({
+            "schema": serialization.SCHEMA_VERSION,
+            "graph": {"nodes": [{
+                "id": "n1", "type": "user.grp.needs_pkg", "pos": [0, 0],
+                "params": {},
+                "code": "import _totally_missing_pkg\n"
+                        "NODE = {'label': 'X', 'category': 'grp'}\n"
+                        "def run(ctx): return 1\n",
+            }], "connections": [], "frames": [], "pages": []},
+        }))
+        loaded = serialization.load(project, NodeRegistry())
+        node = next(iter(loaded.nodes.values()))
+        assert node.spec.broken
+        assert node.code_override is not None  # re-saving writes it back
