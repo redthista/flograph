@@ -62,6 +62,7 @@ from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
 from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
+from .navigator import NavigatorPanel
 from .properties.params_panel import ParamsPanel
 from .resource_monitor import ResourceMonitorWidget, format_seconds
 from flograph.engine.runstats import HISTORY_LIMIT
@@ -477,6 +478,19 @@ class MainWindow(QMainWindow):
         self.library_tree.delete_user_frame_requested.connect(
             self._delete_user_frame)
 
+        # -------------------------------------------------------- navigator
+        # a tree of the canvas layout — frames as groups. Tabbed under the
+        # library on the left: both are "find your way around the graph"
+        # panels, and the library is the one you want in front by default.
+        self.navigator_panel = NavigatorPanel(self.graph, self.scene, self.engine)
+        self.navigator_panel.navigate_requested.connect(self._navigate_to)
+        self.navigator_dock = QDockWidget("Navigator", host)
+        self.navigator_dock.setObjectName("dock_navigator")
+        self.navigator_dock.setWidget(self.navigator_panel)
+        host.addDockWidget(Qt.LeftDockWidgetArea, self.navigator_dock)
+        host.tabifyDockWidget(self.library_dock, self.navigator_dock)
+        self.library_dock.raise_()
+
         # ----------------------------------------------- properties/code/log
         # one tab group: all three answer "what is this node doing", and the
         # right-hand column is the only place tall enough for a code editor
@@ -519,8 +533,8 @@ class MainWindow(QMainWindow):
         # every dock that belongs to the model canvas alone, in the order a
         # reset should put them back
         self._model_docks = [
-            self.library_dock, self.properties_dock, self.editor_dock,
-            self.log_dock, self.inspector_dock,
+            self.library_dock, self.navigator_dock, self.properties_dock,
+            self.editor_dock, self.log_dock, self.inspector_dock,
         ]
         # which of them to restore on the way back from a dashboard page --
         # switching pages must not reopen what someone deliberately closed
@@ -3647,6 +3661,17 @@ class MainWindow(QMainWindow):
         if self.page_bar.current_page_id() is not None:
             self.page_bar.select_page(None)
         self.view.go_to_node(node_id)
+
+    def _navigate_to(self, kind: str, ident: str) -> None:
+        """A row clicked in the Navigator: bring the model canvas to it. A node
+        folded inside a collapsed frame lands on the frame — go_to_node sorts
+        that out — and a frame row lands on the frame."""
+        if self.page_bar.current_page_id() is not None:
+            self.page_bar.select_page(None)
+        if kind == "frame":
+            self.view.go_to_frame(ident)
+        else:
+            self.view.go_to_node(ident)
 
     def _add_view_actions(self, menu: QMenu, node_id: str) -> list:
         """Ways to pop a cached output into its own live window.

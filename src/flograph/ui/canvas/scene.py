@@ -702,6 +702,56 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             queue.extend(self._frame_member_frames(nested))
         return (list(nodes), frames)
 
+    def frame_direct_members(self, frame_id: str) -> tuple:
+        """(node_ids, frame_ids) this frame holds *directly* — one level, not
+        transitive. Folded frames report what they wrote down; open ones report
+        what sits inside them right now. The Navigator builds its tree from
+        this, one frame at a time.
+        """
+        item = self.frame_items.get(frame_id)
+        if item is None:
+            return ([], [])
+        return (list(self._frame_members(item)),
+                list(self._frame_member_frames(item)))
+
+    def canvas_outline(self) -> tuple:
+        """(top_node_ids, top_frame_ids, {frame_id: (node_ids, frame_ids)}).
+
+        The whole containment tree in one call: what sits on the bare canvas,
+        and the direct membership of every frame. A node or frame that several
+        open frames overlap is attributed to the smallest — the same frame the
+        eye reads it as being in.
+        """
+        direct: dict = {fid: self.frame_direct_members(fid)
+                        for fid in self.frame_items}
+
+        def area(fid: str) -> float:
+            item = self.frame_items.get(fid)
+            if item is None:
+                return float("inf")
+            r = item.scene_rect()
+            return r.width() * r.height()
+
+        node_owner: dict = {}
+        frame_owner: dict = {}
+        for fid, (nids, subs) in direct.items():
+            for nid in nids:
+                cur = node_owner.get(nid)
+                if cur is None or area(fid) < area(cur):
+                    node_owner[nid] = fid
+            for sub in subs:
+                cur = frame_owner.get(sub)
+                if cur is None or area(fid) < area(cur):
+                    frame_owner[sub] = fid
+
+        tree: dict = {}
+        for fid, (nids, subs) in direct.items():
+            tree[fid] = ([nid for nid in nids if node_owner.get(nid) == fid],
+                         [sub for sub in subs if frame_owner.get(sub) == fid])
+        top_nodes = [nid for nid in self.node_items if nid not in node_owner]
+        top_frames = [fid for fid in self.frame_items if fid not in frame_owner]
+        return (top_nodes, top_frames, tree)
+
     def flagged_frame_members(self) -> dict:
         """`{frame_id: node_ids}` for the frames carrying a run flag.
 

@@ -162,6 +162,21 @@ class NodeGraphView(ZoomPanGraphicsView):
         self.center_on_scene(item)
         return True
 
+    def go_to_frame(self, frame_id: str) -> bool:
+        """Select one frame and bring the view to it — the Navigator's jump
+        for a frame row, and for a node that is folded away inside one."""
+        from .node_search import MIN_REVEAL_ZOOM, REVEAL_ZOOM
+        scene: NodeGraphScene = self.scene()
+        item = scene.frame_items.get(frame_id)
+        if item is None:
+            return False
+        scene.clearSelection()
+        item.setSelected(True)
+        if self.zoom < MIN_REVEAL_ZOOM:
+            self.set_zoom(REVEAL_ZOOM)
+        self.center_on_scene(item)
+        return True
+
     # ------------------------------------------------------------ keyboard
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
