@@ -19,9 +19,18 @@ means "leave whatever the figure already had". A Style node changes only
 the things you actually set, so putting one in front of a Gantt chart or a
 carefully built script figure is safe.
 
-**Theme** and **Palette** restyle the whole figure. **Legend** shows,
-hides or repositions it; the inside positions float it over the plot,
-which buys back the width a right-hand legend costs.
+**Theme** and **Palette** restyle the whole figure.
+
+**Legend** shows or hides it and **Legend position** drops it in one of
+seven places; the inside positions float it over the plot, which buys back
+the width a right-hand legend costs. **Legend layout** switches it between
+a column and a row independently of position, and **Legend X**/**Legend Y**
+nudge it anywhere — paper fractions, so `1.02` parks it just outside the
+plot and `0.5` centres it. **Legend clicks** decides what clicking an entry
+does: *toggle one* (the plotly default), *isolate one*, or *off* to freeze
+it for a dashboard handed to someone who shouldn't be turning series off by
+accident. **Legend order**, **marker size**, **text size**, **background**
+and **border** are the rest of its look.
 
 **Axis titles** replace whatever the columns were called. **Tick format**
 takes a d3 format string for numbers (`,.0f` for thousands separators,
@@ -103,6 +112,34 @@ PARAMS = [
                  "inside top right", "inside bottom left",
                  "inside bottom right"],
      "default": _KEEP},
+    {"name": "legend_orientation", "type": "choice", "label": "Legend layout",
+     "options": [_KEEP, "vertical", "horizontal"], "default": _KEEP},
+    {"name": "legend_click", "type": "choice", "label": "Legend clicks",
+     "options": [_KEEP, "toggle one", "isolate one", "off"],
+     "default": _KEEP},
+    {"name": "legend_x", "type": "string", "label": "Legend X", "default": "",
+     "placeholder": "0 left – 1 right (1.02 = just outside)",
+     "visible_when": {"more": ["True"]}},
+    {"name": "legend_y", "type": "string", "label": "Legend Y", "default": "",
+     "placeholder": "0 bottom – 1 top",
+     "visible_when": {"more": ["True"]}},
+    {"name": "legend_order", "type": "choice", "label": "Legend order",
+     "options": [_KEEP, "normal", "reversed", "grouped", "reversed grouped"],
+     "default": _KEEP, "visible_when": {"more": ["True"]}},
+    {"name": "legend_item_size", "type": "choice", "label": "Legend marker size",
+     "options": [_KEEP, "from the trace", "uniform"], "default": _KEEP,
+     "visible_when": {"more": ["True"]}},
+    {"name": "legend_font_size", "type": "int", "label": "Legend text size",
+     "default": 0, "min": 0, "max": 36, "visible_when": {"more": ["True"]}},
+    {"name": "legend_bg", "type": "string", "label": "Legend background",
+     "default": "", "placeholder": "(keep)",
+     "visible_when": {"more": ["True"]}},
+    {"name": "legend_border", "type": "string", "label": "Legend border",
+     "default": "", "placeholder": "(keep)",
+     "visible_when": {"more": ["True"]}},
+    {"name": "legend_border_width", "type": "int",
+     "label": "Legend border width", "default": 0, "min": 0, "max": 10,
+     "visible_when": {"more": ["True"]}},
 
     {"name": "hovermode", "type": "choice", "label": "Hover",
      "options": [_KEEP, "closest", "x", "y", "x unified", "y unified",
@@ -368,13 +405,69 @@ def _titles(params, layout) -> None:
         layout["legend_title_text"] = params["legend_title"]
 
 
+#: A legend click toggles the entry by default and isolates it on a
+#: double-click. "isolate one" swaps that round; "off" freezes the legend,
+#: which is what a dashboard handed to someone who shouldn't be hiding
+#: series by accident wants. Values are (itemclick, itemdoubleclick).
+_LEGEND_CLICK = {
+    "toggle one": ("toggle", "toggleothers"),
+    "isolate one": ("toggleothers", "toggle"),
+    "off": (False, False),
+}
+
+_LEGEND_ORDER = {"reversed grouped": "reversed+grouped"}
+_LEGEND_ITEM_SIZE = {"from the trace": "trace", "uniform": "constant"}
+
+
 def _legend(params, layout) -> None:
     legend = params.get("legend", "keep")
     if legend != "keep":
         layout["showlegend"] = legend == "show"
+
+    # Everything below lands in one legend dict. update_layout merges it
+    # into whatever the figure already had, so a position preset and a
+    # single tweak on top of it both take.
+    spec: dict = {}
     position = params.get("legend_pos", "keep")
     if position != "keep":
-        layout["legend"] = dict(_LEGEND_POS[position])
+        spec.update(_LEGEND_POS[position])
+
+    orientation = params.get("legend_orientation", "keep")
+    if orientation != "keep":
+        spec["orientation"] = "h" if orientation == "horizontal" else "v"
+
+    x = _as_bound(params.get("legend_x"))
+    if x is not None:
+        spec["x"] = x
+    y = _as_bound(params.get("legend_y"))
+    if y is not None:
+        spec["y"] = y
+
+    order = params.get("legend_order", "keep")
+    if order != "keep":
+        spec["traceorder"] = _LEGEND_ORDER.get(order, order)
+
+    item_size = params.get("legend_item_size", "keep")
+    if item_size != "keep":
+        spec["itemsizing"] = _LEGEND_ITEM_SIZE[item_size]
+
+    click = params.get("legend_click", "keep")
+    if click != "keep":
+        spec["itemclick"], spec["itemdoubleclick"] = _LEGEND_CLICK[click]
+
+    size = int(params.get("legend_font_size") or 0)
+    if size:
+        spec["font"] = {"size": size}
+    if params.get("legend_bg"):
+        spec["bgcolor"] = params["legend_bg"]
+    if params.get("legend_border"):
+        spec["bordercolor"] = params["legend_border"]
+    width = int(params.get("legend_border_width") or 0)
+    if width:
+        spec["borderwidth"] = width
+
+    if spec:
+        layout["legend"] = spec
 
 
 def _fonts(params, layout) -> None:

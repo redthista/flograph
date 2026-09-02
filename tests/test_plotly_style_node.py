@@ -78,6 +78,57 @@ class TestSettings:
         assert out.layout.showlegend is False
         assert out.layout.legend.orientation == "h"
 
+    def test_legend_orientation_is_independent_of_position(self, registry,
+                                                           figure):
+        out = style(registry, {"legend_orientation": "horizontal"},
+                    figure=figure)
+        assert out.layout.legend.orientation == "h"
+
+    def test_legend_fine_placement(self, registry, figure):
+        out = style(registry, {"legend_x": "1.02", "legend_y": "0.5"},
+                    figure=figure)
+        assert (out.layout.legend.x, out.layout.legend.y) == (1.02, 0.5)
+
+    def test_a_tweak_merges_onto_a_position_preset(self, registry, figure):
+        out = style(registry, {"legend_pos": "bottom",
+                               "legend_x": "0.1"}, figure=figure)
+        assert out.layout.legend.orientation == "h"   # from the preset
+        assert out.layout.legend.x == 0.1             # the override
+
+    def test_legend_clicks_can_be_frozen(self, registry, figure):
+        out = style(registry, {"legend_click": "off"}, figure=figure)
+        assert out.layout.legend.itemclick is False
+        assert out.layout.legend.itemdoubleclick is False
+
+    def test_legend_isolate_swaps_click_and_double_click(self, registry,
+                                                         figure):
+        out = style(registry, {"legend_click": "isolate one"}, figure=figure)
+        assert out.layout.legend.itemclick == "toggleothers"
+        assert out.layout.legend.itemdoubleclick == "toggle"
+
+    def test_legend_order_and_marker_and_text(self, registry, figure):
+        out = style(registry, {"legend_order": "reversed grouped",
+                               "legend_item_size": "uniform",
+                               "legend_font_size": 11}, figure=figure)
+        assert out.layout.legend.traceorder == "reversed+grouped"
+        assert out.layout.legend.itemsizing == "constant"
+        assert out.layout.legend.font.size == 11
+
+    def test_legend_background_and_border(self, registry, figure):
+        out = style(registry, {"legend_bg": "#fff", "legend_border": "#333",
+                               "legend_border_width": 1}, figure=figure)
+        assert out.layout.legend.bgcolor == "#fff"
+        assert out.layout.legend.bordercolor == "#333"
+        assert out.layout.legend.borderwidth == 1
+
+    def test_legend_title_still_works_alongside_a_legend_tweak(self, registry,
+                                                              figure):
+        out = style(registry, {"legend_title": "Region",
+                               "legend_orientation": "horizontal"},
+                    figure=figure)
+        assert out.layout.legend.title.text == "Region"
+        assert out.layout.legend.orientation == "h"
+
     def test_hover_off_is_false_not_the_word(self, registry, figure):
         out = style(registry, {"hovermode": "off"}, figure=figure)
         assert out.layout.hovermode is False
