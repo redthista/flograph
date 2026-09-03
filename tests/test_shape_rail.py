@@ -80,3 +80,17 @@ def test_a_click_without_a_drag_still_makes_a_shape(window):
     window.view.mouseReleaseEvent(
         _mouse(QEvent.MouseButtonRelease, QPoint(91, 91)))
     assert len(window.graph.shapes) == 1
+
+
+def test_dropping_a_rail_tool_on_the_canvas_makes_a_shape(window):
+    from PySide6.QtCore import QMimeData
+    from PySide6.QtGui import QDropEvent
+    from flograph.ui.canvas.shape_rail import SHAPE_KIND_MIME
+    mime = QMimeData()
+    mime.setData(SHAPE_KIND_MIME, b"diamond")
+    pos = QPointF(120, 90)
+    drop = QDropEvent(pos, Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier,
+                      QEvent.Drop)
+    window.view.dropEvent(drop)
+    assert len(window.graph.shapes) == 1
+    assert next(iter(window.graph.shapes.values())).kind == "diamond"

@@ -66,6 +66,7 @@ from .inspector.inspector_dock import InspectorPanel
 from .navigator import NavigatorPanel
 from .selection import SelectionPanel
 from .properties.params_panel import ParamsPanel
+from .properties.shape_panel import ShapePropertiesPanel
 from .resource_monitor import ResourceMonitorWidget, format_seconds
 from flograph.engine.runstats import HISTORY_LIMIT
 
@@ -488,9 +489,16 @@ class MainWindow(QMainWindow):
         # right-hand column is the only place tall enough for a code editor
         self.params_panel = ParamsPanel(self.graph, self.undo_stack,
                                         cache=self.engine.cache)
+        self.shape_panel = ShapePropertiesPanel(self.graph, self.scene)
+        # one dock, two faces: a node's params, or a selected shape's style.
+        # Nodes and shapes are never both the sole selection, so the stack
+        # just follows the selection.
+        self._properties_stack = QStackedWidget()
+        self._properties_stack.addWidget(self.params_panel)
+        self._properties_stack.addWidget(self.shape_panel)
         self.properties_dock = QDockWidget("Properties", host)
         self.properties_dock.setObjectName("dock_properties")
-        self.properties_dock.setWidget(self.params_panel)
+        self.properties_dock.setWidget(self._properties_stack)
         host.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
         self.editor_panel = EditorPanel(self.graph, self.undo_stack, self.registry)
@@ -2351,6 +2359,13 @@ class MainWindow(QMainWindow):
         self.params_panel.set_node(node_id)
         self.editor_panel.set_node(node_id)
         self.resource_monitor.set_node(node_id)
+        shapes = self.scene.selected_shape_items()
+        shape_id = (shapes[0].shape_model.id
+                    if len(shapes) == 1 and not items
+                    and not self.scene.selected_frame_items() else None)
+        self.shape_panel.set_shape(shape_id)
+        self._properties_stack.setCurrentWidget(
+            self.shape_panel if shape_id is not None else self.params_panel)
         if node_id is not None:
             self.inspector_panel.show_node(node_id)
             return
@@ -2914,11 +2929,7 @@ class MainWindow(QMainWindow):
         already like — with the two things on that menu that are not nodes
         kept as rows of their own, so nothing is lost by the swap.
         """
-        from .canvas.shape_item import KIND_LABELS
         extras = [("Frame", "frame")]
-        for kind in ("rect", "rounded", "ellipse", "diamond", "triangle",
-                     "line", "arrow", "text"):
-            extras.append((KIND_LABELS[kind], f"shape:{kind}"))
         if self._clipboard_payload() is not None:
             extras.append(("Paste", "paste"))
         elif self._clipboard_has_image():
@@ -2932,8 +2943,6 @@ class MainWindow(QMainWindow):
         opened, like the node rows beside them."""
         if key == "frame":
             self._add_frame_at(self._palette_scene_pos)
-        elif key.startswith("shape:"):
-            self._add_shape_at(self._palette_scene_pos, key.split(":", 1)[1])
         elif key == "paste":
             self._paste(self._palette_scene_pos)
 
@@ -3881,6 +3890,8 @@ class MainWindow(QMainWindow):
             item.setSelected(True)
 
     def _show_shape_menu(self, shape_id: str, global_pos: QPoint) -> None:
+        """A shape's right-click is only stacking order and delete — every
+        style setting lives in the Properties panel instead."""
         shape = self.graph.shapes.get(shape_id)
         if shape is None:
             return
@@ -3888,75 +3899,29 @@ class MainWindow(QMainWindow):
         if item is not None and not item.isSelected():
             self.scene.clearSelection()
             item.setSelected(True)
-        is_line = shape.kind in ("line", "arrow")
         menu = QMenu(self)
-        text_action = None if is_line else menu.addAction("Edit text…")
-        stroke_action = menu.addAction("Line colour…")
-        fill_action = nofill_action = None
-        if not is_line:
-            fill_action = menu.addAction("Fill colour…")
-            nofill_action = menu.addAction("No fill")
-            nofill_action.setEnabled(bool(shape.fill))
-        width_menu = menu.addMenu("Line width")
-        width_actions = {}
-        for w in (1, 2, 3, 5, 8):
-            a = width_menu.addAction(f"{w} px")
-            a.setCheckable(True)
-            a.setChecked(abs(shape.stroke_width - w) < 0.01)
-            width_actions[a] = float(w)
-        dashed_action = menu.addAction("Dashed")
-        dashed_action.setCheckable(True)
-        dashed_action.setChecked(shape.dashed)
-        menu.addSeparator()
+        edit_text = None if shape.kind in ("line", "arrow") \
+            else menu.addAction("Edit text…")
         behind_action = menu.addAction(
             "Bring in front of nodes" if shape.behind else "Send behind nodes")
         layer_actions = add_layer_menu(menu)
-        hide_action = menu.addAction("Hide")
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
         if chosen is None:
             return
-        if chosen is text_action:
+        if chosen is edit_text:
             new, ok = QInputDialog.getMultiLineText(
                 self, "Shape text", "Label:", shape.text)
             if ok and new != shape.text:
                 self.scene.push_shape_text(shape_id, new)
-        elif chosen is stroke_action:
-            self._pick_shape_color(shape_id, "stroke")
-        elif chosen is fill_action:
-            self._pick_shape_color(shape_id, "fill")
-        elif chosen is nofill_action:
-            self.scene.push_shape_style(shape_id, label="clear fill", fill="")
-        elif chosen in width_actions:
-            self.scene.push_shape_style(
-                shape_id, label="line width",
-                stroke_width=width_actions[chosen])
-        elif chosen is dashed_action:
-            self.scene.push_shape_style(
-                shape_id, label="dashed", dashed=not shape.dashed)
         elif chosen is behind_action:
             self.scene.push_shape_style(
                 shape_id, label="restack shape", behind=not shape.behind)
-        elif chosen is hide_action:
-            self.scene.push_shape_style(shape_id, label="hide shape",
-                                        hidden=True)
         elif chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
         elif chosen is delete_action:
             self.scene.delete_items([], [], [], [shape_id])
-
-    def _pick_shape_color(self, shape_id: str, which: str) -> None:
-        shape = self.graph.shapes.get(shape_id)
-        if shape is None:
-            return
-        current = QColor(getattr(shape, which) or "#e5e7eb")
-        color = QColorDialog.getColor(
-            current, self,
-            "Line colour" if which == "stroke" else "Fill colour")
-        if color.isValid():
-            self.scene.push_shape_style(
-                shape_id, label=f"{which} colour", **{which: color.name()})
 
     def _align(self, mode: str) -> None:
         # frames line up alongside nodes: a collapsed one is a box in the

@@ -452,8 +452,10 @@ class NodeGraphView(ZoomPanGraphicsView):
 
     def dragEnterEvent(self, event) -> None:
         from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
+        from .shape_rail import SHAPE_KIND_MIME
         if event.mimeData().hasFormat(NODE_TYPE_MIME) \
-                or event.mimeData().hasFormat(FRAME_ID_MIME):
+                or event.mimeData().hasFormat(FRAME_ID_MIME) \
+                or event.mimeData().hasFormat(SHAPE_KIND_MIME):
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             if self._matching_dropped_files(event.mimeData()):
@@ -469,6 +471,7 @@ class NodeGraphView(ZoomPanGraphicsView):
 
     def dragMoveEvent(self, event) -> None:
         from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
+        from .shape_rail import SHAPE_KIND_MIME
         if event.mimeData().hasFormat(NODE_TYPE_MIME):
             # light up what this drop would do, so letting go is never a
             # guess: a green wire means splice, a ringed node means replace
@@ -477,6 +480,8 @@ class NodeGraphView(ZoomPanGraphicsView):
                 type_id, self.mapToScene(event.position().toPoint())))
             event.acceptProposedAction()
         elif event.mimeData().hasFormat(FRAME_ID_MIME):
+            event.acceptProposedAction()
+        elif event.mimeData().hasFormat(SHAPE_KIND_MIME):
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             if self._matching_dropped_files(event.mimeData()):
@@ -488,6 +493,17 @@ class NodeGraphView(ZoomPanGraphicsView):
 
     def dropEvent(self, event) -> None:
         from .palette import FRAME_ID_MIME, NODE_TYPE_MIME
+        from .shape_rail import SHAPE_KIND_MIME
+        if event.mimeData().hasFormat(SHAPE_KIND_MIME):
+            kind = bytes(event.mimeData().data(SHAPE_KIND_MIME)).decode()
+            a = self.mapToScene(event.position().toPoint())
+            w, h = (190.0, 90.0) if kind in ("line", "arrow") else (
+                150.0, 46.0) if kind == "text" else (170.0, 110.0)
+            self.shape_draw_requested.emit(
+                kind, QRectF(a.x() - w / 2, a.y() - h / 2, w, h))
+            self._arm_shape_draw(None)
+            event.acceptProposedAction()
+            return
         if event.mimeData().hasFormat(NODE_TYPE_MIME):
             type_id = bytes(event.mimeData().data(NODE_TYPE_MIME)).decode()
             scene_pos = self.mapToScene(event.position().toPoint())

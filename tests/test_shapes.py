@@ -151,6 +151,17 @@ class TestSceneItem:
         stack.undo()
         assert "s1" in graph.shapes
 
+    def test_whole_edge_is_grabbable_for_resize(self, env):
+        graph, stack, scene = env
+        stack.push(AddShapeCommand(graph, Shape(
+            id="s1", kind="rect", rect=(0, 0, 200, 120))))
+        item = scene.shape_items["s1"]
+        item.setSelected(True)
+        # a point halfway along the right edge — not near any corner
+        assert item._handle_at(QPointF(200, 60)) == 3      # right-middle handle
+        # a point in the dead centre grabs nothing (it moves instead)
+        assert item._handle_at(QPointF(100, 60)) is None
+
     def test_endpoint_drag_commits_rect_and_flip(self, env):
         graph, stack, scene = env
         stack.push(AddShapeCommand(graph, Shape(

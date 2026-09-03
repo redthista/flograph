@@ -56,6 +56,11 @@ _BOX_CURSORS = (Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor,
 _ARROW_HEAD = 13.0
 _ARROW_HALF = 0.42
 
+#: How far outside (and inside) an edge still counts as grabbing it — a
+#: whole-edge band, like a frame's, so a resize is not a hunt for a corner.
+_EDGE_MARGIN = 7.0
+_HANDLE_INDEX = {h: i for i, h in enumerate(_BOX_HANDLES)}
+
 
 class ShapeItem(QGraphicsObject):
     def __init__(self, shape: Shape) -> None:
@@ -257,11 +262,26 @@ class ShapeItem(QGraphicsObject):
     def _handle_at(self, pos: QPointF) -> Optional[int]:
         if not self.isSelected():
             return None
-        for i, p in enumerate(self._handle_points()):
-            if (abs(pos.x() - p.x()) <= HANDLE + 1
-                    and abs(pos.y() - p.y()) <= HANDLE + 1):
-                return i
-        return None
+        if self.shape_model.kind in LINE_KINDS:
+            for i, p in enumerate(self._handle_points()):
+                if (abs(pos.x() - p.x()) <= HANDLE + 3
+                        and abs(pos.y() - p.y()) <= HANDLE + 3):
+                    return i
+            return None
+        # box kinds: the whole edge is grabbable, not just the corner square
+        m = _EDGE_MARGIN
+        w, h = self._w, self._h
+        if not (-m <= pos.x() <= w + m and -m <= pos.y() <= h + m):
+            return None
+        near_edge = (pos.x() <= m or pos.x() >= w - m
+                     or pos.y() <= m or pos.y() >= h - m)
+        if not near_edge:
+            return None
+        ux = 0 if pos.x() <= m else 1 if pos.x() >= w - m else 0.5
+        uy = 0 if pos.y() <= m else 1 if pos.y() >= h - m else 0.5
+        if ux == 0.5 and uy == 0.5:
+            return None
+        return _HANDLE_INDEX[(ux, uy)]
 
     def hoverMoveEvent(self, event) -> None:
         i = self._handle_at(event.pos())

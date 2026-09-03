@@ -654,13 +654,13 @@ class SettingsDialog(QDialog):
         shape_rail_check = QCheckBox()
         shape_rail_check.setObjectName("shape_rail_checkbox")
         shape_rail_check.setChecked(window.shape_rail_enabled)
-        rows.add("Show shape tool rail", shape_rail_check,
+        rows.add("Show shape tool rail (experimental)", shape_rail_check,
                  "A slim strip of buttons over the canvas for drawing basic "
                  "shapes — rectangle, ellipse, diamond, line, arrow, text and "
-                 "the rest — the way a whiteboard tool works: pick a tool, "
-                 "then drag on the canvas. Off by default; shapes can also be "
-                 "added from the Edit menu (Insert Shape) or the canvas "
-                 "right-click without it.")
+                 "the rest — the way a whiteboard tool works: click a tool "
+                 "then drag on the canvas, or drag a tool straight onto it. "
+                 "Experimental, and off by default; shapes can also be added "
+                 "from the Edit menu (Insert Shape) without it.")
 
         compact_check = QCheckBox()
         compact_check.setObjectName("compact_nodes_checkbox")

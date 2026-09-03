@@ -1,5 +1,5 @@
-"""Shape creation wired through the main window: the Edit-menu submenu, the
-right-click palette rows, and Select All."""
+"""Shape creation and editing wired through the main window: the Edit-menu
+submenu, the trimmed right-click menu, the Properties panel, Select All."""
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings
 
@@ -32,22 +32,12 @@ def window(qtbot, registry):
     win._palette_popup.hide()
 
 
-def test_right_click_offers_every_shape(window):
+def test_right_click_does_not_offer_shapes(window):
+    """Shapes muddied the node palette — they live in the Edit menu now."""
     window._show_add_node_menu(QPointF(0, 0), QPoint(0, 0))
     keys = {k for _, k in window._palette_popup._extras}
-    assert {"shape:rect", "shape:arrow", "shape:text",
-            "shape:diamond"} <= keys
-
-
-def test_palette_row_drops_a_shape_where_it_opened(window):
-    window._show_add_node_menu(QPointF(400, 300), QPoint(0, 0))
-    window._palette_popup.hide()
-    window._palette_extra_chosen("shape:ellipse")
-    shape = next(iter(window.graph.shapes.values()))
-    assert shape.kind == "ellipse"
-    cx = shape.rect[0] + shape.rect[2] / 2
-    cy = shape.rect[1] + shape.rect[3] / 2
-    assert abs(cx - 400) < 1 and abs(cy - 300) < 1
+    assert not any(k.startswith("shape:") for k in keys)
+    assert "frame" in keys
 
 
 def test_edit_menu_has_an_insert_shape_submenu(window):
@@ -86,22 +76,67 @@ def _menu_entries(window, monkeypatch, shape_id):
     return seen.get("labels", [])
 
 
-def test_shape_context_menu_offers_the_expected_entries(window, monkeypatch):
+def test_shape_context_menu_is_only_order_and_delete(window, monkeypatch):
     window._add_shape_at(QPointF(0, 0), "rect")
     sid = next(iter(window.graph.shapes))
     labels = _menu_entries(window, monkeypatch, sid)
     assert "Edit text…" in labels
-    assert "Line colour…" in labels and "Fill colour…" in labels
     assert "Send behind nodes" in labels
-    assert "Hide" in labels and "Delete" in labels
-
-
-def test_line_context_menu_has_no_fill_entries(window, monkeypatch):
-    window._add_shape_at(QPointF(0, 0), "arrow")
-    sid = next(iter(window.graph.shapes))
-    labels = _menu_entries(window, monkeypatch, sid)
+    assert "Delete" in labels
+    # every style knob moved to the Properties panel
+    assert "Line colour…" not in labels
     assert "Fill colour…" not in labels
-    assert "Edit text…" not in labels
+    assert "Line width" not in labels
+    assert "Dashed" not in labels
+    assert "Hide" not in labels
+
+
+# --------------------------------------------------------- Properties panel
+
+def _shape_panel(window, kind="rect"):
+    window._add_shape_at(QPointF(0, 0), kind)
+    sid = next(iter(window.graph.shapes))
+    window._on_selection_changed()
+    return sid, window.shape_panel
+
+
+def test_selecting_a_shape_shows_the_shape_properties(window):
+    sid, panel = _shape_panel(window)
+    assert window._properties_stack.currentWidget() is panel
+    assert panel._shape_id == sid
+    assert not panel.tree.isHidden()
+
+
+def test_properties_edits_reach_the_graph_as_undo_steps(window):
+    sid, panel = _shape_panel(window)
+    panel._push(stroke_width=4.0)
+    assert window.graph.shapes[sid].stroke_width == 4.0
+    panel._behind.setChecked(True)
+    assert window.graph.shapes[sid].behind is True
+    panel._visible.setChecked(False)
+    assert window.graph.shapes[sid].hidden is True
+    window.undo_stack.undo()                     # undo the hide
+    assert window.graph.shapes[sid].hidden is False
+
+
+def test_properties_text_field_commits(window):
+    sid, panel = _shape_panel(window)
+    panel._text.setText("hello")
+    panel._commit_text()
+    assert window.graph.shapes[sid].text == "hello"
+
+
+def test_line_properties_hide_the_text_and_fill_rows(window):
+    _sid, panel = _shape_panel(window, "arrow")
+    assert panel._rows[1].isHidden()      # Text
+    assert panel._rows[3].isHidden()      # Fill
+
+
+def test_deselecting_returns_to_the_node_panel(window):
+    _sid, panel = _shape_panel(window)
+    window.scene.clearSelection()
+    window._on_selection_changed()
+    assert window._properties_stack.currentWidget() is window.params_panel
 
 
 def test_duplicate_copies_a_shape_with_a_fresh_id(window):
