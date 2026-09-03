@@ -386,22 +386,45 @@ def _split_condition(cond: str) -> tuple:
     raise ValueError(f"no operator in condition {cond!r}")
 
 
+def _parse_one_line(lineno: int, line: str) -> Rule:
+    return (_parse_condition_line(lineno, line) if "=>" in line
+            else _parse_token_line(lineno, line))
+
+
 def parse_rules(text: str) -> list[Rule]:
+    """Parse the rule text, raising ``ValueError`` on the first bad line."""
     rules: list[Rule] = []
+    for lineno, raw in enumerate(str(text or "").splitlines(), 1):
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            rules.append(_parse_one_line(lineno, line))
+    return rules
+
+
+def parse_rules_lenient(text: str) -> tuple[list[Rule], list[str]]:
+    """Parse the rule text, skipping bad lines and collecting their
+    messages — for the node paths where one typo must not lose the rest."""
+    rules: list[Rule] = []
+    errors: list[str] = []
     for lineno, raw in enumerate(str(text or "").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if "=>" in line:
-            rules.append(_parse_condition_line(lineno, line))
-        else:
-            rules.append(_parse_token_line(lineno, line))
-    return rules
+        try:
+            rules.append(_parse_one_line(lineno, line))
+        except ValueError as exc:
+            errors.append(str(exc))
+    return rules, errors
 
 
-def rules_from_params(params: dict) -> list[Rule]:
-    """The Table Style node's structured quick-rule, then the text box."""
+def rules_from_params(params: dict) -> tuple[list[Rule], list[str]]:
+    """The Table Style node's structured quick-rule, then the text box.
+
+    Never raises: returns ``(rules, error messages)`` so the errors can be
+    reported wherever the style lands (Show Table), not where it is typed.
+    """
     rules: list[Rule] = []
+    errors: list[str] = []
     mode = str(params.get("cf_mode", "off") or "off")
     columns = _column_list(params.get("cf_columns"))
     if mode == "colour scale":
@@ -415,23 +438,39 @@ def rules_from_params(params: dict) -> list[Rule]:
                                    _BAR_PRESETS["blue"]),
             negative_color=_BAR_NEGATIVE))
     elif mode == "highlight":
-        op, value = parse_op_value(params.get("cf_test", ""))
-        scope = "row" if params.get("cf_scope") == "whole row" else "cell"
-        rules.append(Rule("highlight", columns, scope=scope, op=op, value=value,
-                          bg=_FILL_PRESETS.get(str(params.get("cf_fill", "red")),
-                                               "#5c2b2b")))
+        try:
+            op, value = parse_op_value(params.get("cf_test", ""))
+            scope = "row" if params.get("cf_scope") == "whole row" else "cell"
+            rules.append(Rule(
+                "highlight", columns, scope=scope, op=op, value=value,
+                bg=_FILL_PRESETS.get(str(params.get("cf_fill", "red")),
+                                     "#5c2b2b")))
+        except ValueError as exc:
+            errors.append(f"Highlight rule: {exc}")
     elif mode == "icons":
         key = _ICON_LABELS.get(str(params.get("cf_icons", "traffic lights")),
                                "traffic")
         rules.append(Rule("icons", columns, icon_set=key))
-    rules.extend(parse_rules(params.get("format_rules", "")))
-    return rules
+
+    text_rules, text_errors = parse_rules_lenient(params.get("format_rules", ""))
+    rules.extend(text_rules)
+    errors.extend(text_errors)
+    return rules, errors
+
+
+def style_payload(params: dict) -> dict:
+    """What the Table Style node emits on its ``style`` port."""
+    rules, errors = rules_from_params(params)
+    return {"rules": [r.to_dict() for r in rules], "errors": errors}
 
 
 def rules_from_style(style_obj: Any) -> list[Rule]:
-    """Rehydrate the ``style`` port payload. Tolerant of anything — a bad
-    payload yields no rules rather than an exception, because this runs in
-    the render path where a raise would blank the card."""
+    """Rehydrate the ``style`` port payload — a ``{"rules": [...]}`` dict or
+    a bare list. Tolerant of anything: a bad payload yields no rules rather
+    than an exception, because this runs in the render path where a raise
+    would blank the card."""
+    if isinstance(style_obj, dict):
+        style_obj = style_obj.get("rules")
     if not isinstance(style_obj, (list, tuple)):
         return []
     out: list[Rule] = []
@@ -444,6 +483,23 @@ def rules_from_style(style_obj: Any) -> list[Rule]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def style_report(style_obj: Any, df=None) -> list[str]:
+    """Everything wrong with a style, for Show Table to log: the parse
+    errors the Table Style node carried, plus any column its rules name that
+    this table does not have."""
+    messages: list[str] = []
+    if isinstance(style_obj, dict):
+        messages.extend(str(m) for m in (style_obj.get("errors") or []))
+    columns = getattr(df, "columns", None)
+    if columns is not None:
+        known = {str(c) for c in columns}
+        missing = sorted({c for rule in rules_from_style(style_obj)
+                          for c in rule.columns if c not in known})
+        if missing:
+            messages.append("column(s) not in the table: " + ", ".join(missing))
+    return messages
 
 
 # --------------------------------------------------------------- evaluation

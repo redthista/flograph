@@ -33,4 +33,8 @@ PARAMS = [
 
 
 def run(ctx, table, style=None):
+    if style is not None:
+        from flograph.core.table_format import style_report
+        for message in style_report(style, table):
+            ctx.log(f"conditional formatting — {message}")
     return {"table": table, "style": style}

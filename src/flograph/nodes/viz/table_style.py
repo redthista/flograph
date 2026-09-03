@@ -1,15 +1,15 @@
 """Table Style
 
-Decides how a **Show Table** card looks — without touching the data. Wire
-this node's **Style** output into Show Table's **Style** input and the grid
-picks up colour scales, in-cell data bars, highlighted cells, whole-row
-flags and icon sets. The table flowing out of Show Table is unchanged; this
-is presentation only, the same split as **Plotly Style** for charts.
+Decides how a **Show Table** card looks — without touching the data. It has
+no input of its own: it just holds the rules. Wire its **Style** output
+into a Show Table's **Style** input and that grid picks up colour scales,
+in-cell data bars, highlighted cells, whole-row flags and icon sets. The
+table flowing out of Show Table is unchanged; this is presentation only,
+the same split as **Plotly Style** for charts. Anything wrong with a rule —
+a typo, a column the table doesn't have — is reported on the **Show Table**
+node it feeds, where the data is.
 
-Connect the same table into this node's optional **table** input too and the
-column picker fills itself in and unknown column names are flagged.
-
-**Quick rule** — the fastest path: pick one or more columns, pick *Format
+**Quick rule** — the fastest path: name one or more columns, pick *Format
 as*, and the extra fields for that mode appear.
 
   * **Colour scale** shades each cell by where its value sits in the
@@ -43,12 +43,12 @@ NODE = {
     "label": "Table Style",
     "category": "Viz",
     "version": "1.0",
-    "inputs": [("table", "dataframe", {"optional": True})],
+    "inputs": [],
     "outputs": [("style", "object")],
 }
 PARAMS = [
-    {"name": "cf_columns", "type": "columns", "label": "Format column(s)",
-     "default": "", "placeholder": "pick one or more columns"},
+    {"name": "cf_columns", "type": "string", "label": "Format column(s)",
+     "default": "", "placeholder": "column name — or several, comma separated"},
     {"name": "cf_mode", "type": "choice", "label": "Format as",
      "options": ["off", "colour scale", "data bars", "highlight", "icons"],
      "default": "off", "unset_label": "off"},
@@ -77,16 +77,14 @@ PARAMS = [
 ]
 
 
-def run(ctx, table=None):
-    from flograph.core.table_format import rules_from_params
+def run(ctx):
+    from flograph.core.table_format import style_payload
 
-    rules = rules_from_params(ctx.params)
-    if table is not None and rules:
-        known = {str(c) for c in table.columns}
-        missing = sorted({c for r in rules for c in r.columns} - known)
-        if missing:
-            ctx.log("columns not in the table — those rules do nothing: "
-                    + ", ".join(missing))
-    kinds = ", ".join(sorted({r.mode.replace("_", " ") for r in rules})) or "none"
-    ctx.log(f"{len(rules)} rule(s): {kinds}")
-    return {"style": [r.to_dict() for r in rules]}
+    payload = style_payload(ctx.params)
+    rules, errors = payload["rules"], payload["errors"]
+    kinds = ", ".join(sorted({r["mode"].replace("_", " ") for r in rules})) \
+        or "none"
+    ctx.log(f"{len(rules)} rule(s): {kinds}"
+            + (f"; {len(errors)} not understood (see the Show Table it feeds)"
+               if errors else ""))
+    return {"style": payload}

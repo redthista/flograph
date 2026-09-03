@@ -6,8 +6,9 @@ import pytest
 
 from flograph.core.table_format import (
     CellStyle, Rule, column_stats, evaluate_column, evaluate_rows,
-    parse_op_value, parse_rules, readable_fg, rules_from_params,
-    rules_from_style, split_rules,
+    parse_op_value, parse_rules, parse_rules_lenient, readable_fg,
+    rules_from_params, rules_from_style, style_payload, style_report,
+    split_rules,
 )
 
 
@@ -78,22 +79,58 @@ class TestParseOpValue:
 
 class TestRulesFromParams:
     def test_structured_scale_then_text_box(self):
-        rules = rules_from_params({
+        rules, errors = rules_from_params({
             "cf_mode": "colour scale", "cf_columns": "a, b", "cf_scale": "blue",
             "format_rules": "c bar green",
         })
         assert [r.mode for r in rules] == ["color_scale", "data_bar"]
-        assert rules[0].columns == ["a", "b"]
+        assert rules[0].columns == ["a", "b"] and errors == []
 
     def test_structured_highlight_row_scope(self):
-        (rule,) = rules_from_params({
+        (rules, _errors) = rules_from_params({
             "cf_mode": "highlight", "cf_columns": "status",
             "cf_test": "= closed", "cf_scope": "whole row", "cf_fill": "amber",
         })
+        (rule,) = rules
         assert rule.scope == "row" and rule.op == "=" and rule.bg == "#5c4a24"
 
     def test_off_mode_yields_only_text_rules(self):
-        assert rules_from_params({"cf_mode": "off"}) == []
+        assert rules_from_params({"cf_mode": "off"}) == ([], [])
+
+    def test_bad_text_line_is_collected_not_raised(self):
+        rules, errors = rules_from_params({
+            "format_rules": "a scale green\nb scale bogus\nc bar blue"})
+        assert [r.mode for r in rules] == ["color_scale", "data_bar"]
+        assert len(errors) == 1 and "bogus" in errors[0]
+
+    def test_bad_structured_highlight_test_is_collected(self):
+        rules, errors = rules_from_params({
+            "cf_mode": "highlight", "cf_columns": "x", "cf_test": ""})
+        assert rules == [] and errors and "Highlight rule" in errors[0]
+
+
+class TestStylePayloadAndReport:
+    def test_style_payload_shape(self):
+        payload = style_payload({"format_rules": "a scale green\nb bad line !"})
+        assert isinstance(payload["rules"], list) and len(payload["rules"]) == 1
+        assert len(payload["errors"]) == 1
+
+    def test_style_report_carries_parse_errors_and_missing_columns(self):
+        payload = style_payload({"format_rules": "known scale green\n?? bogus"})
+        df = pd.DataFrame({"other": [1]})
+        report = style_report(payload, df)
+        assert any("bogus" in m for m in report)
+        assert any("known" in m for m in report)   # names a column df lacks
+
+    def test_style_report_clean_style_is_empty(self):
+        payload = style_payload({"format_rules": "a scale green"})
+        assert style_report(payload, pd.DataFrame({"a": [1]})) == []
+
+
+def test_parse_rules_lenient_skips_bad_keeps_good():
+    rules, errors = parse_rules_lenient("a scale green\nnonsense\nb bar blue")
+    assert [r.mode for r in rules] == ["color_scale", "data_bar"]
+    assert len(errors) == 1
 
 
 class TestRulesFromStyle:

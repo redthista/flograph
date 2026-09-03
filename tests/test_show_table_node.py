@@ -47,14 +47,35 @@ def test_show_table_runs_as_passthrough(registry):
 
 
 def test_show_table_re_emits_the_style_payload(registry):
+    import pandas as pd
+
     from flograph.core import compile_run
     from tests.conftest import FakeContext
 
     spec = registry.get("flograph.viz.show_table")
     run = compile_run(spec.source, "test-show-table")
-    style = [{"mode": "color_scale", "columns": ["a"]}]
-    out = run(FakeContext(params=spec.default_params()), table=1, style=style)
-    assert out == {"table": 1, "style": style}
+    df = pd.DataFrame({"a": [1, 2]})
+    style = {"rules": [{"mode": "color_scale", "columns": ["a"]}], "errors": []}
+    out = run(FakeContext(params=spec.default_params()), table=df, style=style)
+    assert out["style"] is style and out["table"] is df
+
+
+def test_show_table_logs_style_errors(registry):
+    import pandas as pd
+
+    from flograph.core import compile_run
+    from tests.conftest import FakeContext
+
+    spec = registry.get("flograph.viz.show_table")
+    run = compile_run(spec.source, "test-show-table")
+    df = pd.DataFrame({"a": [1, 2]})
+    style = {"rules": [{"mode": "color_scale", "columns": ["missing"]}],
+             "errors": ["line 2: unknown scale 'mauve'"]}
+    ctx = FakeContext(params=spec.default_params())
+    out = run(ctx, table=df, style=style)
+    assert out["table"] is df                      # table still passes through
+    assert any("mauve" in m for m in ctx.logs)
+    assert any("missing" in m for m in ctx.logs)   # column not in the table
 
 
 def test_show_table_item_embeds_a_table_view_with_placeholder(env, registry):
