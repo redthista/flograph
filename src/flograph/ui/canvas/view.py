@@ -3,9 +3,9 @@ drag & drop, the Tab palette, node keyboard shortcuts, minimap, and the
 node context menu."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QRubberBand
 
 from .base_view import (ZoomPanGraphicsView, edge_scroll_delta,
                         EDGE_SCROLL_TICK_MS)
@@ -28,6 +28,8 @@ class NodeGraphView(ZoomPanGraphicsView):
     files_dropped = Signal(list, QPointF)          # local file paths, scene pos
     node_context_requested = Signal(str, QPoint)   # node_id, global pos
     frame_context_requested = Signal(str, QPoint)  # frame_id, global pos
+    shape_context_requested = Signal(str, QPoint)  # shape_id, global pos
+    shape_draw_requested = Signal(str, QRectF)     # kind, scene-coord rect
     # An order edge only: a data wire has never had a menu, and the one this
     # opens is about what an order edge *is*.
     order_context_requested = Signal(str, QPoint)  # conn_id, global pos
@@ -60,15 +62,94 @@ class NodeGraphView(ZoomPanGraphicsView):
         self._edge_timer.timeout.connect(self._edge_scroll_tick)
         scene.canvas_drag_changed.connect(self._set_edge_scrolling)
 
+        # the optional shape tool rail (Settings ▸ Canvas), and draw mode
+        self._shape_rail = None
+        self._shape_draw_kind: "str | None" = None
+        self._draw_origin: "QPoint | None" = None
+        self._draw_band: "QRubberBand | None" = None
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.minimap.reposition()
         self.search_bar.reposition()
+        if self._shape_rail is not None:
+            self._shape_rail.reposition()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.minimap.reposition()
         self.search_bar.reposition()
+        if self._shape_rail is not None:
+            self._shape_rail.reposition()
+
+    # -------------------------------------------------------- shape tool rail
+
+    def set_shape_rail_enabled(self, enabled: bool) -> None:
+        if enabled and self._shape_rail is None:
+            from .shape_rail import ShapeRail
+            self._shape_rail = ShapeRail(self)
+            self._shape_rail.tool_armed.connect(self._arm_shape_draw)
+            self._shape_rail.tool_disarmed.connect(
+                lambda: self._arm_shape_draw(None))
+            self._shape_rail.reposition()
+        if self._shape_rail is not None:
+            self._shape_rail.setVisible(enabled)
+        if not enabled:
+            self._arm_shape_draw(None)
+
+    def _arm_shape_draw(self, kind: "str | None") -> None:
+        self._shape_draw_kind = kind
+        self.viewport().setCursor(Qt.CrossCursor if kind else Qt.ArrowCursor)
+        if kind is None:
+            self._draw_origin = None
+            if self._draw_band is not None:
+                self._draw_band.hide()
+            if self._shape_rail is not None:
+                self._shape_rail.clear_selection()
+
+    def _band(self) -> QRubberBand:
+        if self._draw_band is None or self._draw_band.parent() is not self.viewport():
+            self._draw_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
+        return self._draw_band
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if (self._shape_draw_kind is not None
+                and event.button() == Qt.LeftButton):
+            self._draw_origin = event.position().toPoint()
+            band = self._band()
+            band.setGeometry(QRect(self._draw_origin, self._draw_origin))
+            band.show()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._draw_origin is not None:
+            self._band().setGeometry(
+                QRect(self._draw_origin, event.position().toPoint()).normalized())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._draw_origin is not None and event.button() == Qt.LeftButton:
+            origin, self._draw_origin = self._draw_origin, None
+            self._band().hide()
+            end = event.position().toPoint()
+            kind = self._shape_draw_kind
+            a = self.mapToScene(origin)
+            b = self.mapToScene(end)
+            rect = QRectF(a, b).normalized()
+            if rect.width() < 6 and rect.height() < 6:
+                # a click, not a drag — a default-sized shape at the point
+                w, h = (190.0, 90.0) if kind in ("line", "arrow") else (
+                    150.0, 46.0) if kind == "text" else (170.0, 110.0)
+                rect = QRectF(a.x() - w / 2, a.y() - h / 2, w, h)
+            self.shape_draw_requested.emit(kind, rect)
+            self._arm_shape_draw(None)     # one shape per pick; re-click to repeat
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     # ------------------------------------------------------------ edge scroll
 
@@ -177,6 +258,24 @@ class NodeGraphView(ZoomPanGraphicsView):
         self.center_on_scene(item)
         return True
 
+    def go_to_shape(self, shape_id: str) -> bool:
+        """Select one shape and bring the view to it — the Selection pane's
+        jump for a shape row. A hidden shape only selects; there is nothing
+        to centre on."""
+        from .node_search import MIN_REVEAL_ZOOM, REVEAL_ZOOM
+        scene: NodeGraphScene = self.scene()
+        item = scene.shape_items.get(shape_id)
+        if item is None:
+            return False
+        scene.clearSelection()
+        if not item.isVisible():
+            return True
+        item.setSelected(True)
+        if self.zoom < MIN_REVEAL_ZOOM:
+            self.set_zoom(REVEAL_ZOOM)
+        self.center_on_scene(item)
+        return True
+
     # ------------------------------------------------------------ keyboard
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -187,6 +286,10 @@ class NodeGraphView(ZoomPanGraphicsView):
             super().keyPressEvent(event)
             return
         key = event.key()
+        if key == Qt.Key_Escape and self._shape_draw_kind is not None:
+            self._arm_shape_draw(None)
+            event.accept()
+            return
         # Before everything else, and only on a bare press: holding it with a
         # modifier down is somebody reaching for a different shortcut.
         # isAutoRepeat is mandatory — X11 and Wayland synthesise release/press
@@ -295,10 +398,16 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .node_item import NodeItem, PortItem
         from .frame_item import FrameItem
         from .connection_item import ConnectionItem
+        from .shape_item import ShapeItem
         item = self.itemAt(event.pos())
         scene_pos = self.mapToScene(event.pos())
         if item is None:
             self.add_node_requested.emit(scene_pos, event.globalPos())
+            event.accept()
+            return
+        if isinstance(item, ShapeItem):
+            self.shape_context_requested.emit(item.shape_model.id,
+                                              event.globalPos())
             event.accept()
             return
         if isinstance(item, PortItem):

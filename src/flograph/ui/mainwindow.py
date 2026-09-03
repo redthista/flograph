@@ -64,6 +64,7 @@ from .editor.editor_dock import EditorPanel
 from .editor.save_user_node_dialog import SaveUserNodeDialog
 from .inspector.inspector_dock import InspectorPanel
 from .navigator import NavigatorPanel
+from .selection import SelectionPanel
 from .properties.params_panel import ParamsPanel
 from .resource_monitor import ResourceMonitorWidget, format_seconds
 from flograph.engine.runstats import HISTORY_LIMIT
@@ -225,6 +226,9 @@ class MainWindow(QMainWindow):
         self.minimap_enabled = self.settings.value(
             "canvas/minimap_enabled", True, type=bool)
         self.view.minimap.setVisible(self.minimap_enabled)
+        self.shape_rail_enabled = self.settings.value(
+            "canvas/shape_rail", False, type=bool)
+        self.view.set_shape_rail_enabled(self.shape_rail_enabled)
         self.port_labels_enabled = self.settings.value(
             "canvas/port_labels", False, type=bool)
         self.scene.set_port_labels_enabled(self.port_labels_enabled)
@@ -528,6 +532,21 @@ class MainWindow(QMainWindow):
         self.properties_dock.raise_()
         self.navigator_dock.hide()
 
+        # -------------------------------------------------------- selection
+        # Power BI-style: the shapes and frames on the canvas, top-to-bottom in
+        # drawing order, with an eye toggle and drag-to-restack. Rides the same
+        # tab group and starts closed, like the Navigator beside it.
+        self.selection_panel = SelectionPanel(self.graph, self.scene)
+        self.selection_panel.navigate_requested.connect(self._navigate_to)
+        self.selection_dock = QDockWidget("Selection", host)
+        self.selection_dock.setObjectName("dock_selection")
+        self.selection_dock.setWidget(self.selection_panel)
+        host.addDockWidget(Qt.RightDockWidgetArea, self.selection_dock)
+        self.selection_dock.show()
+        host.tabifyDockWidget(self.navigator_dock, self.selection_dock)
+        self.properties_dock.raise_()
+        self.selection_dock.hide()
+
         # ------------------------------------------------------ inspector
         # on its own at the bottom: it is a wide, table-shaped panel, so it
         # wants the window's full width rather than a 420px column
@@ -542,12 +561,14 @@ class MainWindow(QMainWindow):
         # reset should put them back
         self._model_docks = [
             self.library_dock, self.properties_dock, self.editor_dock,
-            self.log_dock, self.navigator_dock, self.inspector_dock,
+            self.log_dock, self.navigator_dock, self.selection_dock,
+            self.inspector_dock,
         ]
         # docks that start closed on a fresh install (no saved layout) and
         # stay closed through a layout reset -- an occasional aid, not the
         # default working set
-        self._docks_closed_by_default = [self.navigator_dock]
+        self._docks_closed_by_default = [self.navigator_dock,
+                                         self.selection_dock]
         # which of them to restore on the way back from a dashboard page --
         # switching pages must not reopen what someone deliberately closed
         self._docks_open_on_model_page = [
@@ -742,6 +763,7 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.action_find_node)
         edit_menu.addAction(self.action_add_frame)
+        self._build_shape_menu(edit_menu)
         align_menu = edit_menu.addMenu("Align")
         for action in (self.action_align_left, self.action_align_top,
                        self.action_dist_h, self.action_dist_v):
@@ -900,6 +922,13 @@ class MainWindow(QMainWindow):
         self.minimap_enabled = enabled
         self.settings.setValue("canvas/minimap_enabled", enabled)
         self.view.minimap.setVisible(enabled)
+
+    def set_shape_rail_enabled(self, enabled: bool) -> None:
+        """Show the Miro-style shape tool rail over the model canvas. Off by
+        default; the Edit menu and canvas right-click add shapes either way."""
+        self.shape_rail_enabled = enabled
+        self.settings.setValue("canvas/shape_rail", enabled)
+        self.view.set_shape_rail_enabled(enabled)
 
     def set_port_labels_enabled(self, enabled: bool) -> None:
         """Canvas-wide: float every port's name beside its pin. Nodes that
@@ -1504,6 +1533,8 @@ class MainWindow(QMainWindow):
         self.view.files_dropped.connect(self._add_reader_nodes_for_files)
         self.view.node_context_requested.connect(self._show_node_menu)
         self.view.frame_context_requested.connect(self._show_frame_menu)
+        self.view.shape_context_requested.connect(self._show_shape_menu)
+        self.view.shape_draw_requested.connect(self._push_new_shape)
         self.view.order_context_requested.connect(self._show_order_edge_menu)
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self.scene.node_double_clicked.connect(self._on_node_double_clicked)
@@ -2883,7 +2914,11 @@ class MainWindow(QMainWindow):
         already like — with the two things on that menu that are not nodes
         kept as rows of their own, so nothing is lost by the swap.
         """
+        from .canvas.shape_item import KIND_LABELS
         extras = [("Frame", "frame")]
+        for kind in ("rect", "rounded", "ellipse", "diamond", "triangle",
+                     "line", "arrow", "text"):
+            extras.append((KIND_LABELS[kind], f"shape:{kind}"))
         if self._clipboard_payload() is not None:
             extras.append(("Paste", "paste"))
         elif self._clipboard_has_image():
@@ -2897,6 +2932,8 @@ class MainWindow(QMainWindow):
         opened, like the node rows beside them."""
         if key == "frame":
             self._add_frame_at(self._palette_scene_pos)
+        elif key.startswith("shape:"):
+            self._add_shape_at(self._palette_scene_pos, key.split(":", 1)[1])
         elif key == "paste":
             self._paste(self._palette_scene_pos)
 
@@ -3640,8 +3677,8 @@ class MainWindow(QMainWindow):
                 self._go_to_node(target_id)
 
     def _select_all_nodes(self) -> None:
-        """Edit > Select All, and Ctrl+A on the canvas — select every node
-        and frame on the model canvas.
+        """Edit > Select All, and Ctrl+A on the canvas — select every node,
+        frame and shape on the model canvas.
 
         Selecting is a model-canvas act, so a dashboard or report page steps
         aside for it, on the same reasoning as _find_node."""
@@ -3651,6 +3688,9 @@ class MainWindow(QMainWindow):
             item.setSelected(True)
         for item in self.scene.frame_items.values():
             item.setSelected(True)
+        for item in self.scene.shape_items.values():
+            if item.isVisible():
+                item.setSelected(True)
 
     def _find_node(self) -> None:
         """Edit > Find Node…, and Ctrl+F on the canvas.
@@ -3684,6 +3724,8 @@ class MainWindow(QMainWindow):
             self.page_bar.select_page(None)
         if kind == "frame":
             self.view.go_to_frame(ident)
+        elif kind == "shape":
+            self.view.go_to_shape(ident)
         else:
             self.view.go_to_node(ident)
 
@@ -3801,6 +3843,120 @@ class MainWindow(QMainWindow):
         self.undo_stack.push(RestackCommand(
             self.graph, "frame", new_order, text="add frame"))
         self.undo_stack.endMacro()
+
+    # ----------------------------------------------------------- shapes
+
+    def _build_shape_menu(self, edit_menu) -> None:
+        from .canvas.shape_item import KIND_LABELS
+        order = ("rect", "rounded", "ellipse", "diamond", "triangle",
+                 "line", "arrow", "text")
+        shape_menu = edit_menu.addMenu("Insert Shape")
+        for kind in order:
+            action = shape_menu.addAction(KIND_LABELS[kind])
+            action.triggered.connect(
+                lambda _=False, k=kind: self._add_shape_at(
+                    self.view.mapToScene(
+                        self.view.viewport().rect().center()), k))
+
+    def _add_shape_at(self, scene_pos: QPointF, kind: str) -> None:
+        if kind in ("line", "arrow"):
+            w, h = 190.0, 90.0
+        elif kind == "text":
+            w, h = 150.0, 46.0
+        else:
+            w, h = 170.0, 110.0
+        self._push_new_shape(kind, QRectF(
+            scene_pos.x() - w / 2, scene_pos.y() - h / 2, w, h))
+
+    def _push_new_shape(self, kind: str, rect: QRectF) -> None:
+        from flograph.core import Shape
+        from .commands import AddShapeCommand
+        shape = Shape(id=uuid.uuid4().hex, kind=kind,
+                      rect=(rect.x(), rect.y(),
+                            max(8.0, rect.width()), max(1.0, rect.height())))
+        self.undo_stack.push(AddShapeCommand(self.graph, shape))
+        item = self.scene.shape_items.get(shape.id)
+        if item is not None:
+            self.scene.clearSelection()
+            item.setSelected(True)
+
+    def _show_shape_menu(self, shape_id: str, global_pos: QPoint) -> None:
+        shape = self.graph.shapes.get(shape_id)
+        if shape is None:
+            return
+        item = self.scene.shape_items.get(shape_id)
+        if item is not None and not item.isSelected():
+            self.scene.clearSelection()
+            item.setSelected(True)
+        is_line = shape.kind in ("line", "arrow")
+        menu = QMenu(self)
+        text_action = None if is_line else menu.addAction("Edit text…")
+        stroke_action = menu.addAction("Line colour…")
+        fill_action = nofill_action = None
+        if not is_line:
+            fill_action = menu.addAction("Fill colour…")
+            nofill_action = menu.addAction("No fill")
+            nofill_action.setEnabled(bool(shape.fill))
+        width_menu = menu.addMenu("Line width")
+        width_actions = {}
+        for w in (1, 2, 3, 5, 8):
+            a = width_menu.addAction(f"{w} px")
+            a.setCheckable(True)
+            a.setChecked(abs(shape.stroke_width - w) < 0.01)
+            width_actions[a] = float(w)
+        dashed_action = menu.addAction("Dashed")
+        dashed_action.setCheckable(True)
+        dashed_action.setChecked(shape.dashed)
+        menu.addSeparator()
+        behind_action = menu.addAction(
+            "Bring in front of nodes" if shape.behind else "Send behind nodes")
+        layer_actions = add_layer_menu(menu)
+        hide_action = menu.addAction("Hide")
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete")
+        chosen = menu.exec(global_pos)
+        if chosen is None:
+            return
+        if chosen is text_action:
+            new, ok = QInputDialog.getMultiLineText(
+                self, "Shape text", "Label:", shape.text)
+            if ok and new != shape.text:
+                self.scene.push_shape_text(shape_id, new)
+        elif chosen is stroke_action:
+            self._pick_shape_color(shape_id, "stroke")
+        elif chosen is fill_action:
+            self._pick_shape_color(shape_id, "fill")
+        elif chosen is nofill_action:
+            self.scene.push_shape_style(shape_id, label="clear fill", fill="")
+        elif chosen in width_actions:
+            self.scene.push_shape_style(
+                shape_id, label="line width",
+                stroke_width=width_actions[chosen])
+        elif chosen is dashed_action:
+            self.scene.push_shape_style(
+                shape_id, label="dashed", dashed=not shape.dashed)
+        elif chosen is behind_action:
+            self.scene.push_shape_style(
+                shape_id, label="restack shape", behind=not shape.behind)
+        elif chosen is hide_action:
+            self.scene.push_shape_style(shape_id, label="hide shape",
+                                        hidden=True)
+        elif chosen in layer_actions:
+            self.scene.restack_selection(layer_actions[chosen])
+        elif chosen is delete_action:
+            self.scene.delete_items([], [], [], [shape_id])
+
+    def _pick_shape_color(self, shape_id: str, which: str) -> None:
+        shape = self.graph.shapes.get(shape_id)
+        if shape is None:
+            return
+        current = QColor(getattr(shape, which) or "#e5e7eb")
+        color = QColorDialog.getColor(
+            current, self,
+            "Line colour" if which == "stroke" else "Fill colour")
+        if color.isValid():
+            self.scene.push_shape_style(
+                shape_id, label=f"{which} colour", **{which: color.name()})
 
     def _align(self, mode: str) -> None:
         # frames line up alongside nodes: a collapsed one is a box in the
@@ -3927,6 +4083,7 @@ class MainWindow(QMainWindow):
         self.set_grid_step(grid.DEFAULT_STEP)
         self.set_grid_visible(True)
         self.set_minimap_enabled(True)
+        self.set_shape_rail_enabled(False)
         self.set_port_labels_enabled(False)
         self.set_flow_pins_enabled(False)
         self.set_reveal_ports_key(canvas_view.DEFAULT_REVEAL_PORTS_KEY)
@@ -3971,7 +4128,9 @@ class MainWindow(QMainWindow):
                  if nid in self.graph.nodes]
         frames = [self.graph.frames[fid] for fid in frame_ids
                   if fid in self.graph.frames]
-        if not nodes and not frames:
+        shapes = [i.shape_model for i in self.scene.selected_shape_items()
+                  if i.shape_model.id in self.graph.shapes]
+        if not nodes and not frames and not shapes:
             return None
         ids = {n.id for n in nodes}
         return {
@@ -4009,6 +4168,13 @@ class MainWindow(QMainWindow):
                 # frame shoved aside *on this canvas*, which the copy has
                 # displaced nothing of.
             } for f in frames],
+            "shapes": [{
+                "kind": s.kind, "rect": list(s.rect), "behind": s.behind,
+                "hidden": s.hidden, "stroke": s.stroke, "fill": s.fill,
+                "stroke_width": s.stroke_width, "dashed": s.dashed,
+                "text": s.text, "text_color": s.text_color,
+                "font_size": s.font_size, "flip": s.flip,
+            } for s in shapes],
         }
 
     def _copy_selection(self) -> None:
@@ -4183,13 +4349,33 @@ class MainWindow(QMainWindow):
                 source=entry.get("source", ""),
                 source_fingerprint=entry.get("source_fingerprint", ""),
             ))
-        if not new_nodes and not new_frames:
+        from flograph.core import Shape
+        from .commands import AddShapeCommand
+        new_shapes: list[Shape] = []
+        for entry in payload.get("shapes", []):
+            rect = entry.get("rect", [0.0, 0.0, 160.0, 110.0])
+            new_shapes.append(Shape(
+                id=uuid.uuid4().hex,
+                kind=entry.get("kind", "rect"),
+                rect=(rect[0] + dx, rect[1] + dy, rect[2], rect[3]),
+                behind=bool(entry.get("behind", False)),
+                hidden=bool(entry.get("hidden", False)),
+                stroke=entry.get("stroke", ""), fill=entry.get("fill", ""),
+                stroke_width=float(entry.get("stroke_width", 2.0)),
+                dashed=bool(entry.get("dashed", False)),
+                text=entry.get("text", ""),
+                text_color=entry.get("text_color", ""),
+                font_size=float(entry.get("font_size", 0.0)),
+                flip=bool(entry.get("flip", False))))
+        if not new_nodes and not new_frames and not new_shapes:
             return None
         self.undo_stack.beginMacro(label)
         for node in new_nodes:
             self.undo_stack.push(AddNodeCommand(self.graph, node))
         for frame in new_frames:
             self.undo_stack.push(AddFrameCommand(self.graph, frame))
+        for shape in new_shapes:
+            self.undo_stack.push(AddShapeCommand(self.graph, shape))
         for conn in payload.get("connections", []):
             src_node, src_port = conn["src"]
             dst_node, dst_port = conn["dst"]
@@ -4205,6 +4391,10 @@ class MainWindow(QMainWindow):
                 item.setSelected(True)
         for frame in new_frames:
             item = self.scene.frame_items.get(frame.id)
+            if item is not None:
+                item.setSelected(True)
+        for shape in new_shapes:
+            item = self.scene.shape_items.get(shape.id)
             if item is not None:
                 item.setSelected(True)
         # what it built, so a component update can re-attach the wires that

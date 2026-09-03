@@ -6,7 +6,7 @@ matplotlib either — heavy imports happen lazily inside functions.
 """
 from .datatypes import PortType, can_connect, validate_value, WIRE_COLORS
 from .events import Event, GraphEvents
-from .graph import Connection, Frame, Graph, GraphError, Page, Tile
+from .graph import Connection, Frame, Graph, GraphError, Page, Shape, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .params import ParamSpec
 from .ports import PortDirection, PortSpec
@@ -18,7 +18,7 @@ from . import dotenv, serialization, varlinks
 __all__ = [
     "PortType", "can_connect", "validate_value", "WIRE_COLORS",
     "Event", "GraphEvents",
-    "Connection", "Frame", "Graph", "GraphError", "Page", "Tile",
+    "Connection", "Frame", "Graph", "GraphError", "Page", "Shape", "Tile",
     "NodeInstance", "NodeSpec", "NodeStatus",
     "ParamSpec", "PortDirection", "PortSpec",
     "NodeRegistry", "fuzzy_score",

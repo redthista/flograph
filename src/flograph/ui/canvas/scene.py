@@ -14,7 +14,8 @@ from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
 from flograph.core import (
-    Connection, Frame, Graph, NodeInstance, NodeRegistry, PortSpec, can_connect,
+    Connection, Frame, Graph, NodeInstance, NodeRegistry, PortSpec, Shape,
+    can_connect,
 )
 from flograph.core.node import NodeStatus
 from flograph.core.ports import is_flow
@@ -23,10 +24,12 @@ from ..commands import (
     AddNodeCommand, ConnectCommand, DisconnectCommand, MoveNodesCommand,
     RemoveSelectionCommand, SetCompactViewCommand, SetLabelCommand,
     SetNodeColorCommand, SetNodeMarkCommand, UpdateFrameCommand,
+    UpdateShapeCommand,
 )
 from .base_view import SCENE_MARGIN
 from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
+from .shape_item import ShapeItem
 from .node_item import (
     DEFAULT_LOD_THRESHOLD, NodeItem, PortItem, compact_on,
 )
@@ -242,6 +245,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # a wire and not in graph.connections — see canvas.link_line.
         self.link_line_items: dict[str, "LinkLineItem"] = {}
         self.frame_items: dict[str, FrameItem] = {}
+        self.shape_items: dict[str, ShapeItem] = {}
         # --- collapsed frames (see _refresh_collapsed_frames) --------------
         # Which nodes each collapsed frame is standing in for. Mirrors
         # Frame.members, which the frame wrote down when it folded — never
@@ -348,6 +352,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
         events.frame_changed.connect(self._on_frame_changed)
+        events.shape_added.connect(self._on_shape_added)
+        events.shape_removed.connect(self._on_shape_removed)
+        events.shape_changed.connect(self._on_shape_changed)
         events.restacked.connect(self._on_restacked)
 
         # mirror pre-existing graph content (e.g. a loaded project)
@@ -357,6 +364,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             self._on_connected(conn)
         for frame in graph.frames.values():
             self._on_frame_added(frame)
+        for shape in graph.shapes.values():
+            self._on_shape_added(shape)
         self._refresh_link_cards()
         self._refresh_link_lines()
         # frames were mirrored above, before any link line existed — fold
@@ -394,7 +403,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         renumbers the whole kind, so a partial update would leave stale
         z-values behind on the items that merely shifted along."""
         items = (self.node_items if kind == "node"
-                 else self.frame_items if kind == "frame" else {})
+                 else self.frame_items if kind == "frame"
+                 else self.shape_items if kind == "shape" else {})
         for item in items.values():
             item.apply_stacking()
 
@@ -1530,6 +1540,43 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # its flags may have changed, and so may the region they apply to
         self.refresh_frame_holds()
 
+    # -------------------------------------------------------------- shapes
+
+    def _on_shape_added(self, shape: Shape) -> None:
+        item = ShapeItem(shape)
+        self.addItem(item)
+        self.shape_items[shape.id] = item
+
+    def _on_shape_removed(self, shape_id: str) -> None:
+        item = self.shape_items.pop(shape_id, None)
+        if item is not None:
+            self.removeItem(item)
+
+    def _on_shape_changed(self, shape: Shape) -> None:
+        item = self.shape_items.get(shape.id)
+        if item is not None:
+            item.sync_from_model()
+
+    def selected_shape_items(self) -> list[ShapeItem]:
+        return [i for i in self.selectedItems() if isinstance(i, ShapeItem)]
+
+    def push_shape_rect(self, shape_id: str, pos, size, *,
+                        flip: Optional[bool] = None) -> None:
+        fields = {"rect": (pos.x(), pos.y(), size[0], size[1])}
+        if flip is not None:
+            fields["flip"] = flip
+        self.undo_stack.push(UpdateShapeCommand(
+            self.graph, shape_id, label="resize shape", **fields))
+
+    def push_shape_text(self, shape_id: str, text: str) -> None:
+        self.undo_stack.push(UpdateShapeCommand(
+            self.graph, shape_id, label="edit shape text", text=text))
+
+    def push_shape_style(self, shape_id: str, label: str = "style shape",
+                         **fields) -> None:
+        self.undo_stack.push(UpdateShapeCommand(
+            self.graph, shape_id, label=label, **fields))
+
     # ------------------------------------------------------------- helpers
 
     def is_port_connected(self, node_id: str, spec: PortSpec) -> bool:
@@ -1606,9 +1653,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     # ------------------------------------------------------- group drag/move
 
     def _selected_movables(self) -> list:
-        """Selected items that participate in a drag: nodes and frames."""
+        """Selected items that participate in a drag: nodes, frames, shapes."""
         return [i for i in self.selectedItems()
-                if isinstance(i, (NodeItem, FrameItem))]
+                if isinstance(i, (NodeItem, FrameItem, ShapeItem))]
 
     def _bump_group_drags(self, delta: int) -> None:
         """Raise or lower the drag-nesting count, emitting canvas_drag_changed
@@ -1652,6 +1699,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             item._dragging = False
             item._group_starts = None
             item._edge_scrolling = False
+        for item in self.shape_items.values():
+            item._dragging = False
+            item._group_starts = None
+            item._grab = None
 
     def begin_group_drag(self) -> dict:
         """Arm every selected node/frame for a group drag: flag each as
@@ -1674,6 +1725,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                     if node_item is not None:
                         starts["carried"][node_id] = (
                             node_item.pos().x(), node_item.pos().y())
+            elif isinstance(item, ShapeItem):
+                starts.setdefault("shapes", {})[item.shape_model.id] = (
+                    item.pos().x(), item.pos().y())
             else:
                 starts["nodes"][item.node.id] = (item.pos().x(), item.pos().y())
         return starts
@@ -1716,7 +1770,17 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                 new = (old[0] + dx, old[1] + dy)
                 item.setPos(*new)
                 node_moves[node_id] = (old, new)
-        if not (node_moves or frame_moves):
+        shape_moves: dict = {}
+        for shape_id, old in starts.get("shapes", {}).items():
+            item = self.shape_items.get(shape_id)
+            if item is None:
+                continue
+            item._dragging = False
+            new = (item.pos().x(), item.pos().y())
+            if new != old:
+                shape_moves[shape_id] = (item.pos().x(), item.pos().y(),
+                                         item._w, item._h)
+        if not (node_moves or frame_moves or shape_moves):
             return
         self.undo_stack.beginMacro("move selection")
         if node_moves:
@@ -1724,6 +1788,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         for frame_id, rect in frame_moves.items():
             self.undo_stack.push(UpdateFrameCommand(
                 self.graph, frame_id, rect=rect))
+        for shape_id, rect in shape_moves.items():
+            self.undo_stack.push(UpdateShapeCommand(
+                self.graph, shape_id, label="move selection", rect=rect))
         self.undo_stack.endMacro()
 
     def delete_selection(self) -> None:
@@ -1732,10 +1799,12 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                     if isinstance(i, ConnectionItem)]
         frame_ids = [i.frame.id for i in self.selectedItems()
                      if isinstance(i, FrameItem)]
-        self.delete_items(node_ids, conn_ids, frame_ids)
+        shape_ids = [i.shape_model.id for i in self.selected_shape_items()]
+        self.delete_items(node_ids, conn_ids, frame_ids, shape_ids)
 
     def delete_items(self, node_ids: list, conn_ids: list,
-                     frame_ids: list, *, confirm: bool = True) -> None:
+                     frame_ids: list, shape_ids: list = (), *,
+                     confirm: bool = True) -> None:
         """Remove nodes, wires and frames in one undo step.
 
         A *collapsed* frame takes its contents with it. Expanded, deleting a
@@ -1749,8 +1818,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         down only to build them straight back — asking would be a question
         about something that isn't happening.
         """
-        from ..commands import RemoveFrameCommand
-        if not (node_ids or conn_ids or frame_ids):
+        from ..commands import RemoveFrameCommand, RemoveShapeCommand
+        if not (node_ids or conn_ids or frame_ids or shape_ids):
             return
         collapsed = [fid for fid in frame_ids
                      if fid in self.graph.frames
@@ -1777,6 +1846,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # visible on top of the box.
         for frame_id in all_frames:
             self.undo_stack.push(RemoveFrameCommand(self.graph, frame_id))
+        for shape_id in shape_ids:
+            if shape_id in self.graph.shapes:
+                self.undo_stack.push(RemoveShapeCommand(self.graph, shape_id))
         if all_nodes or conn_ids:
             self.undo_stack.push(
                 RemoveSelectionCommand(self.graph, all_nodes, conn_ids))
@@ -1799,7 +1871,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         moves = []
         for kind, ids in (("node", {i.node.id for i in self.selected_node_items()}),
                           ("frame", {i.frame.id for i in self.selectedItems()
-                                     if isinstance(i, FrameItem)})):
+                                     if isinstance(i, FrameItem)}),
+                          ("shape", {i.shape_model.id
+                                     for i in self.selected_shape_items()})):
             if not ids:
                 continue
             current = self.graph.stacking_order(kind)

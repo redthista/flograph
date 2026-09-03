@@ -61,6 +61,9 @@ class GraphEvents:
         self.frame_added = Event()     # (frame: Frame)
         self.frame_removed = Event()   # (frame_id: str)
         self.frame_changed = Event()   # (frame: Frame)
+        self.shape_added = Event()     # (shape: Shape)
+        self.shape_removed = Event()   # (shape_id: str)
+        self.shape_changed = Event()   # (shape: Shape)
         self.page_added = Event()      # (page: Page)
         self.page_removed = Event()    # (page_id: str)
         self.page_changed = Event()    # (page: Page)
@@ -69,7 +72,7 @@ class GraphEvents:
         self.tile_added = Event()      # (page_id: str, tile: Tile)
         self.tile_removed = Event()    # (page_id: str, tile_id: str)
         self.tile_changed = Event()    # (page_id: str, tile: Tile)
-        # (kind: "node"|"frame"|"tile", page_id: str|None) — the stacking
+        # (kind: "node"|"frame"|"shape"|"tile", page_id: str|None) — the stacking
         # order of that whole kind changed; hosts re-read z for every item
         # they own rather than being told which ones moved
         self.restacked = Event()

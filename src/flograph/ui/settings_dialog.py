@@ -242,6 +242,7 @@ class SettingsDialog(QDialog):
             "snap_enabled_checkbox": window.snap_enabled,
             "grid_visible_checkbox": window.grid_visible,
             "minimap_enabled_checkbox": window.minimap_enabled,
+            "shape_rail_checkbox": window.shape_rail_enabled,
             "compact_nodes_checkbox": window.compact_nodes,
             "port_labels_checkbox": window.port_labels_enabled,
             "flow_pins_checkbox": window.flow_pins_enabled,
@@ -650,6 +651,17 @@ class SettingsDialog(QDialog):
                  "the current viewport — click or drag on it to jump around "
                  "a large graph.")
 
+        shape_rail_check = QCheckBox()
+        shape_rail_check.setObjectName("shape_rail_checkbox")
+        shape_rail_check.setChecked(window.shape_rail_enabled)
+        rows.add("Show shape tool rail", shape_rail_check,
+                 "A slim strip of buttons over the canvas for drawing basic "
+                 "shapes — rectangle, ellipse, diamond, line, arrow, text and "
+                 "the rest — the way a whiteboard tool works: pick a tool, "
+                 "then drag on the canvas. Off by default; shapes can also be "
+                 "added from the Edit menu (Insert Shape) or the canvas "
+                 "right-click without it.")
+
         compact_check = QCheckBox()
         compact_check.setObjectName("compact_nodes_checkbox")
         compact_check.setChecked(window.compact_nodes)
@@ -835,6 +847,7 @@ class SettingsDialog(QDialog):
         threshold_spin.valueChanged.connect(
             lambda value: window.set_lod_threshold(value / 100.0))
         minimap_check.toggled.connect(window.set_minimap_enabled)
+        shape_rail_check.toggled.connect(window.set_shape_rail_enabled)
         def _push_reveal_key(sequence) -> None:
             """A capture field yields a whole QKeySequence; the view compares
             one key code, so take the first chord's key and drop whatever

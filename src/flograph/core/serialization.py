@@ -36,7 +36,7 @@ from typing import Any, Callable, Iterable
 
 from . import dotenv
 from .datatypes import PortType
-from .graph import Connection, Frame, Graph, GraphError, Page, Tile
+from .graph import Connection, Frame, Graph, GraphError, Page, Shape, Tile
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .page_setup import PageSetup
 from .ports import PortDirection, PortSpec
@@ -151,6 +151,25 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "source_fingerprint": f.source_fingerprint,
                 }
                 for f in graph.frames.values()
+            ],
+            "shapes": [
+                {
+                    "id": s.id,
+                    "kind": s.kind,
+                    "rect": list(s.rect),
+                    "z": s.z,
+                    "behind": s.behind,
+                    "hidden": s.hidden,
+                    "stroke": s.stroke,
+                    "fill": s.fill,
+                    "stroke_width": s.stroke_width,
+                    "dashed": s.dashed,
+                    "text": s.text,
+                    "text_color": s.text_color,
+                    "font_size": s.font_size,
+                    "flip": s.flip,
+                }
+                for s in graph.shapes.values()
             ],
             "pages": [
                 {
@@ -331,6 +350,24 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             nudged=tuple(tuple(n) for n in entry.get("nudged", ())),
             source=entry.get("source", ""),
             source_fingerprint=entry.get("source_fingerprint", ""),
+        ))
+
+    for entry in payload.get("shapes", []):
+        graph.add_shape(Shape(
+            id=entry["id"],
+            kind=entry.get("kind", "rect"),
+            rect=tuple(entry.get("rect", (0, 0, 160, 110))),
+            z=entry.get("z"),
+            behind=bool(entry.get("behind", False)),
+            hidden=bool(entry.get("hidden", False)),
+            stroke=entry.get("stroke", ""),
+            fill=entry.get("fill", ""),
+            stroke_width=float(entry.get("stroke_width", 2.0)),
+            dashed=bool(entry.get("dashed", False)),
+            text=entry.get("text", ""),
+            text_color=entry.get("text_color", ""),
+            font_size=float(entry.get("font_size", 0.0)),
+            flip=bool(entry.get("flip", False)),
         ))
 
     for entry in payload.get("pages", []):

@@ -11,7 +11,9 @@ from typing import Any, Optional
 
 from PySide6.QtGui import QUndoCommand
 
-from flograph.core import Connection, Frame, Graph, NodeInstance, NodeSpec, Page, Tile
+from flograph.core import (
+    Connection, Frame, Graph, NodeInstance, NodeSpec, Page, Shape, Tile,
+)
 
 _ID_MOVE = 1001
 _ID_PARAM = 1002
@@ -680,6 +682,61 @@ class UpdateFrameCommand(QUndoCommand):
     def undo(self) -> None:
         title, rect, color = self._old
         self._graph.update_frame(self._frame_id, title=title, rect=rect, color=color)
+
+
+class AddShapeCommand(QUndoCommand):
+    def __init__(self, graph: Graph, shape: Shape,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("add shape", parent)
+        self._graph = graph
+        self._shape = shape
+
+    def redo(self) -> None:
+        self._graph.add_shape(self._shape)
+
+    def undo(self) -> None:
+        self._graph.remove_shape(self._shape.id)
+
+
+class RemoveShapeCommand(QUndoCommand):
+    def __init__(self, graph: Graph, shape_id: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("remove shape", parent)
+        self._graph = graph
+        self._shape_id = shape_id
+        self._shape: Optional[Shape] = None
+
+    def redo(self) -> None:
+        self._shape = self._graph.remove_shape(self._shape_id)
+
+    def undo(self) -> None:
+        self._graph.add_shape(self._shape)
+
+
+class UpdateShapeCommand(QUndoCommand):
+    """Rewrite one or more style / geometry / text fields on a shape.
+
+    Only the named fields are snapshotted and restored, so an unrelated
+    later edit to the same shape does not get reverted by an undo of this
+    one — the same reasoning `apply_frame_collapse` records on the core
+    side. One command per completed gesture; drags push on release.
+    """
+
+    def __init__(self, graph: Graph, shape_id: str, *,
+                 label: str = "edit shape",
+                 parent: Optional[QUndoCommand] = None, **fields: Any) -> None:
+        super().__init__(label, parent)
+        self._graph = graph
+        self._shape_id = shape_id
+        shape = graph.shapes[shape_id]
+        self._new = dict(fields)
+        self._old = {name: getattr(shape, name) for name in fields}
+
+    def redo(self) -> None:
+        self._graph.update_shape(self._shape_id, **self._new)
+
+    def undo(self) -> None:
+        self._graph.update_shape(self._shape_id, **self._old)
 
 
 class SetFrameCollapsedCommand(QUndoCommand):

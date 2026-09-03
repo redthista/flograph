@@ -104,6 +104,42 @@ class Frame:
 
 
 @dataclass
+class Shape:
+    """A free-floating drawing on the model canvas — a rectangle, ellipse,
+    diamond, triangle, line, arrow or text label.
+
+    Not a node and not a frame: it has no spec, no ports, no run flags, and
+    the engine, scheduler and headless runner never see it. It is graph
+    state only so that it saves with the project and rides the undo stack.
+    Frames group the flow and sit behind it; shapes annotate it and can sit
+    either side of the nodes — `behind` picks which (see
+    `ui/canvas/stacking.py`).
+
+    `rect` is always a normalised bounding box (positive width/height). For
+    `line` / `arrow` the two endpoints are that box's diagonal — top-left to
+    bottom-right, or bottom-left to top-right when `flip` is True — so a
+    connector can point any direction while `rect` stays a plain bbox.
+
+    Empty colour strings mean "the theme's default", resolved in the scene
+    item, so a saved file carries no theme assumption.
+    """
+    id: str
+    kind: str = "rect"   # rect|rounded|ellipse|diamond|triangle|line|arrow|text
+    rect: tuple[float, float, float, float] = (0.0, 0.0, 160.0, 110.0)
+    z: Optional[int] = None   # stacking order among shapes; see core.layers
+    behind: bool = False      # draw behind the nodes rather than over them
+    hidden: bool = False      # kept in the graph, not painted (Selection pane)
+    stroke: str = ""          # outline colour; "" = theme default
+    fill: str = ""            # "" = no fill
+    stroke_width: float = 2.0
+    dashed: bool = False
+    text: str = ""            # centred label (box kinds and `text`)
+    text_color: str = ""      # "" = theme default
+    font_size: float = 0.0    # 0 = default
+    flip: bool = False        # line/arrow: use the other diagonal
+
+
+@dataclass
 class Tile:
     """A dashboard tile: a placed view of one node's output on a Page.
 
@@ -178,6 +214,7 @@ class Graph:
         # index. It exists only to say "this node depends on that one".
         self.var_links: dict[str, Connection] = {}
         self.frames: dict[str, Frame] = {}
+        self.shapes: dict[str, Shape] = {}
         self.pages: dict[str, Page] = {}
         # Where this project's secrets live, for `${env:NAME}`. A *path*,
         # relative to the project file where it can be — never the values,
@@ -918,6 +955,45 @@ class Graph:
         self.events.frame_changed.emit(frame)
         return frame
 
+    # --------------------------------------------------------------- shapes
+
+    #: The fields `update_shape` is allowed to rewrite. `id` and `z` are not
+    #: here — z moves through `restack`, id never changes.
+    SHAPE_FIELDS = frozenset({
+        "kind", "rect", "behind", "hidden", "stroke", "fill", "stroke_width",
+        "dashed", "text", "text_color", "font_size", "flip",
+    })
+
+    def add_shape(self, shape: Shape) -> Shape:
+        if shape.id in self.shapes:
+            raise GraphError(f"shape id {shape.id!r} already in graph")
+        if shape.z is None:
+            shape.z = next_z(self.shapes.values())
+        self.shapes[shape.id] = shape
+        self.events.shape_added.emit(shape)
+        return shape
+
+    def remove_shape(self, shape_id: str) -> Shape:
+        shape = self.shapes.pop(shape_id, None)
+        if shape is None:
+            raise GraphError(f"no shape with id {shape_id!r}")
+        self.events.shape_removed.emit(shape_id)
+        return shape
+
+    def update_shape(self, shape_id: str, **fields: Any) -> Shape:
+        shape = self.shapes.get(shape_id)
+        if shape is None:
+            raise GraphError(f"no shape with id {shape_id!r}")
+        unknown = set(fields) - self.SHAPE_FIELDS
+        if unknown:
+            raise GraphError(f"cannot set {sorted(unknown)!r} on a shape")
+        if "rect" in fields:
+            fields["rect"] = tuple(float(v) for v in fields["rect"])
+        for name, value in fields.items():
+            setattr(shape, name, value)
+        self.events.shape_changed.emit(shape)
+        return shape
+
     # ---------------------------------------------------------------- pages
 
     def page(self, page_id: str) -> Page:
@@ -1053,10 +1129,12 @@ class Graph:
             return self.nodes
         if kind == "frame":
             return self.frames
+        if kind == "shape":
+            return self.shapes
         if kind == "tile":
             return self.page(page_id).tiles
         raise GraphError(f"no stacking order for {kind!r} "
-                         "(valid: node, frame, tile)")
+                         "(valid: node, frame, shape, tile)")
 
     def stacking_order(self, kind: str,
                        page_id: Optional[str] = None) -> list[str]:

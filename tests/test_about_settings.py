@@ -277,7 +277,8 @@ class TestTheNavTreeAndSearch:
                  if not item.isHidden()]
         assert shown == ["GPU-accelerated canvas (experimental)",
                          "Simplify nodes when zoomed out", "Zoom threshold",
-                         "Show minimap", "Compact nodes", "Show port names",
+                         "Show minimap", "Show shape tool rail",
+                         "Compact nodes", "Show port names",
                          "Show flow pins", "Show scroll bars",
                          "Double-click a node opens",
                          "Hold to show port names"]
