@@ -24,10 +24,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, Qt
-from PySide6.QtGui import (
-    QBrush, QImage, QLinearGradient, QPainter, QPainterPath, QPen,
-)
+from PySide6.QtCore import QBuffer, QByteArray, QRectF, Qt
+from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit,
     QMessageBox, QVBoxLayout,
@@ -215,45 +213,19 @@ def shortcut_path(name: str) -> Path:
 # --------------------------------------------------------------------- icon
 
 def _paint_mark(size: int) -> QImage:
-    """The app's own visual language — two nodes and the wire between them —
-    rather than an invented logo, so the desktop icon reads as the canvas.
+    """The flograph app mark — the same linked-nodes-on-a-tile logo the
+    window and taskbar icon use, so the desktop shortcut matches it.
 
     QImage rather than QPixmap on purpose: this is a raster file being
     written, not something being shown, and QImage needs no window system.
     """
+    from .window_frame import paint_app_mark
+
     image = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.transparent)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.Antialiasing)
-    unit = size / 256.0
-
-    backdrop = QLinearGradient(0, 0, 0, size)
-    backdrop.setColorAt(0.0, theme.NODE_BORDER.lighter(140))
-    backdrop.setColorAt(1.0, theme.CANVAS_BG)
-    body = QPainterPath()
-    body.addRoundedRect(2 * unit, 2 * unit, size - 4 * unit, size - 4 * unit,
-                        48 * unit, 48 * unit)
-    painter.fillPath(body, QBrush(backdrop))
-    painter.setPen(QPen(theme.GRID_COARSE, 3 * unit))
-    painter.drawPath(body)
-
-    wire = QPainterPath()
-    wire.moveTo(112 * unit, 92 * unit)
-    wire.cubicTo(150 * unit, 92 * unit, 106 * unit, 168 * unit, 144 * unit, 168 * unit)
-    painter.setPen(QPen(theme.BUTTON_ACCENT, 10 * unit, Qt.SolidLine, Qt.RoundCap))
-    painter.drawPath(wire)
-
-    for x, y in ((40, 64), (144, 140)):
-        rect_x, rect_y, w, h = x * unit, y * unit, 72 * unit, 56 * unit
-        node = QPainterPath()
-        node.addRoundedRect(rect_x, rect_y, w, h, 10 * unit, 10 * unit)
-        painter.fillPath(node, QBrush(theme.NODE_BODY))
-        painter.save()
-        painter.setClipPath(node)
-        painter.fillRect(rect_x, rect_y, w, 20 * unit, QBrush(theme.NODE_HEADER))
-        painter.restore()
-        painter.setPen(QPen(theme.NODE_BORDER, 3 * unit))
-        painter.drawPath(node)
+    paint_app_mark(painter, QRectF(0, 0, size, size))
     painter.end()
     return image
 

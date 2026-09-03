@@ -289,6 +289,25 @@ def frame_icon(kind: str, color: QColor = _FG, pt: int = _ICON_PT) -> QIcon:
     return icon
 
 
+def paint_app_mark(p: QPainter, r: QRectF) -> None:
+    """The flograph mark — the linked-nodes logo on a rounded dark tile.
+
+    The one place the app icon is drawn: the window / taskbar icon
+    (`app_icon`) and the desktop-shortcut icon both render through here so
+    they stay the same picture.
+    """
+    side = min(r.width(), r.height())
+    tile = QPainterPath()
+    tile.addRoundedRect(r.adjusted(side * 0.06, side * 0.06,
+                                   -side * 0.06, -side * 0.06),
+                        side * 0.18, side * 0.18)
+    p.fillPath(tile, theme.CANVAS_BG.lighter(115))
+    p.setPen(_pen(theme.GRID_COARSE, side * 0.012))
+    p.drawPath(tile)
+    _logo(p, r.adjusted(side * 0.18, side * 0.18,
+                        -side * 0.18, -side * 0.18), _FG)
+
+
 def app_icon() -> QIcon:
     """The window / taskbar icon — the mark on a rounded dark tile."""
     icon = QIcon()
@@ -297,16 +316,7 @@ def app_icon() -> QIcon:
         pm.fill(Qt.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(0, 0, size, size)
-        tile = QPainterPath()
-        tile.addRoundedRect(r.adjusted(size * 0.06, size * 0.06,
-                                       -size * 0.06, -size * 0.06),
-                            size * 0.18, size * 0.18)
-        p.fillPath(tile, theme.CANVAS_BG.lighter(115))
-        p.setPen(_pen(theme.GRID_COARSE, size * 0.012))
-        p.drawPath(tile)
-        _logo(p, r.adjusted(size * 0.18, size * 0.18,
-                            -size * 0.18, -size * 0.18), _FG)
+        paint_app_mark(p, QRectF(0, 0, size, size))
         p.end()
         icon.addPixmap(pm)
     return icon
