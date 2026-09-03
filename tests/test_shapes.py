@@ -8,7 +8,7 @@ from flograph.core import Graph, NodeRegistry, Shape
 from flograph.core.serialization import graph_from_dict, graph_to_dict
 from flograph.ui.canvas import NodeGraphScene
 from flograph.ui.canvas.shape_item import ShapeItem
-from flograph.ui.canvas.stacking import SHAPE_BACK_Z, SHAPE_FRONT_Z
+from flograph.ui.canvas.stacking import NODE_Z, SHAPE_Z
 from flograph.ui.commands import (
     AddShapeCommand, RemoveShapeCommand, RestackCommand, UpdateShapeCommand,
 )
@@ -34,7 +34,7 @@ class TestModel:
     def test_defaults(self):
         s = Shape(id="s1")
         assert s.kind == "rect"
-        assert s.behind is False and s.hidden is False
+        assert s.hidden is False
         assert s.fill == "" and s.stroke == ""
 
     def test_add_assigns_stacking_index(self):
@@ -69,15 +69,14 @@ class TestSerialization:
         graph.add_shape(Shape(
             id="s1", kind="arrow", rect=(10, 20, 100, 50), stroke="#ff0000",
             fill="#00ff00", stroke_width=3.0, dashed=True, text="hi",
-            behind=True, hidden=True, flip=True, font_size=14.0,
-            text_color="#123456"))
+            hidden=True, flip=True, font_size=14.0, text_color="#123456"))
         loaded = graph_from_dict(graph_to_dict(graph), registry)
         got = loaded.shapes["s1"]
         assert (got.kind, got.rect, got.stroke, got.fill, got.stroke_width,
-                got.dashed, got.text, got.behind, got.hidden, got.flip,
+                got.dashed, got.text, got.hidden, got.flip,
                 got.font_size, got.text_color) == (
             "arrow", (10.0, 20.0, 100.0, 50.0), "#ff0000", "#00ff00", 3.0,
-            True, "hi", True, True, True, 14.0, "#123456")
+            True, "hi", True, True, 14.0, "#123456")
 
     def test_file_without_shapes_key_loads_clean(self, registry):
         graph = Graph()
@@ -128,13 +127,11 @@ class TestSceneItem:
         stack.push(RemoveShapeCommand(graph, "s1"))
         assert "s1" not in scene.shape_items
 
-    def test_behind_flag_switches_z_band(self, env):
+    def test_shapes_draw_behind_the_nodes(self, env):
         graph, stack, scene = env
         stack.push(AddShapeCommand(graph, Shape(id="s1")))
-        assert scene.shape_items["s1"].zValue() >= SHAPE_FRONT_Z
-        scene.push_shape_style("s1", behind=True)
-        assert scene.shape_items["s1"].zValue() < 0
-        assert scene.shape_items["s1"].zValue() >= SHAPE_BACK_Z
+        z = scene.shape_items["s1"].zValue()
+        assert SHAPE_Z <= z < NODE_Z
 
     def test_hidden_flag_hides_item(self, env):
         graph, stack, scene = env

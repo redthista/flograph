@@ -1124,6 +1124,8 @@ class MainWindow(QMainWindow):
         # stacking order — without this it's invisible behind the viewport
         # every time this runs, including the unconditional startup call.
         self.view.minimap.raise_()
+        if self.view._shape_rail is not None:
+            self.view._shape_rail.raise_()
 
     def _verify_gpu_viewport_soon(self) -> None:
         """Force a synchronous paint (so a QOpenGLWidget viewport actually
@@ -3902,8 +3904,6 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         edit_text = None if shape.kind in ("line", "arrow") \
             else menu.addAction("Edit text…")
-        behind_action = menu.addAction(
-            "Bring in front of nodes" if shape.behind else "Send behind nodes")
         layer_actions = add_layer_menu(menu)
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
@@ -3915,9 +3915,6 @@ class MainWindow(QMainWindow):
                 self, "Shape text", "Label:", shape.text)
             if ok and new != shape.text:
                 self.scene.push_shape_text(shape_id, new)
-        elif chosen is behind_action:
-            self.scene.push_shape_style(
-                shape_id, label="restack shape", behind=not shape.behind)
         elif chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
         elif chosen is delete_action:
@@ -4134,7 +4131,7 @@ class MainWindow(QMainWindow):
                 # displaced nothing of.
             } for f in frames],
             "shapes": [{
-                "kind": s.kind, "rect": list(s.rect), "behind": s.behind,
+                "kind": s.kind, "rect": list(s.rect),
                 "hidden": s.hidden, "stroke": s.stroke, "fill": s.fill,
                 "stroke_width": s.stroke_width, "dashed": s.dashed,
                 "text": s.text, "text_color": s.text_color,
@@ -4323,7 +4320,6 @@ class MainWindow(QMainWindow):
                 id=uuid.uuid4().hex,
                 kind=entry.get("kind", "rect"),
                 rect=(rect[0] + dx, rect[1] + dy, rect[2], rect[3]),
-                behind=bool(entry.get("behind", False)),
                 hidden=bool(entry.get("hidden", False)),
                 stroke=entry.get("stroke", ""), fill=entry.get("fill", ""),
                 stroke_width=float(entry.get("stroke_width", 2.0)),

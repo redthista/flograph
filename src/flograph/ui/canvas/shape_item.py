@@ -24,7 +24,7 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QInputDialog
 from flograph.core import Shape
 
 from .. import theme
-from .stacking import SHAPE_BACK_Z, SHAPE_FRONT_Z, z_for
+from .stacking import SHAPE_Z, z_for
 
 #: Half-width of a resize / endpoint handle, in scene units.
 HANDLE = 5.0
@@ -97,8 +97,7 @@ class ShapeItem(QGraphicsObject):
         self.update()
 
     def apply_stacking(self) -> None:
-        band = SHAPE_BACK_Z if self.shape_model.behind else SHAPE_FRONT_Z
-        self.setZValue(z_for(band, self.shape_model.z))
+        self.setZValue(z_for(SHAPE_Z, self.shape_model.z))
 
     # --------------------------------------------------------------- paint
 

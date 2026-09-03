@@ -4,12 +4,11 @@ in front-to-back drawing order — the way Power BI's Selection pane reads.
 It answers two questions the canvas itself answers slowly once a flow is busy:
 *what is stacked on top of what*, and *what have I hidden*. Rows carry an eye
 toggle (shapes only — hiding a frame's contents is a separate question) and
-can be dragged to restack. A shape dragged across the **Nodes & wires**
-divider swaps sides: above it the shape draws over the nodes, below it behind
-them.
+can be dragged to restack within their own group.
 
-Nodes are deliberately not in this list. They have their own structural view
-in the Navigator; here they are just the reference line the shapes sit around.
+Shapes always draw behind the nodes and frames sit further back still, so
+this is a list of the canvas furniture — the nodes and wires are not in it
+(the Navigator is their structural view).
 
 Rebuilt from the graph on any change that could move a row, coalesced to one
 pass per event-loop turn, exactly as the Navigator does it. The graph is the
@@ -31,7 +30,6 @@ from flograph.core import Graph
 from ..canvas.shape_item import KIND_LABELS
 
 _ROLE = Qt.UserRole            # (kind, id) on a real row; ("divider", name) else
-_DIVIDER_NODES = ("divider", "nodes")
 _DIVIDER_FRAMES = ("divider", "frames")
 
 
@@ -89,19 +87,15 @@ class SelectionPanel(QWidget):
 
     def _rebuild(self) -> None:
         self._pending.stop()
-        shapes = self._graph.shapes
-        front = [s for s in self._front_first("shape")
-                 if not shapes[s].behind]
-        back = [s for s in self._front_first("shape") if shapes[s].behind]
+        shapes = self._front_first("shape")
         frames = self._front_first("frame")
 
         self._tree.blockSignals(True)
         self._tree.clear()
-        for sid in front:
-            self._tree.addTopLevelItem(self._shape_row(sid))
-        self._tree.addTopLevelItem(self._divider("Nodes & wires",
-                                                 _DIVIDER_NODES))
-        for sid in back:
+        if not shapes and not frames:
+            self._tree.blockSignals(False)
+            return
+        for sid in shapes:
             self._tree.addTopLevelItem(self._shape_row(sid))
         if frames:
             self._tree.addTopLevelItem(self._divider("Frames",
@@ -194,40 +188,23 @@ class SelectionPanel(QWidget):
     # ----------------------------------------------------------- reordering
 
     def _commit_reorder(self) -> None:
-        """Read the list back after an internal drag and push whatever
-        restack / behind-flip it implies, in one undo step."""
+        """Read the list back after an internal drag and restack whichever
+        group moved. Shapes and frames keep to their own group — dragging a
+        shape into the frames only reorders it among the shapes."""
         rows = [self._tree.topLevelItem(i).data(0, _ROLE)
                 for i in range(self._tree.topLevelItemCount())]
-        section = "front"
-        front, back, frames = [], [], []
-        for data in rows:
-            if data == _DIVIDER_NODES:
-                section = "back"
-            elif data == _DIVIDER_FRAMES:
-                section = "frames"
-            elif data and data[0] == "shape":
-                (front if section == "front" else back).append(data[1])
-            elif data and data[0] == "frame":
-                frames.append(data[1])
+        shapes = [d[1] for d in rows if d and d[0] == "shape"]
+        frames = [d[1] for d in rows if d and d[0] == "frame"]
 
-        shapes = self._graph.shapes
-        # back-to-front: behind shapes first (lower z), then the front ones
-        new_shape_order = list(reversed(back)) + list(reversed(front))
+        new_shape_order = list(reversed(shapes))    # list is front-first
         new_frame_order = list(reversed(frames))
-        behind_flips = {sid: True for sid in back if not shapes[sid].behind}
-        behind_flips.update({sid: False for sid in front if shapes[sid].behind})
-
         cur_shape = self._graph.stacking_order("shape")
         cur_frame = self._graph.stacking_order("frame")
-        if (new_shape_order == cur_shape and new_frame_order == cur_frame
-                and not behind_flips):
+        if new_shape_order == cur_shape and new_frame_order == cur_frame:
             return
 
-        from ..commands import RestackCommand, UpdateShapeCommand
+        from ..commands import RestackCommand
         self._scene.undo_stack.beginMacro("reorder canvas")
-        for sid, value in behind_flips.items():
-            self._scene.undo_stack.push(UpdateShapeCommand(
-                self._graph, sid, label="restack shape", behind=value))
         if new_shape_order != cur_shape:
             self._scene.undo_stack.push(RestackCommand(
                 self._graph, "shape", new_shape_order, text="reorder canvas"))

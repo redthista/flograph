@@ -81,7 +81,7 @@ def test_shape_context_menu_is_only_order_and_delete(window, monkeypatch):
     sid = next(iter(window.graph.shapes))
     labels = _menu_entries(window, monkeypatch, sid)
     assert "Edit text…" in labels
-    assert "Send behind nodes" in labels
+    assert "Layer" in labels
     assert "Delete" in labels
     # every style knob moved to the Properties panel
     assert "Line colour…" not in labels
@@ -89,6 +89,7 @@ def test_shape_context_menu_is_only_order_and_delete(window, monkeypatch):
     assert "Line width" not in labels
     assert "Dashed" not in labels
     assert "Hide" not in labels
+    assert "Send behind nodes" not in labels
 
 
 # --------------------------------------------------------- Properties panel
@@ -111,8 +112,8 @@ def test_properties_edits_reach_the_graph_as_undo_steps(window):
     sid, panel = _shape_panel(window)
     panel._push(stroke_width=4.0)
     assert window.graph.shapes[sid].stroke_width == 4.0
-    panel._behind.setChecked(True)
-    assert window.graph.shapes[sid].behind is True
+    panel._dashed.setChecked(True)
+    assert window.graph.shapes[sid].dashed is True
     panel._visible.setChecked(False)
     assert window.graph.shapes[sid].hidden is True
     window.undo_stack.undo()                     # undo the hide

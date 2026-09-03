@@ -20,14 +20,11 @@ LINK_LINE_Z = -1500.0
 WIRE_Z = -1000.0
 NODE_Z = 0.0
 
-# Whiteboard shapes (see core.graph.Shape) are the one band the user moves
-# freely — a shape's own `behind` flag picks the side. Behind the nodes it
-# sits just over the frame backdrop but under the wires, so a wire crossing a
-# background box stays readable. In front it sits above every node (a node's
-# stacking index is added to NODE_Z, so this needs the same wide headroom
-# COLLAPSED_FRAME_Z leaves) but below a collapsed frame's live pins.
-SHAPE_BACK_Z = -1750.0
-SHAPE_FRONT_Z = 250_000.0
+# Whiteboard shapes (see core.graph.Shape) always draw behind the nodes: a
+# background box, a label or an arrow read in the gaps between them. Just
+# over the frame backdrop and under the goto-lines and wires, so anything
+# the flow is actually made of stays on top of a shape drawn around it.
+SHAPE_Z = -1750.0
 
 # A collapsed frame leaves the backdrop band entirely: it is no longer a
 # region behind the flow but a single box standing in the middle of it, with

@@ -111,9 +111,9 @@ class Shape:
     Not a node and not a frame: it has no spec, no ports, no run flags, and
     the engine, scheduler and headless runner never see it. It is graph
     state only so that it saves with the project and rides the undo stack.
-    Frames group the flow and sit behind it; shapes annotate it and can sit
-    either side of the nodes — `behind` picks which (see
-    `ui/canvas/stacking.py`).
+    Shapes always draw behind the nodes (above the frame backdrop) — a
+    background box, a label, an arrow read in the gaps — and stack among
+    themselves by `z` (see `ui/canvas/stacking.py`).
 
     `rect` is always a normalised bounding box (positive width/height). For
     `line` / `arrow` the two endpoints are that box's diagonal — top-left to
@@ -127,7 +127,6 @@ class Shape:
     kind: str = "rect"   # rect|rounded|ellipse|diamond|triangle|line|arrow|text
     rect: tuple[float, float, float, float] = (0.0, 0.0, 160.0, 110.0)
     z: Optional[int] = None   # stacking order among shapes; see core.layers
-    behind: bool = False      # draw behind the nodes rather than over them
     hidden: bool = False      # kept in the graph, not painted (Selection pane)
     stroke: str = ""          # outline colour; "" = theme default
     fill: str = ""            # "" = no fill
@@ -960,7 +959,7 @@ class Graph:
     #: The fields `update_shape` is allowed to rewrite. `id` and `z` are not
     #: here — z moves through `restack`, id never changes.
     SHAPE_FIELDS = frozenset({
-        "kind", "rect", "behind", "hidden", "stroke", "fill", "stroke_width",
+        "kind", "rect", "hidden", "stroke", "fill", "stroke_width",
         "dashed", "text", "text_color", "font_size", "flip",
     })
 

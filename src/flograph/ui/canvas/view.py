@@ -72,15 +72,17 @@ class NodeGraphView(ZoomPanGraphicsView):
         super().resizeEvent(event)
         self.minimap.reposition()
         self.search_bar.reposition()
-        if self._shape_rail is not None:
+        if self._shape_rail is not None and self._shape_rail.isVisible():
             self._shape_rail.reposition()
+            self._shape_rail.raise_()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.minimap.reposition()
         self.search_bar.reposition()
-        if self._shape_rail is not None:
+        if self._shape_rail is not None and self._shape_rail.isVisible():
             self._shape_rail.reposition()
+            self._shape_rail.raise_()
 
     # -------------------------------------------------------- shape tool rail
 
@@ -91,9 +93,13 @@ class NodeGraphView(ZoomPanGraphicsView):
             self._shape_rail.tool_armed.connect(self._arm_shape_draw)
             self._shape_rail.tool_disarmed.connect(
                 lambda: self._arm_shape_draw(None))
-            self._shape_rail.reposition()
         if self._shape_rail is not None:
             self._shape_rail.setVisible(enabled)
+            if enabled:
+                # created after the viewport, so it stacks below it until
+                # lifted — same reason a late-added overlay needs raise_()
+                self._shape_rail.reposition()
+                self._shape_rail.raise_()
         if not enabled:
             self._arm_shape_draw(None)
 

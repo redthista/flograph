@@ -129,8 +129,6 @@ class ShapePropertiesPanel(QWidget):
 
         self._dashed = QCheckBox("Dashed")
         self._dashed.toggled.connect(lambda on: self._push(dashed=on))
-        self._behind = QCheckBox("Behind the nodes")
-        self._behind.toggled.connect(lambda on: self._push(behind=on))
         self._visible = QCheckBox("Visible on the canvas")
         self._visible.toggled.connect(lambda on: self._push(hidden=not on))
 
@@ -144,7 +142,6 @@ class ShapePropertiesPanel(QWidget):
                 ("Text colour", self._text_colour),
                 ("Text size", self._font),
                 ("", self._dashed),
-                ("", self._behind),
                 ("", self._visible)):
             item = QTreeWidgetItem([label, ""])
             self.tree.addTopLevelItem(item)
@@ -182,7 +179,6 @@ class ShapePropertiesPanel(QWidget):
             self._width.setValue(max(0.5, shape.stroke_width))
             self._font.setValue(int(shape.font_size))
             self._dashed.setChecked(shape.dashed)
-            self._behind.setChecked(shape.behind)
             self._visible.setChecked(not shape.hidden)
             # a line/arrow carries no text or fill — hide those rows
             for item, hidden in (

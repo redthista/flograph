@@ -42,7 +42,7 @@ def test_lists_shapes_front_first_around_the_node_divider(window):
     panel = window.selection_panel
     panel._rebuild()
     rows = _rows(panel)
-    assert rows == ["Ellipse", "Rectangle", "Nodes & wires", "Frames", "Stage"]
+    assert rows == ["Ellipse", "Rectangle", "Frames", "Stage"]
 
 
 def test_eye_toggle_hides_and_shows_the_shape(window):
@@ -67,18 +67,6 @@ def test_click_navigates_and_selects(window):
     panel._rebuild()
     panel._on_clicked(panel._tree.topLevelItem(0), 0)
     assert window.scene.shape_items[sid].isSelected()
-
-
-def test_dragging_a_shape_below_the_divider_sends_it_behind(window):
-    window._add_shape_at(QPointF(0, 0), "rect")
-    sid = next(iter(window.graph.shapes))
-    panel = window.selection_panel
-    panel._rebuild()
-    tree = panel._tree
-    row = tree.takeTopLevelItem(0)             # the shape, above the divider
-    tree.insertTopLevelItem(tree.topLevelItemCount(), row)  # now last of all
-    panel._commit_reorder()
-    assert window.graph.shapes[sid].behind is True
 
 
 def test_reordering_two_shapes_restacks_them(window):
