@@ -8,8 +8,11 @@ further consumers (e.g. a second Show Table, or an export node).
 **Conditional formatting.** The card can colour cells by value (a heatmap),
 draw in-cell data bars, highlight the cells or rows that pass a test, add
 icon sets, reformat numbers, and hide helper columns. Nothing is formatted
-by default. Write the rules in **Conditional formatting** — one per line,
-`#` for a comment — or press **Build a rule…** for a guided dialog.
+by default. Press **Rules…** for the rule manager — a list of what is
+applied, with add / edit / remove — or type them straight into
+**Conditional formatting**, one per line, `#` for a comment. Rules apply
+top to bottom: where two touch the same cell the **later one wins**, so a
+`=> bg green` line below a `=> row red` line still turns that cell green.
 
 ```
 revenue              scale green                # 2- or 3-colour gradient

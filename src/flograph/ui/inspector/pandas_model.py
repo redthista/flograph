@@ -97,16 +97,14 @@ class PandasModel(QAbstractTableModel):
     # ----------------------------------------------- conditional formatting
 
     def _set_rules(self, rules) -> None:
-        from flograph.core.table_format import split_rules
-        self._rules = list(rules or [])
-        self._col_rules, self._row_rules = split_rules(self._rules)
+        self._rules = [r for r in (rules or []) if r.mode != "hide"]
         # A style is only honoured on a table small enough to walk per-cell.
-        self._cf_active = (bool(self._col_rules or self._row_rules)
-                           and len(self._df) <= CF_MAX_ROWS)
+        self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS
         self._value_roles = _VALUE_ROLES_FMT if self._cf_active else _VALUE_ROLES
         self._col_stats: dict = {}          # col index -> ColumnStats
-        self._col_style_cache: dict = {}    # col index -> list[CellStyle | None]
-        self._row_styles = None             # list[CellStyle | None] | None
+        # col index -> [(rule index, [CellStyle | None] down the rows)]
+        self._col_cache: dict = {}
+        self._row_cache = None              # {rule index: [CellStyle | None]}
 
     def set_rules(self, rules) -> None:
         """Swap the formatting rules and repaint — no model rebuild, so a
@@ -115,36 +113,58 @@ class PandasModel(QAbstractTableModel):
         self._set_rules(rules)
         self.endResetModel()
 
+    def _is_row_rule(self, rule) -> bool:
+        return rule.mode == "highlight" and rule.scope == "row"
+
+    def _row_styles(self) -> dict:
+        if self._row_cache is None:
+            from flograph.core.table_format import evaluate_rows
+            self._row_cache = {
+                i: evaluate_rows(self._df, [rule])
+                for i, rule in enumerate(self._rules) if self._is_row_rule(rule)}
+        return self._row_cache
+
+    def _col_styles(self, col: int) -> list:
+        entry = self._col_cache.get(col)
+        if entry is None:
+            from flograph.core.table_format import column_stats, evaluate_column
+            name = str(self._df.columns[col])
+            stats = None
+            entry = []
+            for i, rule in enumerate(self._rules):
+                if self._is_row_rule(rule):
+                    continue
+                if rule.columns and name not in rule.columns:
+                    continue
+                if stats is None:
+                    stats = self._col_stats.get(col) or column_stats(
+                        self._source.iloc[:, col])
+                    self._col_stats[col] = stats
+                entry.append((i, evaluate_column(self._df.iloc[:, col], [rule],
+                                                 stats, frame=self._df)))
+            self._col_cache[col] = entry
+        return entry
+
     def _cell_style(self, row: int, col: int):
+        """Every rule that touches this cell, applied in the order they
+        appear in the box — a later line wins, whether it is a whole-row
+        highlight or a single-cell one."""
         if not self._cf_active:
             return None
-        from flograph.core.table_format import (
-            column_stats, evaluate_column, evaluate_rows)
-        styles = self._col_style_cache.get(col)
-        if styles is None:
-            name = str(self._df.columns[col])
-            rules = [r for r in self._col_rules
-                     if not r.columns or name in r.columns]
-            if rules:
-                stats = self._col_stats.get(col)
-                if stats is None:
-                    stats = column_stats(self._source.iloc[:, col])
-                    self._col_stats[col] = stats
-                styles = evaluate_column(self._df.iloc[:, col], rules, stats,
-                                         frame=self._df)
-            else:
-                styles = []
-            self._col_style_cache[col] = styles
-        cell = styles[row] if row < len(styles) else None
-        if self._row_rules:
-            if self._row_styles is None:
-                self._row_styles = evaluate_rows(self._df, self._row_rules)
-            band = self._row_styles[row] if row < len(self._row_styles) else None
-            if band is not None:
-                # a whole-row flag wins the fill: "this row is bad" should
-                # read across every cell, even one a column rule also colours
-                return band.over(cell) if cell is not None else band
-        return cell
+        parts = []                         # (rule index, CellStyle)
+        for i, styles in self._col_styles(col):
+            if row < len(styles) and styles[row] is not None:
+                parts.append((i, styles[row]))
+        for i, styles in self._row_styles().items():
+            if row < len(styles) and styles[row] is not None:
+                parts.append((i, styles[row]))
+        if not parts:
+            return None
+        parts.sort(key=lambda t: t[0])
+        acc = None
+        for _i, style in parts:
+            acc = style.over(acc)
+        return acc
 
     def dataframe(self) -> pd.DataFrame:
         """The frame behind the model, whole — not just the rows paged in.
@@ -196,8 +216,8 @@ class PandasModel(QAbstractTableModel):
         self._loaded = min(PAGE_SIZE, len(self._df))
         # colours follow values: the per-cell styles were built against the
         # old order, the column stats (whole-column min/max/…) still hold
-        self._col_style_cache.clear()
-        self._row_styles = None
+        self._col_cache.clear()
+        self._row_cache = None
         self.endResetModel()
 
     # ------------------------------------------------------------- shape

@@ -491,14 +491,15 @@ class ParamsPanel(QWidget):
 
     def _with_rule_wizard(self, spec: ParamSpec,
                           text: QPlainTextEdit) -> QWidget:
-        """A multiline rules box with a 'Build a rule…' button under it that
-        opens the conditional-formatting wizard and appends what it builds."""
+        """A multiline rules box with a 'Rules…' button under it that opens
+        the rule manager — a list of the applied rules with add / edit /
+        remove — and writes the box back."""
         host = QWidget()
         col = QVBoxLayout(host)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(3)
         col.addWidget(text)
-        button = QPushButton("Build a rule…")
+        button = QPushButton("Rules…")
         button.setObjectName(f"param_{spec.name}_wizard")
         button.clicked.connect(lambda: self._open_rule_wizard(spec, text))
         col.addWidget(button, 0, Qt.AlignLeft)
@@ -523,14 +524,16 @@ class ParamsPanel(QWidget):
         return []
 
     def _open_rule_wizard(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
-        from .table_rule_wizard import RuleWizard
+        from PySide6.QtWidgets import QDialog
 
-        def add(line: str) -> None:
-            current = text.toPlainText().rstrip("\n")
-            text.setPlainText(f"{current}\n{line}" if current else line)
-            self._commit(spec.name, text.toPlainText())
+        from .table_rule_wizard import RuleManager
 
-        RuleWizard(self._wizard_columns(), add, self).exec()
+        dlg = RuleManager(text.toPlainText(), self._wizard_columns(), self)
+        if dlg.exec() == QDialog.Accepted:
+            new_text = dlg.result_text()
+            if new_text != text.toPlainText():
+                text.setPlainText(new_text)
+                self._commit(spec.name, new_text)
 
     def _with_column_inserter(self, spec: ParamSpec,
                               text: QPlainTextEdit) -> QWidget:

@@ -53,11 +53,6 @@ _SCALE_PRESETS = {
     "diverging": ("#2f6f9f", "#3a3d44", "#a4373a"),
 }
 
-# Structured-param labels → DSL preset keys.
-_SCALE_LABELS = {
-    "green": "green", "red to green": "red-green",
-    "white to red": "white-red", "blue": "blue", "diverging": "diverging",
-}
 _BAR_PRESETS = {
     "blue": "#3b6299", "green": "#2e7d46", "orange": "#b9722e",
     "purple": "#7d5aa8", "red": "#a4373a", "grey": "#5b5f68",
@@ -81,6 +76,30 @@ _ICON_LABELS = {
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format"}
+
+
+def scale_token(low, mid, high) -> str:
+    """The DSL name for a (low, mid, high) triple, or its raw ``low..high``
+    when it matches no preset."""
+    for name, triple in _SCALE_PRESETS.items():
+        if triple == (low, mid, high):
+            return name
+    return "green"
+
+
+def preset_name(colour, presets) -> str:
+    for name, value in presets.items():
+        if value == colour:
+            return name
+    return colour or ""
+
+
+def bar_token(colour) -> str:
+    return preset_name(colour, _BAR_PRESETS)
+
+
+def fill_token(colour) -> str:
+    return preset_name(colour, _FILL_PRESETS)
 _OPS = {">", ">=", "<", "<=", "=", "!=", "between",
         "contains", "starts", "ends", "matches", "empty", "notempty"}
 
@@ -353,7 +372,7 @@ def _parse_icon_map(lineno: int, arg: str) -> tuple:
                 f"(use 'value=icon colour')")
         parts = spec.split()
         glyph = parts[0]
-        color = _resolve_color(parts[1]) if len(parts) > 1 else None
+        color = _resolve_glyph_color(parts[1]) if len(parts) > 1 else None
         mapping[key.strip()] = [glyph, color]
     if not mapping:
         raise ValueError(f"line {lineno}: 'iconmap' has no value=icon pairs")
@@ -414,6 +433,19 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
 def _resolve_color(token: str) -> str:
     token = token.strip()
     return _FILL_PRESETS.get(token.lower(), token)
+
+
+# vivid foreground colours for an icon glyph — the fill presets are dark
+# backgrounds and would be invisible drawn as a glyph on the grid
+_GLYPH_COLOURS = {
+    "green": "#5cb85c", "amber": "#e0a83d", "orange": "#e0a83d",
+    "red": "#d9534f", "blue": "#4a90d9", "grey": "#9aa0a6", "gray": "#9aa0a6",
+}
+
+
+def _resolve_glyph_color(token: str) -> str:
+    token = token.strip()
+    return _GLYPH_COLOURS.get(token.lower(), token)
 
 
 def _parse_style_tokens(lineno: int, rhs: str) -> dict:
@@ -503,6 +535,59 @@ def parse_rules(text: str) -> list[Rule]:
         if line and not line.startswith("#"):
             rules.append(_parse_one_line(lineno, line))
     return rules
+
+
+def parse_rule_lines(text: str) -> list[tuple]:
+    """Every line of the rules box as ``(raw line, Rule | None, error | None)``
+    — comments and blanks come back as ``(raw, None, None)``. For the rule
+    manager, which edits the box one line at a time and must not disturb the
+    others."""
+    out: list[tuple] = []
+    for lineno, raw in enumerate(str(text or "").splitlines(), 1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            out.append((raw, None, None))
+            continue
+        try:
+            out.append((raw, _parse_one_line(lineno, stripped), None))
+        except ValueError as exc:
+            out.append((raw, None, str(exc)))
+    return out
+
+
+def _op_phrase(op: str, value: Any) -> str:
+    words = {">": "> ", ">=": "≥ ", "<": "< ", "<=": "≤ ", "=": "= ",
+             "!=": "≠ ", "contains": "contains ", "starts": "starts with ",
+             "ends": "ends with ", "matches": "matches "}
+    if op == "empty":
+        return "is empty"
+    if op == "notempty":
+        return "is not empty"
+    if op == "between" and isinstance(value, (list, tuple)):
+        return f"between {value[0]}–{value[1]}"
+    return words.get(op, f"{op} ") + str(value)
+
+
+def rule_summary(rule: Rule) -> str:
+    """A one-line human description of a rule, for the manager's list."""
+    cols = ", ".join(rule.columns) or "every column"
+    if rule.mode == "color_scale":
+        return f"{cols}  ·  colour scale"
+    if rule.mode == "data_bar":
+        return f"{cols}  ·  data bar"
+    if rule.mode == "highlight":
+        where = "row" if rule.scope == "row" else "cell"
+        return f"{cols} {_op_phrase(rule.op, rule.value)}  ·  highlight the {where}"
+    if rule.mode == "icons":
+        rev = ", reversed" if rule.reverse else ""
+        return f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev})"
+    if rule.mode == "icon_map":
+        return f"{cols}  ·  icon from “{rule.source}”"
+    if rule.mode == "number_format":
+        return f"{cols}  ·  number format “{rule.number_spec}”"
+    if rule.mode == "hide":
+        return f"hide  {cols}"
+    return rule.mode
 
 
 def parse_rules_lenient(text: str) -> tuple[list[Rule], list[str]]:

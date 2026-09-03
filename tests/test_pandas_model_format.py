@@ -52,6 +52,21 @@ class TestRules:
         assert _bg(model, 1, 1) == QColor("#3a3d44")
         assert _bg(model, 0, 0) is None
 
+    def test_order_of_application_a_later_cell_rule_beats_a_row_rule(self):
+        df = pd.DataFrame({"status": ["fail", "fail"], "score": [95, 40]})
+        # row red first, then a cell rule for the 95
+        model = PandasModel(df, rules=parse_rules(
+            "status = fail => row red\nscore >= 90 => bg green"))
+        assert _bg(model, 0, 1) == QColor("#2e4d33")   # green wins (later)
+        assert _bg(model, 1, 1) == QColor("#5c2b2b")   # 40 stays row red
+        assert _bg(model, 0, 0) == QColor("#5c2b2b")   # status cell: row red
+
+    def test_order_of_application_row_rule_last_wins(self):
+        df = pd.DataFrame({"status": ["fail"], "score": [95]})
+        model = PandasModel(df, rules=parse_rules(
+            "score >= 90 => bg green\nstatus = fail => row red"))
+        assert _bg(model, 0, 1) == QColor("#5c2b2b")   # red wins (later)
+
     def test_data_bar_role(self):
         model = PandasModel(pd.DataFrame({"a": [0.0, 100.0]}),
                             rules=parse_rules("a bar blue"))

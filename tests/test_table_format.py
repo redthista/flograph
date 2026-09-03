@@ -164,7 +164,7 @@ class TestIconMap:
         assert rule.mode == "icon_map" and rule.columns == ["growth"]
         assert rule.source == "sla"
         assert rule.mapping["breach"][0] == "✗"
-        assert rule.mapping["ok"] == ["✓", "#2e4d33"]
+        assert rule.mapping["ok"] == ["✓", "#5cb85c"]   # vivid glyph green
 
     def test_evaluates_against_another_column(self):
         df = pd.DataFrame({"growth": [0.1, -0.2, 0.3],

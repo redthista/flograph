@@ -7,7 +7,9 @@ carries its own rules box, so this node is only worth reaching for when a
 style is shared across several tables, or a long rule list would clutter a
 Show Table's properties.
 
-Write one rule per line (`#` for a comment), or press **Build a rule…**:
+Press **Rules…** for the manager, or write one rule per line (`#` for a
+comment). Rules apply top to bottom — a later rule wins where two touch the
+same cell:
 
 ```
 revenue              scale green                # 2- or 3-colour gradient
@@ -24,8 +26,7 @@ Colours are a preset name (`green`, `red`, `amber`, `blue`, `grey`) or a
 `#hex`. Scales: `green`, `blue`, `red`, `red-green`, `red-yellow-green`,
 `diverging`. A column name with a space just works; `"quote it"` if it has
 a comma or reads like a keyword. Several rules can target one column (a
-data bar *and* an icon). When two rules set the same thing on a cell the
-later wins.
+data bar *and* an icon).
 
 Anything wrong with a rule — a typo, a column the table doesn't have — is
 reported on the **Show Table** that applies it, where the data is.
