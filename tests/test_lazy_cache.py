@@ -499,6 +499,116 @@ class TestWarmEntries:
         # the alias itself resolves through the resident owner, no disk
         assert engine.cache.outputs_for(dot.id)["value"] == "shared object"
 
+    def test_warming_an_alias_makes_the_alias_itself_resident(
+            self, qtbot, registry, tmp_path):
+        """The regression: the warm marked only the blob *owner* resident and
+        left the alias entry spilled. A card reading the alias — its own, or a
+        Slicer one hop downstream — then sat on its "run the graph" placeholder
+        while the node showed a full green LED, because _restore_cache had
+        already set it DONE. The alias has to come back too, and fire its own
+        became_resident so the waiting card is told."""
+        from flograph.engine import ExecutionEngine
+
+        graph = Graph()
+        const = registry.instantiate("flograph.util.constant", pos=(0, 0))
+        dot = registry.instantiate("flograph.util.reroute", pos=(200, 0))
+        graph.add_node(const)
+        graph.add_node(dot)
+        graph.connect(const.id, "value", dot.id, "value")
+        cache = OutputCache()
+        cache.set(const.id, {"value": "v"}, wall_time=0.01)
+        cache.set(dot.id, {"value": "v"}, wall_time=0.01,
+                  alias_of=const.id, alias_port="value")
+        path = tmp_path / "alias.flograph"
+        save_cache(graph, cache, path)
+
+        engine = ExecutionEngine(graph)
+        register_cache(graph, engine.cache, path)
+        notified = []
+        engine.cache.became_resident.connect(notified.append)
+
+        assert engine.warm_entries([dot.id]) is True
+        qtbot.waitUntil(lambda: engine.cache.is_resident(dot.id),
+                        timeout=10000)
+        # resident with nobody having called outputs_for / materialize
+        assert engine.cache.get(dot.id).outputs == {"value": "v"}
+        assert dot.id in notified, "the alias's own card was never notified"
+
+    def test_a_slicer_over_a_passthrough_can_answer_after_a_warm(
+            self, qtbot, registry, tmp_path):
+        """The Slicer face of the same bug: the card reads its *upstream*
+        value, and when that upstream is a spilled pass-through the warm left
+        it empty — so slicer_options returned None and the card showed
+        "Run the graph to load slicer values." next to a green LED."""
+        from flograph.engine import ExecutionEngine
+        from flograph.engine.introspect import slicer_options
+
+        graph = Graph()
+        src = registry.instantiate("flograph.io.read_csv", pos=(0, 0))
+        dot = registry.instantiate("flograph.util.reroute", pos=(200, 0))
+        slicer = registry.instantiate("flograph.viz.slicer", pos=(400, 0))
+        graph.add_node(src)
+        graph.add_node(dot)
+        graph.add_node(slicer)
+        graph.connect(src.id, "table", dot.id, "value")
+        graph.connect(dot.id, "value", slicer.id, "table")
+        graph.set_param(slicer.id, "column", "region")
+
+        frame = pd.DataFrame({"region": ["n", "s", "n", "e"],
+                              "value": [1, 2, 3, 4]})
+        cache = OutputCache()
+        cache.set(src.id, {"table": frame}, wall_time=0.01)
+        cache.set(dot.id, {"value": frame}, wall_time=0.01,
+                  alias_of=src.id, alias_port="table")
+        cache.set(slicer.id, {"table": frame, "selected": []}, wall_time=0.01)
+        path = tmp_path / "slicer.flograph"
+        save_cache(graph, cache, path)
+
+        engine = ExecutionEngine(graph)
+        register_cache(graph, engine.cache, path)
+        # what _restore_cache warms for a slicer card: the slicer and the
+        # node feeding its table input
+        assert engine.warm_entries([slicer.id, dot.id]) is True
+        qtbot.waitUntil(lambda: engine.cache.is_resident(dot.id),
+                        timeout=10000)
+        assert slicer_options(graph, engine.cache, slicer.id) == \
+            ["e", "n", "s"]
+
+    def test_a_dud_owner_drops_the_aliases_waiting_on_it(
+            self, qtbot, registry, tmp_path, monkeypatch):
+        """If the owner's blob will not read, the aliases re-serving it have
+        lost their source too: drop them and dirty them so they recompute,
+        rather than leaving a card waiting forever."""
+        from flograph.engine import ExecutionEngine
+
+        graph = Graph()
+        const = registry.instantiate("flograph.util.constant", pos=(0, 0))
+        dot = registry.instantiate("flograph.util.reroute", pos=(200, 0))
+        graph.add_node(const)
+        graph.add_node(dot)
+        graph.connect(const.id, "value", dot.id, "value")
+        cache = OutputCache()
+        cache.set(const.id, {"value": "v"}, wall_time=0.01)
+        cache.set(dot.id, {"value": "v"}, wall_time=0.01,
+                  alias_of=const.id, alias_port="value")
+        path = tmp_path / "alias.flograph"
+        save_cache(graph, cache, path)
+
+        engine = ExecutionEngine(graph)
+        register_cache(graph, engine.cache, path)
+        monkeypatch.setattr(
+            cache_persistence, "load_blob",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("gone")))
+
+        failed = []
+        engine.cache_load_failed.connect(failed.append)
+        assert engine.warm_entries([dot.id]) is True
+        qtbot.waitUntil(lambda: not engine.cache.has(const.id), timeout=10000)
+
+        assert not engine.cache.has(dot.id), "the orphaned alias was dropped"
+        assert set(failed) == {const.id, dot.id}
+        assert graph.node(dot.id).dirty and graph.node(const.id).dirty
+
 
 class TestOpenRestoresWhatCardsShow:
     """The user-visible contract: reopening a flow finds it how it was

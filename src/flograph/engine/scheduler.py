@@ -449,6 +449,14 @@ class ExecutionEngine(QObject):
         # cannot decrement the new one's counter and dispatch it early.
         self._warm_generation = 0
         self._warm_signals: list = []
+        # {blob owner -> alias node ids waiting on it}. A display warm
+        # (`warm_entries`) reads a spilled *alias* through its chain root,
+        # but the warm only marks the root resident — the alias entry stays
+        # spilled and any card reading it (its own, or a Slicer downstream)
+        # is stuck on a placeholder with a green LED. Recorded here so
+        # `_on_entry_warmed` unwinds the chain once the root lands, exactly
+        # as `materialize` does on the run path.
+        self._warm_aliases: dict[str, set[str]] = {}
 
         # Where the frames' run flags get their membership from: a callable
         # returning {frame_id: node_ids} for the frames carrying one. The
@@ -667,17 +675,28 @@ class ExecutionEngine(QObject):
             if entry is None or entry.resident:
                 continue
             root = self.cache.blob_source(node_id)
-            if root is None or root in wanted:
+            if root is None:
+                # blob_source gives None when nothing needs reading off disk
+                # — most often an alias whose chain root is already resident
+                # and only wants an in-memory unwind. Cheap enough to do
+                # here; materialize() fires became_resident for the alias,
+                # which is what a waiting card listens on.
+                if entry.alias_of is not None:
+                    self.cache.materialize(node_id)
                 continue
             root_entry = self.cache.get(root)
-            if root_entry is not None and root_entry.blob:
-                wanted[root] = root_entry.blob
+            if root_entry is None or not root_entry.blob:
+                continue
+            wanted.setdefault(root, root_entry.blob)
+            if node_id != root:
+                self._warm_aliases.setdefault(root, set()).add(node_id)
         if not wanted:
             return False
         return self._start_warm(wanted)
 
     def _on_entry_warmed(self, node_id: str, outputs: object) -> None:
         """One spilled entry came back — or didn't."""
+        aliases = self._warm_aliases.pop(node_id, set())
         if outputs is None:
             # Unreadable blob. Drop it and dirty the node so it recomputes:
             # the alternative is handing the flow a missing input and calling
@@ -687,8 +706,21 @@ class ExecutionEngine(QObject):
             if node_id in self.graph.nodes:
                 self.graph.mark_dirty(node_id)
             self.cache_load_failed.emit(node_id)
+            # Every alias that was re-serving this blob has lost its source:
+            # drop it too so its card stops waiting and the node recomputes.
+            for alias_id in aliases:
+                self.cache.evict(alias_id)
+                if alias_id in self.graph.nodes:
+                    self.graph.mark_dirty(alias_id)
+                self.cache_load_failed.emit(alias_id)
             return
         self.cache.mark_resident(node_id, outputs)
+        # The warm only marked the blob owner; unwind the chain so each
+        # spilled alias resolves in memory and its own became_resident fires.
+        for alias_id in aliases:
+            alias_entry = self.cache.get(alias_id)
+            if alias_entry is not None and not alias_entry.resident:
+                self.cache.materialize(alias_id)
 
     def _on_warm_finished(self, generation: int) -> None:
         outstanding = self._warm_remaining.get(generation)
