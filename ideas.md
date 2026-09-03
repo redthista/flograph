@@ -111,25 +111,12 @@ this is the "capture a record" shape it cannot express.
 
 ## N. Dashboard pages
 
-**N3. Set the shape a visual takes on a page** (Dan). Asked for as "a wide
-Plotly chart, or a long thin one". The two page kinds answer this
-differently today:
-
-  On a **report page** (the flowing document), `![[chart|width=50%]]` is
-  the only per-embed control — `EMBED_OPTIONS == ("width",)`, and a test
-  pins it closed. The figure's wide-or-tall shape comes from the figure's
-  own `layout.width` / `layout.height`, set on the chart node or a Plotly
-  Style node; the report only scales the placement width. A `height=` or
-  `ratio=` embed option is the natural addition, plumbed through
-  `parse_options` and `render.plotly_geometry` — but the render code
-  deliberately resists resizing Plotly figures, because the labels do not
-  scale with them. Sits with `ideas_archived.md` #7, which already parks
-  `![[chart|fit]]` and embed alignment.
-
-  On a **dashboard page** (free-form tiles) the capability is already there
-  by dragging a tile's edges; what is missing is a numeric "W:H" input, an
-  aspect lock while resizing, and a few preset ratios — new UI on `TileItem`
-  or the properties panel.
+**N3. Set the shape a visual takes on a dashboard page** (Dan). Asked for as
+"a wide Plotly chart, or a long thin one". On a **report page** this shipped
+as the `ratio=` / `height=` embed options (0.1.12). On a **dashboard page**
+(free-form tiles) the capability is already there by dragging a tile's edges;
+what is missing is a numeric "W:H" input, an aspect lock while resizing, and
+a few preset ratios — new UI on `TileItem` or the properties panel.
 
 ---
 
