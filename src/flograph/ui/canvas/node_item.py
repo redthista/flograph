@@ -1933,10 +1933,11 @@ class NodeItem(QGraphicsObject):
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_table_viewer_proxy()
 
-    def set_table_data(self, table) -> None:
+    def set_table_data(self, table, style=None) -> None:
         """Push a freshly computed DataFrame (or None) onto the embedded
         table view — called from the GUI thread once the engine reports this
-        node done."""
+        node done. `style` is the optional Table Style payload wired into
+        the Style port."""
         view = self._table_viewer_view
         if view is None:
             return
@@ -1950,7 +1951,12 @@ class NodeItem(QGraphicsObject):
         else:
             self._table_viewer_placeholder.hide()
             from ..inspector.pandas_model import PandasModel
-            view.setModel(PandasModel(table, parent=view))
+            from flograph.core.table_format import rules_from_style
+            try:
+                rules = rules_from_style(style)
+            except Exception:
+                rules = []
+            view.setModel(PandasModel(table, parent=view, rules=rules))
             view.show()
         if previous is not None:
             # setModel swaps models without deleting the old one — Qt does

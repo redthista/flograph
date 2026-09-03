@@ -1667,7 +1667,8 @@ class MainWindow(QMainWindow):
         # first output holds the displayed frame: "table" for Show Table,
         # "spec" for Table Spec
         port = node.spec.outputs[0].name if node.spec.outputs else "table"
-        item.set_table_data(entry.outputs.get(port) if entry else None)
+        style = entry.outputs.get("style") if entry else None
+        item.set_table_data(entry.outputs.get(port) if entry else None, style)
 
     def _on_grid_node_succeeded(self, node_id: str) -> None:
         """After a linked Table run, show the merged sheet on the card:

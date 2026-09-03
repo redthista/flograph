@@ -12,8 +12,15 @@ import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QFont
 
+from ..table_delegate import BAR_ROLE, ICON_ROLE
+
 PAGE_SIZE = 500
 FLOAT_PRECISION = 6
+
+# Above this row count a conditional-format style is not evaluated: the
+# per-cell pass is Python-level, and nobody heatmaps a million rows. Matches
+# the ceiling table_sort puts on its text-date sniff.
+CF_MAX_ROWS = 200_000
 
 _NAN_COLOR = QColor("#6b7280")
 
@@ -25,14 +32,27 @@ _NAN_COLOR = QColor("#6b7280")
 _DISPLAY = int(Qt.DisplayRole)
 _EDIT = int(Qt.EditRole)
 _FOREGROUND = int(Qt.ForegroundRole)
+_BACKGROUND = int(Qt.BackgroundRole)
 _FONT = int(Qt.FontRole)
 _ALIGNMENT = int(Qt.TextAlignmentRole)
 _TOOLTIP = int(Qt.ToolTipRole)
 _HORIZONTAL = Qt.Horizontal
 _ALIGN_NUMBER = int(Qt.AlignRight | Qt.AlignVCenter)
+
 # the roles that need the cell's value at all; anything else can answer
 # without touching the frame
 _VALUE_ROLES = frozenset({_DISPLAY, _EDIT, _FOREGROUND, _FONT, _ALIGNMENT})
+# ...plus the format roles, used only when a style is actually wired in
+_VALUE_ROLES_FMT = _VALUE_ROLES | {_BACKGROUND, BAR_ROLE, ICON_ROLE}
+
+
+def _bold() -> QFont:
+    font = QFont()
+    font.setBold(True)
+    return font
+
+
+_BOLD_FONT = _bold()
 
 
 def _italic() -> QFont:
@@ -53,7 +73,7 @@ def _is_missing(value: Any) -> bool:
 
 
 class PandasModel(QAbstractTableModel):
-    def __init__(self, df: pd.DataFrame, parent=None) -> None:
+    def __init__(self, df: pd.DataFrame, parent=None, rules=None) -> None:
         super().__init__(parent)
         self._df = df
         # The frame as it arrived. sort() reorders a *copy* off this, so
@@ -61,6 +81,57 @@ class PandasModel(QAbstractTableModel):
         # source (and anything downstream sharing it) is never touched.
         self._source = df
         self._loaded = min(PAGE_SIZE, len(df))
+        self._set_rules(rules)
+
+    # ----------------------------------------------- conditional formatting
+
+    def _set_rules(self, rules) -> None:
+        from flograph.core.table_format import split_rules
+        self._rules = list(rules or [])
+        self._col_rules, self._row_rules = split_rules(self._rules)
+        # A style is only honoured on a table small enough to walk per-cell.
+        self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS
+        self._value_roles = _VALUE_ROLES_FMT if self._cf_active else _VALUE_ROLES
+        self._col_stats: dict = {}          # col index -> ColumnStats
+        self._col_style_cache: dict = {}    # col index -> list[CellStyle | None]
+        self._row_styles = None             # list[CellStyle | None] | None
+
+    def set_rules(self, rules) -> None:
+        """Swap the formatting rules and repaint — no model rebuild, so a
+        sort in progress survives."""
+        self.beginResetModel()
+        self._set_rules(rules)
+        self.endResetModel()
+
+    def _cell_style(self, row: int, col: int):
+        if not self._cf_active:
+            return None
+        from flograph.core.table_format import (
+            column_stats, evaluate_column, evaluate_rows)
+        styles = self._col_style_cache.get(col)
+        if styles is None:
+            name = str(self._df.columns[col])
+            rules = [r for r in self._col_rules
+                     if not r.columns or name in r.columns]
+            if rules:
+                stats = self._col_stats.get(col)
+                if stats is None:
+                    stats = column_stats(self._source.iloc[:, col])
+                    self._col_stats[col] = stats
+                styles = evaluate_column(self._df.iloc[:, col], rules, stats)
+            else:
+                styles = []
+            self._col_style_cache[col] = styles
+        cell = styles[row] if row < len(styles) else None
+        if self._row_rules:
+            if self._row_styles is None:
+                self._row_styles = evaluate_rows(self._df, self._row_rules)
+            band = self._row_styles[row] if row < len(self._row_styles) else None
+            if band is not None:
+                # a whole-row flag wins the fill: "this row is bad" should
+                # read across every cell, even one a column rule also colours
+                return band.over(cell) if cell is not None else band
+        return cell
 
     def dataframe(self) -> pd.DataFrame:
         """The frame behind the model, whole — not just the rows paged in.
@@ -106,6 +177,10 @@ class PandasModel(QAbstractTableModel):
         except Exception:
             self._df = self._source
         self._loaded = min(PAGE_SIZE, len(self._df))
+        # colours follow values: the per-cell styles were built against the
+        # old order, the column stats (whole-column min/max/…) still hold
+        self._col_style_cache.clear()
+        self._row_styles = None
         self.endResetModel()
 
     # ------------------------------------------------------------- shape
@@ -135,12 +210,18 @@ class PandasModel(QAbstractTableModel):
         role = int(role)
         # Bail before touching the frame: Qt asks for roles this model has
         # no opinion on, and `iat` is a real pandas lookup, not a free one.
-        if role not in _VALUE_ROLES or not index.isValid():
+        # `_value_roles` widens to include the format roles only when a
+        # style is actually wired in, so an unformatted table pays nothing.
+        if role not in self._value_roles or not index.isValid():
             return None
         value = self._df.iat[index.row(), index.column()]
+        style = self._cell_style(index.row(), index.column()) \
+            if self._cf_active else None
         if role == _DISPLAY:
             if _is_missing(value):
                 return "NaN"
+            if style is not None and style.text is not None:
+                return style.text
             if isinstance(value, float):
                 return f"{value:.{FLOAT_PRECISION}g}"
             return str(value)
@@ -159,10 +240,30 @@ class PandasModel(QAbstractTableModel):
                 # shortest string that round-trips, so nothing is lost.
                 return repr(float(value))
             return str(value)
-        if role == _FOREGROUND and _is_missing(value):
-            return _NAN_COLOR
-        if role == _FONT and _is_missing(value):
-            return _MISSING_FONT
+        if role == _FOREGROUND:
+            if _is_missing(value):
+                return _NAN_COLOR
+            if style is not None and style.fg:
+                return QColor(style.fg)
+            return None
+        if role == _FONT:
+            if _is_missing(value):
+                return _MISSING_FONT
+            if style is not None and style.bold:
+                return _BOLD_FONT
+            return None
+        if role == _BACKGROUND:
+            if style is not None and style.bg and not _is_missing(value):
+                return QColor(style.bg)
+            return None
+        if role == BAR_ROLE:
+            if style is not None and style.bar is not None:
+                return (style.bar, style.bar_color, style.bar_mode)
+            return None
+        if role == ICON_ROLE:
+            if style is not None and style.icon:
+                return (style.icon, style.icon_color)
+            return None
         if role == _ALIGNMENT:
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 return _ALIGN_NUMBER

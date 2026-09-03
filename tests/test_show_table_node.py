@@ -25,10 +25,11 @@ def env(qtbot, registry):
 
 def test_show_table_is_registered_with_passthrough_ports(registry):
     spec = registry.get("flograph.viz.show_table")
-    assert [p.name for p in spec.inputs] == ["table"]
-    assert [p.name for p in spec.outputs] == ["table"]
+    assert [p.name for p in spec.inputs] == ["table", "style"]
+    assert [p.name for p in spec.outputs] == ["table", "style"]
     assert spec.inputs[0].type == PortType.DATAFRAME
     assert spec.outputs[0].type == PortType.DATAFRAME
+    assert spec.input("style").optional is True
     assert can_connect(PortType.DATAFRAME, spec.inputs[0].type)
     assert spec.param("width") is not None
     assert spec.param("height") is not None
@@ -42,7 +43,18 @@ def test_show_table_runs_as_passthrough(registry):
     run = compile_run(spec.source, "test-show-table")
     sentinel = object()
     out = run(FakeContext(params=spec.default_params()), table=sentinel)
-    assert out == {"table": sentinel}
+    assert out == {"table": sentinel, "style": None}
+
+
+def test_show_table_re_emits_the_style_payload(registry):
+    from flograph.core import compile_run
+    from tests.conftest import FakeContext
+
+    spec = registry.get("flograph.viz.show_table")
+    run = compile_run(spec.source, "test-show-table")
+    style = [{"mode": "color_scale", "columns": ["a"]}]
+    out = run(FakeContext(params=spec.default_params()), table=1, style=style)
+    assert out == {"table": 1, "style": style}
 
 
 def test_show_table_item_embeds_a_table_view_with_placeholder(env, registry):
@@ -54,8 +66,8 @@ def test_show_table_item_embeds_a_table_view_with_placeholder(env, registry):
     assert item._table_viewer_placeholder is not None
     assert item._table_viewer_placeholder.isVisible()
     assert item._table_viewer_view.isHidden()
-    assert list(item.input_ports) == ["table"]
-    assert list(item.output_ports) == ["table"]
+    assert list(item.input_ports) == ["table", "style"]
+    assert list(item.output_ports) == ["table", "style"]
 
 
 def test_show_table_set_table_data_swaps_placeholder_for_grid(env, registry):
@@ -136,3 +148,34 @@ def test_running_the_graph_pushes_the_table_onto_the_canvas_card(qtbot, window):
     assert item._table_viewer_view.isVisible()
     assert item._table_viewer_placeholder.isHidden()
     assert item._table_viewer_view.model().rowCount() == 3
+
+
+def test_table_style_wire_colours_the_card(qtbot, window):
+    import json
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+
+    win = window
+    table = win.registry.instantiate("flograph.io.table", pos=(-300, 0))
+    style = win.registry.instantiate("flograph.viz.table_style", pos=(-300, 200))
+    show = win.registry.instantiate("flograph.viz.show_table", pos=(300, 0))
+    for node in (table, style, show):
+        win.graph.add_node(node)
+    win.graph.set_param(table.id, "data", json.dumps({
+        "columns": ["x"], "rows": [["10"], ["20"], ["30"]],
+    }))
+    win.graph.set_param(style.id, "cf_mode", "colour scale")
+    win.graph.set_param(style.id, "cf_columns", "x")
+    win.graph.set_param(style.id, "cf_scale", "blue")
+    win.graph.connect(table.id, "table", show.id, "table")
+    win.graph.connect(style.id, "style", show.id, "style")
+
+    with qtbot.waitSignal(win.engine.run_finished, timeout=20000) as blocker:
+        win.engine.run_all()
+    assert blocker.args[0], "run finished with a node failure"
+
+    model = win.scene.node_items[show.id]._table_viewer_view.model()
+    assert model._cf_active is True
+    assert isinstance(model.data(model.index(0, 0), Qt.BackgroundRole), QColor)
+    assert isinstance(model.data(model.index(2, 0), Qt.BackgroundRole), QColor)

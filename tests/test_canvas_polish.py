@@ -724,7 +724,9 @@ def run(ctx, a, b):
 
     def test_single_input_card_port_position_is_unchanged(self, env, registry):
         graph, stack, scene = env
-        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        # Table Spec is a single-input table_viewer card (Show Table now also
+        # takes an optional Style input).
+        node = graph.add_node(registry.instantiate("flograph.viz.table_spec"))
         item = scene.node_items[node.id]
         assert item.table_viewer
         assert len(item.input_ports) == 1

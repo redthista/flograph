@@ -152,6 +152,12 @@ class DataTableView(QTableView):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_menu)
 
+        # Draws data bars and icon glyphs when the model carries a
+        # conditional-format style; a pure pass-through otherwise, so this is
+        # harmless on the inspector / spec views that never have one.
+        from .table_delegate import ConditionalFormatDelegate
+        self.setItemDelegate(ConditionalFormatDelegate(self))
+
         from .table_sort import HeaderSortCycler
         self._sort_cycler = HeaderSortCycler(self.horizontalHeader())
         self._sort_cycler.sortRequested.connect(self._sort_requested)
@@ -187,17 +193,22 @@ class DataTableView(QTableView):
         model = self.model()
         if model is None:
             return
+        from .table_delegate import ICON_ROLE
         header = self.horizontalHeader()
         metrics = QFontMetrics(self.font())
         rows = min(model.rowCount(), FIT_SAMPLE_ROWS)
         for col in range(model.columnCount()):
             width = header.sectionSizeHint(col)
+            icon_pad = 0
             for row in range(rows):
-                text = model.data(model.index(row, col), Qt.DisplayRole)
+                index = model.index(row, col)
+                text = model.data(index, Qt.DisplayRole)
                 if text:
                     width = max(width, metrics.horizontalAdvance(str(text)) + 16)
+                if not icon_pad and model.data(index, ICON_ROLE):
+                    icon_pad = 24
             self.setColumnWidth(
-                col, max(MIN_COL_WIDTH, min(width, MAX_COL_WIDTH)))
+                col, max(MIN_COL_WIDTH, min(width + icon_pad, MAX_COL_WIDTH)))
 
     def keyPressEvent(self, event) -> None:
         """Ctrl+C here rather than through a QShortcut.
