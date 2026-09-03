@@ -18,11 +18,12 @@ as*, and the extra fields for that mode appear.
     column with negatives grows bars both ways from zero.
   * **Highlight** colours the cells (or whole rows) that pass a test —
     `> 90`, `contains fail`, `between 10 20`, `= closed`.
-  * **Icons** put a 3-tier glyph (🔴 🟡 🟢, arrows, ✅ ➖ ❌) beside the
-    value, split at the column's thirds.
+  * **Icons** put a 3-tier glyph (● ● ●, arrows, ✓ – ✗) beside the value,
+    split at the column's thirds.
 
 **More rules** takes one rule per line for anything past a single quick
-rule. `#` starts a comment.
+rule. `#` starts a comment. Several rules can target the same column — a
+data bar *and* an icon, say — and they stack.
 
 ```
 revenue              scale green                # 2- or 3-colour gradient
@@ -31,13 +32,21 @@ units                bar blue                   # in-cell data bar
 score   >= 90        => bg green, bold          # highlight a cell
 status  contains fail => bg red
 status  = closed     => row grey                # highlight the whole row
-health               icons traffic              # 3-tier icon set
+health               icons traffic              # 3-tier icon set on health
 amount               format $,.0f               # per-column number format
+growth               bar blue                   # a bar…
+growth iconmap sla: breach=✗ red, ok=✓ green    # …and an icon from another column
+hide sla                                        # keep the helper column out of view
 ```
+
+`iconmap` draws an icon in one column decided by the **exact text value**
+of another: `<shown column> iconmap <source column>: value=icon colour, …`.
+`hide` drops a column from the Show Table view while leaving it in the
+frame for rules (and downstream) to use.
 
 Colours are a preset name (`green`, `red`, `amber`, `blue`, `grey`) or a
 `#hex`. Scales: `green`, `blue`, `red`, `red-green`, `red-yellow-green`,
-`diverging`. When two rules touch the same cell the later one wins.
+`diverging`. When two rules set the same thing on one cell the later wins.
 """
 NODE = {
     "label": "Table Style",

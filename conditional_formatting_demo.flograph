@@ -8,7 +8,7 @@
         "type": "flograph.io.table",
         "pos": [-540, 0],
         "params": {
-          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"number\"}, {\"name\": \"growth\", \"type\": \"number\"}, {\"name\": \"units\", \"type\": \"integer\"}, {\"name\": \"status\", \"type\": \"text\"}, {\"name\": \"score\", \"type\": \"integer\"}], \"rows\": [[\"North\", \"320\", \"0.12\", \"40\", \"ok\", \"88\"], [\"South\", \"190\", \"-0.05\", \"22\", \"watch\", \"61\"], [\"East\", \"450\", \"0.34\", \"55\", \"ok\", \"95\"], [\"West\", \"275\", \"-0.18\", \"33\", \"fail\", \"44\"], [\"Central\", \"380\", \"0.08\", \"47\", \"ok\", \"79\"], [\"Coastal\", \"130\", \"-0.22\", \"15\", \"fail\", \"38\"], [\"Mountain\", \"410\", \"0.27\", \"51\", \"ok\", \"91\"], [\"Valley\", \"240\", \"0.03\", \"28\", \"watch\", \"67\"]]}",
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"number\"}, {\"name\": \"growth\", \"type\": \"number\"}, {\"name\": \"units\", \"type\": \"integer\"}, {\"name\": \"status\", \"type\": \"text\"}, {\"name\": \"score\", \"type\": \"integer\"}, {\"name\": \"sla\", \"type\": \"text\"}], \"rows\": [[\"North\", \"320\", \"0.12\", \"40\", \"ok\", \"88\", \"ok\"], [\"South\", \"190\", \"-0.05\", \"22\", \"watch\", \"61\", \"warn\"], [\"East\", \"450\", \"0.34\", \"55\", \"ok\", \"95\", \"ok\"], [\"West\", \"275\", \"-0.18\", \"33\", \"fail\", \"44\", \"breach\"], [\"Central\", \"380\", \"0.08\", \"47\", \"ok\", \"79\", \"ok\"], [\"Coastal\", \"130\", \"-0.22\", \"15\", \"fail\", \"38\", \"breach\"], [\"Mountain\", \"410\", \"0.27\", \"51\", \"ok\", \"91\", \"ok\"], [\"Valley\", \"240\", \"0.03\", \"28\", \"watch\", \"67\", \"warn\"]]}",
           "width": 360,
           "height": 260
         },
@@ -23,7 +23,7 @@
           "cf_columns": "revenue",
           "cf_mode": "colour scale",
           "cf_scale": "green",
-          "format_rules": "growth bar blue\nunits icons traffic\nscore >= 90 => bg green, bold\nscore < 50 => bg red, fg #fff\nstatus = fail => row red\nrevenue format $,.0f"
+          "format_rules": "growth bar blue\ngrowth iconmap sla: breach=✗ red, warn=! amber, ok=✓ green\nunits icons traffic\nscore >= 90 => bg green, bold\nscore < 50 => bg red, fg #fff\nstatus = fail => row red\nrevenue format $,.0f\nhide sla"
         },
         "code": null,
         "label": null

@@ -849,15 +849,18 @@ class TileItem(QGraphicsObject):
                 self._placeholder.show()
             else:
                 from ..inspector.pandas_model import PandasModel
-                from flograph.core.table_format import rules_from_style
+                from flograph.core.table_format import (
+                    hidden_columns, rules_from_style)
                 style = self._engine.cache.outputs_for(
                     self.tile.node_id).get("style")
                 try:
                     rules = rules_from_style(style)
+                    hidden = hidden_columns(style)
                 except Exception:
-                    rules = []
+                    rules, hidden = [], []
                 self._table_view.setModel(
-                    PandasModel(value, parent=self._table_view, rules=rules))
+                    PandasModel(value, parent=self._table_view, rules=rules,
+                                hidden=hidden))
                 self._placeholder.hide()
                 widget.show()
             if previous is not None:

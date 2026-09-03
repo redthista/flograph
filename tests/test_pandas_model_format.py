@@ -84,6 +84,39 @@ class TestSortSurvival:
         assert _bg(model, 0, 0) == top               # cleared -> original order
 
 
+class TestHiddenColumns:
+    def test_hidden_column_is_dropped_from_the_view(self):
+        df = pd.DataFrame({"shown": [1, 2], "helper": ["a", "b"], "x": [3, 4]})
+        model = PandasModel(df, hidden=["helper"])
+        assert model.columnCount() == 2
+        headers = [model.headerData(c, Qt.Horizontal, Qt.DisplayRole)
+                   for c in range(2)]
+        assert headers == ["shown", "x"]
+        assert model.data(model.index(0, 1), Qt.DisplayRole) == "3"  # 'x'
+
+    def test_iconmap_reads_a_hidden_column(self):
+        df = pd.DataFrame({"growth": [0.1, 0.2],
+                           "sla": ["breach", "ok"]})
+        model = PandasModel(
+            df, hidden=["sla"],
+            rules=parse_rules("growth iconmap sla: breach=✗ red, ok=✓ green"))
+        assert model.columnCount() == 1
+        assert model.data(model.index(0, 0), ICON_ROLE)[0] == "✗"
+        assert model.data(model.index(1, 0), ICON_ROLE)[0] == "✓"
+
+    def test_dataframe_export_excludes_hidden(self):
+        df = pd.DataFrame({"a": [1], "secret": [2]})
+        model = PandasModel(df, hidden=["secret"])
+        assert list(model.dataframe().columns) == ["a"]
+
+    def test_sort_maps_through_the_projection(self):
+        df = pd.DataFrame({"h": [9, 9], "val": [2, 1]})
+        model = PandasModel(df, hidden=["h"])
+        model.sort(0, Qt.AscendingOrder)          # visible col 0 == 'val'
+        assert [model.data(model.index(r, 0), Qt.DisplayRole)
+                for r in range(2)] == ["1", "2"]
+
+
 def test_set_rules_swaps_formatting_live():
     model = PandasModel(pd.DataFrame({"a": [1, 2, 3]}))
     assert _bg(model, 0, 0) is None

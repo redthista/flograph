@@ -1951,12 +1951,15 @@ class NodeItem(QGraphicsObject):
         else:
             self._table_viewer_placeholder.hide()
             from ..inspector.pandas_model import PandasModel
-            from flograph.core.table_format import rules_from_style
+            from flograph.core.table_format import (
+                hidden_columns, rules_from_style)
             try:
                 rules = rules_from_style(style)
+                hidden = hidden_columns(style)
             except Exception:
-                rules = []
-            view.setModel(PandasModel(table, parent=view, rules=rules))
+                rules, hidden = [], []
+            view.setModel(PandasModel(table, parent=view, rules=rules,
+                                      hidden=hidden))
             view.show()
         if previous is not None:
             # setModel swaps models without deleting the old one — Qt does

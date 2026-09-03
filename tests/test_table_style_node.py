@@ -31,7 +31,7 @@ def test_registered_with_no_input_and_a_style_output(registry):
 
 def test_off_mode_with_no_text_emits_an_empty_payload(registry):
     out, _ = _run(registry, {"cf_mode": "off"})
-    assert out == {"style": {"rules": [], "errors": []}}
+    assert out == {"style": {"rules": [], "hide": [], "errors": []}}
 
 
 def test_structured_colour_scale_emits_a_rule_dict(registry):

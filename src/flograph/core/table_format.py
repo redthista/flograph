@@ -79,7 +79,8 @@ _ICON_LABELS = {
     "check / cross": "check", "check": "check", "cross": "check",
 }
 
-_MODES = {"color_scale", "data_bar", "highlight", "icons", "number_format"}
+_MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
+          "number_format"}
 _OPS = {">", ">=", "<", "<=", "=", "!=", "between",
         "contains", "starts", "ends", "matches", "empty", "notempty"}
 
@@ -111,6 +112,9 @@ class Rule:
     icon_set: Optional[str] = None
     thresholds: Optional[list] = None
     reverse: bool = False
+    # icon_map / any rule reading a different column than the one it draws in
+    source: Optional[str] = None              # column whose value decides it
+    mapping: Optional[dict] = None            # exact value -> [glyph, colour]
     # number_format
     number_spec: Optional[str] = None
 
@@ -276,21 +280,58 @@ def parse_op_value(text: str) -> tuple:
     return ("=", _coerce(raw))
 
 
-_KEYWORDS = ("scale", "bar", "icons", "icon", "format")
+_KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "format")
+
+
+def _parse_icon_map(lineno: int, arg: str) -> tuple:
+    """`"severity: high=▲ #d9534f, med=■ amber, low=▼ green"`
+    → (source column, {value: [glyph, colour]})."""
+    source, sep, body = arg.partition(":")
+    source = source.strip()
+    if not sep or not source:
+        raise ValueError(
+            f"line {lineno}: 'iconmap' needs 'source-column: value=icon, …'")
+    mapping: dict = {}
+    for chunk in body.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        key, eq, spec = chunk.partition("=")
+        if not eq or not key.strip() or not spec.strip():
+            raise ValueError(
+                f"line {lineno}: don't understand icon mapping {chunk!r} "
+                f"(use 'value=icon colour')")
+        parts = spec.split()
+        glyph = parts[0]
+        color = _resolve_color(parts[1]) if len(parts) > 1 else None
+        mapping[key.strip()] = [glyph, color]
+    if not mapping:
+        raise ValueError(f"line {lineno}: 'iconmap' has no value=icon pairs")
+    return source, mapping
 
 
 def _parse_token_line(lineno: int, line: str) -> Rule:
     tokens = line.split()
+
+    if tokens and tokens[0].lower() == "hide":
+        cols = _column_list(" ".join(tokens[1:]))
+        if not cols:
+            raise ValueError(f"line {lineno}: 'hide' needs a column name")
+        return Rule("hide", cols)
+
     kw_idx = next((i for i in range(len(tokens) - 1, -1, -1)
                    if tokens[i].lower() in _KEYWORDS), None)
     if kw_idx is None or kw_idx == 0:
         raise ValueError(
-            f"line {lineno}: expected 'column scale|bar|icons|format ...' "
-            f"or 'condition => style', got {line!r}")
+            f"line {lineno}: expected 'column scale|bar|icons|iconmap|format "
+            f"…', 'hide column', or 'condition => style', got {line!r}")
     columns = _column_list(" ".join(tokens[:kw_idx]))
     keyword = tokens[kw_idx].lower()
     arg = " ".join(tokens[kw_idx + 1:]).strip()
 
+    if keyword == "iconmap":
+        source, mapping = _parse_icon_map(lineno, arg)
+        return Rule("icon_map", columns, source=source, mapping=mapping)
     if keyword == "scale":
         preset = _SCALE_PRESETS.get(arg.lower().replace(" ", "-")
                                     or "red-yellow-green")
@@ -461,7 +502,18 @@ def rules_from_params(params: dict) -> tuple[list[Rule], list[str]]:
 def style_payload(params: dict) -> dict:
     """What the Table Style node emits on its ``style`` port."""
     rules, errors = rules_from_params(params)
-    return {"rules": [r.to_dict() for r in rules], "errors": errors}
+    hide = [c for r in rules if r.mode == "hide" for c in r.columns]
+    keep = [r for r in rules if r.mode != "hide"]
+    return {"rules": [r.to_dict() for r in keep], "hide": hide,
+            "errors": errors}
+
+
+def hidden_columns(style_obj: Any) -> list[str]:
+    """Columns the style asks Show Table to keep out of view — helper
+    columns a rule reads but the reader shouldn't see."""
+    if isinstance(style_obj, dict):
+        return [str(c) for c in (style_obj.get("hide") or [])]
+    return []
 
 
 def rules_from_style(style_obj: Any) -> list[Rule]:
@@ -495,8 +547,13 @@ def style_report(style_obj: Any, df=None) -> list[str]:
     columns = getattr(df, "columns", None)
     if columns is not None:
         known = {str(c) for c in columns}
-        missing = sorted({c for rule in rules_from_style(style_obj)
-                          for c in rule.columns if c not in known})
+        named: set = set()
+        for rule in rules_from_style(style_obj):
+            named.update(rule.columns)
+            if rule.source:
+                named.add(rule.source)
+        named.update(hidden_columns(style_obj))
+        missing = sorted(c for c in named if c not in known)
         if missing:
             messages.append("column(s) not in the table: " + ", ".join(missing))
     return messages
@@ -577,8 +634,12 @@ def _format_value(value: Any, spec: str) -> Optional[str]:
         return None
 
 
-def evaluate_column(series, rules, stats: ColumnStats) -> list:
-    """One ``CellStyle | None`` per row of `series`, in its current order."""
+def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
+    """One ``CellStyle | None`` per row of `series`, in its current order.
+
+    `frame` is the whole (current-order) DataFrame — needed only by a rule
+    that reads a *different* column than the one it draws in (``iconmap``).
+    """
     import pandas as pd
 
     n = len(series)
@@ -652,6 +713,22 @@ def evaluate_column(series, rules, stats: ColumnStats) -> list:
                 glyph, color = glyphs[tier]
                 contrib[i] = CellStyle(icon=glyph, icon_color=color)
 
+        elif rule.mode == "icon_map":
+            src = None
+            if frame is not None and rule.source in getattr(frame, "columns", []):
+                src = list(frame[rule.source])
+            mapping = rule.mapping or {}
+            if src is not None:
+                for i, v in enumerate(src):
+                    if _is_missing(v):
+                        continue
+                    pair = mapping.get(str(v).strip())
+                    if pair:
+                        glyph = pair[0] if len(pair) else None
+                        color = pair[1] if len(pair) > 1 else None
+                        if glyph:
+                            contrib[i] = CellStyle(icon=glyph, icon_color=color)
+
         elif rule.mode == "number_format":
             for i, v in enumerate(values):
                 text = _format_value(v, rule.number_spec or "")
@@ -690,7 +767,10 @@ def evaluate_rows(df, row_rules) -> list:
 
 
 def split_rules(rules) -> tuple:
-    """(column rules, whole-row rules)."""
-    row = [r for r in rules if r.mode == "highlight" and r.scope == "row"]
-    col = [r for r in rules if not (r.mode == "highlight" and r.scope == "row")]
+    """(column rules, whole-row rules) — ``hide`` directives are neither."""
+    row, col = [], []
+    for r in rules:
+        if r.mode == "hide":
+            continue
+        (row if r.mode == "highlight" and r.scope == "row" else col).append(r)
     return col, row

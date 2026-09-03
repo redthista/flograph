@@ -133,6 +133,51 @@ def test_parse_rules_lenient_skips_bad_keeps_good():
     assert len(errors) == 1
 
 
+class TestIconMap:
+    def test_parses_source_and_mapping(self):
+        (rule,) = parse_rules(
+            "growth iconmap sla: breach=✗ red, ok=✓ green")
+        assert rule.mode == "icon_map" and rule.columns == ["growth"]
+        assert rule.source == "sla"
+        assert rule.mapping["breach"][0] == "✗"
+        assert rule.mapping["ok"] == ["✓", "#2e4d33"]
+
+    def test_evaluates_against_another_column(self):
+        df = pd.DataFrame({"growth": [0.1, -0.2, 0.3],
+                           "sla": ["ok", "breach", "ok"]})
+        (rule,) = parse_rules("growth iconmap sla: breach=✗ red, ok=✓ green")
+        styles = evaluate_column(df["growth"], [rule], column_stats(df["growth"]),
+                                 frame=df)
+        assert styles[0].icon == "✓" and styles[1].icon == "✗"
+        assert styles[2].icon == "✓"
+
+    def test_composes_with_a_data_bar_on_the_same_column(self):
+        df = pd.DataFrame({"g": [1.0, 2.0], "s": ["ok", "bad"]})
+        rules = parse_rules("g bar blue\ng iconmap s: bad=! red, ok=. green")
+        styles = evaluate_column(df["g"], rules, column_stats(df["g"]), frame=df)
+        assert styles[1].bar is not None and styles[1].icon == "!"
+
+    def test_missing_mapping_body_raises(self):
+        with pytest.raises(ValueError, match="value=icon"):
+            parse_rules("g iconmap s:")
+
+
+class TestHide:
+    def test_hide_line_becomes_a_hide_rule(self):
+        (rule,) = parse_rules("hide helper1, helper2")
+        assert rule.mode == "hide" and rule.columns == ["helper1", "helper2"]
+
+    def test_style_payload_separates_hide_from_rules(self):
+        payload = style_payload({
+            "format_rules": "a scale green\nhide secret\nb bar blue"})
+        assert [r["mode"] for r in payload["rules"]] == ["color_scale", "data_bar"]
+        assert payload["hide"] == ["secret"]
+
+    def test_hide_with_no_column_is_an_error(self):
+        payload = style_payload({"format_rules": "hide"})
+        assert payload["hide"] == [] and len(payload["errors"]) == 1
+
+
 class TestRulesFromStyle:
     def test_round_trips_dicts(self):
         original = parse_rules("a scale green\nb >= 1 => bg red")

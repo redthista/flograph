@@ -76,13 +76,19 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         text_pen = opt.palette.color(
             QPalette.HighlightedText if selected else QPalette.Text)
 
+        # a cell/row highlight has painted a fill; a semantic icon colour
+        # (a red breach glyph on a red row) would vanish into it, so on a
+        # filled cell the icon takes the already-contrasted text colour
+        filled = index.data(Qt.BackgroundRole) is not None
+
         text_rect = inner
         if icon:
             try:
                 glyph, icon_color = icon
             except (TypeError, ValueError):
                 glyph, icon_color = str(icon), None
-            painter.setPen(QColor(icon_color) if icon_color and not selected
+            painter.setPen(QColor(icon_color)
+                           if icon_color and not selected and not filled
                            else text_pen)
             painter.drawText(
                 QRect(inner.left(), inner.top(), _ICON_CELL_W, inner.height()),

@@ -73,7 +73,8 @@ def _is_missing(value: Any) -> bool:
 
 
 class PandasModel(QAbstractTableModel):
-    def __init__(self, df: pd.DataFrame, parent=None, rules=None) -> None:
+    def __init__(self, df: pd.DataFrame, parent=None, rules=None,
+                 hidden=None) -> None:
         super().__init__(parent)
         self._df = df
         # The frame as it arrived. sort() reorders a *copy* off this, so
@@ -81,7 +82,17 @@ class PandasModel(QAbstractTableModel):
         # source (and anything downstream sharing it) is never touched.
         self._source = df
         self._loaded = min(PAGE_SIZE, len(df))
+        # Column projection: which source columns are shown, in order. A
+        # `hide` directive keeps a helper column in the frame (a rule may
+        # read it) but out of the view.
+        hide = {str(c) for c in (hidden or [])}
+        self._visible = [i for i, c in enumerate(df.columns)
+                         if str(c) not in hide] if hide else None
         self._set_rules(rules)
+
+    def _src(self, col: int) -> int:
+        """A visible column index -> its position in the underlying frame."""
+        return col if self._visible is None else self._visible[col]
 
     # ----------------------------------------------- conditional formatting
 
@@ -90,7 +101,8 @@ class PandasModel(QAbstractTableModel):
         self._rules = list(rules or [])
         self._col_rules, self._row_rules = split_rules(self._rules)
         # A style is only honoured on a table small enough to walk per-cell.
-        self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS
+        self._cf_active = (bool(self._col_rules or self._row_rules)
+                           and len(self._df) <= CF_MAX_ROWS)
         self._value_roles = _VALUE_ROLES_FMT if self._cf_active else _VALUE_ROLES
         self._col_stats: dict = {}          # col index -> ColumnStats
         self._col_style_cache: dict = {}    # col index -> list[CellStyle | None]
@@ -118,7 +130,8 @@ class PandasModel(QAbstractTableModel):
                 if stats is None:
                     stats = column_stats(self._source.iloc[:, col])
                     self._col_stats[col] = stats
-                styles = evaluate_column(self._df.iloc[:, col], rules, stats)
+                styles = evaluate_column(self._df.iloc[:, col], rules, stats,
+                                         frame=self._df)
             else:
                 styles = []
             self._col_style_cache[col] = styles
@@ -138,9 +151,12 @@ class PandasModel(QAbstractTableModel):
 
         Copying the whole table goes through this rather than through the
         view, so asking for a million rows does not first have to fetchMore
-        its way there.
+        its way there. Hidden helper columns are dropped: a copy is of what
+        you see.
         """
-        return self._df
+        if self._visible is None:
+            return self._df
+        return self._df.iloc[:, self._visible]
 
     # ------------------------------------------------------------- sorting
 
@@ -158,6 +174,7 @@ class PandasModel(QAbstractTableModel):
         the key computation or the reorder leaves the rows as they were
         rather than escaping into the Qt slot that called this.
         """
+        column = self._src(column) if 0 <= column < self.columnCount() else column
         if not 0 <= column < len(self._source.columns):
             return
         from ..table_sort import pandas_sort_key
@@ -189,7 +206,10 @@ class PandasModel(QAbstractTableModel):
         return 0 if parent.isValid() else self._loaded
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._df.columns)
+        if parent.isValid():
+            return 0
+        return (len(self._df.columns) if self._visible is None
+                else len(self._visible))
 
     def canFetchMore(self, parent: QModelIndex = QModelIndex()) -> bool:
         return not parent.isValid() and self._loaded < len(self._df)
@@ -214,9 +234,9 @@ class PandasModel(QAbstractTableModel):
         # style is actually wired in, so an unformatted table pays nothing.
         if role not in self._value_roles or not index.isValid():
             return None
-        value = self._df.iat[index.row(), index.column()]
-        style = self._cell_style(index.row(), index.column()) \
-            if self._cf_active else None
+        col = self._src(index.column())
+        value = self._df.iat[index.row(), col]
+        style = self._cell_style(index.row(), col) if self._cf_active else None
         if role == _DISPLAY:
             if _is_missing(value):
                 return "NaN"
@@ -274,8 +294,8 @@ class PandasModel(QAbstractTableModel):
         role = int(role)
         if role == _DISPLAY:
             if orientation == _HORIZONTAL:
-                return str(self._df.columns[section])
+                return str(self._df.columns[self._src(section)])
             return str(self._df.index[section])
         if role == _TOOLTIP and orientation == _HORIZONTAL:
-            return f"dtype: {self._df.dtypes.iloc[section]}"
+            return f"dtype: {self._df.dtypes.iloc[self._src(section)]}"
         return None
