@@ -16,29 +16,41 @@
         "label": "Regional Sales"
       },
       {
-        "id": "cf02tablestyle00000000000002",
-        "type": "flograph.viz.table_style",
-        "pos": [-540, 340],
-        "params": {
-          "cf_columns": "revenue",
-          "cf_mode": "colour scale",
-          "cf_scale": "green",
-          "format_rules": "growth bar blue\ngrowth iconmap sla: breach=✗ red, warn=! amber, ok=✓ green\nunits icons traffic\nscore >= 90 => bg green, bold\nscore < 50 => bg red, fg #fff\nstatus = fail => row red\nrevenue format $,.0f\nhide sla"
-        },
-        "code": null,
-        "label": null
-      },
-      {
         "id": "cf03showtable000000000000003",
         "type": "flograph.viz.show_table",
-        "pos": [200, 20],
+        "pos": [120, -20],
         "params": {
-          "width": 620,
+          "format_rules": "revenue scale green\nrevenue format $,.0f\ngrowth bar blue\ngrowth iconmap sla: breach=✗ red, warn=! amber, ok=✓ green\nunits icons traffic\nscore >= 90 => bg green, bold\nscore < 50 => bg red, fg #fff\nstatus = fail => row red\nhide sla",
+          "width": 640,
           "height": 340,
           "scale": 100
         },
         "code": null,
         "label": "Formatted Table"
+      },
+      {
+        "id": "cf04tablestyle00000000000004",
+        "type": "flograph.viz.table_style",
+        "pos": [120, 380],
+        "params": {
+          "format_rules": "score scale red-yellow-green\nscore format .0f",
+          "hide": ""
+        },
+        "code": null,
+        "label": "Shared: score heatmap"
+      },
+      {
+        "id": "cf05showtable000000000000005",
+        "type": "flograph.viz.show_table",
+        "pos": [820, 200],
+        "params": {
+          "format_rules": "",
+          "width": 460,
+          "height": 300,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Second table, shared style"
       }
     ],
     "connections": [
@@ -48,9 +60,14 @@
         "dst": ["cf03showtable000000000000003", "table"]
       },
       {
+        "id": "cf0c020000000000000000000002",
+        "src": ["cf03showtable000000000000003", "table"],
+        "dst": ["cf05showtable000000000000005", "table"]
+      },
+      {
         "id": "cf0c030000000000000000000003",
-        "src": ["cf02tablestyle00000000000002", "style"],
-        "dst": ["cf03showtable000000000000003", "style"]
+        "src": ["cf04tablestyle00000000000004", "style"],
+        "dst": ["cf05showtable000000000000005", "style"]
       }
     ],
     "frames": [],

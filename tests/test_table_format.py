@@ -5,10 +5,9 @@ import pandas as pd
 import pytest
 
 from flograph.core.table_format import (
-    CellStyle, Rule, column_stats, evaluate_column, evaluate_rows,
-    parse_op_value, parse_rules, parse_rules_lenient, readable_fg,
-    rules_from_params, rules_from_style, style_payload, style_report,
-    split_rules,
+    CellStyle, Rule, _column_list, column_stats, evaluate_column, evaluate_rows,
+    merge_styles, parse_op_value, parse_rules, parse_rules_lenient, quote_column,
+    readable_fg, rules_from_style, style_payload, style_report, split_rules,
 )
 
 
@@ -77,36 +76,56 @@ class TestParseOpValue:
             parse_op_value("   ")
 
 
-class TestRulesFromParams:
-    def test_structured_scale_then_text_box(self):
-        rules, errors = rules_from_params({
-            "cf_mode": "colour scale", "cf_columns": "a, b", "cf_scale": "blue",
-            "format_rules": "c bar green",
-        })
-        assert [r.mode for r in rules] == ["color_scale", "data_bar"]
-        assert rules[0].columns == ["a", "b"] and errors == []
+class TestColumnsWithSpaces:
+    @pytest.mark.parametrize("text,expected", [
+        ("a, b", ["a", "b"]),
+        ("unit price", ["unit price"]),
+        ('a, "b, c", d', ["a", "b, c", "d"]),
+        ('"scale"', ["scale"]),
+    ])
+    def test_column_list(self, text, expected):
+        assert _column_list(text) == expected
 
-    def test_structured_highlight_row_scope(self):
-        (rules, _errors) = rules_from_params({
-            "cf_mode": "highlight", "cf_columns": "status",
-            "cf_test": "= closed", "cf_scope": "whole row", "cf_fill": "amber",
-        })
-        (rule,) = rules
-        assert rule.scope == "row" and rule.op == "=" and rule.bg == "#5c4a24"
+    def test_space_column_before_keyword(self):
+        (rule,) = parse_rules("gross margin scale green")
+        assert rule.columns == ["gross margin"]
 
-    def test_off_mode_yields_only_text_rules(self):
-        assert rules_from_params({"cf_mode": "off"}) == ([], [])
+    def test_space_column_in_a_condition(self):
+        (rule,) = parse_rules("gross margin contains loss => bg amber")
+        assert rule.columns == ["gross margin"] and rule.op == "contains"
 
-    def test_bad_text_line_is_collected_not_raised(self):
-        rules, errors = rules_from_params({
-            "format_rules": "a scale green\nb scale bogus\nc bar blue"})
-        assert [r.mode for r in rules] == ["color_scale", "data_bar"]
-        assert len(errors) == 1 and "bogus" in errors[0]
+    def test_quoted_column_disambiguates_a_keyword_name(self):
+        (rule,) = parse_rules('"scale" >= 1 => bg red')
+        assert rule.columns == ["scale"]
 
-    def test_bad_structured_highlight_test_is_collected(self):
-        rules, errors = rules_from_params({
-            "cf_mode": "highlight", "cf_columns": "x", "cf_test": ""})
-        assert rules == [] and errors and "Highlight rule" in errors[0]
+    def test_quoted_iconmap_source(self):
+        (rule,) = parse_rules('growth iconmap "service level": ok=+ green')
+        assert rule.source == "service level"
+
+    def test_quote_column_only_when_needed(self):
+        assert quote_column("revenue") == "revenue"
+        assert quote_column("unit price") == '"unit price"'
+        assert quote_column("scale") == '"scale"'
+
+
+class TestMergeStyles:
+    def test_extra_layers_on_top_of_base(self):
+        base = style_payload({"format_rules": "a scale green"})
+        extra = style_payload({"format_rules": "b bar blue"})
+        merged = merge_styles(base, extra)
+        assert [r["mode"] for r in merged["rules"]] == ["color_scale", "data_bar"]
+
+    def test_hide_lists_union_and_errors_concatenate(self):
+        base = style_payload({"format_rules": "hide x\nq bad !"})
+        extra = style_payload({"format_rules": "hide y", "hide": "x, z"})
+        merged = merge_styles(base, extra)
+        assert merged["hide"] == ["x", "y", "z"]
+        assert len(merged["errors"]) == 1
+
+    def test_none_and_bare_list_accepted(self):
+        assert merge_styles(None, None) == {"rules": [], "hide": [], "errors": []}
+        merged = merge_styles([{"mode": "color_scale", "columns": ["a"]}], None)
+        assert len(merged["rules"]) == 1
 
 
 class TestStylePayloadAndReport:
@@ -114,6 +133,11 @@ class TestStylePayloadAndReport:
         payload = style_payload({"format_rules": "a scale green\nb bad line !"})
         assert isinstance(payload["rules"], list) and len(payload["rules"]) == 1
         assert len(payload["errors"]) == 1
+
+    def test_hide_param_and_dsl_line_both_feed_hide(self):
+        payload = style_payload({"format_rules": "hide fromline",
+                                 "hide": "fromparam, fromline"})
+        assert payload["hide"] == ["fromline", "fromparam"]
 
     def test_style_report_carries_parse_errors_and_missing_columns(self):
         payload = style_payload({"format_rules": "known scale green\n?? bogus"})

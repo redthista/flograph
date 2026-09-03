@@ -239,12 +239,54 @@ def _coerce(text: str) -> Any:
         return t
 
 
+def _unquote(name: str) -> str:
+    name = str(name).strip()
+    if len(name) >= 2 and name[0] == name[-1] and name[0] in "\"'":
+        return name[1:-1]
+    return name
+
+
+def _split_top_commas(text: str) -> list[str]:
+    """Split on commas that are not inside "quotes"; the quote chars are
+    dropped."""
+    parts: list[str] = []
+    buf: list[str] = []
+    quote = None
+    for ch in str(text):
+        if quote:
+            if ch == quote:
+                quote = None
+            else:
+                buf.append(ch)
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ",":
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    return [p.strip() for p in parts if p.strip()]
+
+
 def _column_list(value: Any) -> list[str]:
+    """A comma-separated column list, honouring "quotes" so a name may
+    itself contain a comma or read like a keyword."""
     if value is None:
         return []
     if isinstance(value, (list, tuple)):
-        return [str(v).strip() for v in value if str(v).strip()]
-    return [c.strip() for c in str(value).split(",") if c.strip()]
+        return [_unquote(v) for v in value if str(v).strip()]
+    return _split_top_commas(str(value))
+
+
+def quote_column(name: str) -> str:
+    """Wrap a column name in quotes for the DSL when it would otherwise be
+    ambiguous — a space, a comma, or a bare keyword."""
+    name = str(name)
+    if (any(ch in name for ch in ', "\'')
+            or name.lower() in _KEYWORDS or name.lower() == "hide"):
+        return '"' + name.replace('"', "") + '"'
+    return name
 
 
 def parse_op_value(text: str) -> tuple:
@@ -286,8 +328,16 @@ _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "format")
 def _parse_icon_map(lineno: int, arg: str) -> tuple:
     """`"severity: high=▲ #d9534f, med=■ amber, low=▼ green"`
     → (source column, {value: [glyph, colour]})."""
-    source, sep, body = arg.partition(":")
-    source = source.strip()
+    arg = arg.strip()
+    if arg[:1] in "\"'":
+        end = arg.find(arg[0], 1)
+        after = arg[end + 1:].lstrip() if end != -1 else ""
+        source = arg[1:end] if end != -1 else ""
+        body = after[1:] if after.startswith(":") else ""
+        sep = ":" if after.startswith(":") else ""
+    else:
+        source, sep, body = arg.partition(":")
+        source = source.strip()
     if not sep or not source:
         raise ValueError(
             f"line {lineno}: 'iconmap' needs 'source-column: value=icon, …'")
@@ -345,11 +395,16 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
                     color=_BAR_PRESETS.get(arg.lower(), arg or _BAR_PRESETS["blue"]),
                     negative_color=_BAR_NEGATIVE)
     if keyword in ("icons", "icon"):
+        reverse = False
+        low = arg.lower()
+        if low.endswith(" reverse") or low == "reverse":
+            reverse = True
+            arg = arg[:len(arg) - len("reverse")].strip()
         key = _ICON_LABELS.get(arg.lower(), arg.lower() or "traffic")
         if key not in _ICON_SETS:
             raise ValueError(f"line {lineno}: unknown icon set {arg!r} "
                              f"(traffic, arrows, check)")
-        return Rule("icons", columns, icon_set=key)
+        return Rule("icons", columns, icon_set=key, reverse=reverse)
     # format
     if not arg:
         raise ValueError(f"line {lineno}: 'format' needs a spec like ',.0f'")
@@ -404,6 +459,14 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
 
 def _split_condition(cond: str) -> tuple:
     """`"score >= 90"` → (op, value, column)."""
+    cond = cond.strip()
+    # a "quoted column" takes everything up to its closing quote, then the
+    # rest is a bare condition parse_op_value already understands
+    if cond[:1] in "\"'":
+        end = cond.find(cond[0], 1)
+        if end != -1:
+            op, value = parse_op_value(cond[end + 1:])
+            return (op, value, cond[1:end])
     low = cond.lower()
     for token, canon in (("is not empty", "notempty"), ("is empty", "empty")):
         if low.endswith(" " + token) or low == token:
@@ -458,54 +521,48 @@ def parse_rules_lenient(text: str) -> tuple[list[Rule], list[str]]:
     return rules, errors
 
 
-def rules_from_params(params: dict) -> tuple[list[Rule], list[str]]:
-    """The Table Style node's structured quick-rule, then the text box.
-
-    Never raises: returns ``(rules, error messages)`` so the errors can be
-    reported wherever the style lands (Show Table), not where it is typed.
-    """
-    rules: list[Rule] = []
-    errors: list[str] = []
-    mode = str(params.get("cf_mode", "off") or "off")
-    columns = _column_list(params.get("cf_columns"))
-    if mode == "colour scale":
-        key = _SCALE_LABELS.get(str(params.get("cf_scale", "green")), "green")
-        lo, md, hi = _SCALE_PRESETS[key]
-        rules.append(Rule("color_scale", columns, low=lo, mid=md, high=hi))
-    elif mode == "data bars":
-        rules.append(Rule(
-            "data_bar", columns,
-            color=_BAR_PRESETS.get(str(params.get("cf_bar_color", "blue")),
-                                   _BAR_PRESETS["blue"]),
-            negative_color=_BAR_NEGATIVE))
-    elif mode == "highlight":
-        try:
-            op, value = parse_op_value(params.get("cf_test", ""))
-            scope = "row" if params.get("cf_scope") == "whole row" else "cell"
-            rules.append(Rule(
-                "highlight", columns, scope=scope, op=op, value=value,
-                bg=_FILL_PRESETS.get(str(params.get("cf_fill", "red")),
-                                     "#5c2b2b")))
-        except ValueError as exc:
-            errors.append(f"Highlight rule: {exc}")
-    elif mode == "icons":
-        key = _ICON_LABELS.get(str(params.get("cf_icons", "traffic lights")),
-                               "traffic")
-        rules.append(Rule("icons", columns, icon_set=key))
-
-    text_rules, text_errors = parse_rules_lenient(params.get("format_rules", ""))
-    rules.extend(text_rules)
-    errors.extend(text_errors)
-    return rules, errors
+def _dedup(seq) -> list:
+    seen, out = set(), []
+    for item in seq:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
 
 
 def style_payload(params: dict) -> dict:
-    """What the Table Style node emits on its ``style`` port."""
-    rules, errors = rules_from_params(params)
+    """Turn a node's params — a ``format_rules`` text box and an optional
+    ``hide`` column list — into the payload carried on a ``style`` port.
+
+    Never raises: a bad rule line is dropped and its message collected, to
+    be reported wherever the style is *applied* (Show Table), not typed.
+    """
+    rules, errors = parse_rules_lenient(params.get("format_rules", ""))
     hide = [c for r in rules if r.mode == "hide" for c in r.columns]
+    hide += _column_list(params.get("hide"))
     keep = [r for r in rules if r.mode != "hide"]
-    return {"rules": [r.to_dict() for r in keep], "hide": hide,
+    return {"rules": [r.to_dict() for r in keep], "hide": _dedup(hide),
             "errors": errors}
+
+
+def _style_parts(style_obj: Any) -> tuple:
+    if isinstance(style_obj, dict):
+        return (list(style_obj.get("rules") or []),
+                list(style_obj.get("hide") or []),
+                list(style_obj.get("errors") or []))
+    if isinstance(style_obj, (list, tuple)):
+        return (list(style_obj), [], [])
+    return ([], [], [])
+
+
+def merge_styles(base: Any, extra: Any) -> dict:
+    """`extra` laid on top of `base`: rules concatenated (so a later rule
+    wins), hide lists unioned, errors kept from both. Either side may be a
+    payload dict, a bare rule list, or ``None``."""
+    b_rules, b_hide, b_err = _style_parts(base)
+    e_rules, e_hide, e_err = _style_parts(extra)
+    return {"rules": b_rules + e_rules, "hide": _dedup(b_hide + e_hide),
+            "errors": b_err + e_err}
 
 
 def hidden_columns(style_obj: Any) -> list[str]:

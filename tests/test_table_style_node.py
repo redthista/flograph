@@ -27,31 +27,29 @@ def test_registered_with_no_input_and_a_style_output(registry):
     assert list(spec.inputs) == []
     assert [p.name for p in spec.outputs] == ["style"]
     assert spec.outputs[0].type == PortType.OBJECT
+    assert [p.name for p in spec.params] == ["format_rules", "hide"]
+    assert spec.param("format_rules").rule_wizard is True
 
 
-def test_off_mode_with_no_text_emits_an_empty_payload(registry):
-    out, _ = _run(registry, {"cf_mode": "off"})
+def test_empty_rules_emit_an_empty_payload(registry):
+    out, _ = _run(registry, {})
     assert out == {"style": {"rules": [], "hide": [], "errors": []}}
 
 
-def test_structured_colour_scale_emits_a_rule_dict(registry):
-    out, _ = _run(registry, {"cf_mode": "colour scale", "cf_columns": "revenue",
-                             "cf_scale": "blue"})
-    (rule,) = out["style"]["rules"]
-    assert rule["mode"] == "color_scale" and rule["columns"] == ["revenue"]
+def test_rules_box_becomes_rule_dicts(registry):
+    out, _ = _run(registry, {"format_rules": "revenue scale blue\nunits bar green"})
+    assert [r["mode"] for r in out["style"]["rules"]] == ["color_scale", "data_bar"]
 
 
-def test_structured_and_text_rules_combine(registry):
-    out, ctx = _run(registry, {"cf_mode": "data bars", "cf_columns": "units",
-                               "format_rules": "revenue scale green"})
-    assert [r["mode"] for r in out["style"]["rules"]] == ["data_bar", "color_scale"]
-    assert any("2 rule" in m for m in ctx.logs)
+def test_hide_from_the_box_and_the_param(registry):
+    out, _ = _run(registry, {"format_rules": "sla iconmap x: a=b\nhide sla",
+                             "hide": "secret"})
+    assert set(out["style"]["hide"]) == {"sla", "secret"}
 
 
-def test_malformed_text_rule_is_carried_not_raised(registry):
+def test_malformed_line_is_carried_not_raised(registry):
     out, ctx = _run(registry, {"format_rules": "revenue scale nonsense"})
-    assert out["style"]["rules"] == []
-    assert len(out["style"]["errors"]) == 1
+    assert out["style"]["rules"] == [] and len(out["style"]["errors"]) == 1
     assert any("not understood" in m for m in ctx.logs)
 
 

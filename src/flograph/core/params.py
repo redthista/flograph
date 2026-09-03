@@ -96,6 +96,9 @@ class ParamSpec:
     # things like how a list of charts is arranged — re-running a heavy
     # node because someone asked for two columns would be absurd.
     cosmetic: bool = False
+    # text only: offer a "build a rule…" button beside the box that opens
+    # the conditional-formatting wizard and appends the line it builds.
+    rule_wizard: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], where: str = "PARAMS") -> "ParamSpec":
@@ -153,6 +156,7 @@ class ParamSpec:
             insert_columns=_insert_columns_mode(
                 d.get("insert_columns"), name, where),
             cosmetic=cosmetic,
+            rule_wizard=bool(d.get("rule_wizard", False)),
             visible_when=visible_when,
         )
 

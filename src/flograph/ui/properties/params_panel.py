@@ -19,8 +19,8 @@ from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QSpinBox,
-    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
+    QSpinBox, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph, ParamSpec, varlinks
@@ -405,6 +405,8 @@ class ParamsPanel(QWidget):
                 # would reset the cursor to the start — only sync real changes
                 if text.toPlainText() != str(v or ""):
                     self._silently(text.setPlainText, str(v or ""))
+            if spec.rule_wizard:
+                return self._with_rule_wizard(spec, text), set_text
             if spec.insert_columns:
                 return self._with_column_inserter(spec, text), set_text
             return text, set_text
@@ -486,6 +488,49 @@ class ParamsPanel(QWidget):
         # value — don't make it wait out the timer
         edit.editingFinished.connect(self.flush_pending)
         return edit, self._line_setter(edit)
+
+    def _with_rule_wizard(self, spec: ParamSpec,
+                          text: QPlainTextEdit) -> QWidget:
+        """A multiline rules box with a 'Build a rule…' button under it that
+        opens the conditional-formatting wizard and appends what it builds."""
+        host = QWidget()
+        col = QVBoxLayout(host)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(3)
+        col.addWidget(text)
+        button = QPushButton("Build a rule…")
+        button.setObjectName(f"param_{spec.name}_wizard")
+        button.clicked.connect(lambda: self._open_rule_wizard(spec, text))
+        col.addWidget(button, 0, Qt.AlignLeft)
+        return host
+
+    def _wizard_columns(self) -> list:
+        """Column names to offer the rule wizard: the table feeding this
+        node, or — for a Table Style node with no input — the table feeding
+        a Show Table it is wired into."""
+        from flograph.engine import upstream_columns
+        if self._cache is None or self._node_id is None:
+            return []
+        columns = upstream_columns(self._graph, self._cache, self._node_id)
+        if columns:
+            return columns
+        for conn in self._graph.connections.values():
+            if conn.src_node == self._node_id and conn.src_port == "style":
+                columns = upstream_columns(
+                    self._graph, self._cache, conn.dst_node)
+                if columns:
+                    return columns
+        return []
+
+    def _open_rule_wizard(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
+        from .table_rule_wizard import RuleWizard
+
+        def add(line: str) -> None:
+            current = text.toPlainText().rstrip("\n")
+            text.setPlainText(f"{current}\n{line}" if current else line)
+            self._commit(spec.name, text.toPlainText())
+
+        RuleWizard(self._wizard_columns(), add, self).exec()
 
     def _with_column_inserter(self, spec: ParamSpec,
                               text: QPlainTextEdit) -> QWidget:

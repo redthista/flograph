@@ -33,9 +33,11 @@ def test_show_table_is_registered_with_passthrough_ports(registry):
     assert can_connect(PortType.DATAFRAME, spec.inputs[0].type)
     assert spec.param("width") is not None
     assert spec.param("height") is not None
+    assert spec.param("format_rules").rule_wizard is True
+    assert spec.param("hide").type == "columns"
 
 
-def test_show_table_runs_as_passthrough(registry):
+def test_show_table_passes_the_table_through_untouched(registry):
     from flograph.core import compile_run
     from tests.conftest import FakeContext
 
@@ -43,10 +45,11 @@ def test_show_table_runs_as_passthrough(registry):
     run = compile_run(spec.source, "test-show-table")
     sentinel = object()
     out = run(FakeContext(params=spec.default_params()), table=sentinel)
-    assert out == {"table": sentinel, "style": None}
+    assert out["table"] is sentinel
+    assert out["style"] == {"rules": [], "hide": [], "errors": []}
 
 
-def test_show_table_re_emits_the_style_payload(registry):
+def test_show_table_merges_incoming_style_with_its_own_box(registry):
     import pandas as pd
 
     from flograph.core import compile_run
@@ -54,10 +57,16 @@ def test_show_table_re_emits_the_style_payload(registry):
 
     spec = registry.get("flograph.viz.show_table")
     run = compile_run(spec.source, "test-show-table")
-    df = pd.DataFrame({"a": [1, 2]})
-    style = {"rules": [{"mode": "color_scale", "columns": ["a"]}], "errors": []}
-    out = run(FakeContext(params=spec.default_params()), table=df, style=style)
-    assert out["style"] is style and out["table"] is df
+    df = pd.DataFrame({"a": [1, 2], "helper": ["x", "y"]})
+    incoming = {"rules": [{"mode": "data_bar", "columns": ["a"]}],
+                "hide": [], "errors": []}
+    params = {**spec.default_params(),
+              "format_rules": "a scale green\nhide helper"}
+    out = run(FakeContext(params=params), table=df, style=incoming)
+    modes = [r["mode"] for r in out["style"]["rules"]]
+    assert modes == ["data_bar", "color_scale"]      # own box layered on top
+    assert out["style"]["hide"] == ["helper"]
+    assert out["table"] is df
 
 
 def test_show_table_logs_style_errors(registry):
@@ -69,12 +78,11 @@ def test_show_table_logs_style_errors(registry):
     spec = registry.get("flograph.viz.show_table")
     run = compile_run(spec.source, "test-show-table")
     df = pd.DataFrame({"a": [1, 2]})
-    style = {"rules": [{"mode": "color_scale", "columns": ["missing"]}],
-             "errors": ["line 2: unknown scale 'mauve'"]}
-    ctx = FakeContext(params=spec.default_params())
-    out = run(ctx, table=df, style=style)
+    ctx = FakeContext(params={**spec.default_params(),
+                              "format_rules": "missing scale green\nq scale mauve"})
+    out = run(ctx, table=df)
     assert out["table"] is df                      # table still passes through
-    assert any("mauve" in m for m in ctx.logs)
+    assert any("mauve" in m for m in ctx.logs)     # parse error, on Show Table
     assert any("missing" in m for m in ctx.logs)   # column not in the table
 
 
@@ -186,9 +194,7 @@ def test_table_style_wire_colours_the_card(qtbot, window):
     win.graph.set_param(table.id, "data", json.dumps({
         "columns": ["x"], "rows": [["10"], ["20"], ["30"]],
     }))
-    win.graph.set_param(style.id, "cf_mode", "colour scale")
-    win.graph.set_param(style.id, "cf_columns", "x")
-    win.graph.set_param(style.id, "cf_scale", "blue")
+    win.graph.set_param(style.id, "format_rules", "x scale blue")
     win.graph.connect(table.id, "table", show.id, "table")
     win.graph.connect(style.id, "style", show.id, "style")
 
@@ -200,3 +206,36 @@ def test_table_style_wire_colours_the_card(qtbot, window):
     assert model._cf_active is True
     assert isinstance(model.data(model.index(0, 0), Qt.BackgroundRole), QColor)
     assert isinstance(model.data(model.index(2, 0), Qt.BackgroundRole), QColor)
+
+
+def test_show_tables_own_rules_box_formats_and_hides(qtbot, window):
+    import json
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+
+    win = window
+    table = win.registry.instantiate("flograph.io.table", pos=(-300, 0))
+    show = win.registry.instantiate("flograph.viz.show_table", pos=(300, 0))
+    win.graph.add_node(table)
+    win.graph.add_node(show)
+    win.graph.set_param(table.id, "data", json.dumps({
+        "columns": ["value", "sla"],
+        "rows": [["10", "ok"], ["20", "warn"], ["30", "breach"]],
+    }))
+    win.graph.set_param(show.id, "format_rules",
+                        "value scale green\n"
+                        "value iconmap sla: breach=x red, ok=y green\n"
+                        "hide sla")
+    win.graph.connect(table.id, "table", show.id, "table")
+
+    with qtbot.waitSignal(win.engine.run_finished, timeout=20000) as blocker:
+        win.engine.run_all()
+    assert blocker.args[0], "run finished with a node failure"
+
+    model = win.scene.node_items[show.id]._table_viewer_view.model()
+    assert model.columnCount() == 1                              # sla hidden
+    assert model.headerData(0, Qt.Horizontal, Qt.DisplayRole) == "value"
+    assert isinstance(model.data(model.index(0, 0), Qt.BackgroundRole), QColor)
+    from flograph.ui.table_delegate import ICON_ROLE
+    assert model.data(model.index(2, 0), ICON_ROLE)[0] == "x"    # iconmap from sla
