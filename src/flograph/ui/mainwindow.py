@@ -57,6 +57,7 @@ from .dashboard import (
     is_tile_able,
 )
 from . import dock_edges
+from .dock_host import DockHost
 from .shortcuts import ShortcutRegistry
 from .console.log_dock import LogConsole
 from .editor.editor_dock import EditorPanel
@@ -106,7 +107,7 @@ class MainWindow(QMainWindow):
         # live outside that dock system entirely (see _apply_page_bar_position)
         # -- so the docks+canvas live in this nested QMainWindow, and it plus
         # the page bar are arranged in the outer window's central widget.
-        self._dock_host = QMainWindow(self)
+        self._dock_host = DockHost(self, on_reveal=self._reveal_dock)
         self._dock_host.setDockOptions(
             QMainWindow.AnimatedDocks | QMainWindow.AllowTabbedDocks)
         self._dock_host.setCentralWidget(self._canvas_stack)
