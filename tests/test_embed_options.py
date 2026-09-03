@@ -14,8 +14,9 @@ import re
 
 import pytest
 
-from flograph.core.report import EMBED_OPTIONS, find_embeds, parse_options
-from flograph.ui.report.render import FIGURE_WIDTH, render_body
+from flograph.core.report import (EMBED_FLAGS, EMBED_OPTIONS, find_embeds,
+                                  parse_options)
+from flograph.ui.report.render import FIGURE_WIDTH, parse_aspect, render_body
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +73,21 @@ class TestTheSyntax:
 
     def test_the_option_list_is_closed(self):
         """A closed set is what makes a typo reportable at all."""
-        assert EMBED_OPTIONS == ("width",)
+        assert EMBED_OPTIONS == ("width", "ratio", "height", "scale")
+        assert EMBED_FLAGS == ("fit",)
+
+    def test_a_bare_flag_is_recognised_not_taken_as_the_port(self):
+        assert parse_options("|fit") == ("", {"fit": True}, [])
+
+    def test_a_flag_sits_alongside_the_port(self):
+        assert parse_options("|scores|fit") == ("scores", {"fit": True}, [])
+
+    def test_a_flag_is_case_insensitive(self):
+        assert parse_options("|FIT") == ("", {"fit": True}, [])
+
+    def test_ratio_and_scale_parse_as_options(self):
+        assert parse_options("|ratio=16:9|scale=2") \
+            == ("", {"ratio": "16:9", "scale": "2"}, [])
 
 
 class TestParsingInPlace:

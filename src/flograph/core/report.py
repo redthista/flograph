@@ -28,23 +28,38 @@ from dataclasses import dataclass, field
 # The label runs to a "|" or "]]", so it may contain spaces and punctuation,
 # which node labels routinely do. Everything after it is a list of
 # "|"-separated segments, sorted out by `parse_options` — a segment with an
-# "=" in it is an option, and a bare one is the port name. That rule is what
-# lets the port stay optional without a placeholder: `![[c|width=50%]]` is
-# unambiguous because "width=50%" cannot be a port.
+# "=" in it is an option, a bare one that names a known flag is that flag,
+# and any other bare one is the port name. That rule is what lets the port
+# stay optional without a placeholder: `![[c|width=50%]]` is unambiguous
+# because "width=50%" cannot be a port.
 EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*((?:\|[^\]|]*)*)\]\]")
 
-#: Options an embed understands. Deliberately a closed set: a typo'd option
-#: is worth reporting, and silently ignoring `widht=50%` would leave someone
-#: staring at an unchanged chart.
-EMBED_OPTIONS = ("width",)
+#: Options an embed understands, each written `key=value`. Deliberately a
+#: closed set: a typo'd option is worth reporting, and silently ignoring
+#: `widht=50%` would leave someone staring at an unchanged chart.
+#:
+#: `width`  — the placement width, `50%` of the text column or `280` points.
+#: `ratio`  — the shape the chart is drawn at, `16:9` / `4x3` / `1.5`.
+#: `height` — an exact height in points, the other way to say a shape.
+#: `scale`  — render density, `2` for a chart with fine detail. Capped.
+EMBED_OPTIONS = ("width", "ratio", "height", "scale")
+
+#: Bare-word flags an embed understands, written with no `=`. Matched
+#: before the port, so a node whose label collides with one cannot be
+#: embedded by that bare name — in practice none do.
+#:
+#: `fit` — shrink this chart so it fits the space left on the page rather
+#: than starting a new one and leaving a gap.
+EMBED_FLAGS = ("fit",)
 
 
 def parse_options(rest: str) -> "tuple[str, dict, list]":
     """Split the "|"-separated tail of an embed.
 
-    Returns (port, options, unknown) — the port name, the options that were
-    recognised, and any segments that were not, which the renderer reports
-    rather than swallowing.
+    Returns (port, options, unknown) — the port name, the options and flags
+    that were recognised (a flag lands in the dict as ``True``), and any
+    segments that were neither, which the renderer reports rather than
+    swallowing.
     """
     port = ""
     options: dict = {}
@@ -53,7 +68,9 @@ def parse_options(rest: str) -> "tuple[str, dict, list]":
         segment = segment.strip()
         if not segment:
             continue
-        if "=" in segment:
+        if segment.lower() in EMBED_FLAGS:
+            options[segment.lower()] = True
+        elif "=" in segment:
             key, _, value = segment.partition("=")
             key = key.strip().lower()
             if key in EMBED_OPTIONS:

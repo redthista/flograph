@@ -34,15 +34,33 @@ produced, name it:</p>
     <td>half the width of the text column</td></tr>
 <tr><td><code>![[Chart|width=280]]</code></td>
     <td>280 points wide, whatever the paper</td></tr>
+<tr><td><code>![[Chart|ratio=16:9]]</code></td>
+    <td>drawn at that shape &mdash; also <code>4x3</code>, <code>3/2</code>,
+        <code>1.5</code></td></tr>
+<tr><td><code>![[Chart|height=180]]</code></td>
+    <td>exactly 180 points tall</td></tr>
+<tr><td><code>![[Chart|scale=2]]</code></td>
+    <td>rendered at twice the density, for fine detail</td></tr>
+<tr><td><code>![[Chart|fit]]</code></td>
+    <td>shrunk to the room left on the page</td></tr>
 <tr><td><code>![[Chart|figure|width=60%]]</code></td>
     <td>a port <i>and</i> a width</td></tr>
 </table>
 <p><b>Width is the answer to "the chart went onto the next page".</b> A
 chart is placed at its full size, so one that will not fit in what is left
 of the page starts a new one and leaves a gap. Sizing it down to
-<code>60%</code> or so fits it under the heading it belongs with. (Making a
-chart shrink itself into the space left is not something Qt's layout can
-do — it is on the list, via the HTML export.)</p>
+<code>60%</code> or so fits it under the heading it belongs with, or add
+<code>fit</code> and it shrinks itself into whatever is left &mdash; down to
+about half size, past which it is too small to read and starts its own page
+instead. A <code>fit</code> chart is a different size on different pages, so
+it is opt-in, never the default.</p>
+<p><b>Ratio</b> is the answer to "a wide chart, or a long thin one". The
+chart is <i>redrawn</i> at that shape &mdash; the axes and labels lay out
+for it &mdash; rather than stretched. <code>height=</code> says the same
+thing as an exact number of points. Neither changes how wide the chart
+sits on the page; that stays <code>width</code>'s job. <code>ratio</code>,
+<code>height</code> and <code>scale</code> apply to charts, not to
+pictures, which already have a size of their own.</p>
 <p>Use <b>Insert embed &#9662;</b> to pick from the nodes that have
 actually produced something — it also avoids typos in a label.</p>
 <p>What an embed becomes depends on what arrives: a <b>chart</b> is placed

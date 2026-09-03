@@ -216,13 +216,43 @@ def _animation_bytes(value) -> "bytes | None":
 # way it looks on a card.
 PLOTLY_SIZE = (700, 450)
 
+#: Ceiling on the `scale=` density multiplier, on top of the resolution the
+#: placement already asks for. Same reasoning as MAX_IMAGE_SCALE: the cost
+#: is quadratic and a report can hold a stack of charts.
+MAX_SCALE_MULTIPLIER = 4.0
+
+
+def parse_aspect(raw: str) -> "float | None":
+    """A `ratio=` value as the single number width / height.
+
+    `16:9`, `4x3` and `3/2` all mean the same thing; a bare `1.5` is taken
+    as that ratio directly. None for anything unparseable or non-positive —
+    the caller reports it rather than drawing a nonsense shape.
+    """
+    text = (raw or "").strip().lower().replace("x", ":").replace("/", ":")
+    if not text:
+        return None
+    try:
+        if ":" in text:
+            left, _, right = text.partition(":")
+            width, height = float(left), float(right)
+            if width <= 0 or height <= 0:
+                return None
+            return width / height
+        value = float(text)
+        return value if value > 0 else None
+    except ValueError:
+        return None
+
 # On screen there is no paper to match, so charts are drawn at twice the
 # width they are placed at — enough to stay sharp on a HiDPI display
 # without paying print resolution for a preview.
 PREVIEW_OVERSAMPLE = 2
 
 
-def plotly_geometry(value, image_width: int, for_print: bool) -> tuple:
+def plotly_geometry(value, image_width: int, for_print: bool,
+                    aspect: "float | None" = None,
+                    scale_mult: float = 1.0) -> tuple:
     """(width, height, scale) to draw a Plotly figure at.
 
     The split matters. Plotly lays out in CSS pixels and sizes its fonts in
@@ -232,23 +262,34 @@ def plotly_geometry(value, image_width: int, for_print: bool) -> tuple:
     job, which multiplies the pixel density and leaves the layout alone.
     Kaleido draws the same distinction; so does this.
 
-    So the figure keeps the size it was designed at, and only the density
-    follows the placement: on paper, enough to land at PRINT_DPI for the
-    width the picture is actually placed at. Capped, because the cost is
+    So the figure keeps the *width* it was designed at, and only the
+    density follows the placement: on paper, enough to land at PRINT_DPI for
+    the width the picture is actually placed at. Capped, because the cost is
     quadratic and a stack can hold forty charts.
+
+    `aspect` (from `ratio=`) is the one thing that does change the layout —
+    the height, at that same design width, so a `16:9` figure comes out
+    letterbox and a `2:3` one tall. Only the height moves, so the fonts
+    keep their size against the axis. `scale_mult` (from `scale=`) pushes
+    the density past what the placement asked for, for a fine-detail chart.
     """
     layout = getattr(value, "layout", None)
     width = int(getattr(layout, "width", None) or PLOTLY_SIZE[0])
     height = int(getattr(layout, "height", None) or PLOTLY_SIZE[1])
+    if aspect:
+        height = max(1, round(width / aspect))
     if for_print:
         wanted = image_width / 72.0 * PRINT_DPI
     else:
         wanted = image_width * PREVIEW_OVERSAMPLE
     scale = max(1.0, min(MAX_IMAGE_SCALE, wanted / width))
+    if scale_mult != 1.0:
+        scale = max(1.0, min(MAX_IMAGE_SCALE, scale * scale_mult))
     return width, height, round(scale, 3)
 
 
-def plotly_image(value, image_width: int, for_print: bool):
+def plotly_image(value, image_width: int, for_print: bool,
+                 aspect: "float | None" = None, scale_mult: float = 1.0):
     """A Plotly figure as PNG bytes, or a warning block if it cannot be.
 
     Plotly figures are interactive HTML, not pictures, so a report has to
@@ -260,7 +301,8 @@ def plotly_image(value, image_width: int, for_print: bool):
     module = type(value).__module__ or ""
     if not module.startswith("plotly"):
         return None
-    width, height, scale = plotly_geometry(value, image_width, for_print)
+    width, height, scale = plotly_geometry(value, image_width, for_print,
+                                           aspect, scale_mult)
     try:
         from .plotly_snapshot import snapshot
         image = snapshot(value, width, height, scale)
@@ -476,7 +518,7 @@ class _Resolver:
 
     def __init__(self, lookup, image_scale: float = 1.0,
                  image_width: int = FIGURE_WIDTH, params=None,
-                 nested=None) -> None:
+                 nested=None, page_height: "float | None" = None) -> None:
         self._lookup = lookup
         # (ref, port) -> (body, lookup, params) when the embed names a report
         # card, so its contents are rendered here instead of its source text.
@@ -491,10 +533,19 @@ class _Resolver:
         # preview); "print" = scale each so it lands at PRINT_DPI on paper
         self._for_print = image_scale != 1.0
         self._image_width = image_width
+        # The shape and density asked of the embed being rendered right now,
+        # set for its duration only — see `render`. None/1.0 = leave it be.
+        self._aspect: "float | None" = None
+        self._scale_mult = 1.0
+        # The body height of one page, in points — only a report *page* has
+        # one. Needed by the `fit` pass; None makes `fit` a no-op.
+        self._page_height = page_height
         self.images: list[QImage] = []
         # the width each image should be drawn at — per image, because a
         # multi-column grid renders its cells narrower than the page
         self.widths: list[int] = []
+        # image indices tagged `fit`, for the post-layout shrink pass
+        self.fit_marks: list[int] = []
         self.problems: list[str] = []
         # image index -> encoded bytes, for the ones that move. Never
         # collected for print: a PDF gets the poster frame and nothing else.
@@ -522,14 +573,33 @@ class _Resolver:
         # the grid settings belong to the node that produced the list, so
         # its charts are arranged the same on paper as on its own card
         self._grid = self._grid_for(embed)
-        # A per-embed width is applied for the duration of this embed only,
-        # so `![[a|width=50%]]` narrows that one chart and leaves the next
-        # at the page width.
-        was, self._image_width = self._image_width, self._width_for(embed)
+        # A per-embed width, shape and density are applied for the duration
+        # of this embed only, so `![[a|width=50%]]` narrows that one chart
+        # and leaves the next at the page width.
+        was = (self._image_width, self._aspect, self._scale_mult)
+        self._image_width = self._width_for(embed)
+        self._aspect = self._aspect_for(embed)
+        self._scale_mult = self._scale_for(embed)
+        before = len(self.images)
         try:
             return self.render_value(value, embed.ref)
         finally:
-            self._image_width = was
+            if (embed.options or {}).get("fit"):
+                self._mark_fit(embed, before)
+            (self._image_width, self._aspect, self._scale_mult) = was
+
+    def _mark_fit(self, embed, before: int) -> None:
+        """Record the images this embed added as candidates for the
+        end-of-layout shrink. `fit` needs a page to fit *within*, so on a
+        report card — which has none — it says so rather than doing nothing
+        silently."""
+        added = range(before, len(self.images))
+        if self._page_height is None:
+            if added:
+                self.problems.append(
+                    f"“{embed.ref}”: “fit” only works on a report page")
+            return
+        self.fit_marks.extend(added)
 
     def _width_for(self, embed) -> int:
         """`width=50%` of the page's text column, or `width=280` in points.
@@ -551,6 +621,49 @@ class _Resolver:
             self.problems.append(
                 f"“{embed.ref}”: “{raw}” is not a width — try 50% or 280")
             return self._image_width
+
+    def _aspect_for(self, embed) -> "float | None":
+        """The width/height the chart should be drawn at.
+
+        `ratio=16:9` says it directly; `height=180` says it as points, and
+        is turned into a ratio against the width now in force so the two
+        options can share one code path downstream. `ratio` wins if both
+        are given.
+        """
+        options = embed.options or {}
+        raw = str(options.get("ratio", "")).strip()
+        if raw:
+            aspect = parse_aspect(raw)
+            if aspect is None:
+                self.problems.append(
+                    f"“{embed.ref}”: “{raw}” is not a ratio — try 16:9 or 1.5")
+            return aspect
+        raw = str(options.get("height", "")).strip()
+        if raw:
+            try:
+                points = float(raw.removesuffix("pt").strip())
+                if points > 0:
+                    return self._image_width / points
+            except ValueError:
+                pass
+            self.problems.append(
+                f"“{embed.ref}”: “{raw}” is not a height — try 180 or 180pt")
+        return None
+
+    def _scale_for(self, embed) -> float:
+        """`scale=2` renders the chart at twice the density the placement
+        asked for — for a chart with small text or dense lines. Capped, and
+        never below 1: this knob makes things sharper, not softer."""
+        raw = str((embed.options or {}).get("scale", "")).strip()
+        if not raw:
+            return 1.0
+        try:
+            value = float(raw.rstrip("x"))
+        except ValueError:
+            self.problems.append(
+                f"“{embed.ref}”: “{raw}” is not a scale — try 2")
+            return 1.0
+        return max(1.0, min(MAX_SCALE_MULTIPLIER, value))
 
 
     #: How many report cards deep an embed may go. Wires are acyclic, so
@@ -691,6 +804,33 @@ class _Resolver:
             return markdown
         return body[body.find(">", start) + 1:end]
 
+    def _matplotlib_image(self, value):
+        """A matplotlib Figure as a QImage with this embed's shape and
+        density applied, or None for anything that isn't a Figure.
+
+        `ratio=` / `height=` change the figure's size in inches for the
+        draw, so the axes and labels lay out for the new shape rather than
+        being stretched into it afterwards — the size is borrowed and put
+        back, the same way `_as_image` borrows the dpi.
+        """
+        if not hasattr(value, "canvas") or not hasattr(value, "savefig"):
+            return None
+        original = None
+        if self._aspect:
+            width_in = float(value.get_size_inches()[0])
+            original = tuple(value.get_size_inches())
+            value.set_size_inches(width_in, width_in / self._aspect,
+                                  forward=False)
+        try:
+            density = self._scale_mult
+            if self._for_print:
+                density *= print_scale(value, self._image_width)
+            density = max(1.0, min(MAX_IMAGE_SCALE, density))
+            return _as_image(value, density)
+        finally:
+            if original is not None:
+                value.set_size_inches(original, forward=False)
+
     def render_value(self, value, ref: str) -> str:
         if value is None:
             self.problems.append(f"“{ref}” produced nothing")
@@ -705,13 +845,12 @@ class _Resolver:
                 return f"> *(“{ref}” produced nothing to show)*"
             return self.render_list(value, ref)
 
-        image = _as_image(
-            value, print_scale(value, self._image_width)
-            if self._for_print and hasattr(value, "get_size_inches") else 1.0)
+        image = self._matplotlib_image(value)
         if image is not None:
             return self._token(image)
 
-        plotly = plotly_image(value, self._image_width, self._for_print)
+        plotly = plotly_image(value, self._image_width, self._for_print,
+                              self._aspect, self._scale_mult)
         if isinstance(plotly, bytes):
             image = QImage()
             image.loadFromData(plotly, "PNG")
@@ -724,6 +863,13 @@ class _Resolver:
         # string, and inlining that as markdown would print the base64.
         picture = _as_payload_image(value)
         if picture is not None:
+            # A chart is redrawn at whatever shape and density is asked for;
+            # a picture is a fixed grid of pixels, so `ratio`, `height` and
+            # `scale` have nothing to act on. `fit` still does — a tall
+            # photo can overflow a page just as a chart can.
+            if self._aspect is not None or self._scale_mult != 1.0:
+                self.problems.append(
+                    f"“{ref}”: ratio, height and scale only apply to charts")
             # A chart is drawn to fill the column, but a picture has a real
             # size of its own: a 120px logo stretched across the page would
             # just be a blurry logo. Fill only if it has the pixels for it.
@@ -787,17 +933,23 @@ def render_report(body: str, graph, cache, image_scale: float = 1.0,
     Naming a report *card* renders that card's contents onto the page —
     charts, tables and all — rather than reproducing its source markdown.
 
-    `setup` is the page's PageSetup, and the only thing taken from it here
-    is the body width: charts are raster by the time they reach the
-    document, so the width they are drawn at has to be decided now, from
-    the paper they are going onto. None keeps the A4 default.
+    `setup` is the page's PageSetup. Two things are taken from it here: the
+    body width, because charts are raster by the time they reach the
+    document and the width they are drawn at has to be decided now; and the
+    body height, so an `![[chart|fit]]` can be shrunk to the room left on
+    its page. None keeps the A4 default.
     """
     width = setup.body_width_points() if setup is not None else FIGURE_WIDTH
+    page_height = None
+    if setup is not None:
+        from .export import body_rect, printable_points
+        page_height = body_rect(printable_points(setup), setup).height()
     return render_body(body, by_label(graph, cache), image_width=width,
                        image_scale=image_scale,
                        params=params_by_label(graph),
                        nested=nested_by_label(graph, cache),
-                       page_break_rule=page_break_rule)
+                       page_break_rule=page_break_rule,
+                       page_height=page_height)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -824,7 +976,8 @@ def render_card(body: str, graph, cache, node_id: str,
 
 def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 image_scale: float = 1.0, params=None,
-                nested=None, page_break_rule: bool = False) -> RenderedReport:
+                nested=None, page_break_rule: bool = False,
+                page_height: "float | None" = None) -> RenderedReport:
     """Lay a report body out as a document ready to show or print.
 
     `page_break_rule` is for the on-screen preview, which is one
@@ -832,8 +985,13 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     land on. It draws the break as a visible rule instead, which is the
     only way the writer can see that the marker took effect at all; the
     printed document gets a real break and no rule.
+
+    `page_height` is the body height of one page in points, and only a
+    report *page* has one. It is what an `![[chart|fit]]` is measured
+    against; without it `fit` is a no-op that says so.
     """
-    resolver = _Resolver(lookup, image_scale, image_width, params, nested)
+    resolver = _Resolver(lookup, image_scale, image_width, params, nested,
+                         page_height)
     # Columns first, and they resolve their own embeds as they go: an embed
     # inside a column has to be rendered knowing how wide that column is.
     staged_body = replace_columns(body, resolver.render_columns)
@@ -846,9 +1004,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     staged.setMarkdown(resolved)
     html = staged.toHtml()
     for index, width in enumerate(resolver.widths):
-        html = html.replace(
-            IMAGE_TOKEN.format(index),
-            f'<img src="embed:{index}" width="{max(80, width)}" />')
+        html = html.replace(IMAGE_TOKEN.format(index), _img_tag(index, width))
     if page_break_rule:
         html = _PAGEBREAK_P_RE.sub("<hr />", html)
 
@@ -864,11 +1020,91 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                              QUrl(IMAGE_TOKEN_URL.format(index)), image)
     document.setHtml(html)
     apply_page_breaks(document)
+    if resolver.fit_marks and page_height:
+        _fit_to_page(document, html, resolver, page_height, image_width)
     return RenderedReport(
         document=document, problems=resolver.problems,
         animations=resolver.animations,
         image_widths={i: w for i, w in enumerate(resolver.widths)},
         images=list(resolver.images))
+
+
+#: How far `fit` will shrink a chart before it gives up and lets it start
+#: its own page — a fraction of the width the embed was going to be.
+_FIT_FLOOR = 0.45
+
+
+def _img_tag(index: int, width: int) -> str:
+    """The `<img>` an embed token becomes. One place, so the initial pass
+    and the `fit` rewrite cannot spell it differently."""
+    return f'<img src="embed:{index}" width="{max(80, int(width))}" />'
+
+
+def _fit_to_page(document, html: str, resolver, page_height: float,
+                 page_width: int) -> None:
+    """Shrink each `![[...|fit]]` image that would overflow the room left
+    on its page, so it stays on the page it was written on instead of
+    starting a new one and leaving a gap.
+
+    One measure-and-relayout pass. The case it is for — a chart under a
+    heading and a paragraph — is caught by it; a chart still too tall after
+    one shrink is left to start its own page, which is where it was headed
+    anyway. Opt-in per embed, because it makes a chart a different size
+    depending on where on the page it falls.
+
+    The room left is measured from the *bottom of the paragraph before* the
+    chart, not the chart's own top: Qt has already floated an oversized
+    image onto the next page by the time this runs, so its own position
+    reads as a fresh page and says nothing about where it was written.
+
+    A floor of `_FIT_FLOOR` of the intended width: past that a chart is too
+    small to read, and the reader is better served by it whole on the next
+    page than shrunk to a stamp on this one.
+    """
+    from PySide6.QtCore import QSizeF
+
+    from .animate import image_positions
+
+    document.setPageSize(QSizeF(page_width, page_height))
+    layout = document.documentLayout()
+    positions = image_positions(document)
+    changes: dict[int, int] = {}
+    for index in resolver.fit_marks:
+        image = resolver.images[index]
+        if image is None or image.width() <= 0 or image.height() <= 0:
+            continue
+        position = positions.get(IMAGE_TOKEN_URL.format(index))
+        if position is None:
+            continue
+        block = document.findBlock(position)
+        if not block.isValid():
+            continue
+        # walk back past blank blocks to the last one with real content
+        before = block.previous()
+        while before.isValid() and not before.text().strip():
+            before = before.previous()
+        if not before.isValid():
+            continue          # nothing above it — it is already page-top
+        anchor = layout.blockBoundingRect(before).bottom()
+        remaining = page_height - (anchor % page_height)
+        width = resolver.widths[index]
+        drawn_height = width * image.height() / image.width()
+        # Act only when it overflows this page but would fit on a fresh
+        # one: a chart taller than a whole page has to break regardless.
+        if drawn_height <= remaining + 1 or drawn_height >= page_height:
+            continue
+        scaled = int(width * (remaining - 6) / drawn_height)
+        new_width = min(width, scaled)
+        if _FIT_FLOOR * width <= new_width < width:
+            changes[index] = new_width
+    if not changes:
+        return
+    for index, new_width in changes.items():
+        resolver.widths[index] = new_width
+        html = re.sub(rf'<img src="embed:{index}" width="\d+" />',
+                      lambda _m, w=new_width, i=index: _img_tag(i, w), html)
+    document.setHtml(html)
+    apply_page_breaks(document)
 
 
 #: The whole paragraph Qt wraps a lone page-break token in. Matched as a

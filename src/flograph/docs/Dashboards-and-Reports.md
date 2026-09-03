@@ -63,6 +63,13 @@ string — resolved by node label; `![[Label|port]]` picks a specific output
 port. Scalars render inline mid-sentence, charts and tables as blocks. Embeds
 update when the flow re-runs and warn visibly when a name does not resolve.
 
+A chart embed takes options after another `|`: `width=50%` or `width=280`
+(points) for how wide it sits, `ratio=16:9` (or `4x3`, `1.5`) or `height=180`
+for the shape it is *redrawn* at — labels and all, not stretched — `scale=2`
+for extra render density on a fine-detail chart, and the bare word `fit` to
+shrink a chart into the space left on the page instead of bumping it to the
+next. The report toolbar's **?** button lists them all with examples.
+
 The page prints to **PDF** at 300 dpi; the preview and the PDF are literally
 the same document, so they cannot disagree. The report toolbar's **?** button
 opens the full embed-syntax reference.

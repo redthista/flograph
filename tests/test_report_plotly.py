@@ -59,6 +59,25 @@ class TestGeometry:
         width, height, _scale = plotly_geometry(figure, 510, for_print=False)
         assert (width, height) == (800, 400)
 
+    def test_a_ratio_moves_only_the_height(self, figure):
+        """`ratio=16:9` keeps the design width and sets the height to
+        match, so the fonts stay put against the axis."""
+        width, height, _s = plotly_geometry(figure, 510, for_print=False,
+                                            aspect=16 / 9)
+        assert width == 700
+        assert height == round(700 / (16 / 9))
+
+    def test_a_scale_multiplier_pushes_the_density_up(self, figure):
+        _w, _h, plain = plotly_geometry(figure, 510, for_print=False)
+        _w, _h, dense = plotly_geometry(figure, 510, for_print=False,
+                                        scale_mult=2.0)
+        assert dense > plain
+
+    def test_the_scale_multiplier_is_still_capped(self, figure):
+        _w, _h, scale = plotly_geometry(figure, 510, for_print=True,
+                                        scale_mult=10.0)
+        assert scale == MAX_IMAGE_SCALE
+
 
 class TestSnapshot:
     """Real Chromium, real plotly.js, no kaleido."""
