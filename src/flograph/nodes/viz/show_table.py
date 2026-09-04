@@ -36,6 +36,9 @@ a `*` / `?` is a **pattern** — `20* scale green` heatmaps every year
 column, `*_qty bar blue` every quantity column, `hide _tmp_*` every scratch
 column.
 
+The full rule language is in the **Conditional Formatting** handbook page
+(F1), and **Open Example ▸ Conditional Formatting** is a worked flow.
+
 **Sharing a look.** The rules being applied come out on the **style**
 output, and a Show Table also *accepts* a style on its **style** input — so
 you can wire one table's formatting into another, or feed both from a

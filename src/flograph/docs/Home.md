@@ -22,6 +22,8 @@ Documentation** or **F1**.
   a checklist and error table for when one won't load.
 - **[[Dashboards and Reports]]** — turning a flow into a dashboard for
   someone else, or a report that prints to PDF.
+- **[[Conditional Formatting]]** — the Show Table rule language: heatmaps,
+  data bars, icons, highlights, and patterns.
 - **[[Flow Variables]]** — `${name}` settings, the Variables node, and
   secrets that stay out of the project file.
 - **[[Running Headless]]** — run a `.flograph` from a terminal, a scheduler,

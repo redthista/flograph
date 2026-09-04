@@ -60,11 +60,12 @@ class TestBundledExamples:
             "19_pdf_page_turner.flograph",
             "20_plotly_chart_gallery.flograph",
             "21_storage_treemap.flograph",
+            "22_conditional_formatting.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 21
+        assert len(window._examples_menu.actions()) == 22
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -82,6 +83,7 @@ class TestBundledExamples:
         "15_report_page.flograph",
         "17_run_while_running.flograph",
         "20_plotly_chart_gallery.flograph",
+        "22_conditional_formatting.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below
     ])
@@ -423,6 +425,34 @@ class TestTheOrderEdgeExample:
             assert graph.nodes[nid].params["path"] == "${export_path}"
             assert graph.order_sources(nid) or graph.var_sources(nid)
             assert "t13_vars" in graph.var_sources(nid)
+
+
+class TestTheConditionalFormattingExample:
+    """22_conditional_formatting: the rules box exercises every verb, and the
+    style flows from the Table Style node into the second table."""
+
+    def test_it_runs_and_the_rules_all_parse(self, qtbot, window):
+        window._open_example(template_path("22_conditional_formatting.flograph"))
+        assert wait_run(qtbot, window.engine)
+
+        from flograph.core.table_format import parse_rules_lenient
+        show = window.graph.nodes["n2_show"]
+        rules, errors = parse_rules_lenient(show.params["format_rules"])
+        assert errors == []
+        modes = {r.mode for r in rules}
+        assert modes == {"color_scale", "data_bar", "icons", "icon_map",
+                         "highlight", "number_format", "hide"}
+        # a by-clause, an if-clause and a wildcard are all in there
+        assert any(r.source for r in rules if r.mode == "color_scale")
+        assert any(r.source for r in rules if r.mode == "highlight")
+        assert any("*" in c for r in rules for c in r.columns)
+
+    def test_the_shared_style_reaches_the_second_table(self, qtbot, window):
+        window._open_example(template_path("22_conditional_formatting.flograph"))
+        assert wait_run(qtbot, window.engine)
+        style = window.engine.cache.outputs_for("n4_show2")["style"]
+        assert [r["mode"] for r in style["rules"]] == ["color_scale",
+                                                       "number_format"]
 
 
 class TestTheFlowVariablesExample:

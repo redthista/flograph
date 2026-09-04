@@ -10,7 +10,8 @@ glyph.
 Nothing here imports pandas at module load — the evaluators take a Series /
 DataFrame and import pandas locally, matching the node-script rule.
 
-The text DSL, one rule per line (``#`` comments and blank lines skipped)::
+The text DSL, one rule per line (blank lines skipped, ``#`` starts a
+comment — a whole line, or trailing after a rule)::
 
     revenue              scale green                # 2- or 3-colour gradient
     margin               scale red-yellow-green
@@ -611,7 +612,26 @@ def _split_condition(cond: str) -> tuple:
     raise ValueError(f"no operator in condition {cond!r}")
 
 
+def _strip_inline_comment(line: str) -> str:
+    """Drop a trailing ``# comment`` from a rule line. A ``#`` only starts a
+    comment when it is outside "quotes" and followed by whitespace or the end
+    of the line — so ``=> bg #2e7d46`` and ``ok=✓ #d9534f`` keep their hex."""
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i + 1 == len(line) or line[i + 1].isspace()):
+            return line[:i].rstrip()
+    return line
+
+
 def _parse_one_line(lineno: int, line: str) -> Rule:
+    line = _strip_inline_comment(line)
+    if not line:
+        raise ValueError(f"line {lineno}: nothing but a comment")
     return (_parse_condition_line(lineno, line) if "=>" in line
             else _parse_token_line(lineno, line))
 

@@ -1,0 +1,180 @@
+{
+  "flograph_version": "0.1.13",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "note_guide",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "text": "## Conditional formatting\n\n**Show Table** paints itself from a plain-text rule list — open the\n**Conditional formatting** box in its Properties, or press **Rules…** for a\nguided builder. Nothing is styled until a rule is added.\n\nOne rule per line, `#` starts a comment. Each is `columns  verb  argument`:\n\n| verb | example | does |\n| --- | --- | --- |\n| `scale` | `revenue scale green` | 2- / 3-colour heatmap |\n| `bar` | `units bar blue` | in-cell data bar |\n| `icons` | `score icons traffic` | 3-tier ● ▲ ✓ set, split at the thirds |\n| `iconmap` | `sla iconmap sla: ok=✓ green, bad=📉` | an icon per exact value — the glyph is any character **or emoji** |\n| `… => bg / fg / bold` | `score >= 90 => bg green, bold` | highlight the cell on a test |\n| `… => row <colour>` | `status = fail => row red` | highlight the whole row |\n| `format` | `amount format $,.0f` | per-column number format |\n| `hide` | `hide helper_col` | keep a column in the data but out of the view |\n\n**Decide on another column.**  Add `by <column>` to a `scale` / `bar` /\n`icons` rule, or write `paint-cols if <column> op value => style` for a\nhighlight — the style lands in the columns on the left, the *decision* reads\nthe named column (its own min / max / thirds drive a scale or icon set).\n\n**Column patterns.**  A name with `*` or `?` selects every match —\n`FY* scale green`, `*_qty bar blue`, `hide _tmp_*`.\n\n**Colours** are a preset (`green` `red` `amber` `blue` `grey` `purple`) or a\n`#hex`; the builder's colour menus carry a **Custom…** picker.\n\nShare one look across tables with the **style** output → another table's\n**style** input, or a **Table Style** node (below).\n",
+          "width": 1520,
+          "height": 460
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "n1_data",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          580
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"Region\", \"type\": \"text\"}, {\"name\": \"Owner\", \"type\": \"text\"}, {\"name\": \"Revenue\", \"type\": \"number\"}, {\"name\": \"Target\", \"type\": \"number\"}, {\"name\": \"Growth %\", \"type\": \"number\"}, {\"name\": \"Deals\", \"type\": \"integer\"}, {\"name\": \"Health\", \"type\": \"integer\"}, {\"name\": \"SLA\", \"type\": \"text\"}, {\"name\": \"Grade\", \"type\": \"text\"}, {\"name\": \"Trend\", \"type\": \"text\"}, {\"name\": \"FY2023\", \"type\": \"number\"}, {\"name\": \"FY2024\", \"type\": \"number\"}, {\"name\": \"FY2025\", \"type\": \"number\"}, {\"name\": \"_row\", \"type\": \"integer\"}], \"rows\": [[\"North\", \"Alice\", 482000, 450000, 0.12, 34, 91, \"ok\", \"A\", \"rising\", 402000, 430000, 482000, 1], [\"South\", \"Bilal\", 318000, 400000, -0.06, 21, 63, \"warn\", \"B\", \"falling\", 350000, 338000, 318000, 2], [\"East\", \"Chen\", 655000, 520000, 0.34, 47, 96, \"ok\", \"A\", \"rising\", 470000, 560000, 655000, 3], [\"West\", \"Dana\", 274000, 380000, -0.19, 18, 41, \"breach\", \"C\", \"falling\", 360000, 305000, 274000, 4], [\"Central\", \"Ewan\", 401000, 390000, 0.05, 29, 78, \"ok\", \"B\", \"steady\", 372000, 388000, 401000, 5], [\"Coastal\", \"Farah\", 129000, 300000, -0.28, 11, 38, \"breach\", \"C\", \"falling\", 210000, 170000, 129000, 6], [\"Mountain\", \"Gita\", 447000, 410000, 0.22, 38, 88, \"warn\", \"B\", \"rising\", 360000, 405000, 447000, 7]]}",
+          "width": 440,
+          "height": 300
+        },
+        "code": null,
+        "label": "Regional performance"
+      },
+      {
+        "id": "n2_show",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          700,
+          500
+        ],
+        "params": {
+          "format_rules": "# Conditional formatting — one rule per line, '#' starts a comment.\n# Rules apply top to bottom; a later line wins any attribute it sets.\n\n# --- Colour scales -----------------------------------------------\nRevenue            scale green                    # 2-colour heatmap\nGrowth %           scale red-yellow-green         # 3-colour\n\n# --- Decide the style from ANOTHER column -----------------------\nRegion             scale blue by Revenue          # shade the label by its number\nOwner              if \"Growth %\" < 0 => bg red, fg #ffffff\n\n# --- Data bars -------------------------------------------------\nDeals              bar blue\nTarget             bar purple by Revenue          # bar = Revenue, drawn in Target\n\n# --- Icons ---------------------------------------------------\nHealth             icons traffic                  # numbers ranked into thirds\nSLA                iconmap SLA: ok=● green, warn=▲ amber, breach=✕ red\nGrade              iconmap Grade: A=A green, B=B amber, C=C red   # any letter works as the icon\nTrend              iconmap Trend: rising=📈, steady=➡️, falling=📉   # …and so does an emoji\n\n# --- Highlight a cell, or a whole row ----------------------\nHealth   >= 90     => bg green, bold\nHealth   < 55      => bg red, fg #ffffff\nSLA      = breach  => row #3a1e1e\n\n# --- One rule, every matching column (wildcard) ----------\nFY*                scale green\n\n# --- Number format, and hiding a helper column ----------\nRevenue            format $,.0f\nTarget             format $,.0f\nhide _row\n",
+          "hide": "",
+          "width": 820,
+          "height": 480,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Formatted"
+      },
+      {
+        "id": "n3_style",
+        "type": "flograph.viz.table_style",
+        "pos": [
+          460,
+          1400
+        ],
+        "params": {
+          "format_rules": "Revenue scale red-yellow-green\nRevenue format $,.0f",
+          "hide": ""
+        },
+        "code": null,
+        "label": "Shared: revenue heatmap"
+      },
+      {
+        "id": "n4_show2",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          700,
+          1320
+        ],
+        "params": {
+          "format_rules": "",
+          "hide": "_row",
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Second table, same look"
+      },
+      {
+        "id": "note_shared",
+        "type": "flograph.util.note",
+        "pos": [
+          1260,
+          1320
+        ],
+        "params": {
+          "text": "### Share a style across tables\n\n**Table Style** holds a rule list and no data. Wire its **style** output into\nany number of **Show Table** cards' **style** input to give them one look from\none place. A Show Table's own rule box layers on top of an incoming style.\n",
+          "width": 460,
+          "height": 260
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1",
+        "src": [
+          "n1_data",
+          "table"
+        ],
+        "dst": [
+          "n2_show",
+          "table"
+        ]
+      },
+      {
+        "id": "c2",
+        "src": [
+          "n1_data",
+          "table"
+        ],
+        "dst": [
+          "n4_show2",
+          "table"
+        ]
+      },
+      {
+        "id": "c3",
+        "src": [
+          "n3_style",
+          "style"
+        ],
+        "dst": [
+          "n4_show2",
+          "style"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f_live",
+        "title": "Live example  —  every rule type",
+        "rect": [
+          -60,
+          -80,
+          1660,
+          1060
+        ],
+        "color": "#2f5230"
+      },
+      {
+        "id": "f_share",
+        "title": "Share a style across tables",
+        "rect": [
+          400,
+          1240,
+          1400,
+          560
+        ],
+        "color": "#26415c"
+      }
+    ],
+    "pages": [
+      {
+        "id": "p_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t_tbl",
+            "node": "n2_show",
+            "port": "table",
+            "rect": [
+              40,
+              40,
+              940,
+              560
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

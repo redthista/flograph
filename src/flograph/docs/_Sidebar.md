@@ -11,4 +11,5 @@
   - [[Node Cookbook]]
 - **Sharing results**
   - [[Dashboards and Reports]]
+  - [[Conditional Formatting]]
   - [[Running Headless]]

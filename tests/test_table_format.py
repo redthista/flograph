@@ -59,6 +59,18 @@ class TestParseRules:
         with pytest.raises(ValueError, match="line 1"):
             parse_rules("scale green")
 
+    def test_trailing_comment_is_stripped(self):
+        (rule,) = parse_rules("revenue scale green   # the money column")
+        assert rule.mode == "color_scale" and rule.columns == ["revenue"]
+
+    def test_trailing_comment_keeps_a_hex_colour(self):
+        (rule,) = parse_rules("score >= 90 => bg #2e7d46  # pass")
+        assert rule.bg == "#2e7d46"
+
+    def test_hash_without_a_following_space_is_not_a_comment(self):
+        (rule,) = parse_rules('"col#1" scale green')
+        assert rule.columns == ["col#1"]
+
 
 class TestParseOpValue:
     @pytest.mark.parametrize("text,op,value", [
