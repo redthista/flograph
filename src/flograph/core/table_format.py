@@ -21,6 +21,17 @@ The text DSL, one rule per line (``#`` comments and blank lines skipped)::
     health               icons traffic              # 3-tier icon set
     amount               format $,.0f               # per-column number format
 
+A ``scale`` / ``bar`` / ``icons`` rule can take its deciding value **from
+another column** with a trailing ``by`` (or ``from``) clause, and a
+highlight can **test another column** with an ``if`` (or ``when``) clause —
+the style still lands in the column(s) named on the left::
+
+    product   scale green by revenue               # shade Product by revenue
+    product   bar blue    by units
+    product   icons traffic by score
+    product   if revenue < 0 => bg red             # flag Product when revenue < 0
+    product   if status = closed => row grey        # whole row, tested on status
+
 Later lines win where two rules touch the same cell; a ``row``-scope style
 sits under a ``cell``-scope one.
 """
@@ -131,7 +142,9 @@ class Rule:
     icon_set: Optional[str] = None
     thresholds: Optional[list] = None
     reverse: bool = False
-    # icon_map / any rule reading a different column than the one it draws in
+    # icon_map, and any rule that reads a different column than the one it
+    # draws in: `scale`/`bar`/`icons` with a `by <col>` clause, and a
+    # `highlight` with an `if <col> …` clause (the tested column).
     source: Optional[str] = None              # column whose value decides it
     mapping: Optional[dict] = None            # exact value -> [glyph, colour]
     # number_format
@@ -344,6 +357,25 @@ def parse_op_value(text: str) -> tuple:
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "format")
 
 
+def _split_by_clause(arg: str) -> tuple:
+    """Pull a trailing ``by <column>`` / ``from <column>`` off a keyword
+    argument. Returns ``(remaining arg, source column | None)``.
+
+    ``x scale green by revenue`` → ``("green", "revenue")``;
+    ``x icons by score`` (no preset) → ``("", "score")``.
+    """
+    low = arg.lower()
+    for sep in (" by ", " from "):
+        idx = low.rfind(sep)
+        if idx != -1:
+            return arg[:idx].strip(), (_unquote(arg[idx + len(sep):].strip())
+                                       or None)
+    for sep in ("by ", "from "):
+        if low.startswith(sep):
+            return "", (_unquote(arg[len(sep):].strip()) or None)
+    return arg, None
+
+
 def _parse_icon_map(lineno: int, arg: str) -> tuple:
     """`"severity: high=▲ #d9534f, med=■ amber, low=▼ green"`
     → (source column, {value: [glyph, colour]})."""
@@ -402,18 +434,21 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         source, mapping = _parse_icon_map(lineno, arg)
         return Rule("icon_map", columns, source=source, mapping=mapping)
     if keyword == "scale":
+        arg, source = _split_by_clause(arg)
         preset = _SCALE_PRESETS.get(arg.lower().replace(" ", "-")
                                     or "red-yellow-green")
         if preset is None:
             raise ValueError(f"line {lineno}: unknown scale {arg!r} "
                              f"(try {', '.join(sorted(_SCALE_PRESETS))})")
         return Rule("color_scale", columns,
-                    low=preset[0], mid=preset[1], high=preset[2])
+                    low=preset[0], mid=preset[1], high=preset[2], source=source)
     if keyword == "bar":
+        arg, source = _split_by_clause(arg)
         return Rule("data_bar", columns,
                     color=_BAR_PRESETS.get(arg.lower(), arg or _BAR_PRESETS["blue"]),
-                    negative_color=_BAR_NEGATIVE)
+                    negative_color=_BAR_NEGATIVE, source=source)
     if keyword in ("icons", "icon"):
+        arg, source = _split_by_clause(arg)
         reverse = False
         low = arg.lower()
         if low.endswith(" reverse") or low == "reverse":
@@ -423,7 +458,7 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         if key not in _ICON_SETS:
             raise ValueError(f"line {lineno}: unknown icon set {arg!r} "
                              f"(traffic, arrows, check)")
-        return Rule("icons", columns, icon_set=key, reverse=reverse)
+        return Rule("icons", columns, icon_set=key, reverse=reverse, source=source)
     # format
     if not arg:
         raise ValueError(f"line {lineno}: 'format' needs a spec like ',.0f'")
@@ -480,6 +515,22 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
     cond, _, rhs = line.partition("=>")
     cond, rhs = cond.strip(), rhs.strip()
     style = _parse_style_tokens(lineno, rhs)
+    # `paint-columns if <other column> op value` — style the columns on the
+    # left, but test the column named after `if` / `when`.
+    low = cond.lower()
+    for sep in (" if ", " when "):
+        idx = low.find(sep)
+        if idx > 0:
+            left, right = cond[:idx].strip(), cond[idx + len(sep):].strip()
+            try:
+                op, value, tested = _split_condition(right)
+            except ValueError:
+                continue
+            if not left or not tested:
+                break
+            return Rule("highlight", _column_list(left), scope=style["scope"],
+                        op=op, value=value, source=tested, bg=style.get("bg"),
+                        fg=style.get("fg"), bold=bool(style.get("bold")))
     # split "column op value": the column is everything up to the operator
     op, value, column = _split_condition(cond)
     if not column:
@@ -571,16 +622,21 @@ def _op_phrase(op: str, value: Any) -> str:
 def rule_summary(rule: Rule) -> str:
     """A one-line human description of a rule, for the manager's list."""
     cols = ", ".join(rule.columns) or "every column"
+    by = f" (by {rule.source})" if rule.source else ""
     if rule.mode == "color_scale":
-        return f"{cols}  ·  colour scale"
+        return f"{cols}  ·  colour scale{by}"
     if rule.mode == "data_bar":
-        return f"{cols}  ·  data bar"
+        return f"{cols}  ·  data bar{by}"
     if rule.mode == "highlight":
         where = "row" if rule.scope == "row" else "cell"
-        return f"{cols} {_op_phrase(rule.op, rule.value)}  ·  highlight the {where}"
+        test = f"{rule.source} " if rule.source else ""
+        return (f"{cols}  ·  highlight the {where} when {test}"
+                f"{_op_phrase(rule.op, rule.value)}" if rule.source else
+                f"{cols} {_op_phrase(rule.op, rule.value)}  ·  "
+                f"highlight the {where}")
     if rule.mode == "icons":
         rev = ", reversed" if rule.reverse else ""
-        return f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev})"
+        return f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev}){by}"
     if rule.mode == "icon_map":
         return f"{cols}  ·  icon from “{rule.source}”"
     if rule.mode == "number_format":
@@ -780,7 +836,9 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
     """One ``CellStyle | None`` per row of `series`, in its current order.
 
     `frame` is the whole (current-order) DataFrame — needed only by a rule
-    that reads a *different* column than the one it draws in (``iconmap``).
+    that reads a *different* column than the one it draws in: ``iconmap``,
+    and any ``scale`` / ``bar`` / ``icons`` / ``highlight`` rule carrying a
+    ``by`` / ``if`` clause (its deciding column is ``rule.source``).
     """
     import pandas as pd
 
@@ -788,17 +846,27 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
     acc: list = [None] * n
     values = list(series)
 
+    def _decide(rule) -> tuple:
+        """The series whose values drive `rule`, and stats for it — the
+        drawn column, unless a ``by`` / ``if`` clause named another one."""
+        if (rule.source and frame is not None
+                and rule.source in getattr(frame, "columns", [])):
+            other = frame[rule.source]
+            return other, column_stats(other)
+        return series, stats
+
     for rule in rules:
         contrib: list = [None] * n
 
         if rule.mode == "color_scale":
-            lo = stats.min if rule.low_value is None else rule.low_value
-            hi = stats.max if rule.high_value is None else rule.high_value
+            decide, dstats = _decide(rule)
+            lo = dstats.min if rule.low_value is None else rule.low_value
+            hi = dstats.max if rule.high_value is None else rule.high_value
             if lo is None or hi is None or hi == lo:
                 span = None
             else:
                 span = hi - lo
-            num = pd.to_numeric(series, errors="coerce")
+            num = pd.to_numeric(decide, errors="coerce")
             for i, v in enumerate(num):
                 if span is None or _is_missing(v):
                     continue
@@ -812,12 +880,13 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
             # Excel-style: the axis sits at zero (or an explicit origin). A
             # column with negatives splits from the centre; an all-positive
             # column fills from the left.
+            decide, dstats = _decide(rule)
             origin = 0.0 if rule.origin is None else rule.origin
-            top = max(abs((stats.max or 0) - origin),
-                      abs((stats.min or 0) - origin)) or 1.0
-            mode = "center" if (stats.min is not None
-                                and stats.min < origin) else "left"
-            num = pd.to_numeric(series, errors="coerce")
+            top = max(abs((dstats.max or 0) - origin),
+                      abs((dstats.min or 0) - origin)) or 1.0
+            mode = "center" if (dstats.min is not None
+                                and dstats.min < origin) else "left"
+            num = pd.to_numeric(decide, errors="coerce")
             for i, v in enumerate(num):
                 if _is_missing(v):
                     continue
@@ -829,10 +898,11 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                     else (rule.color or _BAR_PRESETS["blue"]))
 
         elif rule.mode == "highlight" and rule.scope == "cell":
+            decide, _ = _decide(rule)
             try:
-                mask = _condition_mask(series, rule.op, rule.value)
+                mask = _condition_mask(decide, rule.op, rule.value)
             except Exception:
-                mask = pd.Series(False, index=series.index)
+                mask = pd.Series(False, index=decide.index)
             style = CellStyle(bg=rule.bg,
                               fg=rule.fg or (readable_fg(rule.bg) if rule.bg else None),
                               bold=rule.bold)
@@ -841,13 +911,14 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                     contrib[i] = style
 
         elif rule.mode == "icons":
+            decide, dstats = _decide(rule)
             glyphs = _ICON_SETS.get(rule.icon_set or "traffic",
                                     _ICON_SETS["traffic"])
             if rule.reverse:
                 glyphs = list(reversed(glyphs))
             t1, t2 = (rule.thresholds if rule.thresholds
-                      else (stats.tertiles or (None, None)))
-            num = pd.to_numeric(series, errors="coerce")
+                      else (dstats.tertiles or (None, None)))
+            num = pd.to_numeric(decide, errors="coerce")
             for i, v in enumerate(num):
                 if _is_missing(v) or t1 is None:
                     continue
@@ -891,7 +962,9 @@ def evaluate_rows(df, row_rules) -> list:
     n = len(df)
     acc: list = [None] * n
     for rule in row_rules:
-        cols = rule.columns or list(df.columns)
+        # an `if <column>` clause names the tested column in `source`;
+        # otherwise the condition is tested on the rule's own column(s).
+        cols = [rule.source] if rule.source else (rule.columns or list(df.columns))
         col = next((c for c in cols if c in df.columns), None)
         if col is None:
             continue

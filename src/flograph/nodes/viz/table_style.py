@@ -22,6 +22,19 @@ growth iconmap sla: breach=✗ red, ok=✓ green    # icon decided by another co
 hide sla                                        # keep a helper column out of view
 ```
 
+`scale`, `bar` and `icons` can take their deciding value **from another
+column** with a trailing `by` clause, and a highlight can **test another
+column** with an `if` clause — the style still lands in the column(s) on
+the left:
+
+```
+product   scale green by revenue                # shade Product by revenue
+product   bar blue by units
+product   icons traffic by score
+product   if revenue < 0 => bg red              # flag Product when revenue < 0
+product   if status = closed => row grey         # whole row, tested on status
+```
+
 Colours are a preset name (`green`, `red`, `amber`, `blue`, `grey`) or a
 `#hex`. Scales: `green`, `blue`, `red`, `red-green`, `red-yellow-green`,
 `diverging`. A column name with a space just works; `"quote it"` if it has

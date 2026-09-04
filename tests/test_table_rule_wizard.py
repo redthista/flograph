@@ -161,6 +161,81 @@ class TestManager:
         assert not mgr._edit_btn.isEnabled()
 
 
+def _pick_other(box, name):
+    box.setCurrentIndex([box.itemData(i) for i in range(box.count())].index(name))
+
+
+def test_scale_by_another_column(build):
+    b = build()
+    b._kind.setCurrentIndex(0)
+    _select(b, "status")
+    _pick_other(b._scale_by, "revenue")
+    rule = _valid(b.line())
+    assert rule.mode == "color_scale" and rule.columns == ["status"]
+    assert rule.source == "revenue"
+
+
+def test_data_bar_sized_by_another_column(build):
+    b = build()
+    b._kind.setCurrentIndex(1)
+    _select(b, "status")
+    _pick_other(b._bar_by, "units")
+    assert _valid(b.line()).source == "units"
+
+
+def test_icons_ranked_by_another_column(build):
+    b = build()
+    b._kind.setCurrentIndex(3)
+    _select(b, "status")
+    _pick_other(b._icon_by, "revenue")
+    b._icon_reverse.setChecked(True)
+    rule = _valid(b.line())
+    assert rule.source == "revenue" and rule.reverse is True
+
+
+def test_highlight_tested_on_another_column(build):
+    b = build()
+    b._kind.setCurrentIndex(2)
+    _select(b, "gross margin")
+    _pick_other(b._hl_test, "revenue")
+    b._op.setCurrentIndex(2)              # is less than
+    b._val1.setText("0")
+    rule = _valid(b.line())
+    assert rule.mode == "highlight" and rule.columns == ["gross margin"]
+    assert rule.source == "revenue" and rule.op == "<" and rule.value == 0
+
+
+def test_by_clause_round_trips_through_the_builder(build):
+    rule = parse_rules("units icons traffic by revenue")[0]
+    b = build(rule)
+    assert b._icon_by.currentData() == "revenue"
+    assert b.line() == "units icons traffic by revenue"
+
+
+def test_if_clause_round_trips_through_the_builder(build):
+    rule = parse_rules("status if revenue < 0 => bg red")[0]
+    b = build(rule)
+    assert b._hl_test.currentData() == "revenue"
+    assert _valid(b.line()).source == "revenue"
+
+
+def test_manager_duplicate_copies_the_selected_rule(qtbot):
+    m = RuleManager("revenue scale green\nunits bar blue", COLUMNS)
+    qtbot.addWidget(m)
+    m._list.setCurrentRow(0)
+    m._duplicate()
+    lines = m.result_text().splitlines()
+    assert lines == ["revenue scale green", "revenue scale green", "units bar blue"]
+    assert m._list.currentRow() == 1
+
+
+def test_manager_duplicate_disabled_on_a_note(qtbot):
+    m = RuleManager("# just a note", COLUMNS)
+    qtbot.addWidget(m)
+    m._list.setCurrentRow(0)
+    assert not m._dup_btn.isEnabled()
+
+
 def test_free_text_columns_when_none_known(qtbot):
     b = RuleBuilder([])
     qtbot.addWidget(b)

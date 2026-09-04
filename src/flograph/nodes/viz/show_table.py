@@ -25,6 +25,11 @@ growth iconmap sla: breach=✗ red, ok=✓ green    # icon decided by another co
 hide sla                                        # keep a helper column out of view
 ```
 
+`scale`, `bar` and `icons` can read their deciding value **from another
+column** with a trailing `by revenue` clause, and a highlight can **test
+another column** with `product if revenue < 0 => bg red` — the style still
+lands in the column(s) named on the left.
+
 A column whose name has a space just works (`unit price scale green`);
 `"quote it"` if the name has a comma or reads like a keyword.
 

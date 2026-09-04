@@ -60,6 +60,19 @@ def _combo(pairs) -> QComboBox:
     return box
 
 
+_THIS_COLUMN = "(this column)"
+
+
+def _other_col_value(box: QComboBox) -> str:
+    """The column name chosen in an "another column" combo, or "" for the
+    default "(this column)"."""
+    data = box.currentData()
+    if data:
+        return str(data)
+    text = box.currentText().strip()
+    return "" if text in ("", _THIS_COLUMN) else text
+
+
 def _pick_data(combo: QComboBox, token) -> None:
     index = combo.findData(token)
     if index >= 0:
@@ -148,6 +161,29 @@ class RuleBuilder(QDialog):
     def _columns_text(self) -> str:
         return _cols_text(self._chosen_columns())
 
+    def _other_col_combo(self) -> QComboBox:
+        """A combo offering "(this column)" then every column name — for a
+        rule that can take its deciding value from a different column."""
+        box = QComboBox()
+        box.setEditable(not self._columns)
+        box.addItem(_THIS_COLUMN, None)
+        for name in self._columns:
+            box.addItem(name, name)
+        box.currentIndexChanged.connect(self._refresh)
+        if box.isEditable():
+            box.editTextChanged.connect(self._refresh)
+        return box
+
+    def _set_other_col(self, box: QComboBox, name) -> None:
+        if not name:
+            box.setCurrentIndex(0)
+            return
+        idx = box.findData(str(name))
+        if idx >= 0:
+            box.setCurrentIndex(idx)
+        elif box.isEditable():
+            box.setCurrentText(str(name))
+
     def _select_columns(self, names) -> None:
         wanted = {str(n) for n in names}
         if self._columns:
@@ -165,6 +201,8 @@ class RuleBuilder(QDialog):
         self._scale = _combo(_SCALES)
         self._scale.currentIndexChanged.connect(self._refresh)
         f.addRow("Colours", self._scale)
+        self._scale_by = self._other_col_combo()
+        f.addRow("Colour by", self._scale_by)
         self._stack.addWidget(page)
 
     def _build_bar_page(self) -> None:
@@ -173,6 +211,8 @@ class RuleBuilder(QDialog):
         self._bar = _combo(_BAR_COLOURS)
         self._bar.currentIndexChanged.connect(self._refresh)
         f.addRow("Bar colour", self._bar)
+        self._bar_by = self._other_col_combo()
+        f.addRow("Size by", self._bar_by)
         self._stack.addWidget(page)
 
     def _build_highlight_page(self) -> None:
@@ -198,6 +238,8 @@ class RuleBuilder(QDialog):
             w.textChanged.connect(self._refresh)
         self._bold.toggled.connect(self._refresh)
         self._op.currentIndexChanged.connect(self._sync_highlight_inputs)
+        self._hl_test = self._other_col_combo()
+        f.addRow("Test column", self._hl_test)
         f.addRow("When the value", self._op)
         f.addRow("", vrow)
         f.addRow("Fill", self._fill)
@@ -214,7 +256,9 @@ class RuleBuilder(QDialog):
         self._icon_reverse.toggled.connect(self._refresh)
         f.addRow("Icon set", self._iconset)
         f.addRow("", self._icon_reverse)
-        f.addRow(QLabel("Split at the column's lower / upper third."))
+        self._icon_by = self._other_col_combo()
+        f.addRow("Rank by", self._icon_by)
+        f.addRow(QLabel("Split at the ranking column's lower / upper third."))
         self._stack.addWidget(page)
 
     def _build_iconmap_page(self) -> None:
@@ -338,8 +382,10 @@ class RuleBuilder(QDialog):
         self._select_columns(rule.columns)
         if rule.mode == "color_scale":
             _pick_data(self._scale, scale_token(rule.low, rule.mid, rule.high))
+            self._set_other_col(self._scale_by, rule.source)
         elif rule.mode == "data_bar":
             _pick_data(self._bar, bar_token(rule.color))
+            self._set_other_col(self._bar_by, rule.source)
         elif rule.mode == "highlight":
             _pick_data(self._op, rule.op or "=")
             self._sync_highlight_inputs()
@@ -352,9 +398,11 @@ class RuleBuilder(QDialog):
             _pick_data(self._fill, fill_token(rule.bg))
             self._bold.setChecked(bool(rule.bold))
             self._scope.setCurrentIndex(1 if rule.scope == "row" else 0)
+            self._set_other_col(self._hl_test, rule.source)
         elif rule.mode == "icons":
             _pick_data(self._iconset, rule.icon_set or "traffic")
             self._icon_reverse.setChecked(bool(rule.reverse))
+            self._set_other_col(self._icon_by, rule.source)
         elif rule.mode == "icon_map":
             self._map_source.setCurrentText(rule.source or "")
             self._map.setRowCount(0)
@@ -369,6 +417,13 @@ class RuleBuilder(QDialog):
 
     # -------------------------------------------------------- line builder
 
+    @staticmethod
+    def _by(box: QComboBox) -> str:
+        """The ``  by <column>`` DSL tail for an "another column" combo,
+        or ``""`` when it is on "(this column)"."""
+        name = _other_col_value(box)
+        return f" by {quote_column(name)}" if name else ""
+
     def _line(self) -> str:
         kind = self._kind.currentIndex()
         cols = self._columns_text()
@@ -377,27 +432,29 @@ class RuleBuilder(QDialog):
         if not cols:
             return ""
         if kind == 0:
-            return f"{cols} scale {self._scale.currentData()}"
+            return f"{cols} scale {self._scale.currentData()}{self._by(self._scale_by)}"
         if kind == 1:
-            return f"{cols} bar {self._bar.currentData()}"
+            return f"{cols} bar {self._bar.currentData()}{self._by(self._bar_by)}"
         if kind == 2:
             op = self._op.currentData()
             words = {">": ">", ">=": ">=", "<": "<", "<=": "<=", "=": "=",
                      "!=": "!=", "contains": "contains", "starts": "starts with",
                      "ends": "ends with", "matches": "matches",
                      "empty": "is empty", "notempty": "is not empty"}
+            test = _other_col_value(self._hl_test)
+            subject = f"{cols} if {quote_column(test)}" if test else cols
             if op in ("empty", "notempty"):
-                cond = f"{cols} {words[op]}"
+                cond = f"{subject} {words[op]}"
             elif op == "between":
                 v1, v2 = self._val1.text().strip(), self._val2.text().strip()
                 if not v1 or not v2:
                     return ""
-                cond = f"{cols} between {v1} {v2}"
+                cond = f"{subject} between {v1} {v2}"
             else:
                 value = self._val1.text().strip()
                 if not value:
                     return ""
-                cond = f"{cols} {words[op]} {value}"
+                cond = f"{subject} {words[op]} {value}"
             fill = self._fill.currentData()
             if self._scope.currentIndex() == 1:
                 return f"{cond} => row {fill}"
@@ -405,7 +462,8 @@ class RuleBuilder(QDialog):
             return f"{cond} => {tail}"
         if kind == 3:
             rev = " reverse" if self._icon_reverse.isChecked() else ""
-            return f"{cols} icons {self._iconset.currentData()}{rev}"
+            return (f"{cols} icons {self._iconset.currentData()}{rev}"
+                    f"{self._by(self._icon_by)}")
         if kind == 4:
             source = quote_column(self._map_source.currentText().strip())
             pairs = []
@@ -452,15 +510,17 @@ class RuleManager(QDialog):
         side = QVBoxLayout()
         self._add_btn = QPushButton("＋  Add rule")
         self._edit_btn = QPushButton("Edit…")
+        self._dup_btn = QPushButton("Duplicate")
         self._del_btn = QPushButton("Remove")
         self._up_btn = QPushButton("Move up")
         self._down_btn = QPushButton("Move down")
         self._add_btn.clicked.connect(self._add)
         self._edit_btn.clicked.connect(self._edit)
+        self._dup_btn.clicked.connect(self._duplicate)
         self._del_btn.clicked.connect(self._remove)
         self._up_btn.clicked.connect(lambda: self._move(-1))
         self._down_btn.clicked.connect(lambda: self._move(1))
-        for b in (self._add_btn, self._edit_btn, self._del_btn,
+        for b in (self._add_btn, self._edit_btn, self._dup_btn, self._del_btn,
                   self._up_btn, self._down_btn):
             side.addWidget(b)
         side.addStretch(1)
@@ -503,6 +563,7 @@ class RuleManager(QDialog):
         has = row >= 0
         rule = self._entries[row][1] if has else None
         self._edit_btn.setEnabled(rule is not None)
+        self._dup_btn.setEnabled(rule is not None)
         self._del_btn.setEnabled(has)
         self._up_btn.setEnabled(row > 0)
         self._down_btn.setEnabled(0 <= row < len(self._entries) - 1)
@@ -524,6 +585,14 @@ class RuleManager(QDialog):
         if dlg.exec() == QDialog.Accepted and dlg.line():
             self._entries[row] = self._entry_for(dlg.line())
             self._reload()
+
+    def _duplicate(self) -> None:
+        row = self._list.currentRow()
+        if row < 0 or self._entries[row][1] is None:
+            return
+        self._entries.insert(row + 1, self._entry_for(self._entries[row][0]))
+        self._reload()
+        self._list.setCurrentRow(row + 1)
 
     def _remove(self) -> None:
         row = self._list.currentRow()

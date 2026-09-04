@@ -1,5 +1,5 @@
 {
-  "flograph_version": "0.1.12",
+  "flograph_version": "0.1.13",
   "schema": 1,
   "graph": {
     "nodes": [
@@ -20,7 +20,7 @@
         "type": "flograph.viz.show_table",
         "pos": [120, -20],
         "params": {
-          "format_rules": "revenue scale green\nrevenue format $,.0f\ngrowth bar blue\ngrowth iconmap sla: breach=✗ red, warn=! amber, ok=✓ green\nunits icons traffic\nstatus = fail => row red\nscore >= 90 => bg green, bold\nscore < 50 => bg red, fg #fff\nhide sla",
+          "format_rules": "region scale green by revenue\nregion if growth < 0 => bg red, fg #fff\nrevenue scale green\nrevenue format $,.0f\ngrowth bar blue\ngrowth iconmap sla: breach=✗ red, warn=! amber, ok=✓ green\nunits icons traffic\nstatus = fail => row red\nscore >= 90 => bg green, bold\nscore < 50 => bg red, fg #fff\nhide sla",
           "width": 640,
           "height": 340,
           "scale": 100

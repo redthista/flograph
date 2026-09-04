@@ -186,6 +186,81 @@ class TestIconMap:
             parse_rules("g iconmap s:")
 
 
+class TestFromAnotherColumn:
+    def test_scale_by_clause_sets_source(self):
+        (rule,) = parse_rules("product scale green by revenue")
+        assert rule.mode == "color_scale" and rule.columns == ["product"]
+        assert rule.source == "revenue"
+
+    def test_bar_and_icons_by_clause(self):
+        bar, icons = parse_rules("p bar blue by units\np icons traffic by score")
+        assert bar.source == "units" and bar.color == "#3b6299"
+        assert icons.source == "score" and icons.icon_set == "traffic"
+
+    def test_icons_reverse_and_by_together(self):
+        (rule,) = parse_rules("p icons traffic reverse by score")
+        assert rule.reverse is True and rule.source == "score"
+
+    def test_by_with_no_preset(self):
+        (rule,) = parse_rules("p icons by score")
+        assert rule.icon_set == "traffic" and rule.source == "score"
+
+    def test_from_is_an_alias_for_by(self):
+        (rule,) = parse_rules('p scale blue from "gross margin"')
+        assert rule.source == "gross margin"
+
+    def test_highlight_if_clause_tests_another_column(self):
+        (rule,) = parse_rules("product if revenue < 0 => bg red")
+        assert rule.mode == "highlight" and rule.columns == ["product"]
+        assert rule.source == "revenue" and rule.op == "<" and rule.value == 0
+
+    def test_highlight_when_is_an_alias_and_carries_row_scope(self):
+        (rule,) = parse_rules("product if status = closed => row grey")
+        assert rule.scope == "row" and rule.source == "status"
+        assert rule.columns == ["product"]
+
+    def test_if_inside_a_quoted_value_is_not_a_clause(self):
+        (rule,) = parse_rules('notes contains "if only" => bg amber')
+        assert rule.op == "contains" and rule.source is None
+
+    def test_scale_decides_on_the_source_column(self):
+        df = pd.DataFrame({"product": ["a", "b", "c"], "revenue": [0, 50, 100]})
+        (rule,) = parse_rules("product scale blue by revenue")
+        styles = evaluate_column(df["product"], [rule],
+                                 column_stats(df["product"]), frame=df)
+        assert styles[0].bg == rule.low and styles[2].bg == rule.high
+
+    def test_data_bar_sized_by_the_source_column(self):
+        df = pd.DataFrame({"product": ["a", "b"], "units": [10.0, 40.0]})
+        (rule,) = parse_rules("product bar blue by units")
+        styles = evaluate_column(df["product"], [rule],
+                                 column_stats(df["product"]), frame=df)
+        assert styles[1].bar == pytest.approx(1.0)
+
+    def test_highlight_cell_uses_the_if_column(self):
+        df = pd.DataFrame({"product": ["a", "b", "c"], "revenue": [5, -1, 9]})
+        (rule,) = parse_rules("product if revenue < 0 => bg red")
+        styles = evaluate_column(df["product"], [rule],
+                                 column_stats(df["product"]), frame=df)
+        assert styles[0] is None and styles[1].bg == "#5c2b2b" and styles[2] is None
+
+    def test_whole_row_highlight_tested_on_the_if_column(self):
+        df = pd.DataFrame({"product": ["a", "b"], "status": ["ok", "closed"]})
+        _, row_rules = split_rules(parse_rules("product if status = closed => row grey"))
+        styles = evaluate_rows(df, row_rules)
+        assert styles[0] is None and styles[1].bg == "#3a3d44"
+
+    def test_style_report_flags_an_unknown_by_column(self):
+        payload = style_payload({"format_rules": "product scale green by nope"})
+        report = style_report(payload, pd.DataFrame({"product": ["a"]}))
+        assert any("nope" in m for m in report)
+
+    def test_source_round_trips_through_the_style_port(self):
+        (rule,) = parse_rules("product bar blue by units")
+        (back,) = rules_from_style([rule.to_dict()])
+        assert back.source == "units"
+
+
 class TestHide:
     def test_hide_line_becomes_a_hide_rule(self):
         (rule,) = parse_rules("hide helper1, helper2")
