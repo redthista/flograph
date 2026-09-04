@@ -5,9 +5,10 @@ import pandas as pd
 import pytest
 
 from flograph.core.table_format import (
-    CellStyle, Rule, _column_list, column_stats, evaluate_column, evaluate_rows,
-    merge_styles, parse_op_value, parse_rules, parse_rules_lenient, quote_column,
-    readable_fg, rules_from_style, style_payload, style_report, split_rules,
+    CellStyle, Rule, _column_list, column_matches, column_stats, evaluate_column,
+    evaluate_rows, expand_columns, merge_styles, parse_op_value, parse_rules,
+    parse_rules_lenient, quote_column, readable_fg, rules_from_style,
+    style_payload, style_report, split_rules,
 )
 
 
@@ -259,6 +260,54 @@ class TestFromAnotherColumn:
         (rule,) = parse_rules("product bar blue by units")
         (back,) = rules_from_style([rule.to_dict()])
         assert back.source == "units"
+
+
+class TestWildcardColumns:
+    def test_column_matches_exact_and_glob(self):
+        assert column_matches(["revenue"], "revenue")
+        assert not column_matches(["revenue"], "revenues")
+        assert column_matches(["20*"], "2021")
+        assert column_matches(["Q?_sales"], "Q3_sales")
+        assert not column_matches(["20*"], "sales_2021")
+        assert column_matches([], "x") is False
+
+    def test_expand_columns_keeps_plain_drops_unmatched_glob(self):
+        cols = ["2019", "2020", "2021", "region"]
+        assert expand_columns(["202*"], cols) == ["2020", "2021"]
+        assert expand_columns(["20*"], cols) == ["2019", "2020", "2021"]
+        assert expand_columns(["region", "no_such"], cols) == ["region", "no_such"]
+        assert expand_columns(["*", "region"], cols) == cols  # order + dedup
+
+    def test_glob_is_case_sensitive(self):
+        assert not column_matches(["q*"], "Q1")
+
+    def test_parse_keeps_a_glob_as_a_column_entry(self):
+        (rule,) = parse_rules("20* scale green")
+        assert rule.columns == ["20*"]
+
+    def test_scale_applies_to_every_matching_column(self):
+        df = pd.DataFrame({"2020": [0, 10], "2021": [0, 10], "name": ["a", "b"]})
+        (rule,) = parse_rules("20* scale blue")
+        for col in ("2020", "2021"):
+            styles = evaluate_column(df[col], [rule], column_stats(df[col]))
+            assert styles[1].bg == rule.high
+        # the rule simply doesn't fire on a non-matching column
+        assert not column_matches(rule.columns, "name")
+
+    def test_row_highlight_with_a_glob_tests_the_first_match(self):
+        df = pd.DataFrame({"q1_flag": ["ok", "bad"], "q2_flag": ["x", "y"]})
+        _, row_rules = split_rules(parse_rules("q?_flag = bad => row red"))
+        styles = evaluate_rows(df, row_rules)
+        assert styles[0] is None and styles[1].bg == "#5c2b2b"
+
+    def test_style_report_flags_a_glob_that_matches_nothing(self):
+        payload = style_payload({"format_rules": "9999_* scale green"})
+        report = style_report(payload, pd.DataFrame({"2021": [1]}))
+        assert any("matched no column" in m for m in report)
+
+    def test_style_report_is_clean_when_the_glob_matches(self):
+        payload = style_payload({"format_rules": "20* bar blue"})
+        assert style_report(payload, pd.DataFrame({"2021": [1]})) == []
 
 
 class TestHide:

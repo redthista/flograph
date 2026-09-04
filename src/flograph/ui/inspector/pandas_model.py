@@ -84,8 +84,9 @@ class PandasModel(QAbstractTableModel):
         self._loaded = min(PAGE_SIZE, len(df))
         # Column projection: which source columns are shown, in order. A
         # `hide` directive keeps a helper column in the frame (a rule may
-        # read it) but out of the view.
-        hide = {str(c) for c in (hidden or [])}
+        # read it) but out of the view; a `hide` entry may be a glob.
+        from flograph.core.table_format import expand_columns
+        hide = set(expand_columns(hidden or [], df.columns))
         self._visible = [i for i, c in enumerate(df.columns)
                          if str(c) not in hide] if hide else None
         self._set_rules(rules)
@@ -127,14 +128,15 @@ class PandasModel(QAbstractTableModel):
     def _col_styles(self, col: int) -> list:
         entry = self._col_cache.get(col)
         if entry is None:
-            from flograph.core.table_format import column_stats, evaluate_column
+            from flograph.core.table_format import (
+                column_matches, column_stats, evaluate_column)
             name = str(self._df.columns[col])
             stats = None
             entry = []
             for i, rule in enumerate(self._rules):
                 if self._is_row_rule(rule):
                     continue
-                if rule.columns and name not in rule.columns:
+                if rule.columns and not column_matches(rule.columns, name):
                     continue
                 if stats is None:
                     stats = self._col_stats.get(col) or column_stats(

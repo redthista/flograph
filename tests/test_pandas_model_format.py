@@ -131,6 +131,22 @@ class TestHiddenColumns:
         assert [model.data(model.index(r, 0), Qt.DisplayRole)
                 for r in range(2)] == ["1", "2"]
 
+    def test_hide_accepts_a_glob(self):
+        df = pd.DataFrame({"name": [1], "_tmp_a": [2], "_tmp_b": [3]})
+        model = PandasModel(df, hidden=["_tmp_*"])
+        assert model.columnCount() == 1
+        assert model.headerData(0, Qt.Horizontal, Qt.DisplayRole) == "name"
+
+
+class TestWildcardRules:
+    def test_a_glob_rule_paints_every_matching_column(self):
+        df = pd.DataFrame({"2020": [0.0, 10.0], "2021": [0.0, 10.0],
+                           "name": ["a", "b"]})
+        model = PandasModel(df, rules=parse_rules("20* scale blue"))
+        assert isinstance(_bg(model, 1, 0), QColor)   # 2020
+        assert isinstance(_bg(model, 1, 1), QColor)   # 2021
+        assert _bg(model, 1, 2) is None               # name — untouched
+
 
 def test_set_rules_swaps_formatting_live():
     model = PandasModel(pd.DataFrame({"a": [1, 2, 3]}))

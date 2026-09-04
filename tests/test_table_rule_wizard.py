@@ -3,7 +3,9 @@ round-trips a rules box."""
 import pytest
 
 from flograph.core.table_format import parse_rules
-from flograph.ui.properties.table_rule_wizard import RuleBuilder, RuleManager
+from flograph.ui.properties.table_rule_wizard import (
+    ColorChoice, RuleBuilder, RuleManager,
+)
 
 COLUMNS = ["revenue", "units", "status", "sla", "gross margin"]
 
@@ -79,19 +81,34 @@ def test_icons_reverse(build):
 
 def test_iconmap(build):
     b = build()
-    b._kind.setCurrentIndex(4)
+    b._kind.setCurrentIndex(3)                # Icons
+    b._icon_style.setCurrentIndex(1)          # Map exact values to icons
     _select(b, "units")
-    b._map_source.setCurrentText("sla")
+    _pick_other(b._icon_by, "sla")
     b._map.item(0, 0).setText("breach")
-    b._map.cellWidget(0, 1).setCurrentText("x")
-    b._map.cellWidget(0, 2).setCurrentText("red")
+    b._map.cellWidget(0, 1).setText("x")
+    b._map.cellWidget(0, 2).set_value("red")
     rule = _valid(b.line())
     assert rule.mode == "icon_map" and rule.source == "sla"
+    assert rule.mapping["breach"][0] == "x"
+
+
+def test_iconmap_free_text_glyph_and_custom_hex_colour(build):
+    b = build()
+    b._kind.setCurrentIndex(3)
+    b._icon_style.setCurrentIndex(1)
+    _select(b, "units")
+    _pick_other(b._icon_by, "sla")
+    b._map.item(0, 0).setText("warn")
+    b._map.cellWidget(0, 1).setText("🙂")
+    b._map.cellWidget(0, 2).set_value("#ff8800")
+    rule = _valid(b.line())
+    assert rule.mapping["warn"] == ["🙂", "#ff8800"]
 
 
 def test_number_format(build):
     b = build()
-    b._kind.setCurrentIndex(5)
+    b._kind.setCurrentIndex(4)
     _select(b, "revenue")
     b._numfmt.setCurrentText("$,.0f")
     assert _valid(b.line()).number_spec == "$,.0f"
@@ -99,7 +116,7 @@ def test_number_format(build):
 
 def test_hide_quotes_a_spaced_name(build):
     b = build()
-    b._kind.setCurrentIndex(6)
+    b._kind.setCurrentIndex(5)
     _select(b, "gross margin")
     assert b.line() == 'hide "gross margin"'
 
@@ -217,6 +234,42 @@ def test_if_clause_round_trips_through_the_builder(build):
     b = build(rule)
     assert b._hl_test.currentData() == "revenue"
     assert _valid(b.line()).source == "revenue"
+
+
+def test_column_pattern_typed_alongside_the_list(build):
+    b = build()
+    b._kind.setCurrentIndex(0)
+    _select(b, "revenue")
+    b._col_edit.setText("Q?_*, units")
+    rule = _valid(b.line())
+    assert rule.mode == "color_scale"
+    assert rule.columns == ["revenue", "Q?_*", "units"]
+
+
+def test_builder_prefills_a_pattern_into_the_field(build):
+    rule = parse_rules("20* bar blue")[0]
+    b = build(rule)
+    assert b._kind.currentIndex() == 1
+    assert b._col_edit.text() == "20*"
+    assert b.line() == "20* bar blue"
+
+
+def test_color_choice_presets_and_custom_hex(qtbot):
+    cc = ColorChoice([("Red", "red", "#c00"), ("Blue", "blue", "#00c")])
+    qtbot.addWidget(cc)
+    cc.set_value("blue")
+    assert cc.value() == "blue"
+    cc.set_value("#ff8800")            # a hex it has no preset for
+    assert cc.value() == "#ff8800"
+    cc.set_value("red")
+    assert cc.value() == "red"
+
+
+def test_highlight_fill_accepts_a_custom_hex(build):
+    rule = parse_rules("score >= 90 => bg #123456")[0]
+    b = build(rule)
+    assert b._fill.value() == "#123456"
+    assert _valid(b.line()).bg == "#123456"
 
 
 def test_manager_duplicate_copies_the_selected_rule(qtbot):

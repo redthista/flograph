@@ -9,12 +9,13 @@ the graph — the caller hands it the column names to offer.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog,
+    QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from flograph.core.table_format import (
@@ -29,10 +30,17 @@ _SCALES = [("Green (low → high)", "green"), ("Blue (low → high)", "blue"),
            ("Red (low → high)", "red"), ("Red → Green", "red-green"),
            ("Red → Yellow → Green", "red-yellow-green"),
            ("Diverging (blue ↔ red)", "diverging")]
-_BAR_COLOURS = [("Blue", "blue"), ("Green", "green"),
-                ("Orange", "orange"), ("Purple", "purple")]
-_FILLS = [("Red", "red"), ("Amber", "amber"), ("Green", "green"),
-          ("Grey", "grey"), ("Blue", "blue")]
+# (label, DSL token, swatch colour) for the ColorChoice dropdowns. The
+# swatch is a readable stand-in — the table paints its own dark fills.
+_FILL_CHOICES = [("Red", "red", "#b3524f"), ("Amber", "amber", "#b0902f"),
+                 ("Green", "green", "#4f9d5b"), ("Grey", "grey", "#6b6f78"),
+                 ("Blue", "blue", "#4a7ab3"), ("Purple", "purple", "#7d5aa8")]
+_GLYPH_CHOICES = [("Green", "green", "#5cb85c"), ("Amber", "amber", "#e0a83d"),
+                  ("Red", "red", "#d9534f"), ("Blue", "blue", "#4a90d9"),
+                  ("Grey", "grey", "#9aa0a6")]
+_BAR_CHOICES = [("Blue", "blue", "#3b6299"), ("Green", "green", "#2e7d46"),
+                ("Orange", "orange", "#b9722e"), ("Purple", "purple", "#7d5aa8"),
+                ("Red", "red", "#a4373a"), ("Grey", "grey", "#5b5f68")]
 _OPS = [("is greater than", ">"), ("is ≥", ">="), ("is less than", "<"),
         ("is ≤", "<="), ("equals", "="), ("does not equal", "!="),
         ("contains", "contains"), ("starts with", "starts"),
@@ -47,10 +55,11 @@ _MAP_COLOURS = ["green", "amber", "red", "blue", "grey", "(none)"]
 _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 
 _KINDS = ["Colour scale", "Data bars", "Highlight cells / rows",
-          "Icon set (by this column)", "Icon from another column",
-          "Number format", "Hide columns"]
+          "Icons", "Number format", "Hide columns"]
+# both icon modes share the one "Icons" page (index 3); the page's own
+# Style toggle picks between the graduated set and a value→icon map.
 _MODE_KIND = {"color_scale": 0, "data_bar": 1, "highlight": 2, "icons": 3,
-              "icon_map": 4, "number_format": 5, "hide": 6}
+              "icon_map": 3, "number_format": 4, "hide": 5}
 
 
 def _combo(pairs) -> QComboBox:
@@ -83,6 +92,92 @@ def _cols_text(names) -> str:
     return ", ".join(quote_column(str(n).strip()) for n in names if str(n).strip())
 
 
+def _looks_hex(token: str) -> bool:
+    s = str(token or "").strip()
+    return s.startswith("#") and len(s) in (4, 7)
+
+
+def _swatch(colour: str) -> QIcon:
+    pm = QPixmap(14, 14)
+    c = QColor(colour)
+    pm.fill(c if c.isValid() else QColor("#888888"))
+    return QIcon(pm)
+
+
+class ColorChoice(QWidget):
+    """A colour dropdown: a few named presets, each with a swatch, plus
+    **Custom…** which opens the system colour picker (hex, RGB, HSV and
+    screen-pick — all of Qt's dialog). :meth:`value` is the preset name,
+    a ``#rrggbb`` string, or ``"(none)"``; :meth:`set_value` takes any of
+    those back."""
+
+    changed = Signal()
+    _CUSTOM = "\x00custom"
+
+    def __init__(self, choices, allow_none: bool = False, parent=None) -> None:
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self._combo = QComboBox()
+        self._names = {tok for _lbl, tok, _hex in choices}
+        if allow_none:
+            self._combo.addItem("(none)", "(none)")
+        for label, token, hexv in choices:
+            self._combo.addItem(_swatch(hexv), label, token)
+        self._combo.insertSeparator(self._combo.count())
+        self._combo.addItem("Custom…", self._CUSTOM)
+        self._custom_row = None            # index of the picked-colour item
+        self._prev = self._combo.currentIndex()
+        self._combo.activated.connect(self._on_activated)
+        self._combo.currentIndexChanged.connect(self._on_changed)
+        lay.addWidget(self._combo)
+
+    # -------------------------------------------------------------- value
+    def value(self) -> str:
+        data = self._combo.currentData()
+        return "" if data in (None, self._CUSTOM) else str(data)
+
+    def set_value(self, token) -> None:
+        token = str(token or "").strip()
+        idx = self._combo.findData(token)
+        if idx >= 0:
+            self._combo.setCurrentIndex(idx)
+        elif _looks_hex(token):
+            self._set_custom(QColor(token))
+        elif token in ("", "(none)"):
+            self._combo.setCurrentIndex(0)
+        self._prev = self._combo.currentIndex()
+
+    # ----------------------------------------------------------- internal
+    def _on_changed(self, idx: int) -> None:
+        if self._combo.itemData(idx) != self._CUSTOM:
+            self._prev = idx
+            self.changed.emit()
+
+    def _on_activated(self, idx: int) -> None:
+        if self._combo.itemData(idx) != self._CUSTOM:
+            return
+        start = self._combo.itemData(self._prev)
+        initial = QColor(start if _looks_hex(str(start)) else "#4a7ab3")
+        picked = QColorDialog.getColor(initial, self, "Pick a colour")
+        if picked.isValid():
+            self._set_custom(picked)
+            self.changed.emit()
+        else:
+            self._combo.setCurrentIndex(self._prev)
+
+    def _set_custom(self, colour: QColor) -> None:
+        hexv = colour.name()
+        if self._custom_row is None:
+            self._custom_row = self._combo.count()
+            self._combo.addItem(_swatch(hexv), hexv, hexv)
+        else:
+            self._combo.setItemText(self._custom_row, hexv)
+            self._combo.setItemIcon(self._custom_row, _swatch(hexv))
+            self._combo.setItemData(self._custom_row, hexv)
+        self._combo.setCurrentIndex(self._custom_row)
+
+
 class RuleBuilder(QDialog):
     """Build (or edit) one rule; ``line()`` is the DSL it produces."""
 
@@ -105,12 +200,17 @@ class RuleBuilder(QDialog):
         for name in self._columns:
             self._col_list.addItem(QListWidgetItem(name))
         self._col_edit = QLineEdit()
-        self._col_edit.setPlaceholderText(
-            "column name — or several, comma separated")
         self._col_label = QLabel("Columns")
         cform = QFormLayout()
-        cform.addRow(self._col_label,
-                     self._col_list if self._columns else self._col_edit)
+        if self._columns:
+            cform.addRow(self._col_label, self._col_list)
+            self._col_edit.setPlaceholderText(
+                "…or a name / pattern:  20*,  Q?_sales,  *total*")
+            cform.addRow("", self._col_edit)
+        else:
+            self._col_edit.setPlaceholderText(
+                "column name or pattern — several, comma separated")
+            cform.addRow(self._col_label, self._col_edit)
         outer.addLayout(cform)
 
         self._stack = QStackedWidget()
@@ -118,7 +218,6 @@ class RuleBuilder(QDialog):
         self._build_bar_page()
         self._build_highlight_page()
         self._build_icons_page()
-        self._build_iconmap_page()
         self._build_number_page()
         self._build_hide_page()
         outer.addWidget(self._stack)
@@ -154,9 +253,15 @@ class RuleBuilder(QDialog):
     # ------------------------------------------------------------- columns
 
     def _chosen_columns(self) -> list[str]:
-        if self._columns:
-            return [i.text() for i in self._col_list.selectedItems()]
-        return [c.strip() for c in self._col_edit.text().split(",") if c.strip()]
+        picks = ([i.text() for i in self._col_list.selectedItems()]
+                 if self._columns else [])
+        typed = [c.strip() for c in self._col_edit.text().split(",") if c.strip()]
+        seen, out = set(), []
+        for c in picks + typed:
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+        return out
 
     def _columns_text(self) -> str:
         return _cols_text(self._chosen_columns())
@@ -185,13 +290,16 @@ class RuleBuilder(QDialog):
             box.setCurrentText(str(name))
 
     def _select_columns(self, names) -> None:
-        wanted = {str(n) for n in names}
-        if self._columns:
-            for i in range(self._col_list.count()):
-                item = self._col_list.item(i)
-                item.setSelected(item.text() in wanted)
-        else:
-            self._col_edit.setText(", ".join(str(n) for n in names))
+        names = [str(n) for n in names]
+        if not self._columns:
+            self._col_edit.setText(", ".join(names))
+            return
+        known = set(self._columns)
+        for i in range(self._col_list.count()):
+            item = self._col_list.item(i)
+            item.setSelected(item.text() in names)
+        # a pattern, or a name this table doesn't list, goes in the field
+        self._col_edit.setText(", ".join(n for n in names if n not in known))
 
     # ---------------------------------------------------------- type pages
 
@@ -208,8 +316,8 @@ class RuleBuilder(QDialog):
     def _build_bar_page(self) -> None:
         page = QWidget()
         f = QFormLayout(page)
-        self._bar = _combo(_BAR_COLOURS)
-        self._bar.currentIndexChanged.connect(self._refresh)
+        self._bar = ColorChoice(_BAR_CHOICES)
+        self._bar.changed.connect(self._refresh)
         f.addRow("Bar colour", self._bar)
         self._bar_by = self._other_col_combo()
         f.addRow("Size by", self._bar_by)
@@ -228,11 +336,12 @@ class RuleBuilder(QDialog):
         self._and = QLabel("and")
         vl.addWidget(self._and)
         vl.addWidget(self._val2)
-        self._fill = _combo(_FILLS)
+        self._fill = ColorChoice(_FILL_CHOICES)
+        self._fill.changed.connect(self._refresh)
         self._bold = QCheckBox("bold text")
         self._scope = QComboBox()
         self._scope.addItems(["this cell", "the whole row"])
-        for w in (self._op, self._fill, self._scope):
+        for w in (self._op, self._scope):
             w.currentIndexChanged.connect(self._refresh)
         for w in (self._val1, self._val2):
             w.textChanged.connect(self._refresh)
@@ -248,38 +357,46 @@ class RuleBuilder(QDialog):
         self._stack.addWidget(page)
 
     def _build_icons_page(self) -> None:
+        """One page for both icon rules. **Style** picks between a graduated
+        3-tier set (ranked into thirds) and an explicit value → icon map;
+        **Decided by** is the column that drives either, this one or another.
+        """
         page = QWidget()
-        f = QFormLayout(page)
+        v = QVBoxLayout(page)
+        v.setContentsMargins(0, 0, 0, 0)
+        head = QFormLayout()
+        self._icon_style = QComboBox()
+        self._icon_style.addItem("Graduated set — rank into 3 tiers", "set")
+        self._icon_style.addItem("Map exact values to icons", "map")
+        head.addRow("Style", self._icon_style)
+        self._icon_by = self._other_col_combo()
+        head.addRow("Decided by", self._icon_by)
+        v.addLayout(head)
+
+        # -- graduated set
+        self._icon_set_box = QWidget()
+        sf = QFormLayout(self._icon_set_box)
+        sf.setContentsMargins(0, 0, 0, 0)
         self._iconset = _combo(_ICON_SETS)
         self._icon_reverse = QCheckBox("reverse (high = red)")
         self._iconset.currentIndexChanged.connect(self._refresh)
         self._icon_reverse.toggled.connect(self._refresh)
-        f.addRow("Icon set", self._iconset)
-        f.addRow("", self._icon_reverse)
-        self._icon_by = self._other_col_combo()
-        f.addRow("Rank by", self._icon_by)
-        f.addRow(QLabel("Split at the ranking column's lower / upper third."))
-        self._stack.addWidget(page)
+        sf.addRow("Icon set", self._iconset)
+        sf.addRow("", self._icon_reverse)
+        sf.addRow(QLabel("Split at the deciding column's lower / upper third."))
+        v.addWidget(self._icon_set_box)
 
-    def _build_iconmap_page(self) -> None:
-        page = QWidget()
-        v = QVBoxLayout(page)
-        f = QFormLayout()
-        self._map_source = QComboBox()
-        self._map_source.setEditable(not self._columns)
-        self._map_source.addItems(self._columns)
-        self._map_source.currentIndexChanged.connect(self._refresh)
-        if self._map_source.isEditable():
-            self._map_source.editTextChanged.connect(self._refresh)
-        f.addRow("Icon decided by", self._map_source)
-        v.addLayout(f)
-        v.addWidget(QLabel("Value → icon:"))
+        # -- value → icon map
+        self._icon_map_box = QWidget()
+        mv = QVBoxLayout(self._icon_map_box)
+        mv.setContentsMargins(0, 0, 0, 0)
+        mv.addWidget(QLabel("Value → icon  (type any character or emoji):"))
         self._map = QTableWidget(0, 3)
         self._map.setHorizontalHeaderLabels(["value", "icon", "colour"])
         self._map.setMaximumHeight(150)
         self._map.horizontalHeader().setStretchLastSection(True)
         self._map.cellChanged.connect(self._refresh)
-        v.addWidget(self._map)
+        mv.addWidget(self._map)
         row = QHBoxLayout()
         add = QPushButton("＋ row")
         rm = QPushButton("－ row")
@@ -288,9 +405,13 @@ class RuleBuilder(QDialog):
         row.addWidget(add)
         row.addWidget(rm)
         row.addStretch(1)
-        v.addLayout(row)
+        mv.addLayout(row)
         self._add_map_row()
         self._add_map_row()
+        v.addWidget(self._icon_map_box)
+
+        self._icon_style.currentIndexChanged.connect(self._sync_icon_style)
+        self._icon_by.currentIndexChanged.connect(self._sync_icon_style)
         self._stack.addWidget(page)
 
     def _add_map_row(self, value: str = "", glyph: str = "",
@@ -298,16 +419,13 @@ class RuleBuilder(QDialog):
         r = self._map.rowCount()
         self._map.insertRow(r)
         self._map.setItem(r, 0, QTableWidgetItem(value))
-        gbox = QComboBox()
-        gbox.setEditable(True)
-        gbox.addItems(_GLYPHS)
-        gbox.setCurrentText(glyph)
-        gbox.currentTextChanged.connect(self._refresh)
-        self._map.setCellWidget(r, 1, gbox)
-        cbox = QComboBox()
-        cbox.addItems(_MAP_COLOURS)
-        cbox.setCurrentText(colour if colour in _MAP_COLOURS else "(none)")
-        cbox.currentIndexChanged.connect(self._refresh)
+        gedit = QLineEdit(glyph)
+        gedit.setPlaceholderText("any character / emoji  (e.g. T, →, 🙂)")
+        gedit.textChanged.connect(self._refresh)
+        self._map.setCellWidget(r, 1, gedit)
+        cbox = ColorChoice(_GLYPH_CHOICES, allow_none=True)
+        cbox.set_value(colour or "(none)")
+        cbox.changed.connect(self._refresh)
         self._map.setCellWidget(r, 2, cbox)
 
     def _remove_map_row(self) -> None:
@@ -342,10 +460,25 @@ class RuleBuilder(QDialog):
     def _on_kind(self) -> None:
         idx = self._kind.currentIndex()
         self._stack.setCurrentIndex(idx)
-        single = idx == 4
+        if idx == 3:
+            self._sync_icon_style()
+            return
+        self._col_label.setText("Columns")
+        if self._columns:
+            self._col_list.setSelectionMode(_MULTI)
+
+    def _sync_icon_style(self) -> None:
+        """Show the graduated-set fields or the value-map table, and — for
+        the map, whose source must be one column — pin column selection to
+        a single pick when 'Decided by' is left on '(this column)'."""
+        is_map = self._icon_style.currentData() == "map"
+        self._icon_set_box.setVisible(not is_map)
+        self._icon_map_box.setVisible(is_map)
+        single = is_map and not _other_col_value(self._icon_by)
         self._col_label.setText("Shown in column" if single else "Columns")
         if self._columns:
             self._col_list.setSelectionMode(_SINGLE if single else _MULTI)
+        self._refresh()
 
     def _sync_highlight_inputs(self) -> None:
         op = self._op.currentData()
@@ -384,7 +517,7 @@ class RuleBuilder(QDialog):
             _pick_data(self._scale, scale_token(rule.low, rule.mid, rule.high))
             self._set_other_col(self._scale_by, rule.source)
         elif rule.mode == "data_bar":
-            _pick_data(self._bar, bar_token(rule.color))
+            self._bar.set_value(bar_token(rule.color))
             self._set_other_col(self._bar_by, rule.source)
         elif rule.mode == "highlight":
             _pick_data(self._op, rule.op or "=")
@@ -395,16 +528,22 @@ class RuleBuilder(QDialog):
                 self._val2.setText(str(value[1]))
             elif value is not None:
                 self._val1.setText(str(value))
-            _pick_data(self._fill, fill_token(rule.bg))
+            self._fill.set_value(fill_token(rule.bg))
             self._bold.setChecked(bool(rule.bold))
             self._scope.setCurrentIndex(1 if rule.scope == "row" else 0)
             self._set_other_col(self._hl_test, rule.source)
         elif rule.mode == "icons":
+            _pick_data(self._icon_style, "set")
             _pick_data(self._iconset, rule.icon_set or "traffic")
             self._icon_reverse.setChecked(bool(rule.reverse))
             self._set_other_col(self._icon_by, rule.source)
+            self._sync_icon_style()
         elif rule.mode == "icon_map":
-            self._map_source.setCurrentText(rule.source or "")
+            _pick_data(self._icon_style, "map")
+            # `source` is the deciding column; show it as "(this column)"
+            # only when it is the single column the icon is drawn in.
+            src = rule.source if rule.source not in rule.columns else None
+            self._set_other_col(self._icon_by, src)
             self._map.setRowCount(0)
             for value, pair in (rule.mapping or {}).items():
                 glyph = pair[0] if pair else ""
@@ -412,6 +551,7 @@ class RuleBuilder(QDialog):
                 self._add_map_row(value, glyph, colour)
             if not self._map.rowCount():
                 self._add_map_row()
+            self._sync_icon_style()
         elif rule.mode == "number_format":
             self._numfmt.setCurrentText(rule.number_spec or "")
 
@@ -427,14 +567,14 @@ class RuleBuilder(QDialog):
     def _line(self) -> str:
         kind = self._kind.currentIndex()
         cols = self._columns_text()
-        if kind == 6:
+        if kind == 5:
             return f"hide {cols}" if cols else ""
         if not cols:
             return ""
         if kind == 0:
             return f"{cols} scale {self._scale.currentData()}{self._by(self._scale_by)}"
         if kind == 1:
-            return f"{cols} bar {self._bar.currentData()}{self._by(self._bar_by)}"
+            return f"{cols} bar {self._bar.value()}{self._by(self._bar_by)}"
         if kind == 2:
             op = self._op.currentData()
             words = {">": ">", ">=": ">=", "<": "<", "<=": "<=", "=": "=",
@@ -455,31 +595,33 @@ class RuleBuilder(QDialog):
                 if not value:
                     return ""
                 cond = f"{subject} {words[op]} {value}"
-            fill = self._fill.currentData()
+            fill = self._fill.value() or "grey"
             if self._scope.currentIndex() == 1:
                 return f"{cond} => row {fill}"
             tail = f"bg {fill}" + (", bold" if self._bold.isChecked() else "")
             return f"{cond} => {tail}"
         if kind == 3:
+            decider = _other_col_value(self._icon_by)
+            if self._icon_style.currentData() == "map":
+                chosen = self._chosen_columns()
+                source = quote_column(decider or (chosen[0] if chosen else ""))
+                pairs = []
+                for r in range(self._map.rowCount()):
+                    item = self._map.item(r, 0)
+                    value = item.text().strip() if item else ""
+                    glyph = "".join(self._map.cellWidget(r, 1).text().split())
+                    colour = self._map.cellWidget(r, 2).value()
+                    if not value or not glyph:
+                        continue
+                    pairs.append(f"{value}={glyph}"
+                                 + ("" if colour == "(none)" else f" {colour}"))
+                if not source or not pairs:
+                    return ""
+                return f"{cols} iconmap {source}: " + ", ".join(pairs)
             rev = " reverse" if self._icon_reverse.isChecked() else ""
-            return (f"{cols} icons {self._iconset.currentData()}{rev}"
-                    f"{self._by(self._icon_by)}")
+            by = f" by {quote_column(decider)}" if decider else ""
+            return f"{cols} icons {self._iconset.currentData()}{rev}{by}"
         if kind == 4:
-            source = quote_column(self._map_source.currentText().strip())
-            pairs = []
-            for r in range(self._map.rowCount()):
-                item = self._map.item(r, 0)
-                value = item.text().strip() if item else ""
-                glyph = self._map.cellWidget(r, 1).currentText().strip()
-                colour = self._map.cellWidget(r, 2).currentText()
-                if not value or not glyph:
-                    continue
-                pairs.append(f"{value}={glyph}"
-                             + ("" if colour == "(none)" else f" {colour}"))
-            if not source or not pairs:
-                return ""
-            return f"{cols} iconmap {source}: " + ", ".join(pairs)
-        if kind == 5:
             spec = self._numfmt.currentText().strip()
             return f"{cols} format {spec}" if spec else ""
         return ""

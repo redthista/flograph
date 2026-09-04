@@ -31,7 +31,10 @@ another column** with `product if revenue < 0 => bg red` — the style still
 lands in the column(s) named on the left.
 
 A column whose name has a space just works (`unit price scale green`);
-`"quote it"` if the name has a comma or reads like a keyword.
+`"quote it"` if the name has a comma or reads like a keyword. A name with
+a `*` / `?` is a **pattern** — `20* scale green` heatmaps every year
+column, `*_qty bar blue` every quantity column, `hide _tmp_*` every scratch
+column.
 
 **Sharing a look.** The rules being applied come out on the **style**
 output, and a Show Table also *accepts* a style on its **style** input — so

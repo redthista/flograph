@@ -32,12 +32,18 @@ the style still lands in the column(s) named on the left::
     product   if revenue < 0 => bg red             # flag Product when revenue < 0
     product   if status = closed => row grey        # whole row, tested on status
 
+A column name is matched exactly, unless it contains a glob metacharacter
+(``*``, ``?``, ``[``) — then it selects every matching column, so
+``20* scale green`` heatmaps every year column and ``*_qty bar blue`` every
+quantity column. (Case-sensitive; quote a pattern that contains a space.)
+
 Later lines win where two rules touch the same cell; a ``row``-scope style
 sits under a ``cell``-scope one.
 """
 from __future__ import annotations
 
 import dataclasses
+import fnmatch
 import math
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -309,6 +315,38 @@ def _column_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [_unquote(v) for v in value if str(v).strip()]
     return _split_top_commas(str(value))
+
+
+def _is_glob(pattern: str) -> bool:
+    return any(ch in str(pattern) for ch in "*?[")
+
+
+def column_matches(patterns, name) -> bool:
+    """True if `name` is selected by `patterns` — a plain entry matches by
+    exact name, an entry with ``*`` / ``?`` / ``[`` is a case-sensitive
+    glob. An empty `patterns` matches nothing (callers treat that as
+    "every column" themselves)."""
+    name = str(name)
+    for p in patterns or ():
+        p = str(p)
+        if p == name or (_is_glob(p) and fnmatch.fnmatchcase(name, p)):
+            return True
+    return False
+
+
+def expand_columns(patterns, columns) -> list[str]:
+    """The concrete column names `patterns` selects, in `columns` order and
+    de-duplicated. A plain name is kept even when absent (so a caller can
+    still flag it missing); a glob contributes only the names it matches."""
+    cols = [str(c) for c in columns]
+    out: list[str] = []
+    for p in patterns or ():
+        p = str(p)
+        if _is_glob(p):
+            out.extend(c for c in cols if fnmatch.fnmatchcase(c, p))
+        else:
+            out.append(p)
+    return _dedup(out)
 
 
 def quote_column(name: str) -> str:
@@ -746,14 +784,19 @@ def style_report(style_obj: Any, df=None) -> list[str]:
     if columns is not None:
         known = {str(c) for c in columns}
         named: set = set()
-        for rule in rules_from_style(style_obj):
-            named.update(rule.columns)
-            if rule.source:
-                named.add(rule.source)
-        named.update(hidden_columns(style_obj))
+        patterns: set = set()
+        entries = [c for rule in rules_from_style(style_obj) for c in rule.columns]
+        entries += [r.source for r in rules_from_style(style_obj) if r.source]
+        entries += hidden_columns(style_obj)
+        for c in entries:
+            (patterns if _is_glob(c) else named).add(str(c))
         missing = sorted(c for c in named if c not in known)
         if missing:
             messages.append("column(s) not in the table: " + ", ".join(missing))
+        empty = sorted(p for p in patterns
+                       if not any(fnmatch.fnmatchcase(k, p) for k in known))
+        if empty:
+            messages.append("pattern(s) matched no column: " + ", ".join(empty))
     return messages
 
 
@@ -961,11 +1004,16 @@ def evaluate_rows(df, row_rules) -> list:
 
     n = len(df)
     acc: list = [None] * n
+    names = list(df.columns)
     for rule in row_rules:
         # an `if <column>` clause names the tested column in `source`;
-        # otherwise the condition is tested on the rule's own column(s).
-        cols = [rule.source] if rule.source else (rule.columns or list(df.columns))
-        col = next((c for c in cols if c in df.columns), None)
+        # otherwise the condition is tested on the rule's own column(s),
+        # which may be a glob.
+        if rule.source:
+            col = rule.source if rule.source in df.columns else None
+        else:
+            patterns = rule.columns or names
+            col = next((c for c in names if column_matches(patterns, c)), None)
         if col is None:
             continue
         try:
