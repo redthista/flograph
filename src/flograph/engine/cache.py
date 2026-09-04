@@ -62,6 +62,16 @@ class CacheEntry:
     # from the value, and the value is on disk. Empty for pre-existing
     # side-cars written before the manifest recorded them.
     port_names: tuple[str, ...] = ()
+    # {port: column names} for every output that is a DataFrame, on the same
+    # principle as `port_names` and for the same reason: the Properties
+    # panel's column pickers ask what columns feed a node, and asking the
+    # value would mean reading gigabytes off disk to list some strings. So
+    # the strings are recorded while the value is in hand and travel in the
+    # manifest. None — not {} — for a side-car written before this was
+    # recorded: the two have to be told apart, because {} is the honest
+    # answer for an entry that carries no frame, while None means "nobody
+    # wrote this down" and is the only case worth a disk read.
+    column_names: Optional[dict[str, tuple[str, ...]]] = None
 
     @property
     def resident(self) -> bool:
@@ -70,6 +80,27 @@ class CacheEntry:
 
     def ports(self) -> tuple[str, ...]:
         return tuple(self.outputs) if self.resident else self.port_names
+
+    def columns(self, port: str) -> Optional[tuple[str, ...]]:
+        """This port's column names, or None if they are not known without
+        reading the value.
+
+        A resident entry answers from the value. A spilled one answers from
+        what the manifest recorded — that is the whole point — and returns
+        None only for a side-car written before columns were recorded, so a
+        caller can decide whether listing them is worth a disk read."""
+        if self.resident:
+            return column_names_of(self.outputs.get(port))
+        if self.column_names is None:
+            return None
+        return self.column_names.get(port, ())
+
+    def recorded_columns(self) -> Optional[dict[str, tuple[str, ...]]]:
+        """The {port: columns} map to write to the manifest, in whatever
+        state this entry is in. None only when a spilled entry never had one
+        — carried forward as None rather than {} so a re-save does not claim
+        to know that an old side-car's entry has no columns."""
+        return column_map(self.outputs) if self.resident else self.column_names
 
     def summary(self, port: str) -> str:
         if not self.resident:
@@ -108,12 +139,14 @@ class OutputCache:
             outputs=outputs, wall_time=wall_time, memory_bytes=memory_bytes,
             alias_of=alias_of, alias_port=alias_port,
             port_names=tuple(outputs),
+            column_names=column_map(outputs),
         )
 
     def register_spilled(
         self, node_id: str, blob: Optional[str], wall_time: float,
         memory_bytes: int = 0, port_names: tuple[str, ...] = (),
         alias_of: Optional[str] = None, alias_port: Optional[str] = None,
+        column_names: Optional[dict[str, tuple[str, ...]]] = None,
     ) -> None:
         """Record that a node's outputs are cached, on disk, and not loaded.
 
@@ -123,11 +156,16 @@ class OutputCache:
 
         `blob` is None for an alias, which owns no blob and resolves through
         the entry named by `alias_of` instead.
+
+        `column_names` stays None for a side-car that never recorded them —
+        the one case where listing a spilled entry's columns still costs a
+        read (see CacheEntry.columns).
         """
         self._entries[node_id] = CacheEntry(
             outputs={}, wall_time=wall_time, memory_bytes=memory_bytes,
             alias_of=alias_of, alias_port=alias_port,
             spilled=True, blob=blob, port_names=tuple(port_names),
+            column_names=column_names,
         )
 
     def mark_resident(self, node_id: str, outputs: dict[str, Any]) -> None:
@@ -145,6 +183,7 @@ class OutputCache:
         entry.spilled = False
         entry.blob = None
         entry.port_names = tuple(outputs)
+        entry.column_names = column_map(outputs)
         if not entry.memory_bytes:
             entry.memory_bytes = sum(estimate_size(v) for v in outputs.values())
         self.became_resident.emit(node_id)
@@ -320,6 +359,31 @@ class OutputCache:
 
     def clear(self) -> None:
         self._entries.clear()
+
+
+def column_names_of(value: Any) -> tuple[str, ...]:
+    """A DataFrame's column names, or () for anything else.
+
+    `sys.modules.get("pandas")` rather than an import: this module is on the
+    path of every cache write, and pandas must not be dragged in for a flow
+    that never touches it (same rule `summarize` follows)."""
+    import sys
+    pd = sys.modules.get("pandas")
+    if pd is None or not isinstance(value, pd.DataFrame):
+        return ()
+    return tuple(str(col) for col in value.columns)
+
+
+def column_map(outputs: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    """{port: column names} for the ports carrying a DataFrame. Ports with
+    no frame are left out — absent means "no columns", which is what
+    CacheEntry.columns() reads it as."""
+    found = {}
+    for port, value in outputs.items():
+        names = column_names_of(value)
+        if names:
+            found[port] = names
+    return found
 
 
 def summarize(value: Any) -> str:

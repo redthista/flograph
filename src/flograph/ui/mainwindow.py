@@ -1819,6 +1819,12 @@ class MainWindow(QMainWindow):
             self._on_grid_node_succeeded(node_id)
         elif kind == "kpi":
             self._on_kpi_node_succeeded(node_id)
+        elif kind in ("image", "pdf"):
+            self._on_image_node_succeeded(node_id)
+        elif kind == "report":
+            # Coalesced: a report re-reads every embed it names, and an open
+            # lands a batch of them at once (see _refresh_report_cards).
+            self._report_refresh.start()
 
     # ------------------------------------------- cache data arriving late
 
@@ -1834,14 +1840,16 @@ class MainWindow(QMainWindow):
         batch, self._resident_batch = self._resident_batch, set()
         if not batch:
             return
-        # A slicer or control shows what its UPSTREAM entry says, so data
-        # arriving upstream has to refresh the readers below it too.
+        # A slicer, control, linked Table or report shows what its UPSTREAM
+        # entry says, so data arriving upstream has to refresh the readers
+        # below it too. Without this a report reopened blank and a linked
+        # Table reopened empty, both healing only on a re-run.
         extra = set()
         for node_id in batch:
             for downstream_id in self.graph.downstream(node_id):
                 node = self.graph.nodes.get(downstream_id)
-                if node is not None and card_kind(node) in ("slicer",
-                                                            "control"):
+                if node is not None and \
+                        card_kind(node) in self._CARD_READS_INPUTS:
                     extra.add(downstream_id)
         for node_id in batch | extra:
             self._refresh_node_card(node_id)
@@ -4654,15 +4662,25 @@ class MainWindow(QMainWindow):
             self.show_status("")
 
     #: The canvas kinds whose cards render cached data rather than params.
+    #: Every kind here needs a branch in `_refresh_node_card`, or its card
+    #: reopens as a placeholder and stays one until the node is re-run —
+    #: which is exactly the bug that adding grid/report/image/pdf fixed.
     _CARD_DATA_KINDS = ("figure", "webview", "table_viewer", "kpi",
-                        "slicer", "control")
+                        "slicer", "control", "grid", "report", "image", "pdf")
+
+    #: Of those, the kinds that display what their *inputs* hold rather than
+    #: their own output: a slicer's options and a control's bounds come from
+    #: upstream, a linked Table merges the frame feeding it, and a report
+    #: renders the nodes its `![[...]]` embeds name. Their sources have to be
+    #: warmed too, and their cards have to be refreshed when one lands.
+    _CARD_READS_INPUTS = ("slicer", "control", "grid", "report")
 
     def _display_warm_ids(self, registered: list[str]) -> list[str]:
         """Which spilled entries the visible cards are waiting on.
 
-        A figure/webview/table/kpi card shows its own output; a slicer or
-        control shows what its wired inputs' entries say (options, bounds),
-        so those nodes' sources come along too. Everything else — bulk
+        A figure/webview/table/kpi/image card shows its own output; a slicer,
+        control, linked Table or report shows what its wired inputs' entries
+        say, so those nodes' sources come along too. Everything else — bulk
         intermediates nobody is looking at — stays on disk until asked."""
         ids: list[str] = []
         sources: set[str] = set()
@@ -4674,7 +4692,7 @@ class MainWindow(QMainWindow):
             if kind not in self._CARD_DATA_KINDS:
                 continue
             ids.append(node_id)
-            if kind in ("slicer", "control"):
+            if kind in self._CARD_READS_INPUTS:
                 for port in node.spec.inputs:
                     conn = self.graph.input_connection(node_id, port.name)
                     if conn is not None:

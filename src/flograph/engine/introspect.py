@@ -183,9 +183,16 @@ def orphaned_table_sheets(graph: Graph, cache: OutputCache, *,
 
 def upstream_columns(graph: Graph, cache: OutputCache, node_id: str) -> list[str]:
     """Column names of every cached DataFrame feeding node_id's inputs,
-    in port order, deduplicated. Empty when nothing upstream has run yet."""
-    pd = sys.modules.get("pandas")
-    if pd is None or node_id not in graph.nodes:
+    in port order, deduplicated. Empty when nothing upstream has run yet.
+
+    Answers from what the entry *records* rather than from the frame, so a
+    project opened lazily can list its columns without any of it being read
+    back. Before that was recorded this walked `entry.outputs`, which a
+    spilled entry leaves empty — so every column picker in a just-opened
+    project came up blank until the flow had been re-run, and whether one
+    worked came down to whether some card happened to have pulled that
+    node's value in for its own sake."""
+    if node_id not in graph.nodes:
         return []
     node = graph.nodes[node_id]
     seen: dict[str, None] = {}
@@ -196,8 +203,14 @@ def upstream_columns(graph: Graph, cache: OutputCache, node_id: str) -> list[str
         entry = cache.get(conn.src_node)
         if entry is None:
             continue
-        value = entry.outputs.get(conn.src_port)
-        if isinstance(value, pd.DataFrame):
-            for col in value.columns:
-                seen.setdefault(str(col))
+        columns = entry.columns(conn.src_port)
+        if columns is None:
+            # A side-car written before columns were recorded. The names are
+            # only in the value, so read it back — a one-off per old project,
+            # and the alternative is an empty picker with nothing to say why.
+            cache.outputs_for(conn.src_node)
+            entry = cache.get(conn.src_node)
+            columns = (entry.columns(conn.src_port) or ()) if entry else ()
+        for col in columns:
+            seen.setdefault(col)
     return list(seen)

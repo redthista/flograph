@@ -678,3 +678,94 @@ class TestOpenRestoresWhatCardsShow:
         assert slicer_options(reopened.graph, engine.cache, slicer.id)
         # ...all without anything having executed
         assert engine.history.latest is None
+
+    def test_report_and_linked_table_cards_come_back_too(
+            self, qtbot, reg, tmp_path):
+        """The 0.1.12 regression: the warm covered figure/table/slicer/kpi
+        cards and nothing else, so a report card reopened blank and a linked
+        Table card reopened empty. Both healed only on a re-run — or, for the
+        cards that draw a preview, on folding and unfolding them, which is
+        what routes back through _refresh_node_card by hand.
+
+        Both kinds read their *inputs* rather than their own output, so this
+        pins the sources coming back as well as the cards themselves.
+        """
+        from flograph.core import serialization
+
+        csv = tmp_path / "sales.csv"
+        csv.write_text("region,value\n" +
+                       "".join(f"r{i % 3},{i}\n" for i in range(20)))
+
+        builder = self._window(qtbot, reg)
+        graph = builder.graph
+        reader = graph.add_node(reg.instantiate("flograph.io.read_csv"))
+        graph.set_param(reader.id, "path", str(csv))
+        chart = graph.add_node(reg.instantiate("flograph.viz.show_plot"))
+        graph.connect(reader.id, "table", chart.id, "table")
+        linked = graph.add_node(reg.instantiate("flograph.io.table"))
+        graph.connect(reader.id, "table", linked.id, "table")
+        report = graph.add_node(reg.instantiate("flograph.viz.report_card"))
+        graph.connect(chart.id, "figure", report.id, "a")
+        graph.set_param(report.id, "text", "# Sales\n\n![[a]]\n")
+
+        with qtbot.waitSignal(builder.engine.run_finished, timeout=30000) as b:
+            builder.engine.run_all()
+        assert b.args == [True]
+        project = tmp_path / "cards.flograph"
+        serialization.save(graph, project)
+        save_cache(graph, builder.engine.cache, project)
+
+        # --- session two: open, and wait
+        reopened = self._window(qtbot, reg)
+        assert reopened.open_path(str(project), confirm=False) is True
+        engine = reopened.engine
+        qtbot.waitUntil(
+            lambda: (engine.cache.is_resident(linked.id)
+                     and engine.cache.is_resident(report.id)),
+            timeout=15000)
+        # the report's embed points at the chart, so that has to be back too
+        assert engine.cache.is_resident(chart.id)
+        assert engine.history.latest is None, "nothing was re-run"
+
+    def test_column_pickers_answer_without_reading_the_frame(
+            self, qtbot, reg, tmp_path):
+        """A Properties-panel column picker on a just-opened project used to
+        come up empty — it walked `entry.outputs`, and a spilled entry's are
+        empty by design — so the columns appeared only for nodes whose
+        upstream some card had happened to warm for its own sake. That is
+        what made it look random.
+
+        The names now travel in the manifest, so the answer costs no read at
+        all: the branch here feeds nothing visual and must stay on disk.
+        """
+        from flograph.core import serialization
+        from flograph.engine import upstream_columns
+
+        csv = tmp_path / "sales.csv"
+        csv.write_text("region,value\n" +
+                       "".join(f"r{i % 3},{i}\n" for i in range(20)))
+
+        builder = self._window(qtbot, reg)
+        graph = builder.graph
+        reader = graph.add_node(reg.instantiate("flograph.io.read_csv"))
+        graph.set_param(reader.id, "path", str(csv))
+        grouped = graph.add_node(reg.instantiate("flograph.transform.group_by"))
+        graph.connect(reader.id, "table", grouped.id, "table")
+        graph.set_param(grouped.id, "by", "region")
+        graph.set_param(grouped.id, "values", "value")
+
+        with qtbot.waitSignal(builder.engine.run_finished, timeout=30000) as b:
+            builder.engine.run_all()
+        assert b.args == [True]
+        project = tmp_path / "cols.flograph"
+        serialization.save(graph, project)
+        save_cache(graph, builder.engine.cache, project)
+
+        reopened = self._window(qtbot, reg)
+        assert reopened.open_path(str(project), confirm=False) is True
+        engine = reopened.engine
+
+        assert upstream_columns(reopened.graph, engine.cache, grouped.id) == \
+            ["region", "value"]
+        assert not engine.cache.is_resident(reader.id), \
+            "listing columns must not drag the frame off disk"

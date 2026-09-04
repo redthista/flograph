@@ -68,6 +68,10 @@ CACHE_SCHEMA = 3
 # Schema 3 adds "codec" per entry and starts writing compressed blobs; the
 # reader sniffs rather than trusting it (see the module docstring), so even
 # so the field earns its place by making a side-car self-describing.
+# An optional per-entry "columns" ({port: column names}, see _columns_meta)
+# arrived later and deliberately did *not* bump the schema: it is purely
+# additive, its absence is handled, and a bump would have made every older
+# flograph throw away the whole cache of a project this one had saved.
 SUPPORTED_SCHEMAS = (1, 2, 3)
 
 # zlib level 1, chosen by measurement over levels 6/9 and lzma: string-heavy
@@ -441,6 +445,31 @@ def _alias_meta(entry: CacheEntry, manifest: dict, frozen: bool) -> Optional[dic
     return {"node": entry.alias_of, "port": entry.alias_port, "as": ports[0]}
 
 
+def _columns_meta(entry: CacheEntry) -> dict[str, Any]:
+    """The manifest's `columns` field for an entry, or nothing at all.
+
+    Recorded so the Properties panel's column pickers can list what feeds a
+    node without reading its blob back — the same trade `ports` makes. The
+    key is *omitted* rather than written empty when the entry never had a
+    map (an old side-car carried over), because {} is a real answer meaning
+    "this entry holds no frame" and must not be confused with "unknown"."""
+    recorded = entry.recorded_columns()
+    if recorded is None:
+        return {}
+    return {"columns": {port: list(names)
+                        for port, names in recorded.items()}}
+
+
+def _columns_from(meta: dict[str, Any]) -> Optional[dict[str, tuple[str, ...]]]:
+    """The inverse: a manifest entry's recorded columns, or None when this
+    side-car predates the field."""
+    raw = meta.get("columns")
+    if not isinstance(raw, dict):
+        return None
+    return {str(port): tuple(str(c) for c in names)
+            for port, names in raw.items()}
+
+
 def restore_aliases(graph: Graph, cache: OutputCache,
                     entries: list[tuple[str, dict[str, Any]]]) -> list[str]:
     """Rebuild the entries that share another node's value, once the blobs
@@ -576,6 +605,7 @@ def write_cache_plan(project_path: str | Path,
                 "timestamp": entry.timestamp,
                 "bytes": entry.memory_bytes,
                 "ports": list(entry.ports()),
+                **_columns_meta(entry),
                 "alias": alias,
             }
             tick()
@@ -609,6 +639,7 @@ def write_cache_plan(project_path: str | Path,
                 "timestamp": entry.timestamp,
                 "bytes": entry.memory_bytes,
                 "ports": list(entry.ports()),
+                **_columns_meta(entry),
                 "disk_bytes": carried_bytes,
             }
             tick()
@@ -653,6 +684,7 @@ def write_cache_plan(project_path: str | Path,
             "timestamp": entry.timestamp,
             "bytes": entry.memory_bytes,
             "ports": list(entry.ports()),
+            **_columns_meta(entry),
             "codec": codec,
             "raw_bytes": raw_bytes,
             "disk_bytes": disk_bytes,
@@ -881,12 +913,14 @@ def register_cache(graph: Graph, cache: OutputCache,
                     memory_bytes=meta.get("bytes", 0) or 0,
                     port_names=tuple(meta.get("ports") or (alias["as"],)),
                     alias_of=alias["node"], alias_port=alias.get("port"),
+                    column_names=_columns_from(meta),
                 )
             else:
                 cache.register_spilled(
                     node_id, project, meta.get("wall_time", 0.0),
                     memory_bytes=_known_size(meta, source, node_id),
                     port_names=tuple(meta.get("ports") or ()),
+                    column_names=_columns_from(meta),
                 )
             registered.append(node_id)
     finally:
@@ -1104,6 +1138,7 @@ def _write_planned_blobs(writer: "container.BundleWriter",
             "timestamp": entry.timestamp,
             "bytes": entry.memory_bytes,
             "ports": list(entry.ports()),
+            **_columns_meta(entry),
         }
         alias = _alias_meta(entry, manifest, frozen)
         if alias is not None:

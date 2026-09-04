@@ -4,6 +4,8 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | Report and linked-Table cards come back when a project is reopened | Opening a project registers its cached results without reading any of them, then warms back just what the visible cards need — and that list covered figure, plotly, Show Table, KPI, slicer and control cards and nothing else. A **report card** reopened blank and a **linked Table** card reopened empty, both healing only on a re-run; image and PDF cards had the same gap. All four kinds are warmed now, and the two that render what their *inputs* hold (a report's `![[…]]` embeds, a linked Table's merged frame) refresh when an upstream value lands, not just when their own does. |
+| Fix | Column pickers list their columns on a just-opened project | The Properties panel's column pickers read the loaded frame, which a project opened lazily does not have — so a picker offered "run upstream nodes to list columns" until the flow had been re-run. Whether any given one worked came down to whether some card happened to have pulled that node's value back for its own sake, which is what made it look random. Column names now travel in the cache manifest beside the port names, so a picker answers instantly and **without reading anything off disk**. A side-car written before this reads the frame back once, rather than showing an empty menu. |
 
 ## 0.1.12
 
