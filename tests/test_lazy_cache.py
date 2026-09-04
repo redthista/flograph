@@ -388,6 +388,31 @@ def run(ctx, value):
         assert engine.cache.outputs_for(double.id)["value"] == 42
 
 
+class TestColumnNamesOf:
+    """`column_names_of` runs on every cache write, including for a fast
+    non-pandas node that finishes while a parallel worker is still partway
+    through its first `import pandas` — the module is then in `sys.modules`
+    without `DataFrame` bound. It must return () there, not raise."""
+
+    def test_returns_columns_for_a_frame(self):
+        from flograph.engine.cache import column_names_of
+        assert column_names_of(pd.DataFrame({"a": [1], "b": [2]})) == ("a", "b")
+
+    def test_non_frame_is_empty(self):
+        from flograph.engine.cache import column_names_of
+        assert column_names_of({"style": "x"}) == ()
+        assert column_names_of(None) == ()
+
+    def test_half_imported_pandas_does_not_raise(self, monkeypatch):
+        import sys
+        import types
+        from flograph.engine.cache import column_map, column_names_of
+        half = types.ModuleType("pandas")            # no DataFrame attribute
+        monkeypatch.setitem(sys.modules, "pandas", half)
+        assert column_names_of(object()) == ()
+        assert column_map({"style": {"rules": []}}) == {}
+
+
 class TestAccounting:
     def test_spilled_is_not_counted_as_held(self):
         cache = OutputCache()

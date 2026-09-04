@@ -366,10 +366,15 @@ def column_names_of(value: Any) -> tuple[str, ...]:
 
     `sys.modules.get("pandas")` rather than an import: this module is on the
     path of every cache write, and pandas must not be dragged in for a flow
-    that never touches it (same rule `summarize` follows)."""
+    that never touches it (same rule `summarize` follows).
+
+    `getattr(pd, "DataFrame", None)` because a fast non-pandas node can
+    finish — and be cached, on this path — while a parallel worker is still
+    partway through its first `import pandas`, so the module object exists
+    in `sys.modules` without `DataFrame` bound yet."""
     import sys
-    pd = sys.modules.get("pandas")
-    if pd is None or not isinstance(value, pd.DataFrame):
+    frame_cls = getattr(sys.modules.get("pandas"), "DataFrame", None)
+    if frame_cls is None or not isinstance(value, frame_cls):
         return ()
     return tuple(str(col) for col in value.columns)
 
