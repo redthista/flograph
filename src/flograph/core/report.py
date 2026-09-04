@@ -42,7 +42,9 @@ EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*((?:\|[^\]|]*)*)\]\]")
 #: `ratio`  — the shape the chart is drawn at, `16:9` / `4x3` / `1.5`.
 #: `height` — an exact height in points, the other way to say a shape.
 #: `scale`  — render density, `2` for a chart with fine detail. Capped.
-EMBED_OPTIONS = ("width", "ratio", "height", "scale")
+#: `rows`   — how many rows of a table to show before it is cut with a
+#:            note. Only a table has rows; on a chart it says so.
+EMBED_OPTIONS = ("width", "ratio", "height", "scale", "rows")
 
 #: Bare-word flags an embed understands, written with no `=`. Matched
 #: before the port, so a node whose label collides with one cannot be

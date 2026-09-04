@@ -601,7 +601,29 @@ class TestVisualPreview:
         assert popup._label.pixmap().isNull()
         assert "Run the flow" in popup._label.text()
 
-    def test_a_web_view_is_not_claimed_as_a_chart(self, window, monkeypatch):
+    def test_a_web_view_is_previewed_as_the_page_it_draws(self, window,
+                                                          monkeypatch):
+        """A web view used to say "drag it onto the page to see it" — the
+        preview could not photograph one. It goes through the report's HTML
+        snapshot now, the same picture a report page places."""
+        node = window.registry.instantiate("flograph.viz.show_web", pos=(0, 0))
+        window.graph.add_node(node)
+        add_page(window)
+        window.engine.cache.set(node.id, {"view": "<p>hello</p>"}, 0.01)
+        visuals = window._dashboard_pages["p1"].visuals
+        monkeypatch.setattr(type(visuals), "isVisible", lambda self: True)
+
+        popup = self.hover(visuals, 0)
+        if popup._label.pixmap().isNull():
+            # No Qt WebEngine here: it must still say why, not draw nothing
+            assert popup._label.text()
+        else:
+            assert not popup._label.text()
+
+    def test_a_web_view_that_cannot_be_drawn_says_so(self, window,
+                                                     monkeypatch):
+        from flograph.ui.report import html_snapshot
+        monkeypatch.setattr(html_snapshot, "snapshot", lambda *a, **k: None)
         node = window.registry.instantiate("flograph.viz.show_web", pos=(0, 0))
         window.graph.add_node(node)
         add_page(window)

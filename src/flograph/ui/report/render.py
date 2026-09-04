@@ -221,6 +221,13 @@ PLOTLY_SIZE = (700, 450)
 #: is quadratic and a report can hold a stack of charts.
 MAX_SCALE_MULTIPLIER = 4.0
 
+#: Rows of a table an embed shows before it is cut with a note, and the
+#: most `rows=` may ask for. The ceiling is not arithmetic like the ones
+#: above — it is that a table is laid out cell by cell by Qt, so a report
+#: asking for a hundred thousand rows would appear to hang.
+TABLE_ROWS = 30
+MAX_TABLE_ROWS = 2000
+
 
 def parse_aspect(raw: str) -> "float | None":
     """A `ratio=` value as the single number width / height.
@@ -320,6 +327,81 @@ def plotly_image(value, image_width: int, for_print: bool,
                 "again.")
 
 
+# The size a webview card is when nothing says otherwise — the default
+# width/height every stock webview node ships with. Only reached for a card
+# whose params have been stripped; a real node always says.
+HTML_CARD_SIZE = (420, 320)
+
+
+def html_geometry(params, image_width: int, for_print: bool,
+                  aspect: "float | None" = None,
+                  scale_mult: float = 1.0) -> tuple:
+    """(width, height, scale) to draw a webview card's HTML at.
+
+    The same split as plotly_geometry, for the same reason: HTML lays out
+    in CSS pixels, so a *wider* page is a different layout — text wraps
+    elsewhere, a flex row breaks differently — not a sharper picture. So
+    the page keeps the pixel size its card is set to, which is the size its
+    author was looking at while building it, and only the density follows
+    the placement on the page.
+
+    That the density is free is the gift of printing the page rather than
+    grabbing it: the snapshot is vector, so 4x costs nothing but pixels.
+
+    `aspect` (from `ratio=`/`height=`) changes the height the page is laid
+    out at, exactly as dragging the card taller would.
+    """
+    params = params or {}
+    width = _card_dimension(params.get("width"), HTML_CARD_SIZE[0])
+    height = _card_dimension(params.get("height"), HTML_CARD_SIZE[1])
+    if aspect:
+        height = max(1, round(width / aspect))
+    if for_print:
+        wanted = image_width / 72.0 * PRINT_DPI
+    else:
+        wanted = image_width * PREVIEW_OVERSAMPLE
+    scale = max(1.0, min(MAX_IMAGE_SCALE, wanted / width))
+    if scale_mult != 1.0:
+        scale = max(1.0, min(MAX_IMAGE_SCALE, scale * scale_mult))
+    return width, height, round(scale, 3)
+
+
+def _card_dimension(value, fallback: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return number if number > 0 else fallback
+
+
+def html_image(value, params, image_width: int, for_print: bool,
+               aspect: "float | None" = None, scale_mult: float = 1.0,
+               grid: tuple = ()):
+    """A webview card's output as PNG bytes, or None.
+
+    The HTML is built by the *same* function the card and Open in Browser
+    use (core.html.to_html), so the three cannot drift, and photographed by
+    the app's own Chromium (see html_snapshot). None means "nothing to
+    show here" — the value wasn't HTML at all, or no browser was available
+    to take the picture — and leaves the caller to fall back.
+    """
+    from flograph.core import html as core_html
+    try:
+        page = (core_html.to_html(value, *grid) if grid
+                else core_html.to_html(value))
+    except Exception:
+        return None
+    if not page:
+        return None
+    width, height, scale = html_geometry(params, image_width, for_print,
+                                         aspect, scale_mult)
+    try:
+        from .html_snapshot import snapshot
+        return snapshot(page, width, height, scale)
+    except Exception:
+        return None
+
+
 def _labelled(graph, ref: str) -> list:
     """Every node whose label matches `ref`, case-insensitively."""
     wanted = ref.strip().casefold()
@@ -402,7 +484,7 @@ def nested_by_label(graph, cache):
             return None
         node_id = matches[0].id
         return (body, by_wired_input(graph, cache, node_id),
-                params_by_wired_input(graph, node_id))
+                source_by_wired_input(graph, node_id))
     return find
 
 
@@ -427,7 +509,7 @@ def nested_by_wired_input(graph, cache, node_id: str):
         if body is None:
             return None
         return (body, by_wired_input(graph, cache, source.id),
-                params_by_wired_input(graph, source.id))
+                source_by_wired_input(graph, source.id))
     return find
 
 
@@ -517,16 +599,24 @@ class _Resolver:
     passed in — see by_label and by_wired_input."""
 
     def __init__(self, lookup, image_scale: float = 1.0,
-                 image_width: int = FIGURE_WIDTH, params=None,
-                 nested=None, page_height: "float | None" = None) -> None:
+                 image_width: int = FIGURE_WIDTH, source=None,
+                 nested=None, page_height: "float | None" = None,
+                 cache=None) -> None:
         self._lookup = lookup
-        # (ref, port) -> (body, lookup, params) when the embed names a report
+        # Read for one thing only: the `style` a table card publishes, so
+        # an embedded table arrives on the page with the conditional
+        # formatting it is showing on the canvas. Everything else about a
+        # value still comes through `lookup`.
+        self._cache = cache
+        # (ref, port) -> (body, lookup, source) when the embed names a report
         # card, so its contents are rendered here instead of its source text.
         self._nested = nested
         self._depth = 0
-        # (ref) -> the producing node's params, so a list embed can be laid
-        # out on the grid that node configured. None = no grid settings.
-        self._params = params
+        # (ref) -> the node that produced the value, so an embed can be
+        # rendered the way that node's own card renders it: the grid a list
+        # is laid out on, and the size a webview card's HTML was built for.
+        # None = nothing known about the source.
+        self._source = source
         from flograph.core.chart_grid import DEFAULT_DIRECTION
         self._grid = (0, 0, DEFAULT_DIRECTION)
         # 1.0 = leave figures at their own resolution (the on-screen
@@ -537,6 +627,8 @@ class _Resolver:
         # set for its duration only — see `render`. None/1.0 = leave it be.
         self._aspect: "float | None" = None
         self._scale_mult = 1.0
+        # How many rows of a table this embed shows, from `rows=`.
+        self._max_rows = TABLE_ROWS
         # The body height of one page, in points — only a report *page* has
         # one. Needed by the `fit` pass; None makes `fit` a no-op.
         self._page_height = page_height
@@ -576,17 +668,20 @@ class _Resolver:
         # A per-embed width, shape and density are applied for the duration
         # of this embed only, so `![[a|width=50%]]` narrows that one chart
         # and leaves the next at the page width.
-        was = (self._image_width, self._aspect, self._scale_mult)
+        was = (self._image_width, self._aspect, self._scale_mult,
+               self._max_rows)
         self._image_width = self._width_for(embed)
         self._aspect = self._aspect_for(embed)
         self._scale_mult = self._scale_for(embed)
+        self._max_rows = self._rows_for(embed)
         before = len(self.images)
         try:
             return self.render_value(value, embed.ref)
         finally:
             if (embed.options or {}).get("fit"):
                 self._mark_fit(embed, before)
-            (self._image_width, self._aspect, self._scale_mult) = was
+            (self._image_width, self._aspect, self._scale_mult,
+             self._max_rows) = was
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -665,6 +760,21 @@ class _Resolver:
             return 1.0
         return max(1.0, min(MAX_SCALE_MULTIPLIER, value))
 
+    def _rows_for(self, embed) -> int:
+        """`rows=50` shows fifty rows of a table before the "showing N of
+        M" note. The default is deliberately short — a report is a summary,
+        and a table that runs for nine pages is nearly always an accident —
+        but "nearly always" is why it can be asked for."""
+        raw = str((embed.options or {}).get("rows", "")).strip()
+        if not raw:
+            return TABLE_ROWS
+        try:
+            value = int(float(raw))
+        except ValueError:
+            self.problems.append(
+                f"“{embed.ref}”: “{raw}” is not a row count — try 50")
+            return TABLE_ROWS
+        return max(1, min(MAX_TABLE_ROWS, value))
 
     #: How many report cards deep an embed may go. Wires are acyclic, so
     #: this can't actually run away — it is a guard against a graph state
@@ -672,15 +782,15 @@ class _Resolver:
     #: can pull into a page.
     MAX_DEPTH = 5
 
-    def _render_nested(self, ref: str, body: str, lookup, params) -> str:
+    def _render_nested(self, ref: str, body: str, lookup, source) -> str:
         """Render a report card's body in place, on *this* resolver.
 
         Reusing self rather than building a second one is the whole trick:
         images are collected in one list and spliced into one document, so a
         chart inside an embedded card arrives on the page like any other.
-        Only the lookup and params are swapped, and put back afterwards —
-        the nested embeds must resolve against the card's inputs, and
-        everything after it in the body against the page again.
+        Only the lookup and the source finder are swapped, and put back
+        afterwards — the nested embeds must resolve against the card's
+        inputs, and everything after it in the body against the page again.
         """
         if self._depth >= self.MAX_DEPTH:
             self.problems.append(f"“{ref}” nests reports more than "
@@ -688,18 +798,27 @@ class _Resolver:
             return (f"> **⚠ “{ref}” nests reports too deeply** — a report "
                     "card embedding another, more than "
                     f"{self.MAX_DEPTH} levels down.")
-        was = (self._lookup, self._params, self._depth)
-        self._lookup, self._params = lookup, params
+        was = (self._lookup, self._source, self._depth)
+        self._lookup, self._source = lookup, source
         self._depth += 1
         try:
             return replace_embeds(body, self.render)
         finally:
-            self._lookup, self._params, self._depth = was
+            self._lookup, self._source, self._depth = was
 
     def _grid_for(self, embed) -> tuple:
         from flograph.core.chart_grid import grid_settings
-        params = self._params(embed.ref) if self._params else None
-        return grid_settings(params)
+        node = self._node_for(embed.ref)
+        return grid_settings(node.params if node is not None else None)
+
+    def _node_for(self, ref: str):
+        """The node that produced this embed's value, if it can be found."""
+        if self._source is None:
+            return None
+        try:
+            return self._source(ref)
+        except Exception:
+            return None
 
     def render_list(self, values, ref: str) -> str:
         """A list laid out on the node's grid.
@@ -831,6 +950,33 @@ class _Resolver:
             if original is not None:
                 value.set_size_inches(original, forward=False)
 
+    def _webview_image(self, value, ref: str) -> "str | None":
+        """This embed as a picture of its webview card, or None if it isn't
+        one — in which case the ordinary branches below have it.
+
+        A card that *is* a webview and cannot be photographed says so
+        rather than falling back to inlining its HTML: the fallback is the
+        wrecked-layout wall of text this branch exists to replace, and a
+        report is better off naming the missing piece.
+        """
+        node = self._node_for(ref)
+        if node is None:
+            return None
+        from ..canvas.node_item import card_kind
+        if card_kind(node) != "webview":
+            return None
+        picture = html_image(value, node.params, self._image_width,
+                             self._for_print, self._aspect, self._scale_mult,
+                             self._grid)
+        if picture:
+            image = QImage()
+            if image.loadFromData(picture, "PNG") and not image.isNull():
+                return self._token(image)
+        self.problems.append(f"“{ref}” could not be drawn")
+        return ("> **⚠ This web view could not be drawn** — Qt WebEngine "
+                "is not available to take a picture of it. Install the full "
+                "PySide6 package from Manage Packages…, then run again.")
+
     def render_value(self, value, ref: str) -> str:
         if value is None:
             self.problems.append(f"“{ref}” produced nothing")
@@ -858,6 +1004,14 @@ class _Resolver:
         if plotly is not None:
             self.problems.append(f"“{ref}” could not be drawn")
             return plotly
+
+        # A webview card's own HTML, photographed at the card's size. This
+        # sits above the string branch below on purpose: a Web View node's
+        # output *is* a string, and inlining it as markdown was what threw
+        # the layout away — the page kept the words and lost the design.
+        web = self._webview_image(value, ref)
+        if web is not None:
+            return web
 
         # Before the string branch below: an Image node's `data_uri` is a
         # string, and inlining that as markdown would print the base64.
@@ -893,36 +1047,90 @@ class _Resolver:
 
         pd = sys.modules.get("pandas")
         if pd is not None and isinstance(value, (pd.DataFrame, pd.Series)):
-            return frame_to_markdown(value)
+            return self._table(value, ref)
         if hasattr(value, "itertuples") and hasattr(value, "columns"):
-            return frame_to_markdown(value)   # duck-typed frame
+            return self._table(value, ref)    # duck-typed frame
 
         return format_scalar(value)
 
+    def _table(self, value, ref: str) -> str:
+        """A frame as a table, carrying whatever formatting its card shows.
 
-def params_by_label(graph):
-    """The params of the node an embed names, for reading its grid layout."""
+        HTML rather than markdown, and not because of the colours: a
+        markdown table has no width either, so `![[Sales|width=50%]]` did
+        nothing on the one kind of embed most likely to need it. Written as
+        HTML the table takes the placement width like a chart, keeps the
+        conditional formatting its Show Table card is displaying, and is
+        still *text* — selectable in the PDF, and free to break across a
+        page where a picture of a table could not.
+
+        Falls back to the markdown table if anything about the styling
+        cannot be worked out: a report showing an unstyled table is a small
+        loss, and a report that fails to render is a large one.
+        """
+        from flograph.core.table_html import frame_to_html
+        if self._aspect is not None or self._scale_mult != 1.0:
+            # Said rather than ignored, the same way a picture says it: a
+            # table is laid out from its text, so there is no shape to
+            # redraw it at and no density to render it denser.
+            self.problems.append(
+                f"“{ref}”: ratio, height and scale only apply to charts — "
+                "a table takes width and rows")
+        rules, hidden = self._table_style(ref)
+        try:
+            return frame_to_html(value, rules, hidden,
+                                 max_rows=self._max_rows,
+                                 width=self._image_width)
+        except Exception:
+            return frame_to_markdown(value, self._max_rows)
+
+    def _table_style(self, ref: str) -> tuple:
+        """(rules, hidden columns) for this embed's table.
+
+        Read off the producing node's own `style` output — the port a Show
+        Table already publishes so one table's formatting can be wired into
+        another. Taking it from there rather than from the node's params is
+        what makes an *incoming* style (from a Table Style node, or another
+        table) show up on the page too: the port carries the merged result,
+        which is exactly what the card is drawing.
+        """
+        node = self._node_for(ref)
+        if node is None or self._cache is None:
+            return (), ()
+        if not any(port.name == "style" for port in node.spec.outputs):
+            return (), ()
+        try:
+            style = self._cache.outputs_for(node.id).get("style")
+            from flograph.core.table_format import (hidden_columns,
+                                                    rules_from_style)
+            return rules_from_style(style), hidden_columns(style)
+        except Exception:
+            return (), ()
+
+
+def source_by_label(graph):
+    """The node an embed names, for reading how its card is set up — the
+    grid a list is laid out on, and (for a webview card) the pixel size the
+    HTML was designed at."""
     def lookup(ref: str):
         wanted = ref.strip().casefold()
-        node = next((n for n in graph.nodes.values()
+        return next((n for n in graph.nodes.values()
                      if n.label.casefold() == wanted), None)
-        return node.params if node is not None else None
     return lookup
 
 
-def params_by_wired_input(graph, node_id: str):
-    """The params of whatever an embed on this card names — the node feeding
-    the input, or the node of that label. Same order as by_wired_input, so a
-    chart grid is laid out from its own node's settings either way."""
+def source_by_wired_input(graph, node_id: str):
+    """Whatever an embed on this card names — the node feeding the input, or
+    the node of that label. Same order as by_wired_input, so a chart grid is
+    laid out from its own node's settings either way."""
     def lookup(ref: str):
         name = ref.strip()
         node = graph.nodes.get(node_id)
         if node is not None and name in {p.name for p in node.spec.inputs}:
             conn = graph.input_connection(node_id, name)
-            source = graph.nodes.get(conn.src_node) if conn else None
-            return source.params if source is not None else None
+            return graph.nodes.get(conn.src_node) if conn else None
         matches = _labelled(graph, ref)
-        return matches[0].params if len(matches) == 1 else None
+        return matches[0] if len(matches) == 1 else None
     return lookup
 
 
@@ -946,10 +1154,10 @@ def render_report(body: str, graph, cache, image_scale: float = 1.0,
         page_height = body_rect(printable_points(setup), setup).height()
     return render_body(body, by_label(graph, cache), image_width=width,
                        image_scale=image_scale,
-                       params=params_by_label(graph),
+                       source=source_by_label(graph),
                        nested=nested_by_label(graph, cache),
                        page_break_rule=page_break_rule,
-                       page_height=page_height)
+                       page_height=page_height, cache=cache)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -969,15 +1177,16 @@ def render_card(body: str, graph, cache, node_id: str,
     return render_body(body, by_wired_input(graph, cache, node_id),
                        image_width=width or FIGURE_WIDTH,
                        image_scale=image_scale,
-                       params=params_by_wired_input(graph, node_id),
+                       source=source_by_wired_input(graph, node_id),
                        nested=nested_by_wired_input(graph, cache, node_id),
-                       page_break_rule=page_break_rule)
+                       page_break_rule=page_break_rule, cache=cache)
 
 
 def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
-                image_scale: float = 1.0, params=None,
+                image_scale: float = 1.0, source=None,
                 nested=None, page_break_rule: bool = False,
-                page_height: "float | None" = None) -> RenderedReport:
+                page_height: "float | None" = None,
+                cache=None) -> RenderedReport:
     """Lay a report body out as a document ready to show or print.
 
     `page_break_rule` is for the on-screen preview, which is one
@@ -990,8 +1199,8 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     report *page* has one. It is what an `![[chart|fit]]` is measured
     against; without it `fit` is a no-op that says so.
     """
-    resolver = _Resolver(lookup, image_scale, image_width, params, nested,
-                         page_height)
+    resolver = _Resolver(lookup, image_scale, image_width, source, nested,
+                         page_height, cache)
     # Columns first, and they resolve their own embeds as they go: an embed
     # inside a column has to be rendered knowing how wide that column is.
     staged_body = replace_columns(body, resolver.render_columns)

@@ -248,6 +248,68 @@ def readable_fg(bg_hex: str) -> str:
     return "#1b1c20" if luminance > 0.55 else "#e5e7eb"
 
 
+# ------------------------------------------------------------------ paper
+
+# The presets above are built for the card: solid fills that read against a
+# dark grid (#2a2c33). A report page is white, so printed unchanged they
+# would put a near-black block where the card shows "low", and light
+# auto-text on a white ground where it shows a highlight. These turn a card
+# style into the same style *for paper* — the meaning kept (the gradient
+# still runs the same way, the highlight is still that colour), the ground
+# swapped underneath it.
+
+#: How much of the card's colour survives against white. Low enough that a
+#: whole heatmapped column stays readable text on tinted paper rather than
+#: a wall of ink; high enough that the gradient is still legible.
+PAPER_TINT = 0.24
+
+#: A bar is one solid shape rather than a ground for text, so it keeps more
+#: of its colour than a fill does.
+PAPER_BAR_TINT = 0.55
+
+#: The two values readable_fg produces. A style carrying one of these has an
+#: *automatic* text colour — chosen for the card's ground, so on paper it has
+#: to be chosen again. Anything else was asked for by name and is kept, only
+#: darkened if it would be invisible on white.
+_AUTO_FG = {"#1b1c20", "#e5e7eb"}
+
+
+def paper_tint(colour: str, amount: float = PAPER_TINT) -> str:
+    """`colour` mixed into white — the same hue, on a page."""
+    rgb = _hex_rgb(colour)
+    if rgb is None:
+        return colour
+    return _rgb_hex(_lerp((255, 255, 255), rgb, amount))
+
+
+def on_white(colour: str) -> str:
+    """`colour` made legible as *ink*: darkened if it would disappear."""
+    rgb = _hex_rgb(colour)
+    if rgb is None:
+        return colour
+    r, g, b = (c / 255 for c in rgb)
+    if 0.2126 * r + 0.7152 * g + 0.0722 * b <= 0.55:
+        return colour
+    return _rgb_hex(_lerp(rgb, (0, 0, 0), 0.45))
+
+
+def for_paper(style: Optional["CellStyle"]) -> Optional["CellStyle"]:
+    """A cell's card style as it should print on a white page."""
+    if style is None:
+        return None
+    bg = paper_tint(style.bg) if style.bg else None
+    fg = style.fg
+    if fg is None or fg.lower() in _AUTO_FG:
+        fg = readable_fg(bg) if bg else None
+    else:
+        fg = on_white(fg)
+    return dataclasses.replace(
+        style, bg=bg, fg=fg,
+        bar_color=(paper_tint(style.bar_color, PAPER_BAR_TINT)
+                   if style.bar_color else None),
+        icon_color=on_white(style.icon_color) if style.icon_color else None)
+
+
 def _scale_color(frac: float, low: str, mid: Optional[str], high: str) -> Optional[str]:
     lo, hi = _hex_rgb(low), _hex_rgb(high)
     if lo is None or hi is None:

@@ -43,6 +43,8 @@ produced, name it:</p>
     <td>rendered at twice the density, for fine detail</td></tr>
 <tr><td><code>![[Chart|fit]]</code></td>
     <td>shrunk to the room left on the page</td></tr>
+<tr><td><code>![[Sales|rows=50]]</code></td>
+    <td>fifty rows of a table before it is cut</td></tr>
 <tr><td><code>![[Chart|figure|width=60%]]</code></td>
     <td>a port <i>and</i> a width</td></tr>
 </table>
@@ -60,7 +62,20 @@ for it &mdash; rather than stretched. <code>height=</code> says the same
 thing as an exact number of points. Neither changes how wide the chart
 sits on the page; that stays <code>width</code>'s job. <code>ratio</code>,
 <code>height</code> and <code>scale</code> apply to charts, not to
-pictures, which already have a size of their own.</p>
+pictures, which already have a size of their own, and not to tables, which
+are laid out from their text &mdash; a table takes <code>width</code> and
+<code>rows</code>.</p>
+<p><b>A table arrives with its formatting.</b> Whatever a <b>Show Table</b>
+card is displaying &mdash; the colour scales, data bars, highlighted rows,
+icons, number formats and hidden columns &mdash; comes onto the page with
+it, re-grounded for white paper. It stays real text, so it is selectable in
+the PDF and free to break across a page. <code>rows=</code> says how much of
+a long table to show; the rest is summarised as "showing 30 of 4,000".</p>
+<p><b>A web view arrives as it looks.</b> A <b>Show Web View</b> node (or
+anything else with a web-view card) is photographed at the size its card is
+set to, by the same browser the card draws in, so the page shows the design
+rather than the words out of it. Resize the card to change how it lays out;
+<code>width=</code> then places that picture on the page.</p>
 <p>Use <b>Insert embed &#9662;</b> to pick from the nodes that have
 actually produced something — it also avoids typos in a label.</p>
 <p>What an embed becomes depends on what arrives: a <b>chart</b> is placed

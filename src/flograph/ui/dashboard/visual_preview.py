@@ -89,10 +89,16 @@ def _plotly_pixmap(engine, node, max_size: QSize,
     if value is None:
         return None, _RUN_FIRST
     data = plotly_image(value, max_size.width(), False)
+    if data is None:
+        # Not a Plotly figure — a Web View node's own HTML. Photographed
+        # the way a report photographs it, so the preview shows the page
+        # rather than apologising for not being a chart.
+        from ..report.render import html_image
+        data = html_image(value, node.params, max_size.width(), False)
     if not isinstance(data, bytes):
-        # None = not a Plotly figure at all (a Web View node's HTML); a
-        # string = the renderer's own explanation, which is markdown meant
-        # for a page rather than a line for a popup
+        # A string is the renderer's own explanation, which is markdown
+        # meant for a page rather than a line for a popup; None here means
+        # nothing could take the picture.
         return None, _NOT_A_CHART if data is None else _NO_PICTURE
     image = QImage()
     if not image.loadFromData(data, "PNG") or image.isNull():

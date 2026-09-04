@@ -70,6 +70,20 @@ for extra render density on a fine-detail chart, and the bare word `fit` to
 shrink a chart into the space left on the page instead of bumping it to the
 next. The report toolbar's **?** button lists them all with examples.
 
+A **table** takes `width=` too, plus `rows=50` for how many rows to show
+before it is cut with a "showing 30 of 4,000" note — `ratio`, `height` and
+`scale` are chart-only, since a table is laid out from its text. It arrives
+carrying whatever conditional formatting its **Show Table** card is showing:
+colour scales, data bars, highlighted rows, icon sets, number formats and
+hidden columns, re-grounded for white paper. The table stays real text, so
+it can be selected in the PDF and can break across a page.
+
+A **web view** — a Show Web View node, or any card that renders HTML —
+arrives as a picture of the card, taken by the same browser the card draws
+in, at the size the card is set to. The design comes with it: layout, CSS,
+colours, web fonts. Resize the card to change how the HTML lays out;
+`width=` places the result on the page.
+
 The page prints to **PDF** at 300 dpi; the preview and the PDF are literally
 the same document, so they cannot disagree. The report toolbar's **?** button
 opens the full embed-syntax reference.

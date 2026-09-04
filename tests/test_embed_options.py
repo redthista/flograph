@@ -73,7 +73,8 @@ class TestTheSyntax:
 
     def test_the_option_list_is_closed(self):
         """A closed set is what makes a typo reportable at all."""
-        assert EMBED_OPTIONS == ("width", "ratio", "height", "scale")
+        assert EMBED_OPTIONS == ("width", "ratio", "height", "scale",
+                                 "rows")
         assert EMBED_FLAGS == ("fit",)
 
     def test_a_bare_flag_is_recognised_not_taken_as_the_port(self):
