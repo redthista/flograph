@@ -175,6 +175,17 @@ class TestFrameToHtml:
     def test_an_empty_frame_says_so_rather_than_raising(self):
         assert "no columns" in frame_to_html(pd.DataFrame())
 
+    def test_a_narrow_table_puts_the_bar_under_its_value(self):
+        """Side by side, the number and the bar share one line's width, and
+        Qt pays for a narrow column by wrapping the number to one digit a
+        line. Under it costs a row of height and keeps the figure."""
+        rules = parse_rules("a bar blue")
+        frame = pd.DataFrame({"a": [412, 233], "b": ["x", "y"]})
+        wide = frame_to_html(frame, rules, width=510)
+        narrow = frame_to_html(frame, rules, width=240)
+        assert "<div align=" in narrow
+        assert "<div align=" not in wide
+
     def test_rules_can_be_left_dark_for_a_dark_ground(self):
         rules = parse_rules("a scale green")
         light = frame_to_html(pd.DataFrame({"a": [1, 5]}), rules)

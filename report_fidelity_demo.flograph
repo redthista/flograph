@@ -1,0 +1,183 @@
+{
+  "flograph_version": "0.1.13",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "f2dc4f0be49e4f6f8e58411831fabe6f",
+        "type": "flograph.util.note",
+        "pos": [
+          -620,
+          -260
+        ],
+        "params": {
+          "text": "## Two things to look at\n\n**1. The HTML visual.** *Sales Dashboard* is a Show Web View with its own\nHTML \u2014 CSS grid, gradients, rounded cards. Open the **Report** tab: it used\nto arrive there as a wall of unstyled text, because a report inlined the\nnode's string as markdown. It is now a picture of the card, taken by the\nsame browser the card draws in.\n\nResize the card (drag its edge, or change Width/Height in Properties) and\nre-open the report \u2014 the HTML lays out at the card's size, so the card is\nwhere you control the design.\n\n**2. The table.** *Sales Table* carries conditional formatting: a green\nscale on revenue, data bars on orders, red rows for `fail`, currency and\npercent formats. All of it now reaches the page, re-grounded for white\npaper, and the table takes `width=` and the new `rows=`.\n\nRun the flow (F5), then open the **Report** tab.\n",
+          "width": 420,
+          "height": 420
+        },
+        "code": null,
+        "label": null,
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 0,
+        "extra_inputs": []
+      },
+      {
+        "id": "51641df6587f449094878b99bb731608",
+        "type": "flograph.io.table",
+        "pos": [
+          -120,
+          -260
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"integer\"}, {\"name\": \"growth\", \"type\": \"decimal\"}, {\"name\": \"orders\", \"type\": \"integer\"}, {\"name\": \"status\", \"type\": \"text\"}], \"rows\": [[\"North\", 1240000, 0.18, 412, \"ok\"], [\"South\", 610000, -0.04, 233, \"fail\"], [\"East\", 880000, 0.09, 300, \"ok\"], [\"West\", 320000, -0.12, 118, \"fail\"], [\"Central\", 455000, 0.02, 176, \"ok\"]]}",
+          "width": 320,
+          "height": 220
+        },
+        "code": null,
+        "label": "Sales Data",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 1,
+        "extra_inputs": []
+      },
+      {
+        "id": "bc959b8d1c7b471aa2834506f67daa3b",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          380,
+          -300
+        ],
+        "params": {
+          "format_rules": "revenue scale green\nrevenue format $,.0f\ngrowth format .0%\norders bar blue\nstatus = fail => row red\nregion if revenue > 1000000 => bg green, bold\n",
+          "hide": "",
+          "width": 520,
+          "height": 300,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Sales Table",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 2,
+        "extra_inputs": []
+      },
+      {
+        "id": "063fc7ff326542cd82002cd2fd380d6b",
+        "type": "flograph.viz.show_web",
+        "pos": [
+          380,
+          140
+        ],
+        "params": {
+          "width": 560,
+          "height": 360,
+          "scale": 100
+        },
+        "code": "\"\"\"Sales Dashboard\n\nA Show Web View forked into a hand-written HTML dashboard \u2014 CSS grid,\ngradients, rounded cards, a web font stack. The point of the example: this\nis what the *card* shows, and now it is what the report page shows too.\n\"\"\"\nNODE = {\n    \"label\": \"Sales Dashboard\",\n    \"category\": \"Viz\",\n    \"card\": \"webview\",\n    \"inputs\": [(\"data\", \"dataframe\")],\n    \"outputs\": [(\"view\", \"object\")],\n}\nPARAMS = [\n    {\"name\": \"width\", \"type\": \"int\", \"label\": \"Width\",\n     \"default\": 560, \"min\": 260, \"max\": 1600, \"cosmetic\": True},\n    {\"name\": \"height\", \"type\": \"int\", \"label\": \"Height\",\n     \"default\": 360, \"min\": 200, \"max\": 2000, \"cosmetic\": True},\n    {\"name\": \"scale\", \"type\": \"int\", \"label\": \"Scale %\",\n     \"default\": 100, \"min\": 25, \"max\": 400, \"cosmetic\": True},\n]\n\n\ndef run(ctx, data):\n    total = float(data[\"revenue\"].sum())\n    orders = int(data[\"orders\"].sum())\n    growth = float(data[\"growth\"].mean())\n    top = data.sort_values(\"revenue\", ascending=False).iloc[0]\n    most = float(data[\"revenue\"].max())\n\n    bars = \"\"\n    for row in data.itertuples(index=False):\n        share = (float(row.revenue) / most) if most else 0.0\n        bars += (\n            f\"<div class='row'><span class='name'>{row.region}</span>\"\n            f\"<span class='track'><i style='width:{share * 100:.0f}%'></i>\"\n            f\"</span>\"\n            f\"<span class='val'>\u00a3{row.revenue / 1000:,.0f}k</span></div>\")\n\n    ctx.log(f\"rendered {len(data)} regions\")\n    return f\"\"\"\n<div class=\"wrap\">\n  <header>\n    <h1>Regional performance</h1>\n    <p>Quarter to date &middot; all channels</p>\n  </header>\n  <div class=\"kpis\">\n    <div class=\"kpi\"><b>\u00a3{total / 1e6:,.2f}m</b><span>revenue</span></div>\n    <div class=\"kpi\"><b>{orders:,}</b><span>orders</span></div>\n    <div class=\"kpi {'up' if growth >= 0 else 'down'}\">\n      <b>{growth:+.1%}</b><span>avg growth</span></div>\n    <div class=\"kpi\"><b>{top.region}</b><span>top region</span></div>\n  </div>\n  <div class=\"bars\">{bars}</div>\n</div>\n<style>\n  html, body {{ margin: 0; padding: 0; background: #0f172a; }}\n  .wrap {{ font-family: \"Segoe UI\", system-ui, sans-serif; color: #e2e8f0;\n          padding: 22px 24px; }}\n  header h1 {{ margin: 0 0 2px; font-size: 21px; letter-spacing: -0.01em; }}\n  header p {{ margin: 0 0 18px; color: #7c8aa5; font-size: 12px; }}\n  .kpis {{ display: grid; grid-template-columns: repeat(4, 1fr);\n           gap: 10px; margin-bottom: 20px; }}\n  .kpi {{ background: linear-gradient(160deg, #1e293b, #172033);\n          border: 1px solid #2b3a52; border-radius: 12px;\n          padding: 12px 14px; }}\n  .kpi b {{ display: block; font-size: 19px; color: #38bdf8;\n            letter-spacing: -0.02em; }}\n  .kpi span {{ font-size: 11px; color: #8ea0bd; }}\n  .kpi.up b {{ color: #4ade80; }}\n  .kpi.down b {{ color: #fb7185; }}\n  .row {{ display: flex; align-items: center; gap: 10px;\n          margin-bottom: 9px; font-size: 12px; }}\n  .name {{ width: 62px; color: #cbd5e1; }}\n  .track {{ flex: 1; height: 9px; background: #1e293b;\n            border-radius: 5px; overflow: hidden; }}\n  .track i {{ display: block; height: 100%;\n              background: linear-gradient(90deg, #38bdf8, #a855f7); }}\n  .val {{ width: 58px; text-align: right; color: #94a3b8; }}\n</style>\n\"\"\"\n",
+        "label": "Sales Dashboard",
+        "description": "",
+        "active": true,
+        "locked": false,
+        "frozen": false,
+        "manual": false,
+        "frozen_fingerprint": null,
+        "exclusive": null,
+        "preview": true,
+        "port_labels": null,
+        "flow_pins": null,
+        "ports_collapsed": false,
+        "color": null,
+        "compact_view": null,
+        "mark": "",
+        "mark_text": "",
+        "mark_image": "",
+        "z": 3,
+        "extra_inputs": []
+      }
+    ],
+    "connections": [
+      {
+        "id": "04cc787f423d42d68988d77e91acc814",
+        "src": [
+          "51641df6587f449094878b99bb731608",
+          "table"
+        ],
+        "dst": [
+          "bc959b8d1c7b471aa2834506f67daa3b",
+          "table"
+        ]
+      },
+      {
+        "id": "db9dbe35f9654250b4df73365e752092",
+        "src": [
+          "51641df6587f449094878b99bb731608",
+          "table"
+        ],
+        "dst": [
+          "063fc7ff326542cd82002cd2fd380d6b",
+          "data"
+        ]
+      }
+    ],
+    "frames": [],
+    "shapes": [],
+    "pages": [
+      {
+        "id": "report",
+        "title": "Report",
+        "kind": "report",
+        "body": "# Regional review\n\nThe dashboard below is the **Sales Dashboard** card, exactly as it is drawn\non the canvas \u2014 layout, gradients and all:\n\n![[Sales Dashboard]]\n\nPlaced narrower, it is the same design, not a squeezed one:\n\n![[Sales Dashboard|width=55%]]\n\n\\pagebreak\n\n## The numbers\n\nThe table arrives with the formatting the card is showing:\n\n![[Sales Table]]\n\nTwo thirds of the column, and only the first three rows:\n\n![[Sales Table|width=66%|rows=3]]\n\nBoth stay real text on the page \u2014 select a figure in the exported PDF and\nit is still a figure.\n",
+        "color": null,
+        "maximized_tile": null,
+        "view_mode": false,
+        "fit_to_window": false,
+        "setup": {},
+        "tiles": []
+      }
+    ],
+    "env_path": ""
+  }
+}

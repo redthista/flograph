@@ -49,6 +49,14 @@ MAX_ROWS = 30
 BAR_TRACK = 54
 MIN_BAR_TRACK = 22
 
+#: Below this table width, in points, the bar goes *under* its value
+#: instead of beside it. Side by side reads better and is what a full-width
+#: table gets; but the two share one line's width, and on a narrow table Qt
+#: pays for that by wrapping the number itself — "412" comes out as three
+#: stacked digits, which costs more than the row of height the stacked form
+#: costs. See _bar.
+STACK_BELOW = 380
+
 #: The track a bar is drawn in. Light enough to sit under a table's rules
 #: without being mistaken for a filled cell.
 BAR_TRACK_COLOR = "#eceef1"
@@ -76,6 +84,7 @@ def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
     styles = _cell_styles(frame, shown, columns, rules, paper)
     numeric = {c: _is_numeric(frame[c]) for c in columns}
     track = _track_width(width)
+    stacked = bool(width) and int(width) < STACK_BELOW
 
     size = f' width="{int(width)}"' if width else ""
     out = [f'<table{size} class="flograph-table"><thead><tr>']
@@ -88,7 +97,7 @@ def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
         for column in columns:
             out.append(_cell(shown[column].iloc[row],
                              styles.get((row, column)),
-                             numeric[column], track))
+                             numeric[column], track, stacked))
         out.append("</tr>")
     out.append("</tbody></table>")
     if total > max_rows:
@@ -175,7 +184,7 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
 
 
 def _cell(value, style: "CellStyle | None", numeric: bool,
-          track: int = BAR_TRACK) -> str:
+          track: int = BAR_TRACK, stacked: bool = False) -> str:
     """One `<td>`: the value, plus whatever the rules said about it."""
     text = _escape(_text(value, style))
     if style is not None and style.icon:
@@ -183,7 +192,7 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
                   if style.icon_color else "")
         text = f"<span{colour}>{_escape(style.icon)}</span> {text}"
     if style is not None and style.bar is not None:
-        text = _bar(text, style, numeric, track)
+        text = _bar(text, style, numeric, track, stacked)
         numeric = False       # the bar table fills the cell; don't re-align
     css = []
     if style is not None:
@@ -199,20 +208,27 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
 
 
 def _bar(text: str, style: CellStyle, numeric: bool,
-         track_width: int = BAR_TRACK) -> str:
-    """A data bar beside its value, as a nested one-row table.
+         track_width: int = BAR_TRACK, stacked: bool = False) -> str:
+    """A data bar and its value.
 
-    Beside, not behind: the card paints the bar under the text, and Qt's
-    rich text has no way to say that. A percentage-width cell is the one
-    proportional shape it *does* understand, so the value keeps its own
-    column and the bar gets the rest — the length still says what the card's
-    says.
+    Beside the value, not behind it: the card paints the bar under the text
+    with a delegate, and Qt's rich text has no way to say that. A
+    percentage-width cell is the one proportional shape it *does*
+    understand, so the value keeps its own column and the bar gets a fixed
+    track beside it — the length still says what the card's says.
+
+    `stacked` puts the bar on a line of its own under the value, for a
+    table too narrow to give them a line each (see STACK_BELOW). Taller,
+    but the alternative is Qt wrapping the number to make room.
     """
     fraction = max(-1.0, min(1.0, float(style.bar)))
     colour = style.bar_color or "#3b6299"
     align = ' align="right"' if numeric else ""
     track = (_centred_track(fraction, colour) if style.bar_mode == "center"
              else _left_track(fraction, colour))
+    if stacked:
+        where = "right" if numeric else "left"
+        return f'<div align="{where}">{text}</div>{track}'
     # No width on the outer table, and one only on the track: the value
     # cell is then sized by its own text, which is what stops Qt stacking
     # "412" as "4 / 1 / 2". Giving the value a stated width instead makes
