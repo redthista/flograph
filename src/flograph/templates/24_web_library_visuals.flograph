@@ -1,0 +1,379 @@
+{
+  "flograph_version": "0.1.13",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "note_intro",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -340
+        ],
+        "params": {
+          "text": "# Visuals that draw with a web library\n\nEach row below is one node from **Tools \u25b8 Web Libraries** \u2014 install **Cytoscape**, **Apache ECharts** and **D3** and they render from your own machine, offline, for good.\n\n**Click any of them.** The visual writes its own *Clicked* parameter and re-runs what follows, so the table on the right is the input filtered to whatever you just clicked. Click the same thing again to clear it.",
+          "width": 920,
+          "height": 200
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "n1_links",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"from\", \"type\": \"text\"}, {\"name\": \"to\", \"type\": \"text\"}, {\"name\": \"weight\", \"type\": \"integer\"}], \"rows\": [[\"CEO\", \"CTO\", 34], [\"CEO\", \"CFO\", 21], [\"CEO\", \"COO\", 26], [\"CTO\", \"Eng Lead\", 48], [\"CTO\", \"Data Lead\", 30], [\"Eng Lead\", \"Dev A\", 41], [\"Eng Lead\", \"Dev B\", 37], [\"Data Lead\", \"Analyst\", 25], [\"CFO\", \"Accountant\", 18], [\"COO\", \"Ops Mgr\", 29]]}",
+          "width": 360,
+          "height": 260
+        },
+        "code": null,
+        "label": "Reporting lines"
+      },
+      {
+        "id": "n1_people",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          380
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"name\", \"type\": \"text\"}, {\"name\": \"team\", \"type\": \"text\"}, {\"name\": \"reports\", \"type\": \"integer\"}], \"rows\": [[\"CEO\", \"exec\", 3], [\"CTO\", \"exec\", 2], [\"CFO\", \"finance\", 1], [\"COO\", \"ops\", 1], [\"Eng Lead\", \"engineering\", 2], [\"Data Lead\", \"data\", 1], [\"Dev A\", \"engineering\", 0], [\"Dev B\", \"engineering\", 0], [\"Analyst\", \"data\", 0], [\"Accountant\", \"finance\", 0], [\"Ops Mgr\", \"ops\", 0]]}",
+          "width": 360,
+          "height": 240
+        },
+        "code": null,
+        "label": "People"
+      },
+      {
+        "id": "n1_graph",
+        "type": "flograph.viz.network_graph",
+        "pos": [
+          600,
+          100
+        ],
+        "params": {
+          "source": "from",
+          "target": "to",
+          "weight": "weight",
+          "node_key": "name",
+          "size_by": "reports",
+          "colour_by": "team",
+          "layout": "breadthfirst",
+          "on_click": "select one",
+          "width": 520,
+          "height": 420
+        },
+        "code": null,
+        "label": "Who reports to whom"
+      },
+      {
+        "id": "n1_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1460,
+          160
+        ],
+        "params": {
+          "width": 420,
+          "height": 320
+        },
+        "code": null,
+        "label": "Links you clicked"
+      },
+      {
+        "id": "n2_incidents",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          900
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"date\", \"type\": \"date\"}, {\"name\": \"service\", \"type\": \"text\"}, {\"name\": \"minutes\", \"type\": \"integer\"}], \"rows\": [[\"2026-01-06\", \"search\", 30], [\"2026-01-08\", \"checkout\", 28], [\"2026-01-13\", \"checkout\", 32], [\"2026-01-14\", \"search\", 10], [\"2026-01-16\", \"checkout\", 19], [\"2026-01-21\", \"billing\", 8], [\"2026-01-23\", \"search\", 23], [\"2026-01-26\", \"checkout\", 41], [\"2026-01-27\", \"search\", 11], [\"2026-01-30\", \"checkout\", 41], [\"2026-02-02\", \"search\", 36], [\"2026-02-04\", \"auth\", 34], [\"2026-02-06\", \"auth\", 20], [\"2026-02-11\", \"auth\", 174], [\"2026-02-12\", \"auth\", 154], [\"2026-02-13\", \"checkout\", 70], [\"2026-02-16\", \"search\", 127], [\"2026-02-17\", \"billing\", 147], [\"2026-02-18\", \"checkout\", 182], [\"2026-02-23\", \"auth\", 43], [\"2026-02-24\", \"billing\", 9], [\"2026-02-27\", \"checkout\", 8], [\"2026-03-03\", \"billing\", 23], [\"2026-03-06\", \"billing\", 27], [\"2026-03-09\", \"checkout\", 36], [\"2026-03-10\", \"auth\", 13], [\"2026-03-12\", \"billing\", 10], [\"2026-03-13\", \"billing\", 40], [\"2026-03-16\", \"search\", 32], [\"2026-03-18\", \"billing\", 27], [\"2026-03-20\", \"search\", 14], [\"2026-03-23\", \"search\", 19], [\"2026-03-25\", \"search\", 21], [\"2026-03-26\", \"search\", 31], [\"2026-03-27\", \"auth\", 13], [\"2026-03-31\", \"checkout\", 34]]}",
+          "width": 360,
+          "height": 300
+        },
+        "code": null,
+        "label": "Incident minutes"
+      },
+      {
+        "id": "n2_calendar",
+        "type": "flograph.viz.calendar_heatmap",
+        "pos": [
+          600,
+          960
+        ],
+        "params": {
+          "date": "date",
+          "value": "minutes",
+          "combine": "sum",
+          "palette": "orange",
+          "on_click": "select one",
+          "width": 620,
+          "height": 220
+        },
+        "code": null,
+        "label": "Downtime by day"
+      },
+      {
+        "id": "n2_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1460,
+          900
+        ],
+        "params": {
+          "width": 420,
+          "height": 320
+        },
+        "code": null,
+        "label": "That day's incidents"
+      },
+      {
+        "id": "n3_funnel",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          1560
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"stage\", \"type\": \"text\"}, {\"name\": \"next\", \"type\": \"text\"}, {\"name\": \"people\", \"type\": \"integer\"}], \"rows\": [[\"applied\", \"screened\", 420], [\"applied\", \"rejected\", 780], [\"screened\", \"interview\", 180], [\"screened\", \"rejected\", 240], [\"interview\", \"onsite\", 74], [\"interview\", \"rejected\", 106], [\"onsite\", \"offer\", 31], [\"onsite\", \"rejected\", 43], [\"offer\", \"accepted\", 22], [\"offer\", \"declined\", 9]]}",
+          "width": 360,
+          "height": 260
+        },
+        "code": null,
+        "label": "Hiring funnel"
+      },
+      {
+        "id": "n3_sankey",
+        "type": "flograph.viz.sankey_flow",
+        "pos": [
+          600,
+          1500
+        ],
+        "params": {
+          "source": "stage",
+          "target": "next",
+          "value": "people",
+          "on_click": "select one",
+          "width": 560,
+          "height": 380
+        },
+        "code": null,
+        "label": "Where candidates went"
+      },
+      {
+        "id": "n3_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1460,
+          1520
+        ],
+        "params": {
+          "width": 420,
+          "height": 320
+        },
+        "code": null,
+        "label": "Flows you clicked"
+      },
+      {
+        "id": "n4_stores",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          2240
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"city\", \"type\": \"text\"}, {\"name\": \"store\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"integer\"}], \"rows\": [[\"North\", \"Leeds\", \"Briggate\", 412], [\"North\", \"Leeds\", \"Headingley\", 168], [\"North\", \"York\", \"Coppergate\", 233], [\"North\", \"Hull\", \"Prospect\", 96], [\"Midlands\", \"Birmingham\", \"Bullring\", 638], [\"Midlands\", \"Birmingham\", \"Selly Oak\", 121], [\"Midlands\", \"Nottingham\", \"Victoria\", 274], [\"South\", \"Bath\", \"Southgate\", 189], [\"South\", \"Bath\", \"Milsom\", 77], [\"South\", \"Exeter\", \"Princesshay\", 142], [\"South\", \"Bristol\", \"Cabot\", 501], [\"South\", \"Bristol\", \"Clifton\", 88]]}",
+          "width": 360,
+          "height": 300
+        },
+        "code": null,
+        "label": "Store revenue"
+      },
+      {
+        "id": "n4_pack",
+        "type": "flograph.viz.circle_pack",
+        "pos": [
+          600,
+          2160
+        ],
+        "params": {
+          "group_by": "region, city, store",
+          "size_by": "revenue",
+          "palette": "cool",
+          "on_click": "select one",
+          "width": 460,
+          "height": 460
+        },
+        "code": null,
+        "label": "Revenue by region"
+      },
+      {
+        "id": "n4_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1460,
+          2240
+        ],
+        "params": {
+          "width": 420,
+          "height": 320
+        },
+        "code": null,
+        "label": "Stores you clicked"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1a",
+        "src": [
+          "n1_links",
+          "table"
+        ],
+        "dst": [
+          "n1_graph",
+          "edges"
+        ]
+      },
+      {
+        "id": "c1b",
+        "src": [
+          "n1_people",
+          "table"
+        ],
+        "dst": [
+          "n1_graph",
+          "nodes"
+        ]
+      },
+      {
+        "id": "c1c",
+        "src": [
+          "n1_graph",
+          "table"
+        ],
+        "dst": [
+          "n1_table",
+          "table"
+        ]
+      },
+      {
+        "id": "c2a",
+        "src": [
+          "n2_incidents",
+          "table"
+        ],
+        "dst": [
+          "n2_calendar",
+          "table"
+        ]
+      },
+      {
+        "id": "c2b",
+        "src": [
+          "n2_calendar",
+          "table"
+        ],
+        "dst": [
+          "n2_table",
+          "table"
+        ]
+      },
+      {
+        "id": "c3a",
+        "src": [
+          "n3_funnel",
+          "table"
+        ],
+        "dst": [
+          "n3_sankey",
+          "table"
+        ]
+      },
+      {
+        "id": "c3b",
+        "src": [
+          "n3_sankey",
+          "table"
+        ],
+        "dst": [
+          "n3_table",
+          "table"
+        ]
+      },
+      {
+        "id": "c4a",
+        "src": [
+          "n4_stores",
+          "table"
+        ],
+        "dst": [
+          "n4_pack",
+          "table"
+        ]
+      },
+      {
+        "id": "c4b",
+        "src": [
+          "n4_pack",
+          "table"
+        ],
+        "dst": [
+          "n4_table",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f1",
+        "title": "Network Graph \u2014 Cytoscape",
+        "rect": [
+          -40,
+          -70,
+          1960,
+          730
+        ],
+        "color": "#2a3a5c"
+      },
+      {
+        "id": "f2",
+        "title": "Calendar Heatmap \u2014 Apache ECharts",
+        "rect": [
+          -40,
+          820,
+          1960,
+          440
+        ],
+        "color": "#5c4327"
+      },
+      {
+        "id": "f3",
+        "title": "Sankey Flow \u2014 Apache ECharts",
+        "rect": [
+          -40,
+          1420,
+          1960,
+          500
+        ],
+        "color": "#2c5244"
+      },
+      {
+        "id": "f4",
+        "title": "Circle Pack \u2014 D3",
+        "rect": [
+          -40,
+          2080,
+          1960,
+          580
+        ],
+        "color": "#43305c"
+      }
+    ],
+    "pages": []
+  }
+}

@@ -62,11 +62,12 @@ class TestBundledExamples:
             "21_storage_treemap.flograph",
             "22_conditional_formatting.flograph",
             "23_report_visuals.flograph",
+            "24_web_library_visuals.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 23
+        assert len(window._examples_menu.actions()) == 24
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -87,7 +88,13 @@ class TestBundledExamples:
         "22_conditional_formatting.flograph",
         "23_report_visuals.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
-        # own below
+        # own below.
+        # 24 is not here on purpose: its visuals draw with web libraries from
+        # the user's store, and the only way to put one there is to download
+        # it. A suite that reaches a CDN is one that fails on a train — which
+        # is the very thing those nodes exist to prevent. It is covered by
+        # test_library_visuals.py against planted libraries instead, and by
+        # the load/layout checks below.
     ])
     def test_template_loads_and_runs_without_error(self, qtbot, window, name):
         window._open_example(template_path(name))
@@ -104,6 +111,28 @@ class TestBundledExamples:
         window._project_path = str(tmp_path / "existing.flograph")
         window._open_example(template_path("01_load_filter_visualize.flograph"))
         assert window._project_path is None
+
+    def test_web_library_visuals_loads_and_is_wired(self, qtbot, window):
+        """Template 24 can't be *run* here — its visuals need a downloaded
+        web library, and the suite must never reach a CDN. Everything short
+        of running it still has to hold: it loads, no node is broken, and
+        every visual is wired to the table that shows what a click filtered.
+        """
+        window._open_example(template_path("24_web_library_visuals.flograph"))
+        nodes = window.graph.nodes
+        assert not any(n.spec.broken for n in nodes.values())
+
+        by_type = {n.type_id for n in nodes.values()}
+        assert {"flograph.viz.network_graph", "flograph.viz.calendar_heatmap",
+                "flograph.viz.sankey_flow", "flograph.viz.circle_pack"} <= by_type
+
+        # each visual's filtered "table" output feeds a Show Table
+        shown = {c.src_node for c in window.graph.connections.values()
+                 if c.src_port == "table"
+                 and nodes[c.dst_node].type_id == "flograph.viz.show_table"}
+        visuals = {nid for nid, n in nodes.items()
+                   if n.spec.interactive}
+        assert visuals and visuals <= shown
 
     def test_aggregate_dashboard_groups_and_totals_correctly(self, qtbot, window):
         window._open_example(template_path("02_aggregate_dashboard.flograph"))
