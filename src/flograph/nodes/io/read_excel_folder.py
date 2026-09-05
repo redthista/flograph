@@ -29,6 +29,10 @@ under it. `*` crosses `/`, so `2023*` covers everything below `2023`.
 **Add folder column** which subfolder — `.` for the folder itself,
 otherwise a relative path like `2023/q1`.
 
+**Max rows per sheet** keeps the first N rows of each sheet read, so a
+folder of workbooks gives a slice of every one of them rather than all of
+the first. With *Sheet* set to `*` the cap is per sheet, not per workbook.
+
 **Header** — ticked, row 0 holds the column names. Unticked, *Header row*
 names the 0-based row that does; leave it blank for no header at all.
 
@@ -76,7 +80,7 @@ PARAMS = [
      "visible_when": {"header": ["False"]}},
     {"name": "skiprows", "type": "int", "label": "Skip rows at start",
      "default": 0, "min": 0},
-    {"name": "nrows", "type": "int", "label": "Max rows (0 = all)",
+    {"name": "nrows", "type": "int", "label": "Max rows per sheet (0 = all)",
      "default": 0, "min": 0},
     {"name": "columns", "type": "string", "label": "Columns",
      "default": "", "placeholder": "names or ranges like A:C,F; empty = all"},
@@ -327,9 +331,12 @@ def run(ctx, path_input=None):
                 at += 1
             if add_source:
                 frame.insert(at, "source_file", name)
-            frames.append(frame)
+            # Per sheet rather than per file: a sheet is the unit that
+            # becomes a table here, and it is what both engines already push
+            # the limit into when they read.
+            frames.append(folders.cap_rows(frame, nrows))
 
-    table = folders.stack(ctx, frames, files, nrows)
+    table = folders.stack(ctx, frames, files)
 
     # What the polars path could not push into the read, applied once at the
     # end so both engines look the same from outside.

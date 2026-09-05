@@ -32,6 +32,9 @@ instead of its name, e.g. `2023/*.csv`.
 **Add folder column** records which subfolder each row came from — `.` for
 the folder itself, otherwise a relative path like `2023/q1`.
 
+**Max rows per file** keeps the first N rows of each file, so reading a
+folder gives a slice of every file rather than all of the first one.
+
 **Engine**: *polars* reads with a Rust parser and hands back a pandas frame;
 pandas' own *c* parser is already fast and also releases the GIL, so both
 overlap properly across files. *pyarrow* is fastest per file but honours
@@ -76,7 +79,7 @@ PARAMS = [
      "default": "", "placeholder": "name or 0-based position"},
     {"name": "skiprows", "type": "int", "label": "Skip rows at start",
      "default": 0, "min": 0},
-    {"name": "nrows", "type": "int", "label": "Max rows (0 = all)",
+    {"name": "nrows", "type": "int", "label": "Max rows per file (0 = all)",
      "default": 0, "min": 0},
     {"name": "decimal", "type": "string", "label": "Decimal mark", "default": "."},
     {"name": "thousands", "type": "string", "label": "Thousands mark",
@@ -304,9 +307,9 @@ def run(ctx, path_input=None):
             at += 1
         if add_source:
             frame.insert(at, "source_file", os.path.basename(path))
-        frames.append(frame)
+        frames.append(folders.cap_rows(frame, nrows))
 
-    table = folders.stack(ctx, frames, files, nrows)
+    table = folders.stack(ctx, frames, files)
 
     if engine == "polars":
         missing = [c for c in parse_dates if c not in table.columns]

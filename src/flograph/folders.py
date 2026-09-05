@@ -224,18 +224,33 @@ def read_files(ctx, files: Sequence[str], read_one: Callable[[str], Any],
             raise
 
 
-def stack(ctx, frames: list, files: Sequence[str], nrows: int = 0):
-    """Concatenate the per-file frames and apply a total row cap."""
+def cap_rows(frame, nrows: int):
+    """Keep at most `nrows` rows of one file's frame.
+
+    The row cap is per file, not a cap on the stack: reading 200 rows of
+    each of twelve monthly exports is a sample of the year, where the first
+    200 rows of the stack is January and nothing else. Most readers push the
+    limit into the read itself, which is cheaper and gives the same answer —
+    this trims whatever came back over the line anyway, so every path ends
+    up honouring the setting even where the underlying reader takes no
+    limit (pandas reading Parquet).
+    """
+    if nrows and len(frame) > nrows:
+        return frame.head(nrows).copy()
+    return frame
+
+
+def stack(ctx, frames: list, files: Sequence[str]):
+    """Concatenate the per-file frames.
+
+    No row cap here — see cap_rows, which the callers apply per file as each
+    one arrives.
+    """
     import pandas as pd
 
     if not frames:
         raise ValueError(
             f"no rows read from the {len(files)} file(s) found")
     table = pd.concat(frames, ignore_index=True)
-    if nrows and len(table) > nrows:
-        # Each file was already capped at nrows where the reader could take a
-        # limit, so trimming here leaves exactly the first nrows rows in file
-        # order rather than a per-file slice of each.
-        table = table.head(nrows).copy()
     ctx.progress(1.0)
     return table

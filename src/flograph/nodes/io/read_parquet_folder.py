@@ -39,9 +39,10 @@ which is where a partitioned dataset keeps its partition keys. The values
 are the path as written; splitting `key=value` back out into columns is a
 job for String Manipulation downstream.
 
-**Max rows** trims the stacked result; Parquet takes no row limit through
-pandas, so it bounds what the rest of the flow carries rather than the read.
-The polars engine does take one, and pushes it down per file.
+**Max rows per file** keeps the first N rows of each file, so reading a
+partitioned dataset gives a slice of every partition rather than all of the
+first one. The polars engine pushes the limit into the read; pandas takes no
+row limit for Parquet, so there the file is read and then trimmed.
 """
 NODE = {
     "label": "Read Parquet (Folder)",
@@ -71,7 +72,7 @@ PARAMS = [
      "default": False},
     {"name": "columns", "type": "columns", "label": "Columns",
      "default": "", "placeholder": "empty = all columns"},
-    {"name": "nrows", "type": "int", "label": "Max rows (0 = all)",
+    {"name": "nrows", "type": "int", "label": "Max rows per file (0 = all)",
      "default": 0, "min": 0},
     {"name": "engine", "type": "choice", "label": "Engine",
      "options": ["auto", "polars", "pyarrow", "fastparquet"], "default": "auto"},
@@ -228,9 +229,9 @@ def run(ctx, path_input=None):
             at += 1
         if add_source:
             frame.insert(at, "source_file", os.path.basename(path))
-        frames.append(frame)
+        frames.append(folders.cap_rows(frame, nrows))
 
-    table = folders.stack(ctx, frames, files, nrows)
+    table = folders.stack(ctx, frames, files)
     ctx.log(f"loaded {len(table)} rows x {len(table.columns)} columns "
             f"from {len(files)} file(s) via {engine}")
     return table

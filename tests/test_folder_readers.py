@@ -270,11 +270,27 @@ class TestReadCsvFolder:
         out, _ = run_folder(registry, CSV_FOLDER, {"path": str(tmp_path)})
         assert len(out) == 6
 
-    def test_nrows_caps_the_stack_not_each_file(self, registry, csv_dir):
+    def test_nrows_caps_each_file_not_the_stack(self, registry, csv_dir):
+        """A row cap on a folder read is a sample of every file. Capping the
+        stack instead gave the whole of the first file and none of the rest,
+        which is the one answer nobody wants from a folder of exports."""
         out, _ = run_folder(registry, CSV_FOLDER,
-                            {"path": str(csv_dir), "nrows": 4})
-        assert len(out) == 4
-        assert list(out["units"]) == [0, 1, 2, 10]
+                            {"path": str(csv_dir), "nrows": 2})
+        assert list(out["units"]) == [0, 1, 10, 11, 20, 21]
+
+    def test_a_cap_above_the_file_size_changes_nothing(self, registry, csv_dir):
+        out, _ = run_folder(registry, CSV_FOLDER,
+                            {"path": str(csv_dir), "nrows": 50})
+        assert len(out) == 9
+
+    def test_both_engines_cap_the_same_way(self, registry, csv_dir):
+        pytest.importorskip("polars")
+        pandas_out, _ = run_folder(registry, CSV_FOLDER,
+                                   {"path": str(csv_dir), "nrows": 2})
+        polars_out, _ = run_folder(registry, CSV_FOLDER,
+                                   {"path": str(csv_dir), "nrows": 2,
+                                    "engine": "polars"})
+        assert list(polars_out["units"]) == list(pandas_out["units"])
 
     def test_dtypes_reach_the_parser(self, registry, tmp_path):
         (tmp_path / "codes.csv").write_text("code,n\n01234,1\n")
@@ -362,6 +378,24 @@ class TestReadExcelFolder:
         assert list(out.columns[:2]) == ["sheet", "source_file"]
         assert set(out["sheet"]) == {"one", "two"}
         assert len(out) == 6
+
+    def test_nrows_caps_each_workbook(self, registry, excel_dir):
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(excel_dir), "nrows": 2})
+        assert list(out["units"]) == [0, 1, 10, 11, 20, 21]
+
+    def test_nrows_caps_each_sheet_of_a_workbook(self, registry, tmp_path,
+                                                 parts):
+        """With Sheet set to `*` the unit is the sheet, not the workbook —
+        it is what becomes a table here, and what the read is limited by."""
+        pytest.importorskip("openpyxl")
+        with pd.ExcelWriter(tmp_path / "book.xlsx") as writer:
+            parts[0].to_excel(writer, sheet_name="one", index=False)
+            parts[1].to_excel(writer, sheet_name="two", index=False)
+        out, _ = run_folder(registry, EXCEL_FOLDER,
+                            {"path": str(tmp_path), "sheet_name": "*",
+                             "nrows": 2})
+        assert list(out["units"]) == [0, 1, 10, 11]
 
     def test_lock_files_are_not_read(self, registry, excel_dir, parts):
         pytest.importorskip("openpyxl")
@@ -459,6 +493,20 @@ class TestReadParquetFolder:
         out, _ = run_folder(registry, PARQUET_FOLDER, {"path": str(parquet_dir)})
         assert len(out) == 9
         assert list(out["units"]) == [0, 1, 2, 10, 11, 12, 20, 21, 22]
+
+    def test_nrows_caps_each_part(self, registry, parquet_dir):
+        """The path that had no cap at all once the total one went: pandas
+        takes no row limit for Parquet, so the trim happens after the read."""
+        out, _ = run_folder(registry, PARQUET_FOLDER,
+                            {"path": str(parquet_dir), "nrows": 2})
+        assert list(out["units"]) == [0, 1, 10, 11, 20, 21]
+
+    def test_polars_caps_each_part_the_same_way(self, registry, parquet_dir):
+        pytest.importorskip("polars")
+        out, _ = run_folder(registry, PARQUET_FOLDER,
+                            {"path": str(parquet_dir), "nrows": 2,
+                             "engine": "polars"})
+        assert list(out["units"]) == [0, 1, 10, 11, 20, 21]
 
     def test_source_file_keeps_partition_identity(self, registry, parquet_dir):
         out, _ = run_folder(registry, PARQUET_FOLDER,
