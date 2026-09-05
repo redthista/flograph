@@ -465,6 +465,28 @@ class TestBecameResidentEvent:
         cache.mark_resident("gone", {"out": 3}) # evicted since: nobody home
         assert seen == ["n2"]
 
+    def test_warming_a_source_wakes_the_spilled_aliases_below_it(self):
+        """The warm path attaches only the blob it read. An alias between a
+        producer and a card (a Reroute, or a pass-through Slicer feeding
+        another Slicer) owns no blob, so it must come to life — and fire its
+        own event — off the back of its source, or the card below it never
+        heals and keeps showing 'Run the graph to load…'."""
+        cache = OutputCache()
+        seen = []
+        cache.became_resident.connect(seen.append)
+        cache.register_spilled("reader", "proj", 0.0, port_names=("table",))
+        cache.register_spilled("reroute", None, 0.0, port_names=("table",),
+                               alias_of="reader", alias_port="table")
+        cache.register_spilled("chained", None, 0.0, port_names=("table",),
+                               alias_of="reroute", alias_port="table")
+
+        frame = object()
+        cache.mark_resident("reader", {"table": frame})
+
+        assert seen == ["reader", "reroute", "chained"]
+        assert cache.get("reroute").outputs["table"] is frame
+        assert cache.get("chained").outputs["table"] is frame
+
 
 class TestWarmEntries:
     """warm_entries: the display half of warming. Not a run — nothing is
@@ -794,3 +816,47 @@ class TestOpenRestoresWhatCardsShow:
             ["region", "value"]
         assert not engine.cache.is_resident(reader.id), \
             "listing columns must not drag the frame off disk"
+
+    def test_reopening_populates_a_slicer_fed_through_a_reroute(
+            self, qtbot, reg, tmp_path, monkeypatch):
+        """The card reads its *upstream* value, and on a bigger flow that
+        upstream is often a pass-through (a Reroute, a chained Slicer) whose
+        entry aliases the real producer's blob. Reopening has to light that
+        alias up too, or the slicer sits on 'Run the graph to load…' while
+        the data behind it is right there."""
+        from flograph.core import serialization
+        from flograph.engine.introspect import slicer_options
+
+        csv = tmp_path / "sales.csv"
+        csv.write_text("region,value\n" +
+                       "".join(f"r{i % 3},{i}\n" for i in range(50)))
+
+        builder = self._window(qtbot, reg)
+        reader = builder.graph.add_node(
+            reg.instantiate("flograph.io.read_csv"))
+        builder.graph.set_param(reader.id, "path", str(csv))
+        dot = builder.graph.add_node(reg.instantiate("flograph.util.reroute"))
+        slicer = builder.graph.add_node(
+            reg.instantiate("flograph.viz.slicer"))
+        builder.graph.set_param(slicer.id, "column", "region")
+        builder.graph.connect(reader.id, "table", dot.id, "value")
+        builder.graph.connect(dot.id, "value", slicer.id, "table")
+        with qtbot.waitSignal(builder.engine.run_finished, timeout=30000):
+            builder.engine.run_all()
+        assert builder.engine.cache.get(dot.id).alias_of == reader.id
+        project = tmp_path / "reroute.flograph"
+        serialization.save(builder.graph, project)
+        save_cache(builder.graph, builder.engine.cache, project)
+
+        reopened = self._window(qtbot, reg)
+        refreshed = []
+        monkeypatch.setattr(reopened, "_on_slicer_node_succeeded",
+                            lambda nid: refreshed.append(nid))
+        assert reopened.open_path(str(project), confirm=False) is True
+
+        engine = reopened.engine
+        qtbot.waitUntil(lambda: engine.cache.is_resident(dot.id), timeout=15000)
+        assert slicer.id in refreshed
+        assert slicer_options(reopened.graph, engine.cache, slicer.id) == [
+            "r0", "r1", "r2"]
+        assert engine.history.latest is None

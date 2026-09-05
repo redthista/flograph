@@ -187,6 +187,31 @@ class OutputCache:
         if not entry.memory_bytes:
             entry.memory_bytes = sum(estimate_size(v) for v in outputs.values())
         self.became_resident.emit(node_id)
+        self._wake_aliases_of(node_id)
+
+    def _wake_aliases_of(self, node_id: str) -> None:
+        """A spilled alias owns no blob — it comes to life the instant its
+        source does. `materialize` unwinds a chain on demand for the blocking
+        path; this is the same unwind for the off-thread warm path, which
+        only ever attaches the one entry it read off disk. Without it an
+        alias that feeds a card — a Reroute, or a pass-through Slicer, ahead
+        of another Slicer — stays a placeholder after its source is warmed,
+        because nothing ever told it (or the card below it) that the value
+        had arrived. The recursion carries a chain; the object is shared, so
+        this allocates nothing.
+        """
+        source = self._entries.get(node_id)
+        if source is None or not source.resident:
+            return
+        for alias_id, entry in list(self._entries.items()):
+            if (entry.resident or entry.alias_of != node_id
+                    or entry.alias_port is None
+                    or entry.alias_port not in source.outputs):
+                continue
+            out_port = (entry.port_names[0] if entry.port_names
+                        else entry.alias_port)
+            self.mark_resident(
+                alias_id, {out_port: source.outputs[entry.alias_port]})
 
     def get(self, node_id: str) -> Optional[CacheEntry]:
         """The entry as it stands. Never touches the disk — a spilled entry
