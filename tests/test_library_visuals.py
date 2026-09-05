@@ -166,6 +166,115 @@ class TestTheyAllShareTheContract:
         assert out["selected"] == []
 
 
+class TestTheyFitTheirCard:
+    """A visual that overflows its card by a few pixels grows a scrollbar
+    that never goes away, and the scrollbar then steals width from the
+    drawing. Measured in a real browser at each card's own size; these
+    guard the specific causes found there."""
+
+    def test_the_svg_is_a_block(self, registry, libraries, sales):
+        """An inline <svg> sits on a text baseline, and the descender space
+        below it overflowed the card — Circle Pack scrolled at 465px inside
+        a 460px card, losing 15px of width to the scrollbar."""
+        _, out = run_node(registry, "flograph.viz.circle_pack",
+                          {"group_by": "region", "size_by": "amount"},
+                          table=sales)
+        assert "#pack { display: block;" in out["html"]
+
+    @pytest.mark.parametrize("type_id", NODES)
+    def test_the_page_cannot_scroll(self, registry, libraries, type_id,
+                                    edges, funnel, sales, diary):
+        params, inputs = {
+            "flograph.viz.network_graph": (
+                {"source": "mgr", "target": "rep"}, {"edges": edges}),
+            "flograph.viz.calendar_heatmap": (
+                {"date": "when", "value": "amount"}, {"table": diary}),
+            "flograph.viz.sankey_flow": (
+                {"source": "stage", "target": "next", "value": "n"},
+                {"table": funnel}),
+            "flograph.viz.circle_pack": (
+                {"group_by": "region", "size_by": "amount"}, {"table": sales}),
+        }[type_id]
+        _, out = run_node(registry, type_id, params, **inputs)
+        assert "overflow: hidden" in out["html"]
+
+
+class TestTheyPrintIntoReports:
+    """A report photographs a webview card through printToPdf, and two
+    things do not survive that: canvas content, and anything still
+    animating a fraction of a second after load. All four came out as empty
+    rectangles; these guard the fixes."""
+
+    def test_echarts_draws_as_svg_not_canvas(self, registry, libraries,
+                                             funnel, diary):
+        """Chromium's print rendering drops canvas content — the page's own
+        text came through and the chart was a blank rectangle."""
+        for type_id, params, inputs in (
+                ("flograph.viz.sankey_flow",
+                 {"source": "stage", "target": "next", "value": "n"},
+                 {"table": funnel}),
+                ("flograph.viz.calendar_heatmap",
+                 {"date": "when", "value": "amount"}, {"table": diary})):
+            _, out = run_node(registry, type_id, params, **inputs)
+            assert 'renderer: "svg"' in out["html"]
+
+    def test_echarts_does_not_animate(self, registry, libraries, funnel,
+                                      diary):
+        """The one that cost the most to find: a sankey animates in over a
+        full second behind an expanding clip, and the report prints ~350ms
+        after load — so the picture was empty even once it was SVG."""
+        for type_id, params, inputs in (
+                ("flograph.viz.sankey_flow",
+                 {"source": "stage", "target": "next", "value": "n"},
+                 {"table": funnel}),
+                ("flograph.viz.calendar_heatmap",
+                 {"date": "when", "value": "amount"}, {"table": diary})):
+            _, out = run_node(registry, type_id, params, **inputs)
+            assert "animation: false" in out["html"]
+
+    def test_echarts_is_given_a_size_and_then_scales(self, registry,
+                                                     libraries, funnel):
+        """The one that took longest to pin down. Everywhere a report takes
+        its picture, the view is never shown, so the container measures
+        **zero** — window.innerWidth, clientWidth, %, even vw/vh all come
+        back 0 — and ECharts draws nothing at all at 0x0. So it is handed an
+        explicit nominal size and the SVG is given a viewBox, which makes
+        the drawing independent of the box it lands in: card, resized card,
+        printed page and exported file all scale the same vector.
+
+        The nominal size is a module constant, never the width/height
+        params — those are cosmetic, and run() reading them would leave a
+        resized card stuck at the size its cached output was drawn at
+        (tests/test_stdlib_nodes.py holds that rule for every card node).
+        """
+        _, out = run_node(registry, "flograph.viz.sankey_flow",
+                          {"source": "stage", "target": "next", "value": "n"},
+                          table=funnel)
+        assert "width: NOMW, height: NOMH" in out["html"]
+        assert 'setAttribute("viewBox"' in out["html"]
+        assert 'preserveAspectRatio", "xMidYMid meet"' in out["html"]
+
+    def test_the_network_keeps_a_picture_for_print(self, registry, libraries,
+                                                   edges):
+        """Cytoscape is canvas-only, so it cannot be made to print the way
+        the ECharts pair can. It keeps a rendered copy of itself instead,
+        which print media shows in place of the live canvas."""
+        _, out = run_node(registry, "flograph.viz.network_graph",
+                          {"source": "mgr", "target": "rep"}, edges=edges)
+        assert "@media print" in out["html"]
+        assert "cy.png(" in out["html"]
+        assert '<img id="shot"' in out["html"]
+
+    def test_the_sankey_leaves_room_for_its_last_labels(self, registry,
+                                                        libraries, funnel):
+        """ECharts draws a node's label outside it, so the final stage —
+        the one you most want to read — ran off the right edge."""
+        _, out = run_node(registry, "flograph.viz.sankey_flow",
+                          {"source": "stage", "target": "next", "value": "n"},
+                          table=funnel)
+        assert 'right: ORIENT === "vertical" ? 14 : 92' in out["html"]
+
+
 class TestNetworkGraph:
     TYPE = "flograph.viz.network_graph"
 

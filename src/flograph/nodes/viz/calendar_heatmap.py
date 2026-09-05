@@ -23,7 +23,7 @@ narrows to that day's rows. Click it again to clear.
 NODE = {
     "label": "Calendar Heatmap",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "interactive": True,
     "inputs": [("table", "dataframe")],
@@ -66,23 +66,42 @@ _RAMPS = {
     "red": ["#2a1113", "#ef4444"],
 }
 
+#: The size the chart is laid out at before it is scaled to fit the
+#: card. It matches this node's default card size, so an unresized
+#: card is drawn 1:1; it is a constant rather than the width/height
+#: params because those are cosmetic and run() must not depend on
+#: them (see TestCardSizeIsPresentation).
+_NOMINAL = (620, 220)
+
 # Not an f-string: the page is mostly braces, and doubling every one to
 # satisfy str.format is how a readable script stops being one.
 _PAGE = """
 <style>
-  html, body { margin: 0; height: 100%; background: #0b1220; }
+  html, body { margin: 0; height: 100%; background: #0b1220;
+               overflow: hidden; }
   #chart { width: 100%; height: 100%; }
 </style>
 <div id="chart"></div>
 <script>
   var DATA = /*DATA*/, YEAR = /*YEAR*/, RAMP = /*RAMP*/;
+  var NOMW = /*NOMW*/, NOMH = /*NOMH*/;
   var TOP = /*TOP*/, PICKED = /*PICKED*/, MODE = /*MODE*/, UNIT = /*UNIT*/;
 
-  var chart = echarts.init(document.getElementById("chart"), null,
-                           {renderer: "canvas"});
+  var el = document.getElementById("chart");
+
+  // SVG, not canvas. A report takes its picture of a card through
+  // printToPdf, and Chromium's print rendering drops canvas content — the
+  // page's own HTML and text come through and the chart is a blank
+  // rectangle. SVG survives it, and stays sharp on paper besides.
+  var chart = echarts.init(el, null,
+                           {renderer: "svg", width: NOMW, height: NOMH});
   function draw() {
     chart.setOption({
       backgroundColor: "transparent",
+      // No entry animation: a report photographs the card a fraction of a
+      // second after it loads, and anything still animating is caught
+      // half-drawn (a sankey came out entirely blank this way).
+      animation: false,
       tooltip: {formatter: function (p) {
         return p.value[0] + "<br/><b>" + p.value[1] + "</b> " + UNIT; }},
       visualMap: {min: 0, max: TOP, calculable: false, show: false,
@@ -108,9 +127,30 @@ _PAGE = """
         data: PICKED.map(function (d) { return [d, 0]; })
       }]
     });
+    rescale();
+  }
+
+  function rescale() {
+    // Drawn at a fixed nominal size, then scaled like any other vector.
+    // The container measures 0 wherever the view is not on screen — which
+    // is exactly how a report photographs a card — so a chart that sized
+    // itself from its box rendered nothing at all. A viewBox makes the
+    // drawing independent of the box it ends up in: the card, a resized
+    // card, a printed page and an exported file all scale the same SVG,
+    // and none of them needs this node to know the card's size.
+    var svg = document.querySelector("#chart svg");
+    if (!svg) { return; }
+    svg.setAttribute("viewBox", "0 0 " + NOMW + " " + NOMH);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.style.width = "100%";
+    svg.style.height = "100%";
+    svg.style.display = "block";
+    if (svg.parentNode && svg.parentNode.id !== "chart") {
+      svg.parentNode.style.width = "100%";
+      svg.parentNode.style.height = "100%";
+    }
   }
   draw();
-  window.addEventListener("resize", function () { chart.resize(); });
 
   if (MODE !== "nothing") {
     chart.on("click", function (params) {
@@ -221,6 +261,8 @@ def run(ctx, table):
             .replace("/*TOP*/", json.dumps(top))
             .replace("/*PICKED*/", json.dumps(picked))
             .replace("/*MODE*/", json.dumps(mode))
+            .replace("/*NOMW*/", str(_NOMINAL[0]))
+            .replace("/*NOMH*/", str(_NOMINAL[1]))
             .replace("/*UNIT*/", json.dumps(unit)))
     html = ("<!doctype html><html><head><meta charset='utf-8'>"
             f"{markup('echarts')}</head><body>{page}</body></html>")

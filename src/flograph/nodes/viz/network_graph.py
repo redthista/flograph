@@ -26,7 +26,7 @@ the busiest nodes in the middle; `breadthfirst` is for hierarchies;
 NODE = {
     "label": "Network Graph",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "interactive": True,
     "inputs": [("edges", "dataframe"),
@@ -73,12 +73,24 @@ PARAMS = [
 # turns into an unreadable one. The placeholders are substituted below.
 _PAGE = """
 <style>
-  html, body { margin: 0; height: 100%; background: #0b1220; }
+  html, body { margin: 0; height: 100%; background: #0b1220;
+               overflow: hidden; }
   #cy { width: 100%; height: 100%; }
+  #shot { display: none; width: 100%; height: 100%; object-fit: contain; }
   #hint { position: absolute; left: 8px; bottom: 6px; font: 11px system-ui;
           color: #64748b; pointer-events: none; }
+  /* Cytoscape draws on a canvas, and Chromium's print rendering drops
+     canvas content — which is how a report takes its picture of a card, so
+     one would photograph an empty box. The graph keeps a picture of itself
+     alongside and print media shows that instead. The hint goes too: it is
+     an instruction for a live card, not something to put on paper. */
+  @media print {
+    #cy, #hint { display: none; }
+    #shot { display: block; }
+  }
 </style>
 <div id="cy"></div>
+<img id="shot" alt="">
 <div id="hint"></div>
 <script>
   var ELEMENTS = /*ELEMENTS*/;
@@ -110,17 +122,32 @@ _PAGE = """
     ]
   });
 
+  var shot = document.getElementById("shot");
+  function capture() {
+    // Redrawn whenever the picture would change, so what a report prints is
+    // the graph as it stands — selection and all — not as it first loaded.
+    try {
+      shot.src = cy.png({full: true, scale: 2, bg: "#0b1220"});
+    } catch (err) {
+      // A graph too large to rasterise still renders live; only the
+      // printed copy is lost, and a broken card would be worse.
+    }
+  }
+  cy.ready(capture);
+  cy.on("layoutstop", capture);
+
   function paint() {
     cy.elements().removeClass("picked faded");
-    if (!PICKED.length) { return; }
+    if (!PICKED.length) { capture(); return; }
     var chosen = cy.nodes().filter(function (n) {
       return PICKED.indexOf(n.id()) !== -1; });
-    if (!chosen.length) { return; }
+    if (!chosen.length) { capture(); return; }
     // Everything not touching the selection dims, so one hop of a busy
     // network reads at a glance rather than having to be traced.
     var near = chosen.closedNeighborhood();
     cy.elements().difference(near).addClass("faded");
     chosen.addClass("picked");
+    capture();
   }
   paint();
 

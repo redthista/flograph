@@ -24,7 +24,7 @@ sides of the same row (`a → a`) is dropped, because a loop has no width.
 NODE = {
     "label": "Sankey Flow",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "interactive": True,
     "inputs": [("table", "dataframe")],
@@ -58,25 +58,50 @@ PARAMS = [
 _PALETTE = ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#a855f7",
             "#14b8a6", "#f472b6", "#84cc16", "#38bdf8", "#fb923c"]
 
+#: The size the chart is laid out at before it is scaled to fit the
+#: card. It matches this node's default card size, so an unresized
+#: card is drawn 1:1; it is a constant rather than the width/height
+#: params because those are cosmetic and run() must not depend on
+#: them (see TestCardSizeIsPresentation).
+_NOMINAL = (560, 380)
+
 # Not an f-string — see the note in network_graph.py.
 _PAGE = """
 <style>
-  html, body { margin: 0; height: 100%; background: #0b1220; }
+  html, body { margin: 0; height: 100%; background: #0b1220;
+               overflow: hidden; }
   #chart { width: 100%; height: 100%; }
 </style>
 <div id="chart"></div>
 <script>
   var NODES = /*NODES*/, LINKS = /*LINKS*/, ORIENT = /*ORIENT*/;
+  var NOMW = /*NOMW*/, NOMH = /*NOMH*/;
   var PICKED = /*PICKED*/, MODE = /*MODE*/;
 
-  var chart = echarts.init(document.getElementById("chart"));
+  var el = document.getElementById("chart");
+
+  // SVG, not canvas — a report photographs a card through printToPdf, and
+  // Chromium's print rendering drops canvas content (the page's text comes
+  // through and the chart is a blank rectangle). SVG survives it.
+  var chart = echarts.init(el, null,
+                           {renderer: "svg", width: NOMW, height: NOMH});
   function draw() {
     chart.setOption({
       backgroundColor: "transparent",
+      // No entry animation. A report photographs the card a fraction of a
+      // second after it loads, and a sankey animates in over a full second
+      // behind an expanding clip — so the picture came out empty. Drawing
+      // at once is also what you want from a chart you are reading rather
+      // than presenting.
+      animation: false,
       tooltip: {trigger: "item", triggerOn: "mousemove"},
       series: [{
         type: "sankey", orient: ORIENT,
-        left: 12, right: 12, top: 14, bottom: 14,
+        // Room for the last column's labels, which ECharts draws *outside*
+        // the node — with an even margin they run off the edge and the
+        // final stage is the one you most want to read.
+        left: 12, right: ORIENT === "vertical" ? 14 : 92,
+        top: 14, bottom: ORIENT === "vertical" ? 40 : 14,
         nodeGap: 10, nodeWidth: 14,
         emphasis: {focus: "adjacency"},
         data: NODES.map(function (n) {
@@ -91,9 +116,30 @@ _PAGE = """
         lineStyle: {color: "gradient", opacity: PICKED.length ? 0.25 : 0.45}
       }]
     });
+    rescale();
+  }
+
+  function rescale() {
+    // Drawn at a fixed nominal size, then scaled like any other vector.
+    // The container measures 0 wherever the view is not on screen — which
+    // is exactly how a report photographs a card — so a chart that sized
+    // itself from its box rendered nothing at all. A viewBox makes the
+    // drawing independent of the box it ends up in: the card, a resized
+    // card, a printed page and an exported file all scale the same SVG,
+    // and none of them needs this node to know the card's size.
+    var svg = document.querySelector("#chart svg");
+    if (!svg) { return; }
+    svg.setAttribute("viewBox", "0 0 " + NOMW + " " + NOMH);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.style.width = "100%";
+    svg.style.height = "100%";
+    svg.style.display = "block";
+    if (svg.parentNode && svg.parentNode.id !== "chart") {
+      svg.parentNode.style.width = "100%";
+      svg.parentNode.style.height = "100%";
+    }
   }
   draw();
-  window.addEventListener("resize", function () { chart.resize(); });
 
   if (MODE !== "nothing") {
     chart.on("click", function (params) {
@@ -196,7 +242,9 @@ def run(ctx, table):
             .replace("/*LINKS*/", json.dumps(links))
             .replace("/*ORIENT*/", json.dumps(orient))
             .replace("/*PICKED*/", json.dumps(picked))
-            .replace("/*MODE*/", json.dumps(mode)))
+            .replace("/*MODE*/", json.dumps(mode))
+            .replace("/*NOMW*/", str(_NOMINAL[0]))
+            .replace("/*NOMH*/", str(_NOMINAL[1])))
     html = ("<!doctype html><html><head><meta charset='utf-8'>"
             f"{markup('echarts')}</head><body>{page}</body></html>")
     return {"html": html, "selected": picked, "table": filtered}

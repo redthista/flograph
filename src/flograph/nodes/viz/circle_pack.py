@@ -25,7 +25,7 @@ hover.
 NODE = {
     "label": "Circle Pack",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "interactive": True,
     "inputs": [("table", "dataframe")],
@@ -63,8 +63,11 @@ _PALETTES = {
 _PAGE = """
 <style>
   html, body { margin: 0; height: 100%; background: #0b1220;
-               font-family: system-ui, sans-serif; }
-  #pack { width: 100%; height: 100%; }
+               overflow: hidden; font-family: system-ui, sans-serif; }
+  /* display:block, or the SVG sits on a text baseline and the few pixels
+     of descender space below it overflow the card — which shows up as a
+     scrollbar that never goes away however the card is sized. */
+  #pack { display: block; width: 100%; height: 100%; }
   circle { cursor: pointer; }
   circle.picked { stroke: #f8fafc; stroke-width: 2.5px; }
   text { pointer-events: none; fill: #e2e8f0; text-anchor: middle;
