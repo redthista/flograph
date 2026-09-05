@@ -147,10 +147,19 @@ class TestTheControls:
         rendered = render_report("![[Sales|rows=lots]]", graph, cache)
         assert rendered.problems
 
-    def test_a_chart_only_option_on_a_table_says_so(self):
+    def test_the_one_chart_only_option_on_a_table_says_so(self):
+        """`ratio` is the only one a table cannot take: it has no shape to
+        be redrawn at, being exactly as tall as its rows."""
         graph, cache, _n = table_node("")
         rendered = render_report("![[Sales|ratio=16:9]]", graph, cache)
-        assert any("only apply to charts" in p for p in rendered.problems)
+        assert any("ratio only applies to a chart" in p
+                   for p in rendered.problems)
+
+    def test_the_other_options_no_longer_complain_on_a_table(self):
+        graph, cache, _n = table_node("")
+        rendered = render_report(
+            "![[Sales|width=50%|height=200|scale=0.8|rows=5]]", graph, cache)
+        assert rendered.problems == []
 
 
 class TestFrameToHtml:

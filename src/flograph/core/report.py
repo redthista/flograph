@@ -39,9 +39,12 @@ EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*((?:\|[^\]|]*)*)\]\]")
 #: `widht=50%` would leave someone staring at an unchanged chart.
 #:
 #: `width`  — the placement width, `50%` of the text column or `280` points.
-#: `ratio`  — the shape the chart is drawn at, `16:9` / `4x3` / `1.5`.
-#: `height` — an exact height in points, the other way to say a shape.
-#: `scale`  — render density, `2` for a chart with fine detail. Capped.
+#: `ratio`  — the shape the chart is drawn at, `16:9` / `4x3` / `1.5`. The
+#:            one option a table cannot take: it is as tall as its rows.
+#: `height` — an exact height in points. A chart is redrawn at it; a table
+#:            reads it as a budget of page and shows the rows that fit.
+#: `scale`  — a chart's render density, `2` for fine detail (capped, never
+#:            below 1). A table's *text size*, which does go below 1.
 #: `rows`   — how many rows of a table to show before it is cut with a
 #:            note. Only a table has rows; on a chart it says so.
 EMBED_OPTIONS = ("width", "ratio", "height", "scale", "rows")
@@ -50,8 +53,8 @@ EMBED_OPTIONS = ("width", "ratio", "height", "scale", "rows")
 #: before the port, so a node whose label collides with one cannot be
 #: embedded by that bare name — in practice none do.
 #:
-#: `fit` — shrink this chart so it fits the space left on the page rather
-#: than starting a new one and leaving a gap.
+#: `fit` — shrink this chart, or trim this table, so it fits the space left
+#: on the page rather than starting a new one and leaving a gap.
 EMBED_FLAGS = ("fit",)
 
 

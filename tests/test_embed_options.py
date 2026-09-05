@@ -164,3 +164,139 @@ class TestSizing:
     def test_a_width_on_a_list_sizes_every_chart(self, figure):
         widths, _ = render("![[c|width=50%]]", [figure, figure])
         assert widths == [FIGURE_WIDTH // 2] * 2
+
+
+# --------------------------------------------------------------- tables
+
+PAGE_HEIGHT = 700
+#: Enough prose to push what follows to the bottom of the first page.
+FILLER = "\n\n".join(
+    f"Paragraph {i}. " + "Words to push the table down the page. " * 6
+    for i in range(6))
+
+
+@pytest.fixture
+def frame():
+    pd = pytest.importorskip("pandas")
+    return pd.DataFrame({"region": [f"row {i}" for i in range(14)],
+                         "revenue": [100000 + i * 7919 for i in range(14)]})
+
+
+def table_render(body, frame, page_height=None):
+    return render_body(body, lambda ref, port: (frame, "", ""),
+                       image_width=510, page_height=page_height)
+
+
+def table_shape(rendered, page_height=PAGE_HEIGHT):
+    """`(rows drawn, height, room left on its page)` for the first table."""
+    from PySide6.QtCore import QSizeF
+    from PySide6.QtGui import QTextTable
+
+    document = rendered.document
+    document.setPageSize(QSizeF(510, page_height))
+    layout = document.documentLayout()
+    for child in document.rootFrame().childFrames():
+        if isinstance(child, QTextTable):
+            rect = layout.frameBoundingRect(child)
+            return (child.rows() - 1, rect.height(),
+                    page_height - (rect.top() % page_height))
+    raise AssertionError("no table in the rendered document")
+
+
+class TestATableTakesThePipeOptions:
+    """`width` and `rows` always worked. `scale`, `height` and `fit` used to
+    be refused as chart-only — a table reads each of them its own way."""
+
+    def test_scale_sets_the_text_size(self, frame):
+        html = table_render("![[t|scale=0.7]]", frame).document.toHtml()
+        assert "font-size:7.7pt" in html.replace(" ", "")
+
+    def test_scale_is_not_refused_as_chart_only(self, frame):
+        assert table_render("![[t|scale=0.7]]", frame).problems == []
+
+    def test_a_bigger_scale_works_too(self, frame):
+        """A chart's `scale` only ever sharpens; a table's goes both ways,
+        because the reason to scale text is to change how much fits."""
+        html = table_render("![[t|scale=1.5]]", frame).document.toHtml()
+        assert "font-size:16.5pt" in html.replace(" ", "")
+
+    def test_height_becomes_a_budget_of_rows(self, frame):
+        tall = table_shape(table_render("![[t]]", frame))
+        short = table_shape(table_render("![[t|height=120]]", frame))
+        assert short[0] < tall[0]
+        assert short[1] <= 120
+
+    def test_a_height_a_table_already_fits_changes_nothing(self, frame):
+        plain = table_shape(table_render("![[t|rows=3]]", frame))
+        budgeted = table_shape(table_render("![[t|rows=3|height=600]]", frame))
+        assert plain[0] == budgeted[0]
+
+    def test_a_trimmed_table_says_how_many_rows_it_shows(self, frame):
+        rendered = table_render("![[t|height=120]]", frame)
+        rows, _height, _room = table_shape(rendered)
+        assert f"Showing {rows} of 14 rows" in rendered.document.toPlainText()
+
+    def test_the_old_row_count_does_not_survive_the_trim(self, frame):
+        """The note lives in a paragraph of its own, so a rebuilt table has
+        to take it with it or the page carries both counts."""
+        text = table_render("![[t|height=120]]", frame).document.toPlainText()
+        assert text.count("Showing") == 1
+
+    def test_fit_trims_the_table_into_the_room_left(self, frame):
+        body = FILLER + "\n\n![[t|fit]]\n"
+        rows, height, room = table_shape(
+            table_render(body, frame, PAGE_HEIGHT))
+        assert height <= room
+        assert rows < 14
+
+    def test_without_fit_it_runs_over_the_page_as_before(self, frame):
+        body = FILLER + "\n\n![[t]]\n"
+        _rows, height, room = table_shape(
+            table_render(body, frame, PAGE_HEIGHT))
+        assert height > room
+
+    def test_fit_leaves_a_table_that_already_fits_alone(self, frame):
+        plain = table_shape(table_render("![[t]]", frame, PAGE_HEIGHT))
+        fitted = table_shape(table_render("![[t|fit]]", frame, PAGE_HEIGHT))
+        assert plain == fitted
+
+    def test_fit_with_almost_no_room_says_so_and_keeps_the_table_whole(
+            self, frame):
+        """Two rows and a promise is worse than a table that breaks. A
+        short page with prose most of the way down it leaves under three
+        rows' worth, which is where `fit` gives up and says so."""
+        tight = "\n\n".join(f"P{i}. " + "Words to push it down. " * 8
+                            for i in range(3))
+        rendered = table_render(tight + "\n\n![[t|fit]]\n", frame, 300)
+        rows, _height, _room = table_shape(rendered, 300)
+        assert rows == 14
+        assert any("not enough room" in p for p in rendered.problems)
+
+    def test_fit_on_a_card_says_it_needs_a_page(self, frame):
+        rendered = table_render("![[t|fit]]", frame, page_height=None)
+        assert any("only works on a report page" in p
+                   for p in rendered.problems)
+
+    def test_a_second_table_is_measured_after_the_first_one_moved(self, frame):
+        """Trimming the first table pulls everything under it up the page,
+        so the second one's "room left" is a different number by then. Both
+        have to end up fitting, not just the one that was measured first."""
+        from PySide6.QtCore import QSizeF
+        from PySide6.QtGui import QTextTable
+
+        page = 500
+        filler = "\n\n".join(f"P{i}. " + "Words to push it down. " * 8
+                             for i in range(4))
+        rendered = table_render(
+            filler + "\n\n![[t|fit]]\n\nBetween the two.\n\n![[t|fit]]\n",
+            frame, page)
+        document = rendered.document
+        document.setPageSize(QSizeF(510, page))
+        layout = document.documentLayout()
+        seen = 0
+        for child in document.rootFrame().childFrames():
+            if isinstance(child, QTextTable):
+                rect = layout.frameBoundingRect(child)
+                assert rect.height() <= page - (rect.top() % page)
+                seen += 1
+        assert seen == 2

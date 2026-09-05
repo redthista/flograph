@@ -63,13 +63,20 @@ BAR_TRACK_COLOR = "#eceef1"
 
 
 def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
-                  width: "int | None" = None, paper: bool = True) -> str:
+                  width: "int | None" = None, paper: bool = True,
+                  font_pt: "float | None" = None, marker: str = "") -> str:
     """`frame` as an HTML table carrying `rules` as cell styling.
 
     `hidden` is the card's hidden-column list (patterns allowed); `width`
     is how wide the table should sit, in points, so an embed's `width=`
     reaches a table as well as a chart. Rows past `max_rows` are cut with
     a note, exactly as the markdown form cuts them.
+
+    `font_pt` sets the whole table's text size — an embed's `scale=`, and
+    the knob `fit` turns to get a table into the room left on a page.
+    `marker` is an invisible string tucked into the first header cell so
+    the renderer can find *this* table in the laid-out document and
+    measure it; it prints as nothing.
     """
     frame = _as_frame(frame)
     if frame is None:
@@ -92,15 +99,19 @@ def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
     layout = column_layout(rules, columns)
 
     size = f' width="{int(width)}"' if width else ""
-    out = [f'<table{size} class="flograph-table"><thead><tr>']
-    for column in columns:
+    text_size = f' style="font-size:{font_pt:g}pt"' if font_pt else ""
+    out = [f'<table{size}{text_size} class="flograph-table"><thead><tr>']
+    for index, column in enumerate(columns):
         entry = layout.get(str(column))
         align = _align_attr(entry, numeric[column])
         # Qt's rich text takes a column's width off the first row that
         # states one, and the header is that row
         fixed = f' width="{entry.width}"' if entry and entry.width else ""
         label = entry.label if entry and entry.label else str(column)
-        out.append(f"<th{align}{fixed}>{_escape(label)}</th>")
+        # the marker rides in the first header cell rather than in a
+        # paragraph of its own, which would print as a blank line
+        head = (marker if index == 0 else "") + _escape(label)
+        out.append(f"<th{align}{fixed}>{head}</th>")
     out.append("</tr></thead><tbody>")
     for row in range(len(shown)):
         out.append("<tr>")
@@ -113,7 +124,11 @@ def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
         out.append("</tr>")
     out.append("</tbody></table>")
     if total > max_rows:
-        out.append(f"<p><i>Showing {max_rows:,} of {total:,} rows.</i></p>")
+        # the marker rides in the note as well as the header: a table that
+        # is rebuilt shorter has to take its own "showing N of M" with it,
+        # or the page ends up carrying both counts
+        out.append(f"<p><i>{marker}Showing {max_rows:,} of "
+                   f"{total:,} rows.</i></p>")
     return "".join(out)
 
 

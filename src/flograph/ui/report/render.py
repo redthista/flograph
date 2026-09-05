@@ -75,6 +75,25 @@ def _document() -> QTextDocument:
 
 
 @dataclass
+class _TablePlacement:
+    """One embedded table that has to be measured once the page exists.
+
+    `height=` needs the real height of a row, and `fit` needs the room left
+    on the page the table landed on — neither is knowable while the HTML is
+    being written. So the table goes out at its asked-for size carrying an
+    invisible marker, and `fit_tables` comes back afterwards, finds it,
+    measures it and rebuilds it if it has to.
+    """
+    ref: str
+    marker: str
+    build: object              # (rows, font_pt) -> html
+    rows: int
+    font_pt: "float | None"
+    height: "float | None"     # the `height=` budget, in points
+    fit: bool
+
+
+@dataclass
 class RenderedReport:
     document: QTextDocument
     #: embed refs that resolved to nothing — the page shows them inline, and
@@ -244,6 +263,28 @@ MAX_SCALE_MULTIPLIER = 4.0
 #: asking for a hundred thousand rows would appear to hang.
 TABLE_ROWS = 30
 MAX_TABLE_ROWS = 2000
+
+#: The body text size REPORT_CSS sets, in points. A table's `scale=` is a
+#: multiple of it, so `scale=0.8` is 8.8pt rather than a guess.
+REPORT_FONT_PT = 11.0
+#: What `scale=` may do to a table. Unlike a chart's density — which only
+#: ever sharpens — a table's text is worth shrinking, which is the whole
+#: reason to ask; but past these it is either unreadable or a headline.
+MIN_TABLE_SCALE, MAX_TABLE_SCALE = 0.4, 3.0
+#: The fewest rows `fit` will cut a table down to. Under this it is not a
+#: table any more, it is a tease — and a whole table broken over a page
+#: boundary reads better than two rows and a promise.
+FIT_MIN_ROWS = 3
+#: The invisible marker that finds one table in the laid-out document: a
+#: word joiner around a run of zero-width spaces. Both print as nothing and
+#: neither is a space. Bracketed so that no marker is a prefix of another —
+#: searching for the first table's mark must not land inside the fourth's.
+TABLE_MARK = "\u2060"
+TABLE_MARK_FILL = "\u200b"
+
+
+def table_marker(index: int) -> str:
+    return TABLE_MARK + TABLE_MARK_FILL * (index + 1) + TABLE_MARK
 
 
 def parse_aspect(raw: str) -> "float | None":
@@ -646,6 +687,18 @@ class _Resolver:
         self._scale_mult = 1.0
         # How many rows of a table this embed shows, from `rows=`.
         self._max_rows = TABLE_ROWS
+        # A table's own reading of `scale=` and `height=`: text size, and a
+        # budget of vertical space. Charts read the same two words as
+        # density and shape, which is why they are held apart.
+        self._table_scale = 1.0
+        self._table_height: "float | None" = None
+        self._table_fit = False
+        # `ratio=` is the one option a table cannot take; remembered so the
+        # message names it exactly rather than guessing from the aspect
+        self._table_ratio = False
+        # tables that asked to be measured after layout — `height=` needs
+        # the real row height, `fit` needs the room left on the page
+        self.tables: list = []
         # The body height of one page, in points — only a report *page* has
         # one. Needed by the `fit` pass; None makes `fit` a no-op.
         self._page_height = page_height
@@ -686,11 +739,17 @@ class _Resolver:
         # of this embed only, so `![[a|width=50%]]` narrows that one chart
         # and leaves the next at the page width.
         was = (self._image_width, self._aspect, self._scale_mult,
-               self._max_rows)
+               self._max_rows, self._table_scale, self._table_height,
+               self._table_fit, self._table_ratio)
         self._image_width = self._width_for(embed)
         self._aspect = self._aspect_for(embed)
         self._scale_mult = self._scale_for(embed)
         self._max_rows = self._rows_for(embed)
+        self._table_scale = self._table_scale_for(embed)
+        self._table_height = self._table_height_for(embed)
+        self._table_fit = bool((embed.options or {}).get("fit"))
+        self._table_ratio = bool(
+            str((embed.options or {}).get("ratio", "")).strip())
         before = len(self.images)
         try:
             return self.render_value(value, embed.ref)
@@ -698,7 +757,8 @@ class _Resolver:
             if (embed.options or {}).get("fit"):
                 self._mark_fit(embed, before)
             (self._image_width, self._aspect, self._scale_mult,
-             self._max_rows) = was
+             self._max_rows, self._table_scale, self._table_height,
+             self._table_fit, self._table_ratio) = was
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -792,6 +852,43 @@ class _Resolver:
                 f"“{embed.ref}”: “{raw}” is not a row count — try 50")
             return TABLE_ROWS
         return max(1, min(MAX_TABLE_ROWS, value))
+
+    def _table_scale_for(self, embed) -> float:
+        """`scale=` read the way a *table* means it: text size.
+
+        The same word does two jobs because each is the obvious reading of
+        its own medium. A chart is a picture, so scaling it is about
+        density and never goes below 1 — asking for a softer picture is
+        asking for a worse one. A table is text, and the reason anyone
+        scales text on a page is to get more of it into the space, so here
+        it goes both ways.
+        """
+        raw = str((embed.options or {}).get("scale", "")).strip()
+        if not raw:
+            return 1.0
+        try:
+            value = float(raw.rstrip("x"))
+        except ValueError:
+            return 1.0          # `_scale_for` has already said so
+        return max(MIN_TABLE_SCALE, min(MAX_TABLE_SCALE, value))
+
+    def _table_height_for(self, embed) -> "float | None":
+        """`height=200` read the way a *table* means it: a budget of page,
+        in points, that it shows as many rows as will fit inside.
+
+        A chart turns the same number into a shape to be redrawn at. A
+        table has no shape — it is as tall as its rows — so the honest
+        reading is how much room it may take, and the "showing N of M rows"
+        note it already carries says what that cost.
+        """
+        raw = str((embed.options or {}).get("height", "")).strip()
+        if not raw:
+            return None
+        try:
+            points = float(raw.removesuffix("pt").strip())
+        except ValueError:
+            return None         # `_aspect_for` has already said so
+        return points if points > 0 else None
 
     #: How many report cards deep an embed may go. Wires are acyclic, so
     #: this can't actually run away — it is a guard against a graph state
@@ -1086,20 +1183,34 @@ class _Resolver:
         loss, and a report that fails to render is a large one.
         """
         from flograph.core.table_html import frame_to_html
-        if self._aspect is not None or self._scale_mult != 1.0:
-            # Said rather than ignored, the same way a picture says it: a
-            # table is laid out from its text, so there is no shape to
-            # redraw it at and no density to render it denser.
+        if self._table_ratio:
+            # The one option a table genuinely cannot take: it has no shape
+            # to be redrawn at, being exactly as tall as its own rows.
+            # Said rather than ignored, the way a picture says it.
             self.problems.append(
-                f"“{ref}”: ratio, height and scale only apply to charts — "
-                "a table takes width and rows")
+                f"“{ref}”: ratio only applies to a chart — a table takes "
+                "width, height, rows, scale and fit")
         rules, hidden = self._table_style(ref)
+        measured = self._table_height is not None or self._table_fit
+        marker = table_marker(len(self.tables)) if measured else ""
+        font_pt = (REPORT_FONT_PT * self._table_scale
+                   if self._table_scale != 1.0 else None)
+
+        def build(rows: int, size: "float | None") -> str:
+            return frame_to_html(value, rules, hidden, max_rows=rows,
+                                 width=self._image_width, font_pt=size,
+                                 marker=marker)
+
         try:
-            return frame_to_html(value, rules, hidden,
-                                 max_rows=self._max_rows,
-                                 width=self._image_width)
+            html = build(self._max_rows, font_pt)
         except Exception:
             return frame_to_markdown(value, self._max_rows)
+        if measured:
+            self.tables.append(_TablePlacement(
+                ref=ref, marker=marker, build=build,
+                rows=self._max_rows, font_pt=font_pt,
+                height=self._table_height, fit=self._table_fit))
+        return html
 
     def _table_style(self, ref: str) -> tuple:
         """(rules, hidden columns) for this embed's table.
@@ -1246,6 +1357,11 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                              QUrl(IMAGE_TOKEN_URL.format(index)), image)
     document.setHtml(html)
     apply_page_breaks(document)
+    if resolver.tables:
+        # before the images: a table that loses rows moves everything under
+        # it, and an image measured against the old layout would be fitted
+        # to a page it is no longer on
+        html = fit_tables(document, html, resolver, page_height, image_width)
     if resolver.fit_marks and page_height:
         _fit_to_page(document, html, resolver, page_height, image_width)
     return RenderedReport(
@@ -1264,6 +1380,177 @@ def _img_tag(index: int, width: int) -> str:
     """The `<img>` an embed token becomes. One place, so the initial pass
     and the `fit` rewrite cannot spell it differently."""
     return f'<img src="embed:{index}" width="{max(80, int(width))}" />'
+
+
+_TABLE_TAG_RE = re.compile(r"<\s*(/?)\s*table\b", re.IGNORECASE)
+
+
+def _table_span(html: str, marker: str) -> "tuple | None":
+    """`(start, end)` of the whole `<table>…</table>` the marker sits in.
+
+    Found rather than remembered: by the time this runs the table has been
+    through Qt's markdown reader and back out of `toHtml`, which rewrites
+    the markup — so the string this module wrote is no longer in the page,
+    but the marker it put in the header cell still is. A data bar is itself
+    a little table inside a cell, so the scan counts depth and takes the
+    outermost one.
+    """
+    at = html.find(marker)
+    if at == -1:
+        return None
+    depth, start = 0, None
+    for match in _TABLE_TAG_RE.finditer(html):
+        closing = match.group(1) == "/"
+        if not closing:
+            if depth == 0:
+                start = match.start()
+            depth += 1
+            continue
+        depth -= 1
+        if depth <= 0:
+            depth = 0
+            end = html.find(">", match.end())
+            if start is not None and end != -1 and start < at < end:
+                return start, _with_note(html, end + 1, marker)
+            start = None
+    return None
+
+
+def _with_note(html: str, end: int, marker: str) -> int:
+    """Extend a table's span over the "showing N of M rows" note under it.
+
+    The note is a paragraph of its own, so replacing only the table would
+    leave the old count sitting under the new table. It carries the same
+    marker, which is what identifies it as this table's own.
+    """
+    opening = html.find("<p", end)
+    if opening == -1:
+        return end
+    closing = html.find("</p>", opening)
+    if closing == -1 or marker not in html[opening:closing]:
+        return end
+    return closing + len("</p>")
+
+
+def _measure(document, placement: "_TablePlacement") -> "tuple | None":
+    """`(top, height, rows drawn)` for a placed table, or None if it cannot
+    be found — a table that fell inside a nested card, say."""
+    from PySide6.QtGui import QTextTable
+
+    cursor = document.find(placement.marker)
+    if cursor.isNull():
+        return None
+    table = document.frameAt(cursor.position())
+    if not isinstance(table, QTextTable):
+        return None
+    rect = document.documentLayout().frameBoundingRect(table)
+    if rect.height() <= 0 or table.rows() < 2:
+        return None
+    return rect.top(), rect.height(), table.rows() - 1      # minus the header
+
+
+def fit_tables(document, html: str, resolver, page_height: "float | None",
+               page_width: int) -> str:
+    """Give each measured table the size it asked for, now that there is a
+    page to measure against.
+
+    Two questions the HTML could not answer on its own:
+
+    * `height=200` — how many rows *is* 200 points? The row height depends
+      on the font, the padding and whatever the cells hold, so the table is
+      drawn once and then trimmed to the rows that fit.
+    * `fit` — how much room is left on the page this table landed on? The
+      table's own top answers it, and unlike an image a table does not
+      float to the next page first: Qt breaks it across the boundary, so
+      where it starts is where it was written.
+
+    One measure-and-rebuild pass, like the image fit. Returns the HTML as
+    it now stands, so the image pass that follows works from the same text.
+    """
+    from PySide6.QtCore import QSizeF
+    from PySide6.QtGui import QGuiApplication
+
+    # Measuring means laying the document out, and laying it out means font
+    # metrics, which Qt will not produce without a GUI application — it
+    # aborts the process rather than returning something wrong. Nothing is
+    # being shown in that case anyway, so the tables keep the size they
+    # were written at.
+    if QGuiApplication.instance() is None:
+        return html
+    # Nothing can be measured until the document has been laid out at a
+    # known width — asking a frame for its rectangle before that aborts Qt
+    # outright, not politely. A card has no page height, and still has a
+    # width, which is all `height=` needs.
+    if page_height:
+        document.setPageSize(QSizeF(page_width, page_height))
+    else:
+        document.setTextWidth(page_width)
+    for placement in resolver.tables:
+        if placement.fit and not page_height:
+            # the same thing an `![[chart|fit]]` on a card is told
+            resolver.problems.append(
+                f"“{placement.ref}”: “fit” only works on a report page")
+        measured = _measure(document, placement)
+        if measured is None:
+            continue
+        top, height, drawn = measured
+        per_row = height / max(1, drawn + 1)     # the header is a row too
+        rows, font_pt = placement.rows, placement.font_pt
+
+        if placement.height and height > placement.height:
+            # one row of the budget belongs to the header
+            fits = int(placement.height / per_row) - 1
+            if fits < 1:
+                resolver.problems.append(
+                    f"“{placement.ref}”: height={placement.height:g} is not "
+                    f"room for even one row — showing one")
+            rows = max(1, min(rows, fits))
+
+        if placement.fit and page_height:
+            room = page_height - (top % page_height)
+            if height > room:
+                # Rows, not text size: a table's height *is* its rows, and
+                # a table shrunk to fit an arbitrary gap is a table nobody
+                # can read. What it drops, its own "showing N of M" says.
+                fits = int(room / per_row) - 1
+                if fits >= FIT_MIN_ROWS:
+                    rows = min(rows, fits)
+                else:
+                    # Less than a glance-worth would fit. A whole table
+                    # broken over two pages beats a two-row tease on this
+                    # one, so it is left alone — as an over-tall chart is.
+                    resolver.problems.append(
+                        f"“{placement.ref}”: not enough room left on the "
+                        f"page for “fit” — showing the table in full")
+
+        if rows == placement.rows and font_pt == placement.font_pt:
+            continue
+        span = _table_span(html, placement.marker)
+        if span is None:
+            continue
+        try:
+            rebuilt = placement.build(rows, font_pt)
+        except Exception:
+            continue
+        html = html[:span[0]] + rebuilt + html[span[1]:]
+        placement.rows, placement.font_pt = rows, font_pt
+        # Relaid out now, not at the end: a table that just lost eight rows
+        # has pulled everything under it up the page, and the next table's
+        # "room left on its page" is a different number because of it.
+        _relayout(document, html, page_height, page_width)
+
+    return html
+
+
+def _relayout(document, html: str, page_height: "float | None",
+              page_width: int) -> None:
+    document.setHtml(html)
+    apply_page_breaks(document)
+    from PySide6.QtCore import QSizeF
+    if page_height:
+        document.setPageSize(QSizeF(page_width, page_height))
+    else:
+        document.setTextWidth(page_width)
 
 
 def _fit_to_page(document, html: str, resolver, page_height: float,

@@ -70,9 +70,16 @@ for extra render density on a fine-detail chart, and the bare word `fit` to
 shrink a chart into the space left on the page instead of bumping it to the
 next. The report toolbar's **?** button lists them all with examples.
 
-A **table** takes `width=` too, plus `rows=50` for how many rows to show
-before it is cut with a "showing 30 of 4,000" note — `ratio`, `height` and
-`scale` are chart-only, since a table is laid out from its text. It arrives
+A **table** takes the same options, each read the way a table means it:
+`width=` places it, `rows=50` sets how many rows to show before the
+"showing 30 of 4,000" note, `scale=0.8` sets the **text size** (smaller to
+get a wide table in, larger for a headline figure — unlike a chart's
+`scale`, it goes both ways), `height=200` is a **budget of page** that the
+table shows as many rows as will fit inside, and `fit` trims it to the rows
+that fit the room left on the page rather than letting it run over. What a
+trim costs is never hidden: the table's own "showing N of M rows" says it.
+`ratio=` is the one chart-only option — a table has no shape to be redrawn
+at, being exactly as tall as its rows. It arrives
 carrying whatever conditional formatting its **Show Table** card is showing:
 colour scales, data bars, highlighted rows, icon sets, number formats and
 hidden columns, re-grounded for white paper. The table stays real text, so

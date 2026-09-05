@@ -45,6 +45,12 @@ produced, name it:</p>
     <td>shrunk to the room left on the page</td></tr>
 <tr><td><code>![[Sales|rows=50]]</code></td>
     <td>fifty rows of a table before it is cut</td></tr>
+<tr><td><code>![[Sales|scale=0.8]]</code></td>
+    <td>a table's text at 80% &mdash; more of it in the same room</td></tr>
+<tr><td><code>![[Sales|height=200]]</code></td>
+    <td>200 points of page: the rows that fit inside it</td></tr>
+<tr><td><code>![[Sales|fit]]</code></td>
+    <td>the rows that fit the room left on the page</td></tr>
 <tr><td><code>![[Chart|figure|width=60%]]</code></td>
     <td>a port <i>and</i> a width</td></tr>
 </table>
@@ -60,11 +66,21 @@ it is opt-in, never the default.</p>
 chart is <i>redrawn</i> at that shape &mdash; the axes and labels lay out
 for it &mdash; rather than stretched. <code>height=</code> says the same
 thing as an exact number of points. Neither changes how wide the chart
-sits on the page; that stays <code>width</code>'s job. <code>ratio</code>,
-<code>height</code> and <code>scale</code> apply to charts, not to
-pictures, which already have a size of their own, and not to tables, which
-are laid out from their text &mdash; a table takes <code>width</code> and
-<code>rows</code>.</p>
+sits on the page; that stays <code>width</code>'s job. <code>ratio</code>
+applies to charts, not to pictures, which already have a size of their own,
+and not to tables, which have no shape to be redrawn at &mdash; a table is
+exactly as tall as its rows.</p>
+<p><b>A table reads the same options its own way.</b>
+<code>scale=</code> is its <i>text size</i> rather than render density, and
+unlike a chart's it goes both ways &mdash; <code>0.8</code> to get a wide
+table into the room, <code>1.4</code> for a figure meant to be read across
+the table. <code>height=</code> is a budget of page: the table shows as
+many rows as fit inside it. <code>fit</code> trims it to the rows that fit
+what is left of the page, instead of running over onto the next &mdash;
+unless that would leave fewer than three rows, when it is left whole,
+because a table broken over two pages beats two rows and a promise. None of
+this hides anything: the table's own <i>showing N of M rows</i> line says
+what a trim cost.</p>
 <p><b>A table arrives with its formatting.</b> Whatever a <b>Show Table</b>
 card is displaying &mdash; the colour scales, data bars, highlighted rows,
 icons, number formats and hidden columns &mdash; comes onto the page with
