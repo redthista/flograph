@@ -744,6 +744,8 @@ class MainWindow(QMainWindow):
                                 self._show_stats)
         self.action_packages = act("Manage &Packages…", None,
                                    self._show_packages)
+        self.action_weblibs = act("&Web Libraries…", None,
+                                  self._show_weblibs)
         self.action_ai_settings = act("AI Assistant &Settings…", None,
                                       self._show_ai_settings)
         self.action_secrets = act("Sec&rets…", None, self._show_secrets)
@@ -791,6 +793,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.action_settings)
         tools_menu.addSeparator()
         tools_menu.addAction(self.action_packages)
+        tools_menu.addAction(self.action_weblibs)
         tools_menu.addAction(self.action_ai_settings)
         tools_menu.addAction(self.action_secrets)
 
@@ -2540,6 +2543,77 @@ class MainWindow(QMainWindow):
         dialog.show()
         dialog.raise_()
 
+    def _view_page(self, node_id: str) -> "str | None":
+        """The page a webview node is currently showing, or None."""
+        from .browser import html_for
+        node = self.graph.nodes.get(node_id)
+        entry = self.engine.cache.get(node_id) if node is not None else None
+        return html_for(node, entry) if node is not None else None
+
+    def _save_view_html(self, node_id: str) -> None:
+        """One self-contained file: the view, with any installed web library
+        embedded rather than pointed at.
+
+        The card renders from `file://` references into the library store,
+        which is right for a card and useless in a file someone else opens —
+        so this is where that tie is cut.
+        """
+        from flograph import weblibs
+        node = self.graph.nodes.get(node_id)
+        page = self._view_page(node_id)
+        if node is None or page is None:
+            self.show_status("Nothing to save — run the node first", 5000)
+            return
+        path = self._save_path_for(node.label, ".html", "Save view as HTML",
+                                   "HTML documents (*.html)")
+        if path is None:
+            return
+        try:
+            Path(path).write_text(weblibs.inline_page(page), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Save failed", str(exc))
+            return
+        self.show_status(f"Saved {path}", 6000)
+
+    def _export_view_folder(self, node_id: str) -> None:
+        """The view as a folder — index.html plus the libraries beside it,
+        linked relatively, for dropping on a share or a static host."""
+        from flograph import weblibs
+        from PySide6.QtWidgets import QFileDialog
+        node = self.graph.nodes.get(node_id)
+        page = self._view_page(node_id)
+        if node is None or page is None:
+            self.show_status("Nothing to export — run the node first", 5000)
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Export view into a folder")
+        if not folder:
+            return
+        from .browser import slug
+        target = Path(folder) / slug(node.label)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            rewritten, written = weblibs.bundle_page(page, target)
+            (target / "index.html").write_text(rewritten, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        self.show_status(
+            f"Exported {target} ({len(written) + 1} files)", 6000)
+
+    def _show_weblibs(self) -> None:
+        """Tools ▸ Web Libraries — the browser-side twin of Manage Packages.
+        Kept alive between showings like the packages dialog, so an install
+        running in the background survives closing the window."""
+        from .weblibs_dialog import WebLibrariesDialog
+        dialog = getattr(self, "_weblibs_dialog", None)
+        if dialog is None:
+            dialog = WebLibrariesDialog(self)
+            self._weblibs_dialog = dialog
+        dialog.refresh()
+        dialog.show()
+        dialog.raise_()
+
     def _create_desktop_shortcut(self) -> None:
         from .desktop_shortcut import ShortcutDialog
         ShortcutDialog(self, self._project_path).exec()
@@ -3532,8 +3606,21 @@ class MainWindow(QMainWindow):
                 "carries it when you share the file. The link to the original "
                 "file is replaced by the image data.")
         browser_action = None
+        save_view_action = export_folder_action = None
         if not many and self._can_open_in_browser(node_id):
             browser_action = menu.addAction("Open in Browser")
+            # The two ways a view leaves flograph for good. Open in Browser
+            # hands over a page in a temp directory that still points at the
+            # library store; these two cut that tie, which is what makes the
+            # file worth mailing or putting on a share.
+            save_view_action = menu.addAction("Save View as HTML…")
+            save_view_action.setToolTip(
+                "One self-contained file: any installed web library is "
+                "embedded, so it opens on a machine with no flograph.")
+            export_folder_action = menu.addAction("Export View as Web Folder…")
+            export_folder_action.setToolTip(
+                "The page plus an assets folder beside it, with relative "
+                "links — for a SharePoint or any static host.")
         # A report *card* has no page, so it has no toolbar, so until these
         # two it had no way of reaching anyone not looking at the canvas.
         # Same two things a report page offers, from the one surface a card
@@ -3683,6 +3770,11 @@ class MainWindow(QMainWindow):
             self._embed_node_image(node_id)
         elif browser_action is not None and chosen is browser_action:
             self._open_in_browser(node_id)
+        elif save_view_action is not None and chosen is save_view_action:
+            self._save_view_html(node_id)
+        elif (export_folder_action is not None
+                and chosen is export_folder_action):
+            self._export_view_folder(node_id)
         elif (report_export_action is not None
                 and chosen is report_export_action):
             self._export_report_card_pdf(node_id)

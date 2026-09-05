@@ -97,3 +97,44 @@ def chain_graph() -> tuple[Graph, list[NodeInstance]]:
     graph.connect(nodes[0].id, "value", nodes[1].id, "value")
     graph.connect(nodes[1].id, "value", nodes[2].id, "value")
     return graph, nodes
+
+
+def install_fake_weblib(monkeypatch, tmp_path, name="mermaid",
+                        filename=None, source="/* stub */",
+                        version="stub"):
+    """Plant a web library in a throwaway store and return its directory.
+
+    The suite must never reach a CDN — an install is a network call, and a
+    test that needs one is a test that fails on a train. This writes what
+    `weblibs.install()` would have written, so everything downstream of the
+    download (resolution, markup, a node rendering) is exercised for real
+    against files that were never fetched.
+    """
+    import json
+
+    monkeypatch.setenv("FLOGRAPH_USER_DIR", str(tmp_path))
+    from flograph import weblibs
+
+    entry = weblibs.CATALOGUE.get(name)
+    if entry is not None:
+        version = entry.version
+        # Every file the catalogue lists, not just the first: a library is
+        # only installed when all of them are there (Leaflet is a script
+        # *and* a stylesheet), so planting one would read as a half-install.
+        names = [asset.filename for asset in entry.assets]
+        if filename is not None:
+            names = [filename]
+    else:
+        names = [filename or f"{name}.js"]
+
+    directory = tmp_path / "weblibs" / name / version
+    directory.mkdir(parents=True, exist_ok=True)
+    for one in names:
+        (directory / one).write_text(source, encoding="utf-8")
+    (directory / "flograph-weblib.json").write_text(json.dumps({
+        "name": name, "title": name, "version": version,
+        "summary": "", "license": "", "homepage": "",
+        "assets": [{"filename": one, "url": "", "sha256": "",
+                    "size": len(source)} for one in names],
+    }), encoding="utf-8")
+    return directory

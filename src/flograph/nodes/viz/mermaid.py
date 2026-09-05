@@ -13,14 +13,19 @@ Render a Mermaid diagram on the canvas — and build one straight from a table.
   • `gantt` — one bar per row from **Task**, **Start** and **End** (or
     **Duration** in days), grouped by **Section**.
 
-Two outputs: **html** (renders here and on a dashboard tile; Mermaid is
-loaded from a CDN, so this tile needs internet) and **mermaid** (the source
-text — wire into Write Text to keep it in version control).
+Two outputs: **html** (renders here and on a dashboard tile) and **mermaid**
+(the source text — wire into Write Text to keep it in version control).
+
+**Needs the Mermaid web library.** Install it once from Tools ▸ Web
+Libraries and every diagram renders from your own machine from then on —
+offline, on a locked-down network, and in a year when that CDN URL has
+moved. Until it is installed this node reports what to install, the same
+way a node whose Python package is missing does.
 """
 NODE = {
     "label": "Mermaid Diagram",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
     "inputs": [("data", "dataframe", {"optional": True})],
     "outputs": [("html", "string"), ("mermaid", "string")],
@@ -62,7 +67,6 @@ PARAMS = [
      "min": 25, "max": 400, "cosmetic": True},
 ]
 
-_MERMAID_JS = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"
 
 
 def _nid(cache, label):
@@ -158,12 +162,18 @@ def run(ctx, data=None):
     if not code.strip():
         raise ValueError("nothing to render — empty diagram")
 
+    # Mermaid itself comes from the local store, never a CDN — install it
+    # once from Tools ▸ Web Libraries and the diagram renders offline for
+    # good. Raises with that instruction when it isn't installed, rather
+    # than quietly reaching for the internet and working only sometimes.
+    from flograph.weblibs import markup
+
     theme = p.get("theme", "default")
     html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<style>html,body{margin:0;background:transparent}"
         ".mermaid{display:flex;justify-content:center;padding:8px}</style>"
-        f"<script src='{_MERMAID_JS}'></script></head><body>"
+        f"{markup('mermaid')}</head><body>"
         f"<pre class='mermaid'>{code}</pre>"
         "<script>mermaid.initialize({startOnLoad:true,theme:'" + theme + "',"
         "securityLevel:'loose'});</script></body></html>"

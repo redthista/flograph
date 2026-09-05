@@ -218,6 +218,35 @@ and delivered on connect.
 Fork **Show Web View** for a working example, or set **On click** on a Show
 Plotly node to get click-to-filter without writing any JavaScript.
 
+## Drawing with a web library
+
+A `webview` node can draw with D3, ECharts, Leaflet, Mermaid and friends.
+Install one from **Tools ▸ Web Libraries**, then ask for it by name:
+
+```python
+def run(ctx, table):
+    from flograph.weblibs import markup
+    return f"<html><head>{markup('echarts')}</head><body>…</body></html>"
+```
+
+**Nothing is ever loaded from the internet when a visual renders.** A CDN is
+where a library is *installed from*, once; from then on the page reads it off
+your disk. That is what keeps a visual working on a train, on a locked-down
+network, and in a year when that CDN URL has moved — and it is why `markup()`
+raises `MissingLibrary` (naming the fix) rather than quietly reaching out
+when a library isn't installed. Treat it exactly like a missing Python
+package: the node reports what to install.
+
+Anything not in the catalogue can be added from a URL in the same dialog, and
+behaves identically afterwards. Behind a corporate mirror, set
+`FLOGRAPH_WEBLIB_BASE_URL` and installs are fetched from
+`<base>/<library>/<version>/<file>`.
+
+Right-click a view to get it out of flograph: **Save View as HTML…** writes
+one self-contained file with the libraries embedded, and **Export View as Web
+Folder…** writes the page plus an `assets/` folder with relative links, for a
+share or a static host.
+
 ## Where nodes live
 
 - **Builtin:** `src/flograph/nodes/<category>/<name>.py` (from a checkout).

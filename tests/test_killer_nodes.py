@@ -600,6 +600,14 @@ class TestSvgTemplate:
 
 
 class TestMermaid:
+    """Mermaid draws with an installed web library, never a CDN — so these
+    plant one rather than reaching the network (tests.conftest)."""
+
+    @pytest.fixture(autouse=True)
+    def _mermaid_installed(self, monkeypatch, tmp_path):
+        from tests.conftest import install_fake_weblib
+        self.lib = install_fake_weblib(monkeypatch, tmp_path, "mermaid")
+
     def test_template_token_fill(self, registry):
         df = pd.DataFrame({"label": ["Ship it"]})
         out = run_node(registry, "flograph.viz.mermaid", {
@@ -607,6 +615,24 @@ class TestMermaid:
         }, data=df)
         assert "A[Ship it]" in out["mermaid"]
         assert "mermaid.min.js" in out["html"]
+
+    def test_the_script_is_the_local_copy_not_a_cdn(self, registry):
+        """The whole point of the store: what the page loads is a file on
+        this machine, so the diagram renders with the network unplugged."""
+        out = run_node(registry, "flograph.viz.mermaid",
+                       {"mode": "template", "source": "flowchart TD\n A --> B"})
+        assert self.lib.as_uri() in out["html"]
+        assert "cdnjs" not in out["html"] and "http://" not in out["html"]
+
+    def test_it_says_what_to_install_when_missing(self, registry, monkeypatch,
+                                                  tmp_path):
+        """A node whose web library is absent reports the fix, the same way
+        one whose Python package is absent does."""
+        monkeypatch.setenv("FLOGRAPH_USER_DIR", str(tmp_path / "empty"))
+        from flograph.weblibs import MissingLibrary
+        with pytest.raises(MissingLibrary, match="Web Libraries"):
+            run_node(registry, "flograph.viz.mermaid",
+                     {"mode": "template", "source": "flowchart TD\n A --> B"})
 
     def test_flowchart_from_edges(self, registry):
         df = pd.DataFrame({"mgr": ["CEO", "CEO", "CTO"],
