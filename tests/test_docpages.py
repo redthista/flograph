@@ -71,6 +71,15 @@ class TestRenderLinks:
         assert "[[Not A Page]]" in out
         assert missing == []
 
+    def test_a_double_tick_span_may_contain_backticks(self):
+        """That is what the ``…`` form is *for* — quoting a backtick. Read
+        as "anything but a backtick" it stopped matching, and the link
+        inside was resolved after all."""
+        text = "Write `` `![[Not A Page]]` `` to show the syntax.\n"
+        out, missing = render_links(text, self.cat)
+        assert "![[Not A Page]]" in out
+        assert missing == []
+
 
 class TestCatalog:
     def test_title_comes_from_the_first_h1(self, tmp_path):

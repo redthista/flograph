@@ -74,6 +74,48 @@ class TestTheSyntax:
     def test_several_in_one_body(self):
         assert [e.ref for e in find_embeds("![[a]] mid ![[b]]")] == ["a", "b"]
 
+
+class TestAnEmbedInsideCode:
+    """Writing `![[Sales]]` in backticks is how a report explains its own
+    syntax to whoever reads it. Resolving it there put the *table's HTML*
+    on the page as a wall of literal code."""
+
+    def test_an_inline_code_span_is_left_alone(self):
+        body = "Write `![[Sales|scale=0.8]]` to shrink it.\n\n![[Sales]]\n"
+        assert [e.ref for e in find_embeds(body)] == ["Sales"]
+        out = replace_embeds(body, lambda e: "TABLE")
+        assert "`![[Sales|scale=0.8]]`" in out
+        assert "TABLE" in out
+
+    def test_a_fenced_block_is_left_alone(self):
+        body = "```\n![[Sales]]\n```\n"
+        assert find_embeds(body) == []
+        assert replace_embeds(body, lambda e: "TABLE") == body
+
+    def test_a_tilde_fence_counts_too(self):
+        body = "~~~\n![[Sales]]\n~~~\n"
+        assert find_embeds(body) == []
+
+    def test_html_code_counts_too(self):
+        """A column's cell text is HTML by the time embeds are resolved, so
+        a code span written in one arrives as `<code>`."""
+        body = "<code>![[Sales]]</code>"
+        assert find_embeds(body) == []
+
+    def test_a_columns_block_is_a_layout_not_code(self):
+        """It is fenced, but it is consumed before embeds are resolved —
+        so anything still fenced by then is a real code block."""
+        from flograph.core.report import replace_columns
+
+        body = "```columns 1 1\nleft\n---\n![[Sales]]\n```\n"
+        staged = replace_columns(body, lambda cols, weights: "\n".join(cols))
+        assert [e.ref for e in find_embeds(staged)] == ["Sales"]
+
+    def test_an_unmatched_backtick_does_not_swallow_the_page(self):
+        """A stray backtick in prose must not protect everything after it."""
+        body = "a ` stray tick\n\n![[Sales]]\n"
+        assert [e.ref for e in find_embeds(body)] == ["Sales"]
+
     def test_a_block_replacement_gets_its_own_blank_lines(self):
         """A table folded into the paragraph above it renders as one
         mangled block, so multi-line replacements are separated out."""

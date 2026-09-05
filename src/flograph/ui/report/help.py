@@ -81,6 +81,11 @@ unless that would leave fewer than three rows, when it is left whole,
 because a table broken over two pages beats two rows and a promise. None of
 this hides anything: the table's own <i>showing N of M rows</i> line says
 what a trim cost.</p>
+<p><b>To write about an embed rather than place one</b>, put it in
+backticks &mdash; <code>`![[Sales]]`</code> &mdash; or in a fenced code
+block. Inside code it stays exactly as typed, which is how a page explains
+its own syntax. A <code>```columns</code> block is a layout rather than
+code, so embeds inside one still resolve.</p>
 <p><b>A table arrives with its formatting.</b> Whatever a <b>Show Table</b>
 card is displaying &mdash; the colour scales, data bars, highlighted rows,
 icons, number formats and hidden columns &mdash; comes onto the page with

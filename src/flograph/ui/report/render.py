@@ -1498,8 +1498,11 @@ def fit_tables(document, html: str, resolver, page_height: "float | None",
         rows, font_pt = placement.rows, placement.font_pt
 
         if placement.height and height > placement.height:
-            # one row of the budget belongs to the header
-            fits = int(placement.height / per_row) - 1
+            # Two rows come off the budget: the header, and the "showing N
+            # of M rows" note — which trimming always produces, which sits
+            # outside the table and so outside what was measured, and which
+            # a budget of page is meant to cover along with it.
+            fits = int(placement.height / per_row) - 2
             if fits < 1:
                 resolver.problems.append(
                     f"“{placement.ref}”: height={placement.height:g} is not "
@@ -1512,7 +1515,12 @@ def fit_tables(document, html: str, resolver, page_height: "float | None",
                 # Rows, not text size: a table's height *is* its rows, and
                 # a table shrunk to fit an arbitrary gap is a table nobody
                 # can read. What it drops, its own "showing N of M" says.
-                fits = int(room / per_row) - 1
+                #
+                # Two rows come off the budget, not one: the header, and
+                # the room for that note — which a trimmed table always
+                # has, and which looks like a mistake stranded at the top
+                # of the next page without the table it belongs to.
+                fits = int(room / per_row) - 2
                 if fits >= FIT_MIN_ROWS:
                     rows = min(rows, fits)
                 else:

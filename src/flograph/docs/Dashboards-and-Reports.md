@@ -91,6 +91,12 @@ in, at the size the card is set to. The design comes with it: layout, CSS,
 colours, web fonts. Resize the card to change how the HTML lays out;
 `width=` places the result on the page.
 
+An embed written **inside code** — `![[Sales]]` in backticks, or in a
+fenced block — is left exactly as typed. That is how a page explains its own
+syntax to whoever reads it, rather than quietly turning the example into
+the thing it was describing. A ```columns block is a layout, not code, so
+embeds inside one still resolve.
+
 **Open Example ▸ Report Visuals** is a worked flow of both: an HTML
 dashboard and a formatted table, on the canvas and on the page.
 

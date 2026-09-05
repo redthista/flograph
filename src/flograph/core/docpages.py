@@ -39,7 +39,9 @@ _H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 # fenced blocks and inline spans — link/embed syntax inside them is a
 # *quotation* of the syntax (this handbook shows report `![[embeds]]` that
 # way), so it is left exactly as written.
-_CODE_RE = re.compile(r"(```.*?```|~~~.*?~~~|``[^`]+``|`[^`\n]+`)", re.DOTALL)
+# A ``double-tick`` span exists precisely so that its content may contain
+# backticks, so it must not be written as "anything but a backtick".
+_CODE_RE = re.compile(r"(```.*?```|~~~.*?~~~|``.+?``|`[^`\n]+`)", re.DOTALL)
 
 
 def _outside_code(text: str, fn) -> str:

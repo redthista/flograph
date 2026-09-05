@@ -226,6 +226,17 @@ class TestATableTakesThePipeOptions:
         assert short[0] < tall[0]
         assert short[1] <= 120
 
+    def test_the_height_budget_covers_the_note_as_well(self, frame):
+        """The "showing N of M rows" line sits outside the table and so
+        outside what was measured, but it is still part of what the embed
+        takes off the page — a budget that ignored it would overrun."""
+        budget = 120
+        _rows, height, _room = table_shape(
+            table_render(f"![[t|height={budget}]]", frame))
+        plain = table_shape(table_render("![[t|rows=1]]", frame))
+        one_row = plain[1] / 2          # header + one row, so half each
+        assert height + one_row <= budget
+
     def test_a_height_a_table_already_fits_changes_nothing(self, frame):
         plain = table_shape(table_render("![[t|rows=3]]", frame))
         budgeted = table_shape(table_render("![[t|rows=3|height=600]]", frame))
@@ -248,6 +259,20 @@ class TestATableTakesThePipeOptions:
             table_render(body, frame, PAGE_HEIGHT))
         assert height <= room
         assert rows < 14
+
+    def test_a_fitted_table_keeps_its_note_on_the_same_page(self, frame):
+        """The trim is only honest because of the "showing N of M" line, so
+        it has to land with the table rather than alone at the top of the
+        next page looking like a mistake."""
+        from PySide6.QtCore import QSizeF
+
+        body = FILLER + "\n\n![[t|fit]]\n"
+        rendered = table_render(body, frame, PAGE_HEIGHT)
+        document = rendered.document
+        document.setPageSize(QSizeF(510, PAGE_HEIGHT))
+        _rows, height, room = table_shape(rendered)
+        # room for the note under it, not just for the table itself
+        assert height < room
 
     def test_without_fit_it_runs_over_the_page_as_before(self, frame):
         body = FILLER + "\n\n![[t]]\n"

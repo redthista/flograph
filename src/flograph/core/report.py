@@ -219,9 +219,37 @@ def _embed_at(match: re.Match) -> Embed:
                  unknown=tuple(unknown))
 
 
+#: Where an embed is text about an embed rather than an embed: a fenced
+#: code block, an inline code span, or the `<code>` a column's cell text has
+#: already been turned into. Writing `` `![[Sales]]` `` in a report is how
+#: you explain the syntax to whoever reads it, and resolving it there put
+#: the *table's HTML* on the page as literal code.
+#:
+#: A ```columns block is not code and is not protected — it is consumed by
+#: `replace_columns` before this runs, so anything still fenced by then is
+#: a real code block.
+_PROTECTED_RE = re.compile(
+    r"^(?P<fence>```|~~~).*?^(?P=fence)[ \t]*$"   # fenced block
+    r"|`+[^`\n]+`+"                               # inline code span
+    r"|<code\b[^>]*>.*?</code>",                  # already HTML
+    re.MULTILINE | re.DOTALL)
+
+
+def _protected_spans(text: str) -> list:
+    return [match.span() for match in _PROTECTED_RE.finditer(text or "")]
+
+
+def _is_protected(spans, position: int) -> bool:
+    return any(start <= position < end for start, end in spans)
+
+
 def find_embeds(text: str) -> list[Embed]:
-    """Every embed in the body, in the order they appear."""
-    return [_embed_at(match) for match in EMBED_RE.finditer(text or "")]
+    """Every embed in the body, in the order they appear — not counting the
+    ones written inside code, which are examples of the syntax rather than
+    uses of it."""
+    spans = _protected_spans(text)
+    return [_embed_at(match) for match in EMBED_RE.finditer(text or "")
+            if not _is_protected(spans, match.start())]
 
 
 def replace_embeds(text: str, render) -> str:
@@ -230,8 +258,14 @@ def replace_embeds(text: str, render) -> str:
     A replacement that isn't already surrounded by blank lines gets them:
     an embed sitting on its own line is a block, and markdown would
     otherwise fold a table or heading into the paragraph above it.
+
+    An embed inside code is left exactly as written — see `_PROTECTED_RE`.
     """
+    spans = _protected_spans(text)
+
     def substitute(match: re.Match) -> str:
+        if _is_protected(spans, match.start()):
+            return match.group(0)
         replacement = render(_embed_at(match))
         if replacement and "\n" in replacement.strip():
             return f"\n\n{replacement.strip()}\n\n"
