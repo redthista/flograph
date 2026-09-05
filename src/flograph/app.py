@@ -9,6 +9,25 @@ def _matplotlib_available() -> bool:
     return importlib.util.find_spec("matplotlib") is not None
 
 
+def _claim_windows_identity() -> None:
+    """Tell Windows this process is flograph, not the interpreter running it.
+
+    Until a process declares an explicit AppUserModelID, the taskbar reads
+    its identity — and therefore its icon and its grouping — off the .exe
+    that started it, which for us is python.exe. Declaring one makes the
+    taskbar button use the window icon we set. Must happen before the first
+    window exists.
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "flograph.flograph")
+    except (AttributeError, OSError):
+        pass  # an icon is not worth failing a launch over
+
+
 def main(argv: list[str] | None = None) -> int:
     if _matplotlib_available():
         import matplotlib
@@ -20,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from flograph.core import NodeRegistry
     from flograph.paths import user_nodes_dir
+    from flograph.ui import window_frame
     from flograph.ui.mainwindow import MainWindow
     from flograph.ui.theme import apply_theme
 
@@ -29,6 +49,11 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("flograph")
     app.setOrganizationName("flograph")
+    # the desktop-file name is what a Linux dock matches a window against, so
+    # the running app sits under its own launcher rather than beside it
+    app.setDesktopFileName("flograph")
+    _claim_windows_identity()
+    app.setWindowIcon(window_frame.app_icon())
     theme_pref = QSettings("flograph", "flograph").value(
         "appearance/theme", "dark", type=str)
     apply_theme(app, theme_pref)

@@ -22,6 +22,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
+from hashlib import sha1
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QRectF, Qt
@@ -212,6 +213,9 @@ def shortcut_path(name: str) -> Path:
 
 # --------------------------------------------------------------------- icon
 
+_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
 def _paint_mark(size: int) -> QImage:
     """The flograph app mark — the same linked-nodes-on-a-tile logo the
     window and taskbar icon use, so the desktop shortcut matches it.
@@ -230,6 +234,18 @@ def _paint_mark(size: int) -> QImage:
     return image
 
 
+def _mark_sizes(sizes=_ICON_SIZES) -> list[tuple[int, QImage]]:
+    """The mark at every size an icon file wants, scaled down from one big
+    render rather than painted small: at 16px the tile's border and the two
+    node dots are sub-pixel, and a smooth downscale of the real drawing
+    reads far better than antialiasing that geometry directly."""
+    master = _paint_mark(max(sizes))
+    return [(s, master if s == master.width()
+             else master.scaled(s, s, Qt.KeepAspectRatio,
+                                Qt.SmoothTransformation))
+            for s in sizes]
+
+
 def _png_bytes(image: QImage) -> bytes:
     # the QByteArray has to outlive the QBuffer that writes into it — a
     # temporary here is collected out from under Qt and takes the process
@@ -242,29 +258,90 @@ def _png_bytes(image: QImage) -> bytes:
     return bytes(data)
 
 
-def _ico_bytes(png: bytes) -> bytes:
-    """A one-image .ico wrapping a 256px PNG — the Vista-and-later form, so
-    the whole container is a 22-byte header (0 width/height means 256)."""
-    header = struct.pack("<HHH", 0, 1, 1)
-    entry = struct.pack("<BBBBHHII", 0, 0, 0, 0, 1, 32, len(png), 22)
-    return header + entry + png
+def _dib_bytes(image: QImage) -> bytes:
+    """One icon image in the old BMP form: a BITMAPINFOHEADER, the pixels
+    bottom-up as BGRA, then an empty 1-bit mask.
+
+    Every size below 256 is written this way rather than as a PNG, because
+    a PNG-only .ico is the form parts of the Windows shell quietly decline
+    to read — and when the shell can't read the icon a shortcut falls back
+    to its target's, which is why one can come out wearing Python's logo.
+    """
+    img = image.convertToFormat(QImage.Format_ARGB32)
+    w, h, stride = img.width(), img.height(), img.bytesPerLine()
+    raw = bytes(img.constBits())
+    # ARGB32 is a little-endian 32-bit int, so its bytes are already BGRA;
+    # only the row order differs from what a DIB wants.
+    xor = b"".join(raw[y * stride:y * stride + w * 4] for y in range(h - 1, -1, -1))
+    # 32-bit icons carry their transparency in the alpha channel, so the
+    # mask is all-zero — present only because the format demands it.
+    mask = bytes(((w + 31) // 32) * 4 * h)
+    header = struct.pack("<IiiHHIIiiII", 40, w, h * 2, 1, 32, 0,
+                         len(xor) + len(mask), 0, 0, 0, 0)
+    return header + xor + mask
+
+
+def _ico_bytes(entries: list[tuple[int, bytes]]) -> bytes:
+    """Pack `(size, image bytes)` pairs into an .ico — a six-byte header, a
+    sixteen-byte directory row each, then the images. A 256px entry records
+    its size as 0, which is how the format spells "256"."""
+    offset = 6 + 16 * len(entries)
+    rows = []
+    for size, payload in entries:
+        dim = 0 if size >= 256 else size
+        rows.append(struct.pack("<BBBBHHII", dim, dim, 0, 0, 1, 32,
+                                len(payload), offset))
+        offset += len(payload)
+    return (struct.pack("<HHH", 0, 1, len(entries)) + b"".join(rows)
+            + b"".join(payload for _, payload in entries))
+
+
+def _icon_bytes() -> bytes:
+    """The icon file for this platform: a multi-size .ico on Windows, a
+    plain 256px PNG everywhere else (both Linux and macOS scale one)."""
+    images = _mark_sizes()
+    if sys.platform != "win32":
+        return _png_bytes(images[-1][1])
+    return _ico_bytes([(size, _png_bytes(image) if size >= 256
+                        else _dib_bytes(image)) for size, image in images])
 
 
 def ensure_icon(directory: Path | None = None) -> Path | None:
     """Write the icon the shortcut points at, returning its path (or None if
-    it can't be painted — a shortcut without an icon still works)."""
+    it can't be painted — a shortcut without an icon still works).
+
+    The name carries a digest of the picture. Windows keys its shell icon
+    cache on the icon's *path*, and re-reads that path grudgingly: an icon
+    rewritten in place leaves every shortcut already on the desktop showing
+    the picture it had the first time. A changed mark lands at a name no
+    cache has an entry for, so it shows up straight away.
+    """
     target_dir = directory or user_data_dir()
     suffix = ".ico" if sys.platform == "win32" else ".png"
-    path = target_dir / f"flograph{suffix}"
     try:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        png = _png_bytes(_paint_mark(256))
-        if not png:
+        blob = _icon_bytes()
+        if not blob:
             return None
-        path.write_bytes(_ico_bytes(png) if suffix == ".ico" else png)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"flograph-{sha1(blob).hexdigest()[:8]}{suffix}"
+        if not path.exists():
+            path.write_bytes(blob)
+        _sweep_old_icons(target_dir, keep=path)
     except (OSError, RuntimeError):
         return None
     return path
+
+
+def _sweep_old_icons(directory: Path, keep: Path) -> None:
+    """Drop the icons earlier versions of the mark left behind. The
+    unversioned `flograph.ico` older releases wrote is left alone: a
+    shortcut made back then still points at it."""
+    for stale in directory.glob("flograph-*"):
+        if stale != keep and stale.suffix in (".ico", ".png"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
 
 
 # ------------------------------------------------------------------- writers
@@ -289,7 +366,9 @@ def _write_windows(path: Path, launch: Launch, icon: Path | None) -> Path:
         "FLOGRAPH_LNK_TARGET": launch.argv[0],
         "FLOGRAPH_LNK_ARGS": subprocess.list2cmdline(launch.argv[1:]),
         "FLOGRAPH_LNK_WORKDIR": launch.workdir or "",
-        "FLOGRAPH_LNK_ICON": str(icon) if icon else "",
+        # WScript.Shell wants "path,index"; a bare path is not the
+        # documented form and the shell can decline to take it.
+        "FLOGRAPH_LNK_ICON": f"{icon},0" if icon else "",
     })
     try:
         proc = subprocess.run(
@@ -331,6 +410,10 @@ def _write_linux(path: Path, launch: Launch, icon: Path | None, name: str) -> Pa
         f"Exec={exec_line}",
         "Terminal=false",
         "Categories=Development;Science;",
+        # matches QApplication.setDesktopFileName, so a dock shows the
+        # running window under this launcher and its icon, not a
+        # generic Python one beside it
+        "StartupWMClass=flograph",
     ]
     if launch.workdir:
         entry.append(f"Path={launch.workdir}")

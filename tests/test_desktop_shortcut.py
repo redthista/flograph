@@ -9,6 +9,7 @@ the dialog that drives both.
 from __future__ import annotations
 
 import shlex
+import struct
 import subprocess
 import sys
 import types
@@ -189,6 +190,16 @@ class TestLinuxEntry:
 
         assert f"Icon={icon}" in text
 
+    def test_it_claims_the_running_window_for_the_launcher(self, desktop):
+        launch = ds.resolve_launch(main_module=types.SimpleNamespace(),
+                                   probe=lambda _: True)
+
+        text = ds.create_shortcut("Docked", launch, icon=None).read_text()
+
+        # has to match QApplication.setDesktopFileName, or a dock shows the
+        # running window as a second, iconless entry
+        assert "StartupWMClass=flograph" in text
+
 
 class TestIcon:
     def test_it_paints_a_real_image_file(self, tmp_path):
@@ -201,13 +212,60 @@ class TestIcon:
         else:
             assert head == b"\x89PNG\r\n\x1a\n"
 
-    def test_the_ico_container_wraps_the_png_at_offset_22(self):
-        png = b"\x89PNG\r\n\x1a\n" + b"payload"
+    def test_the_ico_directory_points_at_every_image_it_holds(self):
+        entries = [(16, b"small"), (256, b"large" * 3)]
 
-        ico = ds._ico_bytes(png)
+        ico = ds._ico_bytes(entries)
 
         assert ico[:4] == b"\x00\x00\x01\x00"
-        assert ico[22:] == png
+        assert struct.unpack("<H", ico[4:6])[0] == 2
+        for index, (size, payload) in enumerate(entries):
+            row = ico[6 + 16 * index:22 + 16 * index]
+            width, height = row[0], row[1]
+            length, offset = struct.unpack("<II", row[8:16])
+            # 256 is spelled 0 in a directory row
+            assert (width, height) == ((0, 0) if size == 256 else (size, size))
+            assert ico[offset:offset + length] == payload
+
+    def test_the_windows_icon_carries_the_small_sizes_as_bitmaps(self, monkeypatch):
+        monkeypatch.setattr(ds.sys, "platform", "win32")
+
+        ico = ds._icon_bytes()
+
+        count = struct.unpack("<H", ico[4:6])[0]
+        assert count == len(ds._ICON_SIZES)
+        payloads = []
+        for index in range(count):
+            row = ico[6 + 16 * index:22 + 16 * index]
+            length, offset = struct.unpack("<II", row[8:16])
+            payloads.append((row[0], ico[offset:offset + length]))
+        # a PNG-only .ico is the form parts of the Windows shell decline to
+        # read, so everything under 256 has to be a BITMAPINFOHEADER
+        for width, payload in payloads:
+            if width == 0:
+                assert payload[:8] == b"\x89PNG\r\n\x1a\n"
+            else:
+                assert struct.unpack("<I", payload[:4])[0] == 40
+
+    def test_the_name_changes_when_the_picture_does(self, tmp_path, monkeypatch):
+        first = ds.ensure_icon(tmp_path)
+
+        monkeypatch.setattr(ds, "_icon_bytes", lambda: b"a different mark")
+        second = ds.ensure_icon(tmp_path)
+
+        # Windows caches shell icons by path, so a redrawn mark has to land
+        # at a new name or existing shortcuts keep the old picture
+        assert first is not None and second is not None
+        assert first.name != second.name
+        assert not first.exists(), "the superseded icon should be swept up"
+
+    def test_it_leaves_the_unversioned_icon_older_releases_wrote(self, tmp_path):
+        legacy = tmp_path / "flograph.ico"
+        legacy.write_bytes(b"an icon a live shortcut still points at")
+
+        ds.ensure_icon(tmp_path)
+
+        assert legacy.exists()
 
     def test_a_read_only_directory_loses_the_icon_not_the_shortcut(self, tmp_path):
         blocked = tmp_path / "nope"
