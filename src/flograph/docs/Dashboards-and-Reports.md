@@ -84,6 +84,9 @@ in, at the size the card is set to. The design comes with it: layout, CSS,
 colours, web fonts. Resize the card to change how the HTML lays out;
 `width=` places the result on the page.
 
+**Open Example ▸ Report Visuals** is a worked flow of both: an HTML
+dashboard and a formatted table, on the canvas and on the page.
+
 The page prints to **PDF** at 300 dpi; the preview and the PDF are literally
 the same document, so they cannot disagree. The report toolbar's **?** button
 opens the full embed-syntax reference.

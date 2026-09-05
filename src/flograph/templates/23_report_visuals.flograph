@@ -4,14 +4,14 @@
   "graph": {
     "nodes": [
       {
-        "id": "f2dc4f0be49e4f6f8e58411831fabe6f",
+        "id": "a80628ad88eb40c19727e112a924e949",
         "type": "flograph.util.note",
         "pos": [
           -620,
           -260
         ],
         "params": {
-          "text": "## Two things to look at\n\n**1. The HTML visual.** *Sales Dashboard* is a Show Web View with its own\nHTML \u2014 CSS grid, gradients, rounded cards. Open the **Report** tab: it used\nto arrive there as a wall of unstyled text, because a report inlined the\nnode's string as markdown. It is now a picture of the card, taken by the\nsame browser the card draws in.\n\nResize the card (drag its edge, or change Width/Height in Properties) and\nre-open the report \u2014 the HTML lays out at the card's size, so the card is\nwhere you control the design.\n\n**2. The table.** *Sales Table* carries conditional formatting: a green\nscale on revenue, data bars on orders, red rows for `fail`, currency and\npercent formats. All of it now reaches the page, re-grounded for white\npaper, and the table takes `width=` and the new `rows=`.\n\nRun the flow (F5), then open the **Report** tab.\n",
+          "text": "## Two visuals, on the canvas and on paper\n\nRun the flow (**F5**), then open the **Report** tab.\n\n**1. An HTML visual.** *Sales Dashboard* is a **Show Web View** with its own\nhand-written HTML \u2014 CSS grid, gradients, rounded cards. A report places it\nas a picture of the card, taken by the same browser the card draws in, so\nthe design survives onto the page and into the PDF.\n\nThe card's **Width / Height** are what the HTML lays out against: drag the\ncard's edge, run again, and the report follows. `width=` on the embed only\ndecides how wide the finished picture sits.\n\n**2. A formatted table.** *Sales Table* carries conditional formatting \u2014 a\ngreen scale on revenue, data bars on orders, red rows where status is\n`fail`, currency and percent formats. All of it reaches the page,\nre-grounded for white paper, and the table stays real text: selectable in\nthe PDF, and free to break across a page.\n\nA table takes `width=` and `rows=` (how many rows before \"showing 3 of 5\").\n`ratio` / `height` / `scale` are for charts.\n",
           "width": 420,
           "height": 420
         },
@@ -37,7 +37,7 @@
         "extra_inputs": []
       },
       {
-        "id": "51641df6587f449094878b99bb731608",
+        "id": "2c9e1f873e1a48668857776554565ac5",
         "type": "flograph.io.table",
         "pos": [
           -120,
@@ -70,7 +70,7 @@
         "extra_inputs": []
       },
       {
-        "id": "bc959b8d1c7b471aa2834506f67daa3b",
+        "id": "0c48d07932da453f8e0c76c581d87e52",
         "type": "flograph.viz.show_table",
         "pos": [
           380,
@@ -105,7 +105,7 @@
         "extra_inputs": []
       },
       {
-        "id": "063fc7ff326542cd82002cd2fd380d6b",
+        "id": "66135e6a4c6343debcfc72e481361256",
         "type": "flograph.viz.show_web",
         "pos": [
           380,
@@ -140,24 +140,24 @@
     ],
     "connections": [
       {
-        "id": "04cc787f423d42d68988d77e91acc814",
+        "id": "ecc9601f16ff4be182089bd86f79d06a",
         "src": [
-          "51641df6587f449094878b99bb731608",
+          "2c9e1f873e1a48668857776554565ac5",
           "table"
         ],
         "dst": [
-          "bc959b8d1c7b471aa2834506f67daa3b",
+          "0c48d07932da453f8e0c76c581d87e52",
           "table"
         ]
       },
       {
-        "id": "db9dbe35f9654250b4df73365e752092",
+        "id": "4e616a31bdd24be0a05a465ea1d19796",
         "src": [
-          "51641df6587f449094878b99bb731608",
+          "2c9e1f873e1a48668857776554565ac5",
           "table"
         ],
         "dst": [
-          "063fc7ff326542cd82002cd2fd380d6b",
+          "66135e6a4c6343debcfc72e481361256",
           "data"
         ]
       }
