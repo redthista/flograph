@@ -13,6 +13,11 @@ The writers are per-platform because the file formats are: a real `.lnk` on
 Windows (built through WScript.Shell, which is the only way to write one
 without a dependency), a `.desktop` entry on Linux, a `.command` script on
 macOS.
+
+On Linux the dialog can also register the app itself — one `flograph.desktop`
+in the applications directory plus the mark in the icon theme — which is a
+different thing from the shortcut: it is what the desktop matches the running
+window against, so the dock shows one flograph wearing its own icon.
 """
 from __future__ import annotations
 
@@ -190,6 +195,25 @@ def _xdg_desktop() -> Path | None:
     return None
 
 
+def applications_dir() -> Path:
+    """Where a Linux desktop looks for the applications it can launch."""
+    base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(base) / "applications"
+
+
+def icon_theme_dir() -> Path:
+    """The user's own slice of the hicolor icon theme."""
+    base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(base) / "icons" / "hicolor"
+
+
+def menu_entry_path() -> Path:
+    """`flograph.desktop`, and it has to be exactly that name: the running
+    window's Wayland app id is `QApplication.setDesktopFileName`'s value, and
+    that is how a desktop matches window to launcher."""
+    return applications_dir() / "flograph.desktop"
+
+
 _BAD_NAME_CHARS = '\\/:*?"<>|\n\r\t'
 
 
@@ -344,6 +368,58 @@ def _sweep_old_icons(directory: Path, keep: Path) -> None:
                 pass
 
 
+def install_theme_icon(root: Path | None = None) -> bool:
+    """Put the mark in the user's icon theme as plain `flograph`, so a
+    launcher, a dock and the task switcher can all resolve it by name.
+
+    A theme icon rather than the digest-named file the shortcut points at:
+    that name changes whenever the mark is redrawn (Windows' icon cache
+    leaves no choice), and a menu entry naming a file that later gets swept
+    would go blank. The theme name never moves.
+    """
+    target = root or icon_theme_dir()
+    try:
+        for size, image in _mark_sizes():
+            folder = target / f"{size}x{size}" / "apps"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "flograph.png").write_bytes(_png_bytes(image))
+    except (OSError, RuntimeError):
+        return False
+    return True
+
+
+# ------------------------------------------------------ applications menu
+
+def install_menu_entry(directory: Path | None = None,
+                       icon_root: Path | None = None) -> Path:
+    """Register flograph with the desktop: write `flograph.desktop` into the
+    applications directory and the mark into the icon theme.
+
+    This is the *application*, not the shortcut being created alongside it —
+    same name and no project, however the shortcut on the desktop is named —
+    because it exists to be matched against the running window. Without it a
+    dock shows flograph as a second, iconless entry beside its own launcher,
+    and the portal logs `App info not found for 'flograph'` at every start.
+    """
+    folder = directory or applications_dir()
+    path = folder / "flograph.desktop"
+    launch = resolve_launch()
+    icon = "flograph" if install_theme_icon(icon_root) else None
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        _write_desktop_entry(path, launch, icon, "flograph")
+    except OSError as exc:
+        raise RuntimeError(f"couldn't write {path}: {exc}") from exc
+    # best-effort: most desktops watch the directory, the rest read a cache
+    try:
+        subprocess.run(["update-desktop-database", str(folder)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return path
+
+
 # ------------------------------------------------------------------- writers
 
 _PS_CREATE = r"""
@@ -399,7 +475,9 @@ def _write_windows_cmd(path: Path, launch: Launch) -> Path:
     return fallback
 
 
-def _write_linux(path: Path, launch: Launch, icon: Path | None, name: str) -> Path:
+def _write_desktop_entry(path: Path, launch: Launch, icon: Path | str | None,
+                         name: str) -> Path:
+    """The one `.desktop` writer, for the desktop and the menu alike."""
     import shlex
     exec_line = shlex.join(launch.argv).replace("%", "%%")
     entry = [
@@ -421,6 +499,11 @@ def _write_linux(path: Path, launch: Launch, icon: Path | None, name: str) -> Pa
         entry.append(f"Icon={icon}")
     path.write_text("\n".join(entry) + "\n", encoding="utf-8")
     path.chmod(0o755)
+    return path
+
+
+def _write_linux(path: Path, launch: Launch, icon: Path | None, name: str) -> Path:
+    _write_desktop_entry(path, launch, icon, name)
     # GNOME won't launch a .desktop it hasn't been told to trust; harmless
     # everywhere else, and a missing gio is not an error worth reporting.
     try:
@@ -471,6 +554,7 @@ class ShortcutDialog(QDialog):
         self.setWindowTitle("Create Desktop Shortcut")
         self._project_path = project_path
         self.created_path: Path | None = None
+        self.menu_entry_path: Path | None = None
 
         default = Path(project_path).stem if project_path else "flograph"
         self.name_edit = QLineEdit(default, self)
@@ -483,6 +567,20 @@ class ShortcutDialog(QDialog):
             self.open_project.setToolTip(
                 "Save the project first and the shortcut can open it.")
 
+        # Linux only: there is no applications directory to register with on
+        # Windows or macOS, and the shortcut needs no help there. A plain flag
+        # rather than the widget's own visibility, which is False until the
+        # dialog is shown and so cannot answer "does this platform have one".
+        self._offers_menu = sys.platform.startswith("linux")
+        self.add_to_menu = QCheckBox("Add flograph to the applications menu", self)
+        self.add_to_menu.setChecked(True)
+        self.add_to_menu.setVisible(self._offers_menu)
+        self.add_to_menu.setToolTip(
+            "Registers flograph with the desktop, so it turns up in the "
+            "launcher and the running window carries its own icon in the "
+            "dock and the task switcher. Writes one file to "
+            f"{applications_dir()}.")
+
         self.summary = QLabel(self)
         self.summary.setWordWrap(True)
         # selectable: the resolved command is worth copying out when a
@@ -493,6 +591,8 @@ class ShortcutDialog(QDialog):
         form = QFormLayout()
         form.addRow("Name", self.name_edit)
         form.addRow("", self.open_project)
+        if self._offers_menu:
+            form.addRow("", self.add_to_menu)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel, self)
         self.create_button = buttons.addButton("Create", QDialogButtonBox.AcceptRole)
@@ -506,9 +606,13 @@ class ShortcutDialog(QDialog):
 
         self.name_edit.textChanged.connect(self._refresh)
         self.open_project.toggled.connect(self._refresh)
+        self.add_to_menu.toggled.connect(self._refresh)
         self._refresh()
 
     # -- state
+
+    def _wants_menu_entry(self) -> bool:
+        return self._offers_menu and self.add_to_menu.isChecked()
 
     def launch(self) -> Launch:
         project = (self._project_path
@@ -524,6 +628,8 @@ class ShortcutDialog(QDialog):
                  f"Runs:  {display_command(launch)}"]
         if target:
             lines.append(f"Creates:  {target}")
+        if self._wants_menu_entry():
+            lines.append(f"Also:  {menu_entry_path()}")
         self.summary.setText("\n".join(lines))
 
     # -- action
@@ -550,6 +656,14 @@ class ShortcutDialog(QDialog):
                 if path.suffix == shortcut_suffix()
                 else "\n\nWindows wouldn't let PowerShell write a .lnk, so this "
                      "is a .cmd launcher instead — it double-clicks the same.")
+        if self._wants_menu_entry():
+            # the shortcut is already written; a menu entry that fails is
+            # worth saying so about, not worth losing the shortcut over
+            try:
+                self.menu_entry_path = install_menu_entry()
+                note += f"\n\nAdded to the applications menu: {self.menu_entry_path}"
+            except (RuntimeError, OSError) as exc:
+                note += f"\n\nThe applications menu entry couldn't be written: {exc}"
         QMessageBox.information(
             self, "Shortcut created", f"Created {path}{note}")
         self.accept()

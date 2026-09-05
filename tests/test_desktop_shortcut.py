@@ -35,6 +35,17 @@ def desktop(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fake_xdg_dirs(tmp_path, monkeypatch):
+    """Never write to the real ~/.local/share — these are the user's own
+    applications menu and icon theme."""
+    apps = tmp_path / "xdg" / "applications"
+    icons = tmp_path / "xdg" / "icons" / "hicolor"
+    monkeypatch.setattr(ds, "applications_dir", lambda: apps)
+    monkeypatch.setattr(ds, "icon_theme_dir", lambda: icons)
+    return apps, icons
+
+
+@pytest.fixture(autouse=True)
 def _no_gio(monkeypatch):
     """The .desktop trust call is best-effort; don't touch the real session."""
     monkeypatch.setattr(ds.subprocess, "run",
@@ -267,6 +278,68 @@ class TestIcon:
 
         assert legacy.exists()
 
+
+@pytest.mark.skipif(sys.platform == "win32" or sys.platform == "darwin",
+                    reason="there is no applications directory to register with")
+class TestApplicationsMenu:
+    def test_the_entry_is_named_for_the_app_id_not_the_shortcut(self, _fake_xdg_dirs):
+        apps, _ = _fake_xdg_dirs
+
+        path = ds.install_menu_entry()
+
+        # the running window's app id is setDesktopFileName's value, and the
+        # file name is how a desktop matches window to launcher
+        assert path == apps / "flograph.desktop"
+        assert "Name=flograph" in path.read_text()
+
+    def test_it_registers_the_app_not_the_project_being_shortcutted(
+            self, _fake_xdg_dirs, tmp_path):
+        project = tmp_path / "sales.flograph"
+        project.write_text("{}")
+
+        text = ds.install_menu_entry().read_text()
+
+        exec_line = next(l for l in text.splitlines() if l.startswith("Exec="))
+        assert "sales.flograph" not in exec_line
+        assert "StartupWMClass=flograph" in text
+
+    def test_the_icon_is_a_theme_name_not_the_shortcut_s_file(self, _fake_xdg_dirs):
+        apps, icons = _fake_xdg_dirs
+
+        text = ds.install_menu_entry().read_text()
+
+        # a digest-named file gets swept when the mark is redrawn; the theme
+        # name never moves, so the menu entry cannot go blank
+        assert "Icon=flograph\n" in text
+        assert (icons / "256x256" / "apps" / "flograph.png").exists()
+        assert (icons / "48x48" / "apps" / "flograph.png").exists()
+
+    def test_every_painted_size_reaches_the_theme(self, _fake_xdg_dirs):
+        _, icons = _fake_xdg_dirs
+
+        ds.install_theme_icon()
+
+        for size in ds._ICON_SIZES:
+            written = icons / f"{size}x{size}" / "apps" / "flograph.png"
+            assert written.exists(), f"{size}px missing from the icon theme"
+            assert written.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_applications_dir_follows_xdg_data_home(self, tmp_path, monkeypatch):
+        monkeypatch.undo()  # the autouse fixture stubs the function itself
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+
+        assert ds.applications_dir() == tmp_path / "share" / "applications"
+        assert ds.icon_theme_dir() == tmp_path / "share" / "icons" / "hicolor"
+
+    def test_a_read_only_theme_loses_the_icon_not_the_entry(
+            self, _fake_xdg_dirs, monkeypatch):
+        monkeypatch.setattr(ds, "install_theme_icon", lambda root=None: False)
+
+        text = ds.install_menu_entry().read_text()
+
+        assert "Icon=" not in text
+        assert "Exec=" in text
+
     def test_a_read_only_directory_loses_the_icon_not_the_shortcut(self, tmp_path):
         blocked = tmp_path / "nope"
         blocked.write_text("I am a file, not a directory")
@@ -374,6 +447,55 @@ class TestDialog:
 
         assert existing.read_text() == "original"
         assert dialog.created_path is None
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"),
+                        reason="the applications menu is a Linux thing")
+    def test_ticking_the_menu_box_registers_the_app(
+            self, qtbot, window, desktop, monkeypatch, _fake_xdg_dirs):
+        apps, _ = _fake_xdg_dirs
+        monkeypatch.setattr(QMessageBox, "information",
+                            lambda *a, **k: QMessageBox.Ok)
+        dialog = ds.ShortcutDialog(window, None)
+        qtbot.addWidget(dialog)
+
+        assert dialog.add_to_menu.isChecked()
+        dialog._create()
+
+        assert dialog.menu_entry_path == apps / "flograph.desktop"
+        assert (apps / "flograph.desktop").exists()
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"),
+                        reason="the applications menu is a Linux thing")
+    def test_unticking_it_writes_only_the_desktop_shortcut(
+            self, qtbot, window, desktop, monkeypatch, _fake_xdg_dirs):
+        apps, _ = _fake_xdg_dirs
+        monkeypatch.setattr(QMessageBox, "information",
+                            lambda *a, **k: QMessageBox.Ok)
+        dialog = ds.ShortcutDialog(window, None)
+        qtbot.addWidget(dialog)
+
+        dialog.add_to_menu.setChecked(False)
+        dialog._create()
+
+        assert dialog.created_path.exists()
+        assert dialog.menu_entry_path is None
+        assert not (apps / "flograph.desktop").exists()
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"),
+                        reason="the applications menu is a Linux thing")
+    def test_a_failed_menu_entry_still_leaves_the_shortcut(
+            self, qtbot, window, desktop, monkeypatch):
+        said = []
+        monkeypatch.setattr(QMessageBox, "information",
+                            lambda *a, **k: said.append(a[2]))
+        monkeypatch.setattr(ds, "install_menu_entry", _explode)
+        dialog = ds.ShortcutDialog(window, None)
+        qtbot.addWidget(dialog)
+
+        dialog._create()
+
+        assert dialog.created_path is not None and dialog.created_path.exists()
+        assert said and "couldn't be written" in said[0]
 
     def test_a_failed_write_is_reported_not_raised(
             self, qtbot, window, desktop, monkeypatch):
