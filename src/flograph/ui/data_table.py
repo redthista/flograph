@@ -24,7 +24,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics, QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QMenu, QMessageBox, QTableView
+from PySide6.QtWidgets import QHeaderView, QMenu, QMessageBox, QTableView
 
 from .spreadsheet.clipboard import block_to_html, block_to_tsv
 
@@ -61,6 +61,15 @@ def cell_text(index) -> str:
 
 
 def headers_for(model, columns: list[int]) -> list[str]:
+    """The header row a copy carries: the columns' real names.
+
+    A `label` rule renames a header on screen, and the values below it are
+    copied raw — so pairing the presentation header with the real values
+    would produce a block that says one thing and means another.
+    """
+    real = getattr(model, "column_name", None)
+    if real is not None:
+        return [str(real(col)) for col in columns]
     return [str(model.headerData(col, Qt.Horizontal, Qt.DisplayRole) or "")
             for col in columns]
 
@@ -189,12 +198,28 @@ class DataTableView(QTableView):
         """
         super().setModel(model)
         self._sort_cycler.reset()
+        self._apply_wrapping(model)
         if model is not None and model.columnCount() > 0:
             self.fit_columns_to_data()
 
+    def _apply_wrapping(self, model) -> None:
+        """A `wrap` rule lets a row grow to fit its text.
+
+        Left to Qt rather than measured here: `ResizeToContents` on the
+        vertical header sizes each row as it is needed, so the rows a
+        paged model fetches later come out right too, without this view
+        tracking insertions. It costs nothing until a rule asks for it.
+        """
+        wraps = bool(model is not None
+                     and getattr(model, "wraps_text", lambda: False)())
+        self.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents if wraps
+            else QHeaderView.Interactive)      # Qt's own default otherwise
+
     def fit_columns_to_data(self) -> None:
         """Size each column to the wider of its header and its sampled
-        content, clamped to [MIN_COL_WIDTH, MAX_COL_WIDTH]."""
+        content, clamped to [MIN_COL_WIDTH, MAX_COL_WIDTH] — unless a
+        `width` rule named it, which wins outright."""
         model = self.model()
         if model is None:
             return
@@ -202,7 +227,15 @@ class DataTableView(QTableView):
         header = self.horizontalHeader()
         metrics = QFontMetrics(self.font())
         rows = min(model.rowCount(), FIT_SAMPLE_ROWS)
+        # a `width` rule is an instruction, not a hint: it is set as asked
+        # and the content is not consulted, which is the whole point of
+        # asking for a fixed column
+        layout = getattr(model, "column_layout", None)
         for col in range(model.columnCount()):
+            fixed = layout(col) if layout is not None else None
+            if fixed is not None and fixed.width:
+                self.setColumnWidth(col, fixed.width)
+                continue
             width = header.sectionSizeHint(col)
             icon_pad = 0
             bar_only = False

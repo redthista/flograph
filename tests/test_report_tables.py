@@ -214,3 +214,36 @@ class TestFormatOnlyOnPaper:
     def test_without_only_the_value_still_prints(self):
         frame = pd.DataFrame({"units": [412]})
         assert "412" in frame_to_html(frame, parse_rules("units bar blue"))
+
+
+class TestLayoutOnPaper:
+    """Width, alignment and header labels have to reach the page, or the
+    report stops looking like the card it was taken from."""
+
+    FRAME = pd.DataFrame({"region": ["North"], "revenue": [482000]})
+
+    def test_a_width_rule_sizes_the_printed_column(self):
+        html = frame_to_html(self.FRAME, parse_rules("revenue width 160"))
+        # on the header, which is the row Qt takes a column's width from
+        assert '<th align="right" width="160">' in html
+
+    def test_an_align_rule_beats_the_dtype(self):
+        html = frame_to_html(self.FRAME, parse_rules("revenue align left"))
+        assert '<td align="left"' in html and '<td align="right"' not in html
+
+    def test_text_can_be_pushed_right(self):
+        html = frame_to_html(self.FRAME, parse_rules("region align right"))
+        assert html.count('align="right"') == 4      # both cells, both headers
+
+    def test_a_label_renames_the_printed_header(self):
+        html = frame_to_html(self.FRAME,
+                             parse_rules('revenue label "Revenue (£)"'))
+        assert "Revenue (£)" in html and ">revenue<" not in html
+
+    def test_a_label_cannot_smuggle_markup_in(self):
+        html = frame_to_html(self.FRAME,
+                             parse_rules('revenue label "<b>bold</b>"'))
+        assert "&lt;b&gt;" in html and "<b>bold" not in html
+
+    def test_an_unstyled_table_is_unchanged(self):
+        assert frame_to_html(self.FRAME) == frame_to_html(self.FRAME, [])

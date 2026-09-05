@@ -5,10 +5,11 @@ import pandas as pd
 import pytest
 
 from flograph.core.table_format import (
-    CellStyle, Rule, _column_list, column_matches, column_stats, evaluate_column,
-    evaluate_rows, expand_columns, merge_styles, parse_op_value, parse_rules,
-    parse_rules_lenient, quote_column, readable_fg, rule_summary,
-    rules_from_style, style_payload, style_report, split_rules,
+    CellStyle, ColumnLayout, Rule, _column_list, column_layout, column_matches,
+    column_stats, evaluate_column, evaluate_rows, expand_columns, merge_styles,
+    parse_op_value, parse_rules, parse_rules_lenient, quote_column, readable_fg,
+    rule_summary, rules_from_style, style_payload, style_report, split_rules,
+    wraps_text,
 )
 
 
@@ -527,3 +528,84 @@ class TestFormatOnly:
         work on the card that owns the rule and nowhere else."""
         payload = style_payload({"format_rules": "units bar blue only"})
         assert [r.hide_value for r in rules_from_style(payload)] == [True]
+
+
+class TestLayoutRules:
+    """`width` / `align` / `label` / `wrap` — shaping the table through the
+    same rule list that paints it."""
+
+    def test_a_width_is_read_in_pixels(self):
+        (rule,) = parse_rules("revenue width 160")
+        assert rule.mode == "column_width" and rule.width == 160
+
+    def test_width_auto_undoes_an_earlier_one(self):
+        """A pattern rule can widen every year column; `auto` is how one of
+        them says "not me"."""
+        rules = parse_rules("FY* width 200\nFY2024 width auto")
+        layout = column_layout(rules, ["FY2023", "FY2024"])
+        assert layout["FY2023"].width == 200
+        assert "FY2024" not in layout          # nothing left to say about it
+
+    def test_an_absurd_width_is_refused_with_the_bounds(self):
+        _, errors = parse_rules_lenient("revenue width 9000")
+        assert errors and "1200" in errors[0]
+
+    def test_a_width_that_is_not_a_number_says_so(self):
+        _, errors = parse_rules_lenient("revenue width wide")
+        assert errors and "pixels" in errors[0]
+
+    def test_alignment_takes_either_spelling_of_centre(self):
+        centre, center = parse_rules("a align centre\nb align center")
+        assert centre.align == center.align == "center"
+
+    def test_an_unknown_alignment_lists_the_real_ones(self):
+        _, errors = parse_rules_lenient("a align sideways")
+        assert errors and "left, right, centre" in errors[0]
+
+    def test_a_label_can_carry_punctuation_when_quoted(self):
+        (rule,) = parse_rules('revenue label "Revenue (£m), net"')
+        assert rule.label == "Revenue (£m), net"
+
+    def test_layout_rules_are_not_cell_rules(self):
+        """They must never reach `evaluate_column` — they say nothing about
+        any particular cell, and walking rows for them is pure waste."""
+        rules = parse_rules("a width 100\na align right\na label X\nwrap")
+        assert split_rules(rules) == ([], [])
+
+    def test_later_layout_lines_win_per_property(self):
+        rules = parse_rules("a width 100\na width 200\na align right")
+        assert column_layout(rules, ["a"])["a"] == ColumnLayout(width=200,
+                                                                align="right")
+
+    def test_a_column_nobody_mentioned_gets_no_entry(self):
+        assert column_layout(parse_rules("a width 100"), ["a", "b"]) == {
+            "a": ColumnLayout(width=100)}
+
+    def test_wrap_is_table_wide(self):
+        assert wraps_text(parse_rules("wrap"))
+        assert not wraps_text(parse_rules("a width 100"))
+
+    def test_wrap_with_a_column_is_refused_and_explains_why(self):
+        """Silently applying it to the whole table would be worse: the rule
+        would read as one column's and act on all of them."""
+        _, errors = parse_rules_lenient("note wrap")
+        assert errors and "whole table" in errors[0]
+
+    def test_a_column_actually_called_wrap_is_quoted_out_of_trouble(self):
+        """The same escape hatch every other keyword-named column uses."""
+        (rule,) = parse_rules('"wrap" scale green')
+        assert rule.mode == "color_scale" and rule.columns == ["wrap"]
+
+    def test_the_summaries_read_as_english(self):
+        width, align, label, wrap = parse_rules(
+            'a width 120\na align right\na label "Money"\nwrap')
+        assert "width 120px" in rule_summary(width)
+        assert "aligned right" in rule_summary(align)
+        assert "Money" in rule_summary(label)
+        assert "rows grow" in rule_summary(wrap)
+
+    def test_they_survive_the_style_port(self):
+        payload = style_payload(
+            {"format_rules": 'revenue width 160\nrevenue label "Money"'})
+        layout = column_layout(rules_from_style(payload), ["revenue"])
+        assert layout["revenue"] == ColumnLayout(width=160, label="Money")

@@ -14,13 +14,13 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog,
     QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QListWidgetItem, QPushButton, QSpinBox, QStackedWidget, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from flograph.core.table_format import (
-    bar_token, fill_token, parse_rule_lines, quote_column, rule_summary,
-    scale_token,
+    MAX_RULE_WIDTH, MIN_RULE_WIDTH, bar_token, fill_token, parse_rule_lines,
+    quote_column, rule_summary, scale_token,
 )
 from flograph.ui.emoji_font import apply_emoji_font, with_emoji
 
@@ -56,11 +56,13 @@ _MAP_COLOURS = ["green", "amber", "red", "blue", "grey", "(none)"]
 _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 
 _KINDS = ["Colour scale", "Data bars", "Highlight cells / rows",
-          "Icons", "Number format", "Hide columns"]
+          "Icons", "Number format", "Hide columns", "Column layout",
+          "Wrap text"]
 # both icon modes share the one "Icons" page (index 3); the page's own
 # Style toggle picks between the graduated set and a value→icon map.
 _MODE_KIND = {"color_scale": 0, "data_bar": 1, "highlight": 2, "icons": 3,
-              "icon_map": 3, "number_format": 4, "hide": 5}
+              "icon_map": 3, "number_format": 4, "hide": 5,
+              "column_width": 6, "align": 6, "header_label": 6, "wrap": 7}
 
 
 def _combo(pairs) -> QComboBox:
@@ -225,6 +227,8 @@ class RuleBuilder(QDialog):
         self._build_icons_page()
         self._build_number_page()
         self._build_hide_page()
+        self._build_layout_page()
+        self._build_wrap_page()
         outer.addWidget(self._stack)
 
         outer.addWidget(QLabel("Rule text:"))
@@ -486,15 +490,95 @@ class RuleBuilder(QDialog):
             "but are not shown in this table."))
         self._stack.addWidget(page)
 
+    def _build_wrap_page(self) -> None:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.addWidget(QLabel(
+            "Long text runs onto more lines instead of being cut off, and "
+            "each row grows to fit it.\n\nThis one is not per column: a row "
+            "is as tall as its tallest cell, so it applies to the whole "
+            "table. Pair it with a fixed width on the column you want "
+            "narrow."))
+        page.findChild(QLabel).setWordWrap(True)
+        self._stack.addWidget(page)
+
+    def _build_layout_page(self) -> None:
+        """Width, alignment and header label.
+
+        One property per rule, chosen here rather than set all at once: a
+        rule is one line, and a page that wrote three of them from one
+        press would have nothing sensible to show when you came back to
+        edit any one of them.
+        """
+        page = QWidget()
+        f = QFormLayout(page)
+        self._layout_prop = QComboBox()
+        self._layout_prop.addItem("Fixed width", "width")
+        self._layout_prop.addItem("Alignment", "align")
+        self._layout_prop.addItem("Header label", "label")
+        f.addRow("Set", self._layout_prop)
+
+        self._layout_width = QSpinBox()
+        # one step below the legal minimum is the "auto" position — how a
+        # spin box says "unset", and here how a rule says "back to fitting
+        # the content" over an earlier pattern rule
+        self._layout_width.setRange(MIN_RULE_WIDTH - 1, MAX_RULE_WIDTH)
+        self._layout_width.setSpecialValueText("auto — fit the content")
+        self._layout_width.setSuffix(" px")
+        self._layout_width.setValue(120)
+        f.addRow("Width", self._layout_width)
+
+        self._layout_align = _combo([("Left", "left"), ("Right", "right"),
+                                     ("Centre", "center")])
+        f.addRow("Align", self._layout_align)
+
+        self._layout_label = QLineEdit()
+        self._layout_label.setPlaceholderText(
+            "shown instead of the column's own name")
+        apply_emoji_font(self._layout_label)
+        f.addRow("Header label", self._layout_label)
+
+        self._layout_note = QLabel(
+            "Layout rules shape the column, not the values: sorting, "
+            "Ctrl+C and exports all still use the real name and the real "
+            "numbers.")
+        self._layout_note.setWordWrap(True)
+        f.addRow("", self._layout_note)
+
+        self._layout_prop.currentIndexChanged.connect(self._sync_layout_prop)
+        self._layout_prop.currentIndexChanged.connect(self._refresh)
+        self._layout_width.valueChanged.connect(self._refresh)
+        self._layout_align.currentIndexChanged.connect(self._refresh)
+        self._layout_label.textChanged.connect(self._refresh)
+        self._layout_form = f
+        self._stack.addWidget(page)
+        self._sync_layout_prop()
+
+    def _sync_layout_prop(self) -> None:
+        """Show only the input the chosen property uses."""
+        prop = self._layout_prop.currentData()
+        for widget, wanted in ((self._layout_width, "width"),
+                               (self._layout_align, "align"),
+                               (self._layout_label, "label")):
+            widget.setVisible(prop == wanted)
+            label = self._layout_form.labelForField(widget)
+            if label is not None:
+                label.setVisible(prop == wanted)
+
     # ------------------------------------------------------------- reactive
 
     def _on_kind(self) -> None:
         idx = self._kind.currentIndex()
         self._stack.setCurrentIndex(idx)
+        # `wrap` is the one rule that takes no columns — offering the picker
+        # anyway would promise something the rule cannot keep
+        table_wide = idx == 7
+        self._col_list.setEnabled(not table_wide)
+        self._col_edit.setEnabled(not table_wide)
         if idx == 3:
             self._sync_icon_style()
             return
-        self._col_label.setText("Columns")
+        self._col_label.setText("Whole table" if table_wide else "Columns")
         if self._columns:
             self._col_list.setSelectionMode(_MULTI)
 
@@ -587,6 +671,18 @@ class RuleBuilder(QDialog):
             self._sync_icon_style()
         elif rule.mode == "number_format":
             self._numfmt.setCurrentText(rule.number_spec or "")
+        elif rule.mode == "column_width":
+            _pick_data(self._layout_prop, "width")
+            self._layout_width.setValue(rule.width or MIN_RULE_WIDTH - 1)
+            self._sync_layout_prop()
+        elif rule.mode == "align":
+            _pick_data(self._layout_prop, "align")
+            _pick_data(self._layout_align, rule.align or "left")
+            self._sync_layout_prop()
+        elif rule.mode == "header_label":
+            _pick_data(self._layout_prop, "label")
+            self._layout_label.setText(rule.label or "")
+            self._sync_layout_prop()
 
     # -------------------------------------------------------- line builder
 
@@ -602,6 +698,8 @@ class RuleBuilder(QDialog):
         cols = self._columns_text()
         if kind == 5:
             return f"hide {cols}" if cols else ""
+        if kind == 7:
+            return "wrap"          # table-wide: it names no columns
         if not cols:
             return ""
         if kind == 0:
@@ -664,6 +762,18 @@ class RuleBuilder(QDialog):
         if kind == 4:
             spec = self._numfmt.currentText().strip()
             return f"{cols} format {spec}" if spec else ""
+        if kind == 6:
+            prop = self._layout_prop.currentData()
+            if prop == "width":
+                value = self._layout_width.value()
+                asked = ("auto" if value < MIN_RULE_WIDTH else str(value))
+                return f"{cols} width {asked}"
+            if prop == "align":
+                return f"{cols} align {self._layout_align.currentData()}"
+            text = self._layout_label.text().strip()
+            # quoted, because a header is prose: "Revenue (£m), net" would
+            # otherwise read as a second column name after the comma
+            return f'{cols} label "{text}"' if text else ""
         return ""
 
 

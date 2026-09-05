@@ -297,6 +297,56 @@ def test_free_text_columns_when_none_known(qtbot):
     assert b.line() == "a, b scale green"
 
 
+class TestColumnLayoutPage:
+    """One property per rule — the page's *Set* dropdown picks which."""
+
+    def _page(self, build, prop):
+        b = build()
+        b._kind.setCurrentIndex(6)
+        _select(b, "revenue")
+        _pick_other(b._layout_prop, prop)
+        return b
+
+    def test_a_fixed_width(self, build):
+        b = self._page(build, "width")
+        b._layout_width.setValue(160)
+        assert b.line() == "revenue width 160"
+        assert _valid(b.line()).width == 160
+
+    def test_the_bottom_of_the_spin_box_means_auto(self, build):
+        b = self._page(build, "width")
+        b._layout_width.setValue(b._layout_width.minimum())
+        assert b.line() == "revenue width auto"
+        assert _valid(b.line()).width is None
+
+    def test_an_alignment(self, build):
+        b = self._page(build, "align")
+        _pick_other(b._layout_align, "center")
+        assert b.line() == "revenue align center"
+
+    def test_a_header_label_is_quoted(self, build):
+        """Unquoted, "Revenue (£m), net" would read as two column names."""
+        b = self._page(build, "label")
+        b._layout_label.setText("Revenue (£m), net")
+        assert b.line() == 'revenue label "Revenue (£m), net"'
+        assert _valid(b.line()).label == "Revenue (£m), net"
+
+    def test_an_empty_label_produces_no_rule(self, build):
+        assert self._page(build, "label").line() == ""
+
+    def test_each_property_round_trips_through_the_builder(self, build):
+        for line in ('revenue width 160', 'revenue align right',
+                     'revenue label "Money"'):
+            b = build(parse_rules(line)[0])
+            assert b.line() == line
+
+    def test_wrap_is_its_own_kind_and_names_no_columns(self, build):
+        b = build()
+        b._kind.setCurrentIndex(7)
+        assert b.line() == "wrap"
+        assert _valid(b.line()).mode == "wrap"
+
+
 class TestValueHidden:
     """The `only` tickbox on the scale, bar and icon pages."""
 

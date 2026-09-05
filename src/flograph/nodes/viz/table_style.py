@@ -20,6 +20,10 @@ health               icons traffic              # 3-tier icon set
 amount               format $,.0f               # per-column number format
 growth iconmap sla: breach=✗ red, ok=✓ green    # icon decided by another column
 rating               icons traffic only         # the icon replaces the value
+revenue              width 160                  # a fixed column width
+region               align centre               # left / right / centre
+revenue              label "Revenue (£)"        # header text, data untouched
+wrap                                            # long text runs to more lines
 hide sla                                        # keep a helper column out of view
 ```
 
@@ -39,6 +43,12 @@ product   if status = closed => row grey         # whole row, tested on status
 Any format rule can be drawn **instead of** the value by adding `only`
 (`units bar blue only`) — Power BI's "bar only" / "icon only". The value is
 hidden, not lost: the column still sorts, copies and exports on it.
+
+`width` / `align` / `label` shape the table rather than paint it: a width is
+obeyed rather than fitted, alignment beats the dtype's own habit and takes
+the header with it, and a label changes the printed header only — rules,
+sorting and exports still use the real column name. `wrap` names no columns
+(a row is as tall as its tallest cell) and lets long text run on.
 
 Colours are a preset name (`green`, `red`, `amber`, `blue`, `grey`) or a
 `#hex`. Scales: `green`, `blue`, `red`, `red-green`, `red-yellow-green`,

@@ -28,10 +28,10 @@ core.
 from __future__ import annotations
 
 from flograph.core.report import format_scalar
-from flograph.core.table_format import (CellStyle, column_matches,
-                                        column_stats, evaluate_column,
-                                        evaluate_rows, for_paper,
-                                        split_rules)
+from flograph.core.table_format import (CellStyle, column_layout,
+                                        column_matches, column_stats,
+                                        evaluate_column, evaluate_rows,
+                                        for_paper, split_rules)
 
 #: Rows shown before a table is cut with a note. The same default
 #: frame_to_markdown uses — a report that quietly showed the first 30 of
@@ -86,23 +86,43 @@ def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
     track = _track_width(width)
     stacked = bool(width) and int(width) < STACK_BELOW
 
+    # `width` / `align` / `label` rules shape the printed table the same
+    # way they shape the card — a report that reads differently from the
+    # dashboard it came off is what this whole path exists to avoid
+    layout = column_layout(rules, columns)
+
     size = f' width="{int(width)}"' if width else ""
     out = [f'<table{size} class="flograph-table"><thead><tr>']
     for column in columns:
-        align = ' align="right"' if numeric[column] else ""
-        out.append(f"<th{align}>{_escape(str(column))}</th>")
+        entry = layout.get(str(column))
+        align = _align_attr(entry, numeric[column])
+        # Qt's rich text takes a column's width off the first row that
+        # states one, and the header is that row
+        fixed = f' width="{entry.width}"' if entry and entry.width else ""
+        label = entry.label if entry and entry.label else str(column)
+        out.append(f"<th{align}{fixed}>{_escape(label)}</th>")
     out.append("</tr></thead><tbody>")
     for row in range(len(shown)):
         out.append("<tr>")
         for column in columns:
+            entry = layout.get(str(column))
             out.append(_cell(shown[column].iloc[row],
                              styles.get((row, column)),
-                             numeric[column], track, stacked))
+                             numeric[column], track, stacked,
+                             align=entry.align if entry else None))
         out.append("</tr>")
     out.append("</tbody></table>")
     if total > max_rows:
         out.append(f"<p><i>Showing {max_rows:,} of {total:,} rows.</i></p>")
     return "".join(out)
+
+
+def _align_attr(entry, numeric: bool) -> str:
+    """The `align=` for a header: what a rule asked for, else the dtype's
+    own habit (numbers right, everything else left)."""
+    if entry is not None and entry.align:
+        return f' align="{entry.align}"'
+    return ' align="right"' if numeric else ""
 
 
 def _track_width(width: "int | None") -> int:
@@ -184,7 +204,8 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
 
 
 def _cell(value, style: "CellStyle | None", numeric: bool,
-          track: int = BAR_TRACK, stacked: bool = False) -> str:
+          track: int = BAR_TRACK, stacked: bool = False,
+          align: "str | None" = None) -> str:
     """One `<td>`: the value, plus whatever the rules said about it."""
     text = _escape(_text(value, style))
     if style is not None and style.icon:
@@ -204,11 +225,14 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
         if style.bold:
             css.append("font-weight:bold")
     attrs = f' style="{";".join(css)}"' if css else ""
-    # an icon standing in for the value centres, the way the grid centres it
-    icon_only = style is not None and style.hide_value and style.icon
-    align = ' align="center"' if icon_only else (
-        ' align="right"' if numeric else "")
-    return f"<td{align}{attrs}>{text}</td>"
+    if align:
+        placement = f' align="{align}"'          # an `align` rule was explicit
+    elif style is not None and style.hide_value and style.icon:
+        # an icon standing in for the value centres, as the grid centres it
+        placement = ' align="center"'
+    else:
+        placement = ' align="right"' if numeric else ""
+    return f"<td{placement}{attrs}>{text}</td>"
 
 
 def _bar(text: str, style: CellStyle, numeric: bool,

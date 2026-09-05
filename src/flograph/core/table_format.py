@@ -43,6 +43,16 @@ displayed::
     units     bar blue only                          # a bar chart in a column
     revenue   scale green only by margin             # a plain heatmap block
 
+The same list shapes the table as well as painting it. ``width`` / ``align``
+/ ``label`` are properties of a *column*, read once rather than per cell,
+and ``wrap`` is the one rule that names no columns — a row is as tall as
+its tallest cell, so wrapping is a fact about the table::
+
+    region    width 90
+    region    align centre
+    revenue   label "Revenue (£)"                 # the header only
+    wrap                                          # rows grow to fit
+
 A column name is matched exactly, unless it contains a glob metacharacter
 (``*``, ``?``, ``[``) — then it selects every matching column, so
 ``20* scale green`` heatmaps every year column and ``*_qty bar blue`` every
@@ -103,7 +113,20 @@ _ICON_LABELS = {
 }
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
-          "number_format"}
+          "number_format", "column_width", "align", "header_label", "wrap"}
+
+#: The rules that shape the *table* rather than paint a cell. They are read
+#: once into a `ColumnLayout` and never evaluated per row, so they cost
+#: nothing on a big frame and are not what makes a style "active".
+LAYOUT_MODES = {"column_width", "align", "header_label", "wrap"}
+
+_ALIGNMENTS = {"left": "left", "right": "right", "center": "center",
+               "centre": "center", "middle": "center"}
+
+#: Sanity bounds on a typed width, in pixels. Wide enough for a paragraph
+#: of prose, narrow enough that a fat-fingered `width 5000` cannot push
+#: every other column off the card.
+MIN_RULE_WIDTH, MAX_RULE_WIDTH = 16, 1200
 
 
 def scale_token(low, mid, high) -> str:
@@ -170,6 +193,10 @@ class Rule:
     #: "bar only". The cell keeps its value for copy, export and sort; only
     #: the display of it goes.
     hide_value: bool = False
+    # layout (column_width / align / header_label)
+    width: Optional[int] = None               # pixels; None = fit to content
+    align: Optional[str] = None               # left | right | center
+    label: Optional[str] = None               # header text shown instead
 
     def to_dict(self) -> dict:
         out = {}
@@ -222,6 +249,22 @@ class CellStyle:
         return (self.bg is None and self.fg is None and not self.bold
                 and self.bar is None and self.icon is None
                 and self.text is None and not self.hide_value)
+
+
+@dataclass
+class ColumnLayout:
+    """How one column is *shaped*, as opposed to painted.
+
+    Every field is None for "leave it alone", which is what an untouched
+    column gets — so a table with no layout rules behaves exactly as it did
+    before there were any.
+    """
+    width: Optional[int] = None       # pixels; None = fit to the content
+    align: Optional[str] = None       # left | right | center
+    label: Optional[str] = None       # header text shown instead of the name
+
+    def is_empty(self) -> bool:
+        return self.width is None and self.align is None and self.label is None
 
 
 @dataclass
@@ -471,7 +514,8 @@ def parse_op_value(text: str) -> tuple:
     return ("=", _coerce(raw))
 
 
-_KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "format")
+_KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "format",
+             "width", "align", "label")
 
 
 def _split_by_clause(arg: str) -> tuple:
@@ -572,6 +616,18 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
             raise ValueError(f"line {lineno}: 'hide' needs a column name")
         return Rule("hide", cols)
 
+    if any(t.lower() == "wrap" for t in tokens):
+        # Deliberately not a per-column rule. A row is as tall as its
+        # tallest cell, so "let this text wrap" is a fact about the table
+        # however it is spelled — and a rule that reads as one column's
+        # while acting on all of them is worse than no rule at all.
+        if len(tokens) > 1:
+            raise ValueError(
+                f"line {lineno}: 'wrap' takes no columns — a row grows to "
+                f"fit its tallest cell, so it applies to the whole table. "
+                f"Put it on a line of its own.")
+        return Rule("wrap")
+
     kw_idx = next((i for i in range(len(tokens) - 1, -1, -1)
                    if tokens[i].lower() in _KEYWORDS), None)
     if kw_idx is None or kw_idx == 0:
@@ -618,6 +674,33 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
                              f"(traffic, arrows, check)")
         return Rule("icons", columns, icon_set=key, reverse=reverse,
                     source=source, hide_value=only)
+    if keyword == "width":
+        if arg.lower() in ("auto", "fit", ""):
+            # an explicit "back to normal", for undoing a wider pattern rule
+            return Rule("column_width", columns, width=None)
+        try:
+            width = int(round(float(arg)))
+        except ValueError:
+            raise ValueError(
+                f"line {lineno}: 'width' wants a number of pixels or 'auto', "
+                f"got {arg!r}") from None
+        if not MIN_RULE_WIDTH <= width <= MAX_RULE_WIDTH:
+            raise ValueError(
+                f"line {lineno}: width {width} is outside "
+                f"{MIN_RULE_WIDTH}–{MAX_RULE_WIDTH} pixels")
+        return Rule("column_width", columns, width=width)
+    if keyword == "align":
+        align = _ALIGNMENTS.get(arg.lower())
+        if align is None:
+            raise ValueError(f"line {lineno}: unknown alignment {arg!r} "
+                             f"(left, right, centre)")
+        return Rule("align", columns, align=align)
+    if keyword == "label":
+        text = _unquote(arg)
+        if not text:
+            raise ValueError(
+                f"line {lineno}: 'label' needs the header text to show")
+        return Rule("header_label", columns, label=text)
     # format
     if not arg:
         raise ValueError(f"line {lineno}: 'format' needs a spec like ',.0f'")
@@ -831,6 +914,15 @@ def rule_summary(rule: Rule) -> str:
         return f"{cols}  ·  number format “{rule.number_spec}”"
     if rule.mode == "hide":
         return f"hide  {cols}"
+    if rule.mode == "column_width":
+        return (f"{cols}  ·  width {rule.width}px" if rule.width
+                else f"{cols}  ·  width fits the content")
+    if rule.mode == "align":
+        return f"{cols}  ·  aligned {rule.align}"
+    if rule.mode == "header_label":
+        return f"{cols}  ·  headed “{rule.label}”"
+    if rule.mode == "wrap":
+        return "wrap text  ·  rows grow to fit"
     return rule.mode
 
 
@@ -1184,10 +1276,41 @@ def evaluate_rows(df, row_rules) -> list:
 
 
 def split_rules(rules) -> tuple:
-    """(column rules, whole-row rules) — ``hide`` directives are neither."""
+    """(column rules, whole-row rules) — ``hide`` and the layout rules are
+    neither: they shape the table rather than paint a cell."""
     row, col = [], []
     for r in rules:
-        if r.mode == "hide":
+        if r.mode == "hide" or r.mode in LAYOUT_MODES:
             continue
         (row if r.mode == "highlight" and r.scope == "row" else col).append(r)
     return col, row
+
+
+def wraps_text(rules) -> bool:
+    """Does any rule ask for wrapped text? Table-wide by nature — see the
+    `wrap` branch in the parser."""
+    return any(getattr(r, "mode", None) == "wrap" for r in rules or [])
+
+
+def column_layout(rules, columns) -> dict:
+    """``{column name: ColumnLayout}`` for the columns any layout rule
+    names — patterns expanded, later lines winning, and columns nobody
+    mentioned left out entirely.
+
+    Read once per table rather than per cell: width, alignment and the
+    header label are properties of the column, and asking a rule about them
+    a hundred thousand times would be a hundred thousand answers the same.
+    """
+    out: dict = {}
+    for rule in rules or []:
+        if rule.mode not in LAYOUT_MODES or rule.mode == "wrap":
+            continue
+        for name in expand_columns(rule.columns, columns):
+            entry = out.setdefault(name, ColumnLayout())
+            if rule.mode == "column_width":
+                entry.width = rule.width
+            elif rule.mode == "align":
+                entry.align = rule.align
+            else:
+                entry.label = rule.label
+    return {name: entry for name, entry in out.items() if not entry.is_empty()}

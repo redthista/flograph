@@ -27,6 +27,10 @@ A rule is `columns  verb  argument`:
 | `format` | `amount format $,.0f` | a Python / d3 number format for the column |
 | `hide` | `hide helper_col` | keep a column in the data (a rule can still read it) but out of the view |
 | `only` | `units bar blue only` | draw the format **instead of** the value — Power BI's "bar only" / "icon only" |
+| `width` | `revenue width 160` | a fixed column width in pixels (`width auto` gives the column back to the content) |
+| `align` | `region align right` | `left`, `right` or `centre` — the header follows the column |
+| `label` | `revenue label "Revenue (£)"` | the header text to show; the real column name is what every rule, sort and export still uses |
+| `wrap` | `wrap` | let long text run onto more lines, growing the rows — the one rule that takes no columns |
 
 Tests for a highlight: `> < >= <= = !=`, `between 10 20`, `contains`,
 `starts with`, `ends with`, `matches` (regex), `is empty`, `is not empty`.
@@ -44,6 +48,38 @@ the app hunts down a font that can draw it, so the same rules look the same on
 Windows, macOS and Linux. If one still shows as a blank space, the machine has
 no emoji font at all: install one (Noto Color Emoji, or Twemoji) and reopen the
 project.
+
+## Shaping the table
+
+The same rule list sets the table's *layout*, not just its colours:
+
+```
+region    width 90
+region    align centre
+revenue   width 200
+revenue   label "Revenue (£)"
+note      width 240
+wrap
+```
+
+A `width` is an instruction, not a hint: the column is set to it and the
+content stops having a vote, which is what makes a data bar or an icon
+column read properly. `width auto` hands the column back to the auto-fit —
+useful for exempting one column from a pattern rule like `FY* width 120`.
+
+`align` beats the column's own habit (numbers right, text left), and the
+header moves with it. `label` changes only what is *printed* on the header:
+rules, sorting, Ctrl+C and exports all still use the real column name, and
+resting the cursor on the header shows it.
+
+`wrap` is the one rule that names no columns. A row is as tall as its
+tallest cell, so wrapping is a fact about the table however it is written —
+pair it with a `width` on the column you want narrow. Rows grow as they are
+scrolled into view, so it costs nothing on a long table.
+
+Layout rules travel the `style` port and print in reports like every other
+rule, so a table set up once looks the same on the canvas, on a dashboard
+page and in the PDF.
 
 ## Showing the format instead of the value
 

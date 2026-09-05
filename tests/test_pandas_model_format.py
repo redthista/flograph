@@ -181,3 +181,53 @@ class TestFormatOnly:
     def test_without_only_the_value_shows(self):
         model = self._model("units bar blue")
         assert model.data(model.index(0, 0), Qt.DisplayRole) == "10"
+
+
+class TestLayoutRules:
+    """`align` and `label` reach the grid through the model; `width` and
+    `wrap` are geometry and belong to the view."""
+
+    def _model(self, rules_text):
+        frame = pd.DataFrame({"region": ["North"], "revenue": [482000]})
+        return PandasModel(frame, rules=parse_rules(rules_text))
+
+    def _align(self, model, row, col):
+        return model.data(model.index(row, col), Qt.TextAlignmentRole)
+
+    def test_an_align_rule_beats_the_dtype(self):
+        """A number is right-aligned by habit — the rule is an instruction,
+        so it wins."""
+        model = self._model("revenue align left")
+        assert self._align(model, 0, 1) == int(Qt.AlignLeft | Qt.AlignVCenter)
+
+    def test_text_can_be_pushed_right(self):
+        model = self._model("region align right")
+        assert self._align(model, 0, 0) == int(Qt.AlignRight | Qt.AlignVCenter)
+
+    def test_the_header_follows_its_column(self):
+        """Or a right-aligned money column sits under a centred title."""
+        model = self._model("revenue align center")
+        assert model.headerData(1, Qt.Horizontal, Qt.TextAlignmentRole) == int(
+            Qt.AlignHCenter | Qt.AlignVCenter)
+
+    def test_a_label_renames_the_header_on_screen(self):
+        model = self._model('revenue label "Revenue (£)"')
+        assert model.headerData(1, Qt.Horizontal, Qt.DisplayRole) == "Revenue (£)"
+
+    def test_the_real_name_is_still_reachable(self):
+        """Every rule, sort and export goes by the real name, so the tooltip
+        has to say what it is."""
+        model = self._model('revenue label "Money"')
+        assert "revenue" in model.headerData(1, Qt.Horizontal, Qt.ToolTipRole)
+
+    def test_layout_alone_does_not_switch_on_per_cell_formatting(self):
+        """The expensive path exists for rules that paint cells. Shaping a
+        column says nothing about any cell, so it must not turn it on."""
+        model = self._model("revenue width 200\nregion align left\nwrap")
+        assert model._cf_active is False
+
+    def test_the_view_can_read_the_width_and_the_wrap(self):
+        model = self._model("revenue width 200\nwrap")
+        assert model.column_layout(1).width == 200
+        assert model.column_layout(0) is None
+        assert model.wraps_text() is True

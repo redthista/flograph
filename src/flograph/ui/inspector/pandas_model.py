@@ -38,6 +38,12 @@ _ALIGNMENT = int(Qt.TextAlignmentRole)
 _TOOLTIP = int(Qt.ToolTipRole)
 _HORIZONTAL = Qt.Horizontal
 _ALIGN_NUMBER = int(Qt.AlignRight | Qt.AlignVCenter)
+#: What an `align` rule asks for, as a Qt flag.
+_ALIGN_RULE = {
+    "left": int(Qt.AlignLeft | Qt.AlignVCenter),
+    "right": int(Qt.AlignRight | Qt.AlignVCenter),
+    "center": int(Qt.AlignHCenter | Qt.AlignVCenter),
+}
 
 # the roles that need the cell's value at all; anything else can answer
 # without touching the frame
@@ -98,7 +104,28 @@ class PandasModel(QAbstractTableModel):
     # ----------------------------------------------- conditional formatting
 
     def _set_rules(self, rules) -> None:
-        self._rules = [r for r in (rules or []) if r.mode != "hide"]
+        from flograph.core.table_format import (
+            LAYOUT_MODES, column_layout, wraps_text)
+        # Layout rules shape the column, not the cell. Reading them once
+        # here keeps them out of the per-cell path entirely — and out of
+        # `_cf_active`, so a table whose only rule is `width 120` pays
+        # nothing per row.
+        self._layout = column_layout(rules, self._df.columns)
+        self._wraps = wraps_text(rules)
+        # by column index, so the hot paths (data / headerData) are a dict
+        # lookup on a number rather than a string built per call
+        self._align: dict = {}
+        self._labels: dict = {}
+        for i, name in enumerate(self._df.columns):
+            entry = self._layout.get(str(name))
+            if entry is None:
+                continue
+            if entry.align in _ALIGN_RULE:
+                self._align[i] = _ALIGN_RULE[entry.align]
+            if entry.label:
+                self._labels[i] = entry.label
+        self._rules = [r for r in (rules or [])
+                       if r.mode != "hide" and r.mode not in LAYOUT_MODES]
         # A style is only honoured on a table small enough to walk per-cell.
         self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS
         self._value_roles = _VALUE_ROLES_FMT if self._cf_active else _VALUE_ROLES
@@ -312,6 +339,9 @@ class PandasModel(QAbstractTableModel):
                 return (style.icon, style.icon_color)
             return None
         if role == _ALIGNMENT:
+            forced = self._align.get(col)
+            if forced is not None:
+                return forced
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 return _ALIGN_NUMBER
         return None
@@ -321,8 +351,35 @@ class PandasModel(QAbstractTableModel):
         role = int(role)
         if role == _DISPLAY:
             if orientation == _HORIZONTAL:
-                return str(self._df.columns[self._src(section)])
+                col = self._src(section)
+                # a `label` rule renames the header on screen only; every
+                # rule, sort and export still goes by the real column name
+                return self._labels.get(col, str(self._df.columns[col]))
             return str(self._df.index[section])
+        if role == _ALIGNMENT and orientation == _HORIZONTAL:
+            # the header follows its column, or a right-aligned money
+            # column would sit under a centred title
+            return self._align.get(self._src(section))
         if role == _TOOLTIP and orientation == _HORIZONTAL:
-            return f"dtype: {self._df.dtypes.iloc[self._src(section)]}"
+            col = self._src(section)
+            name = str(self._df.columns[col])
+            renamed = f"{name}\n" if col in self._labels else ""
+            return f"{renamed}dtype: {self._df.dtypes.iloc[col]}"
         return None
+
+    def column_name(self, section: int) -> str:
+        """The real name behind a visible column, whatever a `label` rule
+        renamed it to on screen. What a copy puts on the clipboard: the
+        values go out raw (EditRole), and a header that did not match them
+        would be worse than useless in the spreadsheet they land in."""
+        return str(self._df.columns[self._src(section)])
+
+    def wraps_text(self) -> bool:
+        """Did a rule ask for wrapped text? The view acts on it — row
+        heights are geometry, which is the view's business."""
+        return self._wraps
+
+    def column_layout(self, section: int):
+        """The `ColumnLayout` for a *visible* column, or None. Read by the
+        view, which owns column widths — the model has no say in geometry."""
+        return self._layout.get(str(self._df.columns[self._src(section)]))

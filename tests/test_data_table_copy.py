@@ -327,6 +327,67 @@ class TestColumnFit:
         table.setModel(PandasModel(df, parent=table))
         assert table.columnWidth(0) > 100
 
+    def test_a_copy_carries_the_real_column_name(self, qtbot):
+        """A `label` rule renames the header on screen. The values below it
+        copy raw, so a header row of presentation names would describe the
+        block wrongly in whatever spreadsheet it lands in."""
+        from flograph.core.table_format import parse_rules
+
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"revenue": [1]})
+        table.setModel(PandasModel(df, parent=table,
+                                   rules=parse_rules('revenue label "Money"')))
+        assert whole_block(table)[0] == ["revenue"]
+        assert table.model().headerData(
+            0, Qt.Horizontal, Qt.DisplayRole) == "Money"
+
+    def test_a_width_rule_is_obeyed_not_negotiated(self, qtbot):
+        """The whole point of asking for a fixed column is that the content
+        stops having a vote — including the auto-fit's own clamps."""
+        from flograph.core.table_format import parse_rules
+
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"n": [1], "c": ["x" * 4000]})
+        table.setModel(PandasModel(df, parent=table,
+                                   rules=parse_rules("n width 400\nc width 90")))
+        assert table.columnWidth(0) == 400        # wider than its content
+        assert table.columnWidth(1) == 90         # narrower than MAX_COL_WIDTH
+
+    def test_an_unnamed_column_still_fits_itself(self, qtbot):
+        from flograph.core.table_format import parse_rules
+
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"n": [1], "a_header_with_room_to_need": [2]})
+        table.setModel(PandasModel(df, parent=table,
+                                   rules=parse_rules("n width 400")))
+        assert table.columnWidth(1) > 100
+
+    def test_wrap_lets_the_rows_grow(self, qtbot):
+        from PySide6.QtWidgets import QHeaderView
+
+        from flograph.core.table_format import parse_rules
+
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"note": ["a long note that will not fit at all "
+                                    "inside a narrow column"]})
+        table.setModel(PandasModel(df, parent=table,
+                                   rules=parse_rules("note width 120\nwrap")))
+        assert (table.verticalHeader().sectionResizeMode(0)
+                == QHeaderView.ResizeToContents)
+
+    def test_without_a_wrap_rule_the_rows_are_left_alone(self, qtbot):
+        from PySide6.QtWidgets import QHeaderView
+
+        table = DataTableView()
+        qtbot.addWidget(table)
+        table.setModel(PandasModel(pd.DataFrame({"a": [1]}), parent=table))
+        assert (table.verticalHeader().sectionResizeMode(0)
+                != QHeaderView.ResizeToContents)
+
     def test_a_bar_only_column_is_wide_enough_to_read_the_bar(self, qtbot):
         """`units bar blue only` leaves no text to fit to, and a column
         sized to the header alone would make the bar — the entire content
