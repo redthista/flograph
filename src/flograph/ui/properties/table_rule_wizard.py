@@ -10,7 +10,7 @@ the graph — the caller hands it the column names to offer.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog,
     QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -22,6 +22,7 @@ from flograph.core.table_format import (
     bar_token, fill_token, parse_rule_lines, quote_column, rule_summary,
     scale_token,
 )
+from flograph.ui.emoji_font import apply_emoji_font, with_emoji
 
 _SINGLE = QAbstractItemView.SelectionMode.SingleSelection
 _MULTI = QAbstractItemView.SelectionMode.MultiSelection
@@ -226,7 +227,14 @@ class RuleBuilder(QDialog):
         self._preview = QLabel()
         self._preview.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._preview.setWordWrap(True)
-        self._preview.setStyleSheet("font-family: monospace; padding: 6px; "
+        # the font is set, not styled: a style sheet's font-family wins over
+        # the widget font, and this one has to carry the emoji fallback so a
+        # glyph rule previews as the glyph rather than as a gap
+        mono = QFont(self._preview.font())
+        mono.setStyleHint(QFont.Monospace)
+        mono.setFamily("monospace")
+        self._preview.setFont(with_emoji(mono))
+        self._preview.setStyleSheet("padding: 6px; "
                                     "border: 1px solid palette(mid);")
         outer.addWidget(self._preview)
 
@@ -420,6 +428,7 @@ class RuleBuilder(QDialog):
         self._map.insertRow(r)
         self._map.setItem(r, 0, QTableWidgetItem(value))
         gedit = QLineEdit(glyph)
+        apply_emoji_font(gedit)  # so a typed emoji shows as itself, not a gap
         gedit.setPlaceholderText("any character / emoji  (e.g. T, →, 🙂)")
         gedit.textChanged.connect(self._refresh)
         self._map.setCellWidget(r, 1, gedit)

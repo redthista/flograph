@@ -38,6 +38,12 @@ a swatch menu with a **Custom…** entry that opens the system colour picker.
 A column name with a space just works (`unit price scale green`). Wrap it in
 `"quotes"` if it contains a comma or reads like a keyword.
 
+An `iconmap` glyph can be an emoji — `sla iconmap sla: breach=🔥, ok=✅` — and
+the app hunts down a font that can draw it, so the same rules look the same on
+Windows, macOS and Linux. If one still shows as a blank space, the machine has
+no emoji font at all: install one (Noto Color Emoji, or Twemoji) and reopen the
+project.
+
 ## Order of application
 
 Rules compose **top to bottom, and a later line wins** any attribute it sets —

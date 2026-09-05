@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QApplication, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
 )
 
+from .emoji_font import with_emoji
+
 # Read by ConditionalFormatDelegate off the model. Kept here (not in
 # pandas_model) so data_table.py can install the delegate without dragging
 # pandas into its import graph.
@@ -90,10 +92,19 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
             painter.setPen(QColor(icon_color)
                            if icon_color and not selected and not filled
                            else text_pen)
+            # the glyph is whatever the rule typed — an emoji needs a font
+            # the UI one falls back to, or it paints an empty cell
+            painter.setFont(with_emoji(opt.font))
+            glyph = str(glyph)
+            # an emoji is squarer and wider than the ✓ this cell was sized
+            # for, and drawText clips to its rect, so measure rather than
+            # assume — and give it the row's full height, not the inset
+            cell_w = max(_ICON_CELL_W, painter.fontMetrics().horizontalAdvance(glyph))
             painter.drawText(
-                QRect(inner.left(), inner.top(), _ICON_CELL_W, inner.height()),
-                Qt.AlignVCenter | Qt.AlignHCenter, str(glyph))
-            text_rect = inner.adjusted(_ICON_CELL_W + _ICON_GAP, 0, 0, 0)
+                QRect(inner.left(), opt.rect.top(), cell_w, opt.rect.height()),
+                Qt.AlignVCenter | Qt.AlignHCenter, glyph)
+            painter.setFont(opt.font)
+            text_rect = inner.adjusted(cell_w + _ICON_GAP, 0, 0, 0)
 
         painter.setPen(text_pen)
         align = int(opt.displayAlignment) or int(Qt.AlignVCenter | Qt.AlignLeft)

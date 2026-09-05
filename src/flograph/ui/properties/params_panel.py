@@ -494,10 +494,15 @@ class ParamsPanel(QWidget):
         """A multiline rules box with a 'Rules…' button under it that opens
         the rule manager — a list of the applied rules with add / edit /
         remove — and writes the box back."""
+        from flograph.ui.emoji_font import apply_emoji_font
+
         host = QWidget()
         col = QVBoxLayout(host)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(3)
+        # rules carry typed glyphs (`breach=🔥`), and an emoji the UI font
+        # cannot draw would leave the line looking like it lost a character
+        apply_emoji_font(text)
         col.addWidget(text)
         button = QPushButton("Rules…")
         button.setObjectName(f"param_{spec.name}_wizard")

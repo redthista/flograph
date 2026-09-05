@@ -34,6 +34,7 @@ from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
                                   mark_page_breaks, missing_embed,
                                   replace_columns, replace_embeds,
                                   unrun_embed)
+from flograph.ui.emoji_font import with_emoji
 
 # Default rendered width of an embedded figure, in points: the printable
 # width of A4 portrait at the margins export.py uses (210mm - 2x15mm).
@@ -55,6 +56,22 @@ REPORT_CSS = """
     th { background-color: #eeeeee; }
     blockquote { color: #b45309; }
 """
+
+
+def _document() -> QTextDocument:
+    """A report document whose font can draw an emoji.
+
+    A rule can put one in a cell (`breach=🔥`) and a page can type one in
+    its prose, and Qt paints an emoji the document font cannot rasterise as
+    empty space — a blank column in the PDF. `ui/emoji_font` finds a family
+    that does draw it and hangs it off the back of the font, which changes
+    nothing about how the text itself sets. Both documents need it: the
+    staged one writes its font-family into the HTML it hands on, and that
+    declaration would otherwise outrank the final document's default.
+    """
+    document = QTextDocument()
+    document.setDefaultFont(with_emoji(document.defaultFont()))
+    return document
 
 
 @dataclass
@@ -915,7 +932,7 @@ class _Resolver:
             return ""
         if markdown.strip().startswith("@@flograph-embed-"):
             return markdown.strip()
-        staged = QTextDocument()
+        staged = _document()
         staged.setMarkdown(markdown)
         body = staged.toHtml()
         start, end = body.find("<body"), body.rfind("</body>")
@@ -1209,7 +1226,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     # a Python Script node gets to start each region on a fresh page.
     resolved = mark_page_breaks(replace_embeds(staged_body, resolver.render))
 
-    staged = QTextDocument()
+    staged = _document()
     staged.setMarkdown(resolved)
     html = staged.toHtml()
     for index, width in enumerate(resolver.widths):
@@ -1217,7 +1234,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     if page_break_rule:
         html = _PAGEBREAK_P_RE.sub("<hr />", html)
 
-    document = QTextDocument()
+    document = _document()
     # Qt insets rich text by 4px a side by default. An image sized to the
     # caller's available width would then be exactly that much too wide, so
     # every embedded chart would hang off the edge; the inset belongs to the
