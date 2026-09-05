@@ -251,6 +251,14 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
     if not isinstance(exclusive, bool):
         raise NodeScriptError("NODE['exclusive'] must be True or False")
 
+    interactive = node_decl.get("interactive", False)
+    if not isinstance(interactive, bool):
+        raise NodeScriptError("NODE['interactive'] must be True or False")
+    if interactive and card != "webview":
+        raise NodeScriptError(
+            "NODE['interactive'] only applies when NODE['card'] is 'webview' "
+            "— it is the web view's page that writes back")
+
     # Optional, and a number is accepted as well as a string because "2.0" is
     # the obvious thing to type and 2.0 is the obvious thing to mistype.
     version = node_decl.get("version") or ""
@@ -298,6 +306,7 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         card=card,
         control=control,
         exclusive=exclusive,
+        interactive=interactive,
         version=version,
     )
 

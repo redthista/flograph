@@ -90,7 +90,10 @@ class TestCard:
         assert item.plotly_card and item.figure_card
         assert item._figure_placeholder.isVisible()
         assert item._plotly_widget.view is None  # webview only built on first figure
-        assert list(item.output_ports) == ["figure"]
+        # "figure" stays first: Open in Browser and the card both read the
+        # first declared output. "selected"/"table" carry what a click
+        # filtered — see the On click param.
+        assert list(item.output_ports) == ["figure", "selected", "table"]
         graph = env[0]
         graph.set_param(item.node.id, "width", 700)
         assert item.width == 700.0

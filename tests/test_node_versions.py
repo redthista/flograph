@@ -82,8 +82,11 @@ class TestEveryBuiltinDeclaresOne:
         # The two nodes this whole feature came out of: they were rebuilt
         # from a handful of params to the full Plotly Express surface, and
         # a user looking at one needs to see which of those they have.
+        # Deliberately exact, so a bump has to be a decision someone made
+        # rather than something that drifted. Show Plotly went to 2.1 when
+        # its clicks learned to filter (two new outputs, two new params).
         by_id = {s.type_id: s.version for s in builtin_specs}
-        assert by_id["flograph.viz.show_plotly"] == "2.0"
+        assert by_id["flograph.viz.show_plotly"] == "2.1"
         assert by_id["flograph.viz.chart_per_value_plotly"] == "2.0"
 
 
@@ -115,8 +118,12 @@ class TestTheVersionIsVisible:
         return panel
 
     def test_the_properties_panel_shows_it(self, qtbot, registry):
+        # The number itself is pinned in TestEveryBuiltinDeclaresOne; this
+        # is about it being *shown*, so it reads what the node declares
+        # rather than failing every time a node is legitimately bumped.
+        version = registry.get("flograph.viz.show_plotly").version
         panel = self._panel(qtbot, registry, "flograph.viz.show_plotly")
-        assert panel._version_label.text() == "version 2.0"
+        assert panel._version_label.text() == f"version {version}"
         assert not panel._version_label.isHidden()
 
     def test_it_goes_away_with_the_selection(self, qtbot, registry):
@@ -141,5 +148,6 @@ class TestTheVersionIsVisible:
                 child = section.child(j)
                 if child.data(0, Qt.UserRole) == "flograph.viz.show_plotly":
                     tips.append(child.toolTip(0))
+        version = registry.get("flograph.viz.show_plotly").version
         assert tips, "Show Plotly is not in the library tree"
-        assert all("version 2.0" in tip for tip in tips)
+        assert all(f"version {version}" in tip for tip in tips)

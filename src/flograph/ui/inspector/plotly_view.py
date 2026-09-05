@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from PySide6.QtCore import QUrl, Qt
+from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from flograph.core import html as core_html
@@ -42,8 +42,20 @@ STACK_ITEM_HEIGHT = core_html.STACK_ITEM_HEIGHT
 
 
 class PlotlyView(QWidget):
+    #: (param name, JSON payload) written by the page itself via
+    #: `flograph.set(...)` — only ever emitted once set_interactive(True) has
+    #: been called. Raw and unvetted: the host owns the node, so the host
+    #: decides what the node allows (flograph.core.bridge.accept).
+    param_written = Signal(str, str)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # The page-writes-back channel, off until a host turns it on: a
+        # channel per web view is not free and an ordinary chart has nothing
+        # to say. The receiver outlives the QWebEngineView, which set_content
+        # destroys and rebuilds to give back a big chart's memory.
+        self._interactive = False
+        self._receiver = None
         # per-instance file token: a canvas card and a dashboard tile showing
         # the same node must not race on one HTML file
         self._token = uuid.uuid4().hex
@@ -85,7 +97,31 @@ class PlotlyView(QWidget):
         view.hide()
         self._layout.addWidget(view, 1)
         self.view = view
+        if self._interactive:
+            self._install_bridge(view)
         return view
+
+    def set_interactive(self, interactive: bool) -> None:
+        """Let this view's page write back (see flograph.core.bridge).
+
+        Called by the host from the node's spec. Applied to a view that
+        already exists as well as to the next one built, so toggling it —
+        editing a node's code to add NODE['interactive'] — takes effect
+        without rebuilding the card.
+        """
+        interactive = bool(interactive)
+        if interactive == self._interactive:
+            return
+        self._interactive = interactive
+        if interactive and self.view is not None:
+            self._install_bridge(self.view)
+
+    def _install_bridge(self, view) -> None:
+        from flograph.ui.web_bridge import BridgeReceiver, install
+        if self._receiver is None:
+            self._receiver = BridgeReceiver(self)
+            self._receiver.param_written.connect(self.param_written)
+        install(view, self._receiver)
 
     def set_grid(self, columns: int = 0, rows: int = 0,
                  direction: str = DEFAULT_DIRECTION) -> None:

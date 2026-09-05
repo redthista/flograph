@@ -41,6 +41,12 @@ class NodeSpec:
     # "toggle", ... None for every other card kind. Like `card`, it lives in
     # `source`, so forking or saving the node keeps it.
     control: Optional[str] = None
+    # declared by NODE["interactive"]: this node's web view may write its own
+    # declared params from JavaScript (see core.bridge), which dirties the node
+    # and re-runs what follows -- a click inside a chart doing what a Slicer
+    # tick does. Only meaningful with card == "webview". Like `card`, it lives
+    # in `source`, so forking or saving the node keeps it.
+    interactive: bool = False
     # declared by NODE["exclusive"]: this node cannot run beside another, so
     # the engine drains the in-flight set and gives it the process to itself.
     # For matplotlib, which is not thread-safe from a worker, and for anything

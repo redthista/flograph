@@ -19,6 +19,24 @@ from __future__ import annotations
 from flograph.core.chart_grid import DEFAULT_DIRECTION
 
 
+def _post_script(obj):
+    """JavaScript a node asked to have run after its chart is drawn.
+
+    A node stashes it on the figure as `_flograph_post_script`, the same
+    trick `_flograph_config` already uses: a Plotly figure travels from the
+    worker to the card as an object, and an attribute is the only place a
+    node can leave a note for the renderer. Plotly substitutes `{plot_id}`
+    for the div it just drew into, which is what lets a click handler find
+    its own chart.
+
+    None (not "") when there is nothing to run: plotly's to_html treats a
+    falsy post_script as absent, but being explicit keeps a node that sets
+    the attribute to "" from looking different to one that never set it.
+    """
+    script = getattr(obj, "_flograph_post_script", None)
+    return script or None
+
+
 def to_html(obj, columns: int = 0, rows: int = 0,
             direction: str = DEFAULT_DIRECTION) -> "str | None":
     """Coerce a node output to a full HTML page, or None if it can't render.
@@ -38,6 +56,7 @@ def to_html(obj, columns: int = 0, rows: int = 0,
         try:
             return render(full_html=True, include_plotlyjs=True,
                           default_width="100%", default_height="100%",
+                          post_script=_post_script(obj),
                           config={"responsive": True,
                                   **getattr(obj, "_flograph_config", {})})
         except TypeError:
@@ -79,6 +98,7 @@ def _fragment(obj, first: bool) -> "str | None":
         try:
             return render(full_html=False, include_plotlyjs=bool(first),
                           default_width="100%", default_height="100%",
+                          post_script=_post_script(obj),
                           config={"responsive": True,
                                   **getattr(obj, "_flograph_config", {})})
         except TypeError:

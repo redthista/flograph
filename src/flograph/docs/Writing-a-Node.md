@@ -44,6 +44,7 @@ and `PARAMS` — so it should only declare. Everything else goes inside `run`.
 | `exclusive` | no | `True` = this node runs with nothing else in flight. See Concurrency. |
 | `card` | no | Makes the node a live card — see Cards. |
 | `control` | no | With `"card": "control"`, the widget shape — see Cards. |
+| `interactive` | no | With `"card": "webview"`, lets the page write this node's params from JavaScript — see Interactive views. |
 
 Unknown keys are ignored, so a newer node file still loads on an older
 flograph.
@@ -178,6 +179,44 @@ For an input control, `"card": "control"` plus `"control": <shape>` —
 `slider`, `range`, `number`, `text`, `date`, `toggle`, `choice`. One host
 renders every control from that declaration plus your `PARAMS`, so a new
 control node is usually just a script.
+
+## Interactive views
+
+A `webview` node that adds `"interactive": True` gets a `flograph` object in
+its page's JavaScript, so a click inside the visual can reach the graph:
+
+```js
+flograph.select(["north", "south"])  // writes the "selected" param
+flograph.set("depth", 3)             // writes any param the node declares
+flograph.ready(function (api) {})    // runs once the channel is live
+flograph.connected                   // false outside flograph
+```
+
+A write commits as one undo step and re-runs the node and everything
+downstream — the same thing a Slicer tick does, from inside your own HTML.
+Read the value back in `run()` from `ctx.params`, redraw from it, and the
+page and the graph stay in step without any state of their own.
+
+The rules:
+
+- **Declared params only.** A page can write what the node lists in
+  `PARAMS`, and nothing else. Anything else is reported in the status bar.
+- **Typed.** Values are coerced to the param's declared type and clamped to
+  its declared `min`/`max`.
+- **A cosmetic param commits without re-running**, like every other
+  cosmetic param.
+- **Writing the value it already has does nothing** — no undo step, no run.
+  That is what stops a page that restores its own selection on load from
+  re-running the flow forever.
+
+`flograph.set` is a no-op outside the app, so the same page still works in
+Open in Browser and in an exported file — it simply isn't live there. Ask
+`flograph.ready()` rather than reading `connected` as the page loads; the
+channel connects asynchronously, and calls made before it does are queued
+and delivered on connect.
+
+Fork **Show Web View** for a working example, or set **On click** on a Show
+Plotly node to get click-to-filter without writing any JavaScript.
 
 ## Where nodes live
 

@@ -120,18 +120,38 @@ class TestShowWebNode:
         assert spec.outputs[0].name == "view"
 
     def test_run_returns_html_with_title(self, registry):
+        """Two outputs now (the page, and what the page selected), so run()
+        returns a dict keyed by port name rather than a bare string."""
         spec = registry.get("flograph.viz.show_web")
         params = spec.default_params()
         params["title"] = "My View"
         run = compile_run(spec.source, "test-web")
-        html = run(FakeContext(params=params))
-        assert isinstance(html, str) and "My View" in html
+        out = run(FakeContext(params=params))
+        assert isinstance(out["view"], str) and "My View" in out["view"]
 
-    def test_run_reports_input_type(self, registry):
+    def test_run_offers_sample_values_without_a_table(self, registry):
         spec = registry.get("flograph.viz.show_web")
         run = compile_run(spec.source, "test-web")
-        html = run(FakeContext(params=spec.default_params()), data=[1, 2, 3])
-        assert "list" in html
+        out = run(FakeContext(params=spec.default_params()), data=[1, 2, 3])
+        assert "connect a table" in out["view"]
+
+    def test_run_offers_the_first_column_of_a_table(self, registry):
+        import pandas as pd
+        spec = registry.get("flograph.viz.show_web")
+        run = compile_run(spec.source, "test-web")
+        out = run(FakeContext(params=spec.default_params()),
+                  data=pd.DataFrame({"region": ["north", "south", "north"]}))
+        assert "region" in out["view"] and "north" in out["view"]
+
+    def test_selected_param_flows_out_of_the_node(self, registry):
+        """What the page wrote is handed on, so an interactive visual can
+        drive a Filter Rows the way a Slicer does."""
+        spec = registry.get("flograph.viz.show_web")
+        params = spec.default_params()
+        params["selected"] = '["north"]'
+        run = compile_run(spec.source, "test-web")
+        out = run(FakeContext(params=params))
+        assert out["selected"] == ["north"]
 
 
 # -------------------------------------------------- regression: saved cards

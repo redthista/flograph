@@ -430,7 +430,14 @@ class TileItem(QGraphicsObject):
             self._figure_view = widget
         elif kind == "plotly":
             from ..inspector.plotly_view import PlotlyView
+            from flograph.core import bridge as core_bridge
             widget = PlotlyView()
+            # A tile is where an interactive visual earns its keep: this is
+            # the page someone who never opens the canvas actually uses.
+            node = self._node()
+            if node is not None and core_bridge.is_interactive(node.spec):
+                widget.set_interactive(True)
+                widget.param_written.connect(self._on_view_param_written)
             self._plotly_widget = widget
         elif kind == "table":
             widget = DataTableView()
@@ -513,6 +520,17 @@ class TileItem(QGraphicsObject):
             scene.undo_stack.push(SetParamCommand(
                 self._graph, node.id, "value", value, merge=False))
         scene.control_changed.emit(node.id)
+
+    def _on_view_param_written(self, name: str, payload: str) -> None:
+        """A page on this tile called flograph.set(...). Same verdict and
+        same consequences as on the canvas card — one shared function, so a
+        dashboard and the canvas can't drift on what a click means."""
+        from ..web_bridge import apply_write
+
+        scene = self.scene()
+        node = self._node()
+        if scene is not None and node is not None:
+            apply_write(scene, self._graph, node, name, payload)
 
     # ------------------------------------------------------- editable sheet
 

@@ -4,6 +4,20 @@ Every chart Plotly Express draws, on an interactive card — hover, zoom and
 pan in place. Needs the 'plotly' package: install it from Tools > Manage
 Packages if missing. Outputs the plotly Figure for further consumers.
 
+**On click** turns the chart into a filter. Set it to *select one* or
+*select many* and clicking a bar, a slice or a point writes what you clicked
+into **Clicked values** and re-runs everything downstream — the same thing a
+Slicer tick does, from inside the chart. Two extra outputs carry it: **table**
+is the input filtered to what you clicked, and **selected** is the bare list
+of values, for driving another node's options. Clicking the selected point
+again clears the filter.
+
+The filter is applied to the column the click reports from: **X** for most
+charts, **Labels** for a pie, the first level of **Hierarchy** for a treemap
+or sunburst, falling back to **Color by**. That means it suits charts whose
+x is a category — clicking a histogram bin gives you the bin's position,
+which matches no row. With nothing clicked, **table** is the whole input.
+
 **Kind** picks the chart, and the rest of the panel follows it: only the
 settings that chart actually has appear. Twenty-eight of them, in families:
 
@@ -93,10 +107,14 @@ from typing import Any, Iterable, Optional
 NODE = {
     "label": "Show Plotly",
     "category": "Viz",
-    "version": "2.0",
+    "version": "2.1",
     "card": "webview",
+    # Lets the chart's own page write this node's "selected" param when a
+    # point is clicked — see "On click" below and flograph.core.bridge.
+    "interactive": True,
     "inputs": [("table", "dataframe")],
-    "outputs": [("figure", "object")],
+    "outputs": [("figure", "object"), ("selected", "any"),
+                ("table", "dataframe")],
 }
 
 #: Chart kinds in dropdown order — grouped by family, the everyday ones
@@ -449,6 +467,19 @@ _ROWS: list[dict[str, Any]] = [
     # Cosmetic, so opening the drawer doesn't re-run the chart.
     {"name": "more", "type": "bool", "label": "More options",
      "default": False, "cosmetic": True},
+
+    # ------------------------------------------------------ click to filter
+    {"name": "on_click", "type": "choice", "label": "On click",
+     "options": ["nothing", "select one", "select many"],
+     "default": "nothing"},
+    # Written by the chart's own page when a point is clicked. Visible
+    # rather than hidden: when a click isn't filtering what you expect, the
+    # first question is what the chart actually sent, and this is where the
+    # answer shows up.
+    {"name": "selected", "type": "string", "label": "Clicked values",
+     "default": "",
+     "placeholder": 'e.g. ["north"] — blank keeps every row',
+     "visible_when": {"on_click": ["select one", "select many"]}},
 
     # ---------------------------------------------------- what to plot
     {"name": "x", "type": "columns", "label": "X column", "multi": False,
@@ -1604,6 +1635,101 @@ PARAMS = [
 ]
 
 
+# --------------------------------------------------------- click to filter
+
+#: Which param names the column a click reports a value from, per chart
+#: family. A click gives back a *label* on the charts that have one and an
+#: *x* everywhere else, so the column that produced that label is the one
+#: worth filtering on.
+_CLICK_COLUMN_PARAM = {
+    "pie": "names", "funnel_area": "names",
+    "sunburst": "path", "treemap": "path", "icicle": "path",
+}
+
+#: Run by plotly once the chart is drawn ({plot_id} is the div it drew
+#: into). Reads the current selection out of the page rather than being
+#: told it separately, so the handler and the chips-and-highlights a node
+#: might draw can never disagree about what is selected.
+_CLICK_JS = """
+var gd = document.getElementById("{plot_id}");
+var picked = %(picked)s, multi = %(multi)s;
+gd.on("plotly_click", function (data) {
+  var point = data.points && data.points[0];
+  if (!point) { return; }
+  // A label on the charts that have one (pie, treemap, sunburst), an x
+  // everywhere else. Both can legitimately be 0 or "", so test for
+  // undefined/null rather than for truthiness.
+  var value = (point.label !== undefined && point.label !== null)
+      ? point.label : point.x;
+  if (value === undefined || value === null) { return; }
+  value = String(value);
+  if (multi) {
+    var at = picked.indexOf(value);
+    if (at === -1) { picked.push(value); } else { picked.splice(at, 1); }
+  } else {
+    // Clicking the selected point again clears it, so a chart that filters
+    // can always be un-filtered from the chart itself.
+    picked = (picked.length === 1 && picked[0] === value) ? [] : [value];
+  }
+  flograph.select(picked);
+});
+"""
+
+
+def _selected(raw) -> list:
+    """The clicked values as a list of strings — a JSON array normally (the
+    chart's own handler writes that), a comma-separated list for hand edits.
+
+    Guarded like `_figure_lock` above: this node is meant to stay droppable
+    into an older flograph, so the one thing it borrows from `core` carries
+    its own copy for when there is nothing to borrow from.
+    """
+    try:
+        from flograph.core.controls import selected_values
+        return selected_values(raw)
+    except ImportError:
+        import json
+
+        text = str(raw or "").strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            return [part.strip() for part in text.split(",") if part.strip()]
+        if isinstance(parsed, list):
+            return [str(v) for v in parsed]
+        return [str(parsed)]
+
+
+def click_column(params, kind: str) -> str:
+    """The column a click on this chart reports values from, or "".
+
+    Falls back to "Color by" when the chart's own column is blank: a bar
+    chart of every numeric column still has a colour split worth clicking.
+    """
+    name = _CLICK_COLUMN_PARAM.get(kind, "x")
+    value = str(params.get(name, "") or "").strip()
+    if name == "path":
+        # A hierarchy is a comma list; a click reports a label from any
+        # level, but the first is the only one every point has.
+        value = value.split(",")[0].strip()
+    return value or str(params.get("color", "") or "").strip()
+
+
+def click_script(params) -> "str | None":
+    """The post-script for this chart's clicks, or None when it has none."""
+    import json
+
+    mode = str(params.get("on_click", "nothing") or "nothing")
+    if mode not in ("select one", "select many"):
+        return None
+    return _CLICK_JS % {
+        "picked": json.dumps(_selected(params.get("selected", ""))),
+        "multi": "true" if mode == "select many" else "false",
+    }
+
+
 def run(ctx, table):
     try:
         import plotly.express as px
@@ -1636,4 +1762,28 @@ def run(ctx, table):
     ctx.log(f"plotted {len(fig.data)} trace(s) ({kind})")
     if ignored:
         ctx.log(f"a {kind} chart has no use for: {', '.join(ignored)}")
-    return {"figure": fig}
+
+    # Click to filter. The script rides along on the figure (core.html hands
+    # it to plotly as post_script), and the clicked values come back through
+    # this node's own "selected" param — so what the chart sends and what
+    # the table below it filters on are the same thing by construction.
+    script = click_script(ctx.params)
+    if script is not None:
+        fig._flograph_post_script = script
+    picked = _selected(ctx.params.get("selected", ""))
+    filtered = table
+    if script is not None and picked:
+        column = click_column(ctx.params, kind)
+        if column and column in table.columns:
+            filtered = table[table[column].astype(str).isin(picked)]
+            ctx.log(f"click filter on {column!r}: kept {len(filtered)} of "
+                    f"{len(table)} rows")
+        elif column:
+            ctx.log(f"clicked values ignored: no column {column!r} in the "
+                    f"table")
+        else:
+            # Nothing names the column a click reports from, so filtering
+            # would be a guess. The values still flow out of "selected".
+            ctx.log("clicked values ignored: this chart has no column to "
+                    "filter on — set X (or Labels/Hierarchy/Color by)")
+    return {"figure": fig, "selected": picked, "table": filtered}

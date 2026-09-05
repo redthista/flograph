@@ -1554,6 +1554,8 @@ class MainWindow(QMainWindow):
         self.scene.button_fired.connect(self._on_button_fired)
         self.scene.slicer_changed.connect(self._on_slicer_changed)
         self.scene.control_changed.connect(self._on_control_changed)
+        self.scene.view_changed.connect(self._on_view_changed)
+        self.scene.view_error.connect(self._on_view_error)
         self.scene.frame_run_requested.connect(self._on_frame_run_requested)
         self.scene.tables_kept.connect(self._on_tables_kept)
 
@@ -1905,6 +1907,8 @@ class MainWindow(QMainWindow):
         widget.scene.button_fired.connect(self._on_button_fired)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
         widget.scene.control_changed.connect(self._on_control_changed)
+        widget.scene.view_changed.connect(self._on_view_changed)
+        widget.scene.view_error.connect(self._on_view_error)
         widget.scene.sheet_edited.connect(self._on_dashboard_sheet_edited)
         widget.view.tile_dropped.connect(
             lambda node_id, pos, page_id=page.id:
@@ -2632,6 +2636,26 @@ class MainWindow(QMainWindow):
         if node is None or card_kind(node) != "control":
             return
         self.engine.request_run([node_id, *self.graph.downstream(node_id)])
+
+    def _on_view_changed(self, node_id: str) -> None:
+        """An interactive web view wrote one of its own params — a bar was
+        clicked, a range was brushed. Re-run it and the visuals it feeds, so
+        clicking inside a chart filters the board the way a Slicer tick
+        does. The SetParamCommand already dirtied the subgraph; request_run
+        coalesces a burst (a drag across a chart) into one run."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or card_kind(node) != "webview":
+            return
+        self.engine.request_run([node_id, *self.graph.downstream(node_id)])
+
+    def _on_view_error(self, node_id: str, message: str) -> None:
+        """A page asked for something its node does not allow — an undeclared
+        param, a value of the wrong type. Reported rather than swallowed:
+        JavaScript inside a card has nowhere else to complain, and silence
+        here is the difference between a five-minute fix and an evening."""
+        node = self.graph.nodes.get(node_id)
+        self.show_status(
+            f"{node.label if node is not None else 'View'}: {message}", 8000)
 
     def _on_dashboard_sheet_edited(self, node_id: str) -> None:
         """A cell changed in a Table tile: re-run it and everything it feeds,

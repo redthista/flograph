@@ -218,6 +218,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     button_fired = Signal(str)          # node_id — an Action Button was clicked
     slicer_changed = Signal(str)        # node_id — a Slicer's selection changed
     control_changed = Signal(str)       # node_id — an input control was moved
+    view_changed = Signal(str)          # node_id — an interactive web view
+                                        # wrote one of its own params
+    view_error = Signal(str, str)       # node_id, message — a web view asked
+                                        # for something the node disallows
     frame_run_requested = Signal(str)   # frame_id — a frame's run glyph was clicked
     tables_kept = Signal(list)          # node_ids — Tables that kept their
                                         # contents as their input was cut

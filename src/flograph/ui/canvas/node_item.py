@@ -1693,6 +1693,11 @@ class NodeItem(QGraphicsObject):
         from ..inspector.plotly_view import PlotlyView
         widget = PlotlyView()
         widget.setContentsMargins(2, 2, 2, 2)
+        # A node that declares NODE["interactive"] gets a channel its page
+        # can write its own params through — see flograph.core.bridge.
+        from flograph.core import bridge as core_bridge
+        widget.set_interactive(core_bridge.is_interactive(self.node.spec))
+        widget.param_written.connect(self._on_view_param_written)
         self._plotly_widget = widget
         self._figure_placeholder = widget.placeholder
 
@@ -1700,6 +1705,21 @@ class NodeItem(QGraphicsObject):
         self._figure_proxy = proxy  # reuses the figure card's resize plumbing
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_figure_proxy()
+
+    def _on_view_param_written(self, name: str, payload: str) -> None:
+        """A page called flograph.set(...): vet it against this node's spec,
+        commit it, and re-run what follows.
+
+        The vetting lives in ui.web_bridge rather than in the view because
+        what a node allows is a question about the *node*, and the view only
+        knows it is showing HTML — and because a dashboard tile has to reach
+        the same verdict this card does.
+        """
+        from ..web_bridge import apply_write
+
+        scene = self.scene()
+        if scene is not None:
+            apply_write(scene, scene.graph, self.node, name, payload)
 
     def relayout_figures(self) -> None:
         """Re-arrange an already-shown list of figures against the node's
