@@ -191,3 +191,26 @@ class TestFrameToHtml:
         light = frame_to_html(pd.DataFrame({"a": [1, 5]}), rules)
         dark = frame_to_html(pd.DataFrame({"a": [1, 5]}), rules, paper=False)
         assert light != dark
+
+
+class TestFormatOnlyOnPaper:
+    """A rule that replaces the value with its format does so in the report
+    too — the page has to look like the card it came from."""
+
+    def test_a_bar_only_column_prints_the_bar_and_no_number(self):
+        frame = pd.DataFrame({"units": [412, 233]})
+        html = frame_to_html(frame, parse_rules("units bar blue only"))
+        assert "412" not in html and "233" not in html
+        assert "width=" in html          # the bar's track is still drawn
+
+    def test_an_icon_only_column_prints_the_icon_centred(self):
+        frame = pd.DataFrame({"sla": ["breach"], "flag": ["breach"]})
+        html = frame_to_html(
+            frame, parse_rules("flag iconmap only sla: breach=✗ red"))
+        assert "✗" in html and 'align="center"' in html
+        # the value is gone from the flag column, not from the table
+        assert html.count("breach") == 1
+
+    def test_without_only_the_value_still_prints(self):
+        frame = pd.DataFrame({"units": [412]})
+        assert "412" in frame_to_html(frame, parse_rules("units bar blue"))

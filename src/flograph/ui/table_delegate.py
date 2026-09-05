@@ -99,10 +99,15 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
             # an emoji is squarer and wider than the ✓ this cell was sized
             # for, and drawText clips to its rect, so measure rather than
             # assume — and give it the row's full height, not the inset
-            cell_w = max(_ICON_CELL_W, painter.fontMetrics().horizontalAdvance(glyph))
-            painter.drawText(
-                QRect(inner.left(), opt.rect.top(), cell_w, opt.rect.height()),
-                Qt.AlignVCenter | Qt.AlignHCenter, glyph)
+            cell_w = max(_ICON_CELL_W,
+                         painter.fontMetrics().horizontalAdvance(glyph))
+            # with no value beside it — an `only` rule — the icon *is* the
+            # column, so it sits in the middle of the cell rather than in a
+            # left margin holding nothing open
+            box = (opt.rect if not text
+                   else QRect(inner.left(), opt.rect.top(),
+                              cell_w, opt.rect.height()))
+            painter.drawText(box, Qt.AlignVCenter | Qt.AlignHCenter, glyph)
             painter.setFont(opt.font)
             text_rect = inner.adjusted(cell_w + _ICON_GAP, 0, 0, 0)
 

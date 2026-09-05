@@ -39,6 +39,11 @@ CONFIRM_ROWS = 50_000
 # long value or a long header from eating the whole viewport.
 MIN_COL_WIDTH = 52
 MAX_COL_WIDTH = 360
+#: A column drawn as a bar with its value hidden (`units bar blue only`)
+#: has no text to be sized from, and would otherwise fit to its header —
+#: leaving the bar, which is the entire point of the column, a few pixels
+#: long. Wide enough for the difference between two lengths to read.
+BAR_ONLY_WIDTH = 110
 # How many of the paged-in rows the content measure samples. The model is
 # lazy (500-row pages), and measuring every cell through the item delegate
 # costs ~190 ms for a wide frame — far too much to spend on every graph run
@@ -193,20 +198,25 @@ class DataTableView(QTableView):
         model = self.model()
         if model is None:
             return
-        from .table_delegate import ICON_ROLE
+        from .table_delegate import BAR_ROLE, ICON_ROLE
         header = self.horizontalHeader()
         metrics = QFontMetrics(self.font())
         rows = min(model.rowCount(), FIT_SAMPLE_ROWS)
         for col in range(model.columnCount()):
             width = header.sectionSizeHint(col)
             icon_pad = 0
+            bar_only = False
             for row in range(rows):
                 index = model.index(row, col)
                 text = model.data(index, Qt.DisplayRole)
                 if text:
                     width = max(width, metrics.horizontalAdvance(str(text)) + 16)
+                elif model.data(index, BAR_ROLE) is not None:
+                    bar_only = True
                 if not icon_pad and model.data(index, ICON_ROLE):
                     icon_pad = 24
+            if bar_only:
+                width = max(width, BAR_ONLY_WIDTH)
             self.setColumnWidth(
                 col, max(MIN_COL_WIDTH, min(width + icon_pad, MAX_COL_WIDTH)))
 

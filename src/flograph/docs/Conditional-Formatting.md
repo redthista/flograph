@@ -26,6 +26,7 @@ A rule is `columns  verb  argument`:
 | `… => row <colour>` | `status = fail => row red` | highlight the whole row |
 | `format` | `amount format $,.0f` | a Python / d3 number format for the column |
 | `hide` | `hide helper_col` | keep a column in the data (a rule can still read it) but out of the view |
+| `only` | `units bar blue only` | draw the format **instead of** the value — Power BI's "bar only" / "icon only" |
 
 Tests for a highlight: `> < >= <= = !=`, `between 10 20`, `contains`,
 `starts with`, `ends with`, `matches` (regex), `is empty`, `is not empty`.
@@ -43,6 +44,23 @@ the app hunts down a font that can draw it, so the same rules look the same on
 Windows, macOS and Linux. If one still shows as a blank space, the machine has
 no emoji font at all: install one (Noto Color Emoji, or Twemoji) and reopen the
 project.
+
+## Showing the format instead of the value
+
+Add **`only`** to a `scale`, `bar`, `icons` or `iconmap` rule and the cell
+draws the format on its own — no number, no text:
+
+```
+status  iconmap only sla: breach=🔥, ok=✅   # the icon is the column
+units   bar blue only                       # a bar chart down a column
+score   scale green only                    # a plain heatmap block
+```
+
+The value is only hidden, never lost: the column still **sorts** on it,
+**Ctrl+C** still copies it, and an export still writes it. It works at
+either end of the rule (`bar only blue`, `bar blue only`), a `by` clause and
+all — and a highlight takes it as a style word, so `score < 0 => bg red,
+only` blanks the failing cells and leaves the rest alone.
 
 ## Order of application
 

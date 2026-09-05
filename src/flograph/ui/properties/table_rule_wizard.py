@@ -89,6 +89,10 @@ def _pick_data(combo: QComboBox, token) -> None:
         combo.setCurrentIndex(index)
 
 
+def _only(box) -> str:
+    return " only" if box.isChecked() else ""
+
+
 def _cols_text(names) -> str:
     return ", ".join(quote_column(str(n).strip()) for n in names if str(n).strip())
 
@@ -311,6 +315,18 @@ class RuleBuilder(QDialog):
 
     # ---------------------------------------------------------- type pages
 
+    def _only_box(self, label: str) -> QCheckBox:
+        """The `only` modifier: draw the format instead of the value.
+
+        The value is still in the table — it sorts, copies and exports as
+        it always did — so the wording says *hide*, not *remove*.
+        """
+        box = QCheckBox(label)
+        box.setToolTip("The value is still there for sorting, copying and "
+                       "export — it just isn't shown.")
+        box.toggled.connect(self._refresh)
+        return box
+
     def _build_scale_page(self) -> None:
         page = QWidget()
         f = QFormLayout(page)
@@ -319,6 +335,8 @@ class RuleBuilder(QDialog):
         f.addRow("Colours", self._scale)
         self._scale_by = self._other_col_combo()
         f.addRow("Colour by", self._scale_by)
+        self._scale_only = self._only_box("colour only — hide the value")
+        f.addRow("", self._scale_only)
         self._stack.addWidget(page)
 
     def _build_bar_page(self) -> None:
@@ -329,6 +347,8 @@ class RuleBuilder(QDialog):
         f.addRow("Bar colour", self._bar)
         self._bar_by = self._other_col_combo()
         f.addRow("Size by", self._bar_by)
+        self._bar_only = self._only_box("bar only — hide the value")
+        f.addRow("", self._bar_only)
         self._stack.addWidget(page)
 
     def _build_highlight_page(self) -> None:
@@ -379,6 +399,8 @@ class RuleBuilder(QDialog):
         head.addRow("Style", self._icon_style)
         self._icon_by = self._other_col_combo()
         head.addRow("Decided by", self._icon_by)
+        self._icon_only = self._only_box("icon only — hide the value")
+        head.addRow("", self._icon_only)
         v.addLayout(head)
 
         # -- graduated set
@@ -522,6 +544,8 @@ class RuleBuilder(QDialog):
         self._kind.setCurrentIndex(_MODE_KIND.get(rule.mode, 0))
         self._on_kind()
         self._select_columns(rule.columns)
+        for box in (self._scale_only, self._bar_only, self._icon_only):
+            box.setChecked(bool(rule.hide_value))
         if rule.mode == "color_scale":
             _pick_data(self._scale, scale_token(rule.low, rule.mid, rule.high))
             self._set_other_col(self._scale_by, rule.source)
@@ -581,9 +605,11 @@ class RuleBuilder(QDialog):
         if not cols:
             return ""
         if kind == 0:
-            return f"{cols} scale {self._scale.currentData()}{self._by(self._scale_by)}"
+            return (f"{cols} scale {self._scale.currentData()}"
+                    f"{self._by(self._scale_by)}{_only(self._scale_only)}")
         if kind == 1:
-            return f"{cols} bar {self._bar.value()}{self._by(self._bar_by)}"
+            return (f"{cols} bar {self._bar.value()}"
+                    f"{self._by(self._bar_by)}{_only(self._bar_only)}")
         if kind == 2:
             op = self._op.currentData()
             words = {">": ">", ">=": ">=", "<": "<", "<=": "<=", "=": "=",
@@ -626,10 +652,15 @@ class RuleBuilder(QDialog):
                                  + ("" if colour == "(none)" else f" {colour}"))
                 if not source or not pairs:
                     return ""
-                return f"{cols} iconmap {source}: " + ", ".join(pairs)
+                # `only` leads here: a trailing one would be read as the
+                # last pair's colour
+                only = "only " if self._icon_only.isChecked() else ""
+                return (f"{cols} iconmap {only}{source}: "
+                        + ", ".join(pairs))
             rev = " reverse" if self._icon_reverse.isChecked() else ""
             by = f" by {quote_column(decider)}" if decider else ""
-            return f"{cols} icons {self._iconset.currentData()}{rev}{by}"
+            return (f"{cols} icons {self._iconset.currentData()}{rev}{by}"
+                    f"{_only(self._icon_only)}")
         if kind == 4:
             spec = self._numfmt.currentText().strip()
             return f"{cols} format {spec}" if spec else ""

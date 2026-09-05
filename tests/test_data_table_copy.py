@@ -326,3 +326,17 @@ class TestColumnFit:
         df = pd.DataFrame({"a_decidedly_long_header_that_needs_room": []})
         table.setModel(PandasModel(df, parent=table))
         assert table.columnWidth(0) > 100
+
+    def test_a_bar_only_column_is_wide_enough_to_read_the_bar(self, qtbot):
+        """`units bar blue only` leaves no text to fit to, and a column
+        sized to the header alone would make the bar — the entire content
+        of the column — a few pixels long."""
+        from flograph.core.table_format import parse_rules
+        from flograph.ui.data_table import BAR_ONLY_WIDTH
+
+        table = DataTableView()
+        qtbot.addWidget(table)
+        df = pd.DataFrame({"n": [1, 200]})
+        table.setModel(PandasModel(df, parent=table,
+                                   rules=parse_rules("n bar blue only")))
+        assert table.columnWidth(0) >= BAR_ONLY_WIDTH

@@ -260,6 +260,11 @@ class PandasModel(QAbstractTableModel):
         value = self._df.iat[index.row(), col]
         style = self._cell_style(index.row(), col) if self._cf_active else None
         if role == _DISPLAY:
+            if style is not None and style.hide_value:
+                # an `only` rule draws its format instead of the value. The
+                # value goes from the *display* and nowhere else: EditRole
+                # still answers, so copy, export and sort are untouched.
+                return ""
             if _is_missing(value):
                 return "NaN"
             if style is not None and style.text is not None:

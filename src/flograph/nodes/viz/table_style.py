@@ -19,6 +19,7 @@ status  = fail       => row red                 # highlight the whole row
 health               icons traffic              # 3-tier icon set
 amount               format $,.0f               # per-column number format
 growth iconmap sla: breach=✗ red, ok=✓ green    # icon decided by another column
+rating               icons traffic only         # the icon replaces the value
 hide sla                                        # keep a helper column out of view
 ```
 
@@ -34,6 +35,10 @@ product   icons traffic by score
 product   if revenue < 0 => bg red              # flag Product when revenue < 0
 product   if status = closed => row grey         # whole row, tested on status
 ```
+
+Any format rule can be drawn **instead of** the value by adding `only`
+(`units bar blue only`) — Power BI's "bar only" / "icon only". The value is
+hidden, not lost: the column still sorts, copies and exports on it.
 
 Colours are a preset name (`green`, `red`, `amber`, `blue`, `grey`) or a
 `#hex`. Scales: `green`, `blue`, `red`, `red-green`, `red-yellow-green`,

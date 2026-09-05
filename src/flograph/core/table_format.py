@@ -33,6 +33,16 @@ the style still lands in the column(s) named on the left::
     product   if revenue < 0 => bg red             # flag Product when revenue < 0
     product   if status = closed => row grey        # whole row, tested on status
 
+Any of ``scale`` / ``bar`` / ``icons`` / ``iconmap`` can draw its format
+**instead of** the value — Power BI's "bar only" / "icon only" — with a
+standalone ``only`` at either end of the argument. The value is still
+there: it sorts, copies and exports as it always did, it is just not
+displayed::
+
+    sla       iconmap only status: breach=🔥, ok=✅   # the icon is the column
+    units     bar blue only                          # a bar chart in a column
+    revenue   scale green only by margin             # a plain heatmap block
+
 A column name is matched exactly, unless it contains a glob metacharacter
 (``*``, ``?``, ``[``) — then it selects every matching column, so
 ``20* scale green`` heatmaps every year column and ``*_qty bar blue`` every
@@ -156,6 +166,10 @@ class Rule:
     mapping: Optional[dict] = None            # exact value -> [glyph, colour]
     # number_format
     number_spec: Optional[str] = None
+    #: draw the format *instead of* the value — Power BI's "icon only" /
+    #: "bar only". The cell keeps its value for copy, export and sort; only
+    #: the display of it goes.
+    hide_value: bool = False
 
     def to_dict(self) -> dict:
         out = {}
@@ -185,6 +199,7 @@ class CellStyle:
     icon: Optional[str] = None
     icon_color: Optional[str] = None
     text: Optional[str] = None                # DisplayRole override
+    hide_value: bool = False                  # show the format, not the value
 
     def over(self, base: Optional["CellStyle"]) -> "CellStyle":
         """`self` laid on top of `base` — self's set fields win."""
@@ -200,12 +215,13 @@ class CellStyle:
             icon=self.icon or base.icon,
             icon_color=self.icon_color or base.icon_color,
             text=self.text or base.text,
+            hide_value=self.hide_value or base.hide_value,
         )
 
     def is_empty(self) -> bool:
         return (self.bg is None and self.fg is None and not self.bold
                 and self.bar is None and self.icon is None
-                and self.text is None)
+                and self.text is None and not self.hide_value)
 
 
 @dataclass
@@ -477,6 +493,41 @@ def _split_by_clause(arg: str) -> tuple:
     return arg, None
 
 
+def _split_only(arg: str) -> tuple:
+    """Pull a standalone ``only`` off either end of a keyword argument.
+
+    Power BI calls it "Bar only" / "Icon only": draw the format *instead
+    of* the value. Both ends are accepted because both read naturally
+    depending on the rule — ``units bar blue only`` and ``growth iconmap
+    only sla: breach=🔥`` — and a trailing one has to come off before an
+    `iconmap` body is split on commas, where it would otherwise be read as
+    a colour name.
+    """
+    text = arg.strip()
+    low = text.lower()
+    if low == "only":
+        return "", True
+    if low.startswith("only "):
+        return text[5:].strip(), True
+    if low.endswith(" only"):
+        return text[:-5].strip(), True
+    return text, False
+
+
+def _split_modifiers(arg: str) -> tuple:
+    """`"green only by revenue"` → `("green", "revenue", True)`.
+
+    `only` is looked for on both sides of the `by` clause, because both
+    orders are things people write and neither is wrong. A column actually
+    named "only" survives — the search runs on the argument, never on the
+    name the clause hands back.
+    """
+    arg, only = _split_only(arg)
+    arg, source = _split_by_clause(arg)
+    arg, trailing = _split_only(arg)
+    return arg, source, only or trailing
+
+
 def _parse_icon_map(lineno: int, arg: str) -> tuple:
     """`"severity: high=▲ #d9534f, med=■ amber, low=▼ green"`
     → (source column, {value: [glyph, colour]})."""
@@ -532,24 +583,30 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
     arg = " ".join(tokens[kw_idx + 1:]).strip()
 
     if keyword == "iconmap":
+        # here the `only` comes off the whole argument: the mapping body is
+        # split on commas, and a trailing one left in place would be read
+        # as the last pair's colour
+        arg, only = _split_only(arg)
         source, mapping = _parse_icon_map(lineno, arg)
-        return Rule("icon_map", columns, source=source, mapping=mapping)
+        return Rule("icon_map", columns, source=source, mapping=mapping,
+                    hide_value=only)
     if keyword == "scale":
-        arg, source = _split_by_clause(arg)
+        arg, source, only = _split_modifiers(arg)
         preset = _SCALE_PRESETS.get(arg.lower().replace(" ", "-")
                                     or "red-yellow-green")
         if preset is None:
             raise ValueError(f"line {lineno}: unknown scale {arg!r} "
                              f"(try {', '.join(sorted(_SCALE_PRESETS))})")
-        return Rule("color_scale", columns,
-                    low=preset[0], mid=preset[1], high=preset[2], source=source)
+        return Rule("color_scale", columns, low=preset[0], mid=preset[1],
+                    high=preset[2], source=source, hide_value=only)
     if keyword == "bar":
-        arg, source = _split_by_clause(arg)
+        arg, source, only = _split_modifiers(arg)
         return Rule("data_bar", columns,
                     color=_BAR_PRESETS.get(arg.lower(), arg or _BAR_PRESETS["blue"]),
-                    negative_color=_BAR_NEGATIVE, source=source)
+                    negative_color=_BAR_NEGATIVE, source=source,
+                    hide_value=only)
     if keyword in ("icons", "icon"):
-        arg, source = _split_by_clause(arg)
+        arg, source, only = _split_modifiers(arg)
         reverse = False
         low = arg.lower()
         if low.endswith(" reverse") or low == "reverse":
@@ -559,7 +616,8 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         if key not in _ICON_SETS:
             raise ValueError(f"line {lineno}: unknown icon set {arg!r} "
                              f"(traffic, arrows, check)")
-        return Rule("icons", columns, icon_set=key, reverse=reverse, source=source)
+        return Rule("icons", columns, icon_set=key, reverse=reverse,
+                    source=source, hide_value=only)
     # format
     if not arg:
         raise ValueError(f"line {lineno}: 'format' needs a spec like ',.0f'")
@@ -603,11 +661,18 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
             out["scope"] = "row"
             if rest:
                 out["bg"] = _resolve_color(rest)
+        elif head == "only":
+            # the same modifier the format keywords take: show the styling,
+            # not the value. On its own it blanks the cell where the test
+            # passes, which is the honest reading of it.
+            out["hide_value"] = True
         else:
             raise ValueError(
                 f"line {lineno}: don't understand style {chunk!r} "
-                f"(use 'bg <colour>', 'fg <colour>', 'bold', 'row <colour>')")
-    if "bg" not in out and "fg" not in out and not out.get("bold"):
+                f"(use 'bg <colour>', 'fg <colour>', 'bold', 'row <colour>', "
+                f"'only')")
+    if ("bg" not in out and "fg" not in out
+            and not out.get("bold") and not out.get("hide_value")):
         raise ValueError(f"line {lineno}: no style after '=>'")
     return out
 
@@ -631,14 +696,16 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                 break
             return Rule("highlight", _column_list(left), scope=style["scope"],
                         op=op, value=value, source=tested, bg=style.get("bg"),
-                        fg=style.get("fg"), bold=bool(style.get("bold")))
+                        fg=style.get("fg"), bold=bool(style.get("bold")),
+                        hide_value=bool(style.get("hide_value")))
     # split "column op value": the column is everything up to the operator
     op, value, column = _split_condition(cond)
     if not column:
         raise ValueError(f"line {lineno}: no column in condition {cond!r}")
     return Rule("highlight", _column_list(column), scope=style["scope"],
                 op=op, value=value, bg=style.get("bg"), fg=style.get("fg"),
-                bold=bool(style.get("bold")))
+                bold=bool(style.get("bold")),
+                hide_value=bool(style.get("hide_value")))
 
 
 def _split_condition(cond: str) -> tuple:
@@ -743,10 +810,11 @@ def rule_summary(rule: Rule) -> str:
     """A one-line human description of a rule, for the manager's list."""
     cols = ", ".join(rule.columns) or "every column"
     by = f" (by {rule.source})" if rule.source else ""
+    only = ", value hidden" if rule.hide_value else ""
     if rule.mode == "color_scale":
-        return f"{cols}  ·  colour scale{by}"
+        return f"{cols}  ·  colour scale{by}{only}"
     if rule.mode == "data_bar":
-        return f"{cols}  ·  data bar{by}"
+        return f"{cols}  ·  data bar{by}{only}"
     if rule.mode == "highlight":
         where = "row" if rule.scope == "row" else "cell"
         test = f"{rule.source} " if rule.source else ""
@@ -756,9 +824,9 @@ def rule_summary(rule: Rule) -> str:
                 f"highlight the {where}")
     if rule.mode == "icons":
         rev = ", reversed" if rule.reverse else ""
-        return f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev}){by}"
+        return f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev}){by}{only}"
     if rule.mode == "icon_map":
-        return f"{cols}  ·  icon from “{rule.source}”"
+        return f"{cols}  ·  icon from “{rule.source}”{only}"
     if rule.mode == "number_format":
         return f"{cols}  ·  number format “{rule.number_spec}”"
     if rule.mode == "hide":
@@ -1075,6 +1143,10 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
 
         for i in range(n):
             if contrib[i] is not None:
+                # set once here rather than in every branch: `only` says
+                # what happens to the *value*, which no branch cares about
+                if rule.hide_value:
+                    contrib[i].hide_value = True
                 acc[i] = contrib[i].over(acc[i])
 
     return acc
@@ -1104,7 +1176,7 @@ def evaluate_rows(df, row_rules) -> list:
             continue
         style = CellStyle(bg=rule.bg,
                           fg=rule.fg or (readable_fg(rule.bg) if rule.bg else None),
-                          bold=rule.bold)
+                          bold=rule.bold, hide_value=rule.hide_value)
         for i, hit in enumerate(mask.tolist()):
             if hit:
                 acc[i] = style.over(acc[i])

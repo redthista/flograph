@@ -7,8 +7,8 @@ import pytest
 from flograph.core.table_format import (
     CellStyle, Rule, _column_list, column_matches, column_stats, evaluate_column,
     evaluate_rows, expand_columns, merge_styles, parse_op_value, parse_rules,
-    parse_rules_lenient, quote_column, readable_fg, rules_from_style,
-    style_payload, style_report, split_rules,
+    parse_rules_lenient, quote_column, readable_fg, rule_summary,
+    rules_from_style, style_payload, style_report, split_rules,
 )
 
 
@@ -457,3 +457,73 @@ class TestEvaluateRows:
 def test_readable_fg_light_vs_dark():
     assert readable_fg("#ffffff") == "#1b1c20"
     assert readable_fg("#000000") == "#e5e7eb"
+
+
+class TestFormatOnly:
+    """`only` — Power BI's "bar only" / "icon only": draw the format
+    instead of the value."""
+
+    def test_it_reads_at_either_end_of_the_argument(self):
+        trailing, leading = parse_rules("units bar blue only\nunits bar only blue")
+        assert trailing.hide_value and leading.hide_value
+        assert trailing.color == leading.color
+
+    def test_it_survives_a_by_clause(self):
+        (rule,) = parse_rules("product scale green only by revenue")
+        assert rule.hide_value and rule.source == "revenue"
+        assert rule.low is not None
+
+    def test_an_iconmap_takes_it_before_the_mapping(self):
+        (rule,) = parse_rules("flag iconmap only sla: breach=✗ red, ok=✓")
+        assert rule.hide_value
+        assert rule.source == "sla" and set(rule.mapping) == {"breach", "ok"}
+
+    def test_a_trailing_one_is_not_swallowed_as_a_colour(self):
+        """The mapping is split on commas, so a trailing `only` has to come
+        off before the last pair is read — or it becomes its colour."""
+        (rule,) = parse_rules("flag iconmap sla: breach=✗ red, ok=✓ only")
+        assert rule.hide_value and rule.mapping["ok"] == ["✓", None]
+
+    def test_an_icon_set_keeps_reverse(self):
+        (rule,) = parse_rules("score icons traffic reverse only")
+        assert rule.hide_value and rule.reverse and rule.icon_set == "traffic"
+
+    def test_a_rule_without_it_hides_nothing(self):
+        (rule,) = parse_rules("units bar blue")
+        assert rule.hide_value is False
+
+    def test_a_highlight_takes_it_as_a_style_token(self):
+        (rule,) = parse_rules("score >= 90 => bg green, only")
+        assert rule.hide_value and rule.bg is not None
+
+    def test_it_can_stand_alone_after_an_arrow(self):
+        (rule,) = parse_rules("score >= 90 => only")
+        assert rule.hide_value and rule.bg is None
+
+    def test_the_flag_reaches_the_evaluated_style(self):
+        s = pd.Series([1.0, 2.0])
+        rules = parse_rules("x bar blue only")
+        styles = evaluate_column(s, rules, column_stats(s))
+        assert all(style.hide_value for style in styles)
+
+    def test_a_row_highlight_carries_it(self):
+        df = pd.DataFrame({"status": ["closed"], "n": [1]})
+        _, row_rules = split_rules(parse_rules("status = closed => row grey, only"))
+        assert evaluate_rows(df, row_rules)[0].hide_value
+
+    def test_a_hiding_style_is_not_empty(self):
+        assert not CellStyle(hide_value=True).is_empty()
+
+    def test_it_merges_upwards(self):
+        merged = CellStyle(bold=True).over(CellStyle(hide_value=True))
+        assert merged.hide_value
+
+    def test_the_summary_says_so(self):
+        (rule,) = parse_rules("units bar blue only")
+        assert "value hidden" in rule_summary(rule)
+
+    def test_it_survives_the_style_port(self):
+        """Rules travel between nodes as dicts — a flag dropped there would
+        work on the card that owns the rule and nowhere else."""
+        payload = style_payload({"format_rules": "units bar blue only"})
+        assert [r.hide_value for r in rules_from_style(payload)] == [True]

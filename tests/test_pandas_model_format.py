@@ -155,3 +155,29 @@ def test_set_rules_swaps_formatting_live():
     assert _bg(model, 0, 0) == QColor("#5c2b2b")
     model.set_rules([])
     assert model._cf_active is False and _bg(model, 0, 0) is None
+
+
+class TestFormatOnly:
+    """`only` takes the value off the display and nowhere else."""
+
+    def _model(self, rules_text):
+        return PandasModel(pd.DataFrame({"units": [10, 20]}),
+                           rules=parse_rules(rules_text))
+
+    def test_the_display_goes_blank(self):
+        model = self._model("units bar blue only")
+        assert model.data(model.index(0, 0), Qt.DisplayRole) == ""
+
+    def test_the_value_is_still_there_to_copy(self):
+        """EditRole is what a copy or an export reads — hiding a value must
+        not quietly drop it out of the clipboard."""
+        model = self._model("units bar blue only")
+        assert str(model.data(model.index(0, 0), Qt.EditRole)) == "10"
+
+    def test_the_bar_is_still_drawn(self):
+        model = self._model("units bar blue only")
+        assert model.data(model.index(1, 0), BAR_ROLE) is not None
+
+    def test_without_only_the_value_shows(self):
+        model = self._model("units bar blue")
+        assert model.data(model.index(0, 0), Qt.DisplayRole) == "10"

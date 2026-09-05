@@ -295,3 +295,40 @@ def test_free_text_columns_when_none_known(qtbot):
     b._kind.setCurrentIndex(0)
     b._col_edit.setText("a, b")
     assert b.line() == "a, b scale green"
+
+
+class TestValueHidden:
+    """The `only` tickbox on the scale, bar and icon pages."""
+
+    def test_a_bar_only_rule_is_written(self, build):
+        b = build()
+        b._kind.setCurrentIndex(1)
+        _select(b, "units")
+        b._bar_only.setChecked(True)
+        assert b.line() == "units bar blue only"
+        assert _valid(b.line()).hide_value
+
+    def test_an_icon_map_puts_only_before_the_mapping(self, build):
+        """A trailing one would be read as the last pair's colour."""
+        b = build()
+        b._kind.setCurrentIndex(3)                # Icons
+        b._icon_style.setCurrentIndex(1)          # Map exact values to icons
+        _select(b, "units")
+        _pick_other(b._icon_by, "sla")
+        b._map.item(0, 0).setText("breach")
+        b._map.cellWidget(0, 1).setText("✗")
+        b._icon_only.setChecked(True)
+        assert b.line() == "units iconmap only sla: breach=✗"
+        assert _valid(b.line()).hide_value
+
+    def test_it_round_trips_through_the_builder(self, build):
+        rule = parse_rules("score icons traffic only")[0]
+        b = build(rule)
+        assert b._icon_only.isChecked()
+        assert b.line() == "score icons traffic only"
+
+    def test_an_ordinary_rule_leaves_it_off(self, build):
+        rule = parse_rules("units bar blue")[0]
+        b = build(rule)
+        assert not b._bar_only.isChecked()
+        assert b.line() == "units bar blue"

@@ -190,7 +190,8 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
     if style is not None and style.icon:
         colour = (f' style="color:{style.icon_color}"'
                   if style.icon_color else "")
-        text = f"<span{colour}>{_escape(style.icon)}</span> {text}"
+        glyph = f"<span{colour}>{_escape(style.icon)}</span>"
+        text = glyph if not text else f"{glyph} {text}"
     if style is not None and style.bar is not None:
         text = _bar(text, style, numeric, track, stacked)
         numeric = False       # the bar table fills the cell; don't re-align
@@ -203,7 +204,10 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
         if style.bold:
             css.append("font-weight:bold")
     attrs = f' style="{";".join(css)}"' if css else ""
-    align = ' align="right"' if numeric else ""
+    # an icon standing in for the value centres, the way the grid centres it
+    icon_only = style is not None and style.hide_value and style.icon
+    align = ' align="center"' if icon_only else (
+        ' align="right"' if numeric else "")
     return f"<td{align}{attrs}>{text}</td>"
 
 
@@ -276,6 +280,8 @@ def _track(cells) -> str:
 def _text(value, style: "CellStyle | None") -> str:
     """The cell's text: a `format` rule's version if there is one, else the
     report's ordinary scalar formatting. Missing values stay blank."""
+    if style is not None and style.hide_value:
+        return ""            # an `only` rule: the format stands in for it
     if style is not None and style.text is not None:
         return str(style.text)
     try:
