@@ -59,6 +59,12 @@ _PALETTES = {
     "mixed": ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#a855f7"],
 }
 
+#: The size the packing is laid out at when there is no box to measure
+#: (a report snapshot). It matches this node's default card size, so an
+#: unresized card is drawn 1:1; a constant rather than the width/height
+#: params, which are cosmetic and must not reach run().
+_NOMINAL = 460
+
 # Not an f-string — see the note in network_graph.py.
 _PAGE = """
 <style>
@@ -75,7 +81,7 @@ _PAGE = """
 </style>
 <svg id="pack"></svg>
 <script>
-  var TREE = /*TREE*/, RAMP = /*RAMP*/;
+  var TREE = /*TREE*/, RAMP = /*RAMP*/, NOMINAL = /*NOMINAL*/;
   var PICKED = /*PICKED*/, MODE = /*MODE*/, UNIT = /*UNIT*/;
 
   var svg = d3.select("#pack");
@@ -83,9 +89,19 @@ _PAGE = """
 
   function draw() {
     var box = document.getElementById("pack").getBoundingClientRect();
-    var size = Math.max(80, Math.min(box.width, box.height)) - 4;
+    // Fall back to a nominal size when there is no box to measure, which
+    // is what happens wherever the view is not on screen — a report taking
+    // its picture of the card. Laying out at the few pixels a zero box
+    // implies is not merely small: labels are only drawn where they fit
+    // their circle, so at that size nearly every one was dropped and the
+    // printed picture came out as bubbles with no names on them.
+    var live = box.width > 0 && box.height > 0;
+    var size = live ? Math.min(box.width, box.height) - 4 : NOMINAL;
+    // A viewBox rather than pixel width/height: the drawing then scales to
+    // whatever box it lands in, square in a square, letterboxed in a wide
+    // one — which is what circle packing wants either way.
     svg.attr("viewBox", "0 0 " + size + " " + size)
-       .attr("width", box.width).attr("height", box.height);
+       .attr("preserveAspectRatio", "xMidYMid meet");
     svg.selectAll("*").remove();
 
     var root = d3.hierarchy(TREE)
@@ -226,6 +242,7 @@ def run(ctx, table):
     page = (_PAGE
             .replace("/*TREE*/", json.dumps(root))
             .replace("/*RAMP*/", json.dumps(ramp))
+            .replace("/*NOMINAL*/", str(_NOMINAL))
             .replace("/*PICKED*/", json.dumps(picked))
             .replace("/*MODE*/", json.dumps(mode))
             .replace("/*UNIT*/", json.dumps(unit)))

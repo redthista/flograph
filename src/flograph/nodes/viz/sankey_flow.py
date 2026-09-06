@@ -115,7 +115,10 @@ _PAGE = """
         // final stage is the one you most want to read.
         left: 12, right: ORIENT === "vertical" ? 14 : 92,
         top: 14, bottom: ORIENT === "vertical" ? 40 : 14,
-        nodeGap: 10, nodeWidth: 14,
+        // A gap wide enough that two small stages landing beside each
+        // other keep their labels apart — the tail of a funnel is all
+        // small stages, and they collided.
+        nodeGap: 16, nodeWidth: 14,
         emphasis: {focus: "adjacency"},
         data: NODES.map(function (n) {
           var on = PICKED.indexOf(n.name) !== -1;
@@ -125,7 +128,12 @@ _PAGE = """
             borderWidth: on ? 2 : 0}};
         }),
         links: LINKS,
-        label: {color: "#cbd5e1", fontSize: 11},
+        // ECharts draws a stage's label beside it, which puts it straight
+        // on top of the bands flowing past. An outline in the background
+        // colour lifts it off them — the same trick the bubbles use — so a
+        // name stays readable wherever it happens to land.
+        label: {color: "#e2e8f0", fontSize: 11,
+                textBorderColor: "rgba(2,6,23,0.85)", textBorderWidth: 3},
         lineStyle: {color: "gradient", opacity: PICKED.length ? 0.25 : 0.45}
       }]
     });

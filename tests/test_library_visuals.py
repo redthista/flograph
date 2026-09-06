@@ -263,6 +263,20 @@ class TestTheyPrintIntoReports:
         # a resize lays out again rather than scaling the old drawing
         assert 'svg.removeAttribute("viewBox")' in out["html"]
 
+    def test_circle_pack_also_falls_back_to_a_nominal_size(
+            self, registry, libraries, sales):
+        """The same zero-sized box, with a subtler symptom: the packing was
+        laid out at the couple of pixels a zero box implies, and labels are
+        only drawn where they fit their circle — so nearly every one was
+        dropped and the printed bubbles came out with no names on them,
+        even though the circles themselves scaled up and looked right."""
+        _, out = run_node(registry, "flograph.viz.circle_pack",
+                          {"group_by": "region, city", "size_by": "amount"},
+                          table=sales)
+        assert "NOMINAL = 460" in out["html"]
+        assert "live ? Math.min(box.width, box.height) - 4 : NOMINAL" in \
+            out["html"]
+
     def test_the_network_keeps_a_picture_for_print(self, registry, libraries,
                                                    edges):
         """Cytoscape is canvas-only, so it cannot be made to print the way
