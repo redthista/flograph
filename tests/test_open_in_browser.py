@@ -162,6 +162,56 @@ class TestSlug:
         assert len(browser.slug("x" * 500)) == 60
 
 
+class TestItLeavesFlographIntact:
+    """A card reaches its web library through a file:// URL into the store,
+    which is right on the card and wrong the moment the page is handed to
+    another application: a browser will not fetch a script from a different
+    directory (Firefox refuses outright), and the tab came up blank."""
+
+    def _page(self, monkeypatch, tmp_path):
+        from tests.conftest import install_fake_weblib
+        install_fake_weblib(monkeypatch, tmp_path, "d3",
+                            source="window.D3_STUB = 1;")
+        from flograph import weblibs
+        return f"<html><head>{weblibs.markup('d3')}</head><body>x</body></html>"
+
+    def test_the_library_is_inlined_on_the_way_out(self, monkeypatch,
+                                                   tmp_path):
+        page = self._page(monkeypatch, tmp_path)
+        assert "file://" in page                    # what the card uses
+        out = browser.portable(page)
+        assert "file://" not in out
+        assert "window.D3_STUB = 1;" in out
+
+    def test_a_page_with_no_libraries_is_untouched(self):
+        page = "<html><body>plain</body></html>"
+        assert browser.portable(page) == page
+
+    def test_open_html_writes_the_portable_copy(self, monkeypatch, tmp_path,
+                                                tmp_pages, opened):
+        """The bug as the user met it: Open in Browser produced a blank
+        tab, because the file it wrote still pointed into the store."""
+        from pathlib import Path
+        page = self._page(monkeypatch, tmp_path)
+        written = browser.open_html(page, "View")
+        text = Path(written).read_text(encoding="utf-8")
+        assert "file://" not in text
+        assert "window.D3_STUB = 1;" in text
+
+    def test_a_refresh_stays_portable(self, monkeypatch, tmp_path, tmp_pages,
+                                      opened, window):
+        """The refresh path writes the file again on every run, so it has
+        to do the same thing or the tab goes blank on the next run."""
+        from pathlib import Path
+        page = self._page(monkeypatch, tmp_path)
+        node = add_web_node(window, label="Libbed", html=page)
+        browser.open_node(node, window.engine.cache.get(node.id))
+        written = browser.refresh_node(node, window.engine.cache.get(node.id))
+        text = Path(written).read_text(encoding="utf-8")
+        assert "file://" not in text
+        assert "window.D3_STUB = 1;" in text
+
+
 class TestHtmlFor:
     def test_nothing_cached_means_nothing_to_open(self, window):
         node = add_web_node(window, run=False)

@@ -76,6 +76,30 @@ def can_open(node, entry) -> bool:
     return html_for(node, entry) is not None
 
 
+def portable(html: str) -> str:
+    """A page that still works once it has left flograph.
+
+    A card loads its web library through a `file://` URL into the library
+    store, which is right for a card: the store is on the same machine,
+    Chromium is told to allow it, and a 3 MB library is not re-embedded on
+    every run. It is wrong the moment the page is handed to another
+    application. A browser opening a `file://` document will not fetch a
+    script from a different directory — Firefox refuses outright — so the
+    tab comes up blank with the library never loaded.
+
+    Everything that hands a page to the desktop goes through here, so the
+    file the user ends up looking at carries what it needs.
+    """
+    try:
+        from flograph import weblibs
+        return weblibs.inline_page(html)
+    except Exception:
+        # Inlining is an improvement, never a precondition: a page with no
+        # web libraries in it is returned unchanged anyway, and one we
+        # cannot read the store for is still better opened than not.
+        return html
+
+
 def open_html(html: str, name: str, token: str = "") -> str:
     """Write `html` where a browser can read it and ask the desktop to open
     it. Returns the path written.
@@ -89,7 +113,7 @@ def open_html(html: str, name: str, token: str = "") -> str:
 
     stem = slug(name)
     path = _tmp_dir() / f"{stem}-{token}.html" if token else _tmp_dir() / f"{stem}.html"
-    path.write_text(html, encoding="utf-8")
+    path.write_text(portable(html), encoding="utf-8")
     QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
     return str(path)
 
@@ -126,7 +150,9 @@ def refresh_node(node, entry) -> Optional[str]:
     if html is None:
         return None
     from pathlib import Path
-    Path(path).write_text(html, encoding="utf-8")
+    # Same treatment as the first open: the tab being refreshed is in a
+    # real browser, which cannot reach the library store from a temp file.
+    Path(path).write_text(portable(html), encoding="utf-8")
     return path
 
 

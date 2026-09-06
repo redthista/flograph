@@ -232,27 +232,36 @@ class TestTheyPrintIntoReports:
             _, out = run_node(registry, type_id, params, **inputs)
             assert "animation: false" in out["html"]
 
-    def test_echarts_is_given_a_size_and_then_scales(self, registry,
-                                                     libraries, funnel):
-        """The one that took longest to pin down. Everywhere a report takes
-        its picture, the view is never shown, so the container measures
-        **zero** — window.innerWidth, clientWidth, %, even vw/vh all come
-        back 0 — and ECharts draws nothing at all at 0x0. So it is handed an
-        explicit nominal size and the SVG is given a viewBox, which makes
-        the drawing independent of the box it lands in: card, resized card,
-        printed page and exported file all scale the same vector.
+    def test_echarts_fills_its_box_or_falls_back_to_a_nominal_size(
+            self, registry, libraries, funnel):
+        """Two situations, and getting either wrong is visible.
+
+        On a card or a dashboard tile the box has a real size, so the chart
+        is laid out to it and fills it — an earlier fix scaled a fixed-aspect
+        drawing instead and left a gap at the bottom of every tile that
+        wasn't the node's default shape.
+
+        Wherever a report takes its picture the view is never shown, so
+        every measurement comes back **zero** — innerWidth, clientWidth, %,
+        even vw/vh — and ECharts draws nothing at all at 0x0. There it falls
+        back to a nominal size and the SVG gets a viewBox so the drawing
+        scales like any other vector.
 
         The nominal size is a module constant, never the width/height
-        params — those are cosmetic, and run() reading them would leave a
-        resized card stuck at the size its cached output was drawn at
+        params: those are cosmetic, so a resized card never re-runs and the
+        cached page would be stuck at the size it was first drawn at
         (tests/test_stdlib_nodes.py holds that rule for every card node).
         """
         _, out = run_node(registry, "flograph.viz.sankey_flow",
                           {"source": "stage", "target": "next", "value": "n"},
                           table=funnel)
-        assert "width: NOMW, height: NOMH" in out["html"]
+        # a real box wins
+        assert "width: space ? space.width : NOMW" in out["html"]
+        # ...and only the fallback gets a viewBox
+        assert "if (room()) { return; }" in out["html"]
         assert 'setAttribute("viewBox"' in out["html"]
-        assert 'preserveAspectRatio", "xMidYMid meet"' in out["html"]
+        # a resize lays out again rather than scaling the old drawing
+        assert 'svg.removeAttribute("viewBox")' in out["html"]
 
     def test_the_network_keeps_a_picture_for_print(self, registry, libraries,
                                                    edges):

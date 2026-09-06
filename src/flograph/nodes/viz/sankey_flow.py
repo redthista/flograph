@@ -80,11 +80,24 @@ _PAGE = """
 
   var el = document.getElementById("chart");
 
+  function room() {
+    // The box this chart has to fill, or null when it has none. Every
+    // measurement comes back 0 wherever the view is not on screen — which
+    // is exactly how a report takes its picture of a card — and ECharts
+    // draws nothing at all at 0x0.
+    var w = el.clientWidth, h = el.clientHeight;
+    return (w > 0 && h > 0) ? {width: w, height: h} : null;
+  }
+
   // SVG, not canvas — a report photographs a card through printToPdf, and
   // Chromium's print rendering drops canvas content (the page's text comes
   // through and the chart is a blank rectangle). SVG survives it.
-  var chart = echarts.init(el, null,
-                           {renderer: "svg", width: NOMW, height: NOMH});
+  var space = room();
+  var chart = echarts.init(el, null, {
+    renderer: "svg",
+    width: space ? space.width : NOMW,
+    height: space ? space.height : NOMH
+  });
   function draw() {
     chart.setOption({
       backgroundColor: "transparent",
@@ -120,13 +133,12 @@ _PAGE = """
   }
 
   function rescale() {
-    // Drawn at a fixed nominal size, then scaled like any other vector.
-    // The container measures 0 wherever the view is not on screen — which
-    // is exactly how a report photographs a card — so a chart that sized
-    // itself from its box rendered nothing at all. A viewBox makes the
-    // drawing independent of the box it ends up in: the card, a resized
-    // card, a printed page and an exported file all scale the same SVG,
-    // and none of them needs this node to know the card's size.
+    // Only when there was no box to measure. The chart was then laid out
+    // at its nominal size, so give the SVG a viewBox and let it scale like
+    // any other vector — that is what makes a report's picture come out
+    // right. Where there *is* a box, ECharts has already filled it and a
+    // viewBox would letterbox the drawing inside its own tile.
+    if (room()) { return; }
     var svg = document.querySelector("#chart svg");
     if (!svg) { return; }
     svg.setAttribute("viewBox", "0 0 " + NOMW + " " + NOMH);
@@ -139,6 +151,18 @@ _PAGE = """
       svg.parentNode.style.height = "100%";
     }
   }
+
+  function fit() {
+    // The card or tile was resized: lay the chart out again at the new
+    // size rather than scaling the old drawing, so text stays the size it
+    // was designed at. Drops any viewBox left over from a nominal render.
+    var space = room();
+    if (!space) { return; }
+    var svg = document.querySelector("#chart svg");
+    if (svg) { svg.removeAttribute("viewBox"); }
+    chart.resize(space);
+  }
+  window.addEventListener("resize", fit);
   draw();
 
   if (MODE !== "nothing") {
