@@ -182,13 +182,21 @@ def _draw(names, periods, places, values, params, tok, colours, picked, mode):
 
     out = [svgplot.svg_open(_W, height)]
 
+    # Each heading has one slot, and eight quarters in the room four of them
+    # used is how a header comes out reading "2024 Q12024 Q2". Sized to the
+    # slot rather than fixed, and only shortened once shrinking has run out
+    # of room — the same trade the name gutter above makes.
+    room = max(24.0, (step if len(periods) > 1 else right - left) - 10.0)
+    widest = max((len(str(p)) for p in periods), default=1)
+    heading = max(13.0, min(25.0, room / max(1.0, widest * svgplot.GLYPH)))
+
     for index, period in enumerate(periods):
         x = left + step * index if len(periods) > 1 else (left + right) / 2
         out.append(
             f"<text x='{svgplot.num(x)}' y='{svgplot.num(top - 32)}' "
-            f"fill='{tok['muted']}' font-size='25' font-weight='600' "
-            f"text-anchor='middle'>"
-            f"{svgplot.escape(svgplot.shorten(str(period), 12))}</text>"
+            f"fill='{tok['muted']}' font-size='{svgplot.num(heading)}' "
+            f"font-weight='600' text-anchor='middle'>"
+            f"{svgplot.escape(svgplot.fit(str(period), room, heading))}</text>"
             f"<line x1='{svgplot.num(x)}' y1='{svgplot.num(top - 16)}' "
             f"x2='{svgplot.num(x)}' y2='{svgplot.num(bottom)}' "
             f"stroke='{tok['border']}' stroke-width='1.5'/>")

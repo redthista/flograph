@@ -1,0 +1,347 @@
+{
+  "flograph_version": "0.1.13",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "note_data",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          300
+        ],
+        "params": {
+          "text": "### The numbers\n\nEight quarters of revenue for five sales channels. Type over them and the whole story rewrites itself.",
+          "width": 400,
+          "height": 120
+        }
+      },
+      {
+        "id": "n01_sales",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          520
+        ],
+        "label": "Revenue by channel",
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"channel\", \"type\": \"text\"}, {\"name\": \"quarter\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"number\"}], \"rows\": [[\"Retail stores\", \"2024 Q1\", 412], [\"Retail stores\", \"2024 Q2\", 402], [\"Retail stores\", \"2024 Q3\", 396], [\"Retail stores\", \"2024 Q4\", 384], [\"Retail stores\", \"2025 Q1\", 371], [\"Retail stores\", \"2025 Q2\", 358], [\"Retail stores\", \"2025 Q3\", 349], [\"Retail stores\", \"2025 Q4\", 338], [\"Online\", \"2024 Q1\", 288], [\"Online\", \"2024 Q2\", 312], [\"Online\", \"2024 Q3\", 341], [\"Online\", \"2024 Q4\", 368], [\"Online\", \"2025 Q1\", 395], [\"Online\", \"2025 Q2\", 421], [\"Online\", \"2025 Q3\", 452], [\"Online\", \"2025 Q4\", 486], [\"Wholesale\", \"2024 Q1\", 224], [\"Wholesale\", \"2024 Q2\", 228], [\"Wholesale\", \"2024 Q3\", 226], [\"Wholesale\", \"2024 Q4\", 231], [\"Wholesale\", \"2025 Q1\", 229], [\"Wholesale\", \"2025 Q2\", 234], [\"Wholesale\", \"2025 Q3\", 232], [\"Wholesale\", \"2025 Q4\", 236], [\"Trade counter\", \"2024 Q1\", 148], [\"Trade counter\", \"2024 Q2\", 143], [\"Trade counter\", \"2024 Q3\", 139], [\"Trade counter\", \"2024 Q4\", 132], [\"Trade counter\", \"2025 Q1\", 128], [\"Trade counter\", \"2025 Q2\", 121], [\"Trade counter\", \"2025 Q3\", 117], [\"Trade counter\", \"2025 Q4\", 112], [\"Marketplace\", \"2024 Q1\", 62], [\"Marketplace\", \"2024 Q2\", 78], [\"Marketplace\", \"2024 Q3\", 99], [\"Marketplace\", \"2024 Q4\", 136], [\"Marketplace\", \"2025 Q1\", 168], [\"Marketplace\", \"2025 Q2\", 197], [\"Marketplace\", \"2025 Q3\", 224], [\"Marketplace\", \"2025 Q4\", 252]]}",
+          "width": 440,
+          "height": 420
+        }
+      },
+      {
+        "id": "n02_style",
+        "type": "flograph.viz.visual_style",
+        "pos": [
+          680,
+          580
+        ],
+        "label": "House style",
+        "params": {
+          "theme": "dark",
+          "palette": "cool",
+          "radius": "14",
+          "heading_weight": "700"
+        }
+      },
+      {
+        "id": "n03_now",
+        "type": "flograph.transform.filter_rows",
+        "pos": [
+          680,
+          800
+        ],
+        "label": "The last quarter",
+        "params": {
+          "query": "quarter == '2025 Q4'"
+        }
+      },
+      {
+        "id": "note_charts",
+        "type": "flograph.util.note",
+        "pos": [
+          980,
+          -240
+        ],
+        "params": {
+          "text": "### Three ways to look\n\nEach one answers a different question about the same eight quarters. Together they are the story.",
+          "width": 400,
+          "height": 140
+        }
+      },
+      {
+        "id": "n04_slope",
+        "type": "flograph.viz.slope_chart",
+        "pos": [
+          980,
+          0
+        ],
+        "label": "How much changed",
+        "params": {
+          "label_column": "channel",
+          "period_column": "quarter",
+          "value_column": "revenue",
+          "title": "Revenue by channel",
+          "subtitle": "2024 Q1 against 2025 Q4, \u00a3000",
+          "width": 480,
+          "height": 380
+        }
+      },
+      {
+        "id": "n05_bump",
+        "type": "flograph.viz.bump_chart",
+        "pos": [
+          980,
+          540
+        ],
+        "label": "Who is ahead",
+        "params": {
+          "label_column": "channel",
+          "period_column": "quarter",
+          "value_column": "revenue",
+          "title": "Place by quarter",
+          "subtitle": "1 is the largest channel",
+          "width": 480,
+          "height": 380
+        }
+      },
+      {
+        "id": "n06_waffle",
+        "type": "flograph.viz.waffle",
+        "pos": [
+          980,
+          1080
+        ],
+        "label": "What it is made of",
+        "params": {
+          "label_column": "channel",
+          "value_column": "revenue",
+          "title": "Share of the last quarter",
+          "subtitle": "2025 Q4",
+          "cells": 100,
+          "across": 10,
+          "width": 480,
+          "height": 380
+        }
+      },
+      {
+        "id": "note_story",
+        "type": "flograph.util.note",
+        "pos": [
+          1700,
+          160
+        ],
+        "params": {
+          "text": "### The story\n\nScroll the card. The words move and the picture keeps up. On paper the same node is an illustrated article instead.",
+          "width": 420,
+          "height": 140
+        }
+      },
+      {
+        "id": "n07_story",
+        "type": "flograph.viz.story",
+        "pos": [
+          1700,
+          400
+        ],
+        "label": "Two years at Northwind",
+        "params": {
+          "title": "Two years at Northwind",
+          "subtitle": "The order the channels come in changed twice, and almost nobody noticed either one.",
+          "steps": "# Two years, five channels\nEvery channel Northwind sells through started somewhere and ended\nsomewhere else. The slope draws the change itself, so the ones going the\nwrong way are the ones tilting down.\n\n---\n\n**Online nearly doubled** while the stores slid quietly for eight quarters\nrunning. Nothing here is a cliff \u2014 which is exactly why it took two years\nto notice.\n\n---\n\n@scene 2\n## The order changed twice\nRanking each quarter on its own turns the same numbers into a race, and an\novertake becomes a crossing you cannot miss.\n\nMarketplace passed the trade counter in 2024 Q4. Online passed the stores\none quarter later.\n\n---\n\nNobody left and nobody arrived. The whole story is five lines swapping\nplaces \u2014 which a chart of the revenue itself would have buried, because\nevery one of these lines is still growing or shrinking gently.\n\n---\n\n@scene 3\n## What the book looks like now\nA hundred squares, shared out by the last quarter alone. Online is most of\na third of it; the trade counter is now the rounding error the stores used\nto treat it as.\n",
+          "prose_side": "left",
+          "prose_width": 38,
+          "transition": "fade",
+          "progress": true,
+          "width": 820,
+          "height": 620
+        }
+      }
+    ],
+    "connections": [
+      {
+        "id": "c01",
+        "src": [
+          "n01_sales",
+          "table"
+        ],
+        "dst": [
+          "n04_slope",
+          "table"
+        ]
+      },
+      {
+        "id": "c02",
+        "src": [
+          "n01_sales",
+          "table"
+        ],
+        "dst": [
+          "n05_bump",
+          "table"
+        ]
+      },
+      {
+        "id": "c03",
+        "src": [
+          "n01_sales",
+          "table"
+        ],
+        "dst": [
+          "n03_now",
+          "table"
+        ]
+      },
+      {
+        "id": "c04",
+        "src": [
+          "n03_now",
+          "filtered"
+        ],
+        "dst": [
+          "n06_waffle",
+          "table"
+        ]
+      },
+      {
+        "id": "c05",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n04_slope",
+          "style"
+        ]
+      },
+      {
+        "id": "c06",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n05_bump",
+          "style"
+        ]
+      },
+      {
+        "id": "c07",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n06_waffle",
+          "style"
+        ]
+      },
+      {
+        "id": "c08",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n07_story",
+          "style"
+        ]
+      },
+      {
+        "id": "c09",
+        "src": [
+          "n04_slope",
+          "html"
+        ],
+        "dst": [
+          "n07_story",
+          "scene1"
+        ]
+      },
+      {
+        "id": "c10",
+        "src": [
+          "n05_bump",
+          "html"
+        ],
+        "dst": [
+          "n07_story",
+          "scene2"
+        ]
+      },
+      {
+        "id": "c11",
+        "src": [
+          "n06_waffle",
+          "html"
+        ],
+        "dst": [
+          "n07_story",
+          "scene3"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f01",
+        "title": "The numbers",
+        "rect": [
+          -40,
+          440,
+          520,
+          520
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "f02",
+        "title": "Three ways to look",
+        "rect": [
+          940,
+          -80,
+          560,
+          1560
+        ],
+        "color": "#2f5d50"
+      },
+      {
+        "id": "f03",
+        "title": "The story",
+        "rect": [
+          1660,
+          320,
+          900,
+          720
+        ],
+        "color": "#5b3f6e"
+      }
+    ],
+    "pages": [
+      {
+        "id": "p01",
+        "title": "The story",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t01",
+            "node": "n07_story",
+            "port": "html",
+            "rect": [
+              40,
+              40,
+              1200,
+              800
+            ]
+          }
+        ]
+      },
+      {
+        "id": "p02",
+        "title": "On paper",
+        "kind": "report",
+        "body": "# Two years at Northwind\n\nA story is a scroll and a page is a rectangle, so there is nothing to\nfreeze one into. What the Story node does instead is more useful:\nunderneath the scrolling it **is** an illustrated article \u2014 a picture,\nthen the steps that talk about it \u2014 and that is what prints here.\n\nGive the embed a generous `height=`, because a report shows the top of the\ncard's box and a story squeezed into 300px is a headline and one chart.\n\n![[Two years at Northwind|width=100%|height=1500|radius=12]]\n\n## The charts on their own\n\nThe same three visuals the story is built from, each still a node you can\nput anywhere else.\n\n![[How much changed|width=100%|radius=12]]\n\n![[Who is ahead|width=100%|radius=12]]\n\n![[What it is made of|width=100%|radius=12]]\n"
+      }
+    ]
+  }
+}

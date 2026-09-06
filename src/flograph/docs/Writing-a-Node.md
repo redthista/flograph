@@ -309,6 +309,35 @@ become the word "nan". **Waffle**, **Slope Chart**, **Bump Chart** and
 **Tile Map** are the worked versions — example 26 wires all four to one
 Visual Style node.
 
+### Taking somebody else's page as an input
+
+A visual's `html` output is a **whole document** — its own `:root`
+variables, its own `body` rules — so a node that shows several of them at
+once cannot paste them together. The **Story** node takes up to six on
+`scene1`…`scene6` and seals each in an `<iframe srcdoc>`, which is the only
+container that keeps six pages from treading on each other. It buys
+something better than isolation too: an iframe **is a viewport**, so a
+scene written against `100vh` fills the pane it is given rather than the
+window it cannot see.
+
+`flograph.core.story` is the model under it, and the pattern it uses is
+worth stealing for anything that behaves differently on a screen and on
+paper:
+
+- **The markup is the fallback, and the script is the upgrade.** What the
+  node writes is an ordinary illustrated article that reads top to bottom
+  with no JavaScript at all. A few lines of script then move the scenes
+  into a sticky pane and add one class, and the same document is a
+  scrolling story. Nothing is written twice, and the paper version is not a
+  degraded mode somebody had to design separately.
+- **`window.innerHeight` says which one you are in.** A report snapshot
+  lays the page out in a view that was never shown, where the viewport
+  measures **zero** — the same zero that makes a self-fitting page
+  impossible there. So the script checks it and returns, leaving the
+  article alone. The trap is the switch.
+
+Example 27 is the worked version.
+
 ## Where nodes live
 
 - **Builtin:** `src/flograph/nodes/<category>/<name>.py` (from a checkout).

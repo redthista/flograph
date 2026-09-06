@@ -311,6 +311,30 @@ class TestSlopeChart:
 
 class TestBumpChart:
 
+    def test_crowded_period_headings_shrink_to_their_slot(self, registry):
+        """Eight long periods in the room four short ones used is how a
+        header comes out reading "2024 Q12024 Q2"."""
+        rows = [{"team": name, "when": f"2024 Q{n}", "score": n * 10 + place}
+                for place, name in enumerate(["Retail stores",
+                                              "Trade counter"])
+                for n in range(1, 9)]
+        _, out = run_node(registry, "flograph.viz.bump_chart",
+                          {"label_column": "team", "period_column": "when",
+                           "value_column": "score"},
+                          table=pd.DataFrame(rows))
+        sizes = {float(size) for size in
+                 re.findall(r"font-size='([\d.]+)' font-weight='600'",
+                            out["html"])}
+        assert sizes and max(sizes) < 25.0
+        assert "2024 Q1" in out["html"]      # shrunk, not truncated
+
+    def test_a_few_periods_keep_the_full_size(self, registry, seasons):
+        _, out = run_node(registry, "flograph.viz.bump_chart",
+                          {"label_column": "brand", "period_column": "month",
+                           "value_column": "share"},
+                          table=seasons)
+        assert "font-size='25' font-weight='600'" in out["html"]
+
     def test_it_plots_places_not_values(self, registry, seasons):
         _, out = run_node(registry, "flograph.viz.bump_chart",
                           {"label_column": "brand", "period_column": "month",
