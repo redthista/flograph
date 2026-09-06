@@ -18,13 +18,27 @@ because they share the name `screened`. That is also the one thing to get
 right: **stage names must match exactly**, and a name that appears on both
 sides of the same row (`a → a`) is dropped, because a loop has no width.
 
+**One shared ending makes a messy picture.** If every stage drops out into
+a single `rejected`, that node lands in the final column and each stage
+drags a band across the whole diagram to reach it — correct, and hard to
+read. Give each stage its own ending (`screened out`, `not progressed`,
+`no offer`) and the crossings go away; you also get to see *where* people
+left, which was the question.
+
+**Stage placement** decides which column a stage sits in when it could sit
+in several. `even` spreads them across the width (the usual choice).
+`early` puts each one as soon as it can go, which is what makes a funnel
+look like a funnel — a stage's drop-out sits beside the stage it left
+rather than at the far edge. `late` pushes everything as far right as it
+will go.
+
 **Click a band or a stage** to filter: the name goes to **selected** and
 **table** narrows to the rows touching it.
 """
 NODE = {
     "label": "Sankey Flow",
     "category": "Viz",
-    "version": "1.1",
+    "version": "1.2",
     "card": "webview",
     "interactive": True,
     "inputs": [("table", "dataframe")],
@@ -41,6 +55,8 @@ PARAMS = [
     {"name": "orient", "type": "choice", "label": "Direction",
      "options": ["left to right", "top to bottom"],
      "default": "left to right"},
+    {"name": "align", "type": "choice", "label": "Stage placement",
+     "options": ["even", "early", "late"], "default": "even"},
     {"name": "on_click", "type": "choice", "label": "On click",
      "options": ["nothing", "select one", "select many"],
      "default": "select one"},
@@ -75,6 +91,7 @@ _PAGE = """
 <div id="chart"></div>
 <script>
   var NODES = /*NODES*/, LINKS = /*LINKS*/, ORIENT = /*ORIENT*/;
+  var ALIGN = /*ALIGN*/;
   var NOMW = /*NOMW*/, NOMH = /*NOMH*/;
   var PICKED = /*PICKED*/, MODE = /*MODE*/;
 
@@ -109,7 +126,7 @@ _PAGE = """
       animation: false,
       tooltip: {trigger: "item", triggerOn: "mousemove"},
       series: [{
-        type: "sankey", orient: ORIENT,
+        type: "sankey", orient: ORIENT, nodeAlign: ALIGN,
         // Room for the last column's labels, which ECharts draws *outside*
         // the node — with an even margin they run off the edge and the
         // final stage is the one you most want to read.
@@ -269,10 +286,18 @@ def run(ctx, table):
     orient = ("vertical"
               if str(params.get("orient", "")) == "top to bottom"
               else "horizontal")
+    # ECharts' nodeAlign, named for what it does to the picture rather than
+    # for the library's word. "early" is what makes a funnel look like a
+    # funnel: a stage's drop-out sits beside the stage it left, instead of
+    # being parked in the final column with a band dragged across the whole
+    # diagram to reach it.
+    align = {"early": "left", "late": "right"}.get(
+        str(params.get("align", "even")), "justify")
     page = (_PAGE
             .replace("/*NODES*/", json.dumps(nodes))
             .replace("/*LINKS*/", json.dumps(links))
             .replace("/*ORIENT*/", json.dumps(orient))
+            .replace("/*ALIGN*/", json.dumps(align))
             .replace("/*PICKED*/", json.dumps(picked))
             .replace("/*MODE*/", json.dumps(mode))
             .replace("/*NOMW*/", str(_NOMINAL[0]))

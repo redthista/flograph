@@ -489,6 +489,21 @@ class TestSankeyFlow:
                            "selected": '["screened"]'}, table=funnel)
         assert len(out["table"]) == 3        # one in, two out
 
+    @pytest.mark.parametrize("asked,echarts", [
+        ("even", "justify"), ("early", "left"), ("late", "right"),
+        ("", "justify"),
+    ])
+    def test_stage_placement_maps_to_echarts(self, registry, libraries,
+                                             funnel, asked, echarts):
+        """Which column a stage sits in when it could sit in several.
+        `early` is what makes a funnel look like a funnel: a stage's
+        drop-out sits beside the stage it left rather than being parked in
+        the final column with a band dragged across the whole diagram."""
+        _, out = run_node(registry, self.TYPE,
+                          {"source": "stage", "target": "next",
+                           "value": "n", "align": asked}, table=funnel)
+        assert f'ALIGN = "{echarts}"' in out["html"]
+
     def test_no_positive_flows_is_an_error(self, registry, libraries):
         nothing = pd.DataFrame({"a": ["x"], "b": ["x"], "n": [1]})
         with pytest.raises(ValueError, match="no flows"):

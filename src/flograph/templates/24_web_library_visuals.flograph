@@ -140,7 +140,7 @@
           1560
         ],
         "params": {
-          "data": "{\"version\": 2, \"columns\": [{\"name\": \"stage\", \"type\": \"text\"}, {\"name\": \"next\", \"type\": \"text\"}, {\"name\": \"people\", \"type\": \"integer\"}], \"rows\": [[\"applied\", \"screened\", 420], [\"applied\", \"rejected\", 780], [\"screened\", \"interview\", 180], [\"screened\", \"rejected\", 240], [\"interview\", \"onsite\", 74], [\"interview\", \"rejected\", 106], [\"onsite\", \"offer\", 31], [\"onsite\", \"rejected\", 43], [\"offer\", \"accepted\", 22], [\"offer\", \"declined\", 9]]}",
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"stage\", \"type\": \"text\"}, {\"name\": \"next\", \"type\": \"text\"}, {\"name\": \"people\", \"type\": \"integer\"}], \"rows\": [[\"applied\", \"screened\", 420], [\"applied\", \"no CV match\", 780], [\"screened\", \"interview\", 180], [\"screened\", \"screened out\", 240], [\"interview\", \"onsite\", 74], [\"interview\", \"not progressed\", 106], [\"onsite\", \"offer\", 31], [\"onsite\", \"no offer\", 43], [\"offer\", \"accepted\", 22], [\"offer\", \"declined\", 9]]}",
           "width": 360,
           "height": 260
         },
@@ -158,6 +158,7 @@
           "source": "stage",
           "target": "next",
           "value": "people",
+          "align": "early",
           "on_click": "select one",
           "width": 560,
           "height": 380
