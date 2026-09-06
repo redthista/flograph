@@ -1,6 +1,6 @@
 """Runs flograph.ai.suggest_node_update() off the Qt thread.
 
-A synchronous HTTP call to a local LLM can take several seconds; doing it
+A synchronous HTTP call to an AI server can take several seconds; doing it
 on the UI thread would freeze the app. Mirrors the JediWorker/
 CompletionController pattern in completion.py: a QObject worker moved to a
 dedicated QThread, owned by a controller parented to the editor.

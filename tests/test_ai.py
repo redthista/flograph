@@ -223,3 +223,211 @@ class TestSuggestNodeUpdate:
         self._mock_reply(monkeypatch, "this is not a node script at all")
         with pytest.raises(ai.LLMError, match="node contract"):
             ai.suggest_node_update(VALID_NODE, "break it")
+
+
+class _Reply:
+    """A response with a body, so error paths can be checked too."""
+
+    def __init__(self, payload=None, status=200, text=""):
+        self._payload = payload
+        self.status_code = status
+        self.text = text or ""
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"http {self.status_code}")
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+def _record_posts(monkeypatch, replies):
+    """Patch requests.post with a scripted list of replies; return the log."""
+    import requests
+
+    calls = []
+    queue = list(replies)
+
+    def fake_post(url, headers=None, json=None, timeout=None, verify=None):
+        calls.append({"url": url, "headers": headers, "json": json})
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    return calls
+
+
+class TestAnthropicFormat:
+    """A work gateway may speak /messages, and GET /models looks identical
+    either way — so listing models can succeed while chat 404s."""
+
+    def _config(self):
+        return ai.LLMConfig(
+            base_url="https://gw.corp/v1", model="claude-x",
+            api_key="secret", provider="anthropic")
+
+    def test_posts_messages_endpoint_with_api_key_header(self, monkeypatch):
+        calls = _record_posts(
+            monkeypatch, [_Reply({"content": [{"type": "text", "text": "hi"}]})])
+
+        result = ai.chat_completion(
+            [{"role": "system", "content": "sys"},
+             {"role": "user", "content": "ask"}], self._config())
+
+        assert result == "hi"
+        assert calls[0]["url"] == "https://gw.corp/v1/messages"
+        assert calls[0]["headers"]["x-api-key"] == "secret"
+        assert "Authorization" not in calls[0]["headers"]
+        assert calls[0]["headers"]["anthropic-version"]
+        # system prompt is a top-level field, not a message, in this format
+        assert calls[0]["json"]["system"] == "sys"
+        assert calls[0]["json"]["messages"] == [{"role": "user", "content": "ask"}]
+        assert calls[0]["json"]["max_tokens"] == ai.DEFAULT_MAX_TOKENS
+
+
+class TestEndpointShapes:
+    def test_full_chat_url_in_base_is_not_doubled(self, monkeypatch):
+        calls = _record_posts(
+            monkeypatch, [_Reply({"choices": [{"message": {"content": "ok"}}]})])
+
+        ai.chat_completion(
+            [{"role": "user", "content": "hi"}],
+            ai.LLMConfig(base_url="https://gw.corp/v1/chat/completions"))
+
+        assert calls[0]["url"] == "https://gw.corp/v1/chat/completions"
+
+    def test_query_string_stays_at_the_end(self, monkeypatch):
+        """Some gateways require ?api-version= on every call; it must not
+        end up in the middle of the path."""
+        calls = _record_posts(
+            monkeypatch, [_Reply({"choices": [{"message": {"content": "ok"}}]})])
+
+        ai.chat_completion(
+            [{"role": "user", "content": "hi"}],
+            ai.LLMConfig(base_url="https://x.example.com/openai/deployments/"
+                                  "gpt4/chat/completions?api-version=2026-01-01"))
+
+        assert calls[0]["url"] == (
+            "https://x.example.com/openai/deployments/gpt4/chat/completions"
+            "?api-version=2026-01-01")
+
+    def test_404_falls_back_to_versioned_path(self, monkeypatch):
+        calls = _record_posts(monkeypatch, [
+            _Reply(status=404, text="not found"),
+            _Reply({"choices": [{"message": {"content": "ok"}}]}),
+        ])
+
+        result = ai.chat_completion(
+            [{"role": "user", "content": "hi"}],
+            ai.LLMConfig(base_url="https://gw.corp"))
+
+        assert result == "ok"
+        assert [call["url"] for call in calls] == [
+            "https://gw.corp/chat/completions",
+            "https://gw.corp/v1/chat/completions",
+        ]
+
+
+class TestErrorReporting:
+    def test_server_explanation_is_in_the_message(self, monkeypatch):
+        _record_posts(monkeypatch, [_Reply(
+            status=400,
+            text='{"error": {"message": "model not deployed here"}}')])
+
+        with pytest.raises(ai.LLMError) as excinfo:
+            ai.chat_completion([{"role": "user", "content": "hi"}])
+
+        message = str(excinfo.value)
+        assert "400" in message
+        assert "model not deployed here" in message
+
+    def test_401_suggests_key_and_format(self, monkeypatch):
+        _record_posts(monkeypatch, [_Reply(status=401, text="unauthorized")])
+
+        with pytest.raises(ai.LLMError, match="API key"):
+            ai.chat_completion([{"role": "user", "content": "hi"}])
+
+    def test_400_is_not_retried_at_the_other_url(self, monkeypatch):
+        calls = _record_posts(monkeypatch, [_Reply(status=400, text="bad")])
+
+        with pytest.raises(ai.LLMError):
+            ai.chat_completion([{"role": "user", "content": "hi"}],
+                               ai.LLMConfig(base_url="https://gw.corp"))
+
+        assert len(calls) == 1
+
+
+class TestParameterClimbDown:
+    """Hosted models reject parts of the request other servers require;
+    the server names the parameter, so drop that one and retry."""
+
+    def test_rejected_temperature_is_dropped(self, monkeypatch):
+        calls = _record_posts(monkeypatch, [
+            _Reply(status=400, text="Unsupported value: 'temperature' "
+                                    "does not support 0.2"),
+            _Reply({"choices": [{"message": {"content": "ok"}}]}),
+        ])
+
+        assert ai.chat_completion([{"role": "user", "content": "hi"}]) == "ok"
+        assert "temperature" in calls[0]["json"]
+        assert "temperature" not in calls[1]["json"]
+
+    def test_max_tokens_is_renamed_when_asked(self, monkeypatch):
+        calls = _record_posts(monkeypatch, [
+            _Reply(status=400, text="Use 'max_completion_tokens' instead"),
+            _Reply({"choices": [{"message": {"content": "ok"}}]}),
+        ])
+
+        assert ai.chat_completion([{"role": "user", "content": "hi"}]) == "ok"
+        assert calls[1]["json"]["max_completion_tokens"] == ai.DEFAULT_MAX_TOKENS
+        assert "max_tokens" not in calls[1]["json"]
+
+    def test_unrelated_400_is_not_retried_forever(self, monkeypatch):
+        calls = _record_posts(
+            monkeypatch, [_Reply(status=400, text="model does not exist")])
+
+        with pytest.raises(ai.LLMError, match="model does not exist"):
+            ai.chat_completion([{"role": "user", "content": "hi"}])
+
+        assert len(calls) == 1
+
+
+class TestReplyShapes:
+    def test_content_parts_list_is_joined(self, monkeypatch):
+        _record_posts(monkeypatch, [_Reply(
+            {"choices": [{"message": {"content": [
+                {"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}}]})])
+
+        assert ai.chat_completion([{"role": "user", "content": "hi"}]) == "ab"
+
+    def test_empty_reply_names_the_finish_reason(self, monkeypatch):
+        _record_posts(monkeypatch, [_Reply(
+            {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]})])
+
+        with pytest.raises(ai.LLMError, match="length"):
+            ai.chat_completion([{"role": "user", "content": "hi"}])
+
+
+class TestCodeExtraction:
+    def _reply(self, monkeypatch, content):
+        _record_posts(
+            monkeypatch, [_Reply({"choices": [{"message": {"content": content}}]})])
+
+    def test_prose_around_the_fence_is_dropped(self, monkeypatch):
+        self._reply(monkeypatch,
+                    f"Sure! Here you go:\n\n```python\n{VALID_NODE}```\n\nHope that helps.")
+
+        code = ai.suggest_node_update("old", "do it")
+
+        assert code.startswith('"""Format Date')
+        assert "Hope that helps" not in code
+
+    def test_reasoning_block_is_dropped(self, monkeypatch):
+        self._reply(monkeypatch,
+                    f"<think>The user wants ```python fenced``` code</think>\n{VALID_NODE}")
+
+        code = ai.suggest_node_update("old", "do it")
+
+        assert code.startswith('"""Format Date')
+        assert "<think>" not in code

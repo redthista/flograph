@@ -81,7 +81,7 @@ class EditorPanel(QWidget):
         self._ask_ai_btn = QPushButton("Ask AI…")
         self._ask_ai_btn.setToolTip(
             "Describe a change in plain English (e.g. \"format the date "
-            "column as YYYY-MM-DD\") and a local LLM will rewrite this "
+            "column as YYYY-MM-DD\") and the AI will rewrite this "
             "node's code for you to review — nothing is applied "
             "automatically.")
         self._ask_ai_btn.hide()
@@ -339,7 +339,7 @@ class EditorPanel(QWidget):
         node = self._graph.node(self._node_id)
         self._ai_request_id += 1
         self._ask_ai_btn.setEnabled(False)
-        self._show_message("Asking the local LLM…")
+        self._show_message("Asking the AI…")
         self.ai.request_suggestion(
             self._ai_request_id, self.editor.toPlainText(),
             instruction, node.type_id, load_llm_config())

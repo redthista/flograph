@@ -190,3 +190,85 @@ class TestFetchModelsButton:
         assert warnings
         assert dialog._model.currentText() == "llama3.1"
         assert dialog._fetch_models_btn.isEnabled()
+
+
+class TestApiFormat:
+    """Which wire format the server speaks is the one thing fetching models
+    can't tell you — both formats answer GET /models the same way."""
+
+    def test_defaults_to_openai_compatible(self, qtbot):
+        assert mod.load_llm_config().provider == "openai"
+
+    def test_save_persists_selected_format(self, qtbot):
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+        dialog._provider.setCurrentIndex(
+            dialog._provider.findData("anthropic"))
+        dialog._save()
+
+        assert mod.load_llm_config().provider == "anthropic"
+
+    def test_prefills_from_existing_settings(self, qtbot):
+        mod.QSettings().setValue("ai/provider", "anthropic")
+
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+        assert dialog._provider.currentData() == "anthropic"
+
+    def test_unknown_saved_format_falls_back_to_first(self, qtbot):
+        mod.QSettings().setValue("ai/provider", "martian")
+
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+        assert dialog._provider.currentData() == "openai"
+
+
+class TestSendTestMessage:
+    def _dialog(self, qtbot):
+        dialog = mod.AiSettingsDialog()
+        qtbot.addWidget(dialog)
+        return dialog
+
+    def test_sends_with_the_values_currently_typed(self, qtbot, monkeypatch):
+        dialog = self._dialog(qtbot)
+        dialog._base_url.setText("https://gw.corp/v1")
+        dialog._model.setCurrentText("gpt-x")
+        dialog._provider.setCurrentIndex(
+            dialog._provider.findData("anthropic"))
+
+        captured = {}
+
+        def fake_chat(messages, config):
+            captured["messages"] = messages
+            captured["config"] = config
+            return "OK"
+
+        monkeypatch.setattr(mod.ai, "chat_completion", fake_chat)
+        monkeypatch.setattr(
+            mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+
+        dialog._test_chat()
+
+        # what is about to be saved, not what was saved last time
+        assert captured["config"].base_url == "https://gw.corp/v1"
+        assert captured["config"].model == "gpt-x"
+        assert captured["config"].provider == "anthropic"
+        assert captured["messages"][0]["role"] == "user"
+        assert dialog._test_btn.isEnabled()
+
+    def test_failure_shows_the_servers_own_words(self, qtbot, monkeypatch):
+        dialog = self._dialog(qtbot)
+
+        def fail(messages, config):
+            raise mod.ai.LLMError("HTTP 400: model not deployed here")
+
+        monkeypatch.setattr(mod.ai, "chat_completion", fail)
+        warnings = []
+        monkeypatch.setattr(
+            mod.QMessageBox, "warning",
+            staticmethod(lambda *a, **k: warnings.append(a)))
+
+        dialog._test_chat()
+
+        assert "model not deployed here" in warnings[0][2]
+        assert dialog._test_btn.isEnabled()
