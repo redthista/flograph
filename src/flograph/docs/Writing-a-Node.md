@@ -215,8 +215,11 @@ Open in Browser and in an exported file — it simply isn't live there. Ask
 channel connects asynchronously, and calls made before it does are queued
 and delivered on connect.
 
-Fork **Show Web View** for a working example, or set **On click** on a Show
-Plotly node to get click-to-filter without writing any JavaScript.
+Fork **Show Web View** for the smallest working example, or **Web View
+Template** for the full thing — a runnable visual whose comments carry every
+rule that matters, including the ones that only bite in a report, a browser
+or a differently-shaped tile. Or set **On click** on a Show Plotly node to
+get click-to-filter without writing any JavaScript at all.
 
 ## Drawing with a web library
 
@@ -260,9 +263,9 @@ name and group. A node whose import is missing loads as a **broken
 placeholder** that keeps its code and params — install the package, re-apply
 the code, and it repairs itself.
 
-Fork **Node Template** or **Control Template** (Scripting category) for a
-commented starting point, or copy a finished one from the
-[[Node Cookbook]].
+Fork **Node Template**, **Control Template** or **Web View Template**
+(Scripting category) for a commented starting point, or copy a finished one
+from the [[Node Cookbook]].
 
 ## Editing with AI (optional)
 

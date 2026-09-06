@@ -16,6 +16,7 @@ the errors.
 from __future__ import annotations
 
 import json
+import re
 
 import pandas as pd
 import pytest
@@ -596,3 +597,59 @@ class TestCirclePack:
             {"group_by": "cost centre", "size_by": "v"},
             table=spaced)[1]["html"], "TREE")
         assert tree["children"] == [{"name": "ops", "value": 3.0}]
+
+
+class TestWebViewTemplate:
+    """The node people fork to build a visual of their own. It has to run
+    before anything is installed, and it has to already obey the rules the
+    four shipped visuals learned the hard way — a template that quietly
+    demonstrates a trap is worse than no template."""
+
+    TYPE = "flograph.scripting.webview_template"
+
+    def test_it_is_the_interactive_webview_shape(self, registry):
+        spec = registry.get(self.TYPE)
+        assert spec.card == "webview" and spec.interactive
+        assert [o.name for o in spec.outputs] == ["html", "selected", "table"]
+
+    def test_it_runs_with_nothing_installed_and_nothing_wired(self, registry,
+                                                              monkeypatch,
+                                                              tmp_path):
+        """No web library, no input: it still draws. A starting point that
+        needs a download before it shows anything is not a starting point."""
+        monkeypatch.setenv("FLOGRAPH_USER_DIR", str(tmp_path / "empty"))
+        _, out = run_node(registry, self.TYPE)
+        assert "<svg" in out["html"]
+        assert "north" in out["html"]
+
+    def test_it_loads_nothing_from_the_internet(self, registry):
+        """Checked as *loads*, not as the string: the page legitimately
+        contains http://www.w3.org/2000/svg, which is an XML namespace and
+        never fetched. What must not appear is a remote src or href."""
+        _, out = run_node(registry, self.TYPE)
+        assert not re.search(r'(?:src|href)\s*=\s*"https?://', out["html"])
+
+    def test_a_click_filters_the_table(self, registry, sales):
+        _, out = run_node(registry, self.TYPE,
+                          {"label_column": "region",
+                           "selected": '["south"]'},
+                          table=sales)
+        assert len(out["table"]) == 3
+        assert out["selected"] == ["south"]
+
+    def test_it_demonstrates_the_traps_rather_than_falling_into_them(
+            self, registry):
+        _, out = run_node(registry, self.TYPE)
+        page = out["html"]
+        assert "overflow: hidden" in page          # no phantom scrollbar
+        assert "#chart { display: block;" in page  # no baseline overflow
+        assert 'setAttribute("viewBox"' in page    # scales when unmeasurable
+        assert "function room()" in page           # box-or-nominal branch
+
+    def test_run_never_reads_the_cosmetic_size_params(self, registry):
+        """The rule with the sharpest edge, and the one a forked node is
+        most likely to break — so the template must not model it."""
+        import re
+        body = registry.get(self.TYPE).source.split("def run(", 1)[-1]
+        assert not re.search(
+            r"""params(?:\.get\(|\[)\s*['"](?:width|height)['"]""", body)
