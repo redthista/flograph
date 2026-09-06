@@ -250,6 +250,30 @@ one self-contained file with the libraries embedded, and **Export View as Web
 Folder…** writes the page plus an `assets/` folder with relative links, for a
 share or a static host.
 
+## Drawing with no library at all
+
+A page that is HTML and CSS rather than a chart needs nothing installed, and
+it sidesteps every trap above: nothing to measure, no canvas to lose, nothing
+animating into a snapshot. `flograph.core.visual_style` is the house design
+token set, and it will build the page for you:
+
+```python
+def run(ctx, table, style=None):
+    from flograph.core import visual_style as vs
+    tok = vs.tokens(style)            # a Visual Style node's payload, or None
+    body = f"<div class='sheet'><div class='card'>"
+    body += f"<div class='label'>Rows</div><div class='big'>{len(table)}</div>"
+    body += "</div></div>"
+    return {"html": vs.page(body, tok)}
+```
+
+`page()` returns a complete document with the stylesheet inlined — the kit of
+class names (`sheet`, `grid`, `card`, `big`, `label`, `muted`, `track`/`bar`,
+`chip`, `c1`…`c8`) and the variables behind them. Taking a `style` input and
+passing it through `tokens()` is what lets one **Visual Style** node set the
+look of every visual on a board. **HTML Template** is this idea with a
+template language on top; read it if you want the worked version.
+
 ## Where nodes live
 
 - **Builtin:** `src/flograph/nodes/<category>/<name>.py` (from a checkout).

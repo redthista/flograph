@@ -274,8 +274,10 @@ class ReportPage(QWidget):
     # ---------------------------------------------------------- the preview
 
     def refresh_preview(self) -> None:
+        import shiboken6
+
         page = self._page()
-        if page is None:
+        if page is None or not shiboken6.isValid(self.preview):
             return
         position = self.preview.verticalScrollBar().value()
         setup = self._setup_override or page.setup
@@ -284,6 +286,12 @@ class ReportPage(QWidget):
         # than a rule standing in for one, and it is what will print.
         rendered = render_report(page.body, self._graph, self._engine.cache,
                                  setup=setup)
+        # `render_report` **re-enters the event loop** — a web-view embed is
+        # printed to PDF, and that waits. So the window can close while this
+        # method is part-way through, and the preview we checked above can be
+        # gone by now. Check it again rather than painting into a dead widget.
+        if not shiboken6.isValid(self.preview):
+            return
         self.problems = rendered.problems
         # Before the old document goes: a running QMovie writing frames into
         # a deleted document is a crash, not a stale picture.

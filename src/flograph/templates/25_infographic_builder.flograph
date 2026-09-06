@@ -1,0 +1,242 @@
+{
+  "flograph_version": "0.1.9",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "n0_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -300
+        ],
+        "params": {
+          "text": "### The infographic builder\n\n**HTML Template** repeats a block of your own HTML for every row, so a table\nbecomes a poster rather than a chart. **Visual Style** decides how all of\nthem look, from one place \u2014 change the theme there and both change.\n\nThe cards on the left are a built-in layout. The league table on the right\nis the same node with the markup written out, and it is worth opening: it\nis where `{{#each}}`, `{{#if growth > 0}}` and the `pct()` binding earn\ntheir keep.\n\nClick a card. The **table** output narrows to what you picked, and the Show\nTable on the right follows.",
+          "width": 460,
+          "height": 200
+        },
+        "label": null
+      },
+      {
+        "id": "n1_sales",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"number\"}, {\"name\": \"growth\", \"type\": \"number\"}, {\"name\": \"status\", \"type\": \"text\"}], \"rows\": [[\"North\", 412000, 12.4, \"on track\"], [\"South\", 288500, -3.1, \"at risk\"], [\"East\", 195000, 8.8, \"on track\"], [\"Central\", 154300, 2.6, \"on track\"], [\"West\", 96400, 21.0, \"on track\"], [\"Islands\", 61200, -8.4, \"at risk\"]]}",
+          "width": 400,
+          "height": 260
+        },
+        "label": "Regional sales"
+      },
+      {
+        "id": "n2_style",
+        "type": "flograph.viz.visual_style",
+        "pos": [
+          0,
+          420
+        ],
+        "params": {
+          "theme": "dark",
+          "palette": "vivid"
+        },
+        "label": "House style"
+      },
+      {
+        "id": "n3_cards",
+        "type": "flograph.viz.html_template",
+        "pos": [
+          640,
+          -80
+        ],
+        "params": {
+          "layout": "cards",
+          "title": "Revenue by region",
+          "subtitle": "Q3 2026 \u00b7 click a card to filter",
+          "label_column": "region",
+          "value_column": "revenue",
+          "value_format": "$,.0f",
+          "columns": 3,
+          "on_click": "select one",
+          "width": 560,
+          "height": 460
+        },
+        "label": "Revenue by region"
+      },
+      {
+        "id": "n4_league",
+        "type": "flograph.viz.html_template",
+        "pos": [
+          640,
+          460
+        ],
+        "params": {
+          "template": "<div class=\"sheet\">\n<div class=\"split\">\n  <div class=\"stack\">\n    <h1 class=\"title\">{{heading}}</h1>\n    <p class=\"subtitle\">{{_count}} regions &middot; {{total:$,.0f}} total</p>\n  </div>\n  <div class=\"chip\">Q3 2026</div>\n</div>\n\n<div class=\"card stack\">\n{{#each}}\n  <div class=\"stack\">\n    <div class=\"split\">\n      <span><span class=\"dot\" style=\"background:{{_color}}\"></span>\n        {{place}}. {{region}}\n        {{#if status = at risk}} <span class=\"chip bad\">at risk</span>{{/if}}\n      </span>\n      <span class=\"num\">{{revenue:$,.0f}}\n        {{#if growth > 0}}<span class=\"up\">&#9650; {{growth:.1f}}%</span>\n        {{#else}}<span class=\"down\">&#9660; {{growth:.1f}}%</span>{{/if}}\n      </span>\n    </div>\n    <div class=\"track\">\n      <div class=\"bar\" style=\"--v:{{width:.0f}};background:{{_color}}\"></div>\n    </div>\n  </div>\n{{/each}}\n</div>\n\n<p class=\"muted\">Biggest region {{best:$,.0f}} &middot;\n  average {{typical:$,.0f}}</p>\n</div>",
+          "value_format": "$,.0f",
+          "label_column": "region",
+          "value_column": "revenue",
+          "bindings": "heading = Regional league table\ntotal = sum(revenue)\nbest = max(revenue)\ntypical = mean(revenue)\nwidth = pct(revenue)\nplace = rank(revenue)",
+          "width": 560,
+          "height": 500
+        },
+        "label": "Regional league table"
+      },
+      {
+        "id": "n5_picked",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1440,
+          -80
+        ],
+        "params": {
+          "width": 420,
+          "height": 400
+        },
+        "label": "What you clicked"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1",
+        "src": [
+          "n1_sales",
+          "table"
+        ],
+        "dst": [
+          "n3_cards",
+          "data"
+        ]
+      },
+      {
+        "id": "c2",
+        "src": [
+          "n1_sales",
+          "table"
+        ],
+        "dst": [
+          "n4_league",
+          "data"
+        ]
+      },
+      {
+        "id": "c3",
+        "src": [
+          "n2_style",
+          "style"
+        ],
+        "dst": [
+          "n3_cards",
+          "style"
+        ]
+      },
+      {
+        "id": "c4",
+        "src": [
+          "n2_style",
+          "style"
+        ],
+        "dst": [
+          "n4_league",
+          "style"
+        ]
+      },
+      {
+        "id": "c5",
+        "src": [
+          "n3_cards",
+          "table"
+        ],
+        "dst": [
+          "n5_picked",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f1",
+        "title": "Data and the look",
+        "rect": [
+          -40,
+          -80,
+          500,
+          620
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "f2",
+        "title": "Two infographics, one style",
+        "rect": [
+          600,
+          -160,
+          640,
+          1160
+        ],
+        "color": "#3c4a3a"
+      },
+      {
+        "id": "f3",
+        "title": "Clicking filters the board",
+        "rect": [
+          1400,
+          -160,
+          500,
+          560
+        ],
+        "color": "#4a3a4a"
+      }
+    ],
+    "pages": [
+      {
+        "id": "page_dashboard",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t1",
+            "node": "n3_cards",
+            "port": "html",
+            "rect": [
+              40,
+              40,
+              620,
+              480
+            ]
+          },
+          {
+            "id": "t2",
+            "node": "n4_league",
+            "port": "html",
+            "rect": [
+              700,
+              40,
+              560,
+              520
+            ]
+          },
+          {
+            "id": "t3",
+            "node": "n5_picked",
+            "port": "table",
+            "rect": [
+              40,
+              560,
+              620,
+              300
+            ]
+          }
+        ]
+      },
+      {
+        "id": "page_report",
+        "title": "Report",
+        "kind": "report",
+        "body": "# Regional performance\n\nBoth pictures below are **HTML Template** nodes: a table repeated into a\nblock of hand-written HTML, dressed by one **Visual Style** node. Nothing\nhere is fetched from the internet, so this page prints the same on any\nmachine.\n\n## Where the revenue is\n\n![[Revenue by region]]\n\n## The league table\n\nRank, share of the biggest region, and which way each one is moving \u2014 the\nkind of page a chart library will not draw for you.\n\n![[Regional league table]]\n",
+        "tiles": []
+      }
+    ]
+  }
+}
