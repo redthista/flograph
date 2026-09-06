@@ -25,8 +25,9 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QImage, QImageReader, QTextDocument
+from PySide6.QtCore import QRectF, Qt, QUrl
+from PySide6.QtGui import (QImage, QImageReader, QPainter, QPainterPath,
+                           QTextDocument)
 
 from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
                                   PAGEBREAK_TOKEN, format_scalar,
@@ -142,6 +143,45 @@ def print_scale(figure, image_width: int) -> float:
         return 1.0
     wanted = image_width / 72.0 * PRINT_DPI
     return max(1.0, min(MAX_IMAGE_SCALE, wanted / natural))
+
+
+def round_corners(image: QImage, radius_pt: float,
+                  drawn_pt: float) -> QImage:
+    """The same picture with its corners cut to a rounded rectangle.
+
+    `radius_pt` is in points **of the printed size**, not pixels, because
+    that is the only unit the writer can reason about: the same image is
+    rendered at one density on screen and another for print, so a radius in
+    pixels would round differently on paper than in the preview. `drawn_pt`
+    is the width it will be drawn at, which is what converts the two.
+
+    The corners become transparent rather than white — a report page is
+    usually white, but it need not be, and a white notch on a tinted page
+    is worse than a square corner.
+    """
+    if radius_pt <= 0 or image.isNull():
+        return image
+    scale = (image.width() / drawn_pt) if drawn_pt else 1.0
+    radius = radius_pt * (scale if scale > 0 else 1.0)
+    # Past half the shorter side the corners overlap and the shape stops
+    # being a rounded rectangle at all.
+    radius = min(radius, image.width() / 2.0, image.height() / 2.0)
+    if radius <= 0:
+        return image
+
+    out = QImage(image.size(), QImage.Format_ARGB32_Premultiplied)
+    out.fill(Qt.transparent)
+    painter = QPainter(out)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(image.rect()), radius, radius)
+        painter.setClipPath(path)
+        painter.drawImage(0, 0, image)
+    finally:
+        painter.end()
+    out.setDevicePixelRatio(image.devicePixelRatio())
+    return out
 
 
 def _as_image(value, scale: float = 1.0) -> "QImage | None":
@@ -271,6 +311,11 @@ REPORT_FONT_PT = 11.0
 #: ever sharpens — a table's text is worth shrinking, which is the whole
 #: reason to ask; but past these it is either unreadable or a headline.
 MIN_TABLE_SCALE, MAX_TABLE_SCALE = 0.4, 3.0
+#: How far `radius=` may round a picture's corners, in points. The ceiling
+#: is not arithmetic: past it the corners meet in the middle of a short
+#: edge and the picture is a lozenge, which is never what was meant. The
+#: real limit is half the shorter side, applied per image.
+MAX_EMBED_RADIUS = 96.0
 #: The fewest rows `fit` will cut a table down to. Under this it is not a
 #: table any more, it is a tease — and a whole table broken over a page
 #: boundary reads better than two rows and a promise.
@@ -687,6 +732,11 @@ class _Resolver:
         self._scale_mult = 1.0
         # How many rows of a table this embed shows, from `rows=`.
         self._max_rows = TABLE_ROWS
+        # Corner rounding for this embed's pictures, in points, from
+        # `radius=`. 0 = square, which is the default because a report is
+        # somebody's document and its pictures should not acquire a house
+        # style nobody asked for.
+        self._radius = 0.0
         # A table's own reading of `scale=` and `height=`: text size, and a
         # budget of vertical space. Charts read the same two words as
         # density and shape, which is why they are held apart.
@@ -714,8 +764,15 @@ class _Resolver:
         self.animations: dict[int, bytes] = {}
 
     def _token(self, image: QImage, width: Optional[int] = None) -> str:
+        drawn = self._image_width if width is None else width
+        # Every picture in a report passes through here — a matplotlib
+        # figure, a plotly chart, a printed web view — so rounding here
+        # rounds all of them, rather than each kind growing its own idea of
+        # a corner.
+        if self._radius > 0:
+            image = round_corners(image, self._radius, drawn)
         self.images.append(image)
-        self.widths.append(self._image_width if width is None else width)
+        self.widths.append(drawn)
         return IMAGE_TOKEN.format(len(self.images) - 1)
 
     def render(self, embed) -> str:
@@ -740,11 +797,12 @@ class _Resolver:
         # and leaves the next at the page width.
         was = (self._image_width, self._aspect, self._scale_mult,
                self._max_rows, self._table_scale, self._table_height,
-               self._table_fit, self._table_ratio)
+               self._table_fit, self._table_ratio, self._radius)
         self._image_width = self._width_for(embed)
         self._aspect = self._aspect_for(embed)
         self._scale_mult = self._scale_for(embed)
         self._max_rows = self._rows_for(embed)
+        self._radius = self._radius_for(embed)
         self._table_scale = self._table_scale_for(embed)
         self._table_height = self._table_height_for(embed)
         self._table_fit = bool((embed.options or {}).get("fit"))
@@ -758,7 +816,7 @@ class _Resolver:
                 self._mark_fit(embed, before)
             (self._image_width, self._aspect, self._scale_mult,
              self._max_rows, self._table_scale, self._table_height,
-             self._table_fit, self._table_ratio) = was
+             self._table_fit, self._table_ratio, self._radius) = was
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -852,6 +910,24 @@ class _Resolver:
                 f"“{embed.ref}”: “{raw}” is not a row count — try 50")
             return TABLE_ROWS
         return max(1, min(MAX_TABLE_ROWS, value))
+
+    def _radius_for(self, embed) -> float:
+        """`radius=12` rounds this picture's corners by 12 points.
+
+        Off by default. A report is somebody's document, and a chart that
+        quietly grew soft corners because the tool prefers them is the kind
+        of thing that is noticed once and distrusted afterwards.
+        """
+        raw = str((embed.options or {}).get("radius", "")).strip()
+        if not raw:
+            return 0.0
+        try:
+            value = float(raw.rstrip("pt").strip())
+        except ValueError:
+            self.problems.append(
+                f"“{embed.ref}”: “{raw}” is not a corner radius — try 12")
+            return 0.0
+        return max(0.0, min(MAX_EMBED_RADIUS, value))
 
     def _table_scale_for(self, embed) -> float:
         """`scale=` read the way a *table* means it: text size.
@@ -1190,6 +1266,12 @@ class _Resolver:
             self.problems.append(
                 f"“{ref}”: ratio only applies to a chart — a table takes "
                 "width, height, rows, scale and fit")
+        if self._radius:
+            # A table is set as real text so it can break across a page; it
+            # has no picture whose corners could be cut.
+            self.problems.append(
+                f"“{ref}”: radius only applies to a picture — a table is "
+                "text on the page, not an image")
         rules, hidden = self._table_style(ref)
         measured = self._table_height is not None or self._table_fit
         marker = table_marker(len(self.tables)) if measured else ""

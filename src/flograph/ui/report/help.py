@@ -41,6 +41,8 @@ produced, name it:</p>
     <td>exactly 180 points tall</td></tr>
 <tr><td><code>![[Chart|scale=2]]</code></td>
     <td>rendered at twice the density, for fine detail</td></tr>
+<tr><td><code>![[Chart|radius=14]]</code></td>
+    <td>corners rounded by 14 points instead of square</td></tr>
 <tr><td><code>![[Chart|fit]]</code></td>
     <td>shrunk to the room left on the page</td></tr>
 <tr><td><code>![[Sales|rows=50]]</code></td>

@@ -234,7 +234,7 @@
         "id": "page_report",
         "title": "Report",
         "kind": "report",
-        "body": "# Regional performance\n\nBoth pictures below are **HTML Template** nodes: a table repeated into a\nblock of hand-written HTML, dressed by one **Visual Style** node. Nothing\nhere is fetched from the internet, so this page prints the same on any\nmachine.\n\n## Where the revenue is\n\n![[Revenue by region]]\n\n## The league table\n\nRank, share of the biggest region, and which way each one is moving \u2014 the\nkind of page a chart library will not draw for you.\n\n![[Regional league table]]\n",
+        "body": "# Regional performance\n\nBoth pictures below are **HTML Template** nodes: a table repeated into a\nblock of hand-written HTML, dressed by one **Visual Style** node. Nothing\nhere is fetched from the internet, so this page prints the same on any\nmachine.\n\n## Where the revenue is\n\n![[Revenue by region|radius=14]]\n\n## The league table\n\nRank, share of the biggest region, and which way each one is moving \u2014 the\nkind of page a chart library will not draw for you.\n\n![[Regional league table|radius=14]]\n\n*`radius=14` on both embeds above rounds the picture's corners by 14\npoints. It works on any embedded picture, not just these \u2014 a plotly chart\nor a matplotlib figure takes it too.*\n",
         "tiles": []
       }
     ]

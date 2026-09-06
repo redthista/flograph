@@ -47,7 +47,9 @@ EMBED_RE = re.compile(r"!\[\[\s*([^\]|]+?)\s*((?:\|[^\]|]*)*)\]\]")
 #:            below 1). A table's *text size*, which does go below 1.
 #: `rows`   — how many rows of a table to show before it is cut with a
 #:            note. Only a table has rows; on a chart it says so.
-EMBED_OPTIONS = ("width", "ratio", "height", "scale", "rows")
+#: `radius` — round the picture's corners, in points. Only a picture has
+#:            corners; on a table it says so.
+EMBED_OPTIONS = ("width", "ratio", "height", "scale", "rows", "radius")
 
 #: Bare-word flags an embed understands, written with no `=`. Matched
 #: before the port, so a node whose label collides with one cannot be

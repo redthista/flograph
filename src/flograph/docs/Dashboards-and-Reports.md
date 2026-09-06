@@ -66,9 +66,17 @@ update when the flow re-runs and warn visibly when a name does not resolve.
 A chart embed takes options after another `|`: `width=50%` or `width=280`
 (points) for how wide it sits, `ratio=16:9` (or `4x3`, `1.5`) or `height=180`
 for the shape it is *redrawn* at — labels and all, not stretched — `scale=2`
-for extra render density on a fine-detail chart, and the bare word `fit` to
+for extra render density on a fine-detail chart, `radius=14` to round the
+picture's corners instead of leaving them square, and the bare word `fit` to
 shrink a chart into the space left on the page instead of bumping it to the
 next. The report toolbar's **?** button lists them all with examples.
+
+`radius=` works on any embedded picture — a plotly chart, a matplotlib
+figure, a printed web view — because it is applied to the picture rather
+than to whatever drew it. The rounded corners are transparent, not white,
+so they are still right on tinted paper. It is off by default: a report is
+your document, and its pictures should not acquire a house style nobody
+asked for.
 
 A **table** takes the same options, each read the way a table means it:
 `width=` places it, `rows=50` sets how many rows to show before the

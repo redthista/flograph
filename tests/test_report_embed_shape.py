@@ -192,3 +192,90 @@ class TestFit:
         rendered = render("![[c|fit]]", figure)   # no page_height
         assert rendered.problems
         assert "only works on a report page" in rendered.problems[0]
+
+
+class TestRadius:
+    """`radius=14` — a rounded picture instead of a sharp rectangle.
+
+    Applied to the picture, in `_token`, which every image in a report
+    passes through: a matplotlib figure, a plotly chart and a printed web
+    view all get it from one place rather than each growing its own idea of
+    a corner.
+    """
+
+    @staticmethod
+    def _corners(image):
+        from PySide6.QtGui import QColor
+        return [QColor.fromRgba(image.pixel(x, y)).alpha()
+                for x, y in ((0, 0), (image.width() - 1, 0),
+                             (0, image.height() - 1),
+                             (image.width() - 1, image.height() - 1))]
+
+    def test_without_it_the_corners_are_square(self, figure):
+        rendered = render("![[c]]", figure)
+        assert self._corners(one_image(rendered)) == [255] * 4
+
+    def test_with_it_the_corners_are_cut_away(self, figure):
+        rendered = render("![[c|radius=16]]", figure)
+        assert self._corners(one_image(rendered)) == [0] * 4
+
+    def test_the_middle_of_the_picture_is_untouched(self, figure):
+        from PySide6.QtGui import QColor
+        rendered = render("![[c|radius=16]]", figure)
+        image = one_image(rendered)
+        middle = QColor.fromRgba(
+            image.pixel(image.width() // 2, image.height() // 2))
+        assert middle.alpha() == 255
+
+    def test_the_corners_are_transparent_not_white(self, figure):
+        """A white notch on tinted paper is worse than a square corner."""
+        from PySide6.QtGui import QColor
+        rendered = render("![[c|radius=16]]", figure)
+        corner = QColor.fromRgba(one_image(rendered).pixel(0, 0))
+        assert corner.alpha() == 0
+
+    def test_it_does_not_leak_into_the_next_embed(self, figure):
+        rendered = render("![[a|radius=20]]\n\n![[b]]", figure)
+        assert len(rendered.images) == 2
+        assert self._corners(rendered.images[0]) == [0] * 4
+        assert self._corners(rendered.images[1]) == [255] * 4
+
+    def test_a_radius_bigger_than_the_picture_is_clamped(self, figure):
+        """Past half the shorter side the corners meet and it stops being a
+        rounded rectangle; it must not become a lozenge or vanish."""
+        from PySide6.QtGui import QColor
+        rendered = render("![[c|radius=5000]]", figure)
+        image = one_image(rendered)
+        middle = QColor.fromRgba(
+            image.pixel(image.width() // 2, image.height() // 2))
+        assert middle.alpha() == 255
+
+    def test_zero_leaves_it_alone(self, figure):
+        rendered = render("![[c|radius=0]]", figure)
+        assert self._corners(one_image(rendered)) == [255] * 4
+
+    def test_a_value_that_is_not_a_number_is_reported(self, figure):
+        rendered = render("![[c|radius=soft]]", figure)
+        assert rendered.problems
+        assert "not a corner radius" in rendered.problems[0]
+
+    def test_pt_may_be_written_out(self, figure):
+        rendered = render("![[c|radius=16pt]]", figure)
+        assert not rendered.problems
+        assert self._corners(one_image(rendered)) == [0] * 4
+
+    def test_it_is_a_known_option_not_a_typo(self, figure):
+        """The option set is closed, so an unknown one is reported — this
+        checks `radius` was actually added to it."""
+        rendered = render("![[c|radius=14]]", figure)
+        assert not rendered.problems
+
+    def test_on_a_table_it_says_it_does_not_apply(self):
+        """A table is set as real text so it can break across a page; it
+        has no picture whose corners could be cut. Said rather than
+        ignored, the way `ratio` already is."""
+        pd = pytest.importorskip("pandas")
+        frame = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+        rendered = render("![[t|radius=14]]", frame)
+        assert any("radius only applies to a picture" in problem
+                   for problem in rendered.problems), rendered.problems
