@@ -374,6 +374,65 @@
         "color": "#43305c"
       }
     ],
-    "pages": []
+    "pages": [
+      {
+        "id": "page_dashboard",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "tile_calendar",
+            "node": "n2_calendar",
+            "port": "html",
+            "rect": [
+              40,
+              40,
+              1200,
+              260
+            ]
+          },
+          {
+            "id": "tile_pack",
+            "node": "n4_pack",
+            "port": "html",
+            "rect": [
+              40,
+              340,
+              380,
+              420
+            ]
+          },
+          {
+            "id": "tile_sankey",
+            "node": "n3_sankey",
+            "port": "html",
+            "rect": [
+              460,
+              340,
+              380,
+              420
+            ]
+          },
+          {
+            "id": "tile_network",
+            "node": "n1_graph",
+            "port": "html",
+            "rect": [
+              880,
+              340,
+              360,
+              420
+            ]
+          }
+        ]
+      },
+      {
+        "id": "page_report",
+        "title": "Report",
+        "kind": "report",
+        "body": "# Four visuals, one library each\n\nEvery visual on this page is drawn by a JavaScript library installed from\n**Tools \u25b8 Web Libraries** \u2014 Apache ECharts, D3 and Cytoscape. They render\nfrom your own machine, so this page works with the network unplugged.\n\n## The year at a glance\n\nIncident minutes per day. The working-week rhythm is visible, and so is\nthe fortnight in February when everything went wrong.\n\n![[Downtime by day]]\n\n\\pagebreak\n\n## Where the money is, and where the candidates went\n\nRevenue nested region, city, store \u2014 area is revenue, so one large store\ninside an otherwise even region shows up as shape rather than as a number\nto look up.\n\n![[Revenue by region|width=60%]]\n\nThe hiring funnel. The bands have to add up, which is what makes the\nlosses at each stage visible instead of absent: 1,200 applications in,\n22 offers accepted.\n\n![[Where candidates went]]\n\n\\pagebreak\n\n## Who reports to whom\n\nThe reporting structure as a graph. Circles are sized by direct reports\nand coloured by team.\n\n![[Who reports to whom]]\n\n---\n\n*On the canvas these are live: click any of them and the table beside it\nnarrows to the rows behind what you clicked.*\n",
+        "tiles": []
+      }
+    ]
   }
 }

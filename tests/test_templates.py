@@ -134,6 +134,38 @@ class TestBundledExamples:
                    if n.spec.interactive}
         assert visuals and visuals <= shown
 
+    def test_web_library_visuals_ships_its_pages(self, qtbot, window):
+        """The dashboard and the report travel *in* the file. Rebuilding
+        them by hand on every open is what the example is meant to save,
+        and a tile pointing at a renamed node fails quietly (it renders a
+        placeholder rather than refusing to load), so it is checked here."""
+        window._open_example(template_path("24_web_library_visuals.flograph"))
+        pages = {p.title: p for p in window.graph.pages.values()}
+        assert set(pages) == {"Dashboard", "Report"}
+
+        dashboard = pages["Dashboard"]
+        nodes = window.graph.nodes
+        assert len(dashboard.tiles) == 4
+        for tile in dashboard.tiles.values():
+            node = nodes.get(tile.node_id)
+            assert node is not None, tile.node_id
+            assert node.spec.output(tile.port) is not None
+
+        # tiles are a layout, not a canvas: overlapping ones hide each other
+        rects = [t.rect for t in dashboard.tiles.values()]
+        for i, (ax, ay, aw, ah) in enumerate(rects):
+            for bx, by, bw, bh in rects[i + 1:]:
+                assert not (ax < bx + bw and bx < ax + aw
+                            and ay < by + bh and by < ay + ah)
+
+        # every ![[embed]] has to name a node that exists, or the report
+        # renders the words and quietly drops the picture
+        import re
+        labels = {n.label for n in nodes.values()}
+        embeds = re.findall(r"!\[\[([^\]|]+)", pages["Report"].body)
+        assert len(embeds) == 4
+        assert all(name in labels for name in embeds), embeds
+
     def test_aggregate_dashboard_groups_and_totals_correctly(self, qtbot, window):
         window._open_example(template_path("02_aggregate_dashboard.flograph"))
         wait_run(qtbot, window.engine)
