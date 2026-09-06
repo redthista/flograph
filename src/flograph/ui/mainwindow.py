@@ -97,6 +97,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.registry = registry
         self.graph = Graph()
+        # The canvas you get on launch is a project like any other, so it
+        # reads the per-user secrets file exactly as File > New does. Without
+        # this, every `${env:NAME}` in the flow you start on an empty canvas
+        # fails with "no secret named ..." — the file is right there, nothing
+        # had loaded it — and `${` completes to nothing.
+        dotenv.bind(self.graph, dotenv.default_path())
         self.undo_stack = QUndoStack(self)
         self.scene = NodeGraphScene(self.graph, self.undo_stack,
                                     registry=registry, parent=self)

@@ -18,6 +18,10 @@ LiteLLM gateway. **Model** is free text (`claude-sonnet-5`, `gpt-4o-mini`,
 `OPENAI_API_KEY` from the environment, type one in, or use a `${env:NAME}`
 project secret; a local server needs none.
 
+Sharing one endpoint across several AI nodes: wire an **LLM Config** card
+into the optional **config** input and it supplies all four of those, so
+they live in one place. This node's own four are then ignored.
+
 Identical prompts are sent once and the answer reused, so enriching a column
 with 10k rows and 40 distinct values costs 40 calls. Rows run **Concurrency**
 at a time. **Preview (no API call)** fills the column with the rendered
@@ -27,7 +31,8 @@ NODE = {
     "label": "LLM Enrich",
     "category": "AI",
     "version": "2.0",
-    "inputs": [("table", "dataframe")],
+    "inputs": [("table", "dataframe"),
+               ("config", "object", {"optional": True})],
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
@@ -71,7 +76,7 @@ def _render(template, row):
                                 for k, v in row.items()})
 
 
-def run(ctx, table):
+def run(ctx, table, config=None):
     from concurrent.futures import ThreadPoolExecutor
 
     from flograph.nodes.ai import _llm
@@ -91,12 +96,7 @@ def run(ctx, table):
         ctx.log(f"preview: rendered {len(prompts)} prompts, no API call")
         return result
 
-    provider = p.get("provider", "anthropic")
-    key = _llm.resolve_key(provider, p.get("api_key"))
-    base = p.get("base_url") or ""
-    model = (p.get("model") or "").strip()
-    if not model:
-        raise ValueError("no model — set 'Model'")
+    provider, base, key, model = _llm.connection(ctx, p, config)
     system = p.get("system") or ""
     max_tokens = int(p.get("max_tokens", 512))
     on_error = p.get("on_error", "fail")

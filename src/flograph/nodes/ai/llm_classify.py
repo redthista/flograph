@@ -14,6 +14,10 @@ Azure, a local Ollama / vLLM server, a gateway. Leave **API key** blank to
 use `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from the environment, or type one
 in / use `${env:NAME}`.
 
+Sharing one endpoint across several AI nodes: wire an **LLM Config** card
+into the optional **config** input and it supplies all four of those, so
+they live in one place. This node's own four are then ignored.
+
 Identical inputs are classified once. **Multi-label** allows several labels
 per row (comma-joined); **Allow "other"** lets a row fall outside the set.
 Needs `httpx`.
@@ -22,7 +26,8 @@ NODE = {
     "label": "LLM Classify",
     "category": "AI",
     "version": "2.0",
-    "inputs": [("table", "dataframe")],
+    "inputs": [("table", "dataframe"),
+               ("config", "object", {"optional": True})],
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
@@ -76,7 +81,7 @@ def _match(answer, labels, multi, allow_other):
     return "other" if allow_other else ""
 
 
-def run(ctx, table):
+def run(ctx, table, config=None):
     from concurrent.futures import ThreadPoolExecutor
 
     from flograph.nodes.ai import _llm
@@ -113,12 +118,7 @@ def run(ctx, table):
         ctx.log("preview: no API call")
         return result
 
-    provider = p.get("provider", "anthropic")
-    key = _llm.resolve_key(provider, p.get("api_key"))
-    base = p.get("base_url") or ""
-    model = (p.get("model") or "").strip()
-    if not model:
-        raise ValueError("no model — set 'Model'")
+    provider, base, key, model = _llm.connection(ctx, p, config)
     on_error = p.get("on_error", "fail")
 
     unique = list(dict.fromkeys(texts))

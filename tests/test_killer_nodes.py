@@ -398,12 +398,14 @@ def llm_server():
     """A localhost server that answers both wire formats — Anthropic
     (`/v1/messages`) and OpenAI (`/v1/chat/completions`). `state["reply"]`
     maps the user message to the assistant text; `state["status"]` forces an
-    error response."""
+    error response; `state["payload"]` returns a whole body verbatim, for the
+    replies a well-behaved server would never send."""
     import json
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    state = {"reply": lambda user: "ok", "status": None, "seen": []}
+    state = {"reply": lambda user: "ok", "status": None, "payload": None,
+             "seen": []}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -425,6 +427,9 @@ def llm_server():
                 "body": req})
             if state["status"]:
                 self._json(state["status"], {"error": {"message": "nope"}})
+                return
+            if state["payload"] is not None:
+                self._json(200, state["payload"])
                 return
             user = req["messages"][-1]["content"]
             text = state["reply"](user)
@@ -567,6 +572,179 @@ class TestLlmExtract:
             run_node(registry, "flograph.ai.llm_extract",
                      {"text_column": "blurb", "fields": "not a name: x",
                       "dry_run": True}, table=self._t())
+
+
+class TestLlmConfig:
+    """One card holding the endpoint, wired into as many AI nodes as you
+    like. A wired config replaces the node's own four connection fields
+    outright — half-overriding them would be unexplainable in front of a
+    flow, since all four have non-empty defaults."""
+
+    CONFIG = "flograph.ai.llm_config"
+
+    def _t(self):
+        return pd.DataFrame({"blurb": ["ACME pays 50k"]})
+
+    def test_emits_the_connection(self, registry):
+        out = run_node(registry, self.CONFIG, {
+            "provider": "openai", "model": "gpt-4o-mini",
+            "base_url": "https://gw.corp/v1", "api_key": "sk-test"})
+        assert out["config"] == {
+            "kind": "llm_connection", "provider": "openai",
+            "base_url": "https://gw.corp/v1", "model": "gpt-4o-mini",
+            "api_key": "sk-test"}
+
+    def test_a_missing_model_is_reported_on_this_card(self, registry):
+        with pytest.raises(ValueError, match="no model"):
+            run_node(registry, self.CONFIG, {"model": "  "})
+
+    def test_a_missing_key_is_reported_on_this_card(self, registry, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="no API key"):
+            run_node(registry, self.CONFIG, {"model": "claude-sonnet-5"})
+
+    def test_the_log_never_carries_the_key(self, registry):
+        spec = registry.get(self.CONFIG)
+        params = spec.default_params()
+        params.update({"provider": "openai", "model": "m", "api_key": "sk-secret"})
+        ctx = FakeContext(params=params)
+        compile_run(spec.source, "test-config")(ctx)
+        assert not any("sk-secret" in line for line in ctx.logs)
+
+    def test_a_wired_config_replaces_the_nodes_own_fields(
+            self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: '{"company": "ACME"}'
+        config = {"kind": "llm_connection", "provider": "openai",
+                  "base_url": llm_server["url"], "model": "gpt-from-config",
+                  "api_key": "sk-from-config"}
+        out = run_node(registry, "flograph.ai.llm_extract", {
+            "text_column": "blurb", "fields": "company: name", "prefix": "",
+            # every one of these must lose to the wired config
+            "provider": "anthropic", "model": "ignored-model",
+            "base_url": "http://127.0.0.1:1", "api_key": "sk-ignored",
+        }, table=self._t(), config=config)
+
+        assert out["company"].iloc[0] == "ACME"
+        seen = llm_server["seen"][0]
+        assert seen["path"].endswith("/v1/chat/completions")   # openai format
+        assert seen["headers"]["authorization"] == "Bearer sk-from-config"
+        assert seen["body"]["model"] == "gpt-from-config"
+
+    def test_the_job_stays_on_the_node(self, registry, llm_server):
+        """Max tokens is about this node's work, not about which server it
+        talks to, so a config does not carry it."""
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: '{"company": "ACME"}'
+        config = {"kind": "llm_connection", "provider": "openai",
+                  "base_url": llm_server["url"], "model": "m", "api_key": "k"}
+        run_node(registry, "flograph.ai.llm_extract", {
+            "text_column": "blurb", "fields": "company: name",
+            "max_tokens": 77,
+        }, table=self._t(), config=config)
+        assert llm_server["seen"][0]["body"]["max_tokens"] == 77
+
+    def test_no_config_leaves_the_node_in_charge(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: '{"company": "ACME"}'
+        run_node(registry, "flograph.ai.llm_extract", {
+            "text_column": "blurb", "fields": "company: name",
+            "provider": "openai", "model": "own-model",
+            "base_url": llm_server["url"], "api_key": "sk-own",
+        }, table=self._t(), config=None)
+        assert llm_server["seen"][0]["body"]["model"] == "own-model"
+
+    def test_the_wrong_thing_on_the_port_says_so(self, registry):
+        import pandas as _pd
+        with pytest.raises(ValueError, match="expects an LLM Config"):
+            run_node(registry, "flograph.ai.llm_extract", {
+                "text_column": "blurb", "fields": "company: name",
+            }, table=self._t(), config=_pd.DataFrame())
+
+    def test_every_ai_node_takes_one(self, registry):
+        for type_id in ("flograph.ai.llm_enrich", "flograph.ai.llm_classify",
+                        "flograph.ai.llm_extract"):
+            port = registry.get(type_id).input("config")
+            assert port is not None, type_id
+            assert port.optional, type_id
+
+
+class TestLlmReplyShapes:
+    """A gateway can answer 200 with no usable text. Every one of these
+    shapes reached a node as `None` before, and `None.strip()` crashed the
+    run with a traceback that named nothing the user could act on."""
+
+    def _reply_text(self):
+        from flograph.nodes.ai import _llm
+        return _llm.reply_text
+
+    def test_null_content_names_the_finish_reason(self):
+        with pytest.raises(RuntimeError, match="finish_reason: length"):
+            self._reply_text()(
+                {"choices": [{"message": {"content": None},
+                              "finish_reason": "length"}]}, "openai")
+
+    def test_length_finish_suggests_raising_max_tokens(self):
+        with pytest.raises(RuntimeError, match="Max tokens"):
+            self._reply_text()(
+                {"choices": [{"message": {"content": None},
+                              "finish_reason": "length"}]}, "openai")
+
+    def test_content_parts_list_is_joined(self):
+        assert self._reply_text()(
+            {"choices": [{"message": {"content": [
+                {"type": "text", "text": "a"},
+                {"type": "text", "text": "b"}]}}]}, "openai") == "ab"
+
+    def test_reasoning_content_is_used_when_content_is_empty(self):
+        assert self._reply_text()(
+            {"choices": [{"message": {"content": "",
+                                      "reasoning_content": "the answer"}}]},
+            "openai") == "the answer"
+
+    def test_refusal_is_quoted(self):
+        with pytest.raises(RuntimeError, match="refused.*policy"):
+            self._reply_text()(
+                {"choices": [{"message": {"content": None,
+                                          "refusal": "against policy"}}]},
+                "openai")
+
+    def test_no_choices_at_all(self):
+        with pytest.raises(RuntimeError, match="no choices"):
+            self._reply_text()({"choices": []}, "openai")
+
+    def test_anthropic_empty_content_names_the_stop_reason(self):
+        with pytest.raises(RuntimeError, match="stop_reason: max_tokens"):
+            self._reply_text()(
+                {"content": [], "stop_reason": "max_tokens"}, "anthropic")
+
+    def test_anthropic_thinking_blocks_are_skipped(self):
+        assert self._reply_text()(
+            {"content": [{"type": "thinking", "thinking": "hmm"},
+                         {"type": "text", "text": "done"}]},
+            "anthropic") == "done"
+
+    def test_node_reports_it_rather_than_crashing(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["payload"] = {
+            "choices": [{"message": {"content": None}, "finish_reason": "length"}]}
+        with pytest.raises(Exception, match="empty reply"):
+            run_node(registry, "flograph.ai.llm_extract", {
+                "text_column": "blurb", "fields": "company: name",
+                "api_key": "sk-test", "provider": "openai", "model": "gpt-4o-mini",
+                "base_url": llm_server["url"],
+            }, table=pd.DataFrame({"blurb": ["ACME pays 50k"]}))
+
+    def test_blank_on_error_still_leaves_the_row_empty(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["payload"] = {
+            "choices": [{"message": {"content": None}, "finish_reason": "length"}]}
+        out = run_node(registry, "flograph.ai.llm_extract", {
+            "text_column": "blurb", "fields": "company: name",
+            "api_key": "sk-test", "provider": "openai", "model": "gpt-4o-mini",
+            "on_error": "blank", "prefix": "", "base_url": llm_server["url"],
+        }, table=pd.DataFrame({"blurb": ["ACME pays 50k"]}))
+        assert pd.isna(out["company"].iloc[0])
 
 
 # --------------------------------------------------------------------------

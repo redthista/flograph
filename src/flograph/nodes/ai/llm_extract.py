@@ -17,12 +17,17 @@ can't find comes back blank. Identical inputs are extracted once.
 this at any compatible endpoint — hosted, Azure, a local server, a gateway.
 Leave **API key** blank to use `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from
 the environment, or type one in / use `${env:NAME}`. Needs `httpx`.
+
+Sharing one endpoint across several AI nodes: wire an **LLM Config** card
+into the optional **config** input and it supplies all four of those, so
+they live in one place. This node's own four are then ignored.
 """
 NODE = {
     "label": "LLM Extract",
     "category": "AI",
     "version": "2.0",
-    "inputs": [("table", "dataframe")],
+    "inputs": [("table", "dataframe"),
+               ("config", "object", {"optional": True})],
     "outputs": [("table", "dataframe")],
 }
 PARAMS = [
@@ -83,7 +88,7 @@ def _parse_json(text):
     return json.loads(body[start:end + 1])
 
 
-def run(ctx, table):
+def run(ctx, table, config=None):
     from concurrent.futures import ThreadPoolExecutor
 
     from flograph.nodes.ai import _llm
@@ -118,12 +123,7 @@ def run(ctx, table):
         ctx.log(f"preview: would extract {len(names)} field(s), no API call")
         return result
 
-    provider = p.get("provider", "anthropic")
-    key = _llm.resolve_key(provider, p.get("api_key"))
-    base = p.get("base_url") or ""
-    model = (p.get("model") or "").strip()
-    if not model:
-        raise ValueError("no model — set 'Model'")
+    provider, base, key, model = _llm.connection(ctx, p, config)
     max_tokens = int(p.get("max_tokens", 1024))
     on_error = p.get("on_error", "fail")
 

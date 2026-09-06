@@ -53,6 +53,44 @@ def resolve_key(provider: str, raw: str) -> str:
         f"environment, or add it to the project's .env file")
 
 
+CONFIG_KIND = "llm_connection"      # what an LLM Config node puts on the wire
+
+
+def connection(ctx, params: dict, config=None) -> tuple:
+    """`(provider, base_url, api_key, model)` — where to send this, as whom.
+
+    A wired **LLM Config** replaces the node's own four connection fields
+    outright rather than filling in the blanks. Per-field precedence reads
+    fine in a docstring and is unexplainable in front of a flow: every field
+    has a non-empty default, so "the config fills what you left blank" would
+    mean a config's model never took effect, and a half-overridden endpoint
+    is the kind of thing you debug for an hour. One rule instead — plugged
+    in, the config is the connection; unplugged, the node's own fields are.
+    What the node keeps either way is the shape of its *job*: max tokens,
+    concurrency, the prompt.
+    """
+    source, where = params, "this node"
+    if config is not None:
+        if not isinstance(config, dict) or config.get("kind") != CONFIG_KIND:
+            raise ValueError(
+                "the 'config' input expects an LLM Config node — "
+                f"got {type(config).__name__}")
+        source, where = config, "the wired LLM Config"
+
+    provider = source.get("provider") or "anthropic"
+    base = source.get("base_url") or ""
+    model = (source.get("model") or "").strip()
+    if not model:
+        raise ValueError(f"no model — set 'Model' on {where}")
+    key = resolve_key(provider, source.get("api_key"))
+    if config is not None:
+        # Never the key: this line goes in the run log, which is on screen
+        # and in the saved project.
+        ctx.log(f"connection from LLM Config: {model} ({provider}) at "
+                f"{base or default_base(provider)}")
+    return provider, base, key, model
+
+
 def chat(provider: str, base_url: str, api_key: str, model: str,
          system: str, user: str, max_tokens: int, timeout: float) -> str:
     """One completion. Returns the assistant text; raises on an API error."""
@@ -85,12 +123,56 @@ def chat(provider: str, base_url: str, api_key: str, model: str,
             f"{provider} API returned {resp.status_code}: "
             f"{resp.text[:400].strip()}")
 
-    data = resp.json()
+    return reply_text(resp.json(), provider).strip()
+
+
+def reply_text(data: dict, provider: str) -> str:
+    """The assistant's text, across the shapes servers actually return.
+
+    The same ground `flograph.ai._reply_text` covers for the AI assistant:
+    a gateway can answer 200 with no text at all, and `content` may be
+    absent, present-but-null, a plain string, or a list of parts. When
+    there is no text the stop reason is the only clue the user gets, so it
+    goes in the message rather than into a silently blank cell.
+    """
     if provider == "anthropic":
         parts = data.get("content") or []
-        return "".join(b.get("text", "") for b in parts
-                       if b.get("type") == "text").strip()
+        if isinstance(parts, str):
+            return parts
+        text = "".join(
+            block.get("text", "") for block in parts
+            if isinstance(block, dict) and block.get("type") == "text")
+        if not text.strip():
+            raise RuntimeError(
+                _empty_reply("stop_reason", data.get("stop_reason")))
+        return text
+
     choices = data.get("choices") or []
     if not choices:
-        return ""
-    return (choices[0].get("message") or {}).get("content", "").strip()
+        raise RuntimeError(
+            "the model returned no choices — the request may have been "
+            "filtered by the gateway")
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+    if isinstance(content, list):  # some gateways return OpenAI content parts
+        content = "".join(part.get("text", "") for part in content
+                          if isinstance(part, dict))
+    if not (content or "").strip():
+        # Reasoning models put the visible answer here when content is empty.
+        content = message.get("reasoning_content") or ""
+    if not (content or "").strip():
+        if message.get("refusal"):
+            raise RuntimeError(
+                f"the model refused the request: {message['refusal']}")
+        raise RuntimeError(
+            _empty_reply("finish_reason", choices[0].get("finish_reason")))
+    return content
+
+
+def _empty_reply(field: str, reason) -> str:
+    why = str(reason or "unknown")
+    hint = ("raise 'Max tokens' — a reasoning model can spend the whole "
+            "budget thinking before it writes an answer"
+            if why in ("length", "max_tokens") else
+            "the model may have hit its token limit")
+    return f"the model returned an empty reply ({field}: {why}) — {hint}"

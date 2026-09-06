@@ -457,6 +457,28 @@ class TestSecrets:
         assert secret.id not in manifest["nodes"]
 
 
+class TestTheCanvasYouLaunchInto:
+    """The graph a launch hands you is a project like any other. It used to
+    be the one graph nobody bound a .env to — File > New did, opening a file
+    did, and the empty canvas you actually start on did not, so `${env:X}`
+    there failed with "no secret named X" while the file sat right where it
+    belonged."""
+
+    def test_the_startup_graph_reads_the_per_user_secrets(
+            self, qtbot, registry, tmp_path, monkeypatch):
+        from flograph.ui import mainwindow as mod
+
+        dotenv.save(tmp_path / ".env", {"TOKEN": "s3cret"})
+        monkeypatch.setattr(dotenv, "default_path", lambda: tmp_path / ".env")
+
+        win = mod.MainWindow(registry)
+        win.confirm_close = False
+        qtbot.addWidget(win)
+
+        assert win.graph.env.get("TOKEN") == "s3cret"
+        assert "TOKEN" in win.graph.env_keys   # so `${` can complete to it
+
+
 class TestPersistence:
     def test_the_env_path_survives_a_round_trip(self, registry, tmp_path):
         graph = Graph()
