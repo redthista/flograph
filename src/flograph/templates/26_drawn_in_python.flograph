@@ -1,0 +1,339 @@
+{
+  "flograph_version": "0.1.10",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "note_data",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -200
+        ],
+        "params": {
+          "text": "### Four charts, no library\n\nEvery one of these is drawn by Python and printed as SVG \u2014 nothing is downloaded, so they look the same on paper.",
+          "width": 420,
+          "height": 120
+        },
+        "label": null
+      },
+      {
+        "id": "n01_quarters",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"quarter\", \"type\": \"text\"}, {\"name\": \"revenue\", \"type\": \"number\"}], \"rows\": [[\"London\", \"Q1\", 612], [\"London\", \"Q2\", 648], [\"London\", \"Q3\", 671], [\"London\", \"Q4\", 704], [\"South East\", \"Q1\", 498], [\"South East\", \"Q2\", 486], [\"South East\", \"Q3\", 495], [\"South East\", \"Q4\", 502], [\"North West\", \"Q1\", 352], [\"North West\", \"Q2\", 366], [\"North West\", \"Q3\", 379], [\"North West\", \"Q4\", 388], [\"East of England\", \"Q1\", 338], [\"East of England\", \"Q2\", 344], [\"East of England\", \"Q3\", 349], [\"East of England\", \"Q4\", 351], [\"West Midlands\", \"Q1\", 281], [\"West Midlands\", \"Q2\", 292], [\"West Midlands\", \"Q3\", 298], [\"West Midlands\", \"Q4\", 302], [\"South West\", \"Q1\", 301], [\"South West\", \"Q2\", 296], [\"South West\", \"Q3\", 291], [\"South West\", \"Q4\", 288], [\"Yorkshire and The Humber\", \"Q1\", 226], [\"Yorkshire and The Humber\", \"Q2\", 238], [\"Yorkshire and The Humber\", \"Q3\", 244], [\"Yorkshire and The Humber\", \"Q4\", 251], [\"East Midlands\", \"Q1\", 219], [\"East Midlands\", \"Q2\", 221], [\"East Midlands\", \"Q3\", 223], [\"East Midlands\", \"Q4\", 224], [\"Scotland\", \"Q1\", 178], [\"Scotland\", \"Q2\", 186], [\"Scotland\", \"Q3\", 191], [\"Scotland\", \"Q4\", 196], [\"North East\", \"Q1\", 108], [\"North East\", \"Q2\", 114], [\"North East\", \"Q3\", 118], [\"North East\", \"Q4\", 121], [\"Wales\", \"Q1\", 102], [\"Wales\", \"Q2\", 99], [\"Wales\", \"Q3\", 97], [\"Wales\", \"Q4\", 96], [\"Northern Ireland\", \"Q1\", 74], [\"Northern Ireland\", \"Q2\", 78], [\"Northern Ireland\", \"Q3\", 81], [\"Northern Ireland\", \"Q4\", 84]]}",
+          "width": 460,
+          "height": 420
+        },
+        "label": "Revenue by region, by quarter"
+      },
+      {
+        "id": "n02_style",
+        "type": "flograph.viz.visual_style",
+        "pos": [
+          700,
+          0
+        ],
+        "params": {
+          "theme": "inherit",
+          "palette": "vivid"
+        },
+        "label": "House style"
+      },
+      {
+        "id": "n03_totals",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          700,
+          1180
+        ],
+        "params": {
+          "by": "region",
+          "agg": "sum",
+          "values": "revenue"
+        },
+        "label": "Year to date"
+      },
+      {
+        "id": "n04_bump",
+        "type": "flograph.viz.bump_chart",
+        "pos": [
+          1000,
+          0
+        ],
+        "params": {
+          "label_column": "region",
+          "period_column": "quarter",
+          "value_column": "revenue",
+          "top": 6,
+          "title": "Who is ahead",
+          "subtitle": "regions by revenue",
+          "labels": "both ends",
+          "width": 620,
+          "height": 420
+        },
+        "label": "Bump: places over time"
+      },
+      {
+        "id": "n05_slope",
+        "type": "flograph.viz.slope_chart",
+        "pos": [
+          1000,
+          560
+        ],
+        "params": {
+          "label_column": "region",
+          "period_column": "quarter",
+          "value_column": "revenue",
+          "rows": 8,
+          "title": "What moved",
+          "subtitle": "Q1 against Q4",
+          "show_change": true,
+          "width": 460,
+          "height": 420
+        },
+        "label": "Slope: before and after"
+      },
+      {
+        "id": "n06_waffle",
+        "type": "flograph.viz.waffle",
+        "pos": [
+          1000,
+          1180
+        ],
+        "params": {
+          "label_column": "region",
+          "value_column": "revenue",
+          "cells": 100,
+          "across": 10,
+          "shape": "rounded",
+          "title": "What the year is made of",
+          "subtitle": "one square is one per cent",
+          "legend_shows": "share",
+          "width": 460,
+          "height": 420
+        },
+        "label": "Waffle: shares you can count"
+      },
+      {
+        "id": "n07_tiles",
+        "type": "flograph.viz.tile_map",
+        "pos": [
+          1000,
+          1740
+        ],
+        "params": {
+          "region_column": "region",
+          "value_column": "revenue",
+          "grid": "UK regions",
+          "ramp": "accent",
+          "title": "Where it came from",
+          "subtitle": "every region the same size",
+          "value_format": ",.0f",
+          "width": 460,
+          "height": 440
+        },
+        "label": "Tile map: places, fairly"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c01",
+        "src": [
+          "n01_quarters",
+          "table"
+        ],
+        "dst": [
+          "n04_bump",
+          "table"
+        ]
+      },
+      {
+        "id": "c02",
+        "src": [
+          "n01_quarters",
+          "table"
+        ],
+        "dst": [
+          "n05_slope",
+          "table"
+        ]
+      },
+      {
+        "id": "c03",
+        "src": [
+          "n01_quarters",
+          "table"
+        ],
+        "dst": [
+          "n03_totals",
+          "table"
+        ]
+      },
+      {
+        "id": "c04",
+        "src": [
+          "n03_totals",
+          "aggregated"
+        ],
+        "dst": [
+          "n06_waffle",
+          "table"
+        ]
+      },
+      {
+        "id": "c05",
+        "src": [
+          "n03_totals",
+          "aggregated"
+        ],
+        "dst": [
+          "n07_tiles",
+          "table"
+        ]
+      },
+      {
+        "id": "c06",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n04_bump",
+          "style"
+        ]
+      },
+      {
+        "id": "c07",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n05_slope",
+          "style"
+        ]
+      },
+      {
+        "id": "c08",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n06_waffle",
+          "style"
+        ]
+      },
+      {
+        "id": "c09",
+        "src": [
+          "n02_style",
+          "style"
+        ],
+        "dst": [
+          "n07_tiles",
+          "style"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f_the",
+        "title": "The numbers",
+        "rect": [
+          -40,
+          -80,
+          540,
+          540
+        ],
+        "color": "#334155"
+      },
+      {
+        "id": "f_over",
+        "title": "Over time",
+        "rect": [
+          960,
+          -80,
+          700,
+          1100
+        ],
+        "color": "#3b2f63"
+      },
+      {
+        "id": "f_shares",
+        "title": "Shares and places",
+        "rect": [
+          960,
+          1120,
+          540,
+          1100
+        ],
+        "color": "#1e3a5f"
+      }
+    ],
+    "pages": [
+      {
+        "id": "p01",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t01",
+            "node": "n04_bump",
+            "port": "html",
+            "rect": [
+              40,
+              40,
+              660,
+              380
+            ]
+          },
+          {
+            "id": "t02",
+            "node": "n05_slope",
+            "port": "html",
+            "rect": [
+              740,
+              40,
+              480,
+              380
+            ]
+          },
+          {
+            "id": "t03",
+            "node": "n06_waffle",
+            "port": "html",
+            "rect": [
+              40,
+              460,
+              660,
+              420
+            ]
+          },
+          {
+            "id": "t04",
+            "node": "n07_tiles",
+            "port": "html",
+            "rect": [
+              740,
+              460,
+              480,
+              420
+            ]
+          }
+        ]
+      },
+      {
+        "id": "p02",
+        "title": "Report",
+        "kind": "report",
+        "body": "# The year, four ways\n\nNot one of these charts needs a library. Python works out every coordinate\nand writes the SVG, so what you see here is what the card shows \u2014 and it\nwould still draw on a laptop with no internet and nothing installed.\n\n## Who is ahead\n\n![[Bump: places over time|width=100%|radius=12]]\n\nA bump chart plots the *place*, not the score. Crossings are overtakes.\n\n## What moved between Q1 and Q4\n\n![[Slope: before and after|width=100%|radius=12]]\n\n## What the year is made of\n\nSquares you can count, rather than angles you cannot.\n\n![[Waffle: shares you can count|width=100%|radius=12]]\n\n## Where it came from\n\nEvery region gets the same square, so the colour is the only thing being\ncompared \u2014 on a real map the Highlands would shout and London would be a dot.\n\n![[Tile map: places, fairly|width=100%|radius=12]]\n"
+      }
+    ]
+  }
+}

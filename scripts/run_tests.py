@@ -100,6 +100,24 @@ def decide(cores: int, load: float, temp: "float | None",
     return workers, why + f"; CPU {temp:.0f}°C"
 
 
+def interpreter() -> str:
+    """The Python that owns *this* checkout, not whichever one is on PATH.
+
+    A worktree has its own `.venv` with its own editable install, but the
+    ambient shell usually still exports `VIRTUAL_ENV` pointing at the main
+    checkout. Run this script by its shebang from a worktree and the tests
+    import the *other* tree's code: edits appear to do nothing, a module
+    you just added reports as missing, and nothing anywhere says why.
+
+    So the interpreter is chosen by where the script lives, and the choice
+    is printed — never inferred from the environment.
+    """
+    own = Path(__file__).resolve().parents[1] / ".venv" / "bin" / "python"
+    if own.is_file() and str(own) != sys.executable:
+        return str(own)
+    return sys.executable
+
+
 def main(argv: "list[str] | None" = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run pytest with a worker count chosen from current load "
@@ -135,7 +153,11 @@ def main(argv: "list[str] | None" = None) -> int:
         # The whole point on a busy machine: the tests take the cores
         # nobody else wants, and give them back the instant anyone does.
         command += ["nice", "-n", "19"]
-    command += [sys.executable, "-m", "pytest", "-q"]
+    python = interpreter()
+    if python != sys.executable:
+        print(f"[run_tests] using this checkout's own interpreter: {python}",
+              file=sys.stderr)
+    command += [python, "-m", "pytest", "-q"]
     if workers > 1:
         # `--dist loadfile` is required, not a preference: modules share a
         # module-scoped Qt fixture and isolate QSettings per file, so a

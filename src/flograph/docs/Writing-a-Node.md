@@ -274,6 +274,41 @@ passing it through `tokens()` is what lets one **Visual Style** node set the
 look of every visual on a board. **HTML Template** is this idea with a
 template language on top; read it if you want the worked version.
 
+### Drawing a chart, not a page
+
+For an actual chart, `flograph.core.svgplot` does the arithmetic and hands
+you finished SVG to put in the same page. Python decides every coordinate,
+so there is no library to install and nothing left for the browser to work
+out:
+
+```python
+def run(ctx, table, style=None):
+    from flograph.core import svgplot as sp, visual_style as vs
+    tok = vs.tokens(style)
+    bars = "".join(
+        f"<rect x='{sp.num(i * 20)}' y='0' width='16' height='60' "
+        f"fill='{sp.cycle(tok['palette'], i)}'/>" for i in range(6))
+    drawing = sp.svg_open(120, 60) + bars + "</svg>"
+    return {"html": sp.chart_page(drawing, tok, title="Six bars")}
+```
+
+`chart_page()` gives every drawn visual the same heading, legend and
+click behaviour, and its stylesheet is where the report trap is handled:
+the height chain starts at `100vh`, because a **percentage height resolves
+to zero** inside the print-to-PDF a report page takes its picture with, and
+a drawing taller than the page is moved whole to a page of its own — which
+comes out as a heading with nothing under it. Viewport *units* work there
+even though viewport *measurement* does not.
+
+The rest of the module is the arithmetic worth having: `allocate()` shares
+a hundred squares out without losing any, `rank_within()` ranks each period
+on its own, `spread()` nudges colliding labels apart, `smooth_path()` runs
+a curve through points, `readable_on()` picks ink that can be read on a
+fill, and `text_of()` turns a cell into a label without letting a blank
+become the word "nan". **Waffle**, **Slope Chart**, **Bump Chart** and
+**Tile Map** are the worked versions — example 26 wires all four to one
+Visual Style node.
+
 ## Where nodes live
 
 - **Builtin:** `src/flograph/nodes/<category>/<name>.py` (from a checkout).

@@ -64,11 +64,12 @@ class TestBundledExamples:
             "23_report_visuals.flograph",
             "24_web_library_visuals.flograph",
             "25_infographic_builder.flograph",
+            "26_drawn_in_python.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 25
+        assert len(window._examples_menu.actions()) == 26
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -91,6 +92,9 @@ class TestBundledExamples:
         # 25 *can* run here, unlike 24: an HTML Template draws with nothing
         # but the CSS it ships, so there is no library to install first.
         "25_infographic_builder.flograph",
+        # 26 likewise: its four visuals are drawn by Python and printed as
+        # SVG, so there is nothing to download and nothing to install.
+        "26_drawn_in_python.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from
