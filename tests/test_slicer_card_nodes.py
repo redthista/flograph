@@ -754,7 +754,7 @@ class TestSlicerLayouts:
         assert default_tile_size(node) == (240.0, 80.0)
 
     def test_dropdown_button_says_what_is_picked(self, qtbot):
-        panel = _panel(qtbot, [("north",), ("south",)],
+        panel = _panel(qtbot, [("north",), ("south",), ("west",)],
                        params={"layout": "dropdown"})
         # nothing ticked means the slicer passes everything through
         assert panel.view._button.text() == "All"
@@ -763,6 +763,38 @@ class TestSlicerLayouts:
         assert panel.view._button.text() == "north"
         panel.sync_params(dict(DEFAULTS, layout="dropdown",
                                selected='["north", "south"]'))
+        assert panel.view._button.text() == "2 selected"
+
+    def test_ticking_every_value_reads_as_all(self, qtbot):
+        """Ticking everything keeps the same rows as ticking nothing, so a
+        shut dropdown says the same thing. "3 selected" over three values
+        counts the clicking rather than answering what comes through."""
+        panel = _panel(qtbot, [("north",), ("south",), ("west",)],
+                       params={"layout": "dropdown",
+                               "selected": '["north", "south", "west"]'})
+        assert panel.view._button.text() == "All"
+
+    def test_select_all_reads_as_all(self, qtbot):
+        """The same by the button rather than by the param."""
+        panel = _panel(qtbot, [("north",), ("south",), ("west",)],
+                       params={"layout": "dropdown"})
+        panel.view.toolbar._select_all.click()
+        assert panel.selected_values() == ["north", "south", "west"]
+        assert panel.view._button.text() == "All"
+
+    def test_a_branch_covering_every_leaf_reads_as_all(self, qtbot):
+        """One tick can be all of it: on a one-region tree, ticking the
+        region covers every store under it."""
+        panel = _panel(qtbot, [("north", "alpha"), ("north", "beta")],
+                       columns=("region", "store"),
+                       params={"layout": "dropdown",
+                               "selected": '[["north"]]'})
+        assert panel.view._button.text() == "All"
+
+    def test_all_but_one_still_counts(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",), ("west",)],
+                       params={"layout": "dropdown",
+                               "selected": '["north", "south"]'})
         assert panel.view._button.text() == "2 selected"
 
     def test_dropdown_carries_its_own_search_not_the_panel_toolbar(self, qtbot):

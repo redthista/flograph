@@ -335,9 +335,18 @@ class _Selection:
         return f"{len(self.selected_leaves())}/{total}"
 
     def button_label(self) -> str:
-        """What a dropdown says when it is shut. Nothing ticked means the
-        slicer passes everything, which reads as "All" — not "none"."""
+        """What a dropdown says when it is shut.
+
+        Nothing ticked means the slicer passes everything, which reads as
+        "All" — not "none". So does ticking *every* value, because it keeps
+        exactly the same rows: a shut dropdown should say what comes
+        through it, and "12 selected" over twelve values is a count of the
+        clicking rather than an answer.
+        """
         if not self.paths:
+            return "All"
+        total = len(self.options.paths)
+        if total and len(self.selected_leaves()) == total:
             return "All"
         if len(self.paths) == 1:
             return path_label(self.paths[0])
