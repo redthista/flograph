@@ -256,3 +256,68 @@ class TestLayoutOnPaper:
 
     def test_an_unstyled_table_is_unchanged(self):
         assert frame_to_html(self.FRAME) == frame_to_html(self.FRAME, [])
+
+
+class TestTheHeaderTone:
+    """The header row is toned on paper, whichever path drew the table.
+
+    It used to be toned only under `fit`. A report is laid out twice — into
+    a staged document whose `toHtml()` becomes the final document's text —
+    and that round trip rewrites every `<th>` as a `<td>`, so the `th` rule
+    in REPORT_CSS had nothing left to match. `fit_tables` rebuilds its
+    tables from `frame_to_html` and re-sets real `<th>` into the document
+    that carries the stylesheet, which is why exactly the fitted ones came
+    out right. Pinned as "the two paths agree" rather than against a
+    hard-coded grey, so changing the tone need not change the test.
+
+    Scope: a table *flograph* draws — an `![[embed]]` of a card. A table
+    typed into the page as markdown is not toned and cannot be by this
+    route: Qt's markdown parser builds those with no `<thead>` and no
+    `<th>` anywhere, so there is no header for a selector to find.
+    """
+
+    #: Enough rows that a `fit` low on the page has to trim some.
+    LONG = pd.DataFrame({"region": [f"R{i}" for i in range(12)],
+                         "revenue": list(range(12))})
+
+    @staticmethod
+    def _header_fills(html: str) -> list:
+        """The bgcolor of every cell in the document's first `<thead>`."""
+        import re
+        head = re.search(r"<thead.*?</thead>", html, re.S)
+        return re.findall(r'bgcolor="([^"]+)"', head.group(0)) if head else []
+
+    def test_a_report_table_has_a_toned_header(self):
+        graph, cache, _n = table_node()
+        fills = self._header_fills(html_of("![[Sales]]", graph, cache))
+        assert fills, "the header row carries no fill at all"
+        assert len(set(fills)) == 1, f"header cells disagree: {fills}"
+
+    def test_the_body_rows_are_not_toned_with_it(self):
+        graph, cache, _n = table_node()
+        html = html_of("![[Sales]]", graph, cache)
+        # nothing but the header: an unstyled table's data cells are bare
+        assert html.count("bgcolor=") == len(self._header_fills(html))
+
+    def test_a_fitted_table_has_the_same_header_as_a_plain_one(self):
+        """The bug, in one line: these two disagreed."""
+        from flograph.core.page_setup import PageSetup
+
+        setup = PageSetup()
+        graph, cache, _n = table_node(frame=self.LONG)
+        filler = "\n\n".join(["Lorem ipsum dolor sit amet."] * 30)
+        body = f"# Report\n\n{filler}\n\n![[Sales{{}}]]\n"
+        plain = render_report(body.format(""), graph, cache, setup=setup)
+        fitted = render_report(body.format("|fit"), graph, cache, setup=setup)
+        assert (self._header_fills(plain.document.toHtml())
+                == self._header_fills(fitted.document.toHtml()))
+
+    def test_the_tone_does_not_leak_into_a_nested_bar_table(self):
+        """A data bar is a nested table inside a cell, and it paints its
+        own cells — so the check is not "how many fills" but that the
+        *header's* fill appears nowhere except the header."""
+        graph, cache, _n = table_node("orders bar blue")
+        html = html_of("![[Sales]]", graph, cache)
+        fills = self._header_fills(html)
+        assert fills, "the header row carries no fill at all"
+        assert html.count(f'bgcolor="{fills[0]}"') == len(fills)

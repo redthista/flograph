@@ -44,6 +44,25 @@ from flograph.ui.emoji_font import with_emoji
 # their own width instead — see render_card.
 FIGURE_WIDTH = 510
 
+# The rules that have to be resolved while a header cell is still a header.
+#
+# A report is laid out twice: once into a *staged* document, whose toHtml()
+# is the text the final document is built from. That round trip does not
+# preserve `<th>` — Qt rewrites every header cell as a bold, centred `<td>`
+# inside the surviving `<thead>` — so a `th` selector on the final document
+# matches nothing that came through staging, and the header tone only ever
+# appeared on a table `fit_tables` had rebuilt (which re-sets real `<th>`
+# into a document that does have the stylesheet). Applying it to the staged
+# document as well resolves the fill while the `<th>` is still there, and
+# Qt writes it out as a `bgcolor` attribute that survives everything after.
+#
+# Deliberately only this rule, not the whole sheet: staging with
+# `body { font-family: … }` in force would bake that family into every span
+# and outrank the emoji-capable default font `_document()` exists to set.
+STAGED_CSS = """
+    th { background-color: #eeeeee; }
+"""
+
 # Enough of a stylesheet to make a printed report look like a document
 # rather than a text dump. Qt's rich text engine supports a small CSS
 # subset — everything here is inside it.
@@ -54,9 +73,8 @@ REPORT_CSS = """
     h3 { font-size: 12.5pt; }
     table { border-collapse: collapse; }
     td, th { border: 1px solid #999; padding: 3px 7px; }
-    th { background-color: #eeeeee; }
     blockquote { color: #b45309; }
-"""
+""" + STAGED_CSS
 
 
 def _document() -> QTextDocument:
@@ -1420,6 +1438,9 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     resolved = mark_page_breaks(replace_embeds(staged_body, resolver.render))
 
     staged = _document()
+    # see STAGED_CSS — the header tone has to be resolved here, because the
+    # `<th>` it selects does not survive staged.toHtml()
+    staged.setDefaultStyleSheet(STAGED_CSS)
     staged.setMarkdown(resolved)
     html = staged.toHtml()
     for index, width in enumerate(resolver.widths):
