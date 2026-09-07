@@ -820,6 +820,153 @@ class TestSlicerCounts:
         assert not win.graph.nodes[shown.id].dirty
 
 
+class TestSlicerChrome:
+    """The search box and the All / None row can each be taken away — on a
+    slicer over five regions they are just clutter, and on a dashboard the
+    space is the whole point."""
+
+    def test_both_rows_are_there_by_default(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",)])
+        assert panel.toolbar.isVisibleTo(panel)
+        assert panel.toolbar._search.isVisibleTo(panel.toolbar)
+        assert panel.toolbar._select_all.isVisibleTo(panel.toolbar)
+        assert panel.toolbar._clear.isVisibleTo(panel.toolbar)
+
+    def test_hiding_the_search_leaves_the_buttons(self, qtbot):
+        panel = _panel(qtbot, [("north",)], params={"show_search": False})
+        assert not panel.toolbar._search.isVisibleTo(panel.toolbar)
+        assert panel.toolbar._clear.isVisibleTo(panel.toolbar)
+        assert panel.toolbar.isVisibleTo(panel)
+
+    def test_hiding_the_buttons_leaves_the_search(self, qtbot):
+        panel = _panel(qtbot, [("north",)], params={"show_buttons": False})
+        assert panel.toolbar._search.isVisibleTo(panel.toolbar)
+        assert not panel.toolbar._select_all.isVisibleTo(panel.toolbar)
+        assert not panel.toolbar._clear.isVisibleTo(panel.toolbar)
+        assert not panel.toolbar._count.isVisibleTo(panel.toolbar)
+        assert panel.toolbar.isVisibleTo(panel)
+
+    def test_hiding_both_hides_the_whole_strip(self, qtbot):
+        """Otherwise the card keeps a two-pixel band of nothing above the
+        values."""
+        panel = _panel(qtbot, [("north",)],
+                       params={"show_search": False, "show_buttons": False})
+        assert not panel.toolbar.isVisibleTo(panel)
+
+    def test_the_values_are_untouched_by_either_toggle(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"show_search": False, "show_buttons": False})
+        assert _texts(panel.view) == ["north", "south"]
+
+    def test_hiding_the_search_clears_a_typed_filter(self, qtbot):
+        """A filter with no box to see it in leaves the slicer showing a
+        fraction of its values, with nothing on screen saying why."""
+        panel = _panel(qtbot, [("north",), ("south",)])
+        panel.toolbar._search.setText("nor")
+        assert _texts(panel.view) == ["north"]
+        panel.sync_params(dict(DEFAULTS, show_search=False))
+        assert panel.model.filter_text == ""
+        assert _texts(panel.view) == ["north", "south"]
+
+    def test_a_dropdown_popup_answers_to_the_toggles_too(self, qtbot):
+        panel = _panel(qtbot, [("north",)],
+                       params={"layout": "dropdown",
+                               "show_search": False, "show_buttons": False})
+        assert not panel.view.toolbar.isVisibleTo(panel.view)
+
+    def test_the_toggles_do_not_rerun_the_flow(self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        win.graph.set_param(slicer.id, "show_search", False)
+        win.graph.set_param(slicer.id, "show_buttons", False)
+        assert not win.graph.nodes[slicer.id].dirty
+        assert not win.graph.nodes[shown.id].dirty
+
+    def test_a_slicer_saved_before_these_existed_keeps_both(self, qtbot):
+        """The params default True, and an older file has neither key —
+        loading one must not silently strip its search box."""
+        from flograph.core.slicer import SlicerOptions
+        from flograph.ui.slicer_list import SlicerPanel
+        panel = SlicerPanel()
+        qtbot.addWidget(panel)
+        panel.set_options(SlicerOptions(["region"], [("north",)]),
+                          {"selected": "", "mode": "multi", "layout": "list"})
+        assert panel.toolbar._search.isVisibleTo(panel.toolbar)
+        assert panel.toolbar._clear.isVisibleTo(panel.toolbar)
+
+
+class TestSlicerAccent:
+    """One colour drives the tick, the chosen tile and the dropdown."""
+
+    def test_no_accent_leaves_the_native_checkbox(self, qtbot):
+        """Nothing chosen means the platform draws its own checkbox — not a
+        hand-painted look-alike of it in the theme colour."""
+        panel = _panel(qtbot, [("north",)])
+        assert panel.view._delegate.accent is None
+
+    def test_an_accent_is_painted_by_the_delegate(self, qtbot):
+        panel = _panel(qtbot, [("north",)], params={"accent": "#e11d48"})
+        assert panel.view._delegate.accent.name() == "#e11d48"
+
+    def test_a_garbled_colour_falls_back_to_the_theme(self, qtbot):
+        """A hand-edited param could hold anything; an invalid QColor is
+        black, which would paint every tick the colour of the card."""
+        from flograph.ui import theme
+        panel = _panel(qtbot, [("north",)], params={"accent": "not a colour"})
+        assert panel.view._delegate.accent.name() == theme.BUTTON_ACCENT.name()
+
+    def test_a_chosen_tile_is_filled_with_the_accent(self, qtbot):
+        panel = _panel(qtbot, [("north",)],
+                       params={"layout": "cards", "accent": "#e11d48"})
+        assert "#e11d48" in _cards(panel.view)[0].styleSheet()
+
+    def test_changing_the_accent_restyles_the_tiles_in_place(self, qtbot):
+        """The rows did not change, so this must not go through a rebuild —
+        but the tiles each carry their own copy of the sheet."""
+        panel = _panel(qtbot, [("north",)], params={"layout": "cards"})
+        before = _cards(panel.view)[0]
+        panel.sync_params(dict(DEFAULTS, layout="cards", accent="#16a34a"))
+        assert _cards(panel.view)[0] is before      # same button, restyled
+        assert "#16a34a" in before.styleSheet()
+
+    def test_the_dropdown_button_takes_the_accent(self, qtbot):
+        panel = _panel(qtbot, [("north",)],
+                       params={"layout": "dropdown", "accent": "#e11d48"})
+        assert "#e11d48" in panel.view._button.styleSheet()
+
+    def test_label_ink_flips_to_stay_readable(self):
+        """White on a lime tile is unreadable, and picking lime is exactly
+        the sort of thing a filter panel does."""
+        from PySide6.QtGui import QColor
+
+        from flograph.ui.slicer_list import ink_on
+        assert ink_on(QColor("#1d4ed8")) == "#ffffff"     # deep blue
+        assert ink_on(QColor("#facc15")) == "#111827"     # amber
+        assert ink_on(QColor("#ffffff")) == "#111827"
+        assert ink_on(QColor("#000000")) == "#ffffff"
+
+    def test_the_accent_does_not_rerun_the_flow(self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        win.graph.set_param(slicer.id, "accent", "#e11d48")
+        assert not win.graph.nodes[slicer.id].dirty
+        assert not win.graph.nodes[shown.id].dirty
+
+    def test_two_slicers_can_be_different_colours(self, qtbot):
+        """The tile stylesheet used to be a module constant, which would
+        hand whichever card was built last to both."""
+        red = _panel(qtbot, [("north",)],
+                     params={"layout": "cards", "accent": "#e11d48"})
+        green = _panel(qtbot, [("north",)],
+                       params={"layout": "cards", "accent": "#16a34a"})
+        assert "#e11d48" in _cards(red.view)[0].styleSheet()
+        assert "#16a34a" in _cards(green.view)[0].styleSheet()
+
+
 class TestStandaloneSlicer:
     def test_a_hierarchy_of_typed_values(self, qtbot, window):
         """With no table wired in, a line is a path: "north > alpha"."""

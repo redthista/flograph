@@ -10,64 +10,17 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QColorDialog, QDoubleSpinBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QCheckBox, QDoubleSpinBox, QHeaderView, QLabel, QLineEdit, QSpinBox,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph
 
-from .. import theme
 from ..canvas.shape_item import KIND_LABELS, LINE_KINDS
+from .colour_row import DEFAULT_PICK, ColourRow
 
-_DEFAULT_STROKE = "#e5e7eb"
-
-
-class _ColourRow(QWidget):
-    """A colour swatch, plus a clear button when the colour is optional
-    (fill, text colour — an empty value means 'none' or 'theme default')."""
-
-    def __init__(self, on_pick, on_clear=None) -> None:
-        super().__init__()
-        self._value = ""
-        self._on_pick = on_pick
-        self._on_clear = on_clear
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(3)
-        self._swatch = QPushButton()
-        self._swatch.setFixedHeight(20)
-        self._swatch.clicked.connect(self._pick)
-        row.addWidget(self._swatch, 1)
-        self._clear = None
-        if on_clear is not None:
-            self._clear = QPushButton("✕")
-            self._clear.setFixedSize(20, 20)
-            self._clear.setToolTip("Clear")
-            self._clear.clicked.connect(lambda: on_clear())
-            row.addWidget(self._clear)
-
-    def set_colour(self, value: str, *, none_label: str) -> None:
-        self._value = value
-        border = QColor(theme.NODE_BORDER).name()
-        if value:
-            self._swatch.setText("")
-            self._swatch.setStyleSheet(
-                f"background: {value}; border: 1px solid {border};")
-        else:
-            self._swatch.setText(none_label)
-            self._swatch.setStyleSheet(
-                f"color: palette(mid); border: 1px solid {border};")
-        if self._clear is not None:
-            self._clear.setEnabled(bool(value))
-
-    def _pick(self) -> None:
-        start = QColor(self._value) if self._value else QColor(_DEFAULT_STROKE)
-        colour = QColorDialog.getColor(start, self, "Pick a colour")
-        if colour.isValid():
-            self._on_pick(colour.name())
+_DEFAULT_STROKE = DEFAULT_PICK
 
 
 class ShapePropertiesPanel(QWidget):
@@ -109,10 +62,10 @@ class ShapePropertiesPanel(QWidget):
         self._text.setPlaceholderText("label")
         self._text.editingFinished.connect(self._commit_text)
 
-        self._stroke = _ColourRow(lambda c: self._push(stroke=c))
-        self._fill = _ColourRow(lambda c: self._push(fill=c),
+        self._stroke = ColourRow(lambda c: self._push(stroke=c))
+        self._fill = ColourRow(lambda c: self._push(fill=c),
                                 lambda: self._push(fill=""))
-        self._text_colour = _ColourRow(lambda c: self._push(text_color=c),
+        self._text_colour = ColourRow(lambda c: self._push(text_color=c),
                                        lambda: self._push(text_color=""))
 
         self._width = QDoubleSpinBox()

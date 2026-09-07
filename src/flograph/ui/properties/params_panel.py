@@ -27,6 +27,7 @@ from flograph.core import Graph, ParamSpec, varlinks
 from flograph.core.params import controllers
 
 from . import var_completion
+from .colour_row import ColourRow
 from ..canvas.node_item import card_kind
 from ..controls import UNCAPPED_TEXT
 from ..commands import SetDescriptionCommand, SetLabelCommand, SetParamCommand
@@ -468,6 +469,21 @@ class ParamsPanel(QWidget):
             row.addWidget(edit, 1)
             row.addWidget(reveal)
             return host, self._line_setter(edit)
+
+        if spec.type == "color":
+            # blank is a real value here, not an empty field: it means "use
+            # the theme's own colour", which is what a node should do until
+            # someone deliberately overrides it. spec.placeholder names that
+            # state on the swatch ("Theme", "None") so the button says what
+            # empty *means* rather than just looking unset.
+            none_label = spec.placeholder or "Theme"
+            row = ColourRow(lambda c: self._commit(name, c),
+                            lambda: self._commit(name, ""),
+                            clear_tip=f"Back to {none_label.lower()}")
+            row.set_colour(str(value or ""), none_label=none_label)
+            return row, lambda v: self._silently(
+                lambda c: row.set_colour(str(c or ""), none_label=none_label),
+                v)
 
         if spec.type == "date":
             return self._make_date_widget(spec, value)

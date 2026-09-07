@@ -31,7 +31,8 @@
           "show_counts": true,
           "selected": "[[\"North\"], [\"South\", \"Bristol\"]]",
           "width": 220,
-          "height": 320
+          "height": 320,
+          "accent": "#e11d48"
         },
         "code": null,
         "label": "Region \u203a Store (tree)"
@@ -47,7 +48,9 @@
           "column": "product",
           "layout": "cards",
           "width": 260,
-          "height": 200
+          "height": 200,
+          "accent": "#f59e0b",
+          "show_search": false
         },
         "code": null,
         "label": "Product (cards)"
@@ -63,7 +66,10 @@
           "column": "channel",
           "layout": "dropdown",
           "width": 220,
-          "height": 80
+          "height": 80,
+          "accent": "#16a34a",
+          "show_search": false,
+          "show_buttons": false
         },
         "code": null,
         "label": "Channel (dropdown)"

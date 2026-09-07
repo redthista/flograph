@@ -48,6 +48,13 @@ Its **Layout** setting draws the same selection three ways — a checkbox
 behind one button saying what is picked — and **Show row counts** puts the
 number of rows behind each value beside it.
 
+A slicer on a page can also drop what it does not need: **Show search box**
+and **Show All / None** take either row away, and turning off both leaves
+just the values. **Accent colour** gives one slicer its own colour for
+ticks, chosen tiles and the dropdown button, so a filter panel of three
+reads at a glance; leave it on **Theme** to follow the app. None of these
+re-runs the flow — they change the picture, not the filter.
+
 The result is a dashboard you hand to someone who never opens the model: they
 turn the knobs, the charts answer. Controls often read a
 [[Flow Variables|Variables]] value for their default.

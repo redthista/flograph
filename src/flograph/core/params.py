@@ -23,11 +23,13 @@ PARAM_TYPES = {
     "password",   # QLineEdit with masked echo + reveal toggle
     "node_ref",   # QComboBox of other nodes in the graph; stores a node id
     "date",       # QDateEdit with a calendar popup; stores an ISO "YYYY-MM-DD"
+    "color",      # swatch + colour picker; stores "#rrggbb", "" for "theme"
 }
 
 _TYPE_DEFAULTS: dict[str, Any] = {
     "string": "", "text": "", "int": 0, "float": 0.0, "bool": False,
     "choice": None, "file_open": "", "file_save": "", "columns": "",
+    "color": "",
     "folder_open": "",
     "password": "", "node_ref": "", "date": "",
 }

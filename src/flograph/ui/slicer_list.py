@@ -26,7 +26,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication, QGridLayout, QLabel, QLineEdit, QMenu, QScrollArea,
     QSizePolicy, QStyle, QStyleOptionButton, QStyleOptionViewItem,
@@ -57,6 +58,30 @@ LAYOUTS = ("list", "cards", "dropdown")
 #: to the model without keeping a parallel index
 _PATH_ROLE = Qt.UserRole + 1
 
+#: the label on a filled tile, once the accent is too light for white
+_DARK_INK = "#111827"
+
+
+def accent_colour(value: str) -> QColor:
+    """The slicer's accent as a colour: what the node's "accent" param says,
+    or the theme's own button accent when it says nothing.
+
+    A garbled hex is treated as "nothing" rather than allowed through as
+    QColor's invalid black, which would silently paint every tick the same
+    colour as the card and read as the slicer having broken.
+    """
+    colour = QColor(value) if value else QColor()
+    return colour if colour.isValid() else QColor(theme.BUTTON_ACCENT)
+
+
+def ink_on(colour: QColor) -> str:
+    """Near-black or white — whichever a label stays readable in on top of
+    `colour`. A fixed white label disappears on a yellow or lime accent, and
+    picking one of those is exactly the sort of thing a filter panel does."""
+    luminance = (0.299 * colour.red() + 0.587 * colour.green()
+                 + 0.114 * colour.blue()) / 255
+    return _DARK_INK if luminance > 0.6 else "#ffffff"
+
 
 # --------------------------------------------------------------- selection
 
@@ -72,6 +97,12 @@ class _Selection:
         self.options = SlicerOptions([], [])
         self.mode = "multi"
         self.show_counts = False
+        # chrome and colour live here beside mode rather than on each view:
+        # the dropdown builds a second toolbar and a second tree inside its
+        # popup, and anything held per-view would have to be handed to both
+        self.show_search = True
+        self.show_buttons = True
+        self.accent = ""
         self.filter_text = ""
         self.paths: list[tuple[str, ...]] = []
         self._roots: list[TreeNode] = []
@@ -321,25 +352,38 @@ class _Selection:
 # ------------------------------------------------------------------- views
 
 class _IndicatorDelegate(QStyledItemDelegate):
-    """Swaps each row's check indicator for a radio button in single mode.
+    """Draws each row's check indicator itself, when the default one will
+    not do: as a radio button in single mode, and in the slicer's accent
+    colour once one is set.
 
     Qt has no "exclusive" tree widget, so single mode is still checkboxes
     underneath — but a checkbox promises you can tick several, which single
     mode then silently undoes. Every tool this borrows from (Power BI,
-    Excel) draws radios there, so the widget does too. Purely cosmetic:
-    check state is still what the view stores and reports.
+    Excel) draws radios there, so the widget does too.
+
+    The accent is painted rather than styled because a stylesheet cannot
+    put a *tick* inside `QTreeWidget::indicator` — only a background and a
+    border, or an image from a resource. Styling it at all also replaces
+    the native indicator wholesale, so every state not written out renders
+    blank. Painting keeps all three states in one place and costs a rect
+    and a three-point path per row.
+
+    Purely cosmetic either way: check state is still what the view stores
+    and reports.
     """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.radio = False
+        #: None leaves the platform style to draw a normal checkbox
+        self.accent: Optional[QColor] = None
 
     def paint(self, painter, option, index) -> None:
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
         has_check = bool(opt.features
                          & QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator)
-        if not self.radio or not has_check:
+        if not has_check or not (self.radio or self.accent is not None):
             super().paint(painter, option, index)
             return
 
@@ -351,7 +395,7 @@ class _IndicatorDelegate(QStyledItemDelegate):
             QStyle.SE_ItemViewItemCheckIndicator, opt, opt.widget)
         text_left = style.subElementRect(
             QStyle.SE_ItemViewItemText, opt, opt.widget).left()
-        checked = opt.checkState == Qt.Checked
+        state = opt.checkState
 
         opt.features &= ~QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
         opt.checkState = Qt.Unchecked
@@ -363,12 +407,66 @@ class _IndicatorDelegate(QStyledItemDelegate):
         opt.rect = option.rect.adjusted(text_left - collapsed_left, 0, 0, 0)
         style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
 
-        button = QStyleOptionButton()
-        button.rect = rect
-        button.state = QStyle.State_Enabled | (
-            QStyle.State_On if checked else QStyle.State_Off)
-        style.drawPrimitive(
-            QStyle.PE_IndicatorRadioButton, button, painter, opt.widget)
+        if self.accent is None:
+            button = QStyleOptionButton()
+            button.rect = rect
+            button.state = QStyle.State_Enabled | (
+                QStyle.State_On if state == Qt.Checked else QStyle.State_Off)
+            style.drawPrimitive(
+                QStyle.PE_IndicatorRadioButton, button, painter, opt.widget)
+            return
+        _paint_indicator(painter, rect, state, self.accent, self.radio)
+
+
+def _paint_indicator(painter, rect: QRect, state, accent: QColor,
+                     radio: bool) -> None:
+    """One tick box (or radio) in the accent colour.
+
+    Kept square and centred in whatever rect the style measured out, so the
+    row's text still lines up with a natively-drawn one beside it — the
+    label position is the style's business, not ours.
+    """
+    size = min(rect.width(), rect.height())
+    box = QRectF(rect.x() + (rect.width() - size) / 2.0,
+                 rect.y() + (rect.height() - size) / 2.0, size, size)
+    box = box.adjusted(1.5, 1.5, -1.5, -1.5)
+    on = state == Qt.Checked
+    partial = state == Qt.PartiallyChecked
+
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setPen(QPen(accent if (on or partial)
+                        else QColor(theme.NODE_BORDER), 1.4))
+    painter.setBrush(accent if on else Qt.NoBrush)
+    if radio:
+        painter.drawEllipse(box)
+        if on:
+            # the dot is punched out of the fill rather than drawn over it,
+            # so a light accent keeps a visible centre
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(ink_on(accent)))
+            painter.drawEllipse(box.adjusted(3, 3, -3, -3))
+        painter.restore()
+        return
+
+    painter.drawRoundedRect(box, 2.5, 2.5)
+    if on:
+        tick = QPainterPath()
+        tick.moveTo(box.left() + size * 0.22, box.top() + size * 0.46)
+        tick.lineTo(box.left() + size * 0.40, box.top() + size * 0.66)
+        tick.lineTo(box.left() + size * 0.76, box.top() + size * 0.24)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(ink_on(accent)), 1.8, Qt.SolidLine,
+                            Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(tick)
+    elif partial:
+        # a bar, not a half-fill: "some of what is under this" reads as one
+        # mark, and it stays legible at the 12px a dense tree draws at
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(accent)
+        painter.drawRoundedRect(box.adjusted(3, size * 0.36, -3,
+                                             -size * 0.36), 1.0, 1.0)
+    painter.restore()
 
 
 class SlicerTreeWidget(QTreeWidget):
@@ -392,14 +490,31 @@ class SlicerTreeWidget(QTreeWidget):
         self.setUniformRowHeights(True)
         self.setExpandsOnDoubleClick(False)
         self.setIndentation(12)
+        self._styled_for = None
+        self._apply_style()
+        self._delegate = _IndicatorDelegate(self)
+        self.setItemDelegate(self._delegate)
+        self.itemChanged.connect(self._on_item_changed)
+
+    def _apply_style(self) -> None:
+        """Restyle for the current accent. Guarded by `_styled_for` because
+        setting a stylesheet re-polishes every row, and rebuild() runs on
+        every tick — re-applying an identical sheet would be a full repaint
+        per click."""
+        accent = self._model.accent
+        if accent == self._styled_for:
+            return
+        self._styled_for = accent
+        highlight = accent_colour(accent)
+        highlight.setAlpha(60)
         self.setStyleSheet(
             f"QTreeWidget {{ background: {theme.NODE_BODY.name()};"
             f" color: {theme.NODE_TEXT.name()}; border: none;"
             f" font-size: 9pt; }}"
-            f"QTreeWidget::item {{ padding: 1px 2px; }}")
-        self._delegate = _IndicatorDelegate(self)
-        self.setItemDelegate(self._delegate)
-        self.itemChanged.connect(self._on_item_changed)
+            f"QTreeWidget::item {{ padding: 1px 2px; }}"
+            f"QTreeWidget::item:selected {{ background: rgba("
+            f"{highlight.red()}, {highlight.green()}, {highlight.blue()},"
+            f" {highlight.alpha()}); color: {theme.NODE_TEXT.name()}; }}")
 
     # ---- building
 
@@ -408,6 +523,12 @@ class SlicerTreeWidget(QTreeWidget):
         signature = [(node.path, depth) for node, depth in rows] + \
             ([("\u2026", hidden)] if hidden else [])
         self._delegate.radio = self._model.mode == "single"
+        # None (not the theme colour) when nothing was chosen, so the rows
+        # keep the platform's own checkbox rather than a hand-drawn
+        # look-alike of it
+        self._delegate.accent = (accent_colour(self._model.accent)
+                                 if self._model.accent else None)
+        self._apply_style()
         self.setRootIsDecorated(self._model.depth > 1)
         self.viewport().update()
         if signature == self._built:
@@ -569,10 +690,30 @@ class _CardsView(QScrollArea):
         self._buttons: dict[tuple[str, ...], QToolButton] = {}
         self._built: list = []
         self._in_change = False
+        self._style_for: Optional[str] = None
+        self._style = ""
+        self._ensure_style()
+
+    def _ensure_style(self) -> bool:
+        """Recompute the tile stylesheet if the accent moved. Returns
+        whether it did, so a caller knows to push it onto the tiles that
+        already exist."""
+        if self._style_for == self._model.accent:
+            return False
+        self._style_for = self._model.accent
+        self._style = card_style(self._model.accent)
+        return True
 
     def rebuild(self) -> None:
+        restyle = self._ensure_style()
         signature = [node.path for node, _kids in
                      _flatten(self._model.visible())]
+        if restyle:
+            # every tile carries its own copy of the sheet, so a colour
+            # change has to reach each of them; the rows themselves are
+            # unchanged, so this is not a reason to rebuild
+            for button in self._buttons.values():
+                button.setStyleSheet(self._style)
         if signature == self._built and self._buttons:
             self.refresh_states()
             return
@@ -632,7 +773,7 @@ class _CardsView(QScrollArea):
                            "partial" if state == Qt.PartiallyChecked
                            else "on" if state == Qt.Checked else "off")
         button.setProperty("slicerBranch", branch)
-        button.setStyleSheet(_CARD_STYLE)
+        button.setStyleSheet(self._style)
         button.clicked.connect(lambda _c=False, p=node.path: self._pick(p))
         self._buttons[node.path] = button
         return button
@@ -666,21 +807,29 @@ class _CardsView(QScrollArea):
             button.style().polish(button)
 
 
-_CARD_STYLE = f"""
+def card_style(accent: str = "") -> str:
+    """The tile stylesheet for one accent colour.
+
+    A function rather than a constant because the accent is per-node: two
+    slicers on the same dashboard can be different colours, and a shared
+    constant would hand whichever was built last to both.
+    """
+    colour = accent_colour(accent)
+    return f"""
 QToolButton {{
     background: {theme.NODE_HEADER.name()};
     color: {theme.NODE_TEXT.name()};
     border: 1px solid {theme.NODE_BORDER.name()};
     border-radius: 4px; padding: 3px 8px; font-size: 8pt;
 }}
-QToolButton:hover {{ border-color: {theme.SELECTION_OUTLINE.name()}; }}
+QToolButton:hover {{ border-color: {colour.name()}; }}
 QToolButton[slicerState="on"] {{
-    background: {theme.BUTTON_ACCENT.name()};
-    border-color: {theme.BUTTON_ACCENT.name()};
-    color: #ffffff;
+    background: {colour.name()};
+    border-color: {colour.name()};
+    color: {ink_on(colour)};
 }}
 QToolButton[slicerState="partial"] {{
-    border: 1px solid {theme.BUTTON_ACCENT.name()};
+    border: 1px solid {colour.name()};
     color: {theme.NODE_TEXT.name()};
 }}
 QToolButton[slicerBranch="true"] {{ font-weight: 600; }}
@@ -705,14 +854,8 @@ class _DropdownView(QWidget):
         self._button.setPopupMode(QToolButton.InstantPopup)
         self._button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._button.setStyleSheet(
-            f"QToolButton {{ background: {theme.NODE_HEADER.name()};"
-            f" color: {theme.NODE_TEXT.name()};"
-            f" border: 1px solid {theme.NODE_BORDER.name()};"
-            f" border-radius: 3px; padding: 3px 6px; font-size: 9pt;"
-            f" text-align: left; }}"
-            f"QToolButton::menu-indicator {{ subcontrol-position: right"
-            f" center; }}")
+        self._styled_for: Optional[str] = None
+        self._apply_style()
         column.addWidget(self._button)
         column.addStretch(1)
 
@@ -736,6 +879,26 @@ class _DropdownView(QWidget):
         self._button.setMenu(self._popup)
         self.tree.selection_changed.connect(self._on_changed)
 
+    def _apply_style(self) -> None:
+        """The button borrows the accent for its border and its open-state
+        highlight — with the values hidden behind a popup it is the only
+        part of a dropdown slicer that can carry the colour at all."""
+        if self._model.accent == self._styled_for:
+            return
+        self._styled_for = self._model.accent
+        colour = accent_colour(self._model.accent)
+        border = (colour.name() if self._model.accent
+                  else theme.NODE_BORDER.name())
+        self._button.setStyleSheet(
+            f"QToolButton {{ background: {theme.NODE_HEADER.name()};"
+            f" color: {theme.NODE_TEXT.name()};"
+            f" border: 1px solid {border};"
+            f" border-radius: 3px; padding: 3px 6px; font-size: 9pt;"
+            f" text-align: left; }}"
+            f"QToolButton:hover {{ border-color: {colour.name()}; }}"
+            f"QToolButton::menu-indicator {{ subcontrol-position: right"
+            f" center; }}")
+
     def _refresh_after_toolbar(self) -> None:
         self.tree.rebuild()
         self._on_changed()
@@ -746,8 +909,11 @@ class _DropdownView(QWidget):
         self.selection_changed.emit()
 
     def rebuild(self) -> None:
+        self._apply_style()
         self.tree.rebuild()
-        self.toolbar.set_mode(self._model.mode)
+        # the popup's own toolbar answers to the same two toggles; hiding
+        # both leaves the popup as a bare list of values
+        self.toolbar.setVisible(self.toolbar.refresh_chrome())
         self.toolbar.refresh_summary()
         self._button.setText(self._model.button_label())
 
@@ -805,14 +971,51 @@ class SlicerToolbar(QWidget):
         self._count = count
 
         self._relayout(wrapped=False)
+        self._styled_for: Optional[str] = None
+        self._apply_style()
 
+    def _apply_style(self) -> None:
+        if self._model.accent == self._styled_for:
+            return
+        self._styled_for = self._model.accent
+        colour = accent_colour(self._model.accent)
         self.setStyleSheet(
             f"QLineEdit {{ background: {theme.NODE_BODY.name()};"
             f" color: {theme.NODE_TEXT.name()};"
             f" border: 1px solid {theme.NODE_BORDER.name()};"
             f" border-radius: 3px; padding: 1px 3px; font-size: 8pt; }}"
+            f"QLineEdit:focus {{ border-color: {colour.name()}; }}"
             f"QToolButton {{ font-size: 8pt; padding: 1px 4px; }}"
+            f"QToolButton:hover {{ color: {colour.name()}; }}"
             f"QLabel {{ color: {theme.NODE_SUBTEXT.name()}; font-size: 8pt; }}")
+
+    def refresh_chrome(self) -> bool:
+        """Show or hide the search box and the All / None / count group, and
+        say whether anything is left — the host hides the whole strip when
+        nothing is, rather than leaving an empty two-pixel band above the
+        values.
+
+        Hiding the search also *clears* it. A filter with no box to see it
+        in leaves the slicer showing a fraction of its values with nothing
+        on screen explaining why, and no way back.
+        """
+        self._apply_style()
+        model = self._model
+        self._search.setVisible(model.show_search)
+        if not model.show_search and model.filter_text:
+            model.filter_text = ""
+            self._search.blockSignals(True)
+            self._search.clear()
+            self._search.blockSignals(False)
+        # Select All is meaningless once only one value can be picked
+        self._select_all.setVisible(model.show_buttons
+                                    and model.mode != "single")
+        self._clear.setVisible(model.show_buttons)
+        self._count.setVisible(model.show_buttons)
+        # _relayout only re-stretches when the *wrap* changes, and hiding
+        # the search is not that
+        self._apply_stretch()
+        return bool(model.show_search or model.show_buttons)
 
     def _relayout(self, wrapped: bool) -> None:
         """Place the four widgets in one row (wide) or two (narrow)."""
@@ -826,12 +1029,22 @@ class SlicerToolbar(QWidget):
             self._grid.addWidget(self._select_all, 1, 0)
             self._grid.addWidget(self._clear, 1, 1)
             self._grid.addWidget(self._count, 1, 2)
+            self._tail_column = 2
         else:
             self._grid.addWidget(self._search, 0, 0)
             self._grid.addWidget(self._select_all, 0, 1)
             self._grid.addWidget(self._clear, 0, 2)
             self._grid.addWidget(self._count, 0, 3)
-        self._grid.setColumnStretch(0, 1)
+            self._tail_column = 3
+        self._apply_stretch()
+
+    def _apply_stretch(self) -> None:
+        """Give the spare width to the search box, or — when it is hidden —
+        to the column after the buttons, so All / None stay on the left with
+        the values they act on rather than drifting to the right edge."""
+        search = self._search.isVisibleTo(self)
+        self._grid.setColumnStretch(0, 1 if search else 0)
+        self._grid.setColumnStretch(self._tail_column, 0 if search else 1)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -853,10 +1066,6 @@ class SlicerToolbar(QWidget):
 
     def _emit(self, changed: bool) -> None:
         (self.selection_changed if changed else self.filter_changed).emit()
-
-    def set_mode(self, mode: str) -> None:
-        """Select All is meaningless once only one value can be picked."""
-        self._select_all.setVisible(mode != "single")
 
     def refresh_summary(self) -> None:
         """Re-read the "N/M" count off the model — hosts call this after
@@ -931,9 +1140,7 @@ class SlicerPanel(QWidget):
         if self.view is not None:
             self.view.hide()
         self.view = self._install_view(name)
-        # the dropdown carries its own search and buttons inside the popup;
-        # a second copy above a single button would be most of the card
-        self.toolbar.setVisible(self._has_options and name != "dropdown")
+        self._apply_chrome()
         if self._has_options:
             self.view.rebuild()
             self.view.show()
@@ -958,10 +1165,9 @@ class SlicerPanel(QWidget):
         self.model.set_paths(selected_paths(params.get("selected", "")))
         self._placeholder.hide()
         self.set_layout_name(str(params.get("layout", "list") or "list"))
-        self.toolbar.set_mode(self.model.mode)
+        self._apply_chrome()
         self.view.rebuild()
         self.view.show()
-        self.toolbar.setVisible(self._layout_name != "dropdown")
         self.toolbar.refresh_summary()
 
     def sync_params(self, params: dict) -> None:
@@ -975,7 +1181,7 @@ class SlicerPanel(QWidget):
         self._read_params(params)
         self.model.set_paths(selected_paths(params.get("selected", "")))
         self.set_layout_name(str(params.get("layout", "list") or "list"))
-        self.toolbar.set_mode(self.model.mode)
+        self._apply_chrome()
         # flipping to single with several ticked trims to the first, so the
         # card and the param it commits never disagree about how many are on
         if entering_single and self.model.trim_to_single():
@@ -990,6 +1196,20 @@ class SlicerPanel(QWidget):
         mode = str(params.get("mode", "multi") or "multi")
         self.model.mode = mode if mode in MODES else "multi"
         self.model.show_counts = bool(params.get("show_counts", False))
+        # default True: a slicer saved before these existed had both,
+        # and must not lose them on load
+        self.model.show_search = bool(params.get("show_search", True))
+        self.model.show_buttons = bool(params.get("show_buttons", True))
+        self.model.accent = str(params.get("accent", "") or "")
+
+    def _apply_chrome(self) -> None:
+        """Show the toolbar only when it has something left on it, and
+        only where it belongs — the dropdown carries its own copy inside
+        the popup, and a second one above a single button would be most
+        of the card."""
+        wanted = self.toolbar.refresh_chrome()
+        self.toolbar.setVisible(self._has_options and wanted
+                                and self._layout_name != "dropdown")
 
     # ---- reporting
 

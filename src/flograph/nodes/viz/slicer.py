@@ -21,6 +21,15 @@ the whole thing behind a button that says what is picked — for a dashboard
 where a slicer should cost one line, not a panel. All three drive the same
 selection, so switching between them changes nothing but the picture.
 
+**Chrome and colour.** "Show search box" and "Show All / None" take away
+the two rows above the values — a slicer on five regions does not need
+either, and on a dashboard they are mostly clutter. "Accent colour" sets
+the colour a tick, a chosen tile and the dropdown are drawn in; leave it on
+"Theme" to follow the app, or give each slicer its own so a filter panel
+reads at a glance. Text on a filled tile flips between white and near-black
+to stay legible against whatever colour is chosen. All of it is cosmetic —
+the flow does not re-run because a slicer changed colour.
+
 "Selection" switches between the two slicer styles those tools offer:
 "multi" is a checkbox list (any number of ticks); "single" is a radio-style
 list where picking one value clears any other and clicking it again clears
@@ -46,7 +55,7 @@ works when editing by hand).
 NODE = {
     "label": "Slicer",
     "category": "Viz",
-    "version": "1.1",
+    "version": "1.2",
     "card": "slicer",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe"), ("selected", "any")],
@@ -62,7 +71,7 @@ PARAMS = [
                                    "— blank keeps every row"},
     {"name": "values", "type": "text", "label": "Values (one per line)",
      "default": "", "placeholder": "Used only when no table is connected"},
-    # Presentation only — run() reads none of the four below, and dirtying
+    # Presentation only — run() reads none of the seven below, and dirtying
     # on one would re-filter the table and re-run every visual downstream to
     # produce the exact same rows.
     {"name": "layout", "type": "choice", "label": "Layout",
@@ -70,6 +79,12 @@ PARAMS = [
      "cosmetic": True},
     {"name": "show_counts", "type": "bool", "label": "Show row counts",
      "default": False, "cosmetic": True},
+    {"name": "show_search", "type": "bool", "label": "Show search box",
+     "default": True, "cosmetic": True},
+    {"name": "show_buttons", "type": "bool", "label": "Show All / None",
+     "default": True, "cosmetic": True},
+    {"name": "accent", "type": "color", "label": "Accent colour",
+     "default": "", "placeholder": "Theme", "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
      "default": 200, "min": 140, "max": 600, "cosmetic": True},
     # the floor is 150 for every layout but "dropdown", which is one button
