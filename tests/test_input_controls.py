@@ -732,8 +732,9 @@ class TestChaining:
         for data it doesn't have."""
         slicer = self._standalone_slicer(window, "alpha\nbeta", "")
         from flograph.engine.introspect import slicer_options
-        assert slicer_options(window.graph, window.engine.cache,
-                              slicer.id) == ["alpha", "beta"]
+        assert [p[0] for p in slicer_options(
+            window.graph, window.engine.cache, slicer.id).paths] \
+            == ["alpha", "beta"]
 
     def test_nothing_ticked_passes_every_value(self, qtbot, window):
         slicer = self._standalone_slicer(window, "alpha\nbeta", "")

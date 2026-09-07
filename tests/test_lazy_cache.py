@@ -618,7 +618,8 @@ class TestWarmEntries:
         assert engine.warm_entries([slicer.id, dot.id]) is True
         qtbot.waitUntil(lambda: engine.cache.is_resident(dot.id),
                         timeout=10000)
-        assert slicer_options(graph, engine.cache, slicer.id) == \
+        assert [p[0] for p in
+                slicer_options(graph, engine.cache, slicer.id).paths] == \
             ["e", "n", "s"]
 
     def test_a_dud_owner_drops_the_aliases_waiting_on_it(
@@ -857,6 +858,7 @@ class TestOpenRestoresWhatCardsShow:
         engine = reopened.engine
         qtbot.waitUntil(lambda: engine.cache.is_resident(dot.id), timeout=15000)
         assert slicer.id in refreshed
-        assert slicer_options(reopened.graph, engine.cache, slicer.id) == [
+        assert [p[0] for p in slicer_options(
+            reopened.graph, engine.cache, slicer.id).paths] == [
             "r0", "r1", "r2"]
         assert engine.history.latest is None

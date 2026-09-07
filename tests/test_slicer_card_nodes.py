@@ -4,7 +4,7 @@ on the canvas)."""
 import json
 
 import pytest
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QResizeEvent, QUndoStack
 from PySide6.QtWidgets import QApplication
 
@@ -15,6 +15,9 @@ from flograph.ui.mainwindow import MainWindow
 
 REGIONS = {"columns": ["region", "units"],
            "rows": [["north", "10"], ["south", "20"], ["north", "30"]]}
+STORES = {"columns": ["region", "store", "units"],
+          "rows": [["north", "alpha", "10"], ["north", "beta", "20"],
+                   ["north", "beta", "5"], ["south", "gamma", "30"]]}
 
 
 def _resize_event(w: int, h: int) -> QResizeEvent:
@@ -52,7 +55,7 @@ def window(qtbot, registry):
     QApplication.processEvents()
 
 
-def _add_sliced_flow(win):
+def _add_sliced_flow(win, column="region"):
     """Table -> Slicer(region) -> Show Table, returning the three nodes."""
     source = win.registry.instantiate("flograph.io.table", pos=(0, 0))
     slicer = win.registry.instantiate("flograph.viz.slicer", pos=(400, 0))
@@ -60,10 +63,66 @@ def _add_sliced_flow(win):
     for node in (source, slicer, shown):
         win.graph.add_node(node)
     win.graph.set_param(source.id, "data", json.dumps(REGIONS))
-    win.graph.set_param(slicer.id, "column", "region")
+    win.graph.set_param(slicer.id, "column", column)
     win.graph.connect(source.id, "table", slicer.id, "table")
     win.graph.connect(slicer.id, "table", shown.id, "table")
     return source, slicer, shown
+
+
+def _add_nested_flow(win, column="region, store"):
+    """The same flow over a two-level table, for the hierarchy tests."""
+    source = win.registry.instantiate("flograph.io.table", pos=(0, 0))
+    slicer = win.registry.instantiate("flograph.viz.slicer", pos=(400, 0))
+    shown = win.registry.instantiate("flograph.viz.show_table", pos=(800, 0))
+    for node in (source, slicer, shown):
+        win.graph.add_node(node)
+    win.graph.set_param(source.id, "data", json.dumps(STORES))
+    win.graph.set_param(slicer.id, "column", column)
+    win.graph.connect(source.id, "table", slicer.id, "table")
+    win.graph.connect(slicer.id, "table", shown.id, "table")
+    return source, slicer, shown
+
+
+def _panel(qtbot, paths, columns=("region",), params=None, counts=None):
+    """A SlicerPanel loaded straight from options, the way a host loads it
+    after a run — so a widget test needs no graph, engine or window."""
+    from flograph.core.slicer import SlicerOptions
+    from flograph.ui.slicer_list import SlicerPanel
+    panel = SlicerPanel()
+    qtbot.addWidget(panel)
+    panel.resize(240, 200)
+    panel.set_options(SlicerOptions(columns, paths, counts),
+                      dict(DEFAULTS, **(params or {})))
+    return panel
+
+
+DEFAULTS = {"selected": "", "mode": "multi", "layout": "list",
+            "show_counts": False}
+
+
+def _rows(tree):
+    """Every built row of a slicer tree, in display order."""
+    from PySide6.QtWidgets import QTreeWidgetItemIterator
+    out = []
+    walker = QTreeWidgetItemIterator(tree)
+    while walker.value():
+        out.append(walker.value())
+        walker += 1
+    return out
+
+
+def _texts(tree):
+    return [item.text(0) for item in _rows(tree)]
+
+
+def _row(tree, text):
+    return next(item for item in _rows(tree) if item.text(0) == text)
+
+
+def _cards(view):
+    """The tile buttons a cards layout built, in display order."""
+    from PySide6.QtWidgets import QToolButton
+    return view.widget().findChildren(QToolButton)
 
 
 class TestSlicerCard:
@@ -72,8 +131,8 @@ class TestSlicerCard:
         node = graph.add_node(registry.instantiate("flograph.viz.slicer"))
         item = scene.node_items[node.id]
         assert item.slicer
-        assert item._slicer_list is not None
-        assert item._slicer_list.isHidden()  # placeholder until a run
+        assert item._slicer_panel is not None
+        assert not item._slicer_panel.has_options()  # placeholder until a run
 
     def test_card_size_params_are_cosmetic(self, registry):
         """Resizing the card must not re-filter the table or re-run the
@@ -82,10 +141,17 @@ class TestSlicerCard:
         assert spec.param("width").cosmetic
         assert spec.param("height").cosmetic
 
+    def test_layout_and_counts_are_cosmetic_too(self, registry):
+        """How the values are *drawn* cannot change which rows come out, so
+        switching a slicer to cards must not re-run the flow beneath it."""
+        spec = registry.get("flograph.viz.slicer")
+        assert spec.param("layout").cosmetic
+        assert spec.param("show_counts").cosmetic
+
     def test_the_value_list_is_clipped_to_the_card(self, env, registry):
         """Reported: dragging the card short let the bottom rows paint out
-        through its edge — a QListWidget won't shrink past its own minimum,
-        so the proxy has to clip it."""
+        through its edge — a tree won't shrink past its own minimum, so the
+        proxy has to clip it."""
         from PySide6.QtWidgets import QGraphicsItem
         graph, _stack, scene = env
         node = graph.add_node(registry.instantiate("flograph.viz.slicer"))
@@ -112,9 +178,8 @@ class TestSlicerCard:
         _source, slicer, _shown = _add_sliced_flow(win)
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
-        widget = win.scene.node_items[slicer.id]._slicer_list
-        texts = [widget.item(i).text() for i in range(widget.count())]
-        assert texts == ["north", "south"]
+        view = win.scene.node_items[slicer.id]._slicer_panel.view
+        assert _texts(view) == ["north", "south"]
 
     def test_tick_commits_param_and_reruns_downstream(self, qtbot, window):
         win = window
@@ -122,10 +187,10 @@ class TestSlicerCard:
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
 
-        widget = win.scene.node_items[slicer.id]._slicer_list
+        panel = win.scene.node_items[slicer.id]._slicer_panel
         # ticking "north" commits the selection and auto-runs downstream
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.item(0).setCheckState(Qt.Checked)
+            _row(panel.view, "north").setCheckState(0, Qt.Checked)
 
         assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
             == ["north"]
@@ -134,7 +199,7 @@ class TestSlicerCard:
         # untick via undo: the param rolls back and the checks resync
         win.undo_stack.undo()
         assert win.graph.nodes[slicer.id].params["selected"] == ""
-        assert widget.item(0).checkState() == Qt.Unchecked
+        assert _row(panel.view, "north").checkState(0) == Qt.Unchecked
 
     def test_single_mode_radio_behaviour(self, qtbot, window):
         win = window
@@ -143,16 +208,16 @@ class TestSlicerCard:
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
 
-        widget = win.scene.node_items[slicer.id]._slicer_list
+        view = win.scene.node_items[slicer.id]._slicer_panel.view
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.item(0).setCheckState(Qt.Checked)  # "north"
+            _row(view, "north").setCheckState(0, Qt.Checked)
         assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
             == ["north"]
 
         # ticking a second value clears the first — only one at a time
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.item(1).setCheckState(Qt.Checked)  # "south"
-        assert widget.item(0).checkState() == Qt.Unchecked
+            _row(view, "south").setCheckState(0, Qt.Checked)
+        assert _row(view, "north").checkState(0) == Qt.Unchecked
         assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
             == ["south"]
         filtered = win.engine.cache.get(shown.id).outputs["table"]
@@ -160,7 +225,7 @@ class TestSlicerCard:
 
         # clicking the ticked value again clears the selection entirely
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.item(1).setCheckState(Qt.Unchecked)
+            _row(view, "south").setCheckState(0, Qt.Unchecked)
         assert win.graph.nodes[slicer.id].params["selected"] == ""
 
     def test_switching_to_single_mode_trims_a_multi_selection(
@@ -173,15 +238,15 @@ class TestSlicerCard:
         _source, slicer, shown = _add_sliced_flow(win)
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
-        widget = win.scene.node_items[slicer.id]._slicer_list
+        panel = win.scene.node_items[slicer.id]._slicer_panel
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.select_all()  # both "north" and "south" ticked
-        assert widget.selected_values() == ["north", "south"]
+            panel.toolbar._select_all.click()  # both "north" and "south"
+        assert panel.selected_values() == ["north", "south"]
 
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.graph.set_param(slicer.id, "mode", "single")
 
-        assert widget.selected_values() == ["north"]
+        assert panel.selected_values() == ["north"]
         assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
             == ["north"]
         filtered = win.engine.cache.get(shown.id).outputs["table"]
@@ -194,25 +259,22 @@ class TestSlicerCard:
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
 
-        item = win.scene.node_items[slicer.id]
-        widget = item._slicer_list
+        panel = win.scene.node_items[slicer.id]._slicer_panel
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.item(0).setCheckState(Qt.Checked)  # tick "north"
+            _row(panel.view, "north").setCheckState(0, Qt.Checked)
 
-        widget.set_filter("south")
+        panel.toolbar._search.setText("south")
         # "north" doesn't match, but a ticked value always keeps a row so the
         # tick stays visible and un-losable
-        rows = {widget.item(i).text(): widget.item(i)
-                for i in range(widget.count())}
-        assert rows["north"].checkState() == Qt.Checked
-        assert widget.selected_values() == ["north"]
+        assert _row(panel.view, "north").checkState(0) == Qt.Checked
+        assert panel.selected_values() == ["north"]
 
         # a search matching neither value still doesn't drop the tick
-        widget.set_filter("zzz")
-        assert widget.selected_values() == ["north"]
+        panel.toolbar._search.setText("zzz")
+        assert panel.selected_values() == ["north"]
 
-        widget.set_filter("")
-        assert widget.selected_values() == ["north"]
+        panel.toolbar._search.setText("")
+        assert panel.selected_values() == ["north"]
 
     def test_filter_survives_the_rerun_a_tick_triggers(self, qtbot, window):
         """Ticking a value re-runs the slicer, which repopulates the list
@@ -224,16 +286,16 @@ class TestSlicerCard:
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
 
-        widget = win.scene.node_items[slicer.id]._slicer_list
-        widget.set_filter("north")
-        assert [widget.item(i).text() for i in range(widget.count())] == ["north"]
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+        panel.toolbar._search.setText("north")
+        assert _texts(panel.view) == ["north"]
 
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.item(0).setCheckState(Qt.Checked)  # tick "north" (visible)
+            _row(panel.view, "north").setCheckState(0, Qt.Checked)
 
         # the rebuild the tick triggered must not have cleared the filter
-        assert [widget.item(i).text() for i in range(widget.count())] == ["north"]
-        assert widget.item(0).checkState() == Qt.Checked
+        assert _texts(panel.view) == ["north"]
+        assert _row(panel.view, "north").checkState(0) == Qt.Checked
 
     def test_select_all_and_clear_all_respect_the_filter(self, qtbot, window):
         win = window
@@ -241,35 +303,51 @@ class TestSlicerCard:
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
 
-        widget = win.scene.node_items[slicer.id]._slicer_list
-        widget.set_filter("north")
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+        panel.toolbar._search.setText("north")
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.select_all()
-        assert widget.selected_values() == ["north"]  # "south" stayed hidden
+            panel.toolbar._select_all.click()
+        assert panel.selected_values() == ["north"]  # "south" stayed hidden
 
-        widget.set_filter("")
+        panel.toolbar._search.setText("")
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.clear_all()
-        assert widget.selected_values() == []
+            panel.toolbar._clear.click()
+        assert panel.selected_values() == []
+
+    def test_typing_in_the_search_box_does_not_rerun_the_flow(
+            self, qtbot, window):
+        """A search narrows the list and nothing else — routing it through
+        the commit path would ask the engine to re-run everything downstream
+        once per keystroke, for a filter the flow cannot see."""
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+        commits = []
+        panel.selection_committed.connect(commits.append)
+        runs = []
+        win.scene.slicer_changed.connect(runs.append)
+
+        panel.toolbar._search.setText("nor")
+        assert _texts(panel.view) == ["north"]
+        assert commits == [] and runs == []
 
     def test_toolbar_hides_select_all_in_single_mode(self, qtbot):
-        from flograph.ui.slicer_list import SlicerListWidget, SlicerToolbar
-        target = SlicerListWidget()
-        toolbar = SlicerToolbar(target)
-        qtbot.addWidget(toolbar)
-        assert not toolbar._select_all.isHidden()
-        toolbar.set_mode("single")
-        assert toolbar._select_all.isHidden()
-        toolbar.set_mode("multi")
-        assert not toolbar._select_all.isHidden()
+        panel = _panel(qtbot, [("north",), ("south",)])
+        assert not panel.toolbar._select_all.isHidden()
+        panel.sync_params(dict(DEFAULTS, mode="single"))
+        assert panel.toolbar._select_all.isHidden()
+        panel.sync_params(dict(DEFAULTS, mode="multi"))
+        assert not panel.toolbar._select_all.isHidden()
 
     def test_toolbar_wraps_the_buttons_under_the_search_when_narrow(self, qtbot):
         """Reported: the card can be dragged narrower than "Search  All  None"
         fits on one row, clipping the buttons. Below the threshold they drop
         onto a second row instead so the card stays usable at small sizes."""
-        from flograph.ui.slicer_list import SlicerListWidget, SlicerToolbar
-        toolbar = SlicerToolbar(SlicerListWidget())
-        qtbot.addWidget(toolbar)
+        panel = _panel(qtbot, [("north",)])
+        toolbar = panel.toolbar
         row_of = lambda w: toolbar._grid.getItemPosition(
             toolbar._grid.indexOf(w))[0]
 
@@ -288,24 +366,22 @@ class TestSlicerCard:
         win.graph.set_param(slicer.id, "mode", "single")
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
-        item = win.scene.node_items[slicer.id]
-        assert item._slicer_list._mode == "single"
-        assert item._slicer_toolbar._select_all.isHidden()
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+        assert panel.model.mode == "single"
+        assert panel.toolbar._select_all.isHidden()
 
     def test_single_mode_draws_radios_not_checkboxes(self, qtbot):
         """ideas.md item 14: a checkbox promises you can tick several, which
         single mode then silently undoes. Painting only — the list still
         stores and reports check state."""
-        from flograph.ui.slicer_list import SlicerListWidget
-        widget = SlicerListWidget()
-        qtbot.addWidget(widget)
-        widget.set_options(["north", "south"], {"north"})
-        assert not widget._delegate.radio
-        widget.set_mode("single")
-        assert widget._delegate.radio
-        assert widget.selected_values() == ["north"]  # unchanged underneath
-        widget.set_mode("multi")
-        assert not widget._delegate.radio
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"selected": '["north"]'})
+        assert not panel.view._delegate.radio
+        panel.sync_params(dict(DEFAULTS, mode="single", selected='["north"]'))
+        assert panel.view._delegate.radio
+        assert panel.selected_values() == ["north"]  # unchanged underneath
+        panel.sync_params(dict(DEFAULTS, mode="multi", selected='["north"]'))
+        assert not panel.view._delegate.radio
 
     def test_radio_rows_keep_the_checkbox_layout(self, qtbot):
         """The radio is drawn by dropping the check indicator and painting
@@ -315,31 +391,33 @@ class TestSlicerCard:
         differ *only* inside the indicator's own rectangle."""
         from PySide6.QtGui import QPixmap
         from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
-        from flograph.ui.slicer_list import SlicerListWidget
 
-        widgets = {}
+        panels = {}
 
         def render(mode):
-            widget = SlicerListWidget()
-            qtbot.addWidget(widget)
-            widget.resize(220, 80)
-            widget.set_mode(mode)
-            widget.set_options(["north", "south"], {"north"})
-            widgets[mode] = widget
-            pixmap = QPixmap(widget.size())
-            widget.render(pixmap)
+            panel = _panel(qtbot, [("north",), ("south",)],
+                           params={"selected": '["north"]', "mode": mode})
+            panels[mode] = panel
+            # the view is pinned rather than left to the panel's layout: the
+            # two modes lay their toolbars out differently (single hides
+            # "All"), and a one-pixel difference in the view's height would
+            # make the whole image differ instead of just the indicator
+            panel.view.setFixedSize(200, 60)
+            QApplication.processEvents()
+            pixmap = QPixmap(panel.view.size())
+            panel.view.render(pixmap)
             return pixmap.toImage()
 
         multi, single = render("multi"), render("single")
         assert multi.size() == single.size()
 
-        widget = widgets["multi"]
+        view = panels["multi"].view
         option = QStyleOptionViewItem()
-        option.rect = widget.visualItemRect(widget.item(0))
+        option.rect = view.visualItemRect(view.topLevelItem(0))
         option.features |= \
             QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
-        indicator = widget.style().subElementRect(
-            QStyle.SE_ItemViewItemCheckIndicator, option, widget)
+        indicator = view.style().subElementRect(
+            QStyle.SE_ItemViewItemCheckIndicator, option, view)
 
         differing = {x for x in range(multi.width())
                      for y in range(multi.height())
@@ -353,109 +431,96 @@ class TestSlicerCard:
         """The row is one target: hitting the 14px tick box exactly is
         needless precision, and the label looked dead when it only
         selected."""
-        from flograph.ui.slicer_list import SlicerListWidget
-        widget = SlicerListWidget()
-        qtbot.addWidget(widget)
-        widget.resize(220, 80)
-        widget.set_mode(mode)
-        widget.set_options(["north", "south"], set())
-        widget.show()
-        qtbot.waitExposed(widget)
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"mode": mode})
+        view = panel.view
+        panel.show()
+        qtbot.waitExposed(panel)
 
-        item = widget.item(0)
-        label = widget.visualItemRect(item).center()
-        assert not widget._indicator_rect(item).contains(label)
+        item = view.topLevelItem(0)
+        label = view.visualItemRect(item).center()
+        assert not view._indicator_rect(item).contains(label)
 
-        with qtbot.waitSignal(widget.selection_committed):
-            qtbot.mouseClick(widget.viewport(), Qt.LeftButton, pos=label)
-        assert widget.selected_values() == ["north"]
+        with qtbot.waitSignal(panel.selection_committed):
+            qtbot.mouseClick(view.viewport(), Qt.LeftButton, pos=label)
+        assert panel.selected_values() == ["north"]
 
         # and clicking it again clears it, same as clicking the box
-        with qtbot.waitSignal(widget.selection_committed):
-            qtbot.mouseClick(widget.viewport(), Qt.LeftButton, pos=label)
-        assert widget.selected_values() == []
+        with qtbot.waitSignal(panel.selection_committed):
+            qtbot.mouseClick(view.viewport(), Qt.LeftButton, pos=label)
+        assert panel.selected_values() == []
 
     @pytest.mark.parametrize("mode", ["multi", "single"])
     def test_clicking_the_tick_box_still_toggles_once(self, qtbot, mode):
         """The box is left to the base class; toggling there as well would
         cancel out and leave the row looking unclickable."""
-        from flograph.ui.slicer_list import SlicerListWidget
-        widget = SlicerListWidget()
-        qtbot.addWidget(widget)
-        widget.resize(220, 80)
-        widget.set_mode(mode)
-        widget.set_options(["north", "south"], set())
-        widget.show()
-        qtbot.waitExposed(widget)
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"mode": mode})
+        view = panel.view
+        panel.show()
+        qtbot.waitExposed(panel)
 
-        item = widget.item(0)
-        with qtbot.waitSignal(widget.selection_committed):
-            qtbot.mouseClick(widget.viewport(), Qt.LeftButton,
-                             pos=widget._indicator_rect(item).center())
-        assert widget.selected_values() == ["north"]
+        item = view.topLevelItem(0)
+        with qtbot.waitSignal(panel.selection_committed):
+            qtbot.mouseClick(view.viewport(), Qt.LeftButton,
+                             pos=view._indicator_rect(item).center())
+        assert panel.selected_values() == ["north"]
 
     def test_clicking_a_label_in_single_mode_replaces_the_selection(
             self, qtbot):
-        from flograph.ui.slicer_list import SlicerListWidget
-        widget = SlicerListWidget()
-        qtbot.addWidget(widget)
-        widget.resize(220, 80)
-        widget.set_mode("single")
-        widget.set_options(["north", "south"], {"north"})
-        widget.show()
-        qtbot.waitExposed(widget)
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"mode": "single", "selected": '["north"]'})
+        view = panel.view
+        panel.show()
+        qtbot.waitExposed(panel)
 
-        with qtbot.waitSignal(widget.selection_committed):
-            qtbot.mouseClick(widget.viewport(), Qt.LeftButton,
-                             pos=widget.visualItemRect(widget.item(1)).center())
-        assert widget.selected_values() == ["south"]
+        with qtbot.waitSignal(panel.selection_committed):
+            qtbot.mouseClick(
+                view.viewport(), Qt.LeftButton,
+                pos=view.visualItemRect(view.topLevelItem(1)).center())
+        assert panel.selected_values() == ["south"]
 
     def test_clicking_the_more_values_note_does_nothing(self, qtbot):
-        from flograph.ui.slicer_list import RENDER_BUDGET, SlicerListWidget
-        widget = SlicerListWidget()
-        qtbot.addWidget(widget)
-        widget.resize(220, 80)
-        widget.set_options([str(i) for i in range(RENDER_BUDGET + 5)], set())
-        widget.show()
-        qtbot.waitExposed(widget)
+        from flograph.ui.slicer_list import RENDER_BUDGET
+        panel = _panel(qtbot, [(str(i),) for i in range(RENDER_BUDGET + 5)])
+        view = panel.view
+        panel.show()
+        qtbot.waitExposed(panel)
 
         # RENDER_BUDGET rows built + one non-interactive "… N more" note
-        assert widget.count() == RENDER_BUDGET + 1
-        note = widget.item(widget.count() - 1)
+        assert view.topLevelItemCount() == RENDER_BUDGET + 1
+        note = view.topLevelItem(view.topLevelItemCount() - 1)
         assert not (note.flags() & Qt.ItemIsUserCheckable)
-        widget.scrollToItem(note)
-        qtbot.mouseClick(widget.viewport(), Qt.LeftButton,
-                         pos=widget.visualItemRect(note).center())
-        assert widget.selected_values() == []
+        view.scrollToItem(note)
+        qtbot.mouseClick(view.viewport(), Qt.LeftButton,
+                         pos=view.visualItemRect(note).center())
+        assert panel.selected_values() == []
 
     def test_values_past_the_render_budget_stay_filterable_and_tickable(
             self, qtbot):
         """The budget bounds how many rows are built, not the column: a
         value with no row is still reachable through the search box, and
         ticking it commits and survives clearing the search."""
-        from flograph.ui.slicer_list import RENDER_BUDGET, SlicerListWidget
-        widget = SlicerListWidget()
-        qtbot.addWidget(widget)
-        widget.resize(220, 120)
+        from flograph.ui.slicer_list import RENDER_BUDGET
         values = [f"v{i:05d}" for i in range(RENDER_BUDGET + 200)]
-        widget.set_options(values, set())
-        widget.show()
-        qtbot.waitExposed(widget)
+        panel = _panel(qtbot, [(v,) for v in values])
+        view = panel.view
+        panel.show()
+        qtbot.waitExposed(panel)
 
         target = values[-1]  # well past the budget, no row yet
-        assert all(widget.item(i).text() != target
-                   for i in range(widget.count()))
+        assert target not in _texts(view)
 
-        widget.set_filter(target)
-        row = widget.item(0)
-        assert row.text() == target
-        with qtbot.waitSignal(widget.selection_committed):
-            row.setCheckState(Qt.Checked)
-        assert widget.selected_values() == [target]
+        panel.toolbar._search.setText(target)
+        row = view.topLevelItem(0)
+        assert row.text(0) == target
+        with qtbot.waitSignal(panel.selection_committed):
+            row.setCheckState(0, Qt.Checked)
+        assert panel.selected_values() == [target]
 
-        widget.set_filter("")  # tick survives the rebuild
-        assert widget.selected_values() == [target]
-        assert widget.selection_summary() == f"1/{len(values)}"
+        panel.toolbar._search.setText("")  # tick survives the rebuild
+        assert panel.selected_values() == [target]
+        assert panel.selection_summary() == f"1/{len(values)}"
 
     def test_mode_syncs_the_delegate_from_the_param(self, qtbot, window):
         win = window
@@ -463,19 +528,327 @@ class TestSlicerCard:
         win.graph.set_param(slicer.id, "mode", "single")
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
-        assert win.scene.node_items[slicer.id]._slicer_list._delegate.radio
+        assert win.scene.node_items[slicer.id]._slicer_panel.view._delegate.radio
 
     def test_toolbar_count_label_tracks_ticks(self, qtbot, window):
         win = window
         _source, slicer, _shown = _add_sliced_flow(win)
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
-        item = win.scene.node_items[slicer.id]
-        assert item._slicer_toolbar._count.text() == "0/2"
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+        assert panel.toolbar._count.text() == "0/2"
 
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            item._slicer_list.item(0).setCheckState(Qt.Checked)
-        assert item._slicer_toolbar._count.text() == "1/2"
+            _row(panel.view, "north").setCheckState(0, Qt.Checked)
+        assert panel.toolbar._count.text() == "1/2"
+
+
+class TestSlicerHierarchy:
+    """Several columns turn the slicer into Power BI's multi-field tree: a
+    level per column, a parent tick standing for its children."""
+
+    def test_two_columns_nest_into_a_tree(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_nested_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        view = win.scene.node_items[slicer.id]._slicer_panel.view
+        assert [item.text(0) for item in
+                (view.topLevelItem(i) for i in
+                 range(view.topLevelItemCount()))] == ["north", "south"]
+        north = view.topLevelItem(0)
+        assert [north.child(i).text(0) for i in range(north.childCount())] \
+            == ["alpha", "beta"]
+
+    def test_one_column_is_still_a_flat_list(self, qtbot, window):
+        """The tree widget draws the ordinary slicer too, and must not grow
+        expander arrows or indentation when there is nothing to expand."""
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        view = win.scene.node_items[slicer.id]._slicer_panel.view
+        assert not view.rootIsDecorated()
+        assert all(view.topLevelItem(i).childCount() == 0
+                   for i in range(view.topLevelItemCount()))
+
+    def test_ticking_a_parent_keeps_the_whole_branch(self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_nested_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            _row(panel.view, "north").setCheckState(0, Qt.Checked)
+
+        # the param carries the *branch*, not every leaf under it
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == ["north"]
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert sorted(set(filtered["store"])) == ["alpha", "beta"]
+        # and the children draw as ticked, because they are
+        assert _row(panel.view, "alpha").checkState(0) == Qt.Checked
+
+    def test_ticking_one_child_part_fills_its_parent(self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_nested_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            _row(panel.view, "alpha").setCheckState(0, Qt.Checked)
+
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == [["north", "alpha"]]
+        assert _row(panel.view, "north").checkState(0) == Qt.PartiallyChecked
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert list(filtered["store"]) == ["alpha"]
+
+    def test_unticking_a_child_of_a_ticked_parent_keeps_the_siblings(
+            self, qtbot, window):
+        """"north" minus "north > alpha" is the rest of north — the parent
+        tick has to break up into the branches it stood for, or unticking
+        one store would silently clear the whole region."""
+        win = window
+        _source, slicer, shown = _add_nested_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        panel = win.scene.node_items[slicer.id]._slicer_panel
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            _row(panel.view, "north").setCheckState(0, Qt.Checked)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            _row(panel.view, "alpha").setCheckState(0, Qt.Unchecked)
+
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == [["north", "beta"]]
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert list(filtered["store"]) == ["beta", "beta"]
+
+    def test_clicking_the_expander_folds_the_branch_instead_of_ticking(
+            self, qtbot):
+        """The row is one click target, but the expander arrow sits outside
+        it — clicking there must open and shut the branch, not select the
+        whole region."""
+        panel = _panel(qtbot, [("north", "alpha"), ("north", "beta")],
+                       columns=("region", "store"))
+        view = panel.view
+        panel.show()
+        qtbot.waitExposed(panel)
+        north = view.topLevelItem(0)
+        assert north.isExpanded()
+
+        rect = view.visualItemRect(north)
+        arrow = rect.adjusted(-view.indentation() // 2, 0, 0, 0).topLeft()
+        qtbot.mouseClick(view.viewport(), Qt.LeftButton,
+                         pos=QPoint(arrow.x(), rect.center().y()))
+        assert not north.isExpanded()
+        assert panel.selected_values() == []
+
+    def test_ticking_every_child_rolls_up_into_the_parent(self, qtbot):
+        """Select All over a wide two-level column would otherwise write
+        every leaf path into the saved param — thousands of entries meaning
+        "everything"."""
+        panel = _panel(qtbot, [("north", "alpha"), ("north", "beta")],
+                       columns=("region", "store"))
+        panel.model.toggle(("north", "alpha"))
+        panel.model.toggle(("north", "beta"))
+        assert panel.selected_paths() == [("north",)]
+
+    def test_a_deeper_selection_survives_a_round_trip_through_the_param(
+            self, qtbot):
+        paths = [("north", "alpha"), ("north", "beta"), ("south", "gamma")]
+        panel = _panel(qtbot, paths, columns=("region", "store"),
+                       params={"selected": '[["north", "alpha"], ["south"]]'})
+        assert panel.selected_paths() == [("north", "alpha"), ("south",)]
+        assert panel.model.committed_value() == \
+            '[["north", "alpha"], ["south"]]'
+
+    def test_a_single_column_still_writes_the_flat_param(self, qtbot):
+        """A file saved by an older build reads back unchanged, and one
+        saved by this build still opens in an older one."""
+        panel = _panel(qtbot, [("north",), ("south",)])
+        panel.model.toggle(("north",))
+        assert panel.model.committed_value() == '["north"]'
+
+    def test_selected_output_carries_the_deepest_values(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_nested_flow(win)
+        win.graph.set_param(slicer.id, "selected",
+                            json.dumps([["north", "alpha"]]))
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        assert win.engine.cache.get(slicer.id).outputs["selected"] == ["alpha"]
+
+    def test_search_reaches_a_value_inside_a_branch(self, qtbot):
+        panel = _panel(qtbot, [("north", "alpha"), ("north", "beta"),
+                               ("south", "gamma")],
+                       columns=("region", "store"))
+        panel.toolbar._search.setText("gamma")
+        # the branch is kept so the match can be reached, but north is gone
+        assert _texts(panel.view) == ["south", "gamma"]
+
+
+class TestSlicerLayouts:
+    def test_cards_layout_draws_a_button_per_value(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"layout": "cards"})
+        assert [b.text() for b in _cards(panel.view)] == ["north", "south"]
+
+    def test_clicking_a_card_selects_it(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"layout": "cards"})
+        with qtbot.waitSignal(panel.selection_committed):
+            _cards(panel.view)[1].click()
+        assert panel.selected_values() == ["south"]
+        assert _cards(panel.view)[1].property("slicerState") == "on"
+
+    def test_a_card_in_single_mode_replaces_the_selection(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"layout": "cards", "mode": "single"})
+        _cards(panel.view)[0].click()
+        _cards(panel.view)[1].click()
+        assert panel.selected_values() == ["south"]
+
+    def test_a_part_filled_branch_card_says_so(self, qtbot):
+        panel = _panel(qtbot, [("north", "alpha"), ("north", "beta")],
+                       columns=("region", "store"),
+                       params={"layout": "cards",
+                               "selected": '[["north", "alpha"]]'})
+        states = {b.text(): b.property("slicerState")
+                  for b in _cards(panel.view)}
+        assert states == {"north": "partial", "alpha": "on", "beta": "off"}
+
+    def test_a_dropdown_card_can_be_dragged_down_to_its_button(
+            self, env, registry):
+        """The list floor leaves room for the search row and a couple of
+        values; a dropdown has neither, so that floor would be most of the
+        card empty."""
+        graph, _stack, scene = env
+        node = graph.add_node(registry.instantiate("flograph.viz.slicer"))
+        item = scene.node_items[node.id]
+        graph.set_param(node.id, "height", 10)      # clamped to the floor
+        assert item.body_height >= 150
+        graph.set_param(node.id, "layout", "dropdown")
+        assert item.body_height < 100
+
+    def test_switching_layout_keeps_the_selection(self, qtbot):
+        """The layouts are views over one selection model, so changing the
+        picture cannot change what is picked."""
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"selected": '["south"]'})
+        for layout in ("cards", "dropdown", "list"):
+            panel.sync_params(dict(DEFAULTS, layout=layout,
+                                   selected='["south"]'))
+            assert panel.selected_values() == ["south"]
+
+    def test_a_dropdown_slicer_lands_on_a_page_as_one_line(self, registry):
+        """Dropped onto a dashboard, a dropdown slicer must not arrive as a
+        260px-tall tile of empty card — that is most of the reason to pick
+        the layout in the first place."""
+        node = registry.instantiate("flograph.viz.slicer")
+        assert default_tile_size(node) == (200.0, 260.0)
+        node.params["layout"] = "dropdown"
+        assert default_tile_size(node) == (240.0, 80.0)
+
+    def test_dropdown_button_says_what_is_picked(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"layout": "dropdown"})
+        # nothing ticked means the slicer passes everything through
+        assert panel.view._button.text() == "All"
+        panel.sync_params(dict(DEFAULTS, layout="dropdown",
+                               selected='["north"]'))
+        assert panel.view._button.text() == "north"
+        panel.sync_params(dict(DEFAULTS, layout="dropdown",
+                               selected='["north", "south"]'))
+        assert panel.view._button.text() == "2 selected"
+
+    def test_dropdown_carries_its_own_search_not_the_panel_toolbar(self, qtbot):
+        """A dropdown is one line by definition; a search box above the
+        button would be most of the card."""
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"layout": "dropdown"})
+        assert panel.toolbar.isHidden()
+        panel.view.toolbar._search.setText("south")
+        assert _texts(panel.view.tree) == ["south"]
+
+    def test_ticking_inside_the_dropdown_commits(self, qtbot):
+        panel = _panel(qtbot, [("north",), ("south",)],
+                       params={"layout": "dropdown"})
+        with qtbot.waitSignal(panel.selection_committed):
+            _row(panel.view.tree, "north").setCheckState(0, Qt.Checked)
+        assert panel.selected_values() == ["north"]
+        assert panel.view._button.text() == "north"
+
+
+class TestSlicerCounts:
+    def test_counts_are_off_by_default(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        view = win.scene.node_items[slicer.id]._slicer_panel.view
+        assert _texts(view) == ["north", "south"]
+
+    def test_counts_show_the_rows_behind_each_value(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_sliced_flow(win)
+        win.graph.set_param(slicer.id, "show_counts", True)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        view = win.scene.node_items[slicer.id]._slicer_panel.view
+        assert _texts(view) == ["north  (2)", "south  (1)"]
+
+    def test_a_parent_counts_every_row_under_it(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_nested_flow(win)
+        win.graph.set_param(slicer.id, "show_counts", True)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        view = win.scene.node_items[slicer.id]._slicer_panel.view
+        assert view.topLevelItem(0).text(0) == "north  (3)"
+
+    def test_turning_counts_on_does_not_rerun_the_flow(self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        win.graph.set_param(slicer.id, "show_counts", True)
+        assert not win.graph.nodes[slicer.id].dirty
+        assert not win.graph.nodes[shown.id].dirty
+
+
+class TestStandaloneSlicer:
+    def test_a_hierarchy_of_typed_values(self, qtbot, window):
+        """With no table wired in, a line is a path: "north > alpha"."""
+        win = window
+        slicer = win.registry.instantiate("flograph.viz.slicer", pos=(0, 0))
+        win.graph.add_node(slicer)
+        win.graph.set_param(slicer.id, "column", "region, store")
+        win.graph.set_param(slicer.id, "values",
+                            "north > alpha\nnorth > beta\nsouth > gamma")
+        win.graph.set_param(slicer.id, "selected", json.dumps([["north"]]))
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        table = win.engine.cache.get(slicer.id).outputs["table"]
+        assert list(table.columns) == ["region", "store"]
+        assert list(table["store"]) == ["alpha", "beta"]
+
+    def test_a_value_containing_the_separator_survives_one_column(
+            self, qtbot, window):
+        """Only a hierarchy has anywhere to put the pieces of a split line,
+        so a one-column slicer takes the line whole."""
+        win = window
+        slicer = win.registry.instantiate("flograph.viz.slicer", pos=(0, 0))
+        win.graph.add_node(slicer)
+        win.graph.set_param(slicer.id, "column", "label")
+        win.graph.set_param(slicer.id, "values", "a > b\nc")
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        table = win.engine.cache.get(slicer.id).outputs["table"]
+        assert list(table["label"]) == ["a > b", "c"]
 
 
 class TestKpiCard:
@@ -562,23 +935,22 @@ class TestDashboardTiles:
 
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_all()
-        widget = item._slicer_widget
-        texts = [widget.item(i).text() for i in range(widget.count())]
-        assert texts == ["north", "south"]
+        panel = item._slicer_panel
+        assert _texts(panel.view) == ["north", "south"]
 
         # ticking on the dashboard commits the param and re-runs downstream
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
-            widget.item(1).setCheckState(Qt.Checked)
+            _row(panel.view, "south").setCheckState(0, Qt.Checked)
         assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
             == ["south"]
         filtered = win.engine.cache.get(shown.id).outputs["table"]
         assert list(filtered["region"]) == ["south"]
         # the canvas card's checkboxes follow the same param
-        canvas_list = win.scene.node_items[slicer.id]._slicer_list
-        assert canvas_list.selected_values() == ["south"]
+        canvas = win.scene.node_items[slicer.id]._slicer_panel
+        assert canvas.selected_values() == ["south"]
         # undo unticks the tile without emitting a new commit
         win.undo_stack.undo()
-        assert widget.selected_values() == []
+        assert panel.selected_values() == []
 
 
 class TestTableSpecCard:

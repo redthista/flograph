@@ -18,7 +18,8 @@ a code comment still cites them.
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30.
+2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30,
+and N4/N5 on 2026-09-07.
 
 ---
 
@@ -117,6 +118,24 @@ as the `ratio=` / `height=` embed options (0.1.12). On a **dashboard page**
 (free-form tiles) the capability is already there by dragging a tile's edges;
 what is missing is a numeric "W:H" input, an aspect lock while resizing, and
 a few preset ratios — new UI on `TileItem` or the properties panel.
+
+**N4. A slicer that greys out values with nothing behind them.** Excel greys
+a slicer value that the *other* slicers have already filtered away, so you
+can see that "Bristol" exists but is empty under the current selection
+rather than watching it vanish. flograph's slicers chain instead: the second
+one reads the first one's *output*, so an emptied value simply has no row.
+Greying instead of dropping needs each slicer to see both the filtered and
+the unfiltered frame — `slicer_options` already reads the upstream cache, so
+the missing half is the *unfiltered* source, which means walking back past
+the slicers above it. Worth doing only if the vanishing turns out to confuse
+people; the counts shipped in 0.1.14 already answer most of "why is that
+gone".
+
+**N5. Expand / collapse all on a deep slicer tree.** A hierarchy opens fully
+expanded, which is right for two levels and wrong for three over a wide
+column. A pair of buttons in the slicer toolbar (and remembering which
+branches were open, in a param) — small, but only worth it once someone has
+a three-level slicer.
 
 ---
 

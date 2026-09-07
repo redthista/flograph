@@ -28,7 +28,7 @@ from ..canvas.node_item import (
     BUTTON_H, BUTTON_W, card_kind, kpi_caption, kpi_text,
 )
 from ..canvas.stacking import FULLSCREEN_TILE_Z, z_for
-from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
+from ..slicer_list import SlicerPanel
 
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
@@ -107,6 +107,11 @@ def default_tile_size(node) -> tuple[float, float]:
     if kind == "kpi":
         return (220.0, 120.0)
     if kind == "slicer":
+        # a dropdown slicer is one button, and dropping it onto a page as a
+        # 260px-tall tile of empty card is most of the reason to reach for
+        # the other two layouts
+        if str(node.params.get("layout", "list") or "list") == "dropdown":
+            return (240.0, 80.0)
         return (200.0, 260.0)
     if kind == "grid":
         # a spreadsheet is for typing in, so it lands wide enough to show
@@ -176,8 +181,7 @@ class TileItem(QGraphicsObject):
         self._table_view = None
         self._sheet_view = None     # SheetWorkbench (Table node tiles)
         self._sheet_model = None    # SheetModel (Table node tiles)
-        self._slicer_widget: Optional[SlicerListWidget] = None
-        self._slicer_toolbar: Optional[SlicerToolbar] = None
+        self._slicer_panel: Optional[SlicerPanel] = None
         self._control_widget = None  # ControlWidget (input control tiles)
         self._report_view = None     # QTextBrowser (report card tiles)
         # plays animated images inside a report tile, and the render they
@@ -413,7 +417,7 @@ class TileItem(QGraphicsObject):
 
     def _content_widget(self) -> Optional[QWidget]:
         for widget in (self._figure_view, self._plotly_widget,
-                       self._table_view, self._sheet_view, self._slicer_widget,
+                       self._table_view, self._sheet_view, self._slicer_panel,
                        self._control_widget, self._report_view, self._wiki_view,
                        self._generic_host):
             if widget is not None:
@@ -467,13 +471,9 @@ class TileItem(QGraphicsObject):
         elif kind == "sheet":
             widget = self._build_sheet_widget()
         elif kind == "slicer":
-            widget = SlicerListWidget()
+            widget = SlicerPanel()
             widget.selection_committed.connect(self._commit_slicer_selection)
-            self._slicer_widget = widget
-            toolbar = SlicerToolbar(widget)
-            toolbar.hide()
-            self._host_layout.addWidget(toolbar)
-            self._slicer_toolbar = toolbar
+            self._slicer_panel = widget
         elif kind == "control":
             widget = self._build_control_widget()
             if widget is None:
@@ -809,23 +809,12 @@ class TileItem(QGraphicsObject):
             from flograph.engine.introspect import slicer_options
             options = slicer_options(self._graph, self._engine.cache,
                                      self.tile.node_id)
+            self._slicer_panel.set_options(options, node.params)
             if options is None:
                 widget.hide()
-                if self._slicer_toolbar is not None:
-                    self._slicer_toolbar.hide()
                 self._placeholder.setText(RUN_PROMPT)
                 self._placeholder.show()
             else:
-                mode = str(node.params.get("mode", "multi") or "multi")
-                self._slicer_widget.set_mode(mode)
-                self._slicer_widget.set_options(
-                    options,
-                    set(selected_param_values(
-                        node.params.get("selected", ""))))
-                if self._slicer_toolbar is not None:
-                    self._slicer_toolbar.set_mode(mode)
-                    self._slicer_toolbar.refresh_summary()
-                    self._slicer_toolbar.show()
                 self._placeholder.hide()
                 widget.show()
         elif kind == "control":
@@ -1062,16 +1051,9 @@ class TileItem(QGraphicsObject):
             # sync() holds a guard, so the edit that caused this can't come
             # straight back out as another commit
             self._control_widget.sync(node.params)
-        elif kind == "slicer" and self._slicer_widget is not None \
-                and not self._slicer_widget.isHidden() and node is not None:
-            mode = str(node.params.get("mode", "multi") or "multi")
-            self._slicer_widget.set_mode(mode)
-            if self._slicer_toolbar is not None:
-                self._slicer_toolbar.set_mode(mode)
-            self._slicer_widget.sync_checks(
-                set(selected_param_values(node.params.get("selected", ""))))
-            if self._slicer_toolbar is not None:
-                self._slicer_toolbar.refresh_summary()
+        elif kind == "slicer" and self._slicer_panel is not None \
+                and not self._slicer_panel.isHidden() and node is not None:
+            self._slicer_panel.sync_params(node.params)
 
     def refresh_render_ratio(self) -> None:
         """Keep embedded matplotlib figures crisp under view zoom and DPR —

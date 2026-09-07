@@ -35,9 +35,18 @@ project.
 The other half of a dashboard: a node category you *set* rather than compute.
 **Slider**, **Number**, **Text**, **Date**, **Toggle** and **Choice** each
 carry a caption you write, are typed properly so wires still validate, and
-re-run everything downstream when you change them. A **Slicer** picks values
-out of a column. A control's options can come from its own input ports — wire
-a column into a Choice node and its dropdown is that column's values.
+re-run everything downstream when you change them. A control's options can
+come from its own input ports — wire a column into a Choice node and its
+dropdown is that column's values.
+
+A **Slicer** picks values out of a column — or out of several. Name more than
+one column and it becomes a **tree**: regions at the top, their stores
+underneath, ticking a region for the whole region and one store to narrow to
+it, with a part-filled box on a region only some of whose stores are ticked.
+Its **Layout** setting draws the same selection three ways — a checkbox
+**list**, **cards** you click, or a **dropdown** that folds the whole picker
+behind one button saying what is picked — and **Show row counts** puts the
+number of rows behind each value beside it.
 
 The result is a dashboard you hand to someone who never opens the model: they
 turn the knobs, the charts answer. Controls often read a
