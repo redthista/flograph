@@ -347,6 +347,125 @@ class TestApplicationsMenu:
         assert ds.ensure_icon(blocked) is None
 
 
+@pytest.fixture
+def _as_windows(monkeypatch):
+    """Run the Windows branches on whatever platform the tests run on.
+
+    The module reads `sys.platform` at call time, so patching it is enough —
+    and it is the only way to cover this code at all from Linux CI.
+    """
+    # held by reference: tests below patch the name with a plain lambda, and
+    # the teardown still has to clear the real cache
+    cached = ds.start_menu_dir
+    monkeypatch.setattr(ds.sys, "platform", "win32")
+    cached.cache_clear()
+    yield
+    cached.cache_clear()
+
+
+class TestStartMenu:
+    def test_start_menu_dir_asks_the_shell_before_assuming(
+            self, _as_windows, tmp_path, monkeypatch):
+        redirected = tmp_path / "Redirected" / "Programs"
+        monkeypatch.setattr(
+            ds.subprocess, "run",
+            lambda *a, **k: subprocess.CompletedProcess(a, 0, f"{redirected}\n", ""))
+
+        # a managed machine can redirect the Start Menu to a network share;
+        # the assembled %APPDATA% path would be the wrong folder entirely
+        assert ds.start_menu_dir() == redirected
+
+    def test_start_menu_dir_falls_back_to_appdata_when_the_shell_is_silent(
+            self, _as_windows, tmp_path, monkeypatch):
+        monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+        # the autouse _no_gio fixture already makes every probe answer ""
+        assert ds.start_menu_dir() == (
+            tmp_path / "Roaming" / "Microsoft" / "Windows"
+            / "Start Menu" / "Programs")
+
+    def test_the_entry_is_named_for_the_app_not_the_shortcut(
+            self, _as_windows, tmp_path, monkeypatch):
+        programs = tmp_path / "Programs"
+        monkeypatch.setattr(ds, "start_menu_dir", lambda: programs)
+
+        assert ds.menu_entry_path() == programs / "flograph.lnk"
+
+    def test_installing_writes_a_lnk_and_creates_the_folder(
+            self, _as_windows, tmp_path, monkeypatch):
+        programs = tmp_path / "not" / "yet" / "Programs"
+        monkeypatch.setattr(ds, "start_menu_dir", lambda: programs)
+        written = {}
+
+        def fake_write(path, launch, icon):
+            written.update(path=path, launch=launch, icon=icon)
+            path.write_text("a .lnk, near enough")
+            return path
+
+        monkeypatch.setattr(ds, "_write_windows", fake_write)
+        monkeypatch.setattr(ds, "ensure_icon", lambda directory=None: None)
+
+        result = ds.install_menu_entry()
+
+        assert result == programs / "flograph.lnk"
+        assert result.exists()
+        assert written["path"] == result
+
+    def test_it_registers_the_app_not_the_project_being_shortcutted(
+            self, _as_windows, tmp_path, monkeypatch):
+        project = tmp_path / "sales.flograph"
+        project.write_text("{}")
+        monkeypatch.setattr(ds, "start_menu_dir", lambda: tmp_path / "Programs")
+        monkeypatch.setattr(ds, "ensure_icon", lambda directory=None: None)
+        captured = {}
+
+        def fake_write(path, launch, icon):
+            captured["launch"] = launch
+            path.write_text("")
+            return path
+
+        monkeypatch.setattr(ds, "_write_windows", fake_write)
+
+        ds.install_menu_entry()
+
+        # same reason the Linux entry drops it: this is flograph, not
+        # "the shortcut someone happened to make for sales.flograph"
+        assert "sales.flograph" not in " ".join(captured["launch"].argv)
+
+    def test_a_cmd_fallback_is_reported_as_what_was_written(
+            self, _as_windows, tmp_path, monkeypatch):
+        programs = tmp_path / "Programs"
+        monkeypatch.setattr(ds, "start_menu_dir", lambda: programs)
+        monkeypatch.setattr(ds, "ensure_icon", lambda directory=None: None)
+        # locked-down PowerShell: _write_windows returns the .cmd it fell
+        # back to, and a .cmd in the Start Menu is still found by search
+        monkeypatch.setattr(
+            ds, "_write_windows",
+            lambda path, launch, icon: _touch(path.with_suffix(".cmd")))
+
+        assert ds.install_menu_entry() == programs / "flograph.cmd"
+
+    def test_an_unwritable_programs_folder_is_a_readable_error(
+            self, _as_windows, tmp_path, monkeypatch):
+        blocked = tmp_path / "nope"
+        blocked.write_text("I am a file, not a directory")
+        monkeypatch.setattr(ds, "start_menu_dir", lambda: blocked)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            ds.install_menu_entry()
+
+        assert "flograph.lnk" in str(excinfo.value)
+
+    def test_the_menu_is_called_what_the_platform_calls_it(self, _as_windows):
+        assert ds.menu_name() == "Start Menu"
+
+
+def _touch(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("")
+    return path
+
+
 @pytest.fixture(scope="module")
 def registry():
     reg = NodeRegistry()
@@ -496,6 +615,30 @@ class TestDialog:
 
         assert dialog.created_path is not None and dialog.created_path.exists()
         assert said and "couldn't be written" in said[0]
+
+    def test_windows_offers_the_start_menu_by_that_name(
+            self, qtbot, window, desktop, tmp_path, monkeypatch, _as_windows):
+        monkeypatch.setattr(ds, "start_menu_dir", lambda: tmp_path / "Programs")
+
+        dialog = ds.ShortcutDialog(window, None)
+        qtbot.addWidget(dialog)
+
+        # the box exists on Windows now, and says what a Windows user looks for
+        assert dialog._offers_menu
+        assert dialog.add_to_menu.isChecked()
+        assert dialog.add_to_menu.text() == "Add flograph to the Start Menu"
+        assert "Programs" in dialog.summary.text()
+
+    def test_macos_still_has_nothing_to_register_with(
+            self, qtbot, window, desktop, monkeypatch):
+        monkeypatch.setattr(ds.sys, "platform", "darwin")
+
+        dialog = ds.ShortcutDialog(window, None)
+        qtbot.addWidget(dialog)
+
+        # an app there is a bundle in /Applications, which this cannot write
+        assert not dialog._offers_menu
+        assert not dialog.add_to_menu.isVisible()
 
     def test_a_failed_write_is_reported_not_raised(
             self, qtbot, window, desktop, monkeypatch):

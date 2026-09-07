@@ -14,10 +14,14 @@ Windows (built through WScript.Shell, which is the only way to write one
 without a dependency), a `.desktop` entry on Linux, a `.command` script on
 macOS.
 
-On Linux the dialog can also register the app itself — one `flograph.desktop`
-in the applications directory plus the mark in the icon theme — which is a
-different thing from the shortcut: it is what the desktop matches the running
-window against, so the dock shows one flograph wearing its own icon.
+The dialog can also register the app itself with the platform's menu, which
+is a different thing from the shortcut on the desktop: it is named for the
+application and carries no project. On Windows that is a `flograph.lnk` in
+the Start Menu, which is mostly about Start's search box — typing "flo" gets
+you the app. On Linux it is one `flograph.desktop` in the applications
+directory plus the mark in the icon theme, and there the name is load-bearing:
+it is what the desktop matches the running window against, so the dock shows
+one flograph wearing its own icon.
 """
 from __future__ import annotations
 
@@ -166,17 +170,28 @@ def desktop_dir() -> Path:
     return Path.home() / "Desktop"
 
 
-def _windows_shell_desktop() -> Path | None:
+def _windows_shell_folder(name: str) -> Path | None:
+    """A Windows special folder as the shell reports it, by the name
+    `Environment.SpecialFolder` uses (`Desktop`, `Programs`, ...).
+
+    Asked rather than assembled from %APPDATA%: every one of these can be
+    redirected — to OneDrive, to a network share on a managed machine — and
+    a shortcut written to the assumed path lands where nobody looks.
+    """
     try:
         proc = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             "[Environment]::GetFolderPath('Desktop')"],
+             f"[Environment]::GetFolderPath('{name}')"],
             capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     path = proc.stdout.strip()
     return Path(path) if proc.returncode == 0 and path else None
+
+
+def _windows_shell_desktop() -> Path | None:
+    return _windows_shell_folder("Desktop")
 
 
 def _xdg_desktop() -> Path | None:
@@ -195,6 +210,22 @@ def _xdg_desktop() -> Path | None:
     return None
 
 
+@lru_cache(maxsize=1)
+def start_menu_dir() -> Path:
+    """The user's own Start Menu programs folder.
+
+    The per-user one, never the all-users copy under ProgramData: writing
+    there needs an administrator, and on the managed machines flograph gets
+    run on it is the difference between the tickbox working and it raising.
+    """
+    resolved = _windows_shell_folder("Programs")
+    if resolved:
+        return resolved
+    appdata = os.environ.get("APPDATA")
+    base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+    return base / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+
+
 def applications_dir() -> Path:
     """Where a Linux desktop looks for the applications it can launch."""
     base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
@@ -208,10 +239,23 @@ def icon_theme_dir() -> Path:
 
 
 def menu_entry_path() -> Path:
-    """`flograph.desktop`, and it has to be exactly that name: the running
-    window's Wayland app id is `QApplication.setDesktopFileName`'s value, and
-    that is how a desktop matches window to launcher."""
+    """Where the *application* gets registered, as against the shortcut being
+    written to the desktop beside it.
+
+    On Windows the name is free, so it matches the app: `flograph.lnk`. On
+    Linux it has to be exactly `flograph.desktop` — the running window's
+    Wayland app id is `QApplication.setDesktopFileName`'s value, and that is
+    how a desktop matches window to launcher.
+    """
+    if sys.platform == "win32":
+        return start_menu_dir() / ("flograph" + shortcut_suffix())
     return applications_dir() / "flograph.desktop"
+
+
+def menu_name() -> str:
+    """What to call the thing being registered with, in the dialog's own
+    words — people look for "Start Menu" on Windows."""
+    return "Start Menu" if sys.platform == "win32" else "applications menu"
 
 
 _BAD_NAME_CHARS = '\\/:*?"<>|\n\r\t'
@@ -392,14 +436,52 @@ def install_theme_icon(root: Path | None = None) -> bool:
 
 def install_menu_entry(directory: Path | None = None,
                        icon_root: Path | None = None) -> Path:
-    """Register flograph with the desktop: write `flograph.desktop` into the
-    applications directory and the mark into the icon theme.
+    """Register flograph itself with the platform's menu, and return the file
+    that was written.
 
-    This is the *application*, not the shortcut being created alongside it —
-    same name and no project, however the shortcut on the desktop is named —
-    because it exists to be matched against the running window. Without it a
-    dock shows flograph as a second, iconless entry beside its own launcher,
-    and the portal logs `App info not found for 'flograph'` at every start.
+    This is the *application*, not the shortcut being created alongside it:
+    named flograph and carrying no project, however the shortcut on the
+    desktop is named. The two platforms want it for different reasons — see
+    the writers below — but from the dialog it is one tickbox.
+    """
+    if sys.platform == "win32":
+        return _install_start_menu_entry(directory)
+    return _install_applications_entry(directory, icon_root)
+
+
+def _install_start_menu_entry(directory: Path | None = None) -> Path:
+    """A `flograph.lnk` in the Start Menu's programs folder.
+
+    Windows needs no help pairing a window with its launcher — the app
+    declares an AppUserModelID for that — so this earns its place on the
+    other thing the Start Menu is: the search box. Typing "flo" finds the
+    app, which for most people is how anything gets launched on Windows.
+
+    The icon is the same digest-named `.ico` the desktop shortcut points at,
+    with the same caveat: redrawing the mark sweeps the old file and leaves
+    entries made before it blank until they are recreated. Linux escapes that
+    with a theme name; Windows has no equivalent, and inventing a second,
+    unswept copy here would only mean two icons drifting apart.
+    """
+    folder = directory or start_menu_dir()
+    path = folder / ("flograph" + shortcut_suffix())
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        # no project: resolve_launch() with no argument is the bare app
+        return _write_windows(path, resolve_launch(), ensure_icon())
+    except OSError as exc:
+        raise RuntimeError(f"couldn't write {path}: {exc}") from exc
+
+
+def _install_applications_entry(directory: Path | None = None,
+                                icon_root: Path | None = None) -> Path:
+    """`flograph.desktop` in the applications directory, plus the mark in the
+    icon theme.
+
+    On Linux this is what the desktop matches the running window against.
+    Without it a dock shows flograph as a second, iconless entry beside its
+    own launcher, and the portal logs `App info not found for 'flograph'` at
+    every start.
     """
     folder = directory or applications_dir()
     path = folder / "flograph.desktop"
@@ -567,19 +649,24 @@ class ShortcutDialog(QDialog):
             self.open_project.setToolTip(
                 "Save the project first and the shortcut can open it.")
 
-        # Linux only: there is no applications directory to register with on
-        # Windows or macOS, and the shortcut needs no help there. A plain flag
-        # rather than the widget's own visibility, which is False until the
-        # dialog is shown and so cannot answer "does this platform have one".
-        self._offers_menu = sys.platform.startswith("linux")
-        self.add_to_menu = QCheckBox("Add flograph to the applications menu", self)
+        # Not macOS: there is no folder to drop a launcher into there — an
+        # app belongs in /Applications and has to be a real bundle to be one,
+        # which is a build-time job, not something this dialog can write. A
+        # plain flag rather than the widget's own visibility, which is False
+        # until the dialog is shown and so cannot answer "does this platform
+        # have one".
+        self._offers_menu = sys.platform == "win32" or sys.platform.startswith("linux")
+        self.add_to_menu = QCheckBox(f"Add flograph to the {menu_name()}", self)
         self.add_to_menu.setChecked(True)
         self.add_to_menu.setVisible(self._offers_menu)
         self.add_to_menu.setToolTip(
-            "Registers flograph with the desktop, so it turns up in the "
-            "launcher and the running window carries its own icon in the "
-            "dock and the task switcher. Writes one file to "
-            f"{applications_dir()}.")
+            ("Registers flograph with the Start Menu, so it is in the menu "
+             "and — the part worth having — Start's search box finds it. "
+             if sys.platform == "win32" else
+             "Registers flograph with the desktop, so it turns up in the "
+             "launcher and the running window carries its own icon in the "
+             "dock and the task switcher. ")
+            + f"Writes one file to {menu_entry_path().parent}.")
 
         self.summary = QLabel(self)
         self.summary.setWordWrap(True)
@@ -661,9 +748,11 @@ class ShortcutDialog(QDialog):
             # worth saying so about, not worth losing the shortcut over
             try:
                 self.menu_entry_path = install_menu_entry()
-                note += f"\n\nAdded to the applications menu: {self.menu_entry_path}"
+                note += (f"\n\nAdded to the {menu_name()}: "
+                         f"{self.menu_entry_path}")
             except (RuntimeError, OSError) as exc:
-                note += f"\n\nThe applications menu entry couldn't be written: {exc}"
+                note += (f"\n\nThe {menu_name()} entry couldn't be "
+                         f"written: {exc}")
         QMessageBox.information(
             self, "Shortcut created", f"Created {path}{note}")
         self.accept()
