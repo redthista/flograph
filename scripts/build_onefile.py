@@ -36,7 +36,7 @@ def _read_version() -> str:
     return match.group(1) if match else "0.0.0"
 
 
-def _build_bundle_zip() -> bytes:
+def _build_bundle_zip(version: str) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(SRC_DIR.rglob("*")):
@@ -48,6 +48,18 @@ def _build_bundle_zip() -> bytes:
                 continue
             arcname = "flograph/" + str(path.relative_to(SRC_DIR)).replace("\\", "/")
             zf.write(path, arcname)
+        # The bundle's own version, generated straight into the zip and never
+        # written to the source tree — a pip install must not acquire this
+        # module, or it would report the version of whatever bundle was built
+        # last instead of its own. flograph.version asks for it first because
+        # it is importable only when the bundle's code is the code running;
+        # a bundle carries no distribution metadata to be read instead, and
+        # reading the interpreter's had it announce whatever other flograph
+        # was pip-installed beside it.
+        zf.writestr("flograph/_bundle_version.py",
+                    '"""Written by scripts/build_onefile.py — not in the '
+                    'source tree."""\n'
+                    f'VERSION = "{version}"\n')
     return buf.getvalue()
 
 
@@ -98,7 +110,7 @@ if __name__ == "__main__":
 
 def build(output_path: Path) -> None:
     version = _read_version()
-    bundle = _build_bundle_zip()
+    bundle = _build_bundle_zip(version)
     bundle_b64 = base64.b64encode(bundle).decode("ascii")
     # wrap at 100 cols so the literal doesn't produce one giant line
     wrapped = "\n".join(bundle_b64[i:i + 100] for i in range(0, len(bundle_b64), 100))

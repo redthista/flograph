@@ -30,10 +30,10 @@ the cache too, lives in cache_persistence.
 from __future__ import annotations
 
 import json
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from ..version import running_version as _running_version
 from . import dotenv
 from .datatypes import PortType
 from .graph import Connection, Frame, Graph, GraphError, Page, Shape, Tile
@@ -45,10 +45,10 @@ from .registry import NodeRegistry
 from .script import NodeScriptError, parse_spec
 from .user_nodes import USER_PREFIX
 
-try:  # stamp saved files with the installed distribution version (single source)
-    FLOGRAPH_VERSION = _pkg_version("flograph")
-except PackageNotFoundError:  # running from a source tree without an install
-    FLOGRAPH_VERSION = "0.0.0+unknown"
+# stamp saved files with the version of the code doing the saving — which
+# for a single-file bundle is the bundle's, not that of any pip install that
+# happens to share the interpreter (see flograph.version)
+FLOGRAPH_VERSION = _running_version("0.0.0+unknown")
 
 SCHEMA_VERSION = 1
 

@@ -158,13 +158,17 @@ GITHUB_RELEASES_URL = "https://github.com/redthista/flograph/releases"
 
 
 def installed_version() -> str:
-    """The running flograph's version, or "0" if it isn't installed as a
-    distribution (a source checkout run in place). "0" compares below every
-    real release, so such a build is simply never told it is behind."""
-    try:
-        return importlib.metadata.version("flograph")
-    except importlib.metadata.PackageNotFoundError:
-        return "0"
+    """The running flograph's version, or "0" when nothing can name it (a
+    source checkout run in place). "0" compares below every real release, so
+    such a build is simply never told it is behind.
+
+    Via `version.running_version`, so a single-file bundle is compared on its
+    own version rather than on that of some older pip install sharing the
+    interpreter — which would have offered an update to something already
+    running, or hidden one that mattered.
+    """
+    from .version import running_version
+    return running_version("0")
 
 
 def _parse_pip_index_output(text: str) -> list[str]:

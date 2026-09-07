@@ -26,11 +26,8 @@ from .canvas import grid
 
 
 def _flograph_version() -> str:
-    import importlib.metadata
-    try:
-        return importlib.metadata.version("flograph")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
+    from ..version import running_version
+    return running_version("unknown")
 
 
 #: Roughly how many characters a tooltip line should hold before wrapping.
