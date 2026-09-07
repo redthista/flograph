@@ -18,7 +18,9 @@ a code comment still cites them.
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30.
+2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30. M3,
+M4, N4 and chunks T–Z were triaged out of Dan's 0.1.13 list and checked
+against the code on 2026-09-07.
 
 ---
 
@@ -107,16 +109,63 @@ node pair with a retrieval side — writing to a DataFrame, a SQL table, or
 whatever else is useful. The Input category covers single values today;
 this is the "capture a record" shape it cannot express.
 
+**M3. A node that runs another `.flograph` file** (Dan), with the option to
+bring an output back. Most of it exists: `flograph run project.flograph
+--var name=value` is a shipped headless runner (`engine/headless.py`), so
+this is a node wrapping a thing that works rather than a second engine. Two
+things need deciding. **In-process or subprocess** — the engine wants a
+`QCoreApplication` and a node's `run` is on a worker thread, so a
+subprocess is the safe answer and also the one that survives the child flow
+crashing. And **how an output comes back** — the CLI prints and returns an
+exit code, so the child has to write somewhere the parent reads (name an
+output node, write it to parquet in a temp dir, read it back). Note the
+overlap with `ideas_archived.md` #4: this is "a node that is its own flow"
+with a file in the middle, and the two should not end up built twice.
+
+**M4. Send an Outlook email, one per row** (Dan). A table in, one email per
+row, subject and body as templates over that row's columns — the
+`{{column}}` grammar HTML Template and Story already share. There are two
+implementations and they are not the same feature: **Outlook on Windows**
+(COM, via `win32com`) sends as the signed-in user, with their signature,
+and lands in Sent Items — and works nowhere else; **SMTP** works everywhere
+and needs a host, a port and a credential. One node with a **How** choice,
+not two nodes. This one wants a guard rail more than most features do: a
+dry run that writes the messages to a table instead of sending them, and a
+confirmation naming the count. A flow that emails four thousand people by
+accident is not a bug anybody gets to undo.
+
 ---
 
 ## N. Dashboard pages
 
-**N3. Set the shape a visual takes on a dashboard page** (Dan). Asked for as
-"a wide Plotly chart, or a long thin one". On a **report page** this shipped
-as the `ratio=` / `height=` embed options (0.1.12). On a **dashboard page**
-(free-form tiles) the capability is already there by dragging a tile's edges;
-what is missing is a numeric "W:H" input, an aspect lock while resizing, and
-a few preset ratios — new UI on `TileItem` or the properties panel.
+**N3. Set the shape a visual takes on a page** (Dan). Asked for as "a wide
+Plotly chart, or a long thin one". The two page kinds answer this
+differently today:
+
+  On a **report page** (the flowing document), `![[chart|width=50%]]` is
+  the only per-embed control — `EMBED_OPTIONS == ("width",)`, and a test
+  pins it closed. The figure's wide-or-tall shape comes from the figure's
+  own `layout.width` / `layout.height`, set on the chart node or a Plotly
+  Style node; the report only scales the placement width. A `height=` or
+  `ratio=` embed option is the natural addition, plumbed through
+  `parse_options` and `render.plotly_geometry` — but the render code
+  deliberately resists resizing Plotly figures, because the labels do not
+  scale with them. Sits with `ideas_archived.md` #7, which already parks
+  `![[chart|fit]]` and embed alignment.
+
+  On a **dashboard page** (free-form tiles) the capability is already there
+  by dragging a tile's edges; what is missing is a numeric "W:H" input, an
+  aspect lock while resizing, and a few preset ratios — new UI on `TileItem`
+  or the properties panel.
+
+**N4. Where is this visual used?** (Dan) A right-click on any visual node
+that answers "this is on dashboard page X and report page Y", and takes you
+there. The links already exist in both directions — a dashboard tile stores
+the node it shows, and a report page's `![[name]]` embed names it — so this
+is a reverse lookup across the project's pages plus a menu entry, and the
+Navigator dock (`ui/navigator/`) is probably where the answer wants to live
+as well as in the menu. Include **"used by no page"** as an answer: on a
+board that has grown, that is the question people are really asking.
 
 ---
 
@@ -158,6 +207,218 @@ guide that ships on the dashboard. What is missing:
   one-file temp dir) or otherwise not writable: hide the toggle and say why.
   All of it lives in `ui/wiki/` and `core/docpages.py`; the card and tile
   wiring is done.
+
+---
+
+## T. Table formatting — what a cell can show
+
+Everything here is `core/table_format.py` (the rule model and its parser),
+`ui/table_delegate.py` (the card) and `core/table_html.py` (paper). The four
+share a grammar and a data model, so the order matters more than usual: T1
+changes the model the other three write into.
+
+**T1. More than one decoration in a cell, and somewhere to put it** (Dan).
+Asked for as four things that are one thing: an icon on the **right** as
+well as the left; **two icons at once** (an "OT" mark and then a green
+tick); **above / below** as positions, with the row growing to hold them;
+and **pill** styles — a coloured lozenge around an icon, some text, or the
+column's own value, drawn either in place or in another column.
+
+  It reads like drawing work and is really a model change. `CellStyle` holds
+  exactly one `icon` / `icon_color` pair, and `CellStyle.over()` merges two
+  rules with `icon=self.icon or base.icon` — so a second icon rule cannot
+  *add*, it can only fail to replace, and no amount of delegate work gets
+  round that. A cell holding a **list** of decorations, each with a position
+  and an optional pill, is the piece the other three hang off; after it, the
+  delegate lays them out and `table_html` writes the same arrangement for
+  paper. The grammar has to grow to match — `units bar blue only` has
+  nowhere today to say "on the right".
+
+  Two decisions to take with a real table in front of you rather than
+  guessing. Whether **above / below** is per-cell or, like `wrap`, a fact
+  about the whole table (a row is as tall as its tallest cell, so one cell
+  asking for a second line spends every row's height). And whether a
+  **pill** is a decoration or a *replacement* for the value — `only`
+  already means "draw the format instead of the value", so it is probably
+  the latter, spelled with what exists.
+
+**T2. A value → colour map, the twin of `iconmap`** (Dan). "If it's x be
+red, if it's y be orange" is one condition line per value today. `iconmap`
+already proves the shorter shape (`status iconmap severity: high=▲ red,
+low=▼ green`); the same one-liner for fills — `status colormap: breach=red,
+watch=amber, ok=green` — is a keyword in `_parse_token_line`, a `mapping`
+Rule the `icon_map` branch already models, and an evaluator branch beside
+it. The smallest entry in the chunk and the clearest in shape.
+
+**T3. An icon decided by the cell's own value** (Dan) — reported as "`20*`
+doesn't work". The glob is not the problem, and it is worth saying so
+before someone goes looking: `20* = 1 => bg green`, `20* icons check` and
+`20* iconmap …` all parse, and all match `2023` and `2024`. What cannot be
+said is the thing actually asked for — *a green tick where the cell is 1*:
+
+  - a `=>` highlight paints `bg` / `fg` / `bold` / `only` and **nothing
+    else** — `_parse_style_tokens` rejects `icon` outright; and
+  - `iconmap` needs a **named** source column, so across a pattern it reads
+    that one column and paints its icon into all of them.
+
+  So it is two small changes, not a glob fix: let a highlight carry an icon
+  (`20* = 1 => icon ✓ green`), and let `iconmap` name the drawn column
+  itself. Do it with T2 — same parser, same evaluator, and the two together
+  are what "a rule map table" means.
+
+**T4. Auto-colour a column by category** (Dan). Pick a column, say "auto
+colour", and every distinct value takes its own colour from a palette —
+text or fill, palette chosen. The point is that nothing is named in
+advance, which is exactly what a rule map (T2) cannot do. The palettes
+exist already on `Visual Style` and `Plotly Style`; the work is a rule that
+resolves at evaluation time against the column's distinct values, in an
+order stable enough that the colours do not move when a row arrives.
+
+---
+
+## U. The table on paper
+
+Two places where the printed table is nearly the card and the gap shows.
+Both live in `core/table_html.py` and `ui/report/render.py`.
+
+**U1. A report table's header is toned under `fit` and white without it**
+(Dan) — and the toned one is the one to keep. Root cause found:
+`REPORT_CSS` carries `th { background-color: #eeeeee }` and is set on the
+**final** document, but the HTML that document is given comes from
+`staged.toHtml()` — a document built with **no** stylesheet, and `toHtml()`
+writes what it resolved as inline attributes, which outrank a default
+stylesheet. `fit_tables` then *rebuilds* its tables from `frame_to_html`
+and re-sets them into the CSS'd document, so a fitted table picks the tone
+up and every other table does not. Fix the staging rather than the CSS: the
+two paths have to produce the same header, and a test pinning a fitted
+table's header against an unfitted one is the honest regression.
+
+**U2. A data bar on paper sits beside its number, and starts in a different
+place on every row** (Dan). One cause, and the code says so: `_bar` puts
+the value and the track in a two-cell nested table with the value cell
+deliberately **content-sized**, because giving it a stated width made Qt
+wrap `412` into three stacked digits. Content-sized means `1` and `10`
+produce different-width cells, so the track's left edge moves down the
+column — which is both the "bars start at different points" complaint and
+the reason the column can no longer be read by length at all. Overlaying
+the bar *behind* the text, as the card's delegate does, is not on offer:
+Qt's rich text has no z-order and no partial-width background.
+
+  Two ways out, and this wants deciding rather than guessing. Give the
+  value cell a **measured** width — `fit_tables` already lays the document
+  out for `height=` / `fit`, so a real width is obtainable now in a way it
+  was not when `_bar` was written. Or let a bar column print as a
+  **picture**, the way a web-view card already does. The first keeps the
+  table as text; the second gets the card's exact look and gives up
+  selectable numbers in that column.
+
+---
+
+## V. The table as a view
+
+Show Table's own parameters (`nodes/viz/show_table.py`) and the inspector
+view — how the table is *presented*, as against how its cells are painted.
+
+**V1. Choose the columns to show, in the order you chose them** (Dan).
+`Hide columns` and the `hide` rule are both subtractive: you say what to
+lose. The other way round — pick what to keep, shown **in the order
+picked** — is also the only way to reorder columns without a Select Columns
+node upstream. Keep the two apart while building: hiding is a view thing
+and the hidden column still leaves on `table`, so a chosen *order* has to
+decide whether it reorders the passed-through frame as well. Probably not —
+the card is a view, and Select Columns is the node that reorders data.
+
+**V2. A default sort** (Dan). The card sorts when a header is clicked
+(`ui/table_sort.py`) and forgets. "Sort by this column, ascending" as a
+parameter is the missing half, and it is what a **report** needs most,
+since a printed table has no header to click.
+
+**V3. A hover tooltip on a table** (Dan). Left open in the ask, and worth
+pinning before building, because there are two features under it. The
+**full value where a cell is truncated** needs no configuration, could
+simply be on, and is a `ToolTipRole` in `pandas_model.py` — half an hour.
+A **tooltip from another column** — a note column that never shows but
+explains the cell — is a rule (`revenue tip note`) and belongs with T1–T4
+in the same DSL.
+
+---
+
+## W. Visual cards
+
+**W1. Raise the size ceilings on charts, tables and visual nodes** (Dan) —
+"it's limited me a few times when I've tried to make them bigger". The caps
+are real and hard-coded: `TABLE_MAX_W` / `FIGURE_MAX_W` and their siblings
+in `ui/canvas/node_item.py` stop at **1600 × 2000**, and each node repeats
+those same numbers in its own `PARAMS` (`show_table.py` pins `width` to
+1600 and `height` to 2000), so raising one without the other changes
+nothing at all. Mostly a numbers change — but find out what the ceiling was
+protecting before picking the new one: a card repaints every frame, and a
+4000px table on a canvas of fifty nodes is precisely the case F1 and the
+LOD work exist for. Measure one huge card first.
+
+**W2. The two Plotly visuals that don't filter when you click them.**
+Clicking a visual to filter downstream is built and shipped — Show Plotly
+has `On click` with a `selected` output and a filtered `table`, and so do
+all nine library and drawn visuals. **Plotly Table** and **Gantt** are the
+ones left out, and both are Plotly figures, so they can have it on exactly
+the same terms. (Show Plot, Chart per Value, KPI Card and Mermaid are
+static by nature — there is no click to catch.)
+
+---
+
+## X. Pivoting
+
+**X1. A Matrix Table** (Dan) — a table that pivots inside itself, the way a
+spreadsheet's pivot table does, instead of needing a Pivot node wired in
+front of it. The arithmetic is already written (`nodes/transform/pivot.py`);
+what is new is a card holding rows / columns / values / aggregation as its
+**own** parameters, so the shape can be changed where you are looking at
+the result. Decide first whether it is a new node or a **mode of Show
+Table**: as a mode it inherits every conditional-formatting rule, which is
+most of what makes the ask worth doing at all; as a node it stays simple
+and the formatting arrives by wiring a style in.
+
+**X2. Pivot re-sorts instead of keeping the table's order** (Dan).
+`pivot_table` sorts both index and columns by default, so a table
+deliberately sorted upstream comes out alphabetical — and for pivoted
+*columns* there is no downstream fix short of a Select Columns node listing
+every one of them by hand. "Keep the incoming order" is small (pandas
+`sort=False`, plus reindexing the columns to first-seen order). Whether it
+should be the **default** is the real question, and the argument for yes is
+that a sort someone set upstream is a decision, and discarding it silently
+is the same class of thing as `issues.md` 4.
+
+---
+
+## Y. Copying code out of flograph
+
+**Y1. Copy from the code editor keeps its indentation** (Dan). Pasting a
+node's script into an email loses every indent unless "paste as
+unformatted" is used. `CodeEditor` is a `QPlainTextEdit`, which puts
+**only** `text/plain` on the clipboard; the mail client turns that into
+HTML, and HTML collapses runs of spaces, so the indentation is gone before
+the recipient ever sees it. The fix is to add a `text/html` flavour —
+override `createMimeDataFromSelection` and wrap the selection in a `<pre>`
+with a monospace family. Syntax colours are optional and probably wanted,
+since `highlighter.py` already knows them. The plain-text flavour stays
+byte-for-byte as it is, so pasting into a terminal or another editor is
+unchanged.
+
+---
+
+## Z. Web libraries from your own machine
+
+**Z1. Install a web library from local files** (Dan). `flograph/weblibs.py`
+installs by downloading a pinned URL into a per-user store and writing a
+manifest beside it — and the store, the manifest, and everything that reads
+them are indifferent to where the bytes came from. So this is a second
+front door onto the same store: pick a `.js` / `.css` or a folder, give it
+a name and a version, write the manifest. It is for the machine with no
+route to a CDN at all, and for a library the catalogue does not carry. Two
+things to keep honest: the manifest records a URL and there will not be one
+(record the source path, and say that is what it is), and the pinned-hash
+discipline the catalogue has does not apply to a file you chose off disk,
+so the dialog must not imply that it does.
 
 ---
 

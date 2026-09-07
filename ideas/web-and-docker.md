@@ -21,6 +21,9 @@ built they are plausibly one server; design them together.
 
 ---
 
+
+
+
 ## 1. What "web / docker flograph" actually means — pick the target
 
 The prompt blends three different products. Cheapest first:
