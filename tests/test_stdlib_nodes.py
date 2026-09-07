@@ -222,6 +222,55 @@ class TestEtlNodes:
             run_node(registry, "flograph.transform.pivot",
                      {"columns": "units"}, table=table)
 
+    #: Months, deliberately not in alphabetical order and not in calendar
+    #: order either — so "kept" and "sorted" cannot be confused with each
+    #: other or with luck.
+    MONTHS = pd.DataFrame({
+        "region": ["south", "north", "south", "north"],
+        "month": ["Mar", "Mar", "Jan", "Feb"],
+        "revenue": [1.0, 2.0, 3.0, 4.0],
+    })
+
+    def test_pivot_keeps_the_tables_own_order(self, registry):
+        """The default. Alphabetical would be Feb, Jan, Mar — which is the
+        classic wrong answer a pivot gives a month column."""
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "month",
+                        "values": "revenue"}, table=self.MONTHS)
+        assert list(out.columns) == ["region", "Mar", "Jan", "Feb"]
+        assert list(out["region"]) == ["south", "north"]
+
+    def test_pivot_can_still_be_asked_to_sort(self, registry):
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "month",
+                        "values": "revenue", "order": "sorted"},
+                       table=self.MONTHS)
+        assert list(out.columns) == ["region", "Feb", "Jan", "Mar"]
+        assert list(out["region"]) == ["north", "south"]
+
+    def test_pivot_keeps_the_order_inside_each_value_column(self, registry):
+        """Two value columns nest the pivot values under each one; the
+        order has to hold in both groups, not just the first."""
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "month",
+                        "values": "revenue, units"}, table=self.MONTHS.assign(
+                            units=[10, 20, 30, 40]))
+        assert list(out.columns) == ["region", "revenue_Mar", "revenue_Jan",
+                                     "revenue_Feb", "units_Mar", "units_Jan",
+                                     "units_Feb"]
+
+    def test_a_pivot_saved_before_order_existed_still_runs(self, registry):
+        """Version 1.0 wrote no `order` param. Reading one back must not
+        raise — it takes the new default like everything else."""
+        spec = registry.get("flograph.transform.pivot")
+        params = spec.default_params()
+        params.update({"index": "region", "columns": "month",
+                       "values": "revenue"})
+        del params["order"]
+        run = compile_run(spec.source, "test-pivot-1.0")
+        out = run(FakeContext(params=params), table=self.MONTHS)
+        assert list(out.columns) == ["region", "Mar", "Jan", "Feb"]
+
     def test_unpivot_roundtrip_shape(self, registry, table):
         out = run_node(registry, "flograph.transform.unpivot",
                        {"id_columns": "region"}, table=table)

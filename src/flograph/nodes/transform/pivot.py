@@ -7,11 +7,19 @@ aggregated.
 With a single value column the output columns are the bare pivot values
 (no value-name prefix). List more than one value column and each output
 column is prefixed with its value name to keep them apart.
+
+**Order** decides how the new rows and columns are arranged. *As they
+appear* (the default) keeps the order the incoming table is already in, so
+a table sorted into Jan, Feb, Mar pivots into columns in that order.
+*Sorted* arranges them alphabetically instead, which is what pandas does on
+its own — and is why a month column used to come back Apr, Aug, Dec. A sort
+set upstream is a decision, so the default is to keep it; there is nowhere
+downstream to put it back, since the pivot is what invented the columns.
 """
 NODE = {
     "label": "Pivot",
     "category": "Transform",
-    "version": "1.0",
+    "version": "1.1",
     "inputs": [("table", "dataframe")],
     "outputs": [("pivoted", "dataframe")],
 }
@@ -25,6 +33,8 @@ PARAMS = [
     {"name": "agg", "type": "choice", "label": "Aggregation",
      "options": ["sum", "mean", "median", "min", "max", "count", "first"],
      "default": "sum"},
+    {"name": "order", "type": "choice", "label": "Row / column order",
+     "options": ["as they appear", "sorted"], "default": "as they appear"},
 ]
 
 
@@ -44,8 +54,16 @@ def run(ctx, table):
     index = cols("index", required=True)
     columns = cols("columns", required=True)
     values = cols("values", required=False)
+    # `.get`, not `[]`: a project saved before this node grew an Order has
+    # no such param, and its pivot should keep working.
+    ordering = str(ctx.params.get("order") or "as they appear")
+    # pandas sorts both axes unless told not to, and sort=False is exactly
+    # "first seen wins" — for the rows, for the pivot values, and, with
+    # more than one value column, within each of them. So the whole choice
+    # is this keyword; there is nothing to reindex by hand afterwards.
     pivoted = table.pivot_table(index=index, columns=columns, values=values,
-                                aggfunc=ctx.params["agg"])
+                                aggfunc=ctx.params["agg"],
+                                sort=ordering == "sorted")
     if hasattr(pivoted.columns, "levels"):
         # Drop any column level carrying a single distinct label - the
         # value-column name when only one value is pivoted - so the output
