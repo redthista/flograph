@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtCore import QMimeData, QRect, QSize, Qt
 from PySide6.QtGui import (
     QColor, QFontDatabase, QKeyEvent, QPainter, QTextCursor, QTextFormat,
 )
@@ -55,6 +55,54 @@ class CodeEditor(QPlainTextEdit):
         self.cursorPositionChanged.connect(self._update_extra_selections)
         self._update_gutter_width()
         self._update_extra_selections()
+
+    # ----------------------------------------------------------- clipboard
+
+    def createMimeDataFromSelection(self) -> QMimeData:
+        """The selection, as preformatted HTML as well as plain text.
+
+        A QPlainTextEdit puts only `text/plain` on the clipboard. Every
+        rich destination — an email, a Word document, a chat box — then
+        converts that to HTML itself, and HTML collapses runs of spaces, so
+        the indentation is gone before the recipient sees it and Python
+        arrives as one flat unreadable block. "Paste as unformatted" was
+        the workaround, and it worked for the wrong reason: it takes the
+        same plain flavour and drops it somewhere already monospaced.
+
+        Offering an HTML flavour of our own settles it — `<pre>` says the
+        whitespace is load-bearing, which is the one thing the destination
+        could not know. The plain flavour is untouched, so pasting into a
+        terminal or another editor is exactly as it was.
+
+        Deliberately no syntax colours. The highlighter's palette is built
+        to sit on the editor's #202226, and a mail client that keeps
+        foreground colours while dropping the background — which is the
+        common case — would print pale grey keywords onto white paper.
+
+        Built fresh rather than by amending Qt's: the QMimeData a text
+        widget hands back is lazy, regenerating each flavour from the
+        document fragment when it is asked for, so `setHtml` on it is
+        silently discarded. Building the object also drops the `text/
+        markdown` and OpenDocument flavours it offers, which is the point
+        — those are what a word processor reaches for first, and both lose
+        the indentation exactly as the generated HTML did.
+        """
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return super().createMimeDataFromSelection()
+        # selectedText() joins blocks with U+2029, not "\n" — pasting that
+        # verbatim would put the whole selection on one line
+        text = cursor.selectedText().replace(" ", "\n")
+        escaped = (text.replace("&", "&amp;")
+                       .replace("<", "&lt;")
+                       .replace(">", "&gt;"))
+        mime = QMimeData()
+        mime.setText(text)
+        mime.setHtml(
+            f'<pre style="font-family:\'{self.font().family()}\',Consolas,'
+            f'\'Courier New\',monospace; font-size:10pt; '
+            f'white-space:pre">{escaped}</pre>')
+        return mime
 
     # -------------------------------------------------------------- errors
 
