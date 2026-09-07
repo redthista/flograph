@@ -69,18 +69,25 @@ def resolve_key(provider: str, raw: str) -> str:
 CONFIG_KIND = "llm_connection"      # what an LLM Config node puts on the wire
 
 
-def connection(ctx, params: dict, config=None) -> tuple:
-    """`(provider, base_url, api_key, model)` — where to send this, as whom.
+THINKING_OPTIONS = ["default", "off", "low", "high"]
 
-    A wired **LLM Config** replaces the node's own four connection fields
-    outright rather than filling in the blanks. Per-field precedence reads
-    fine in a docstring and is unexplainable in front of a flow: every field
-    has a non-empty default, so "the config fills what you left blank" would
-    mean a config's model never took effect, and a half-overridden endpoint
-    is the kind of thing you debug for an hour. One rule instead — plugged
-    in, the config is the connection; unplugged, the node's own fields are.
-    What the node keeps either way is the shape of its *job*: max tokens,
-    concurrency, the prompt.
+# The connection: where a request goes, as whom, and in what dialect. Not the
+# job — max tokens, concurrency and the prompt describe the work, and stay on
+# the node doing it.
+CONNECTION_FIELDS = ("provider", "base_url", "model", "api_key",
+                     "thinking", "extra_json")
+
+
+def connection(ctx, params: dict, config=None) -> dict:
+    """Where this request goes, as whom, and how the gateway wants speaking to.
+
+    A wired **LLM Config** replaces the node's own connection fields outright
+    rather than filling in the blanks. Per-field precedence reads fine in a
+    docstring and is unexplainable in front of a flow: every field has a
+    non-empty default, so "the config fills what you left blank" would mean a
+    config's model never took effect, and a half-overridden endpoint is the
+    kind of thing you debug for an hour. One rule instead — plugged in, the
+    config is the connection; unplugged, the node's own fields are.
     """
     source, where = params, "this node"
     if config is not None:
@@ -91,22 +98,103 @@ def connection(ctx, params: dict, config=None) -> tuple:
         source, where = config, "the wired LLM Config"
 
     provider = source.get("provider") or "anthropic"
-    base = source.get("base_url") or ""
     model = (source.get("model") or "").strip()
     if not model:
         raise ValueError(f"no model — set 'Model' on {where}")
-    key = resolve_key(provider, source.get("api_key"))
+    conn = {
+        "provider": provider,
+        "base_url": source.get("base_url") or "",
+        "model": model,
+        "api_key": resolve_key(provider, source.get("api_key")),
+        "thinking": source.get("thinking") or "default",
+        "extra": parse_extra(source.get("extra_json"), where),
+    }
     if config is not None:
         # Never the key: this line goes in the run log, which is on screen
         # and in the saved project.
         ctx.log(f"connection from LLM Config: {model} ({provider}) at "
-                f"{base or default_base(provider)}")
-    return provider, base, key, model
+                f"{conn['base_url'] or default_base(provider)}")
+    return conn
+
+
+def parse_extra(raw, where: str = "this node") -> dict:
+    """The **Extra request JSON** box as a mapping — `{}` when it is blank.
+
+    The escape hatch, and the reason the Thinking dropdown is allowed to stay
+    a short list: whatever a gateway wants that flograph has never heard of
+    goes in here and is merged over the request last. Same bargain Show
+    Plotly strikes with its JSON boxes.
+    """
+    import json
+
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(
+            f"'Extra request JSON' on {where} is not valid JSON: {exc}") from None
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"'Extra request JSON' on {where} must be a JSON object "
+            f"(a {{...}} of request fields), not {type(value).__name__}")
+    return value
+
+
+def thinking_fields(provider: str, mode: str, max_tokens: int) -> dict:
+    """The request fields that ask for `mode` on this wire format.
+
+    There is no cross-provider standard here, so this maps to the dialect
+    each format actually speaks and says so out loud rather than pretending
+    to be universal. A gateway that wants a third thing will reject what it
+    is sent, naming the field — which is a readable failure — and **Extra
+    request JSON** is how you answer it. `default` sends nothing at all, so
+    the model does whatever it was going to do.
+    """
+    if mode in ("", "default", None):
+        return {}
+    if provider == "anthropic":
+        # Anthropic-format thinking is opt-*in*, so "off" is simply silence.
+        if mode == "off":
+            return {}
+        # budget_tokens must be >= 1024 and leave room for an answer, so a
+        # small Max tokens cannot carry it — better to say that than to send
+        # a request the server will reject for reasons of our making.
+        budget = 1024 if mode == "low" else max(1024, int(max_tokens * 0.6))
+        if max_tokens <= budget:
+            raise ValueError(
+                f"thinking '{mode}' needs room to think: raise 'Max tokens' "
+                f"above {budget} (it is {max_tokens}), or set Thinking to "
+                f"'default'")
+        return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    # OpenAI-format gateways: OpenRouter's `reasoning` object is what most
+    # of them read. OpenAI's own `reasoning_effort` is deliberately not sent
+    # alongside it — that API rejects unknown fields, so sending both would
+    # break the case it was meant to cover.
+    if mode == "off":
+        return {"reasoning": {"enabled": False}}
+    return {"reasoning": {"effort": mode}}
+
+
+def chat_with(conn: dict, system: str, user: str, max_tokens: int,
+              timeout: float) -> str:
+    """One completion over a `connection()` mapping. What nodes call."""
+    return chat(conn["provider"], conn["base_url"], conn["api_key"],
+                conn["model"], system, user, max_tokens, timeout,
+                thinking=conn.get("thinking", "default"),
+                extra=conn.get("extra"))
 
 
 def chat(provider: str, base_url: str, api_key: str, model: str,
-         system: str, user: str, max_tokens: int, timeout: float) -> str:
-    """One completion. Returns the assistant text; raises on an API error."""
+         system: str, user: str, max_tokens: int, timeout: float,
+         *, thinking: str = "default", extra: dict = None) -> str:
+    """One completion. Returns the assistant text; raises on an API error.
+
+    `thinking` and `extra` are keyword-only with defaults so that a node
+    forked before they existed — its script is saved inside the .flograph —
+    keeps calling this successfully.
+    """
     import httpx
 
     url = endpoint(provider, base_url)
@@ -128,6 +216,11 @@ def chat(provider: str, base_url: str, api_key: str, model: str,
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
         body = {"model": model, "messages": messages, "max_tokens": max_tokens}
+
+    body.update(thinking_fields(provider, thinking, max_tokens))
+    # Last, so it wins: the escape hatch has to be able to correct anything
+    # above it, including a Thinking mapping that is wrong for this gateway.
+    body.update(extra or {})
 
     with httpx.Client(timeout=timeout) as client:
         resp = client.post(url, headers=headers, json=body)

@@ -18,14 +18,25 @@ this at any compatible endpoint — hosted, Azure, a local server, a gateway.
 Leave **API key** blank to use `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from
 the environment, or type one in / use `${env:NAME}`. Needs `httpx`.
 
+**Thinking** asks a reasoning model to stop thinking, or to think less —
+the fix when a model spends its whole **Max tokens** budget reasoning and
+has none left to answer with. There is no cross-provider standard, so it
+sends the dialect each API format speaks: `openai` gets OpenRouter's
+`reasoning` field, `anthropic` gets Anthropic's opt-in `thinking` block
+(so `off` is already the default there). **Extra request JSON** is merged
+into the request last and wins over everything, for whatever your gateway
+wants instead — `{"chat_template_kwargs": {"enable_thinking": false}}`,
+`{"reasoning_effort": "minimal"}`, a temperature, a routing preference.
+
 Sharing one endpoint across several AI nodes: wire an **LLM Config** card
-into the optional **config** input and it supplies all four of those, so
-they live in one place. This node's own four are then ignored.
+into the optional **config** input and it supplies every one of those
+connection fields, so they live in one place. This node's own copies are
+then ignored.
 """
 NODE = {
     "label": "LLM Extract",
     "category": "AI",
-    "version": "2.0",
+    "version": "2.1",
     "inputs": [("table", "dataframe"),
                ("config", "object", {"optional": True})],
     "outputs": [("table", "dataframe")],
@@ -48,6 +59,10 @@ PARAMS = [
     {"name": "api_key", "type": "password", "label": "API key",
      "default": "",
      "placeholder": "blank = the provider's env var; ${env:NAME} for a project secret; unset for a local server"},
+    {"name": "thinking", "type": "choice", "label": "Thinking",
+     "options": ["default", "off", "low", "high"], "default": "default"},
+    {"name": "extra_json", "type": "text", "label": "Extra request JSON",
+     "default": "", "placeholder": '{"reasoning": {"enabled": false}}'},
     {"name": "max_tokens", "type": "int", "label": "Max tokens",
      "default": 1024, "min": 1, "max": 8192},
     {"name": "concurrency", "type": "int", "label": "Concurrency",
@@ -123,7 +138,7 @@ def run(ctx, table, config=None):
         ctx.log(f"preview: would extract {len(names)} field(s), no API call")
         return result
 
-    provider, base, key, model = _llm.connection(ctx, p, config)
+    conn = _llm.connection(ctx, p, config)
     max_tokens = int(p.get("max_tokens", 1024))
     on_error = p.get("on_error", "fail")
 
@@ -133,8 +148,8 @@ def run(ctx, table, config=None):
 
     def one(text):
         try:
-            raw = _llm.chat(provider, base, key, model, system,
-                            text or "(empty)", max_tokens, 120.0)
+            raw = _llm.chat_with(conn, system, text or "(empty)",
+                                 max_tokens, 120.0)
             obj = _parse_json(raw)
             return text, {n: obj.get(n) for n in names}
         except Exception as exc:  # noqa: BLE001
@@ -154,5 +169,5 @@ def run(ctx, table, config=None):
     for name, nc in zip(names, new_cols):
         result[nc] = [parsed.get(t, {}).get(name) for t in texts]
     ctx.log(f"extracted {len(names)} field(s) from {len(texts)} rows with "
-            f"{len(unique)} {provider} call(s)")
+            f"{len(unique)} {conn['provider']} call(s)")
     return result

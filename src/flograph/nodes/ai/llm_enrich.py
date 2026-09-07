@@ -18,9 +18,20 @@ LiteLLM gateway. **Model** is free text (`claude-sonnet-5`, `gpt-4o-mini`,
 `OPENAI_API_KEY` from the environment, type one in, or use a `${env:NAME}`
 project secret; a local server needs none.
 
+**Thinking** asks a reasoning model to stop thinking, or to think less —
+the fix when a model spends its whole **Max tokens** budget reasoning and
+has none left to answer with. There is no cross-provider standard, so it
+sends the dialect each API format speaks: `openai` gets OpenRouter's
+`reasoning` field, `anthropic` gets Anthropic's opt-in `thinking` block
+(so `off` is already the default there). **Extra request JSON** is merged
+into the request last and wins over everything, for whatever your gateway
+wants instead — `{"chat_template_kwargs": {"enable_thinking": false}}`,
+`{"reasoning_effort": "minimal"}`, a temperature, a routing preference.
+
 Sharing one endpoint across several AI nodes: wire an **LLM Config** card
-into the optional **config** input and it supplies all four of those, so
-they live in one place. This node's own four are then ignored.
+into the optional **config** input and it supplies every one of those
+connection fields, so they live in one place. This node's own copies are
+then ignored.
 
 Identical prompts are sent once and the answer reused, so enriching a column
 with 10k rows and 40 distinct values costs 40 calls. Rows run **Concurrency**
@@ -30,7 +41,7 @@ prompt so you can check the template before spending anything. Needs `httpx`.
 NODE = {
     "label": "LLM Enrich",
     "category": "AI",
-    "version": "2.0",
+    "version": "2.1",
     "inputs": [("table", "dataframe"),
                ("config", "object", {"optional": True})],
     "outputs": [("table", "dataframe")],
@@ -53,6 +64,10 @@ PARAMS = [
     {"name": "api_key", "type": "password", "label": "API key",
      "default": "",
      "placeholder": "blank = the provider's env var; ${env:NAME} for a project secret; unset for a local server"},
+    {"name": "thinking", "type": "choice", "label": "Thinking",
+     "options": ["default", "off", "low", "high"], "default": "default"},
+    {"name": "extra_json", "type": "text", "label": "Extra request JSON",
+     "default": "", "placeholder": '{"reasoning": {"enabled": false}}'},
     {"name": "max_tokens", "type": "int", "label": "Max tokens",
      "default": 512, "min": 1, "max": 8192},
     {"name": "concurrency", "type": "int", "label": "Concurrency",
@@ -96,7 +111,7 @@ def run(ctx, table, config=None):
         ctx.log(f"preview: rendered {len(prompts)} prompts, no API call")
         return result
 
-    provider, base, key, model = _llm.connection(ctx, p, config)
+    conn = _llm.connection(ctx, p, config)
     system = p.get("system") or ""
     max_tokens = int(p.get("max_tokens", 512))
     on_error = p.get("on_error", "fail")
@@ -107,8 +122,8 @@ def run(ctx, table, config=None):
 
     def one(prompt):
         try:
-            return prompt, _llm.chat(provider, base, key, model, system,
-                                     prompt, max_tokens, 120.0)
+            return prompt, _llm.chat_with(conn, system, prompt,
+                                          max_tokens, 120.0)
         except Exception as exc:  # noqa: BLE001 - surfaced per on_error
             if on_error == "fail":
                 raise
@@ -124,6 +139,6 @@ def run(ctx, table, config=None):
 
     result = table.copy(deep=False)
     result[out_col] = [answers.get(pr) for pr in prompts]
-    ctx.log(f"enriched {len(rows)} rows with {len(unique)} {provider} call(s) "
-            f"→ column {out_col!r}")
+    ctx.log(f"enriched {len(rows)} rows with {len(unique)} "
+            f"{conn['provider']} call(s) → column {out_col!r}")
     return result

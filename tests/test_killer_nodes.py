@@ -592,7 +592,7 @@ class TestLlmConfig:
         assert out["config"] == {
             "kind": "llm_connection", "provider": "openai",
             "base_url": "https://gw.corp/v1", "model": "gpt-4o-mini",
-            "api_key": "sk-test"}
+            "api_key": "sk-test", "thinking": "default", "extra_json": ""}
 
     def test_a_missing_model_is_reported_on_this_card(self, registry):
         with pytest.raises(ValueError, match="no model"):
@@ -683,6 +683,117 @@ class TestLlmConfig:
             port = registry.get(type_id).input("config")
             assert port is not None, type_id
             assert port.optional, type_id
+
+
+class TestThinking:
+    """A reasoning model can spend its whole budget thinking and answer with
+    nothing, so there has to be a way to tell it not to. There is no
+    cross-provider standard for that, hence a short dropdown mapped to the
+    dialects that exist plus a JSON escape hatch that outranks it."""
+
+    def _fields(self):
+        from flograph.nodes.ai import _llm
+        return _llm.thinking_fields
+
+    def test_default_sends_nothing_at_all(self):
+        assert self._fields()("openai", "default", 1024) == {}
+        assert self._fields()("anthropic", "default", 1024) == {}
+
+    def test_openai_off_disables_reasoning(self):
+        assert self._fields()("openai", "off", 1024) == {
+            "reasoning": {"enabled": False}}
+
+    def test_openai_effort_levels(self):
+        assert self._fields()("openai", "low", 1024) == {
+            "reasoning": {"effort": "low"}}
+        assert self._fields()("openai", "high", 1024) == {
+            "reasoning": {"effort": "high"}}
+
+    def test_anthropic_off_is_silence_because_thinking_is_opt_in(self):
+        assert self._fields()("anthropic", "off", 1024) == {}
+
+    def test_anthropic_on_asks_for_a_budget(self):
+        out = self._fields()("anthropic", "low", 4096)
+        assert out == {"thinking": {"type": "enabled", "budget_tokens": 1024}}
+
+    def test_anthropic_high_scales_with_the_budget(self):
+        out = self._fields()("anthropic", "high", 8000)
+        assert out["thinking"]["budget_tokens"] == 4800
+
+    def test_a_budget_that_leaves_no_room_says_so(self):
+        """Rather than sending a request the server would reject for a
+        reason we created."""
+        with pytest.raises(ValueError, match="raise 'Max tokens'"):
+            self._fields()("anthropic", "low", 256)
+
+    def test_the_request_carries_it(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: "positive"
+        run_node(registry, "flograph.ai.llm_classify", {
+            "text_column": "t", "labels": "positive | negative",
+            "provider": "openai", "model": "m", "api_key": "k",
+            "base_url": llm_server["url"], "thinking": "off",
+        }, table=pd.DataFrame({"t": ["great"]}))
+        assert llm_server["seen"][0]["body"]["reasoning"] == {"enabled": False}
+
+    def test_extra_json_is_merged_and_wins(self, registry, llm_server):
+        """Last word, so a Thinking mapping that is wrong for your gateway
+        can always be corrected rather than being a dead end."""
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: "positive"
+        run_node(registry, "flograph.ai.llm_classify", {
+            "text_column": "t", "labels": "positive | negative",
+            "provider": "openai", "model": "m", "api_key": "k",
+            "base_url": llm_server["url"], "thinking": "off",
+            "extra_json": '{"reasoning": {"exclude": true}, "temperature": 0}',
+        }, table=pd.DataFrame({"t": ["great"]}))
+        body = llm_server["seen"][0]["body"]
+        assert body["reasoning"] == {"exclude": True}   # beat the dropdown
+        assert body["temperature"] == 0
+
+    def test_malformed_extra_json_names_the_box(self, registry):
+        with pytest.raises(ValueError, match="Extra request JSON"):
+            run_node(registry, "flograph.ai.llm_config", {
+                "model": "m", "api_key": "k", "extra_json": "{not json"})
+
+    def test_extra_json_must_be_an_object(self, registry):
+        with pytest.raises(ValueError, match="must be a JSON object"):
+            run_node(registry, "flograph.ai.llm_config", {
+                "model": "m", "api_key": "k", "extra_json": "[1, 2]"})
+
+    def test_a_config_carries_thinking_to_the_nodes(self, registry, llm_server):
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: "positive"
+        config = run_node(registry, "flograph.ai.llm_config", {
+            "provider": "openai", "model": "m", "api_key": "k",
+            "base_url": llm_server["url"], "thinking": "high",
+            "extra_json": '{"temperature": 0.2}'})["config"]
+        run_node(registry, "flograph.ai.llm_classify", {
+            "text_column": "t", "labels": "positive | negative",
+            # the node's own say-so, which the wired config overrules
+            "thinking": "off", "extra_json": '{"temperature": 9}',
+        }, table=pd.DataFrame({"t": ["great"]}), config=config)
+        body = llm_server["seen"][0]["body"]
+        assert body["reasoning"] == {"effort": "high"}
+        assert body["temperature"] == 0.2
+
+
+class TestLlmClassifyBudget:
+    def test_it_has_a_max_tokens_of_its_own(self, registry, llm_server):
+        """It used to hardcode 64 — one word is all a label needs, which was
+        true until a reasoning model had to think first."""
+        pytest.importorskip("httpx")
+        llm_server["reply"] = lambda user: "positive"
+        run_node(registry, "flograph.ai.llm_classify", {
+            "text_column": "t", "labels": "positive | negative",
+            "provider": "openai", "model": "m", "api_key": "k",
+            "base_url": llm_server["url"], "max_tokens": 512,
+        }, table=pd.DataFrame({"t": ["great"]}))
+        assert llm_server["seen"][0]["body"]["max_tokens"] == 512
+
+    def test_the_default_leaves_room_to_think(self, registry):
+        spec = registry.get("flograph.ai.llm_classify")
+        assert spec.default_params()["max_tokens"] == 256
 
 
 class TestLlmReplyShapes:
