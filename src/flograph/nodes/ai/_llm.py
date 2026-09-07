@@ -40,7 +40,20 @@ def resolve_key(provider: str, raw: str) -> str:
     import os
 
     key = (raw or "").strip()
-    if key and not key.startswith("${"):
+    if "${" in key:
+        # The engine substitutes every `${name}` before a node runs and fails
+        # the node loudly when it cannot, so one arriving here is a reference
+        # it never recognised — almost always an unclosed `${env:OPENAI_API`
+        # left behind by a half-finished edit. Falling through to the env var
+        # (and, for `openai`, to no key at all) turns that into a remote 401
+        # with nothing local to explain it, which is a bad hour.
+        raise ValueError(
+            f"the API key still reads {key!r} — that is not a resolved "
+            "value. A reference must be the whole `${name}` including the "
+            "closing brace, and must name either a Variables node's "
+            "declaration or, as `${env:NAME}`, a key in the project's "
+            ".env file")
+    if key:
         return key
     env_name = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
     key = os.environ.get(env_name, "").strip()

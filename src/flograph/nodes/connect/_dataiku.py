@@ -39,7 +39,18 @@ def resolve_key(raw: str) -> str:
     import os
 
     key = (raw or "").strip()
-    if key and not key.startswith("${"):
+    if "${" in key:
+        # See the same guard in nodes/ai/_llm.resolve_key: a reference that
+        # reaches here is one the engine never recognised, usually an
+        # unclosed `${env:DKU_API` from a half-finished edit. Reporting it as
+        # "no API key" would send someone looking at the wrong thing.
+        raise ValueError(
+            f"the API key still reads {key!r} — that is not a resolved "
+            "value. A reference must be the whole `${name}` including the "
+            "closing brace, and must name either a Variables node's "
+            "declaration or, as `${env:NAME}`, a key in the project's "
+            ".env file")
+    if key:
         return key
     key = os.environ.get("DKU_API_KEY", "").strip()
     if key:

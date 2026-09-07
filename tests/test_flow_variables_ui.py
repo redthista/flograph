@@ -229,6 +229,48 @@ class TestCompleter:
         completer._insert("region")
         assert text.toPlainText() == "a = ${region}\nb = 2"
 
+    def test_accepting_reports_the_edit_the_way_typing_does(self, qtbot):
+        """The widget was never the problem — the *param* was. A completion
+        written with setText emits only textChanged, and every QLineEdit
+        param in the panel commits on textEdited, so the completed text
+        showed in the field and the stored value stayed half-typed."""
+        edit, completer = self._line_completer(qtbot, ["region"])
+        edited = []
+        edit.textEdited.connect(edited.append)
+        edit.setText("sales in ${re")
+        edit.setCursorPosition(13)
+        completer._refresh()
+        completer._insert("region")
+        assert edited == ["sales in ${region}"]
+
+    def test_the_completed_value_reaches_the_graph(self, qtbot, registry):
+        """End to end: type into the real panel, accept a completion, and
+        the node's param holds the whole reference."""
+        graph = Graph()
+        variables = graph.add_node(registry.instantiate(VARS))
+        consumer = graph.add_node(registry.instantiate(CONST))
+        graph.set_param(variables.id, "assignments", "region = North")
+        stack = QUndoStack()
+        panel = ParamsPanel(graph, stack)
+        qtbot.addWidget(panel)
+        panel.set_node(consumer.id)
+
+        rows = {panel.tree.topLevelItem(i).text(0): panel.tree.topLevelItem(i)
+                for i in range(panel.tree.topLevelItemCount())}
+        widget = panel.tree.itemWidget(rows["Value"], 1)
+        edit = (widget if isinstance(widget, QLineEdit)
+                else widget.findChild(QLineEdit))
+        assert edit is not None
+        completer = edit.findChildren(var_completion.VariableCompleter)[0]
+        edit.setFocus()
+        qtbot.keyClicks(edit, "sales in ${re")
+        completer._refresh()
+        completer._insert("region")
+        panel.flush_pending()
+
+        assert graph.nodes[consumer.id].params["value"] == "sales in ${region}"
+        stack.clear()
+
     def test_the_panel_attaches_one_to_a_text_param(self, qtbot, flow):
         graph, _variables, consumer = flow
         stack = QUndoStack()

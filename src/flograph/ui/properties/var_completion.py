@@ -106,9 +106,19 @@ class VariableCompleter(QObject):
             cursor.setPosition(end, QTextCursor.KeepAnchor)
             cursor.insertText(replacement)
             return
-        text = self._editor.text()
-        self._editor.setText(text[:start] + replacement + text[end:])
-        self._editor.setCursorPosition(start + len(replacement))
+        # Through the editor's *own* editing API, not setText: every
+        # QLineEdit param in the panel commits on `textEdited`, which means
+        # "the user changed this" — deliberately, so that the panel syncing a
+        # value in from the graph doesn't write it straight back. setText
+        # emits only `textChanged`, so a completion landed in the widget and
+        # was never stored: the field read `${env:API_KEY}` while the param
+        # still held the half-typed `${env:AP`, and the value came back
+        # truncated on the next run or the next time the node was selected.
+        # insert() takes the same path as typing, so the panel hears it.
+        self._editor.setCursorPosition(start)
+        if end > start:
+            self._editor.setSelection(start, end - start)
+        self._editor.insert(replacement)
 
     # ---------------------------------------------------------- suggestions
 

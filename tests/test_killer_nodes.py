@@ -603,6 +603,22 @@ class TestLlmConfig:
         with pytest.raises(ValueError, match="no API key"):
             run_node(registry, self.CONFIG, {"model": "claude-sonnet-5"})
 
+    def test_a_half_typed_reference_says_so(self, registry, monkeypatch):
+        """An unclosed `${env:OPENROUTER_API` is not a reference the engine
+        can substitute, so it arrives here verbatim. It used to fall through
+        to the env var and then, for `openai`, to *no key at all* — which
+        reaches the gateway as a 401 with nothing local to explain it."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="not a resolved value"):
+            run_node(registry, self.CONFIG, {
+                "provider": "openai", "model": "m",
+                "api_key": "${env:OPENROUTER_API"})
+
+    def test_a_resolved_key_that_merely_looks_odd_is_kept(self, registry):
+        out = run_node(registry, self.CONFIG, {
+            "provider": "openai", "model": "m", "api_key": "sk-or-v1-abc$def"})
+        assert out["config"]["api_key"] == "sk-or-v1-abc$def"
+
     def test_the_log_never_carries_the_key(self, registry):
         spec = registry.get(self.CONFIG)
         params = spec.default_params()
