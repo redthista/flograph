@@ -37,9 +37,9 @@ PARAMS = [
     {"name": "suffix", "type": "string", "label": "Suffix",
      "default": "", "placeholder": "e.g. % — display only"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 200, "min": 120, "max": 600, "cosmetic": True},
+     "default": 200, "min": 120, "max": 800, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 84, "min": 56, "max": 400, "cosmetic": True},
+     "default": 84, "min": 56, "max": 600, "cosmetic": True},
 ]
 
 

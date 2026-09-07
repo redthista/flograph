@@ -64,9 +64,9 @@ PARAMS = [
      "default": "", "placeholder": '["screened"] — blank keeps every row',
      "visible_when": {"on_click": ["select one", "select many"]}},
     {"name": "width", "type": "int", "label": "Width", "default": 560,
-     "min": 200, "max": 1600, "cosmetic": True},
+     "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height", "default": 380,
-     "min": 120, "max": 2000, "cosmetic": True},
+     "min": 200, "max": 4000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]

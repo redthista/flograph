@@ -52,9 +52,9 @@ PARAMS = [
     {"name": "decimals", "type": "int", "label": "Decimals",
      "default": 0, "min": 0, "max": 6},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 260, "min": 160, "max": 600, "cosmetic": True},
+     "default": 260, "min": 160, "max": 800, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 96, "min": 60, "max": 400, "cosmetic": True},
+     "default": 96, "min": 60, "max": 600, "cosmetic": True},
 ]
 
 

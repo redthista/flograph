@@ -100,9 +100,9 @@ PARAMS = [
     {"name": "direction", "type": "choice", "label": "Fill",
      "options": ["down", "across"], "default": "down", "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 460, "min": 260, "max": 1600, "cosmetic": True},
+     "default": 460, "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 380, "min": 200, "max": 2000, "cosmetic": True},
+     "default": 380, "min": 200, "max": 4000, "cosmetic": True},
     # Cosmetic here, unlike the single-chart nodes: zooming the card is
     # presentation, and re-running a slow split to show it smaller would be
     # as absurd as re-running it to show it in two columns.

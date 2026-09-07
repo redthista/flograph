@@ -61,9 +61,9 @@ PARAMS = [
      "default": "",
      "placeholder": 'written by flograph.select(), e.g. ["north"]'},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 420, "min": 260, "max": 1600, "cosmetic": True},
+     "default": 420, "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 320, "min": 200, "max": 2000, "cosmetic": True},
+     "default": 320, "min": 200, "max": 4000, "cosmetic": True},
     # Cosmetic: run() never reads it — the zoom is applied to the card, to
     # the HTML this node already produced.
     {"name": "scale", "type": "int", "label": "Scale %",

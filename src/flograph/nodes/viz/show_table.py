@@ -77,9 +77,9 @@ PARAMS = [
     {"name": "hide", "type": "columns", "label": "Hide columns", "default": "",
      "placeholder": "columns to keep out of the view"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 420, "min": 260, "max": 1600, "cosmetic": True},
+     "default": 420, "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 320, "min": 200, "max": 2000, "cosmetic": True},
+     "default": 320, "min": 200, "max": 4000, "cosmetic": True},
     # Cosmetic: run() never reads it — the zoom is applied to the card, to
     # the table this node already passed through.
     {"name": "scale", "type": "int", "label": "Scale %",

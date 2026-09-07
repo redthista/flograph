@@ -86,10 +86,25 @@ LABEL_LOD = 0.5  # hide port names below this zoom
 # see NodeGraphScene._flat_state.
 DEFAULT_LOD_THRESHOLD = 0.35
 
+# The ceiling every full-size card shares.
+#
+# Was 1600 x 2000, on the assumption that a big card is an expensive one.
+# Measured, and it is not: a NodeItem runs with DeviceCoordinateCache, and
+# Qt caches only the *exposed* part of an item, not its whole bounding
+# rect. Twelve 6000x6000 cards cost +3.7 MB of RSS against +3.9 MB for
+# twelve 2400x2400 ones — the pixmap is bounded by the viewport, not by the
+# card. What the old ceiling actually did was stop a chart being made big
+# enough to read on a 4K screen, so this is sized to one.
+#
+# Every node that draws a full-size card repeats this number in its own
+# PARAMS, because a node script is Qt-free and cannot import it.
+# tests/test_card_size_limits.py is what keeps the two in step.
+CARD_MAX_W, CARD_MAX_H = 4000.0, 4000.0
+
 NOTE_TYPE = "flograph.util.note"
 NOTE_PAD = 12.0
-NOTE_MIN_W, NOTE_MAX_W = 120.0, 1600.0
-NOTE_MIN_H, NOTE_MAX_H = 60.0, 2000.0
+NOTE_MIN_W, NOTE_MAX_W = 120.0, CARD_MAX_W
+NOTE_MIN_H, NOTE_MAX_H = 60.0, CARD_MAX_H
 # Schemes a Note-card link may open. A .flograph / .flowf from someone else
 # can carry the link text, so file://, smb://, UNC (\\host\share) and the
 # like — which would open a local file or leak credentials on one click —
@@ -97,10 +112,10 @@ NOTE_MIN_H, NOTE_MAX_H = 60.0, 2000.0
 NOTE_LINK_SCHEMES = {"http", "https", "mailto"}
 
 TABLE_TYPE = "flograph.io.table"
-TABLE_MIN_W, TABLE_MAX_W = 220.0, 1600.0
+TABLE_MIN_W, TABLE_MAX_W = 220.0, CARD_MAX_W
 # Floor leaves room for the header, the +Row/+Col button toolbar (which
 # wraps to two lines when narrow) and a couple of grid rows.
-TABLE_MIN_H, TABLE_MAX_H = 160.0, 2000.0
+TABLE_MIN_H, TABLE_MAX_H = 160.0, CARD_MAX_H
 
 REROUTE_LABEL_FONT_SIZE = 8.0
 REROUTE_LABEL_PAD_X = 6.0
@@ -120,34 +135,34 @@ BUTTON_MIN_W, BUTTON_MAX_W = 90.0, 400.0
 BUTTON_MIN_H, BUTTON_MAX_H = 36.0, 160.0
 
 FIGURE_TYPES = {"flograph.viz.show_plot"}
-FIGURE_MIN_W, FIGURE_MAX_W = 260.0, 1600.0
-FIGURE_MIN_H, FIGURE_MAX_H = 200.0, 2000.0
+FIGURE_MIN_W, FIGURE_MAX_W = 260.0, CARD_MAX_W
+FIGURE_MIN_H, FIGURE_MAX_H = 200.0, CARD_MAX_H
 
 PLOTLY_TYPE = "flograph.viz.show_plotly"
 
 # Show Table and Table Spec share the whole table-viewer card path; only the
 # DataFrame pushed into them differs (the data itself vs. its spec).
 TABLE_VIEWER_TYPES = {"flograph.viz.show_table", "flograph.viz.table_spec"}
-REPORT_MIN_W, REPORT_MAX_W = 240.0, 1600.0
-REPORT_MIN_H, REPORT_MAX_H = 140.0, 2000.0
-WIKI_MIN_W, WIKI_MAX_W = 260.0, 1600.0
-WIKI_MIN_H, WIKI_MAX_H = 160.0, 2000.0
-TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W = 260.0, 1600.0
-TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, 2000.0
+REPORT_MIN_W, REPORT_MAX_W = 240.0, CARD_MAX_W
+REPORT_MIN_H, REPORT_MAX_H = 140.0, CARD_MAX_H
+WIKI_MIN_W, WIKI_MAX_W = 260.0, CARD_MAX_W
+WIKI_MIN_H, WIKI_MAX_H = 160.0, CARD_MAX_H
+TABLE_VIEWER_MIN_W, TABLE_VIEWER_MAX_W = 260.0, CARD_MAX_W
+TABLE_VIEWER_MIN_H, TABLE_VIEWER_MAX_H = 200.0, CARD_MAX_H
 
 KPI_TYPE = "flograph.viz.card"
-KPI_MIN_W, KPI_MAX_W = 140.0, 800.0
-KPI_MIN_H, KPI_MAX_H = 80.0, 500.0
+KPI_MIN_W, KPI_MAX_W = 140.0, 1600.0
+KPI_MIN_H, KPI_MAX_H = 80.0, 1000.0
 
 SLICER_TYPE = "flograph.viz.slicer"
-SLICER_MIN_W, SLICER_MAX_W = 140.0, 600.0
+SLICER_MIN_W, SLICER_MAX_W = 140.0, 1600.0
 # Floor leaves room for the header, the (possibly wrapped) search/All/None
 # row and a couple of value rows — below this the list is all scrollbar.
-SLICER_MIN_H, SLICER_MAX_H = 150.0, 2000.0
+SLICER_MIN_H, SLICER_MAX_H = 150.0, CARD_MAX_H
 
 IMAGE_TYPE = "flograph.viz.image"
-IMAGE_MIN_W, IMAGE_MAX_W = 60.0, 2400.0
-IMAGE_MIN_H, IMAGE_MAX_H = 60.0, 2400.0
+IMAGE_MIN_W, IMAGE_MAX_W = 60.0, CARD_MAX_W
+IMAGE_MIN_H, IMAGE_MAX_H = 60.0, CARD_MAX_H
 
 # Input controls (slider, toggle, date, ...). One card path for every shape:
 # the widget comes from ui.controls, keyed on the node's NODE["control"].

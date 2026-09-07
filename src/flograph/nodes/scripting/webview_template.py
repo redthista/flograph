@@ -96,9 +96,9 @@ PARAMS = [
      "visible_when": {"on_click": ["select one", "select many"]}},
     # Card size only. run() must never read these — see trap notes above.
     {"name": "width", "type": "int", "label": "Width", "default": 460,
-     "min": 200, "max": 1600, "cosmetic": True},
+     "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height", "default": 320,
-     "min": 120, "max": 2000, "cosmetic": True},
+     "min": 200, "max": 4000, "cosmetic": True},
     {"name": "scale", "type": "int", "label": "Scale %", "default": 100,
      "min": 25, "max": 400, "cosmetic": True},
 ]
