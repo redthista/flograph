@@ -96,6 +96,7 @@ class PandasModel(QAbstractTableModel):
         self._visible = [i for i, c in enumerate(df.columns)
                          if str(c) not in hide] if hide else None
         self._set_rules(rules)
+        self._apply_default_sort()
 
     def _src(self, col: int) -> int:
         """A visible column index -> its position in the underlying frame."""
@@ -105,7 +106,10 @@ class PandasModel(QAbstractTableModel):
 
     def _set_rules(self, rules) -> None:
         from flograph.core.table_format import (
-            LAYOUT_MODES, column_layout, wraps_text)
+            LAYOUT_MODES, column_layout, sort_order, wraps_text)
+        # Table-wide like `wrap`, and filtered out of `self._rules` with the
+        # other layout modes — so it is read here or not at all.
+        self._sort = sort_order(rules)
         # Layout rules shape the column, not the cell. Reading them once
         # here keeps them out of the per-cell path entirely — and out of
         # `_cf_active`, so a table whose only rule is `width 120` pays
@@ -136,10 +140,36 @@ class PandasModel(QAbstractTableModel):
 
     def set_rules(self, rules) -> None:
         """Swap the formatting rules and repaint — no model rebuild, so a
-        sort in progress survives."""
+        sort in progress survives.
+
+        Deliberately does *not* re-apply a `sort` rule: by now the reader
+        may have clicked a header, and having the rows jump because a
+        colour rule changed would be worse than the default arriving late.
+        It takes effect the next time the table is built — a re-run, or
+        reopening the project.
+        """
         self.beginResetModel()
         self._set_rules(rules)
         self.endResetModel()
+
+    def _apply_default_sort(self) -> None:
+        """Open in the order a `sort` rule asked for.
+
+        Construction only. A header click still wins from then on, and
+        clearing the sort (the third click) restores the frame's own
+        order rather than this one — "no sort" is the honest reading of
+        clear, and the default comes back with the next run.
+        """
+        if not self._sort:
+            return
+        from flograph.core.table_sort import sorted_frame
+        ordered = sorted_frame(self._source, self._sort[0], self._sort[1])
+        if ordered is self._source:
+            return                     # no such column, or the sort failed
+        self._df = ordered
+        self._loaded = min(PAGE_SIZE, len(self._df))
+        self._col_cache.clear()
+        self._row_cache = None
 
     def _is_row_rule(self, rule) -> bool:
         return rule.mode == "highlight" and rule.scope == "row"

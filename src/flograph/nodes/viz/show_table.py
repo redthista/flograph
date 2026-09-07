@@ -27,6 +27,7 @@ revenue              width 160                  # a fixed column width
 region               align centre               # left / right / centre
 revenue              label "Revenue (£)"        # header text, data untouched
 wrap                                            # long text runs to more lines
+revenue              sort desc                  # the order the table opens in
 hide sla                                        # keep a helper column out of view
 ```
 
@@ -44,6 +45,14 @@ obeyed rather than fitted, alignment beats the dtype's own habit and takes
 the header with it, and a label changes the printed header only — rules,
 sorting and exports still use the real column name. `wrap` names no columns
 (a row is as tall as its tallest cell) and lets long text run on.
+
+**A default sort.** Clicking a header sorts the card and forgets; **Sort
+by** (with **Direction**) says what order the table *opens* in, and unlike
+a click it reaches a dashboard tile and a printed report — which is where
+it matters most, because a page has no header to click. Clicking still
+wins from then on; the third click clears the sort back to the table's own
+order rather than to this one, and the default returns on the next run.
+The `sort` rule is the same thing typed, and the dropdown wins over it.
 
 A column whose name has a space just works (`unit price scale green`);
 `"quote it"` if the name has a comma or reads like a keyword. A name with
@@ -63,7 +72,7 @@ box layers on top.
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.2",
+    "version": "1.3",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object", {"optional": True})],
@@ -76,6 +85,10 @@ PARAMS = [
                     "status = fail => row red"},
     {"name": "hide", "type": "columns", "label": "Hide columns", "default": "",
      "placeholder": "columns to keep out of the view"},
+    {"name": "sort", "type": "columns", "label": "Sort by", "default": "",
+     "multi": False, "placeholder": "the order the table opens in"},
+    {"name": "sort_dir", "type": "choice", "label": "Direction",
+     "options": ["ascending", "descending"], "default": "ascending"},
     {"name": "width", "type": "int", "label": "Width",
      "default": 420, "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
@@ -91,8 +104,13 @@ def run(ctx, table, style=None):
     from flograph.core.table_format import (
         merge_styles, style_payload, style_report)
 
+    # Named one by one rather than handing over ctx.params whole: the
+    # cosmetic width/height/scale are not style, and style_payload should
+    # not have to know which of this node's params are and are not.
     own = style_payload({"format_rules": ctx.params.get("format_rules", ""),
-                         "hide": ctx.params.get("hide", "")})
+                         "hide": ctx.params.get("hide", ""),
+                         "sort": ctx.params.get("sort", ""),
+                         "sort_dir": ctx.params.get("sort_dir", "")})
     merged = merge_styles(style, own)
     for message in style_report(merged, table):
         ctx.log(f"conditional formatting — {message}")

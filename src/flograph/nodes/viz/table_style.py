@@ -74,6 +74,10 @@ PARAMS = [
                     "status = fail => row red"},
     {"name": "hide", "type": "string", "label": "Hide columns", "default": "",
      "placeholder": "columns the Show Table should keep out of view"},
+    {"name": "sort", "type": "string", "label": "Sort by", "default": "",
+     "placeholder": "the order every table on this style opens in"},
+    {"name": "sort_dir", "type": "choice", "label": "Direction",
+     "options": ["ascending", "descending"], "default": "ascending"},
 ]
 
 

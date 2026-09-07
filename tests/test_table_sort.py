@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from PySide6.QtCore import Qt
 
+from flograph.core import table_sort as core_table_sort
 from flograph.ui import table_sort
 from flograph.ui.data_table import DataTableView
 from flograph.ui.inspector.pandas_model import PandasModel
@@ -108,7 +109,8 @@ class TestPandasModelSort:
 
     def test_huge_text_date_column_sorts_lexically_not_by_parsing(
             self, monkeypatch):
-        monkeypatch.setattr(table_sort, "_MAX_TEXT_DATE_ROWS", 3)
+        # the ceiling lives with the key function, which is core now
+        monkeypatch.setattr(core_table_sort, "_MAX_TEXT_DATE_ROWS", 3)
         df = pd.DataFrame(
             {"d": ["2024-01-02", "2024-01-01", "2024-01-03", "2024-01-04"]})
         key = pandas_sort_key(df["d"])

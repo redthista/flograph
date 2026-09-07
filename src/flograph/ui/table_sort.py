@@ -1,21 +1,19 @@
 """Click-a-header-to-sort, shared by the read-only data tables and the
 editable Table-node grid.
 
-Two things live here:
+:class:`HeaderSortCycler` is the interaction, and the only thing still
+defined here. Qt's own ``setSortingEnabled(True)`` only ever toggles
+ascending/descending and fires on the first press, before a double-click
+(which the grid uses to rename a column) can arrive. This drives the
+header itself: a click cycles a column through ascending -> descending ->
+cleared, a single-shot timer holds the action back long enough to tell a
+rename double-click apart, and the sort indicator is kept in step.
 
-- :class:`HeaderSortCycler` — the interaction. Qt's own
-  ``setSortingEnabled(True)`` only ever toggles ascending/descending and
-  fires on the first press, before a double-click (which the grid uses to
-  rename a column) can arrive. This drives the header itself: a click
-  cycles a column through ascending -> descending -> cleared, a
-  single-shot timer holds the action back long enough to tell a rename
-  double-click apart, and the sort indicator is kept in step.
-
-- :func:`pandas_sort_key` — the "which way is up" for a DataFrame column.
-  Real dtypes (numbers, ``datetime64``, bool, category) already sort
-  correctly, so they pass straight through. An ``object`` column is
-  sniffed: numbers stored as text sort numerically, dates stored as text
-  sort chronologically, and anything else sorts case-insensitively.
+:func:`pandas_sort_key` — the "which way is up" for a DataFrame column —
+moved to :mod:`flograph.core.table_sort` when a table gained a *default*
+sort, because a sort set as a rule has to reach the printed report too and
+the report renderer may not import Qt. It is re-exported here, where every
+caller already looks.
 
 The grid's equivalent key lives in ``core/sheet/schema.py`` instead —
 that module must not import pandas.
@@ -25,66 +23,12 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QHeaderView
 
-# Fraction of a sampled object column that must parse as one type before we
-# sort the whole column as that type. High enough that a stray numeric code
-# in a text column doesn't flip it, low enough to tolerate a few bad cells.
-_DETECT_THRESHOLD = 0.9
-_DETECT_SAMPLE = 1000
-
-# Above this row count an object column of date-like text sorts lexically
-# rather than chronologically: parsing the whole column with
-# ``format="mixed"`` is a per-element Python loop that would freeze the UI
-# thread for seconds. Numeric coercion stays on at any size — it is
-# vectorised C and cheap. (ISO dates sort correctly lexically anyway.)
-_MAX_TEXT_DATE_ROWS = 200_000
-
-
-def _text_key(series):
-    """Case-insensitive string key — the fallback for anything not sniffed
-    as a number or a date, and for a column too large to date-parse."""
-    return series.astype("string").str.casefold()
-
-
-def pandas_sort_key(series):
-    """The series pandas should actually order when sorting ``series``.
-
-    Same shape out as in (usable as ``key=`` to
-    :meth:`Series.sort_values`); NaT/NaN survive so ``na_position`` still
-    applies. Never raises: a sniff or parse that fails falls back to a
-    plain string key, because this runs inside the Qt slot that reorders
-    the view.
-    """
-    import pandas as pd
-    from pandas.api import types as pdt
-
-    try:
-        # Numbers, datetimes, timedeltas, bools and categoricals already
-        # order correctly; only string / object / mixed columns need sniffing.
-        if (pdt.is_numeric_dtype(series)
-                or pdt.is_datetime64_any_dtype(series)
-                or pdt.is_timedelta64_dtype(series)
-                or isinstance(series.dtype, pd.CategoricalDtype)):
-            return series
-
-        sample = series.dropna().astype(str).head(_DETECT_SAMPLE)
-        if sample.empty:
-            return series
-
-        as_num = pd.to_numeric(sample, errors="coerce")
-        if as_num.notna().mean() >= _DETECT_THRESHOLD:
-            return pd.to_numeric(series, errors="coerce")
-
-        if len(series) <= _MAX_TEXT_DATE_ROWS:
-            as_dt = pd.to_datetime(sample, errors="coerce", format="mixed")
-            if as_dt.notna().mean() >= _DETECT_THRESHOLD:
-                return pd.to_datetime(series, errors="coerce", format="mixed")
-
-        return _text_key(series)
-    except Exception:
-        try:
-            return _text_key(series)
-        except Exception:
-            return series
+# The "which way is up" half of this module now lives in
+# `core.table_sort`, so that the report renderer — which is core and
+# Qt-free — orders a printed table exactly as the card orders it. Kept
+# importable from here, which is where every caller already looks.
+from flograph.core.table_sort import (  # noqa: F401  (re-export)
+    pandas_sort_key, sort_positions, sorted_frame)
 
 
 class HeaderSortCycler(QObject):

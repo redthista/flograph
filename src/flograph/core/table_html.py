@@ -31,7 +31,7 @@ from flograph.core.report import format_scalar
 from flograph.core.table_format import (CellStyle, column_layout,
                                         column_matches, column_stats,
                                         evaluate_column, evaluate_rows,
-                                        for_paper, split_rules)
+                                        for_paper, sort_order, split_rules)
 
 #: Rows shown before a table is cut with a note. The same default
 #: frame_to_markdown uses — a report that quietly showed the first 30 of
@@ -85,6 +85,14 @@ def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
                if not (hidden and column_matches(list(hidden), str(c)))]
     if not columns:
         return "> *(no columns)*"
+
+    # Before the row cut, not after: `rows=`/`fit` keep the *top* of the
+    # table, so sorting afterwards would print an arbitrary thirty rows
+    # neatly ordered among themselves — which looks right and is wrong.
+    order = sort_order(rules)
+    if order:
+        from flograph.core.table_sort import sorted_frame
+        frame = sorted_frame(frame, order[0], order[1])
 
     total = len(frame)
     shown = frame.head(max_rows) if total > max_rows else frame

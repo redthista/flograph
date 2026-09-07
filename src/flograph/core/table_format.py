@@ -52,6 +52,14 @@ its tallest cell, so wrapping is a fact about the table::
     region    align centre
     revenue   label "Revenue (£)"                 # the header only
     wrap                                          # rows grow to fit
+    revenue   sort desc                           # the order it opens in
+
+``sort`` is table-wide for the same reason: there is one row order, so it
+takes one column and a later `sort` line replaces an earlier one rather
+than being a tie-break. It decides the order the table is *first shown*
+in — on the card, in a dashboard tile and on a printed report, which is
+where it matters most, since a page has no header to click. Clicking a
+header still wins from then on.
 
 A column name is matched exactly, unless it contains a glob metacharacter
 (``*``, ``?``, ``[``) — then it selects every matching column, so
@@ -113,15 +121,23 @@ _ICON_LABELS = {
 }
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
-          "number_format", "column_width", "align", "header_label", "wrap"}
+          "number_format", "column_width", "align", "header_label", "wrap",
+          "sort"}
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
 #: nothing on a big frame and are not what makes a style "active".
-LAYOUT_MODES = {"column_width", "align", "header_label", "wrap"}
+LAYOUT_MODES = {"column_width", "align", "header_label", "wrap", "sort"}
 
 _ALIGNMENTS = {"left": "left", "right": "right", "center": "center",
                "centre": "center", "middle": "center"}
+
+#: How a sort direction may be spelled. "up"/"down" are here because that
+#: is what people say about a *ranking* ("biggest at the top"), and getting
+#: it wrong is invisible until you read the numbers.
+_SORT_WORDS = {"asc": "asc", "ascending": "asc", "up": "asc", "a-z": "asc",
+               "desc": "desc", "descending": "desc", "down": "desc",
+               "z-a": "desc"}
 
 #: Sanity bounds on a typed width, in pixels. Wide enough for a paragraph
 #: of prose, narrow enough that a fat-fingered `width 5000` cannot push
@@ -197,6 +213,10 @@ class Rule:
     width: Optional[int] = None               # pixels; None = fit to content
     align: Optional[str] = None               # left | right | center
     label: Optional[str] = None               # header text shown instead
+    #: sort: "asc" | "desc". A string rather than an `ascending` bool
+    #: because `to_dict` drops False as absence — a descending sort would
+    #: have crossed the style port and come back ascending.
+    direction: Optional[str] = None
 
     def to_dict(self) -> dict:
         out = {}
@@ -515,7 +535,7 @@ def parse_op_value(text: str) -> tuple:
 
 
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "format",
-             "width", "align", "label")
+             "width", "align", "label", "sort")
 
 
 def _split_by_clause(arg: str) -> tuple:
@@ -701,6 +721,19 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
             raise ValueError(
                 f"line {lineno}: 'label' needs the header text to show")
         return Rule("header_label", columns, label=text)
+    if keyword == "sort":
+        direction = _SORT_WORDS.get(arg.lower().strip() or "asc")
+        if direction is None:
+            raise ValueError(
+                f"line {lineno}: don't understand sort {arg!r} "
+                f"(asc / ascending / up, or desc / descending / down)")
+        if len(columns) != 1:
+            # One column, because there is one row order. Naming two would
+            # read as a tie-break and isn't one.
+            raise ValueError(
+                f"line {lineno}: 'sort' takes one column, got "
+                f"{len(columns)} — a table has one row order")
+        return Rule("sort", columns, direction=direction)
     # format
     if not arg:
         raise ValueError(f"line {lineno}: 'format' needs a spec like ',.0f'")
@@ -923,6 +956,9 @@ def rule_summary(rule: Rule) -> str:
         return f"{cols}  ·  headed “{rule.label}”"
     if rule.mode == "wrap":
         return "wrap text  ·  rows grow to fit"
+    if rule.mode == "sort":
+        way = "Z–A" if rule.direction == "desc" else "A–Z"
+        return f"{cols}  ·  sorted {way} to start with"
     return rule.mode
 
 
@@ -962,6 +998,16 @@ def style_payload(params: dict) -> dict:
     hide = [c for r in rules if r.mode == "hide" for c in r.columns]
     hide += _column_list(params.get("hide"))
     keep = [r for r in rules if r.mode != "hide"]
+    # The Sort By / direction pair is the same rule spelled as a control.
+    # Appended, so it wins over a `sort` line in the box the way a later
+    # line wins over an earlier one — the box is the advanced way in, the
+    # dropdown the obvious one, and the obvious one should not lose.
+    sort_col = str(params.get("sort") or "").strip()
+    if sort_col:
+        keep.append(Rule("sort", [_unquote(sort_col)],
+                         direction=("desc" if str(
+                             params.get("sort_dir") or "").lower().startswith(
+                                 "desc") else "asc")))
     return {"rules": [r.to_dict() for r in keep], "hide": _dedup(hide),
             "errors": errors}
 
@@ -1292,6 +1338,21 @@ def wraps_text(rules) -> bool:
     return any(getattr(r, "mode", None) == "wrap" for r in rules or [])
 
 
+def sort_order(rules) -> "tuple[str, bool] | None":
+    """``(column name, ascending)`` the rules ask the table to open in, or
+    None for "leave the rows as they arrived".
+
+    Table-wide like `wrap`, and last-one-wins like everything else here: a
+    table has one row order, so a second `sort` line replaces the first
+    rather than being a tie-break.
+    """
+    found = None
+    for rule in rules or []:
+        if getattr(rule, "mode", None) == "sort" and rule.columns:
+            found = (str(rule.columns[0]), rule.direction != "desc")
+    return found
+
+
 def column_layout(rules, columns) -> dict:
     """``{column name: ColumnLayout}`` for the columns any layout rule
     names — patterns expanded, later lines winning, and columns nobody
@@ -1303,7 +1364,9 @@ def column_layout(rules, columns) -> dict:
     """
     out: dict = {}
     for rule in rules or []:
-        if rule.mode not in LAYOUT_MODES or rule.mode == "wrap":
+        # `wrap` and `sort` are layout rules about the *table*, not about a
+        # column, so they have no ColumnLayout entry to fill in
+        if rule.mode not in LAYOUT_MODES or rule.mode in ("wrap", "sort"):
             continue
         for name in expand_columns(rule.columns, columns):
             entry = out.setdefault(name, ColumnLayout())

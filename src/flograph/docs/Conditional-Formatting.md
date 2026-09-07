@@ -31,6 +31,7 @@ A rule is `columns  verb  argument`:
 | `align` | `region align right` | `left`, `right` or `centre` — the header follows the column |
 | `label` | `revenue label "Revenue (£)"` | the header text to show; the real column name is what every rule, sort and export still uses |
 | `wrap` | `wrap` | let long text run onto more lines, growing the rows — the one rule that takes no columns |
+| `sort` | `revenue sort desc` | the order the table *opens* in — on the card, in a tile and on paper |
 
 Tests for a highlight: `> < >= <= = !=`, `between 10 20`, `contains`,
 `starts with`, `ends with`, `matches` (regex), `is empty`, `is not empty`.
@@ -60,6 +61,7 @@ revenue   width 200
 revenue   label "Revenue (£)"
 note      width 240
 wrap
+revenue   sort desc
 ```
 
 A `width` is an instruction, not a hint: the column is set to it and the
@@ -76,6 +78,24 @@ resting the cursor on the header shows it.
 tallest cell, so wrapping is a fact about the table however it is written —
 pair it with a `width` on the column you want narrow. Rows grow as they are
 scrolled into view, so it costs nothing on a long table.
+
+`sort` names one column and a direction — `asc` / `desc` (or `up` / `down`,
+or `a-z` / `z-a`) — and says what order the table is *first shown* in. Like
+`wrap` it is a fact about the table rather than about a column, so a second
+`sort` line replaces the first rather than adding a tie-break.
+
+It is worth having as a rule rather than as a click because a click reaches
+neither of the places that need it: a dashboard tile nobody clicks, and a
+printed report, which has no header to click at all. Clicking a header
+still wins on the card from then on — and the third click clears the sort
+back to the table's own order rather than back to this one, because "clear"
+means no sort. The default returns the next time the flow runs.
+
+**Show Table** and **Table Style** both offer it as **Sort by** with a
+**Direction**, which is the same rule written for you; where both are set,
+the dropdown wins. The row order of the `table` **output** is untouched
+either way — sorting here is presentation, and **Sort** is the node that
+reorders data.
 
 Layout rules travel the `style` port and print in reports like every other
 rule, so a table set up once looks the same on the canvas, on a dashboard
@@ -158,3 +178,6 @@ Conditional formatting applies to the **Show Table** card and to table tiles on
 a [[Dashboards and Reports|dashboard]]. It is skipped above 200,000 rows (the
 per-cell pass is Python-level and nobody heatmaps a million rows). The **Table**
 grid and **Plotly Table** have their own, separate styling.
+
+`sort` is the exception to the row cap: it is one vectorised sort rather
+than a per-cell pass, so it still applies to a table too big to heatmap.
