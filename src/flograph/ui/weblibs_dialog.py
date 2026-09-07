@@ -13,10 +13,13 @@ one-off install feel like a fault.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
+from PySide6.QtCore import (
+    QObject, QRunnable, QStandardPaths, Qt, QThreadPool, Signal,
+)
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
 from flograph import weblibs
@@ -89,10 +92,22 @@ class WebLibrariesDialog(QDialog):
 
         self._install_btn = QPushButton("Install")
         self._install_btn.clicked.connect(self._install_selected)
+        self._file_btn = QPushButton("Install from File…")
+        self._file_btn.setToolTip(
+            "Already downloaded the files in a browser? Pick them here and "
+            "flograph will put them where they belong.")
+        self._file_btn.clicked.connect(self._install_from_file)
+        self._links_btn = QPushButton("Copy Links")
+        self._links_btn.setToolTip(
+            "Copy this library's download addresses, to paste into a browser "
+            "on a machine where flograph itself can't reach them.")
+        self._links_btn.clicked.connect(self._copy_links)
         self._remove_btn = QPushButton("Remove")
         self._remove_btn.clicked.connect(self._remove_selected)
         buttons = QHBoxLayout()
         buttons.addWidget(self._install_btn)
+        buttons.addWidget(self._file_btn)
+        buttons.addWidget(self._links_btn)
         buttons.addWidget(self._remove_btn)
         buttons.addStretch(1)
         close = QPushButton("Close")
@@ -185,6 +200,12 @@ class WebLibrariesDialog(QDialog):
         self._install_btn.setEnabled(
             bool(names) and not busy
             and any(not weblibs.is_installed(n) for n in names))
+        # One at a time: the file picker has to name which library it is
+        # collecting files for, and a dialog saying "choose the files" for
+        # four libraries at once could only be answered by guessing.
+        self._file_btn.setEnabled(
+            len(names) == 1 and not busy and not weblibs.is_installed(names[0]))
+        self._links_btn.setEnabled(bool(names))
         self._remove_btn.setEnabled(
             bool(names) and not busy
             and any(weblibs.is_installed(n) for n in names))
@@ -203,6 +224,72 @@ class WebLibrariesDialog(QDialog):
             if not weblibs.is_installed(name) and name not in self._jobs:
                 self._start(name)
         self.refresh()
+
+    def _install_from_file(self) -> None:
+        """Take files the user already has and put them in the store.
+
+        The escape hatch for the machine this dialog is most needed on: a
+        work PC where the download is blocked but the browser reaches cdnjs
+        fine. Everything that makes a hand-built store folder go wrong —
+        the version in the folder name, the exact filename, the manifest,
+        all of it silently — is done here instead.
+        """
+        names = self._selected_names()
+        if len(names) != 1:
+            return
+        name = names[0]
+        library = weblibs.known(name)
+        title = library.title if library else name
+        wanted = (", ".join(a.filename for a in library.assets)
+                  if library else "")
+        caption = f"Choose the files for {title}"
+        if wanted:
+            caption = f"{caption} — {wanted}"
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, caption,
+            QStandardPaths.writableLocation(
+                QStandardPaths.DownloadLocation),
+            "Web libraries (*.js *.mjs *.css);;All files (*)")
+        if not paths:
+            return
+        try:
+            installed = weblibs.install_from_files(name, paths)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Install from file",
+                f"{title} was not installed.\n\n{exc}")
+            self.refresh()
+            return
+        self.refresh()
+        self._status.setText(
+            f"{installed.title} {installed.version} installed from "
+            f"{len(paths)} file{'s' if len(paths) != 1 else ''} you supplied.")
+
+    def _copy_links(self) -> None:
+        """Put the download addresses on the clipboard.
+
+        The first half of the same escape hatch: a URL that can be pasted
+        into whatever browser *is* allowed. It is the address an install
+        would really use, mirror setting included, rather than a cdnjs one
+        printed from the catalogue and wrong on a mirrored network.
+        """
+        urls = []
+        for name in self._selected_names():
+            try:
+                urls.extend(weblibs.download_urls(name))
+            except weblibs.WebLibError:
+                continue
+        if not urls:
+            QMessageBox.information(
+                self, "Copy links",
+                "There is nothing to download for this one — it was added "
+                "from a file, so flograph never knew an address for it.")
+            return
+        QGuiApplication.clipboard().setText("\n".join(urls))
+        self.refresh()
+        self._status.setText(
+            f"{len(urls)} link{'s' if len(urls) != 1 else ''} copied — open "
+            f"in a browser, save the file, then Install from File…")
 
     def _add_from_url(self) -> None:
         name = self._url_name.text().strip()
@@ -241,7 +328,13 @@ class WebLibrariesDialog(QDialog):
     def _finished(self, name: str, error: str) -> None:
         self._jobs.pop(name, None)
         if error:
+            # A blocked download is the common failure on the machines this
+            # dialog exists for, and the way out is two buttons away — so
+            # the message that reports it says so, rather than leaving the
+            # user to conclude the library is simply unavailable to them.
             QMessageBox.warning(
                 self, "Install failed",
-                f"{name} could not be installed.\n\n{error}")
+                f"{name} could not be installed.\n\n{error}\n\n"
+                f"If this machine can't reach the internet, use Copy Links "
+                f"to download {name} in a browser, then Install from File…")
         self.refresh()

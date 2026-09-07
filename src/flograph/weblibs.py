@@ -359,46 +359,40 @@ def _asset_url(library: Library, asset: Asset) -> str:
     return f"{base}/{library.name}/{library.version}/{asset.filename}"
 
 
-def install(name: str, progress=None) -> Library:
-    """Fetch every file of `name` into the store and return the library.
+def download_urls(name: str) -> list:
+    """Every URL an install of `name` would fetch.
 
-    The only function here that touches the network. Each asset is verified
-    against the catalogue's sha256 before it is kept, and everything is
-    written to a temporary directory that is moved into place at the end —
-    so an interrupted or corrupted install leaves nothing behind that
-    `installed_version` would mistake for a working one.
-
-    `progress(done, total, filename)` is called as each file lands.
+    What to paste into a browser on a machine where flograph itself cannot
+    reach the network — see `install_from_files`. Honours the private
+    mirror, so it names the address that machine is actually allowed.
     """
-    import hashlib
+    library = known(name)
+    if library is None:
+        raise WebLibError(f"unknown web library {name!r}")
+    return [_asset_url(library, asset) for asset in library.assets
+            if asset.url or os.environ.get(BASE_URL_ENV)]
+
+
+def _commit(library: Library, bodies: dict) -> Library:
+    """Write one library's files into the store, atomically.
+
+    Everything lands in a temporary directory that is moved into place at
+    the end, so an interrupted or corrupted install leaves nothing behind
+    that `installed_version` would mistake for a working one. Shared by the
+    download and the from-file path, which differ only in where the bytes
+    came from and are not allowed to differ in what ends up on disk.
+    """
     import json
     import shutil
     import tempfile
-
-    library = CATALOGUE.get(name) or _installed_from_manifest(name)
-    if library is None:
-        raise WebLibError(f"unknown web library {name!r}")
-    if not library.assets:
-        raise WebLibError(f"{name!r} lists no files to install")
 
     target = library_dir(library.name, library.version)
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{library.name}-",
                                     dir=str(target.parent)))
     try:
-        total = len(library.assets)
-        for index, asset in enumerate(library.assets, start=1):
-            body = _download(_asset_url(library, asset))
-            if asset.sha256:
-                got = hashlib.sha256(body).hexdigest()
-                if got != asset.sha256:
-                    raise WebLibError(
-                        f"{library.name}/{asset.filename} does not match the "
-                        f"expected checksum — it was not installed "
-                        f"(expected {asset.sha256[:12]}…, got {got[:12]}…)")
-            (staging / asset.filename).write_bytes(body)
-            if progress is not None:
-                progress(index, total, asset.filename)
+        for asset in library.assets:
+            (staging / asset.filename).write_bytes(bodies[asset.filename])
 
         (staging / "flograph-weblib.json").write_text(json.dumps({
             "name": library.name, "title": library.title,
@@ -415,6 +409,162 @@ def install(name: str, progress=None) -> Library:
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     return library
+
+
+def install(name: str, progress=None) -> Library:
+    """Fetch every file of `name` into the store and return the library.
+
+    The only function here that touches the network. Each asset is verified
+    against the catalogue's sha256 before it is kept, and nothing is moved
+    into place until every file has arrived and passed.
+
+    `progress(done, total, filename)` is called as each file lands.
+    """
+    import hashlib
+
+    library = CATALOGUE.get(name) or _installed_from_manifest(name)
+    if library is None:
+        raise WebLibError(f"unknown web library {name!r}")
+    if not library.assets:
+        raise WebLibError(f"{name!r} lists no files to install")
+
+    bodies = {}
+    total = len(library.assets)
+    for index, asset in enumerate(library.assets, start=1):
+        body = _download(_asset_url(library, asset))
+        if asset.sha256:
+            got = hashlib.sha256(body).hexdigest()
+            if got != asset.sha256:
+                raise WebLibError(
+                    f"{library.name}/{asset.filename} does not match the "
+                    f"expected checksum — it was not installed "
+                    f"(expected {asset.sha256[:12]}…, got {got[:12]}…)")
+        bodies[asset.filename] = body
+        if progress is not None:
+            progress(index, total, asset.filename)
+    return _commit(library, bodies)
+
+
+def install_from_files(name: str, paths: Iterable, version: str = "",
+                       title: str = "") -> Library:
+    """Install a library from files that are already on this machine.
+
+    The other half of "a CDN is where a library is installed from". On a
+    locked-down work PC the thing that is blocked is usually *this app*
+    reaching the network, while a browser can open the very same cdnjs URL
+    perfectly well — so the file lands in Downloads and the store is left
+    to be assembled by hand out of a folder layout and a filename the user
+    has to guess right, with a silent "Not installed" as the only feedback
+    when they guess wrong. This takes the files instead, and does the
+    guessing itself.
+
+    Each file is matched to the asset it *is*, **by sha256 first**: a
+    browser that saved `d3.min(1).js` changed the name and not a single
+    byte, and the hash is what actually identifies a file. The filename is
+    only the fallback. For a catalogue library the pinned checksum is still
+    enforced — carrying a file by hand is not a way around the check, it is
+    the same check happening somewhere else — and the version folder is the
+    catalogue's, so what lands is what a download would have left behind,
+    manifest included.
+    """
+    import hashlib
+
+    library = CATALOGUE.get(name) or _installed_from_manifest(name)
+    pinned = name in CATALOGUE
+
+    files = []
+    for path in paths:
+        path = Path(path)
+        try:
+            body = path.read_bytes()
+        except OSError as exc:
+            raise WebLibError(f"could not read {path} — {exc}") from None
+        digest = hashlib.sha256(body).hexdigest()
+        if any(digest == seen[2] for seen in files):
+            # `lib.js` and `lib(1).js` are one download made twice. Keeping
+            # both would leave one of them unmatched at the end and report
+            # a duplicate as a stranger, which explains nothing.
+            continue
+        files.append((path, body, digest))
+    if not files:
+        raise WebLibError("no files given")
+
+    if library is None:
+        # Nothing to match against: the files themselves are the library,
+        # named as they are named. Same rule as add_from_url — an extension
+        # is what says whether a file becomes a <script> or a <link>.
+        assets = []
+        bodies = {}
+        for path, body, digest in files:
+            if "." not in path.name:
+                raise WebLibError(
+                    f"{path.name!r} has no extension, so there is no telling "
+                    f"whether it is a script or a stylesheet — rename it to "
+                    f"end in .js or .css")
+            assets.append(Asset(filename=path.name, url="",
+                                sha256=digest, size=len(body)))
+            bodies[path.name] = body
+        library = Library(name=name, title=title or name,
+                          version=version or "custom",
+                          summary="installed from a file",
+                          assets=tuple(assets))
+        return _commit(library, bodies)
+
+    wanted = list(library.assets)
+    bodies = {}
+    spare = list(files)
+
+    def take(asset, entry):
+        wanted.remove(asset)
+        spare.remove(entry)
+        bodies[asset.filename] = entry[1]
+
+    # By content, first and without argument: this is the pass that lets a
+    # browser rename a download and still be right.
+    for entry in list(spare):
+        for asset in list(wanted):
+            if asset.sha256 and asset.sha256 == entry[2]:
+                take(asset, entry)
+                break
+
+    # Then by name, verifying if there is anything to verify against.
+    for entry in list(spare):
+        for asset in list(wanted):
+            if asset.filename.lower() == entry[0].name.lower():
+                if pinned and asset.sha256 and asset.sha256 != entry[2]:
+                    raise WebLibError(
+                        f"{entry[0].name} is not the {library.name} "
+                        f"{library.version} flograph pins — it was not "
+                        f"installed (expected sha256 {asset.sha256[:12]}…, "
+                        f"this file is {entry[2][:12]}…). Download it from "
+                        f"{_asset_url(library, asset)}")
+                take(asset, entry)
+                break
+
+    # A library described only by a manifest has no checksum worth the
+    # name, so one file for one remaining slot of the same kind is a safe
+    # last resort there. Never for a pinned one, where an unrecognised file
+    # is a fact worth reporting rather than a gap to paper over.
+    if not pinned and len(wanted) == 1 and len(spare) == 1:
+        if wanted[0].is_stylesheet == spare[0][0].name.lower().endswith(".css"):
+            take(wanted[0], spare[0])
+
+    if wanted:
+        missing = ", ".join(asset.filename for asset in wanted)
+        urls = "\n".join(_asset_url(library, a) for a in wanted if a.url)
+        detail = f"\n\nDownload:\n{urls}" if urls else ""
+        raise WebLibError(
+            f"{library.title} {library.version} also needs {missing} — "
+            f"every file has to be there at once, or what lands is a "
+            f"half-finished install that no node will use.{detail}")
+    if spare:
+        extra = ", ".join(entry[0].name for entry in spare)
+        listed = ", ".join(asset.filename for asset in library.assets)
+        raise WebLibError(
+            f"{extra} is not part of {library.title} {library.version}, so "
+            f"nothing was installed. It may be a different version — this "
+            f"one is built from {listed}.")
+    return _commit(library, bodies)
 
 
 def add_from_url(name: str, urls: Iterable[str], version: str = "custom",
