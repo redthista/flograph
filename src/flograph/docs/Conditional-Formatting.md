@@ -24,6 +24,9 @@ A rule is `columns  verb  argument`:
 | `iconmap` | `sla iconmap sla: ok=✓ green, breach=✗ red` | an icon per exact value; the glyph is any character or emoji |
 | `… => bg / fg / bold` | `score >= 90 => bg green, bold` | highlight the cell when the test passes |
 | `… => row <colour>` | `status = fail => row red` | highlight the whole row |
+| `icon` (in a `=>`) | `20* = 1 => icon ✓ green` | place one icon where the test passes |
+| `iconmap` | `20* iconmap: 1=✓ green` | map a value to an icon — leave the source out to read the column it draws in |
+| `colormap` | `status colormap: fail=red, ok=green` | map a value to a fill; the ink is worked out unless you give one |
 | `format` | `amount format $,.0f` | a Python / d3 number format for the column |
 | `hide` | `hide helper_col` | keep a column in the data (a rule can still read it) but out of the view |
 | `only` | `units bar blue only` | draw the format **instead of** the value — Power BI's "bar only" / "icon only" |
@@ -125,6 +128,37 @@ including a single-cell highlight beating an earlier whole-row one. So a
 `=> bg green` line placed below a `=> row red` line turns that one cell green
 on an otherwise-red row. Several rules can target the same column (a data bar
 *and* an icon, say).
+
+## Mapping a value
+
+Three near-identical `=>` lines, one per value, is the long way round:
+
+```
+status    colormap: breach=red, watch=amber, ok=green
+sla       iconmap: 1=✓ green, 0=✗ red
+```
+
+`colormap` fills the cell and picks readable ink for it; give a second
+colour (`ok=green white`) to choose the ink yourself. `iconmap` places a
+glyph. Both take `only` to draw the format *instead of* the value —
+`status colormap only: fail=red` is a status block with no word in it.
+
+**Leave the source column out** — nothing before the colon — and each
+column the rule draws in reads *its own* value. That is the only spelling
+that means anything under a [[#column-patterns|pattern]]: `20* iconmap:
+1=✓ green` ticks each year column on its own numbers, where naming one
+source column would paint that column's answer into all of them. Name a
+source (`product colormap severity: high=red`) when the decision really
+does come from somewhere else.
+
+For a single flag rather than a whole map, a highlight can place an icon:
+
+```
+20*    = 1 => icon ✓ green
+```
+
+An icon goes in a cell, so it cannot be combined with `row` — name the
+columns on the left instead.
 
 ## Deciding on another column
 

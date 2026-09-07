@@ -22,6 +22,9 @@ status  = fail       => row red                 # highlight the whole row
 health               icons traffic              # 3-tier icon set
 amount               format $,.0f               # per-column number format
 growth iconmap sla: breach=✗ red, ok=✓ green    # icon decided by another column
+20*     = 1  => icon ✓ green                    # a tick in every 20xx column
+20*     iconmap: 1=✓ green, 0=✗ red             # the same, written as a lookup
+status  colormap: fail=red, ok=green            # a fill decided by the value
 rating               icons traffic only         # the icon replaces the value
 revenue              width 160                  # a fixed column width
 region               align centre               # left / right / centre
@@ -35,6 +38,15 @@ hide sla                                        # keep a helper column out of vi
 column** with a trailing `by revenue` clause, and a highlight can **test
 another column** with `product if revenue < 0 => bg red` — the style still
 lands in the column(s) named on the left.
+
+**Mapping a value.** `iconmap` and `colormap` turn a set of values into
+icons or fills without a line each. Leave the source column out — nothing
+before the colon — and every column the rule draws in reads *its own*
+value, which is what a pattern needs: `20* iconmap: 1=✓ green` ticks each
+year column on its own numbers, where naming one source would paint that
+one column's answer into all of them. A highlight can place an icon too
+(`20* = 1 => icon ✓ green`), for a single flag rather than a whole map. An
+icon goes in a cell, so it cannot be combined with `row`.
 
 Any format rule can be drawn **instead of** the value by adding `only`
 (`units bar blue only`) — Power BI's "bar only" / "icon only". The value is

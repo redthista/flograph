@@ -33,6 +33,21 @@ the style still lands in the column(s) named on the left::
     product   if revenue < 0 => bg red             # flag Product when revenue < 0
     product   if status = closed => row grey        # whole row, tested on status
 
+A highlight can place **one icon** as well as a colour, which is how a flag
+column gets a tick; and ``iconmap`` / ``colormap`` map a value to an icon or
+a fill. Both maps may leave the **source column out** — write nothing before
+the colon — and then each column reads its own value, which is the only
+thing that means anything under a pattern::
+
+    20*       = 1 => icon ✓ green                  # a tick in every year column
+    20*       iconmap: 1=✓ green, 0=✗ red          # the same, as a lookup
+    status    colormap: breach=red, watch=amber, ok=green
+    product   colormap severity: high=red          # decided by another column
+
+An icon belongs to a cell, so it cannot be combined with ``row``. A
+``colormap`` ink is worked out from its fill unless a second colour is
+given (``ok=green white``).
+
 Any of ``scale`` / ``bar`` / ``icons`` / ``iconmap`` can draw its format
 **instead of** the value — Power BI's "bar only" / "icon only" — with a
 standalone ``only`` at either end of the argument. The value is still
@@ -122,7 +137,7 @@ _ICON_LABELS = {
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
-          "sort"}
+          "sort", "color_map"}
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
@@ -213,6 +228,11 @@ class Rule:
     width: Optional[int] = None               # pixels; None = fit to content
     align: Optional[str] = None               # left | right | center
     label: Optional[str] = None               # header text shown instead
+    #: highlight: a literal icon to place in the cell the test passed in.
+    #: Distinct from `icons` (a graded set) and `icon_map` (a lookup) —
+    #: this is one glyph, chosen by a condition.
+    glyph: Optional[str] = None
+    glyph_color: Optional[str] = None
     #: sort: "asc" | "desc". A string rather than an `ascending` bool
     #: because `to_dict` drops False as absence — a descending sort would
     #: have crossed the style port and come back ascending.
@@ -534,8 +554,28 @@ def parse_op_value(text: str) -> tuple:
     return ("=", _coerce(raw))
 
 
-_KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "format",
-             "width", "align", "label", "sort")
+_KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "colormap",
+             "colourmap", "format", "width", "align", "label", "sort")
+
+#: The keywords whose argument is a `source: value=…` map. They are the
+#: only ones that may be written with the colon stuck to them — `iconmap:`
+#: with no source is how a rule says "read the column you are drawing in".
+_MAP_KEYWORDS = ("iconmap", "colormap", "colourmap")
+
+
+def _keyword_of(token: str) -> "str | None":
+    """The rule keyword `token` is, or None.
+
+    A map keyword is allowed to carry the colon that opens its body,
+    because leaving the source out is a real spelling and `"iconmap:"` is
+    one token to `str.split()`.
+    """
+    low = token.lower()
+    if low in _KEYWORDS:
+        return low
+    if low.endswith(":") and low[:-1] in _MAP_KEYWORDS:
+        return low[:-1]
+    return None
 
 
 def _split_by_clause(arg: str) -> tuple:
@@ -573,6 +613,11 @@ def _split_only(arg: str) -> tuple:
         return "", True
     if low.startswith("only "):
         return text[5:].strip(), True
+    if low.startswith("only:"):
+        # `status colormap only: fail=red` — the modifier written hard
+        # against the colon that opens a map with no source. The colon
+        # belongs to the body, so it goes back on.
+        return ":" + text[5:], True
     if low.endswith(" only"):
         return text[:-5].strip(), True
     return text, False
@@ -592,9 +637,19 @@ def _split_modifiers(arg: str) -> tuple:
     return arg, source, only or trailing
 
 
-def _parse_icon_map(lineno: int, arg: str) -> tuple:
+def _parse_value_map(lineno: int, arg: str, keyword: str) -> tuple:
     """`"severity: high=▲ #d9534f, med=■ amber, low=▼ green"`
-    → (source column, {value: [glyph, colour]})."""
+    → (source column, {value: [first token, colour]}).
+
+    Shared by `iconmap` and `colormap`, which differ only in what the
+    right-hand side of each pair means and in which colours it resolves
+    against.
+
+    **The source column may be left out** — `20* iconmap: 1=✓ green` reads
+    each column it draws in. That is the only spelling that works with a
+    pattern: naming one source paints one column's answer into all of
+    them, which is what "the 20* rule doesn't work" turned out to be.
+    """
     arg = arg.strip()
     if arg[:1] in "\"'":
         end = arg.find(arg[0], 1)
@@ -605,9 +660,12 @@ def _parse_icon_map(lineno: int, arg: str) -> tuple:
     else:
         source, sep, body = arg.partition(":")
         source = source.strip()
-    if not sep or not source:
+    what = "icon" if keyword == "iconmap" else "colour"
+    if not sep:
         raise ValueError(
-            f"line {lineno}: 'iconmap' needs 'source-column: value=icon, …'")
+            f"line {lineno}: {keyword!r} needs "
+            f"'source-column: value={what}, …' — or ': value={what}, …' "
+            f"to read the column it draws in")
     mapping: dict = {}
     for chunk in body.split(","):
         chunk = chunk.strip()
@@ -616,14 +674,28 @@ def _parse_icon_map(lineno: int, arg: str) -> tuple:
         key, eq, spec = chunk.partition("=")
         if not eq or not key.strip() or not spec.strip():
             raise ValueError(
-                f"line {lineno}: don't understand icon mapping {chunk!r} "
-                f"(use 'value=icon colour')")
+                f"line {lineno}: don't understand {what} mapping {chunk!r} "
+                f"(use 'value={what}')")
         parts = spec.split()
-        glyph = parts[0]
-        color = _resolve_glyph_color(parts[1]) if len(parts) > 1 else None
-        mapping[key.strip()] = [glyph, color]
+        if keyword == "iconmap":
+            # glyph, then an optional colour for it
+            mapping[key.strip()] = [parts[0],
+                                    _resolve_glyph_color(parts[1])
+                                    if len(parts) > 1 else None]
+        else:
+            # a fill, then an optional ink to put on it. Left out, the ink
+            # is computed from the fill — the same readable_fg every other
+            # colour rule uses, so a dark preset does not get dark text.
+            fill = _resolve_color(parts[0])
+            # the ink resolves against the *vivid* presets, not the fill
+            # ones: `ok=green white` is text on a block, and the fill
+            # presets are dark backgrounds that would vanish on one
+            mapping[key.strip()] = [fill,
+                                    _resolve_glyph_color(parts[1])
+                                    if len(parts) > 1 else readable_fg(fill)]
     if not mapping:
-        raise ValueError(f"line {lineno}: 'iconmap' has no value=icon pairs")
+        raise ValueError(
+            f"line {lineno}: {keyword!r} has no value={what} pairs")
     return source, mapping
 
 
@@ -649,22 +721,29 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         return Rule("wrap")
 
     kw_idx = next((i for i in range(len(tokens) - 1, -1, -1)
-                   if tokens[i].lower() in _KEYWORDS), None)
+                   if _keyword_of(tokens[i])), None)
     if kw_idx is None or kw_idx == 0:
         raise ValueError(
-            f"line {lineno}: expected 'column scale|bar|icons|iconmap|format "
-            f"…', 'hide column', or 'condition => style', got {line!r}")
+            f"line {lineno}: expected 'column scale|bar|icons|iconmap|"
+            f"colormap|format …', 'hide column', or 'condition => style', "
+            f"got {line!r}")
     columns = _column_list(" ".join(tokens[:kw_idx]))
-    keyword = tokens[kw_idx].lower()
+    keyword = _keyword_of(tokens[kw_idx])
     arg = " ".join(tokens[kw_idx + 1:]).strip()
+    if tokens[kw_idx].endswith(":"):
+        # give the map parser back the colon the split took off it, so an
+        # absent source still reads as absent rather than as missing
+        arg = ":" + arg
 
-    if keyword == "iconmap":
+    if keyword in ("iconmap", "colormap", "colourmap"):
         # here the `only` comes off the whole argument: the mapping body is
         # split on commas, and a trailing one left in place would be read
         # as the last pair's colour
         arg, only = _split_only(arg)
-        source, mapping = _parse_icon_map(lineno, arg)
-        return Rule("icon_map", columns, source=source, mapping=mapping,
+        keyword = "iconmap" if keyword == "iconmap" else "colormap"
+        source, mapping = _parse_value_map(lineno, arg, keyword)
+        mode = "icon_map" if keyword == "iconmap" else "color_map"
+        return Rule(mode, columns, source=source, mapping=mapping,
                     hide_value=only)
     if keyword == "scale":
         arg, source, only = _split_modifiers(arg)
@@ -782,14 +861,29 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
             # not the value. On its own it blanks the cell where the test
             # passes, which is the honest reading of it.
             out["hide_value"] = True
+        elif head == "icon" and rest:
+            # One glyph placed by a condition — distinct from `icons` (a
+            # graded set) and `iconmap` (a lookup). Without this there was
+            # no way at all to say "a tick where the cell is 1", which is
+            # the commonest thing anyone wants of a flag column.
+            parts = rest.split()
+            out["glyph"] = parts[0]
+            if len(parts) > 1:
+                out["glyph_color"] = _resolve_glyph_color(parts[1])
         else:
             raise ValueError(
                 f"line {lineno}: don't understand style {chunk!r} "
                 f"(use 'bg <colour>', 'fg <colour>', 'bold', 'row <colour>', "
-                f"'only')")
-    if ("bg" not in out and "fg" not in out
+                f"'icon <glyph> [colour]', 'only')")
+    if ("bg" not in out and "fg" not in out and "glyph" not in out
             and not out.get("bold") and not out.get("hide_value")):
         raise ValueError(f"line {lineno}: no style after '=>'")
+    if out.get("glyph") and out["scope"] == "row":
+        # a row highlight paints every cell; an icon in every cell of the
+        # row is not what anyone means by it
+        raise ValueError(
+            f"line {lineno}: an 'icon' goes in a cell, so it cannot be "
+            f"combined with 'row' — name the column on the left instead")
     return out
 
 
@@ -813,6 +907,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
             return Rule("highlight", _column_list(left), scope=style["scope"],
                         op=op, value=value, source=tested, bg=style.get("bg"),
                         fg=style.get("fg"), bold=bool(style.get("bold")),
+                        glyph=style.get("glyph"),
+                        glyph_color=style.get("glyph_color"),
                         hide_value=bool(style.get("hide_value")))
     # split "column op value": the column is everything up to the operator
     op, value, column = _split_condition(cond)
@@ -820,7 +916,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
         raise ValueError(f"line {lineno}: no column in condition {cond!r}")
     return Rule("highlight", _column_list(column), scope=style["scope"],
                 op=op, value=value, bg=style.get("bg"), fg=style.get("fg"),
-                bold=bool(style.get("bold")),
+                bold=bool(style.get("bold")), glyph=style.get("glyph"),
+                glyph_color=style.get("glyph_color"),
                 hide_value=bool(style.get("hide_value")))
 
 
@@ -933,6 +1030,12 @@ def rule_summary(rule: Rule) -> str:
         return f"{cols}  ·  data bar{by}{only}"
     if rule.mode == "highlight":
         where = "row" if rule.scope == "row" else "cell"
+        if rule.glyph:
+            test = f"{rule.source} " if rule.source else ""
+            return (f"{cols}  ·  {rule.glyph} when {test}"
+                    f"{_op_phrase(rule.op, rule.value)}" if rule.source else
+                    f"{cols} {_op_phrase(rule.op, rule.value)}  ·  "
+                    f"{rule.glyph}")
         test = f"{rule.source} " if rule.source else ""
         return (f"{cols}  ·  highlight the {where} when {test}"
                 f"{_op_phrase(rule.op, rule.value)}" if rule.source else
@@ -942,7 +1045,11 @@ def rule_summary(rule: Rule) -> str:
         rev = ", reversed" if rule.reverse else ""
         return f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev}){by}{only}"
     if rule.mode == "icon_map":
-        return f"{cols}  ·  icon from “{rule.source}”{only}"
+        whence = f"“{rule.source}”" if rule.source else "its own value"
+        return f"{cols}  ·  icon from {whence}{only}"
+    if rule.mode == "color_map":
+        whence = f"“{rule.source}”" if rule.source else "its own value"
+        return f"{cols}  ·  colour from {whence}{only}"
     if rule.mode == "number_format":
         return f"{cols}  ·  number format “{rule.number_spec}”"
     if rule.mode == "hide":
@@ -1236,7 +1343,8 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                 mask = pd.Series(False, index=decide.index)
             style = CellStyle(bg=rule.bg,
                               fg=rule.fg or (readable_fg(rule.bg) if rule.bg else None),
-                              bold=rule.bold)
+                              bold=rule.bold, icon=rule.glyph,
+                              icon_color=rule.glyph_color)
             for i, hit in enumerate(mask.tolist()):
                 if hit:
                     contrib[i] = style
@@ -1257,21 +1365,30 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                 glyph, color = glyphs[tier]
                 contrib[i] = CellStyle(icon=glyph, icon_color=color)
 
-        elif rule.mode == "icon_map":
-            src = None
-            if frame is not None and rule.source in getattr(frame, "columns", []):
+        elif rule.mode in ("icon_map", "color_map"):
+            if not rule.source:
+                # no source named = this column decides its own; the only
+                # spelling that means anything under a pattern
+                src = values
+            elif (frame is not None
+                    and rule.source in getattr(frame, "columns", [])):
                 src = list(frame[rule.source])
+            else:
+                src = None
             mapping = rule.mapping or {}
             if src is not None:
                 for i, v in enumerate(src):
                     if _is_missing(v):
                         continue
                     pair = mapping.get(str(v).strip())
-                    if pair:
-                        glyph = pair[0] if len(pair) else None
-                        color = pair[1] if len(pair) > 1 else None
-                        if glyph:
-                            contrib[i] = CellStyle(icon=glyph, icon_color=color)
+                    if not pair or not pair[0]:
+                        continue
+                    first = pair[0]
+                    second = pair[1] if len(pair) > 1 else None
+                    if rule.mode == "icon_map":
+                        contrib[i] = CellStyle(icon=first, icon_color=second)
+                    else:
+                        contrib[i] = CellStyle(bg=first, fg=second)
 
         elif rule.mode == "number_format":
             for i, v in enumerate(values):
