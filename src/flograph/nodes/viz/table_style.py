@@ -25,6 +25,7 @@ region               align centre               # left / right / centre
 revenue              label "Revenue (£)"        # header text, data untouched
 wrap                                            # long text runs to more lines
 hide sla                                        # keep a helper column out of view
+show region, revenue, product                   # only these, in that order
 ```
 
 `scale`, `bar` and `icons` can take their deciding value **from another
@@ -50,6 +51,11 @@ the header with it, and a label changes the printed header only — rules,
 sorting and exports still use the real column name. `wrap` names no columns
 (a row is as tall as its tallest cell) and lets long text run on.
 
+`hide` drops columns; `show` is the keep-list, and the columns come out in
+the order it names them — the one way to reorder a table without a Select
+Columns node in front of it. Both are a view of the table, not a change to
+it: the frame leaving a Show Table's `table` port is the one that arrived.
+
 Colours are a preset name (`green`, `red`, `amber`, `blue`, `grey`) or a
 `#hex`. Scales: `green`, `blue`, `red`, `red-green`, `red-yellow-green`,
 `diverging`. A column name with a space just works; `"quote it"` if it has
@@ -63,7 +69,7 @@ reported on the **Show Table** that applies it, where the data is.
 NODE = {
     "label": "Table Style",
     "category": "Viz",
-    "version": "1.1",
+    "version": "1.2",
     "inputs": [],
     "outputs": [("style", "object")],
 }
@@ -72,6 +78,9 @@ PARAMS = [
      "default": "", "rule_wizard": True,
      "placeholder": "revenue scale green\nscore >= 90 => bg green, bold\n"
                     "status = fail => row red"},
+    {"name": "show", "type": "string", "label": "Show columns",
+     "default": "",
+     "placeholder": "only these, in the order named"},
     {"name": "hide", "type": "string", "label": "Hide columns", "default": "",
      "placeholder": "columns the Show Table should keep out of view"},
     {"name": "sort", "type": "string", "label": "Sort by", "default": "",

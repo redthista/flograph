@@ -6,7 +6,7 @@ from flograph.core.table_format import parse_rules
 from flograph.ui.properties.table_rule_wizard import (
     ColorChoice, RuleBuilder, RuleManager,
     K_AUTO, K_BAR, K_HIDE, K_HIGHLIGHT, K_ICONS, K_LAYOUT,
-    K_NUMBER, K_SCALE, K_WRAP,
+    K_NUMBER, K_SCALE, K_SHOW, K_WRAP,
 )
 
 COLUMNS = ["revenue", "units", "status", "sla", "gross margin"]
@@ -121,6 +121,48 @@ def test_hide_quotes_a_spaced_name(build):
     b._kind.setCurrentIndex(K_HIDE)
     _select(b, "gross margin")
     assert b.line() == 'hide "gross margin"'
+
+
+class TestShowColumnsPage:
+    """`hide` says what to lose; `show` says what to keep, in the order it
+    names them."""
+
+    def test_it_writes_a_show_line(self, build):
+        b = build()
+        b._kind.setCurrentIndex(K_SHOW)
+        _select(b, "revenue", "units")
+        assert b.line() == "show revenue, units"
+
+    def test_it_quotes_a_spaced_name_the_way_hide_does(self, build):
+        b = build()
+        b._kind.setCurrentIndex(K_SHOW)
+        _select(b, "gross margin")
+        assert b.line() == 'show "gross margin"'
+
+    def test_naming_no_columns_writes_no_rule(self, build):
+        """An empty keep-list means *every* column, so writing `show` on
+        its own would be a rule that says the opposite of nothing."""
+        b = build()
+        b._kind.setCurrentIndex(K_SHOW)
+        _select(b)
+        assert b.line() == ""
+
+    def test_the_typed_order_is_what_gets_written(self, build):
+        """The list ticks in the table's own order, so the box below is how
+        a different one is asked for — and the rule text has to follow it."""
+        b = build()
+        b._kind.setCurrentIndex(K_SHOW)
+        _select(b)
+        b._col_edit.setText("units, revenue")
+        assert b.line() == "show units, revenue"
+
+    def test_it_comes_back_to_its_own_page(self, build):
+        b = build(parse_rules("show revenue, units")[0])
+        assert b._kind.currentIndex() == K_SHOW
+        assert b.line() == "show revenue, units"
+
+    def test_hide_still_lands_on_the_hide_page(self, build):
+        assert build(parse_rules("hide sla")[0])._kind.currentIndex() == K_HIDE
 
 
 def test_builder_prefills_from_a_rule(build):

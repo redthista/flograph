@@ -57,20 +57,22 @@ _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 
 _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
           "Highlight cells / rows", "Icons", "Number format",
-          "Hide columns", "Column layout", "Wrap text"]
+          "Hide columns", "Show only these columns", "Column layout",
+          "Wrap text"]
 
 #: The kind combo's index, by name. The stack's pages are added in this
 #: order and `_line` dispatches on it, so the number appears in three
 #: places at once — which is exactly the sort of thing that survives one
 #: insertion and quietly breaks on the next.
-(K_SCALE, K_AUTO, K_BAR, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_HIDE, K_LAYOUT,
- K_WRAP) = range(len(_KINDS))
+(K_SCALE, K_AUTO, K_BAR, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_HIDE, K_SHOW,
+ K_LAYOUT, K_WRAP) = range(len(_KINDS))
 
 # both icon modes share the one "Icons" page; the page's own Style toggle
 # picks between the graduated set and a value→icon map.
 _MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
               "data_bar": K_BAR, "highlight": K_HIGHLIGHT, "icons": K_ICONS,
               "icon_map": K_ICONS, "number_format": K_NUMBER, "hide": K_HIDE,
+              "show": K_SHOW,
               "column_width": K_LAYOUT, "align": K_LAYOUT,
               "header_label": K_LAYOUT, "wrap": K_WRAP}
 
@@ -269,6 +271,7 @@ class RuleBuilder(QDialog):
         self._build_icons_page()
         self._build_number_page()
         self._build_hide_page()
+        self._build_show_page()
         self._build_layout_page()
         self._build_wrap_page()
         outer.addWidget(self._stack)
@@ -594,6 +597,23 @@ class RuleBuilder(QDialog):
             "but are not shown in this table."))
         self._stack.addWidget(page)
 
+    def _build_show_page(self) -> None:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        hint = QLabel(
+            "Only the chosen columns are shown, and they are shown in the "
+            "order this rule names them — which is the one way to reorder a "
+            "table without a Select Columns node in front of it.\n\n"
+            "Ticking the list above names them in the table's own order. To "
+            "put them in a different one, clear the ticks and type the names "
+            "into the box in the order you want, comma separated: the rule "
+            "text below always shows exactly what will be written.\n\n"
+            "The data is untouched either way — every column still leaves "
+            "the card's table port, in its original order.")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        self._stack.addWidget(page)
+
     def _build_wrap_page(self) -> None:
         page = QWidget()
         v = QVBoxLayout(page)
@@ -809,6 +829,8 @@ class RuleBuilder(QDialog):
         cols = self._columns_text()
         if kind == K_HIDE:
             return f"hide {cols}" if cols else ""
+        if kind == K_SHOW:
+            return f"show {cols}" if cols else ""
         if kind == K_WRAP:
             return "wrap"          # table-wide: it names no columns
         if not cols:

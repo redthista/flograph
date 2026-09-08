@@ -31,7 +31,8 @@ from flograph.core.report import format_scalar
 from flograph.core.table_format import (CellStyle, column_layout,
                                         column_matches, column_stats,
                                         evaluate_column, evaluate_rows,
-                                        for_paper, sort_order, split_rules)
+                                        for_paper, sort_order, split_rules,
+                                        visible_columns)
 
 #: Rows shown before a table is cut with a note. The same default
 #: frame_to_markdown uses — a report that quietly showed the first 30 of
@@ -62,12 +63,15 @@ STACK_BELOW = 380
 BAR_TRACK_COLOR = "#eceef1"
 
 
-def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
+def frame_to_html(frame, rules=(), hidden=(), shown=(),
+                  max_rows: int = MAX_ROWS,
                   width: "int | None" = None, paper: bool = True,
                   font_pt: "float | None" = None, marker: str = "") -> str:
     """`frame` as an HTML table carrying `rules` as cell styling.
 
-    `hidden` is the card's hidden-column list (patterns allowed); `width`
+    `hidden` and `shown` are the card's column projection — what to drop
+    and what to keep, in the order to keep it (patterns allowed in both);
+    `width`
     is how wide the table should sit, in points, so an embed's `width=`
     reaches a table as well as a chart. Rows past `max_rows` are cut with
     a note, exactly as the markdown form cuts them.
@@ -81,8 +85,10 @@ def frame_to_html(frame, rules=(), hidden=(), max_rows: int = MAX_ROWS,
     frame = _as_frame(frame)
     if frame is None:
         return "> *(not a table)*"
-    columns = [c for c in frame.columns
-               if not (hidden and column_matches(list(hidden), str(c)))]
+    # the same projection the card applies, from the same function: a
+    # printed table showing different columns from the dashboard it came
+    # off is the exact failure this whole module exists to avoid
+    columns = visible_columns(frame.columns, shown, hidden)
     if not columns:
         return "> *(no columns)*"
 

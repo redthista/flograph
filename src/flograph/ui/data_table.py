@@ -22,9 +22,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QFontMetrics, QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QHeaderView, QMenu, QMessageBox, QTableView
+from PySide6.QtWidgets import (
+    QHeaderView, QMenu, QMessageBox, QStyleOptionViewItem, QTableView,
+    QToolTip,
+)
 
 from .spreadsheet.clipboard import block_to_html, block_to_tsv
 
@@ -261,6 +264,62 @@ class DataTableView(QTableView):
                 width = max(width, BAR_ONLY_WIDTH)
             self.setColumnWidth(
                 col, max(MIN_COL_WIDTH, min(width + icon_pad, MAX_COL_WIDTH)))
+
+    # --------------------------------------------------------- tooltips
+
+    def viewportEvent(self, event) -> bool:
+        """Show the whole value when a cell had to be cut short.
+
+        Qt only offers the tooltip the *model* supplies, and a model cannot
+        know how wide its column ended up — so a truncated cell simply had
+        no way to say what it was hiding. The view can: it asks the
+        delegate for the room the value actually got, measures the text in
+        the same font, and offers a tooltip only when it did not fit.
+
+        Only when. A tooltip on a cell you can already read in full is
+        noise, and noise is what stops people reading the ones that matter.
+        """
+        if event.type() != QEvent.ToolTip:
+            return super().viewportEvent(event)
+        text = self._cut_short_text(self.indexAt(event.pos()))
+        if text:
+            QToolTip.showText(event.globalPos(), text, self.viewport())
+        else:
+            QToolTip.hideText()
+        return True
+
+    def _cut_short_text(self, index) -> str:
+        """The full text of a cell whose value did not fit, or ""."""
+        model = self.model()
+        if model is None or not index.isValid():
+            return ""
+        # a model that has something of its own to say wins outright: it
+        # knows why it is talking, and this only knows that text is wide
+        own = model.data(index, Qt.ToolTipRole)
+        if own:
+            return str(own)
+        if getattr(model, "wraps_text", lambda: False)():
+            # `wrap` exists precisely so that nothing is cut off; measuring
+            # a wrapped cell on one line would fire on text that is
+            # perfectly readable, several lines down
+            return ""
+        text = model.data(index, Qt.DisplayRole)
+        if text in (None, ""):
+            return ""
+        delegate = self.itemDelegate()
+        if not hasattr(delegate, "value_area"):
+            return ""
+        option = QStyleOptionViewItem()
+        self.initViewItemOption(option)
+        option.rect = self.visualRect(index)
+        area = delegate.value_area(option, index)
+        if area is None:
+            # a decoration stands where the value would be: the value is
+            # not shortened, it is deliberately not shown
+            return ""
+        text = str(text)
+        metrics = QFontMetrics(option.font)
+        return text if metrics.horizontalAdvance(text) > area.width() else ""
 
     def keyPressEvent(self, event) -> None:
         """Ctrl+C here rather than through a QShortcut.

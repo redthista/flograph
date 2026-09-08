@@ -137,7 +137,8 @@ class TestMergeStyles:
         assert len(merged["errors"]) == 1
 
     def test_none_and_bare_list_accepted(self):
-        assert merge_styles(None, None) == {"rules": [], "hide": [], "errors": []}
+        assert merge_styles(None, None) == {"rules": [], "show": [],
+                                            "hide": [], "errors": []}
         merged = merge_styles([{"mode": "color_scale", "columns": ["a"]}], None)
         assert len(merged["rules"]) == 1
 

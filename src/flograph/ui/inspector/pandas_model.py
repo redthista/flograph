@@ -80,7 +80,7 @@ def _is_missing(value: Any) -> bool:
 
 class PandasModel(QAbstractTableModel):
     def __init__(self, df: pd.DataFrame, parent=None, rules=None,
-                 hidden=None) -> None:
+                 hidden=None, shown=None) -> None:
         super().__init__(parent)
         self._df = df
         # The frame as it arrived. sort() reorders a *copy* off this, so
@@ -88,13 +88,37 @@ class PandasModel(QAbstractTableModel):
         # source (and anything downstream sharing it) is never touched.
         self._source = df
         self._loaded = min(PAGE_SIZE, len(df))
-        # Column projection: which source columns are shown, in order. A
-        # `hide` directive keeps a helper column in the frame (a rule may
-        # read it) but out of the view; a `hide` entry may be a glob.
-        from flograph.core.table_format import expand_columns
-        hide = set(expand_columns(hidden or [], df.columns))
-        self._visible = [i for i, c in enumerate(df.columns)
-                         if str(c) not in hide] if hide else None
+        # Column projection: which source columns are shown, in order.
+        # `hide` keeps a helper column in the frame (a rule may read it) but
+        # out of the view; `show` is the keep-list and fixes the order. Both
+        # may be globs, and both are a *view* — `self._source` is untouched,
+        # so the frame leaving the node's table port is the one that
+        # arrived, in its own order.
+        from flograph.core.table_format import visible_columns
+        names = [str(c) for c in df.columns]
+        keep = visible_columns(names, shown or [], hidden or [])
+        if keep == names:
+            self._visible = None            # nothing projected: the fast path
+        else:
+            # back to positions, because a frame is allowed two columns of
+            # the same name and both of them still belong in the view. Each
+            # mention takes the next position holding that name, so a `hide`
+            # that kept both keeps both — and a `show` that named it once
+            # (the list is de-duplicated) gets the first, which is the only
+            # answer a name can give when two columns answer to it.
+            where: dict = {}
+            for i, name in enumerate(names):
+                where.setdefault(name, []).append(i)
+            taken: dict = {}
+            visible = []
+            for c in keep:
+                slots = where.get(c, ())
+                if not slots:
+                    continue
+                n = taken.get(c, 0)
+                visible.append(slots[min(n, len(slots) - 1)])
+                taken[c] = n + 1
+            self._visible = visible
         self._set_rules(rules)
         self._apply_default_sort()
 

@@ -64,6 +64,20 @@ class TestTheCardsFormatting:
         graph, cache, _n = table_node("hide _tmp*")
         assert "_tmp" not in html_of("![[Sales]]", graph, cache)
 
+    def test_a_keep_list_reaches_the_page_in_its_own_order(self):
+        """A page that printed the card's columns in the frame's order
+        rather than the card's would be the same failure as printing the
+        wrong ones — just harder to spot."""
+        import re
+        graph, cache, _n = table_node("show status, region")
+        html = html_of("![[Sales]]", graph, cache)
+        # Qt's own toHtml() rewrites the header cells, so read the words out
+        # of the <thead> block rather than matching the tags that went in
+        head = re.search(r"<thead>(.*?)</thead>", html, re.S).group(1)
+        words = [w for w in re.sub(r"<[^>]+>", " ", head).split()
+                 if w in set(FRAME.columns)]
+        assert words == ["status", "region"]
+
     def test_a_data_bar_is_drawn(self):
         graph, cache, _n = table_node("orders bar blue")
         html = html_of("![[Sales]]", graph, cache)

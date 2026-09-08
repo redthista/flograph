@@ -32,6 +32,7 @@ revenue              label "Revenue (£)"        # header text, data untouched
 wrap                                            # long text runs to more lines
 revenue              sort desc                  # the order the table opens in
 hide sla                                        # keep a helper column out of view
+show region, revenue, product                   # only these, in that order
 ```
 
 `scale`, `bar` and `icons` can read their deciding value **from another
@@ -57,6 +58,20 @@ obeyed rather than fitted, alignment beats the dtype's own habit and takes
 the header with it, and a label changes the printed header only — rules,
 sorting and exports still use the real column name. `wrap` names no columns
 (a row is as tall as its tallest cell) and lets long text run on.
+
+**Choosing the columns.** `Hide columns` says what to lose; **Show
+columns** says what to keep — and the columns come out **in the order you
+picked them**, which is the only way to reorder a table without a Select
+Columns node in front of it. The picker appends as you tick, so ticking
+Region then Revenue puts Region first; the box is a plain list, so type the
+names in any order you like. Leave it empty (the usual case) and every
+column shows, in the table's own order. Name both and the keep list is
+applied first, then the hidden ones come out of what is left.
+
+Both are a **view**. The table leaving the `table` port is the one that
+arrived — every column, in its original order — because this card is a way
+of *looking* at a table, not a way of changing one. Put a **Select Columns**
+node in front of it when the data itself should change shape.
 
 **A default sort.** Clicking a header sorts the card and forgets; **Sort
 by** (with **Direction**) says what order the table *opens* in, and unlike
@@ -84,7 +99,7 @@ box layers on top.
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.3",
+    "version": "1.4",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object", {"optional": True})],
@@ -95,6 +110,8 @@ PARAMS = [
      "default": "", "rule_wizard": True,
      "placeholder": "revenue scale green\nscore >= 90 => bg green, bold\n"
                     "status = fail => row red"},
+    {"name": "show", "type": "columns", "label": "Show columns",
+     "default": "", "placeholder": "only these, in the order picked"},
     {"name": "hide", "type": "columns", "label": "Hide columns", "default": "",
      "placeholder": "columns to keep out of the view"},
     {"name": "sort", "type": "columns", "label": "Sort by", "default": "",
@@ -120,6 +137,7 @@ def run(ctx, table, style=None):
     # cosmetic width/height/scale are not style, and style_payload should
     # not have to know which of this node's params are and are not.
     own = style_payload({"format_rules": ctx.params.get("format_rules", ""),
+                         "show": ctx.params.get("show", ""),
                          "hide": ctx.params.get("hide", ""),
                          "sort": ctx.params.get("sort", ""),
                          "sort_dir": ctx.params.get("sort_dir", "")})

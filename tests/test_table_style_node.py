@@ -27,14 +27,15 @@ def test_registered_with_no_input_and_a_style_output(registry):
     assert list(spec.inputs) == []
     assert [p.name for p in spec.outputs] == ["style"]
     assert spec.outputs[0].type == PortType.OBJECT
-    assert [p.name for p in spec.params] == ["format_rules", "hide",
+    assert [p.name for p in spec.params] == ["format_rules", "show", "hide",
                                              "sort", "sort_dir"]
     assert spec.param("format_rules").rule_wizard is True
 
 
 def test_empty_rules_emit_an_empty_payload(registry):
     out, _ = _run(registry, {})
-    assert out == {"style": {"rules": [], "hide": [], "errors": []}}
+    assert out == {"style": {"rules": [], "show": [], "hide": [],
+                             "errors": []}}
 
 
 def test_rules_box_becomes_rule_dicts(registry):

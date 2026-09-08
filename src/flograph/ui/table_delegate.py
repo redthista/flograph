@@ -135,6 +135,67 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
             self._draw_chip(painter, x, band, d, metrics, pen)
             x += width + _ICON_GAP
 
+    # --------------------------------------------------------- the value
+
+    def _value_band(self, opt, decorations, metrics) -> QRect:
+        """The room left for the value once the decorations have taken
+        theirs — a line above or below costs height, a mark to either side
+        costs width."""
+        inner = opt.rect.adjusted(3, 2, -3, -2)
+        above, below = _stacked(decorations)
+        line_h = metrics.height()
+        band = QRect(inner)
+        if above:
+            band.setTop(band.top() + line_h)
+        if below:
+            band.setBottom(band.bottom() - line_h)
+        # each chip costs its own width and the gap after it, which is
+        # exactly the step paint() walks below
+        left = sum(self._chip_width(metrics, d) + _ICON_GAP
+                   for d in decorations if d.where == "left")
+        right = sum(self._chip_width(metrics, d) + _ICON_GAP
+                    for d in decorations if d.where == "right")
+        x, end = band.left() + left, band.right() - right
+        return QRect(x, band.top(), max(0, end - x), band.height())
+
+    def value_area(self, option, index) -> "QRect | None":
+        """Where this cell's value is drawn, or None when it is not drawn
+        at all — something placed `in` stands in for it, so nothing was cut
+        short and there is nothing left to explain.
+
+        Public because the *view* is the only thing that knows how wide the
+        column ended up, the *model* is the only thing that knows the whole
+        value, and neither knows how much of the cell the decorations took.
+        This does, so the tooltip can ask instead of guessing.
+        """
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        decor = index.data(DECOR_ROLE)
+        decorations, pill, _ink = (decor if decor is not None
+                                   else ([], None, None))
+        if any(d.where == "in" for d in decorations):
+            return None
+        if not decorations:
+            # nothing beside the value: Qt laid the text out itself, so ask
+            # the style where it put it rather than re-guessing its margin
+            style = opt.widget.style() if opt.widget else QApplication.style()
+            rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt,
+                                        opt.widget)
+            # SE_ItemViewItemText gives the cell's text *area*; the margin
+            # inside it is applied when the text is drawn, not before, so
+            # without this the last few pixels of a cell read as room the
+            # value never actually had
+            margin = style.pixelMetric(QStyle.PM_FocusFrameHMargin, opt,
+                                       opt.widget) + 1
+            rect = rect.adjusted(margin, 0, -margin, 0)
+        else:
+            rect = self._value_band(opt, decorations,
+                                    QFontMetrics(with_emoji(opt.font)))
+        if pill:
+            # a lozenge pays for its own padding out of the value's room
+            rect = rect.adjusted(_PILL_PAD_X, 0, -_PILL_PAD_X, 0)
+        return rect
+
     # ------------------------------------------------------------ paint
 
     def paint(self, painter, option, index) -> None:
@@ -206,7 +267,9 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # margins are drawn either way: a cell can hold a mark in place of
         # its value *and* one beside that, and dropping the second is the
         # exact failure the decoration list exists to prevent.
-        middle = QRect(x, band.top(), max(0, end - x), band.height())
+        # the same arithmetic the chips were just walked by, from the
+        # one method that owns it
+        middle = self._value_band(opt, decorations, metrics)
         if inside:
             self._draw_line(painter, middle, inside, metrics, pen)
         else:

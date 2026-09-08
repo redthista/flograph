@@ -1290,14 +1290,14 @@ class _Resolver:
             self.problems.append(
                 f"“{ref}”: radius only applies to a picture — a table is "
                 "text on the page, not an image")
-        rules, hidden = self._table_style(ref)
+        rules, hidden, shown = self._table_style(ref)
         measured = self._table_height is not None or self._table_fit
         marker = table_marker(len(self.tables)) if measured else ""
         font_pt = (REPORT_FONT_PT * self._table_scale
                    if self._table_scale != 1.0 else None)
 
         def build(rows: int, size: "float | None") -> str:
-            return frame_to_html(value, rules, hidden, max_rows=rows,
+            return frame_to_html(value, rules, hidden, shown, max_rows=rows,
                                  width=self._image_width, font_pt=size,
                                  marker=marker)
 
@@ -1313,7 +1313,7 @@ class _Resolver:
         return html
 
     def _table_style(self, ref: str) -> tuple:
-        """(rules, hidden columns) for this embed's table.
+        """(rules, hidden columns, shown columns) for this embed's table.
 
         Read off the producing node's own `style` output — the port a Show
         Table already publishes so one table's formatting can be wired into
@@ -1324,16 +1324,18 @@ class _Resolver:
         """
         node = self._node_for(ref)
         if node is None or self._cache is None:
-            return (), ()
+            return (), (), ()
         if not any(port.name == "style" for port in node.spec.outputs):
-            return (), ()
+            return (), (), ()
         try:
             style = self._cache.outputs_for(node.id).get("style")
             from flograph.core.table_format import (hidden_columns,
-                                                    rules_from_style)
-            return rules_from_style(style), hidden_columns(style)
+                                                    rules_from_style,
+                                                    shown_columns)
+            return (rules_from_style(style), hidden_columns(style),
+                    shown_columns(style))
         except Exception:
-            return (), ()
+            return (), (), ()
 
 
 def source_by_label(graph):

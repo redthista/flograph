@@ -30,6 +30,7 @@ A rule is `columns  verb  argument`:
 | `autocolour` | `status autocolour` | every distinct value takes its own colour — nothing named in advance |
 | `format` | `amount format $,.0f` | a Python / d3 number format for the column |
 | `hide` | `hide helper_col` | keep a column in the data (a rule can still read it) but out of the view |
+| `show` | `show region, revenue` | only these columns, in the order named |
 | `only` | `units bar blue only` | draw the format **instead of** the value — Power BI's "bar only" / "icon only" |
 | `width` | `revenue width 160` | a fixed column width in pixels (`width auto` gives the column back to the content) |
 | `align` | `region align right` | `left`, `right` or `centre` — the header follows the column |
@@ -222,6 +223,33 @@ product   if status = closed => row grey      # whole row, tested on status
 
 Name the helper column in a `hide` line to keep it out of the view.
 
+## Choosing the columns, and their order
+
+`hide` is subtractive — name what to lose. `show` is the other half: name
+what to **keep**, and they appear **in the order you named them**.
+
+```
+hide sla                            # drop one helper column
+show region, revenue, product       # only these three, in that order
+show 20*                            # every year column and nothing else
+show region, revenue
+hide revenue                        # keep-list first, then hide from it
+```
+
+The order is the point as much as the choice is: a `show` line is the only
+way to reorder a table's columns without a **Select Columns** node in front
+of it. Name none of them — the usual case — and every column shows, in the
+table's own order.
+
+Both are a **view**. The frame leaving the card's `table` port is the one
+that arrived, every column of it, in its original order, because a Show
+Table is a way of *looking* at a table rather than a way of changing one.
+Put a **Select Columns** node upstream when the data itself should change
+shape.
+
+Naming a column the table does not have is reported on the Show Table
+rather than leaving a gap where it would have been.
+
 ## Column patterns
 
 A column entry containing `*` or `?` is a glob that selects **every matching
@@ -234,6 +262,21 @@ hide _tmp_*                   # every scratch column
 ```
 
 A pattern that matches nothing is reported on the Show Table, next to the data.
+
+## Reading a value that did not fit
+
+A column is fitted to its content and then clamped, so a long value is cut
+short with an ellipsis. Hover it and the whole value appears — no rule, no
+setting, and only on the cells that were actually cut. A cell you can read
+in full says nothing, because a tooltip on every cell is what stops anyone
+reading the ones that matter.
+
+It counts what the formatting took: a cell carrying a mark beside its value,
+or wearing a lozenge, has less room for text and so is cut sooner. A cell
+whose value has been *replaced* — `only`, or a decoration placed `in` —
+offers nothing, since its value was not shortened, it was deliberately not
+shown. A `wrap`ping table offers nothing either: wrapping exists so that
+nothing is cut.
 
 ## Sharing one look across tables
 

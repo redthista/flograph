@@ -130,6 +130,23 @@ in — on the card, in a dashboard tile and on a printed report, which is
 where it matters most, since a page has no header to click. Clicking a
 header still wins from then on.
 
+``hide`` and ``show`` are the two ways to say which columns the table
+has, and they are not mirror images. ``hide`` subtracts — name the helper
+columns a rule reads and the reader shouldn't see. ``show`` is the
+keep-list, and it also fixes the **order**: the columns come out in the
+order they were named, which is the only way to reorder a table without a
+Select Columns node in front of it::
+
+    hide sla                                      # keep a helper out of view
+    show region, revenue, product                 # these three, in that order
+    show 20*                                      # every year column, no others
+
+Both are a *view*: the frame carries on out of the ``table`` port whole,
+in its own order, because the card is a way of looking at a table rather
+than a way of changing one. Naming both applies ``show`` first and then
+subtracts ``hide`` from what is left. Every ``show`` adds to the keep-list
+rather than replacing it, the same way every ``hide`` adds to the drop-list.
+
 A column name is matched exactly, unless it contains a glob metacharacter
 (``*``, ``?``, ``[``) — then it selects every matching column, so
 ``20* scale green`` heatmaps every year column and ``*_qty bar blue`` every
@@ -772,9 +789,15 @@ def column_matches(patterns, name) -> bool:
 
 
 def expand_columns(patterns, columns) -> list[str]:
-    """The concrete column names `patterns` selects, in `columns` order and
-    de-duplicated. A plain name is kept even when absent (so a caller can
-    still flag it missing); a glob contributes only the names it matches."""
+    """The concrete column names `patterns` selects, de-duplicated.
+
+    In **pattern** order, not frame order — each pattern contributes in
+    turn, and a glob contributes the names it matches in frame order. A
+    subtractive caller (`hide`) does not care; `show` is ordered by what it
+    returns, so this is load-bearing there.
+
+    A plain name is kept even when absent, so a caller can still flag it
+    missing."""
     cols = [str(c) for c in columns]
     out: list[str] = []
     for p in patterns or ():
@@ -786,12 +809,40 @@ def expand_columns(patterns, columns) -> list[str]:
     return _dedup(out)
 
 
+def visible_columns(columns, shown=(), hidden=()) -> list[str]:
+    """The columns a table shows, in the order it shows them.
+
+    `shown` is the keep-list — name what you want and everything else goes,
+    in the order you named it. Empty (the usual case) means every column in
+    the frame's own order. `hidden` then subtracts from whatever is left,
+    so naming a column in both is not a contradiction to resolve: it was
+    kept, then dropped.
+
+    A name in `shown` that the table does not have is dropped rather than
+    left as a hole — `style_report` is what tells the reader it was named.
+
+    One function, called by both the card and the printed page, because
+    two implementations of the same projection is exactly how a report
+    starts quietly differing from the dashboard it came off.
+    """
+    cols = [str(c) for c in columns]
+    if shown:
+        known = set(cols)
+        keep = [c for c in expand_columns(shown, cols) if c in known]
+    else:
+        keep = list(cols)
+    if hidden:
+        keep = [c for c in keep if not column_matches(list(hidden), c)]
+    return keep
+
+
 def quote_column(name: str) -> str:
     """Wrap a column name in quotes for the DSL when it would otherwise be
     ambiguous — a space, a comma, or a bare keyword."""
     name = str(name)
     if (any(ch in name for ch in ', "\'')
-            or name.lower() in _KEYWORDS or name.lower() == "hide"):
+            or name.lower() in _KEYWORDS
+            or name.lower() in _LEADING_KEYWORDS):
         return '"' + name.replace('"', "") + '"'
     return name
 
@@ -841,6 +892,13 @@ _AUTO_KEYWORDS = ("autocolour", "autocolor", "auto-colour", "auto-color")
 #: flooded with one of eight saturated chart colours.
 _AUTO_SHAPES = {"pill": "pill", "pills": "pill", "fill": "fill",
                 "block": "fill", "text": "text", "ink": "text"}
+
+#: The two that lead a line rather than following a column list. They are
+#: taken before the right-to-left keyword scan and never join `_KEYWORDS`,
+#: which is what keeps them from colliding with a word some other rule
+#: takes as an argument — and is why a column actually called "show" has to
+#: be quoted, exactly as one called "hide" always has.
+_LEADING_KEYWORDS = ("hide", "show")
 
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "colormap",
              "colourmap", "format", "width", "align", "label", "sort"
@@ -1029,11 +1087,16 @@ def _parse_value_map(lineno: int, arg: str, keyword: str) -> tuple:
 def _parse_token_line(lineno: int, line: str) -> Rule:
     tokens = line.split()
 
-    if tokens and tokens[0].lower() == "hide":
+    if tokens and tokens[0].lower() in _LEADING_KEYWORDS:
+        # `hide`/`show` lead their line instead of following a column list,
+        # so they are taken before the right-to-left keyword scan rather
+        # than being added to it — which is also why neither can collide
+        # with a word that appears as some other rule's argument.
+        word = tokens[0].lower()
         cols = _column_list(" ".join(tokens[1:]))
         if not cols:
-            raise ValueError(f"line {lineno}: 'hide' needs a column name")
-        return Rule("hide", cols)
+            raise ValueError(f"line {lineno}: {word!r} needs a column name")
+        return Rule(word, cols)
 
     if any(t.lower() == "wrap" for t in tokens):
         # Deliberately not a per-column rule. A row is as tall as its
@@ -1052,7 +1115,8 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
     if kw_idx is None or kw_idx == 0:
         raise ValueError(
             f"line {lineno}: expected 'column scale|bar|icons|iconmap|"
-            f"colormap|format …', 'hide column', or 'condition => style', "
+            f"colormap|format …', 'hide column', 'show column, column', "
+            f"or 'condition => style', "
             f"got {line!r}")
     columns = _column_list(" ".join(tokens[:kw_idx]))
     keyword = _keyword_of(tokens[kw_idx])
@@ -1441,6 +1505,8 @@ def rule_summary(rule: Rule) -> str:
         return f"{cols}  ·  number format “{rule.number_spec}”"
     if rule.mode == "hide":
         return f"hide  {cols}"
+    if rule.mode == "show":
+        return f"show only  {cols}"
     if rule.mode == "column_width":
         return (f"{cols}  ·  width {rule.width}px" if rule.width
                 else f"{cols}  ·  width fits the content")
@@ -1482,8 +1548,8 @@ def _dedup(seq) -> list:
 
 
 def style_payload(params: dict) -> dict:
-    """Turn a node's params — a ``format_rules`` text box and an optional
-    ``hide`` column list — into the payload carried on a ``style`` port.
+    """Turn a node's params — a ``format_rules`` text box and the ``show``
+    / ``hide`` column lists — into the payload carried on a ``style`` port.
 
     Never raises: a bad rule line is dropped and its message collected, to
     be reported wherever the style is *applied* (Show Table), not typed.
@@ -1491,7 +1557,13 @@ def style_payload(params: dict) -> dict:
     rules, errors = parse_rules_lenient(params.get("format_rules", ""))
     hide = [c for r in rules if r.mode == "hide" for c in r.columns]
     hide += _column_list(params.get("hide"))
-    keep = [r for r in rules if r.mode != "hide"]
+    # A `show` list is ordered, so it is concatenated rather than unioned
+    # into a set: the order the columns were named is the order they sit
+    # in, and the box's lines come before the picker's for the same reason
+    # a rule earlier in the box is drawn first.
+    show = [c for r in rules if r.mode == "show" for c in r.columns]
+    show += _column_list(params.get("show"))
+    keep = [r for r in rules if r.mode not in _LEADING_KEYWORDS]
     # The Sort By / direction pair is the same rule spelled as a control.
     # Appended, so it wins over a `sort` line in the box the way a later
     # line wins over an earlier one — the box is the advanced way in, the
@@ -1502,28 +1574,45 @@ def style_payload(params: dict) -> dict:
                          direction=("desc" if str(
                              params.get("sort_dir") or "").lower().startswith(
                                  "desc") else "asc")))
-    return {"rules": [r.to_dict() for r in keep], "hide": _dedup(hide),
-            "errors": errors}
+    return {"rules": [r.to_dict() for r in keep], "show": _dedup(show),
+            "hide": _dedup(hide), "errors": errors}
 
 
 def _style_parts(style_obj: Any) -> tuple:
+    """(rules, show, hide, errors) out of a payload of any shape."""
     if isinstance(style_obj, dict):
         return (list(style_obj.get("rules") or []),
+                list(style_obj.get("show") or []),
                 list(style_obj.get("hide") or []),
                 list(style_obj.get("errors") or []))
     if isinstance(style_obj, (list, tuple)):
-        return (list(style_obj), [], [])
-    return ([], [], [])
+        return (list(style_obj), [], [], [])
+    return ([], [], [], [])
 
 
 def merge_styles(base: Any, extra: Any) -> dict:
     """`extra` laid on top of `base`: rules concatenated (so a later rule
-    wins), hide lists unioned, errors kept from both. Either side may be a
-    payload dict, a bare rule list, or ``None``."""
-    b_rules, b_hide, b_err = _style_parts(base)
-    e_rules, e_hide, e_err = _style_parts(extra)
-    return {"rules": b_rules + e_rules, "hide": _dedup(b_hide + e_hide),
-            "errors": b_err + e_err}
+    wins), show and hide lists appended, errors kept from both. Either side
+    may be a payload dict, a bare rule list, or ``None``.
+
+    `show` appends rather than replacing, which is the same bargain `hide`
+    has always struck: a card can add to an incoming style but not argue
+    with it. Replacing would let a card silently drop a column the style it
+    was handed was built around, and there is no way to tell from here
+    which of the two was meant.
+    """
+    b_rules, b_show, b_hide, b_err = _style_parts(base)
+    e_rules, e_show, e_hide, e_err = _style_parts(extra)
+    return {"rules": b_rules + e_rules, "show": _dedup(b_show + e_show),
+            "hide": _dedup(b_hide + e_hide), "errors": b_err + e_err}
+
+
+def shown_columns(style_obj: Any) -> list[str]:
+    """The keep-list the style asks Show Table for, in order. Empty — the
+    usual case — means every column, which is not the same as none."""
+    if isinstance(style_obj, dict):
+        return [str(c) for c in (style_obj.get("show") or [])]
+    return []
 
 
 def hidden_columns(style_obj: Any) -> list[str]:
@@ -1569,7 +1658,7 @@ def style_report(style_obj: Any, df=None) -> list[str]:
         patterns: set = set()
         entries = [c for rule in rules_from_style(style_obj) for c in rule.columns]
         entries += [r.source for r in rules_from_style(style_obj) if r.source]
-        entries += hidden_columns(style_obj)
+        entries += hidden_columns(style_obj) + shown_columns(style_obj)
         for c in entries:
             (patterns if _is_glob(c) else named).add(str(c))
         missing = sorted(c for c in named if c not in known)
@@ -1970,11 +2059,11 @@ def evaluate_rows(df, row_rules) -> list:
 
 
 def split_rules(rules) -> tuple:
-    """(column rules, whole-row rules) — ``hide`` and the layout rules are
-    neither: they shape the table rather than paint a cell."""
+    """(column rules, whole-row rules) — ``hide``/``show`` and the layout
+    rules are neither: they shape the table rather than paint a cell."""
     row, col = [], []
     for r in rules:
-        if r.mode == "hide" or r.mode in LAYOUT_MODES:
+        if r.mode in _LEADING_KEYWORDS or r.mode in LAYOUT_MODES:
             continue
         (row if r.mode == "highlight" and r.scope == "row" else col).append(r)
     return col, row
