@@ -58,6 +58,39 @@ displayed::
     units     bar blue only                          # a bar chart in a column
     revenue   scale green only by margin             # a plain heatmap block
 
+A cell holds **as many decorations as the rules give it**, not one. Two
+rules that both match both land, which is how a cell gets an "OT" mark
+*and* a green tick — before, the second could only fail to replace the
+first. Each one says where it goes: ``left`` (the default, and where the
+single icon always went), ``right``, ``above``, ``below``, or ``in``,
+which draws it where the value would have been and takes the value away.
+``above`` and ``below`` take a line of their own and so make that row
+taller — per cell, unlike ``wrap``, because only the rows a rule matches
+pay for it::
+
+    ready   = 1  => icon ✓ green right      # a tick after the value
+    late    = 1  => icon ! amber above      # its own line, on that row only
+    sla     iconmap right: breach=✗, ok=✓
+    grade   icons traffic in                # the icon *is* the cell
+
+``over``/``top`` and ``under``/``bottom`` are accepted for ``above`` and
+``below``, and ``instead``/``inplace`` for ``in``.
+
+A **pill** is a coloured lozenge. What it wraps is decided by whether
+anything is written in it — with a label it is a mark of its own standing
+beside the value, without one it wraps the value already there::
+
+    status  = breach => pill red            # the value, in a red lozenge
+    status  = breach => pill red "OT"       # an OT badge beside the value
+    status  colormap pill: breach=red, ok=green    # a column of them
+    grade   icons check pill                # the tier colour as the ground
+
+``pill`` also re-reads the colour an ``iconmap`` gives: with no lozenge it
+is the glyph's ink, with one it is the ground behind it, since the map has
+only the one colour to spend. On paper a lozenge prints square-cornered —
+Qt's rich text drops ``border-radius`` — so the colour survives and the
+shape does not.
+
 The same list shapes the table as well as painting it. ``width`` / ``align``
 / ``label`` are properties of a *column*, read once rather than per cell,
 and ``wrap`` is the one rule that names no columns — a row is as tall as
@@ -89,6 +122,7 @@ from __future__ import annotations
 import dataclasses
 import fnmatch
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -237,6 +271,16 @@ class Rule:
     #: because `to_dict` drops False as absence — a descending sort would
     #: have crossed the style port and come back ascending.
     direction: Optional[str] = None
+    #: Where this rule's decoration sits — one of :data:`DECOR_PLACES`.
+    #: None means "left", which is the only place there was before.
+    glyph_where: Optional[str] = None
+    #: Draw this rule's colour as a **lozenge** rather than as a fill behind
+    #: the whole cell. What it wraps is decided by whether the rule also
+    #: names something to write in it: with a glyph it is a pill of its own
+    #: (`pill green "OT"`), without one it wraps the cell's own value
+    #: (`pill green`). Safe as a bool where `direction` was not, because
+    #: here False *is* absence, which is exactly what `to_dict` drops.
+    as_pill: bool = False
 
     def to_dict(self) -> dict:
         out = {}
@@ -255,6 +299,73 @@ class Rule:
         return cls(**{k: v for k, v in d.items() if k in known})
 
 
+#: Where a decoration sits relative to the cell's value. ``left`` and
+#: ``right`` cost nothing — the row is as tall as it was. ``above`` and
+#: ``below`` give the decoration a line of its own, so the row grows; and
+#: because a rule fires on the rows that match it and not the rest, the row
+#: that grows is the row that asked. That is the one place this differs
+#: from ``wrap``, which is table-wide precisely because it would otherwise
+#: spend every row's height on one cell's second line.
+#:
+#: ``in`` is the fifth: *instead of* the value, in the place the value
+#: would have been. One cell can carry all five at once — a mark above, a
+#: tick on the right, a pill where the number was — because a cell holds a
+#: list and every entry names its own place. ``in`` is the only one that
+#: takes the value away, and it is the same thing the older ``only`` says
+#: about a bar or a scale, which is why both end up setting `hide_value`.
+DECOR_PLACES = ("left", "right", "above", "below", "in")
+
+#: The places that stack vertically, and so decide a row's height.
+DECOR_LINES = ("above", "below")
+
+#: How much of a pill's fill survives on the card. A lozenge is a solid
+#: shape behind a few characters, so unlike a cell fill it can afford its
+#: colour outright.
+_PILL_INK = "#ffffff"
+
+
+@dataclass
+class Decoration:
+    """One thing drawn in a cell beside — or instead of — its value.
+
+    A cell used to hold exactly one ``icon`` / ``icon_color`` pair, and
+    :meth:`CellStyle.over` merged two rules with ``icon=self.icon or
+    base.icon``. That is why a second icon rule could never *add* one: it
+    could only fail to replace what was already there, and no amount of
+    delegate work gets round a model that has one slot. This is that slot
+    made a list.
+
+    ``text`` is whatever the rule typed — usually a glyph, but a pill with
+    a label in it is the same shape and gets the same field. ``pill`` is
+    the fill of the lozenge drawn behind it, or None for a bare glyph.
+    """
+    text: str = ""
+    color: Optional[str] = None               # ink
+    pill: Optional[str] = None                # lozenge fill; None = bare
+    where: str = "left"
+
+    def to_dict(self) -> dict:
+        out = {"text": self.text}
+        if self.color:
+            out["color"] = self.color
+        if self.pill:
+            out["pill"] = self.pill
+        if self.where != "left":
+            out["where"] = self.where
+        return out
+
+    @classmethod
+    def from_dict(cls, d: Any) -> "Decoration":
+        if isinstance(d, (list, tuple)):        # the old (glyph, colour) pair
+            glyph = d[0] if d else ""
+            return cls(text=str(glyph or ""),
+                       color=d[1] if len(d) > 1 else None)
+        d = d or {}
+        return cls(text=str(d.get("text") or ""), color=d.get("color"),
+                   pill=d.get("pill"),
+                   where=d.get("where") or "left")
+
+
 @dataclass
 class CellStyle:
     bg: Optional[str] = None
@@ -263,8 +374,14 @@ class CellStyle:
     bar: Optional[float] = None               # signed, -1..1
     bar_color: Optional[str] = None
     bar_mode: str = "left"                    # left | center (column has < 0)
-    icon: Optional[str] = None
-    icon_color: Optional[str] = None
+    #: Every glyph, label and pill this cell draws, in the order the rules
+    #: that asked for them were read. Position within the cell is each
+    #: decoration's own `where`.
+    decorations: list = field(default_factory=list)
+    #: A lozenge drawn around the cell's *own* value — `status pill`, as
+    #: against `status pill "OT"`, which is a decoration of its own.
+    pill: Optional[str] = None
+    pill_fg: Optional[str] = None
     text: Optional[str] = None                # DisplayRole override
     hide_value: bool = False                  # show the format, not the value
 
@@ -279,15 +396,44 @@ class CellStyle:
             bar=base.bar if self.bar is None else self.bar,
             bar_color=self.bar_color or base.bar_color,
             bar_mode=self.bar_mode if self.bar is not None else base.bar_mode,
-            icon=self.icon or base.icon,
-            icon_color=self.icon_color or base.icon_color,
+            # decorations *add*. Every other field here is last-one-wins,
+            # because there is one background and one weight; there is no
+            # such limit on how many things a cell can show, and the ask
+            # this list exists for — an OT mark and then a green tick — is
+            # exactly two rules both firing. Base first, so the earlier
+            # rule keeps the position it had and the later one arrives
+            # beside it in reading order.
+            decorations=list(base.decorations) + list(self.decorations),
+            pill=self.pill or base.pill,
+            pill_fg=self.pill_fg or base.pill_fg,
             text=self.text or base.text,
             hide_value=self.hide_value or base.hide_value,
         )
 
+    def at(self, where: str) -> list:
+        """The decorations sitting at one of :data:`DECOR_PLACES`."""
+        return [d for d in self.decorations if d.where == where]
+
+    @property
+    def icon(self) -> Optional[str]:
+        """The first decoration's glyph, or None.
+
+        Read-only, and a view rather than a second home for the data:
+        `decorations` is the truth. It stays because "is there a mark in
+        this cell, and what is it" is a real question with a single
+        answer — it is what a column sizing itself asks, and it is the
+        whole of what a cell could hold before this was a list.
+        """
+        return self.decorations[0].text if self.decorations else None
+
+    @property
+    def icon_color(self) -> Optional[str]:
+        return self.decorations[0].color if self.decorations else None
+
     def is_empty(self) -> bool:
         return (self.bg is None and self.fg is None and not self.bold
-                and self.bar is None and self.icon is None
+                and self.bar is None and not self.decorations
+                and self.pill is None
                 and self.text is None and not self.hide_value)
 
 
@@ -402,11 +548,35 @@ def for_paper(style: Optional["CellStyle"]) -> Optional["CellStyle"]:
         fg = readable_fg(bg) if bg else None
     else:
         fg = on_white(fg)
+    pill = paper_tint(style.pill, PAPER_BAR_TINT) if style.pill else None
     return dataclasses.replace(
         style, bg=bg, fg=fg,
         bar_color=(paper_tint(style.bar_color, PAPER_BAR_TINT)
                    if style.bar_color else None),
-        icon_color=on_white(style.icon_color) if style.icon_color else None)
+        decorations=[_decor_for_paper(d) for d in style.decorations],
+        pill=pill,
+        pill_fg=_pill_ink_for_paper(style.pill_fg, pill))
+
+
+def _pill_ink_for_paper(ink: Optional[str], tinted: Optional[str]) -> Optional[str]:
+    """A lozenge's ink, re-chosen for the tint it now sits on.
+
+    On the card a pill is a solid colour carrying white text. Tinted for
+    paper it is pale, and that white would vanish — so an ink that was
+    *chosen* (white, or either of `readable_fg`'s two) is chosen again,
+    while one asked for by name is only darkened if it would disappear.
+    """
+    if tinted is None:
+        return on_white(ink) if ink else None
+    if ink is None or ink.lower() in _AUTO_FG or ink.lower() == _PILL_INK:
+        return readable_fg(tinted)
+    return on_white(ink)
+
+
+def _decor_for_paper(d: "Decoration") -> "Decoration":
+    pill = paper_tint(d.pill, PAPER_BAR_TINT) if d.pill else None
+    return dataclasses.replace(
+        d, pill=pill, color=_pill_ink_for_paper(d.color, pill))
 
 
 def _scale_color(frac: float, low: str, mid: Optional[str], high: str) -> Optional[str]:
@@ -444,6 +614,16 @@ def _unquote(name: str) -> str:
     if len(name) >= 2 and name[0] == name[-1] and name[0] in "\"'":
         return name[1:-1]
     return name
+
+
+#: A whitespace split that keeps a "quoted phrase" in one piece — what a
+#: `pill` argument needs, where the label is quoted precisely so it cannot
+#: be mistaken for a colour.
+_TOKEN_RE = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
+
+
+def _quoted_tokens(text: str) -> list[str]:
+    return _TOKEN_RE.findall(str(text).strip())
 
 
 def _split_top_commas(text: str) -> list[str]:
@@ -597,30 +777,68 @@ def _split_by_clause(arg: str) -> tuple:
     return arg, None
 
 
-def _split_only(arg: str) -> tuple:
-    """Pull a standalone ``only`` off either end of a keyword argument.
+#: The words that name a place in a cell, and what each one means. The
+#: synonyms are here because this is typed by hand in a text box and
+#: "over"/"under" are what people reach for as often as "above"/"below".
+#: ``centre`` is deliberately *not* one of them — it already means
+#: something else on an `align` line, and a word that means two things in
+#: one DSL is worse than a word that means nothing.
+_PLACE_WORDS = {
+    "left": "left", "right": "right",
+    "above": "above", "over": "above", "top": "above",
+    "below": "below", "under": "below", "bottom": "below",
+    "in": "in", "inplace": "in", "instead": "in",
+}
 
-    Power BI calls it "Bar only" / "Icon only": draw the format *instead
-    of* the value. Both ends are accepted because both read naturally
-    depending on the rule — ``units bar blue only`` and ``growth iconmap
-    only sla: breach=🔥`` — and a trailing one has to come off before an
-    `iconmap` body is split on commas, where it would otherwise be read as
-    a colour name.
+
+def _split_flag(arg: str, words: dict) -> tuple:
+    """Pull a standalone modifier off either end of a keyword argument.
+
+    Returns the argument without it, and what it meant (or None). Both
+    ends are accepted because both read naturally depending on the rule —
+    ``units bar blue only`` and ``growth iconmap only sla: breach=🔥`` —
+    and a trailing one has to come off before an `iconmap` body is split
+    on commas, where it would otherwise be read as a colour name.
     """
     text = arg.strip()
     low = text.lower()
-    if low == "only":
-        return "", True
-    if low.startswith("only "):
-        return text[5:].strip(), True
-    if low.startswith("only:"):
-        # `status colormap only: fail=red` — the modifier written hard
-        # against the colon that opens a map with no source. The colon
-        # belongs to the body, so it goes back on.
-        return ":" + text[5:], True
-    if low.endswith(" only"):
-        return text[:-5].strip(), True
-    return text, False
+    if low in words:
+        return "", words[low]
+    for word, meaning in words.items():
+        if low.startswith(word + " "):
+            return text[len(word):].strip(), meaning
+        if low.startswith(word + ":"):
+            # `status colormap only: fail=red` — the modifier written hard
+            # against the colon that opens a map with no source. The colon
+            # belongs to the body, so it goes back on.
+            return ":" + text[len(word) + 1:], meaning
+        if low.endswith(" " + word):
+            return text[:-(len(word) + 1)].strip(), meaning
+    return text, None
+
+
+def _split_only(arg: str) -> tuple:
+    """Pull a standalone ``only`` off either end — Power BI's "Bar only" /
+    "Icon only": draw the format *instead of* the value."""
+    text, hit = _split_flag(arg, {"only": True})
+    return text, bool(hit)
+
+
+def _split_place(arg: str) -> tuple:
+    """Pull a standalone position word off either end of an argument.
+
+    A column genuinely named "left" survives, the same way one named
+    "only" does: the search runs on the keyword's argument, never on the
+    column names, which were taken off the line before this sees it.
+    """
+    return _split_flag(arg, _PLACE_WORDS)
+
+
+def _split_pill(arg: str) -> tuple:
+    """Pull a standalone ``pill`` off either end — draw this rule's colour
+    as a lozenge round the value rather than as a fill behind the cell."""
+    text, hit = _split_flag(arg, {"pill": True, "pills": True})
+    return text, bool(hit)
 
 
 def _split_modifiers(arg: str) -> tuple:
@@ -740,11 +958,13 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         # split on commas, and a trailing one left in place would be read
         # as the last pair's colour
         arg, only = _split_only(arg)
+        arg, place = _split_place(arg)
+        arg, pill = _split_pill(arg)
         keyword = "iconmap" if keyword == "iconmap" else "colormap"
         source, mapping = _parse_value_map(lineno, arg, keyword)
         mode = "icon_map" if keyword == "iconmap" else "color_map"
         return Rule(mode, columns, source=source, mapping=mapping,
-                    hide_value=only)
+                    hide_value=only, glyph_where=place, as_pill=pill)
     if keyword == "scale":
         arg, source, only = _split_modifiers(arg)
         preset = _SCALE_PRESETS.get(arg.lower().replace(" ", "-")
@@ -762,6 +982,8 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
                     hide_value=only)
     if keyword in ("icons", "icon"):
         arg, source, only = _split_modifiers(arg)
+        arg, place = _split_place(arg)
+        arg, pill = _split_pill(arg)
         reverse = False
         low = arg.lower()
         if low.endswith(" reverse") or low == "reverse":
@@ -772,7 +994,8 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
             raise ValueError(f"line {lineno}: unknown icon set {arg!r} "
                              f"(traffic, arrows, check)")
         return Rule("icons", columns, icon_set=key, reverse=reverse,
-                    source=source, hide_value=only)
+                    source=source, hide_value=only, glyph_where=place,
+                    as_pill=pill)
     if keyword == "width":
         if arg.lower() in ("auto", "fit", ""):
             # an explicit "back to normal", for undoing a wider pattern rule
@@ -868,21 +1091,44 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
             # the commonest thing anyone wants of a flag column.
             parts = rest.split()
             out["glyph"] = parts[0]
-            if len(parts) > 1:
-                out["glyph_color"] = _resolve_glyph_color(parts[1])
+            for token in parts[1:]:
+                place = _PLACE_WORDS.get(token.lower())
+                if place:
+                    out["glyph_where"] = place
+                else:
+                    out["glyph_color"] = _resolve_glyph_color(token)
+        elif head == "pill":
+            # A lozenge. What it wraps is decided by whether anything is
+            # written in it: `pill green` puts it round the cell's own
+            # value, `pill green "OT"` makes it a mark of its own standing
+            # beside the value. The label is quoted for the same reason
+            # `label` quotes its text — an unquoted word here is a colour,
+            # and guessing between the two would be silently wrong.
+            out["as_pill"] = True
+            for token in _quoted_tokens(rest):
+                place = _PLACE_WORDS.get(token.lower())
+                if place:
+                    out["glyph_where"] = place
+                elif token[:1] in "\"'":
+                    out["glyph"] = _unquote(token)
+                else:
+                    out["bg"] = _resolve_color(token)
         else:
             raise ValueError(
                 f"line {lineno}: don't understand style {chunk!r} "
                 f"(use 'bg <colour>', 'fg <colour>', 'bold', 'row <colour>', "
-                f"'icon <glyph> [colour]', 'only')")
+                f"'icon <glyph> [colour] [left|right|above|below|in]', "
+                f"'pill <colour> [\"text\"]', 'only')")
     if ("bg" not in out and "fg" not in out and "glyph" not in out
-            and not out.get("bold") and not out.get("hide_value")):
+            and not out.get("bold") and not out.get("hide_value")
+            and not out.get("as_pill")):
         raise ValueError(f"line {lineno}: no style after '=>'")
-    if out.get("glyph") and out["scope"] == "row":
-        # a row highlight paints every cell; an icon in every cell of the
+    if (out.get("glyph") or out.get("as_pill")) and out["scope"] == "row":
+        # a row highlight paints every cell; a mark in every cell of the
         # row is not what anyone means by it
+        what = "a 'pill'" if out.get("as_pill") else "an 'icon'"
         raise ValueError(
-            f"line {lineno}: an 'icon' goes in a cell, so it cannot be "
+            f"line {lineno}: {what} goes in a cell, so it cannot be "
             f"combined with 'row' — name the column on the left instead")
     return out
 
@@ -909,6 +1155,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                         fg=style.get("fg"), bold=bool(style.get("bold")),
                         glyph=style.get("glyph"),
                         glyph_color=style.get("glyph_color"),
+                        glyph_where=style.get("glyph_where"),
+                        as_pill=bool(style.get("as_pill")),
                         hide_value=bool(style.get("hide_value")))
     # split "column op value": the column is everything up to the operator
     op, value, column = _split_condition(cond)
@@ -918,6 +1166,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                 op=op, value=value, bg=style.get("bg"), fg=style.get("fg"),
                 bold=bool(style.get("bold")), glyph=style.get("glyph"),
                 glyph_color=style.get("glyph_color"),
+                glyph_where=style.get("glyph_where"),
+                as_pill=bool(style.get("as_pill")),
                 hide_value=bool(style.get("hide_value")))
 
 
@@ -1019,11 +1269,21 @@ def _op_phrase(op: str, value: Any) -> str:
     return words.get(op, f"{op} ") + str(value)
 
 
+#: How a decoration's place reads in the rules manager. "left" is absent
+#: rather than spelled out, because it is where a mark went before there
+#: was anywhere else to put one.
+_PLACE_PHRASE = {"right": "on the right", "above": "above the value",
+                 "below": "below the value", "in": "in place of the value"}
+
+
 def rule_summary(rule: Rule) -> str:
     """A one-line human description of a rule, for the manager's list."""
     cols = ", ".join(rule.columns) or "every column"
     by = f" (by {rule.source})" if rule.source else ""
     only = ", value hidden" if rule.hide_value else ""
+    place = ("" if not rule.glyph_where or rule.glyph_where == "left"
+             else ", " + _PLACE_PHRASE.get(rule.glyph_where, rule.glyph_where))
+    potted = " in a pill" if rule.as_pill else ""
     if rule.mode == "color_scale":
         return f"{cols}  ·  colour scale{by}{only}"
     if rule.mode == "data_bar":
@@ -1035,7 +1295,7 @@ def rule_summary(rule: Rule) -> str:
             return (f"{cols}  ·  {rule.glyph} when {test}"
                     f"{_op_phrase(rule.op, rule.value)}" if rule.source else
                     f"{cols} {_op_phrase(rule.op, rule.value)}  ·  "
-                    f"{rule.glyph}")
+                    f"{rule.glyph}{potted}{place}")
         test = f"{rule.source} " if rule.source else ""
         return (f"{cols}  ·  highlight the {where} when {test}"
                 f"{_op_phrase(rule.op, rule.value)}" if rule.source else
@@ -1043,13 +1303,14 @@ def rule_summary(rule: Rule) -> str:
                 f"highlight the {where}")
     if rule.mode == "icons":
         rev = ", reversed" if rule.reverse else ""
-        return f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev}){by}{only}"
+        return (f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev})"
+                f"{potted}{by}{place}{only}")
     if rule.mode == "icon_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
-        return f"{cols}  ·  icon from {whence}{only}"
+        return f"{cols}  ·  icon from {whence}{potted}{place}{only}"
     if rule.mode == "color_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
-        return f"{cols}  ·  colour from {whence}{only}"
+        return f"{cols}  ·  colour from {whence}{potted}{only}"
     if rule.mode == "number_format":
         return f"{cols}  ·  number format “{rule.number_spec}”"
     if rule.mode == "hide":
@@ -1270,6 +1531,46 @@ def _format_value(value: Any, spec: str) -> Optional[str]:
         return None
 
 
+def _place(rule) -> str:
+    """Where `rule` puts what it draws. Absent means left, which is where
+    the one icon a cell used to hold always went."""
+    where = rule.glyph_where or "left"
+    return where if where in DECOR_PLACES else "left"
+
+
+def _highlight_style(rule) -> "CellStyle":
+    """The style a matched `highlight` lays on a cell.
+
+    Three shapes come out of the same rule, and which one is decided by
+    what the rule named rather than by a separate keyword:
+
+    * a plain fill (no ``pill``) — the cell's background, as it always was;
+    * ``pill green`` — the colour becomes a lozenge around the cell's own
+      value, so the *cell* is not filled and the value carries the ink;
+    * ``pill green "OT"`` — the same lozenge, but around a label of its
+      own, which makes it a decoration that sits beside the value instead
+      of wrapping it.
+    """
+    place = _place(rule)
+    if not rule.as_pill:
+        deco = ([Decoration(text=rule.glyph, color=rule.glyph_color,
+                            where=place)] if rule.glyph else [])
+        return CellStyle(
+            bg=rule.bg,
+            fg=rule.fg or (readable_fg(rule.bg) if rule.bg else None),
+            bold=rule.bold, decorations=deco)
+
+    fill = rule.bg or _FILL_PRESETS["blue"]
+    ink = rule.fg or readable_fg(fill)
+    if rule.glyph:
+        # a pill with something written in it stands beside the value
+        return CellStyle(bold=rule.bold, decorations=[Decoration(
+            text=rule.glyph, color=rule.glyph_color or ink, pill=fill,
+            where=place)])
+    # a pill with nothing written in it wraps what is already there
+    return CellStyle(bold=rule.bold, pill=fill, pill_fg=ink)
+
+
 def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
     """One ``CellStyle | None`` per row of `series`, in its current order.
 
@@ -1341,10 +1642,7 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                 mask = _condition_mask(decide, rule.op, rule.value)
             except Exception:
                 mask = pd.Series(False, index=decide.index)
-            style = CellStyle(bg=rule.bg,
-                              fg=rule.fg or (readable_fg(rule.bg) if rule.bg else None),
-                              bold=rule.bold, icon=rule.glyph,
-                              icon_color=rule.glyph_color)
+            style = _highlight_style(rule)
             for i, hit in enumerate(mask.tolist()):
                 if hit:
                     contrib[i] = style
@@ -1363,7 +1661,14 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                     continue
                 tier = 0 if v < t1 else (1 if v < t2 else 2)
                 glyph, color = glyphs[tier]
-                contrib[i] = CellStyle(icon=glyph, icon_color=color)
+                # in a lozenge the tier colour is the ground, not the ink
+                deco = (Decoration(text=glyph, pill=color,
+                                   color=readable_fg(color),
+                                   where=_place(rule))
+                        if rule.as_pill else
+                        Decoration(text=glyph, color=color,
+                                   where=_place(rule)))
+                contrib[i] = CellStyle(decorations=[deco])
 
         elif rule.mode in ("icon_map", "color_map"):
             if not rule.source:
@@ -1386,7 +1691,25 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                     first = pair[0]
                     second = pair[1] if len(pair) > 1 else None
                     if rule.mode == "icon_map":
-                        contrib[i] = CellStyle(icon=first, icon_color=second)
+                        # `pill` re-reads the mapped colour: it is the ink
+                        # on a bare glyph, and the fill once the glyph is
+                        # in a lozenge — there is no third colour in the
+                        # map to be both.
+                        if rule.as_pill and second:
+                            deco = Decoration(text=first, pill=second,
+                                              color=readable_fg(second),
+                                              where=_place(rule))
+                        else:
+                            deco = Decoration(text=first, color=second,
+                                              where=_place(rule))
+                        contrib[i] = CellStyle(decorations=[deco])
+                    elif rule.as_pill:
+                        # a category pill: the mapped colour wraps the
+                        # value rather than flooding the cell, which is
+                        # what a status column wants and what T4 will
+                        # write into once it can pick the colours itself
+                        contrib[i] = CellStyle(
+                            pill=first, pill_fg=second or readable_fg(first))
                     else:
                         contrib[i] = CellStyle(bg=first, fg=second)
 
@@ -1396,12 +1719,21 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                 if text is not None:
                     contrib[i] = CellStyle(text=text)
 
+        # `only` and a decoration placed `in` overlap but are not the same
+        # thing: both take the value away, and only the second says where
+        # the format goes instead. So `only` on its own moves the mark to
+        # the middle — with nothing beside it, a left margin would read as
+        # a stray mark — but `only right` is a rule that named its place
+        # and keeps it.
+        takes_the_place = rule.hide_value or _place(rule) == "in"
+        placed = bool(rule.glyph_where)
         for i in range(n):
             if contrib[i] is not None:
-                # set once here rather than in every branch: `only` says
-                # what happens to the *value*, which no branch cares about
-                if rule.hide_value:
+                if takes_the_place:
                     contrib[i].hide_value = True
+                    if not placed:
+                        for d in contrib[i].decorations:
+                            d.where = "in"
                 acc[i] = contrib[i].over(acc[i])
 
     return acc

@@ -231,11 +231,8 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
           align: "str | None" = None) -> str:
     """One `<td>`: the value, plus whatever the rules said about it."""
     text = _escape(_text(value, style))
-    if style is not None and style.icon:
-        colour = (f' style="color:{style.icon_color}"'
-                  if style.icon_color else "")
-        glyph = f"<span{colour}>{_escape(style.icon)}</span>"
-        text = glyph if not text else f"{glyph} {text}"
+    if style is not None:
+        text = _decorate(text, style)
     if style is not None and style.bar is not None:
         text = _bar(text, style, numeric, track, stacked)
         numeric = False       # the bar table fills the cell; don't re-align
@@ -250,7 +247,7 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
     attrs = f' style="{";".join(css)}"' if css else ""
     if align:
         placement = f' align="{align}"'          # an `align` rule was explicit
-    elif style is not None and style.hide_value and style.icon:
+    elif style is not None and style.hide_value and style.decorations:
         # an icon standing in for the value centres, as the grid centres it
         placement = ' align="center"'
     else:
@@ -322,6 +319,63 @@ def _track(cells) -> str:
                    'style="border:none;padding:0">&nbsp;</td>')
     out.append("</tr></table>")
     return "".join(out)
+
+
+#: Padding inside a printed lozenge. The card rounds its ends; this cannot
+#: — Qt's rich text drops `border-radius` outright, which a render probe
+#: confirms rather than assumes. So a pill prints as a coloured block: the
+#: colour and the breathing room carry the meaning, the corners do not
+#: survive. Getting real ends on paper needs the column printed as a
+#: picture, which is the same escape hatch U2's data bars are waiting on —
+#: decide it once, for both.
+_PILL_PAD = "1px 6px"
+
+
+def _decor_span(d) -> str:
+    """One decoration as an inline span."""
+    css = []
+    if d.color:
+        css.append(f"color:{d.color}")
+    if d.pill:
+        css.append(f"background-color:{d.pill}")
+        css.append(f"padding:{_PILL_PAD}")
+    attrs = f' style="{";".join(css)}"' if css else ""
+    return f"<span{attrs}>{_escape(d.text)}</span>"
+
+
+def _in_a_pill(text: str, style: "CellStyle") -> str:
+    """The value wrapped in its own lozenge, if a rule asked for one."""
+    if not style.pill or not text:
+        return text
+    css = [f"background-color:{style.pill}", f"padding:{_PILL_PAD}"]
+    if style.pill_fg:
+        css.append(f"color:{style.pill_fg}")
+    return f'<span style="{";".join(css)}">{text}</span>'
+
+
+def _decorate(text: str, style: "CellStyle") -> str:
+    """`text` with everything the rules hung on it, arranged as the card
+    arranges it: a line above, the value between its side marks, a line
+    below. `text` is already escaped; the spans added here are not.
+
+    `above` / `below` are `<br>`-separated lines rather than a nested
+    table, because a cell that grows has to grow the row it is in, and a
+    line break is the one thing Qt's rich text and a browser agree on.
+    """
+    if not style.decorations and not style.pill:
+        return text
+    inside = [_decor_span(d) for d in style.at("in")]
+    if inside:
+        middle = " ".join(inside)     # `only` / `in` — instead of the value
+    else:
+        parts = ([_decor_span(d) for d in style.at("left")]
+                 + ([_in_a_pill(text, style)] if text or style.pill else [])
+                 + [_decor_span(d) for d in style.at("right")])
+        middle = " ".join(p for p in parts if p)
+    lines = [" ".join(_decor_span(d) for d in style.at("above")),
+             middle,
+             " ".join(_decor_span(d) for d in style.at("below"))]
+    return "<br>".join(line for line in lines if line)
 
 
 def _text(value, style: "CellStyle | None") -> str:

@@ -95,6 +95,23 @@ def _only(box) -> str:
     return " only" if box.isChecked() else ""
 
 
+#: Where a mark sits in its cell, as the wizard offers it. "left" is the
+#: empty token because it is the default and writing it would only make
+#: every generated line longer.
+_PLACES = [("left of the value", ""), ("right of the value", "right"),
+           ("above the value", "above"), ("below the value", "below"),
+           ("in place of the value", "in")]
+
+
+def _place(box) -> str:
+    token = box.currentData()
+    return f" {token}" if token else ""
+
+
+def _pill(box) -> str:
+    return " pill" if box.isChecked() else ""
+
+
 def _cols_text(names) -> str:
     return ", ".join(quote_column(str(n).strip()) for n in names if str(n).strip())
 
@@ -331,6 +348,27 @@ class RuleBuilder(QDialog):
         box.toggled.connect(self._refresh)
         return box
 
+    def _place_combo(self) -> QComboBox:
+        """Where this rule's mark goes.
+
+        Per rule, not per cell: a cell shows as many marks as the rules
+        give it, so two rules are how a cell gets one on each side.
+        """
+        box = _combo(_PLACES)
+        box.setToolTip(
+            "A cell can carry a mark on each side and a line above and "
+            "below — that is one rule each, not one rule with four boxes.")
+        box.currentIndexChanged.connect(self._refresh)
+        return box
+
+    def _pill_box(self, label: str) -> QCheckBox:
+        box = QCheckBox(label)
+        box.setToolTip(
+            "A coloured lozenge. With no text of its own it wraps the "
+            "cell's value; give it text and it stands beside the value.")
+        box.toggled.connect(self._refresh)
+        return box
+
     def _build_scale_page(self) -> None:
         page = QWidget()
         f = QFormLayout(page)
@@ -384,6 +422,15 @@ class RuleBuilder(QDialog):
         f.addRow("When the value", self._op)
         f.addRow("", vrow)
         f.addRow("Fill", self._fill)
+        self._hl_pill = self._pill_box("draw the fill as a pill")
+        self._hl_badge = QLineEdit()
+        self._hl_badge.setPlaceholderText(
+            "text in the pill — leave blank to wrap the value")
+        self._hl_badge.textChanged.connect(self._refresh)
+        self._hl_place = self._place_combo()
+        f.addRow("", self._hl_pill)
+        f.addRow("Pill text", self._hl_badge)
+        f.addRow("Place", self._hl_place)
         f.addRow("Apply to", self._scope)
         f.addRow("", self._bold)
         self._stack.addWidget(page)
@@ -405,6 +452,10 @@ class RuleBuilder(QDialog):
         head.addRow("Decided by", self._icon_by)
         self._icon_only = self._only_box("icon only — hide the value")
         head.addRow("", self._icon_only)
+        self._icon_pill = self._pill_box("in a pill")
+        head.addRow("", self._icon_pill)
+        self._icon_place = self._place_combo()
+        head.addRow("Place", self._icon_place)
         v.addLayout(head)
 
         # -- graduated set
@@ -731,7 +782,13 @@ class RuleBuilder(QDialog):
             fill = self._fill.value() or "grey"
             if self._scope.currentIndex() == 1:
                 return f"{cond} => row {fill}"
-            tail = f"bg {fill}" + (", bold" if self._bold.isChecked() else "")
+            if self._hl_pill.isChecked():
+                badge = self._hl_badge.text().strip()
+                label = f' "{badge}"' if badge else ""
+                tail = f"pill {fill}{label}{_place(self._hl_place)}"
+            else:
+                tail = f"bg {fill}"
+            tail += ", bold" if self._bold.isChecked() else ""
             return f"{cond} => {tail}"
         if kind == 3:
             decider = _other_col_value(self._icon_by)
@@ -753,12 +810,17 @@ class RuleBuilder(QDialog):
                 # `only` leads here: a trailing one would be read as the
                 # last pair's colour
                 only = "only " if self._icon_only.isChecked() else ""
-                return (f"{cols} iconmap {only}{source}: "
+                where = self._icon_place.currentData()
+                lead = only + (f"{where} " if where else "")
+                lead += "pill " if self._icon_pill.isChecked() else ""
+                return (f"{cols} iconmap {lead}{source}: "
                         + ", ".join(pairs))
             rev = " reverse" if self._icon_reverse.isChecked() else ""
             by = f" by {quote_column(decider)}" if decider else ""
-            return (f"{cols} icons {self._iconset.currentData()}{rev}{by}"
-                    f"{_only(self._icon_only)}")
+            # before the `by` clause, or the column name would swallow them
+            trail = _pill(self._icon_pill) + _place(self._icon_place)
+            return (f"{cols} icons {self._iconset.currentData()}{rev}{trail}"
+                    f"{by}{_only(self._icon_only)}")
         if kind == 4:
             spec = self._numfmt.currentText().strip()
             return f"{cols} format {spec}" if spec else ""

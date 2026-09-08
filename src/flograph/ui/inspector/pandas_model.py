@@ -12,7 +12,7 @@ import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QFont
 
-from ..table_delegate import BAR_ROLE, ICON_ROLE
+from ..table_delegate import BAR_ROLE, DECOR_ROLE, ICON_ROLE
 
 PAGE_SIZE = 500
 FLOAT_PRECISION = 6
@@ -49,7 +49,7 @@ _ALIGN_RULE = {
 # without touching the frame
 _VALUE_ROLES = frozenset({_DISPLAY, _EDIT, _FOREGROUND, _FONT, _ALIGNMENT})
 # ...plus the format roles, used only when a style is actually wired in
-_VALUE_ROLES_FMT = _VALUE_ROLES | {_BACKGROUND, BAR_ROLE, ICON_ROLE}
+_VALUE_ROLES_FMT = _VALUE_ROLES | {_BACKGROUND, BAR_ROLE, ICON_ROLE, DECOR_ROLE}
 
 
 def _bold() -> QFont:
@@ -365,8 +365,16 @@ class PandasModel(QAbstractTableModel):
                 return (style.bar, style.bar_color, style.bar_mode)
             return None
         if role == ICON_ROLE:
-            if style is not None and style.icon:
-                return (style.icon, style.icon_color)
+            # the first decoration only — what a caller sizing a column
+            # wants to know, and what this role meant when a cell could
+            # hold exactly one icon
+            if style is not None and style.decorations:
+                first = style.decorations[0]
+                return (first.text, first.color)
+            return None
+        if role == DECOR_ROLE:
+            if style is not None and (style.decorations or style.pill):
+                return (style.decorations, style.pill, style.pill_fg)
             return None
         if role == _ALIGNMENT:
             forced = self._align.get(col)

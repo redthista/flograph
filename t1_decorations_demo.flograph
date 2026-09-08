@@ -1,0 +1,265 @@
+{
+  "flograph_version": "0.1.14",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "n00_jobs",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "label": "Jobs",
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"job\", \"type\": \"text\"}, {\"name\": \"owner\", \"type\": \"text\"}, {\"name\": \"status\", \"type\": \"text\"}, {\"name\": \"score\", \"type\": \"integer\"}, {\"name\": \"late\", \"type\": \"integer\"}, {\"name\": \"signed\", \"type\": \"integer\"}], \"rows\": [[\"Weld line A\", \"Priya\", \"breach\", 12, 1, 1], [\"Paint bay\", \"Tom\", \"watch\", 48, 0, 1], [\"Assembly 3\", \"Priya\", \"ok\", 91, 0, 0], [\"Packing\", \"Dev\", \"breach\", 33, 1, 0], [\"Goods in\", \"Tom\", \"ok\", 77, 0, 1], [\"Despatch\", \"Dev\", \"watch\", 55, 1, 1]]}",
+          "width": 420,
+          "height": 300
+        },
+        "code": null
+      },
+      {
+        "id": "n01_goto",
+        "type": "flograph.util.goto",
+        "pos": [
+          660,
+          140
+        ],
+        "label": null,
+        "params": {
+          "name": "jobs"
+        },
+        "code": null
+      },
+      {
+        "id": "n19_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          460
+        ],
+        "label": null,
+        "params": {
+          "text": "### Where a mark goes\n\n`right`, `above`, `below` and `in` — and `left`, which is where the one icon a cell used to hold always went.\n\nThe **late** rows are taller than the others: a mark `above` takes a line of its own, and only the rows that matched the rule pay for it.",
+          "width": 620,
+          "height": 180
+        },
+        "code": null
+      },
+      {
+        "id": "n10_from",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          0,
+          920
+        ],
+        "label": "jobs",
+        "params": {
+          "source": "n01_goto"
+        },
+        "code": null
+      },
+      {
+        "id": "n11_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          420,
+          760
+        ],
+        "label": "1 · Where a mark goes",
+        "params": {
+          "format_rules": "score  icons traffic right\nlate   = 1 => icon ! amber above\nsigned = 1 => icon ✓ green in\nsigned = 0 => icon ✗ red in\njob    width 130\n",
+          "width": 620,
+          "height": 340
+        },
+        "code": null
+      },
+      {
+        "id": "n29_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          1260
+        ],
+        "label": null,
+        "params": {
+          "text": "### More than one, in the same cell\n\nTwo rules that both match both land. This is the whole model change: a cell holds a **list**, so the second rule *adds* a mark rather than failing to replace the first.\n\nLook at **late** on the breached rows — an OT badge, the value, and a tick after it.",
+          "width": 620,
+          "height": 180
+        },
+        "code": null
+      },
+      {
+        "id": "n20_from",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          0,
+          1720
+        ],
+        "label": "jobs",
+        "params": {
+          "source": "n01_goto"
+        },
+        "code": null
+      },
+      {
+        "id": "n21_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          420,
+          1560
+        ],
+        "label": "2 · More than one, in the same cell",
+        "params": {
+          "format_rules": "late   = 1 => pill red \"OT\"\nlate   = 1 => icon ✓ green right\nstatus = breach => icon ▲ red left\njob    width 130\n",
+          "width": 620,
+          "height": 340
+        },
+        "code": null
+      },
+      {
+        "id": "n39_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          2060
+        ],
+        "label": null,
+        "params": {
+          "text": "### Pills\n\nA lozenge. With no text of its own it wraps the value (`status`); with text it stands beside it.\n\n`colormap pill:` is the category-pill shape — the mapped colour becomes the ground behind the value instead of flooding the cell.",
+          "width": 620,
+          "height": 180
+        },
+        "code": null
+      },
+      {
+        "id": "n30_from",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          0,
+          2520
+        ],
+        "label": "jobs",
+        "params": {
+          "source": "n01_goto"
+        },
+        "code": null
+      },
+      {
+        "id": "n31_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          420,
+          2360
+        ],
+        "label": "3 · Pills",
+        "params": {
+          "format_rules": "status colormap pill: breach=red, watch=amber, ok=green\nscore  icons check pill right\nowner  colormap pill: Priya=blue, Tom=green, Dev=amber\njob    width 130\n",
+          "width": 620,
+          "height": 340
+        },
+        "code": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "c00",
+        "src": [
+          "n00_jobs",
+          "table"
+        ],
+        "dst": [
+          "n01_goto",
+          "value"
+        ]
+      },
+      {
+        "id": "c10",
+        "src": [
+          "n10_from",
+          "value"
+        ],
+        "dst": [
+          "n11_table",
+          "table"
+        ]
+      },
+      {
+        "id": "c20",
+        "src": [
+          "n20_from",
+          "value"
+        ],
+        "dst": [
+          "n21_table",
+          "table"
+        ]
+      },
+      {
+        "id": "c30",
+        "src": [
+          "n30_from",
+          "value"
+        ],
+        "dst": [
+          "n31_table",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f00",
+        "title": "Source",
+        "rect": [
+          -40,
+          -70,
+          920,
+          410
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "f10",
+        "title": "1 · Where a mark goes",
+        "rect": [
+          -40,
+          390,
+          1120,
+          750
+        ],
+        "color": "#3c3450"
+      },
+      {
+        "id": "f20",
+        "title": "2 · More than one, in the same cell",
+        "rect": [
+          -40,
+          1190,
+          1120,
+          750
+        ],
+        "color": "#3c3450"
+      },
+      {
+        "id": "f30",
+        "title": "3 · Pills",
+        "rect": [
+          -40,
+          1990,
+          1120,
+          750
+        ],
+        "color": "#3c3450"
+      }
+    ],
+    "pages": [
+      {
+        "id": "p01",
+        "title": "On paper",
+        "kind": "report",
+        "body": "# Decorations on paper\n\nThe same rules, rendered as a document. A mark keeps its place, a\nrow that grew stays grown — and a pill prints square-cornered,\nbecause Qt's rich text has no `border-radius`. The colour carries\nthe meaning; the shape is the one thing the page cannot keep.\n\n## 1 · Where a mark goes\n\n![[1 · Where a mark goes]]\n\n## 2 · More than one, in the same cell\n\n![[2 · More than one, in the same cell]]\n\n## 3 · Pills\n\n![[3 · Pills]]\n"
+      }
+    ]
+  }
+}

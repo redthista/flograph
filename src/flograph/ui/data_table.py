@@ -223,7 +223,7 @@ class DataTableView(QTableView):
         model = self.model()
         if model is None:
             return
-        from .table_delegate import BAR_ROLE, ICON_ROLE
+        from .table_delegate import BAR_ROLE, DECOR_ROLE
         header = self.horizontalHeader()
         metrics = QFontMetrics(self.font())
         rows = min(model.rowCount(), FIT_SAMPLE_ROWS)
@@ -246,8 +246,17 @@ class DataTableView(QTableView):
                     width = max(width, metrics.horizontalAdvance(str(text)) + 16)
                 elif model.data(index, BAR_ROLE) is not None:
                     bar_only = True
-                if not icon_pad and model.data(index, ICON_ROLE):
-                    icon_pad = 24
+                decor = model.data(index, DECOR_ROLE)
+                if decor is not None:
+                    # each mark standing beside the value needs room of its
+                    # own — a cell may carry one on each side — while an
+                    # `above` / `below` one costs the row height instead,
+                    # and a lozenge costs only its padding
+                    marks, pill, _ink = decor
+                    beside = sum(1 for d in marks
+                                 if d.where in ("left", "right", "in"))
+                    icon_pad = max(icon_pad,
+                                   beside * 24 + (14 if pill else 0))
             if bar_only:
                 width = max(width, BAR_ONLY_WIDTH)
             self.setColumnWidth(

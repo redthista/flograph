@@ -382,3 +382,97 @@ class TestValueHidden:
         b = build(rule)
         assert not b._bar_only.isChecked()
         assert b.line() == "units bar blue"
+
+
+# ---------------------------------------------------------------- T1: places
+#
+# The wizard's job here is only to emit a line the parser reads back the
+# way the boxes were ticked. That is worth its own tests because the
+# modifiers strip outward-in: a *leading* block reads `only place pill`
+# and a *trailing* one reads `pill place only`, so the two orders are
+# reversed and neither is guessable from the other.
+
+def _set_place(box, token):
+    box.setCurrentIndex(box.findData(token))
+
+
+def test_a_highlight_can_place_its_icon_on_the_right(build):
+    b = build()
+    b._kind.setCurrentIndex(2)
+    _select(b, "status")
+    b._op.setCurrentIndex(b._op.findData("="))
+    b._val1.setText("breach")
+    b._hl_pill.setChecked(True)
+    b._hl_badge.setText("OT")
+    _set_place(b._hl_place, "right")
+    rule = _valid(b.line())
+    assert (rule.as_pill, rule.glyph, rule.glyph_where) == (True, "OT", "right")
+
+
+def test_a_pill_with_no_text_wraps_the_value(build):
+    b = build()
+    b._kind.setCurrentIndex(2)
+    _select(b, "status")
+    b._op.setCurrentIndex(b._op.findData("="))
+    b._val1.setText("breach")
+    b._hl_pill.setChecked(True)
+    rule = _valid(b.line())
+    assert rule.as_pill is True and rule.glyph is None
+
+
+def test_left_is_not_spelled_out(build):
+    """The default place has an empty token, so the generated line stays
+    as short as it was before there was anywhere else to put a mark."""
+    b = build()
+    b._kind.setCurrentIndex(2)
+    _select(b, "status")
+    b._op.setCurrentIndex(b._op.findData("="))
+    b._val1.setText("breach")
+    b._hl_pill.setChecked(True)
+    assert " left" not in b.line()
+
+
+def test_a_graduated_icon_set_carries_place_and_pill(build):
+    b = build()
+    b._kind.setCurrentIndex(3)
+    _select(b, "revenue")
+    b._icon_style.setCurrentIndex(0)
+    b._icon_pill.setChecked(True)
+    _set_place(b._icon_place, "above")
+    rule = _valid(b.line())
+    assert (rule.mode, rule.as_pill, rule.glyph_where) == \
+        ("icons", True, "above")
+
+
+def test_and_still_does_with_a_by_clause_and_only(build):
+    """The place and the pill sit before `by`, or the column name after it
+    would swallow them."""
+    b = build()
+    b._kind.setCurrentIndex(3)
+    _select(b, "revenue")
+    b._icon_style.setCurrentIndex(0)
+    b._icon_pill.setChecked(True)
+    _set_place(b._icon_place, "right")
+    b._icon_only.setChecked(True)
+    b._icon_by.setCurrentIndex(b._icon_by.findText("units"))
+    rule = _valid(b.line())
+    assert rule.source == "units"
+    assert (rule.as_pill, rule.glyph_where, rule.hide_value) == \
+        (True, "right", True)
+
+
+def test_an_icon_map_carries_them_in_the_leading_block(build):
+    b = build()
+    b._kind.setCurrentIndex(3)
+    _select(b, "sla")
+    b._icon_style.setCurrentIndex(1)
+    b._map.item(0, 0).setText("breach")
+    b._map.cellWidget(0, 1).setText("✗")
+    b._map.cellWidget(0, 2).set_value("red")
+    b._icon_pill.setChecked(True)
+    _set_place(b._icon_place, "right")
+    b._icon_only.setChecked(True)
+    rule = _valid(b.line())
+    assert (rule.as_pill, rule.glyph_where, rule.hide_value) == \
+        (True, "right", True)
+    assert rule.mapping
