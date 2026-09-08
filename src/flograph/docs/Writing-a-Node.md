@@ -245,6 +245,13 @@ behaves identically afterwards. Behind a corporate mirror, set
 `FLOGRAPH_WEBLIB_BASE_URL` and installs are fetched from
 `<base>/<library>/<version>/<file>`.
 
+If the machine blocks flograph's own download but a browser gets through —
+the usual shape of a locked-down work PC — **Copy Links** gives you the
+addresses to open in that browser, and **Install from File…** takes the
+files it saved and puts them in the store. Files are matched by checksum
+first, so a browser that saved `d3.min(1).js` is still recognised as D3, and
+a catalogue library's pin is enforced just as it is on a download.
+
 Right-click a view to get it out of flograph: **Save View as HTML…** writes
 one self-contained file with the libraries embedded, and **Export View as Web
 Folder…** writes the page plus an `assets/` folder with relative links, for a

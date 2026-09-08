@@ -66,11 +66,12 @@ class TestBundledExamples:
             "25_infographic_builder.flograph",
             "26_drawn_in_python.flograph",
             "27_a_story_that_scrolls.flograph",
+            "28_slicer_layouts.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 27
+        assert len(window._examples_menu.actions()) == 28
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -99,6 +100,7 @@ class TestBundledExamples:
         # 27 is the same three visuals again, so it runs here too. The
         # Story node sealing them into iframes adds nothing to fetch.
         "27_a_story_that_scrolls.flograph",
+        "28_slicer_layouts.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from

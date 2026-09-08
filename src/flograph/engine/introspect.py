@@ -8,10 +8,14 @@ pickers populated from whatever DataFrames actually feed a node.
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 from flograph.core import Graph
 
 from .cache import OutputCache
+
+if TYPE_CHECKING:  # the slicer's option model — imported lazily at runtime
+    from flograph.core.slicer import SlicerOptions
 
 
 def cached_input(graph: Graph, cache: OutputCache, node_id: str,
@@ -24,30 +28,64 @@ def cached_input(graph: Graph, cache: OutputCache, node_id: str,
 
 
 def slicer_options(graph: Graph, cache: OutputCache,
-                   node_id: str) -> "list[str] | None":
+                   node_id: str) -> "SlicerOptions | None":
     """The values a Slicer's card should list.
 
-    Connected, that's the unique values (sorted, as strings) of the column
-    it filters on, read from the cached *upstream* DataFrame — the slicer's
-    own output is already filtered, so it can't be the source. Unconnected,
-    it's the "values" param, and needs no run at all: a standalone slicer is
-    a value picker, so making it demand a run before showing anything would
-    be asking for data it doesn't have.
+    Connected, that's the distinct combinations (sorted, as strings) of the
+    column or columns it filters on, read from the cached *upstream*
+    DataFrame — the slicer's own output is already filtered, so it can't be
+    the source. Named several columns, each combination is a **path** down
+    them and the card draws a tree; the row count under every path comes
+    back with it, since the group-by that finds the paths has already
+    counted them. Unconnected, the paths come from the "values" param and
+    need no run at all: a standalone slicer is a value picker, so making it
+    demand a run before showing anything would be asking for data it doesn't
+    have.
 
     None means "nothing usable yet", so hosts can show a run-me placeholder.
     """
+    from flograph.core.slicer import (SlicerOptions, parse_path,
+                                      slicer_columns)
+
     node = graph.nodes.get(node_id)
     if node is None:
         return None
+    columns = slicer_columns(node.params.get("column", ""))
     if graph.input_connection(node_id, "table") is None:
         from flograph.core.controls import lines_to_values
-        return lines_to_values(node.params.get("values", ""))
+        depth = max(1, len(columns))
+        paths = []
+        for value in lines_to_values(node.params.get("values", "")):
+            # a one-level picker takes the line whole, ">" and all: only a
+            # hierarchy has anywhere to put the pieces, and splitting
+            # regardless would mangle a value that simply contains one
+            path = parse_path(value)[:depth] if depth > 1 else (value,)
+            if path:
+                paths.append(path)
+        return SlicerOptions(columns or ["value"], paths)
+    # asked of sys.modules rather than imported: this runs on every card
+    # refresh, and a graph with no data in it should not pay for pandas
     pd = sys.modules.get("pandas")
-    source = cached_input(graph, cache, node_id, "table") if pd else None
-    column = str(node.params.get("column", "") or "").strip()
-    if not isinstance(source, pd.DataFrame) or column not in source.columns:
+    if pd is None:
         return None
-    return sorted(source[column].astype(str).unique())
+    source = cached_input(graph, cache, node_id, "table")
+    if not isinstance(source, pd.DataFrame):
+        return None
+    usable = [c for c in columns if c in source.columns]
+    if not usable:
+        return None
+    frame = source[usable].astype(str)
+    sizes = frame.groupby(usable, sort=True, observed=True).size()
+    paths, counts = [], {}
+    for key, size in sizes.items():
+        path = tuple(key) if isinstance(key, tuple) else (str(key),)
+        paths.append(path)
+        # every ancestor of a leaf gets that leaf's rows, so a collapsed
+        # parent still reports what picking it would keep
+        for depth in range(1, len(path) + 1):
+            prefix = path[:depth]
+            counts[prefix] = counts.get(prefix, 0) + int(size)
+    return SlicerOptions(usable, paths, counts)
 
 
 def control_upstream(graph: Graph, cache: OutputCache,

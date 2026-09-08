@@ -11,17 +11,19 @@ holds what is *not* built.
 
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
-reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q, R
-and Y) are where shipped work used to be. Old numbers are kept as "(was N)" where
+reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q,
+R, Y and Z) are where shipped work used to be. Old numbers are kept as "(was N)" where
 a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
-2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30. M3,
-M4, N4 and chunks T–Z were triaged out of Dan's 0.1.13 list and checked
-against the code on 2026-09-07 — of which T2, T3, U1, V2, W1, X2 and the
-whole of Y shipped the same day and have left the list.
+2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30.
+M3, M4, N6 and chunks T–X were triaged out of Dan's 0.1.13 list and
+checked against the code on 2026-09-07 — of which T2, T3, U1, V2, W1,
+X2 and the whole of Y shipped the same day and have left the list. Z1
+was triaged here too and shipped from another branch, so Z retires
+without ever having been listed.
 
 ---
 
@@ -139,27 +141,32 @@ accident is not a bug anybody gets to undo.
 
 ## N. Dashboard pages
 
-**N3. Set the shape a visual takes on a page** (Dan). Asked for as "a wide
-Plotly chart, or a long thin one". The two page kinds answer this
-differently today:
+**N3. Set the shape a visual takes on a dashboard page** (Dan). Asked for as
+"a wide Plotly chart, or a long thin one". On a **report page** this shipped
+as the `ratio=` / `height=` embed options (0.1.12). On a **dashboard page**
+(free-form tiles) the capability is already there by dragging a tile's edges;
+what is missing is a numeric "W:H" input, an aspect lock while resizing, and
+a few preset ratios — new UI on `TileItem` or the properties panel.
 
-  On a **report page** (the flowing document), `![[chart|width=50%]]` is
-  the only per-embed control — `EMBED_OPTIONS == ("width",)`, and a test
-  pins it closed. The figure's wide-or-tall shape comes from the figure's
-  own `layout.width` / `layout.height`, set on the chart node or a Plotly
-  Style node; the report only scales the placement width. A `height=` or
-  `ratio=` embed option is the natural addition, plumbed through
-  `parse_options` and `render.plotly_geometry` — but the render code
-  deliberately resists resizing Plotly figures, because the labels do not
-  scale with them. Sits with `ideas_archived.md` #7, which already parks
-  `![[chart|fit]]` and embed alignment.
+**N4. A slicer that greys out values with nothing behind them.** Excel greys
+a slicer value that the *other* slicers have already filtered away, so you
+can see that "Bristol" exists but is empty under the current selection
+rather than watching it vanish. flograph's slicers chain instead: the second
+one reads the first one's *output*, so an emptied value simply has no row.
+Greying instead of dropping needs each slicer to see both the filtered and
+the unfiltered frame — `slicer_options` already reads the upstream cache, so
+the missing half is the *unfiltered* source, which means walking back past
+the slicers above it. Worth doing only if the vanishing turns out to confuse
+people; the counts shipped in 0.1.14 already answer most of "why is that
+gone".
 
-  On a **dashboard page** (free-form tiles) the capability is already there
-  by dragging a tile's edges; what is missing is a numeric "W:H" input, an
-  aspect lock while resizing, and a few preset ratios — new UI on `TileItem`
-  or the properties panel.
+**N5. Expand / collapse all on a deep slicer tree.** A hierarchy opens fully
+expanded, which is right for two levels and wrong for three over a wide
+column. A pair of buttons in the slicer toolbar (and remembering which
+branches were open, in a param) — small, but only worth it once someone has
+a three-level slicer.
 
-**N4. Where is this visual used?** (Dan) A right-click on any visual node
+**N6. Where is this visual used?** (Dan) A right-click on any visual node
 that answers "this is on dashboard page X and report page Y", and takes you
 there. The links already exist in both directions — a dashboard tile stores
 the node it shows, and a report page's `![[name]]` embed names it — so this
@@ -326,20 +333,6 @@ the result. Decide first whether it is a new node or a **mode of Show
 Table**: as a mode it inherits every conditional-formatting rule, which is
 most of what makes the ask worth doing at all; as a node it stays simple
 and the formatting arrives by wiring a style in.
-
-## Z. Web libraries from your own machine
-
-**Z1. Install a web library from local files** (Dan). `flograph/weblibs.py`
-installs by downloading a pinned URL into a per-user store and writing a
-manifest beside it — and the store, the manifest, and everything that reads
-them are indifferent to where the bytes came from. So this is a second
-front door onto the same store: pick a `.js` / `.css` or a folder, give it
-a name and a version, write the manifest. It is for the machine with no
-route to a CDN at all, and for a library the catalogue does not carry. Two
-things to keep honest: the manifest records a URL and there will not be one
-(record the source path, and say that is what it is), and the pinned-hash
-discipline the catalogue has does not apply to a file you chose off disk,
-so the dialog must not imply that it does.
 
 ---
 

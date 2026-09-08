@@ -24,7 +24,7 @@ from flograph.core.ports import FLOW_INPUT, FLOW_OUTPUT, is_flow
 
 from .. import theme
 from ..data_table import DataTableView
-from ..slicer_list import SlicerListWidget, SlicerToolbar, selected_param_values
+from ..slicer_list import SlicerPanel
 from . import marks
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .stacking import NODE_Z, z_for
@@ -159,6 +159,9 @@ SLICER_MIN_W, SLICER_MAX_W = 140.0, 1600.0
 # Floor leaves room for the header, the (possibly wrapped) search/All/None
 # row and a couple of value rows — below this the list is all scrollbar.
 SLICER_MIN_H, SLICER_MAX_H = 150.0, CARD_MAX_H
+# A dropdown slicer is one button by design, so the list floor would be most
+# of the card empty; it gets its own, the height of that button plus chrome.
+SLICER_DROPDOWN_MIN_H = 66.0
 
 IMAGE_TYPE = "flograph.viz.image"
 IMAGE_MIN_W, IMAGE_MAX_W = 60.0, CARD_MAX_W
@@ -900,10 +903,8 @@ class NodeItem(QGraphicsObject):
         # so a click can only ever hit a chevron the user can actually see.
         self._pager: Optional[tuple[QRectF, QRectF]] = None
         self._pager_hover = 0                        # -1 back, +1 forward
-        self._slicer_list: SlicerListWidget | None = None
-        self._slicer_toolbar: SlicerToolbar | None = None
+        self._slicer_panel: SlicerPanel | None = None
         self._slicer_proxy: QGraphicsProxyWidget | None = None
-        self._slicer_placeholder: QLabel | None = None
         self._control_widget = None  # ControlWidget (control cards only)
         self._control_proxy: QGraphicsProxyWidget | None = None
         # Output preview faded while a re-run for this node is queued or in
@@ -1043,7 +1044,7 @@ class NodeItem(QGraphicsObject):
             if self._live_height is not None:
                 return self._live_height
             fixed = float(self.node.params.get("height", 240) or 240)
-            return min(SLICER_MAX_H, max(SLICER_MIN_H, fixed))
+            return min(SLICER_MAX_H, max(self._slicer_min_height(), fixed))
         if self.control:
             if self._live_height is not None:
                 return self._live_height
@@ -2279,80 +2280,40 @@ class NodeItem(QGraphicsObject):
         height = max(0.0, self.body_height - HEADER_H - CARD_HANDLE)
         return QRectF(0, HEADER_H, self.width, height)
 
+    def _slicer_min_height(self) -> float:
+        """How short this slicer card may be dragged. A dropdown is one
+        button and needs room for nothing else; every other layout needs the
+        search row plus a couple of values or it is all scrollbar."""
+        layout = str(self.node.params.get("layout", "list") or "list")
+        return SLICER_DROPDOWN_MIN_H if layout == "dropdown" else SLICER_MIN_H
+
     def _layout_slicer_proxy(self) -> None:
         if self._slicer_proxy is not None:
             self._slicer_proxy.setGeometry(self._slicer_proxy_rect())
 
     def _build_slicer_widget(self) -> None:
-        host = QWidget()
-        layout = QVBoxLayout(host)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(0)
+        panel = SlicerPanel()
+        panel.selection_committed.connect(self._on_slicer_committed)
+        self._slicer_panel = panel
 
-        placeholder = QLabel("Run the graph to load slicer values.")
-        placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setWordWrap(True)
-        placeholder.setStyleSheet("color: #6b7280;")
-        layout.addWidget(placeholder, 1)
-        self._slicer_placeholder = placeholder
-
-        values = SlicerListWidget()
-        values.selection_committed.connect(self._on_slicer_committed)
-        values.hide()
-
-        toolbar = SlicerToolbar(values)
-        toolbar.hide()
-        layout.addWidget(toolbar)
-        layout.addWidget(values, 1)
-        self._slicer_toolbar = toolbar
-        self._slicer_list = values
-
-        proxy = self._card_proxy(host)
+        proxy = self._card_proxy(panel)
         self._slicer_proxy = proxy
         self._layout_slicer_proxy()
 
-    def set_slicer_options(self, values: Optional[list[str]]) -> None:
-        """Rebuild the checkbox list from the column's unique values (from
-        the upstream cache), ticking those in the "selected" param — called
-        from the GUI thread once the engine reports this node done. None
-        reverts to the run-me placeholder."""
-        widget = self._slicer_list
-        if widget is None:
-            return
-        if values is None:
-            widget.clear()
-            widget.hide()
-            if self._slicer_toolbar is not None:
-                self._slicer_toolbar.hide()
-            self._slicer_placeholder.show()
-            return
-        widget.set_mode(self._slicer_mode())
-        widget.set_options(values, set(self._slicer_selected_param()))
-        self._slicer_placeholder.hide()
-        widget.show()
-        if self._slicer_toolbar is not None:
-            self._slicer_toolbar.set_mode(self._slicer_mode())
-            self._slicer_toolbar.refresh_summary()
-            self._slicer_toolbar.show()
+    def set_slicer_options(self, options) -> None:
+        """Rebuild the card's values from the column(s) it filters on (read
+        from the upstream cache), ticking what the "selected" param holds —
+        called from the GUI thread once the engine reports this node done.
+        None reverts to the run-me placeholder."""
+        if self._slicer_panel is not None:
+            self._slicer_panel.set_options(options, self.node.params)
 
     def _sync_slicer_checks(self) -> None:
-        """Re-apply check states and selection mode from this node's params
-        — keeps the card honest when they change elsewhere (properties
-        panel, undo)."""
-        widget = self._slicer_list
-        if widget is not None and not widget.isHidden():
-            widget.set_mode(self._slicer_mode())
-            if self._slicer_toolbar is not None:
-                self._slicer_toolbar.set_mode(self._slicer_mode())
-            widget.sync_checks(set(self._slicer_selected_param()))
-            if self._slicer_toolbar is not None:
-                self._slicer_toolbar.refresh_summary()
-
-    def _slicer_selected_param(self) -> list[str]:
-        return selected_param_values(self.node.params.get("selected", ""))
-
-    def _slicer_mode(self) -> str:
-        return str(self.node.params.get("mode", "multi") or "multi")
+        """Re-apply the ticks, the selection mode and the layout from this
+        node's params — keeps the card honest when they change elsewhere
+        (properties panel, undo)."""
+        if self._slicer_panel is not None:
+            self._slicer_panel.sync_params(self.node.params)
 
     def _on_slicer_committed(self, new_value: str) -> None:
         """A tick changed: commit the selection (dirties this node and
@@ -3751,7 +3712,8 @@ class NodeItem(QGraphicsObject):
         if self.image_card:
             return IMAGE_MIN_W, IMAGE_MAX_W, IMAGE_MIN_H, IMAGE_MAX_H
         if self.slicer:
-            return SLICER_MIN_W, SLICER_MAX_W, SLICER_MIN_H, SLICER_MAX_H
+            return (SLICER_MIN_W, SLICER_MAX_W,
+                    self._slicer_min_height(), SLICER_MAX_H)
         if self.control:
             return (CONTROL_MIN_W, CONTROL_MAX_W,
                     CONTROL_MIN_H, CONTROL_MAX_H)

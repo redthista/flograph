@@ -1216,6 +1216,45 @@ class TestSlicerNode:
             run_node(registry, "flograph.viz.slicer", {"column": "nope"},
                      table=table)
 
+    def test_a_path_filters_on_every_level(self, registry, table):
+        out = run_node(registry, "flograph.viz.slicer",
+                       {"column": "region, units",
+                        "selected": '[["north", "10"]]'}, table=table)
+        assert list(out["table"]["units"]) == [10]
+
+    def test_a_short_path_is_a_prefix(self, registry, table):
+        """Ticking a parent keeps everything under it without its children
+        having to be listed — the whole point of the tree."""
+        out = run_node(registry, "flograph.viz.slicer",
+                       {"column": "region, units", "selected": '[["north"]]'},
+                       table=table)
+        assert list(out["table"]["units"]) == [10, 30]
+
+    def test_several_paths_are_ored_together(self, registry, table):
+        out = run_node(registry, "flograph.viz.slicer",
+                       {"column": "region, units",
+                        "selected": '[["north", "10"], ["south", "40"]]'},
+                       table=table)
+        assert list(out["table"]["units"]) == [10, 40]
+
+    def test_selected_output_is_the_deepest_value(self, registry, table):
+        out = run_node(registry, "flograph.viz.slicer",
+                       {"column": "region, units",
+                        "selected": '[["north", "10"]]'}, table=table)
+        assert out["selected"] == ["10"]
+
+    def test_a_missing_second_column_is_named(self, registry, table):
+        with pytest.raises(ValueError, match="'nope' not in table"):
+            run_node(registry, "flograph.viz.slicer",
+                     {"column": "region, nope"}, table=table)
+
+    def test_single_mode_honours_only_the_first_path(self, registry, table):
+        out = run_node(registry, "flograph.viz.slicer",
+                       {"column": "region, units", "mode": "single",
+                        "selected": '[["north", "10"], ["south", "40"]]'},
+                       table=table)
+        assert list(out["table"]["units"]) == [10]
+
 
 class TestTableSpecNode:
     def test_spec_shape(self, registry, table):

@@ -1,0 +1,283 @@
+{
+  "flograph_version": "0.1.14",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "s28_sales",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          -160
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"store\", \"type\": \"text\"}, {\"name\": \"channel\", \"type\": \"text\"}, {\"name\": \"product\", \"type\": \"text\"}, {\"name\": \"units\", \"type\": \"integer\"}, {\"name\": \"revenue\", \"type\": \"number\"}], \"rows\": [[\"North\", \"Aberdeen\", \"Retail\", \"Coffee\", 120, 480.0], [\"North\", \"Aberdeen\", \"Retail\", \"Tea\", 80, 240.0], [\"North\", \"Aberdeen\", \"Online\", \"Coffee\", 45, 198.0], [\"North\", \"Dundee\", \"Retail\", \"Coffee\", 95, 380.0], [\"North\", \"Dundee\", \"Online\", \"Pastry\", 60, 150.0], [\"North\", \"Dundee\", \"Online\", \"Tea\", 30, 90.0], [\"South\", \"Bristol\", \"Retail\", \"Coffee\", 210, 840.0], [\"South\", \"Bristol\", \"Retail\", \"Pastry\", 140, 350.0], [\"South\", \"Bristol\", \"Online\", \"Tea\", 55, 165.0], [\"South\", \"Exeter\", \"Retail\", \"Tea\", 70, 210.0], [\"South\", \"Exeter\", \"Online\", \"Coffee\", 65, 286.0], [\"West\", \"Cardiff\", \"Retail\", \"Coffee\", 130, 520.0], [\"West\", \"Cardiff\", \"Retail\", \"Pastry\", 90, 225.0], [\"West\", \"Swansea\", \"Online\", \"Tea\", 40, 120.0], [\"West\", \"Swansea\", \"Online\", \"Pastry\", 35, 87.5]]}",
+          "width": 380,
+          "height": 300
+        },
+        "code": null,
+        "label": "Store Sales"
+      },
+      {
+        "id": "s28_tree",
+        "type": "flograph.viz.slicer",
+        "pos": [
+          620,
+          -160
+        ],
+        "params": {
+          "column": "region, store",
+          "layout": "list",
+          "show_counts": true,
+          "selected": "[[\"North\"], [\"South\", \"Bristol\"]]",
+          "width": 220,
+          "height": 320,
+          "accent": "#e11d48"
+        },
+        "code": null,
+        "label": "Region \u203a Store (tree)"
+      },
+      {
+        "id": "s28_product",
+        "type": "flograph.viz.slicer",
+        "pos": [
+          1080,
+          -100
+        ],
+        "params": {
+          "column": "product",
+          "layout": "cards",
+          "width": 260,
+          "height": 200,
+          "accent": "#f59e0b",
+          "show_search": false
+        },
+        "code": null,
+        "label": "Product (cards)"
+      },
+      {
+        "id": "s28_channel",
+        "type": "flograph.viz.slicer",
+        "pos": [
+          1580,
+          -40
+        ],
+        "params": {
+          "column": "channel",
+          "layout": "dropdown",
+          "width": 220,
+          "height": 80,
+          "accent": "#16a34a",
+          "show_search": false,
+          "show_buttons": false
+        },
+        "code": null,
+        "label": "Channel (dropdown)"
+      },
+      {
+        "id": "s28_table",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          2040,
+          -320
+        ],
+        "params": {
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": "What survives the filters"
+      },
+      {
+        "id": "s28_kpi",
+        "type": "flograph.viz.card",
+        "pos": [
+          2040,
+          160
+        ],
+        "params": {
+          "column": "revenue",
+          "aggregation": "Sum",
+          "label": "Revenue in view",
+          "format": "{:,.0f}",
+          "width": 240,
+          "height": 140
+        },
+        "code": null,
+        "label": "Revenue"
+      },
+      {
+        "id": "s28_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -540
+        ],
+        "params": {
+          "text": "## Three ways to draw one slicer\n\nThe **Slicer** takes more than one column. Name two \u2014 `region, store` \u2014 and\nit becomes a **tree**: tick a region for the whole region, tick one store to\nnarrow to it, and a region with only some of its stores ticked draws a\npart-filled box.\n\n**Layout** then decides how that selection is *drawn*, and nothing else:\n\n- **list** \u2014 the checkbox list, a tree when there is more than one column\n- **cards** \u2014 a tile per value, wrapping to the width of the card\n- **dropdown** \u2014 the whole picker behind one button saying what is picked\n\nThe three slicers below are chained, so they read as one filter panel: each\none filters what the next one offers. Open the **Filter Panel** page to see\nthem as a dashboard. Layout, **Show row counts** and the card's size are all\ncosmetic \u2014 changing them never re-runs the flow.",
+          "width": 560,
+          "height": 260
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "s28_c1",
+        "src": [
+          "s28_sales",
+          "table"
+        ],
+        "dst": [
+          "s28_tree",
+          "table"
+        ]
+      },
+      {
+        "id": "s28_c2",
+        "src": [
+          "s28_tree",
+          "table"
+        ],
+        "dst": [
+          "s28_product",
+          "table"
+        ]
+      },
+      {
+        "id": "s28_c3",
+        "src": [
+          "s28_product",
+          "table"
+        ],
+        "dst": [
+          "s28_channel",
+          "table"
+        ]
+      },
+      {
+        "id": "s28_c4",
+        "src": [
+          "s28_channel",
+          "table"
+        ],
+        "dst": [
+          "s28_table",
+          "table"
+        ]
+      },
+      {
+        "id": "s28_c5",
+        "src": [
+          "s28_channel",
+          "table"
+        ],
+        "dst": [
+          "s28_kpi",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "s28_f1",
+        "title": "Data",
+        "rect": [
+          -40,
+          -230,
+          460,
+          410
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "s28_f2",
+        "title": "Filter panel \u2014 one slicer, three layouts",
+        "rect": [
+          580,
+          -230,
+          1260,
+          430
+        ],
+        "color": "#3d3357"
+      },
+      {
+        "id": "s28_f3",
+        "title": "Results",
+        "rect": [
+          2000,
+          -390,
+          540,
+          730
+        ],
+        "color": "#2f4f45"
+      }
+    ],
+    "pages": [
+      {
+        "id": "s28_p1",
+        "title": "Filter Panel",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "s28_t1",
+            "node": "s28_tree",
+            "port": null,
+            "rect": [
+              40,
+              40,
+              240,
+              360
+            ]
+          },
+          {
+            "id": "s28_t2",
+            "node": "s28_product",
+            "port": null,
+            "rect": [
+              320,
+              40,
+              300,
+              180
+            ]
+          },
+          {
+            "id": "s28_t3",
+            "node": "s28_channel",
+            "port": null,
+            "rect": [
+              320,
+              260,
+              300,
+              80
+            ]
+          },
+          {
+            "id": "s28_t4",
+            "node": "s28_kpi",
+            "port": "value",
+            "rect": [
+              660,
+              40,
+              260,
+              160
+            ]
+          },
+          {
+            "id": "s28_t5",
+            "node": "s28_table",
+            "port": "table",
+            "rect": [
+              660,
+              240,
+              440,
+              320
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
