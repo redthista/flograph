@@ -1,0 +1,360 @@
+{
+  "flograph_version": "0.1.14",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "note_format",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          -300
+        ],
+        "params": {
+          "text": "## 1 · Table formatting  (T2, T3, V2, W1)\n\n**T3** — `20* = 1 => icon ✓ green` puts a tick in *every* 20xx column where the cell is 1. This is the line you reported as \"20* doesn't work\": the glob was always fine, but a `=>` rule could not place an icon at all.\n\n**T2** — `status colormap: fail=red, watch=amber, ok=green` replaces one condition line per value.\n\n**V2** — the card opens sorted by **revenue, descending** without anyone clicking a header. See **Sort by** in the Properties panel.\n\n**W1** — this card is **1800 × 760**. The old ceiling was 1600 × 2000; drag its corner or type into Width to go up to 4000.",
+          "width": 520,
+          "height": 260
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "src",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"region\", \"type\": \"text\"}, {\"name\": \"month\", \"type\": \"text\"}, {\"name\": \"status\", \"type\": \"text\"}, {\"name\": \"2023\", \"type\": \"integer\"}, {\"name\": \"2024\", \"type\": \"integer\"}, {\"name\": \"revenue\", \"type\": \"number\"}], \"rows\": [[\"South\", \"Mar\", \"ok\", 1, 0, 30.0], [\"North\", \"Mar\", \"fail\", 0, 1, 10.0], [\"South\", \"Jan\", \"watch\", 1, 1, 55.0], [\"North\", \"Jan\", \"ok\", 0, 0, 22.0], [\"East\", \"Feb\", \"fail\", 1, 1, 41.0], [\"East\", \"Jan\", \"ok\", 0, 1, 17.0], [\"West\", \"Feb\", \"watch\", 1, 0, 63.0], [\"West\", \"Mar\", \"ok\", 1, 1, 28.0]]}",
+          "width": 640,
+          "height": 300
+        },
+        "code": null,
+        "label": "Source data"
+      },
+      {
+        "id": "publish",
+        "type": "flograph.util.goto",
+        "pos": [
+          700,
+          120
+        ],
+        "params": {
+          "name": "Source data"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "formatted",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          920,
+          -60
+        ],
+        "params": {
+          "format_rules": "# T3 — an icon placed by a condition, across a column pattern.\n# This is the line that could not be written before.\n20*     = 1 => icon ✓ green\n\n# T2 — a value → colour map, instead of one condition line per value.\nstatus  colormap: fail=red, watch=amber, ok=green\n\n# and the same idea as a lookup, reading each column's own value\n# (T3's other half — no source column before the colon)\nrevenue scale green\n",
+          "sort": "revenue",
+          "sort_dir": "descending",
+          "width": 1800,
+          "height": 760
+        },
+        "code": null,
+        "label": "Formatted"
+      },
+      {
+        "id": "note_pivot",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          900
+        ],
+        "params": {
+          "text": "## 2 · Pivot keeps your order  (X2)\n\nThe source months are **Mar, Jan, Feb** — neither alphabetical nor calendar order, so you can tell the two apart.\n\nThe **top** pivot uses the new default, *as they appear*: columns come out Mar, Jan, Feb.\n\nThe **bottom** one is set to *sorted*, the old behaviour: Feb, Jan, Mar — which is the alphabetical-months problem you hit.",
+          "width": 520,
+          "height": 240
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "from_pivot",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          620,
+          1420
+        ],
+        "params": {
+          "source": "publish"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "pivot_kept",
+        "type": "flograph.transform.pivot",
+        "pos": [
+          920,
+          1240
+        ],
+        "params": {
+          "index": "region",
+          "columns": "month",
+          "values": "revenue",
+          "agg": "sum",
+          "order": "as they appear"
+        },
+        "code": null,
+        "label": "Pivot (as they appear)"
+      },
+      {
+        "id": "pivot_sorted",
+        "type": "flograph.transform.pivot",
+        "pos": [
+          920,
+          1700
+        ],
+        "params": {
+          "index": "region",
+          "columns": "month",
+          "values": "revenue",
+          "agg": "sum",
+          "order": "sorted"
+        },
+        "code": null,
+        "label": "Pivot (sorted)"
+      },
+      {
+        "id": "show_kept",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1240,
+          1160
+        ],
+        "params": {
+          "width": 520,
+          "height": 280
+        },
+        "code": null,
+        "label": "Mar, Jan, Feb — your order"
+      },
+      {
+        "id": "show_sorted",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1240,
+          1620
+        ],
+        "params": {
+          "width": 520,
+          "height": 280
+        },
+        "code": null,
+        "label": "Feb, Jan, Mar — alphabetical"
+      },
+      {
+        "id": "note_copy",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          2200
+        ],
+        "params": {
+          "text": "## 3 · Copy code with its indents  (Y1)\n\nOpen this node's **Code** tab, select the `run` function, Ctrl+C, and paste it into an email. The indentation now survives an ordinary paste — no \"paste as unformatted\" needed.\n\n## 4 · Report header tone  (U1)\n\nOpen the **Report** page tab. Both tables have a toned header row now; before, only the one with `|fit` did.",
+          "width": 520,
+          "height": 280
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "from_copy",
+        "type": "flograph.util.goto_from",
+        "pos": [
+          620,
+          2300
+        ],
+        "params": {
+          "source": "publish"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "copy_me",
+        "type": "flograph.scripting.python_script",
+        "pos": [
+          920,
+          2240
+        ],
+        "params": {},
+        "code": "\"\"\"Copy me\n\nSelect this whole function and copy it (Ctrl+C), then paste into an email\nor a Word document. Before the fix the indentation vanished unless you\nused \"paste as unformatted\"; now the ordinary paste keeps it.\n\"\"\"\nNODE = {\n    \"label\": \"Copy me\",\n    \"category\": \"Scripting\",\n    \"inputs\": [(\"table\", \"dataframe\")],\n    \"outputs\": [(\"table\", \"dataframe\")],\n}\nPARAMS = []\n\n\ndef run(ctx, table):\n    \"\"\"Deliberately deeply indented, so a lost indent is obvious.\"\"\"\n    out = table.copy()\n    for name in out.columns:\n        if name.startswith(\"20\"):\n            if out[name].sum() > 0:\n                ctx.log(f\"{name}: {int(out[name].sum())} flagged\")\n            else:\n                ctx.log(f\"{name}: nothing flagged\")\n    return {\"table\": out}\n",
+        "label": "Copy me"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1",
+        "src": [
+          "src",
+          "table"
+        ],
+        "dst": [
+          "formatted",
+          "table"
+        ]
+      },
+      {
+        "id": "c2",
+        "src": [
+          "src",
+          "table"
+        ],
+        "dst": [
+          "publish",
+          "value"
+        ]
+      },
+      {
+        "id": "c3",
+        "src": [
+          "from_pivot",
+          "value"
+        ],
+        "dst": [
+          "pivot_kept",
+          "table"
+        ]
+      },
+      {
+        "id": "c4",
+        "src": [
+          "from_pivot",
+          "value"
+        ],
+        "dst": [
+          "pivot_sorted",
+          "table"
+        ]
+      },
+      {
+        "id": "c5",
+        "src": [
+          "pivot_kept",
+          "pivoted"
+        ],
+        "dst": [
+          "show_kept",
+          "table"
+        ]
+      },
+      {
+        "id": "c6",
+        "src": [
+          "pivot_sorted",
+          "pivoted"
+        ],
+        "dst": [
+          "show_sorted",
+          "table"
+        ]
+      },
+      {
+        "id": "c7",
+        "src": [
+          "from_copy",
+          "value"
+        ],
+        "dst": [
+          "copy_me",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f1",
+        "title": "1 · Table formatting  (T2, T3, V2, W1)",
+        "rect": [
+          -60,
+          -380,
+          2840,
+          1160
+        ],
+        "color": "#33415c"
+      },
+      {
+        "id": "f2",
+        "title": "2 · Pivot keeps your order  (X2)",
+        "rect": [
+          -60,
+          840,
+          1900,
+          1120
+        ],
+        "color": "#3c5c33"
+      },
+      {
+        "id": "f3",
+        "title": "3 · Copy code with its indents  (Y1)",
+        "rect": [
+          -60,
+          2140,
+          1120,
+          480
+        ],
+        "color": "#5c4a24"
+      }
+    ],
+    "pages": [
+      {
+        "id": "p_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "t1",
+            "node": "formatted",
+            "port": "table",
+            "rect": [
+              40,
+              40,
+              900,
+              420
+            ]
+          },
+          {
+            "id": "t2",
+            "node": "show_kept",
+            "port": "table",
+            "rect": [
+              40,
+              500,
+              430,
+              300
+            ]
+          },
+          {
+            "id": "t3",
+            "node": "show_sorted",
+            "port": "table",
+            "rect": [
+              510,
+              500,
+              430,
+              300
+            ]
+          }
+        ]
+      },
+      {
+        "id": "p_report",
+        "title": "Report",
+        "kind": "report",
+        "body": "# The seven fixes\n\n## U1 — a toned header, both times\n\nThis table is embedded plainly. Its header row is shaded.\n\n![[Formatted]]\n\n\\pagebreak\n\nAnd this one is embedded with `|fit`. Before the fix **only this one** had a toned header, which read as `fit` adding something; it was the other way round — `fit` was the only path that worked.\n\n![[Formatted|fit]]\n\nThe icons, the status colours and the revenue sort all print here too — the page and the card are drawn from the same rules.\n",
+        "tiles": []
+      }
+    ]
+  }
+}
