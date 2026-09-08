@@ -11,8 +11,8 @@ holds what is *not* built.
 
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
-reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q and
-R) are where shipped work used to be. Old numbers are kept as "(was N)" where
+reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q, R
+and Y) are where shipped work used to be. Old numbers are kept as "(was N)" where
 a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -20,7 +20,8 @@ list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
 by name are repeated here. Status notes were checked against the code on
 2026-08-27; the entries added since (G10, N3, O1, S1) on 2026-08-30. M3,
 M4, N4 and chunks T–Z were triaged out of Dan's 0.1.13 list and checked
-against the code on 2026-09-07.
+against the code on 2026-09-07 — of which T2, T3, U1, V2, W1, X2 and the
+whole of Y shipped the same day and have left the list.
 
 ---
 
@@ -213,9 +214,9 @@ guide that ships on the dashboard. What is missing:
 ## T. Table formatting — what a cell can show
 
 Everything here is `core/table_format.py` (the rule model and its parser),
-`ui/table_delegate.py` (the card) and `core/table_html.py` (paper). The four
-share a grammar and a data model, so the order matters more than usual: T1
-changes the model the other three write into.
+`ui/table_delegate.py` (the card) and `core/table_html.py` (paper). T1 is
+the one to schedule deliberately: it changes the data model a cell's
+decorations live in, and T4 writes into that model.
 
 **T1. More than one decoration in a cell, and somewhere to put it** (Dan).
 Asked for as four things that are one thing: an icon on the **right** as
@@ -242,30 +243,6 @@ column's own value, drawn either in place or in another column.
   already means "draw the format instead of the value", so it is probably
   the latter, spelled with what exists.
 
-**T2. A value → colour map, the twin of `iconmap`** (Dan). "If it's x be
-red, if it's y be orange" is one condition line per value today. `iconmap`
-already proves the shorter shape (`status iconmap severity: high=▲ red,
-low=▼ green`); the same one-liner for fills — `status colormap: breach=red,
-watch=amber, ok=green` — is a keyword in `_parse_token_line`, a `mapping`
-Rule the `icon_map` branch already models, and an evaluator branch beside
-it. The smallest entry in the chunk and the clearest in shape.
-
-**T3. An icon decided by the cell's own value** (Dan) — reported as "`20*`
-doesn't work". The glob is not the problem, and it is worth saying so
-before someone goes looking: `20* = 1 => bg green`, `20* icons check` and
-`20* iconmap …` all parse, and all match `2023` and `2024`. What cannot be
-said is the thing actually asked for — *a green tick where the cell is 1*:
-
-  - a `=>` highlight paints `bg` / `fg` / `bold` / `only` and **nothing
-    else** — `_parse_style_tokens` rejects `icon` outright; and
-  - `iconmap` needs a **named** source column, so across a pattern it reads
-    that one column and paints its icon into all of them.
-
-  So it is two small changes, not a glob fix: let a highlight carry an icon
-  (`20* = 1 => icon ✓ green`), and let `iconmap` name the drawn column
-  itself. Do it with T2 — same parser, same evaluator, and the two together
-  are what "a rule map table" means.
-
 **T4. Auto-colour a column by category** (Dan). Pick a column, say "auto
 colour", and every distinct value takes its own colour from a palette —
 text or fill, palette chosen. The point is that nothing is named in
@@ -278,20 +255,8 @@ order stable enough that the colours do not move when a row arrives.
 
 ## U. The table on paper
 
-Two places where the printed table is nearly the card and the gap shows.
-Both live in `core/table_html.py` and `ui/report/render.py`.
-
-**U1. A report table's header is toned under `fit` and white without it**
-(Dan) — and the toned one is the one to keep. Root cause found:
-`REPORT_CSS` carries `th { background-color: #eeeeee }` and is set on the
-**final** document, but the HTML that document is given comes from
-`staged.toHtml()` — a document built with **no** stylesheet, and `toHtml()`
-writes what it resolved as inline attributes, which outrank a default
-stylesheet. `fit_tables` then *rebuilds* its tables from `frame_to_html`
-and re-sets them into the CSS'd document, so a fitted table picks the tone
-up and every other table does not. Fix the staging rather than the CSS: the
-two paths have to produce the same header, and a test pinning a fitted
-table's header against an unfitted one is the honest regression.
+Where the printed table is nearly the card and the gap shows. Lives in
+`core/table_html.py` and `ui/report/render.py`.
 
 **U2. A data bar on paper sits beside its number, and starts in a different
 place on every row** (Dan). One cause, and the code says so: `_bar` puts
@@ -328,33 +293,17 @@ and the hidden column still leaves on `table`, so a chosen *order* has to
 decide whether it reorders the passed-through frame as well. Probably not —
 the card is a view, and Select Columns is the node that reorders data.
 
-**V2. A default sort** (Dan). The card sorts when a header is clicked
-(`ui/table_sort.py`) and forgets. "Sort by this column, ascending" as a
-parameter is the missing half, and it is what a **report** needs most,
-since a printed table has no header to click.
-
 **V3. A hover tooltip on a table** (Dan). Left open in the ask, and worth
 pinning before building, because there are two features under it. The
 **full value where a cell is truncated** needs no configuration, could
 simply be on, and is a `ToolTipRole` in `pandas_model.py` — half an hour.
 A **tooltip from another column** — a note column that never shows but
-explains the cell — is a rule (`revenue tip note`) and belongs with T1–T4
-in the same DSL.
+explains the cell — is a rule (`revenue tip note`) and belongs with T1 and
+T4 in the same DSL.
 
 ---
 
 ## W. Visual cards
-
-**W1. Raise the size ceilings on charts, tables and visual nodes** (Dan) —
-"it's limited me a few times when I've tried to make them bigger". The caps
-are real and hard-coded: `TABLE_MAX_W` / `FIGURE_MAX_W` and their siblings
-in `ui/canvas/node_item.py` stop at **1600 × 2000**, and each node repeats
-those same numbers in its own `PARAMS` (`show_table.py` pins `width` to
-1600 and `height` to 2000), so raising one without the other changes
-nothing at all. Mostly a numbers change — but find out what the ceiling was
-protecting before picking the new one: a card repaints every frame, and a
-4000px table on a canvas of fifty nodes is precisely the case F1 and the
-LOD work exist for. Measure one huge card first.
 
 **W2. The two Plotly visuals that don't filter when you click them.**
 Clicking a visual to filter downstream is built and shipped — Show Plotly
@@ -377,34 +326,6 @@ the result. Decide first whether it is a new node or a **mode of Show
 Table**: as a mode it inherits every conditional-formatting rule, which is
 most of what makes the ask worth doing at all; as a node it stays simple
 and the formatting arrives by wiring a style in.
-
-**X2. Pivot re-sorts instead of keeping the table's order** (Dan).
-`pivot_table` sorts both index and columns by default, so a table
-deliberately sorted upstream comes out alphabetical — and for pivoted
-*columns* there is no downstream fix short of a Select Columns node listing
-every one of them by hand. "Keep the incoming order" is small (pandas
-`sort=False`, plus reindexing the columns to first-seen order). Whether it
-should be the **default** is the real question, and the argument for yes is
-that a sort someone set upstream is a decision, and discarding it silently
-is the same class of thing as `issues.md` 4.
-
----
-
-## Y. Copying code out of flograph
-
-**Y1. Copy from the code editor keeps its indentation** (Dan). Pasting a
-node's script into an email loses every indent unless "paste as
-unformatted" is used. `CodeEditor` is a `QPlainTextEdit`, which puts
-**only** `text/plain` on the clipboard; the mail client turns that into
-HTML, and HTML collapses runs of spaces, so the indentation is gone before
-the recipient ever sees it. The fix is to add a `text/html` flavour —
-override `createMimeDataFromSelection` and wrap the selection in a `<pre>`
-with a monospace family. Syntax colours are optional and probably wanted,
-since `highlighter.py` already knows them. The plain-text flavour stays
-byte-for-byte as it is, so pasting into a terminal or another editor is
-unchanged.
-
----
 
 ## Z. Web libraries from your own machine
 
