@@ -29,7 +29,10 @@ by an entry above — bar the cache bug, which is `issues.md` 8 because it
 needs a repro before it is an idea. Chunk T shipped whole on 2026-09-08
 and the letter retires with it: T1 gave a cell a *list* of decorations
 with a place on each, and T4 then filled that list without anything being
-named in advance.
+named in advance. V1 and the first half of V3 shipped the same day —
+`show` picks a table's columns and their order, and a cut-short cell now
+offers the whole of itself on hover; V3 is edited down to the half that
+is left rather than deleted.
 
 ---
 
@@ -259,24 +262,28 @@ Qt's rich text has no z-order and no partial-width background.
 Show Table's own parameters (`nodes/viz/show_table.py`) and the inspector
 view — how the table is *presented*, as against how its cells are painted.
 
-**V1. Choose the columns to show, in the order you chose them** (Dan).
-`Hide columns` and the `hide` rule are both subtractive: you say what to
-lose. The other way round — pick what to keep, shown **in the order
-picked** — is also the only way to reorder columns without a Select Columns
-node upstream. Keep the two apart while building: hiding is a view thing
-and the hidden column still leaves on `table`, so a chosen *order* has to
-decide whether it reorders the passed-through frame as well. Probably not —
-the card is a view, and Select Columns is the node that reorders data.
+**V3. A tooltip that explains a cell, from another column** (Dan). What
+is left of the ask now the truncation half has shipped: a note column
+that never shows on its own but explains the cell beside it, written as a
+rule (`revenue tip note`). The mechanism is the one chunk T left behind —
+a cell already carries a list of decorations that each know their place,
+so a tooltip is one more thing a rule can put on a cell rather than a new
+kind of thing.
 
-**V3. A hover tooltip on a table** (Dan). Left open in the ask, and worth
-pinning before building, because there are two features under it. The
-**full value where a cell is truncated** needs no configuration, could
-simply be on, and is a `ToolTipRole` in `pandas_model.py` — half an hour.
-A **tooltip from another column** — a note column that never shows but
-explains the cell — is a rule (`revenue tip note`), and the DSL it
-belongs in is the one chunk T left behind: a cell already carries a list
-of decorations that each know their place, so a tooltip is one more thing
-a rule can put on a cell rather than a new mechanism.
+  Two decisions it still needs, neither guessable from the ask. What
+  happens on a cell that has **both** — the note and a value that was cut
+  short — since there is one tooltip and two things wanting it. And
+  whether naming a source column quietly drops it from the view: a note
+  column is a helper by definition, but `hide` already says that out loud,
+  and doing it silently is the sort of kindness people then have to work
+  out how to undo.
+
+  Note that the truncation half did not land where this entry expected. It
+  is not a `ToolTipRole` in `pandas_model.py`: a model cannot know how wide
+  its column ended up, so the measurement lives on the delegate
+  (`ConditionalFormatDelegate.value_area`) and the view asks it. A rule-
+  driven tooltip is a model-side answer and can go where this entry said —
+  but it will have to agree with that one about which of them is talking.
 
 ---
 
