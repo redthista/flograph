@@ -26,7 +26,9 @@ was triaged here too and shipped from another branch, so Z retires
 without ever having been listed. The raw 0.1.13 list itself was cleared on
 2026-09-08: every one of its nineteen bullets is either shipped or carried
 by an entry above — bar the cache bug, which is `issues.md` 8 because it
-needs a repro before it is an idea.
+needs a repro before it is an idea. T1 shipped on 2026-09-08 and has left
+the list; T4 was rewritten the same day, since T1 built the model it
+needed.
 
 ---
 
@@ -228,34 +230,9 @@ guide that ships on the dashboard. What is missing:
 ## T. Table formatting — what a cell can show
 
 Everything here is `core/table_format.py` (the rule model and its parser),
-`ui/table_delegate.py` (the card) and `core/table_html.py` (paper). T1 is
-the one to schedule deliberately: it changes the data model a cell's
-decorations live in, and T4 writes into that model.
-
-**T1. More than one decoration in a cell, and somewhere to put it** (Dan).
-Asked for as four things that are one thing: an icon on the **right** as
-well as the left; **two icons at once** (an "OT" mark and then a green
-tick); **above / below** as positions, with the row growing to hold them;
-and **pill** styles — a coloured lozenge around an icon, some text, or the
-column's own value, drawn either in place or in another column.
-
-  It reads like drawing work and is really a model change. `CellStyle` holds
-  exactly one `icon` / `icon_color` pair, and `CellStyle.over()` merges two
-  rules with `icon=self.icon or base.icon` — so a second icon rule cannot
-  *add*, it can only fail to replace, and no amount of delegate work gets
-  round that. A cell holding a **list** of decorations, each with a position
-  and an optional pill, is the piece the other three hang off; after it, the
-  delegate lays them out and `table_html` writes the same arrangement for
-  paper. The grammar has to grow to match — `units bar blue only` has
-  nowhere today to say "on the right".
-
-  Two decisions to take with a real table in front of you rather than
-  guessing. Whether **above / below** is per-cell or, like `wrap`, a fact
-  about the whole table (a row is as tall as its tallest cell, so one cell
-  asking for a second line spends every row's height). And whether a
-  **pill** is a decoration or a *replacement* for the value — `only`
-  already means "draw the format instead of the value", so it is probably
-  the latter, spelled with what exists.
+`ui/table_delegate.py` (the card) and `core/table_html.py` (paper). T1 has
+shipped, so the model a cell's decorations live in is now a list with a
+place on each entry — T4 writes into that rather than having to build it.
 
 **T4. Auto-colour a column by category** (Dan). Pick a column, say "auto
 colour", and every distinct value takes its own colour from a palette —
@@ -264,6 +241,11 @@ advance, which is exactly what a rule map (T2) cannot do. The palettes
 exist already on `Visual Style` and `Plotly Style`; the work is a rule that
 resolves at evaluation time against the column's distinct values, in an
 order stable enough that the colours do not move when a row arrives.
+
+  Cheaper than it was: T1 shipped `colormap pill:`, so the *shape* an auto
+  colour wants — a lozenge round each value rather than a flooded cell —
+  already exists and already prints. What is left is choosing the colours
+  with nothing named.
 
 ---
 
