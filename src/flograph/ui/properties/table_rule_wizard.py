@@ -57,22 +57,22 @@ _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 
 _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
           "Highlight cells / rows", "Icons", "Number format",
-          "Hide columns", "Show only these columns", "Column layout",
-          "Wrap text"]
+          "Tooltip from another column", "Hide columns",
+          "Show only these columns", "Column layout", "Wrap text"]
 
 #: The kind combo's index, by name. The stack's pages are added in this
 #: order and `_line` dispatches on it, so the number appears in three
 #: places at once — which is exactly the sort of thing that survives one
 #: insertion and quietly breaks on the next.
-(K_SCALE, K_AUTO, K_BAR, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_HIDE, K_SHOW,
- K_LAYOUT, K_WRAP) = range(len(_KINDS))
+(K_SCALE, K_AUTO, K_BAR, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_TIP, K_HIDE,
+ K_SHOW, K_LAYOUT, K_WRAP) = range(len(_KINDS))
 
 # both icon modes share the one "Icons" page; the page's own Style toggle
 # picks between the graduated set and a value→icon map.
 _MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
               "data_bar": K_BAR, "highlight": K_HIGHLIGHT, "icons": K_ICONS,
-              "icon_map": K_ICONS, "number_format": K_NUMBER, "hide": K_HIDE,
-              "show": K_SHOW,
+              "icon_map": K_ICONS, "number_format": K_NUMBER,
+              "tooltip": K_TIP, "hide": K_HIDE, "show": K_SHOW,
               "column_width": K_LAYOUT, "align": K_LAYOUT,
               "header_label": K_LAYOUT, "wrap": K_WRAP}
 
@@ -99,6 +99,10 @@ def _combo(pairs) -> QComboBox:
 
 
 _THIS_COLUMN = "(this column)"
+#: What the note-column combo says before one is picked. A tooltip rule is
+#: the one "another column" rule with no meaning for "(this column)" — a
+#: cell explaining itself is the value already in front of you.
+_PICK_A_COLUMN = "— pick a column —"
 
 
 def _other_col_value(box: QComboBox) -> str:
@@ -108,7 +112,10 @@ def _other_col_value(box: QComboBox) -> str:
     if data:
         return str(data)
     text = box.currentText().strip()
-    return "" if text in ("", _THIS_COLUMN) else text
+    # both placeholders mean "nothing chosen". Matched by text because an
+    # editable combo (a Table Style node, with no upstream columns to
+    # offer) carries typed text and no data at all.
+    return "" if text in ("", _THIS_COLUMN, _PICK_A_COLUMN) else text
 
 
 def _pick_data(combo: QComboBox, token) -> None:
@@ -270,6 +277,7 @@ class RuleBuilder(QDialog):
         self._build_highlight_page()
         self._build_icons_page()
         self._build_number_page()
+        self._build_tip_page()
         self._build_hide_page()
         self._build_show_page()
         self._build_layout_page()
@@ -589,6 +597,31 @@ class RuleBuilder(QDialog):
         f.addRow("1234.5 →", self._numfmt_sample)
         self._stack.addWidget(page)
 
+    def _build_tip_page(self) -> None:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        f = QFormLayout()
+        f.setContentsMargins(0, 0, 0, 0)
+        self._tip_by = self._other_col_combo()
+        # "(this column)" is what every other `by` combo offers and is the
+        # one thing this rule cannot mean: a cell explaining itself is the
+        # value you are already looking at
+        self._tip_by.setItemText(0, _PICK_A_COLUMN)
+        f.addRow("Note column", self._tip_by)
+        v.addLayout(f)
+        hint = QLabel(
+            "Resting on a cell shows the matching value from the note "
+            "column — a comment that explains the number without taking a "
+            "column of the table to say it.\n\n"
+            "The note column keeps showing unless you also hide it: put "
+            "`hide` on a line of its own, so nothing disappears from a rule "
+            "that never mentioned it.\n\n"
+            "A cell that is *also* too narrow for its value shows both — "
+            "the note, then the full value under it.")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        self._stack.addWidget(page)
+
     def _build_hide_page(self) -> None:
         page = QWidget()
         v = QVBoxLayout(page)
@@ -764,6 +797,8 @@ class RuleBuilder(QDialog):
                        "text" if rule.ink_only
                        else ("" if rule.as_pill else "fill"))
             self._set_other_col(self._auto_by, rule.source)
+        elif rule.mode == "tooltip":
+            self._set_other_col(self._tip_by, rule.source)
         elif rule.mode == "data_bar":
             self._bar.set_value(bar_token(rule.color))
             self._set_other_col(self._bar_by, rule.source)
@@ -827,6 +862,10 @@ class RuleBuilder(QDialog):
     def _line(self) -> str:
         kind = self._kind.currentIndex()
         cols = self._columns_text()
+        if kind == K_TIP:
+            note = _other_col_value(self._tip_by)
+            return (f"{cols} tooltip {quote_column(note)}"
+                    if cols and note else "")
         if kind == K_HIDE:
             return f"hide {cols}" if cols else ""
         if kind == K_SHOW:

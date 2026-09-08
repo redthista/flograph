@@ -130,6 +130,18 @@ in — on the card, in a dashboard tile and on a printed report, which is
 where it matters most, since a page has no header to click. Clicking a
 header still wins from then on.
 
+``tooltip`` (``tip`` for short) puts another column's value on a cell as
+a hover note — a sentence about a number that would make the table worse
+as a column of its own. Each row reads its own note and a blank one shows
+nothing::
+
+    revenue   tooltip note
+    revenue   tooltip by note        # the `by` clause, for the habit
+
+The note column keeps showing until a ``hide`` line says otherwise, which
+is deliberate: a rule that quietly removed a column it never named is a
+kindness that has to be undone by somebody who cannot see why it happened.
+
 ``hide`` and ``show`` are the two ways to say which columns the table
 has, and they are not mirror images. ``hide`` subtracts — name the helper
 columns a rule reads and the reader shouldn't see. ``show`` is the
@@ -211,7 +223,7 @@ _ICON_LABELS = {
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
-          "sort", "color_map", "auto_color"}
+          "sort", "color_map", "auto_color", "tooltip"}
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
@@ -430,6 +442,10 @@ class CellStyle:
     pill_fg: Optional[str] = None
     text: Optional[str] = None                # DisplayRole override
     hide_value: bool = False                  # show the format, not the value
+    #: What this cell says when you rest on it — a `tooltip` rule's note,
+    #: read from another column. Not drawn, so it costs the cell nothing
+    #: until somebody points at it.
+    tooltip: Optional[str] = None
 
     def over(self, base: Optional["CellStyle"]) -> "CellStyle":
         """`self` laid on top of `base` — self's set fields win."""
@@ -454,6 +470,10 @@ class CellStyle:
             pill_fg=self.pill_fg or base.pill_fg,
             text=self.text or base.text,
             hide_value=self.hide_value or base.hide_value,
+            # last one wins, like every other single-valued field: there is
+            # one tooltip, and two rules naming a note column is a
+            # replacement rather than something to concatenate
+            tooltip=self.tooltip or base.tooltip,
         )
 
     def at(self, where: str) -> list:
@@ -479,7 +499,7 @@ class CellStyle:
     def is_empty(self) -> bool:
         return (self.bg is None and self.fg is None and not self.bold
                 and self.bar is None and not self.decorations
-                and self.pill is None
+                and self.pill is None and self.tooltip is None
                 and self.text is None and not self.hide_value)
 
 
@@ -900,9 +920,15 @@ _AUTO_SHAPES = {"pill": "pill", "pills": "pill", "fill": "fill",
 #: be quoted, exactly as one called "hide" always has.
 _LEADING_KEYWORDS = ("hide", "show")
 
+#: `tip` is the short spelling of `tooltip`. It is also a perfectly
+#: ordinary column name (seaborn's own tips dataset has one), which is
+#: what `quote_column` is for — it already quotes anything that reads as
+#: a keyword, so the cost falls on that one table and is handled.
+_TIP_KEYWORDS = ("tooltip", "tip")
+
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "colormap",
              "colourmap", "format", "width", "align", "label", "sort"
-             ) + _AUTO_KEYWORDS
+             ) + _AUTO_KEYWORDS + _TIP_KEYWORDS
 
 #: The keywords whose argument is a `source: value=…` map. They are the
 #: only ones that may be written with the colon stuck to them — `iconmap:`
@@ -918,6 +944,8 @@ def _keyword_of(token: str) -> "str | None":
     one token to `str.split()`.
     """
     low = token.lower()
+    if low in _TIP_KEYWORDS:
+        return "tooltip"                  # `tip` is the short spelling
     if low in _KEYWORDS:
         return low
     if low.endswith(":") and low[:-1] in _MAP_KEYWORDS:
@@ -1138,6 +1166,23 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         mode = "icon_map" if keyword == "iconmap" else "color_map"
         return Rule(mode, columns, source=source, mapping=mapping,
                     hide_value=only, glyph_where=place, as_pill=pill)
+    if keyword == "tooltip":
+        # `revenue tooltip note` and `revenue tooltip by note` mean the
+        # same thing: the whole argument *is* the source column, and the
+        # `by` clause every other rule uses is accepted so nobody has to
+        # remember which rules take it.
+        rest, source, _only = _split_modifiers(arg)
+        name = _unquote((source or rest).strip())
+        if not name:
+            raise ValueError(
+                f"line {lineno}: 'tooltip' needs the column to read the "
+                f"note from — 'revenue tooltip note'")
+        if source and rest.strip():
+            raise ValueError(
+                f"line {lineno}: 'tooltip' takes one column, got "
+                f"{rest.strip()!r} and {source!r}")
+        return Rule("tooltip", columns, source=name)
+
     if keyword in _AUTO_KEYWORDS:
         arg, source, only = _split_modifiers(arg)
         arg, shape = _split_flag(arg, _AUTO_SHAPES)
@@ -1503,6 +1548,8 @@ def rule_summary(rule: Rule) -> str:
                 f"({rule.palette or DEFAULT_PALETTE}, {shape}){only}")
     if rule.mode == "number_format":
         return f"{cols}  ·  number format “{rule.number_spec}”"
+    if rule.mode == "tooltip":
+        return f"{cols}  ·  tooltip from “{rule.source}”"
     if rule.mode == "hide":
         return f"hide  {cols}"
     if rule.mode == "show":
@@ -1973,6 +2020,19 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                             pill=first, pill_fg=second or readable_fg(first))
                     else:
                         contrib[i] = CellStyle(bg=first, fg=second)
+
+        elif rule.mode == "tooltip":
+            # the note is a whole other column's value, so there is nothing
+            # to compute per cell — read it across and hand it over
+            notes = (list(frame[rule.source])
+                     if (frame is not None and rule.source
+                         and rule.source in getattr(frame, "columns", []))
+                     else None)
+            if notes is not None:
+                for i, note in enumerate(notes):
+                    if _is_missing(note) or not str(note).strip():
+                        continue        # a blank note is no note, not ""
+                    contrib[i] = CellStyle(tooltip=str(note))
 
         elif rule.mode == "auto_color":
             # the same three spellings as a map: no source means this

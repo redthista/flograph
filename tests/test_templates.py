@@ -519,7 +519,8 @@ class TestTheConditionalFormattingExample:
         modes = {r.mode for r in rules}
         assert modes == {"color_scale", "data_bar", "icons", "icon_map",
                          "auto_color", "highlight", "number_format", "hide",
-                         "column_width", "align", "header_label", "wrap"}
+                         "tooltip", "column_width", "align", "header_label",
+                         "wrap"}
         # a by-clause, an if-clause and a wildcard are all in there
         assert any(r.source for r in rules if r.mode == "color_scale")
         assert any(r.source for r in rules if r.mode == "highlight")

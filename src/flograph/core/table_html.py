@@ -251,6 +251,11 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
         if style.bold:
             css.append("font-weight:bold")
     attrs = f' style="{";".join(css)}"' if css else ""
+    if style is not None and style.tooltip:
+        # `title` is what a browser shows on hover, so a note survives Open
+        # in Browser and the exported HTML. On paper it prints as nothing,
+        # which is the honest answer: paper has no hover.
+        attrs += f' title="{_escape(style.tooltip)}"'
     if align:
         placement = f' align="{align}"'          # an `align` rule was explicit
     elif style is not None and style.hide_value and style.decorations:

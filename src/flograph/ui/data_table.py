@@ -278,26 +278,46 @@ class DataTableView(QTableView):
 
         Only when. A tooltip on a cell you can already read in full is
         noise, and noise is what stops people reading the ones that matter.
+
+        A `tooltip` rule's note comes from the model and is shown whether
+        or not anything was cut — see `_tooltip_text` for what happens
+        when a cell has both.
         """
         if event.type() != QEvent.ToolTip:
             return super().viewportEvent(event)
-        text = self._cut_short_text(self.indexAt(event.pos()))
+        text = self._tooltip_text(self.indexAt(event.pos()))
         if text:
             QToolTip.showText(event.globalPos(), text, self.viewport())
         else:
             QToolTip.hideText()
         return True
 
-    def _cut_short_text(self, index) -> str:
+    def _tooltip_text(self, index) -> str:
+        """What this cell says when you rest on it.
+
+        Two things want the one tooltip: a `tooltip` rule's note, which
+        the model supplies, and the full value of a cell that had to be
+        cut short, which only the view can work out. A cell can have both,
+        and showing one would lose the other — so both are shown, the note
+        first, because it is the thing somebody deliberately wrote.
+        """
+        model = self.model()
+        if model is None or not index.isValid():
+            return ""
+        note = model.data(index, Qt.ToolTipRole)
+        note = str(note) if note else ""
+        cut = self._elided_value(index)
+        if note and cut:
+            # quoted, so the value reads as the cell's own words rather
+            # than as a second sentence of the note
+            return f"{note}\n\n“{cut}”"
+        return note or cut
+
+    def _elided_value(self, index) -> str:
         """The full text of a cell whose value did not fit, or ""."""
         model = self.model()
         if model is None or not index.isValid():
             return ""
-        # a model that has something of its own to say wins outright: it
-        # knows why it is talking, and this only knows that text is wide
-        own = model.data(index, Qt.ToolTipRole)
-        if own:
-            return str(own)
         if getattr(model, "wraps_text", lambda: False)():
             # `wrap` exists precisely so that nothing is cut off; measuring
             # a wrapped cell on one line would fire on text that is

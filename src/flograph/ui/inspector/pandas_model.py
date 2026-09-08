@@ -49,7 +49,8 @@ _ALIGN_RULE = {
 # without touching the frame
 _VALUE_ROLES = frozenset({_DISPLAY, _EDIT, _FOREGROUND, _FONT, _ALIGNMENT})
 # ...plus the format roles, used only when a style is actually wired in
-_VALUE_ROLES_FMT = _VALUE_ROLES | {_BACKGROUND, BAR_ROLE, ICON_ROLE, DECOR_ROLE}
+_VALUE_ROLES_FMT = _VALUE_ROLES | {_BACKGROUND, BAR_ROLE, ICON_ROLE,
+                                   DECOR_ROLE, _TOOLTIP}
 
 
 def _bold() -> QFont:
@@ -396,6 +397,11 @@ class PandasModel(QAbstractTableModel):
                 first = style.decorations[0]
                 return (first.text, first.color)
             return None
+        if role == _TOOLTIP:
+            # a `tooltip` rule's note. The *cut-short* tooltip is not here
+            # and cannot be: it depends on how wide the column ended up,
+            # which is the view's business, not a model's.
+            return style.tooltip if style is not None else None
         if role == DECOR_ROLE:
             if style is not None and (style.decorations or style.pill):
                 return (style.decorations, style.pill, style.pill_fg)

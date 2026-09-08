@@ -6,7 +6,7 @@ from flograph.core.table_format import parse_rules
 from flograph.ui.properties.table_rule_wizard import (
     ColorChoice, RuleBuilder, RuleManager,
     K_AUTO, K_BAR, K_HIDE, K_HIGHLIGHT, K_ICONS, K_LAYOUT,
-    K_NUMBER, K_SCALE, K_SHOW, K_WRAP,
+    K_NUMBER, K_SCALE, K_SHOW, K_TIP, K_WRAP,
 )
 
 COLUMNS = ["revenue", "units", "status", "sla", "gross margin"]
@@ -121,6 +121,35 @@ def test_hide_quotes_a_spaced_name(build):
     b._kind.setCurrentIndex(K_HIDE)
     _select(b, "gross margin")
     assert b.line() == 'hide "gross margin"'
+
+
+class TestTooltipPage:
+    def test_it_writes_a_tooltip_line(self, build):
+        b = build()
+        b._kind.setCurrentIndex(K_TIP)
+        _select(b, "revenue")
+        b._tip_by.setCurrentIndex(b._tip_by.findData("sla"))
+        assert b.line() == "revenue tooltip sla"
+
+    def test_no_note_column_writes_no_rule(self, build):
+        """The one "another column" rule that cannot fall back to this
+        one: a cell explaining itself is the value already on screen."""
+        b = build()
+        b._kind.setCurrentIndex(K_TIP)
+        _select(b, "revenue")
+        assert b.line() == ""
+
+    def test_it_quotes_a_spaced_note_column(self, build):
+        b = build()
+        b._kind.setCurrentIndex(K_TIP)
+        _select(b, "revenue")
+        b._tip_by.setCurrentIndex(b._tip_by.findData("gross margin"))
+        assert b.line() == 'revenue tooltip "gross margin"'
+
+    def test_it_comes_back_to_its_own_page(self, build):
+        b = build(parse_rules("revenue tooltip sla")[0])
+        assert b._kind.currentIndex() == K_TIP
+        assert b.line() == "revenue tooltip sla"
 
 
 class TestShowColumnsPage:

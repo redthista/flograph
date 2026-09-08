@@ -33,6 +33,7 @@ wrap                                            # long text runs to more lines
 revenue              sort desc                  # the order the table opens in
 hide sla                                        # keep a helper column out of view
 show region, revenue, product                   # only these, in that order
+revenue              tooltip note               # rest on a cell, read a note
 ```
 
 `scale`, `bar` and `icons` can read their deciding value **from another
@@ -58,6 +59,14 @@ obeyed rather than fitted, alignment beats the dtype's own habit and takes
 the header with it, and a label changes the printed header only — rules,
 sorting and exports still use the real column name. `wrap` names no columns
 (a row is as tall as its tallest cell) and lets long text run on.
+
+**A note that explains a cell.** `revenue tooltip note` puts another
+column's value on the cell as a hover note — a sentence about a number
+that would make the table worse as a column of its own. Each row reads
+its own note, a blank note shows nothing, and the note column keeps
+showing until you `hide` it as well. On a report page it becomes the
+cell's `title`, so it survives Open in Browser. A cell that is *also* too
+narrow for its value shows both: the note, then the full value under it.
 
 **Choosing the columns.** `Hide columns` says what to lose; **Show
 columns** says what to keep — and the columns come out **in the order you

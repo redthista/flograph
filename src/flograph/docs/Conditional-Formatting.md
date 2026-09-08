@@ -31,6 +31,7 @@ A rule is `columns  verb  argument`:
 | `format` | `amount format $,.0f` | a Python / d3 number format for the column |
 | `hide` | `hide helper_col` | keep a column in the data (a rule can still read it) but out of the view |
 | `show` | `show region, revenue` | only these columns, in the order named |
+| `tooltip` | `revenue tooltip note` | resting on the cell shows the matching value from another column |
 | `only` | `units bar blue only` | draw the format **instead of** the value — Power BI's "bar only" / "icon only" |
 | `width` | `revenue width 160` | a fixed column width in pixels (`width auto` gives the column back to the content) |
 | `align` | `region align right` | `left`, `right` or `centre` — the header follows the column |
@@ -263,6 +264,39 @@ hide _tmp_*                   # every scratch column
 
 A pattern that matches nothing is reported on the Show Table, next to the data.
 
+## A note that explains a cell
+
+Some numbers need a sentence, and giving that sentence a column of its own
+makes the table worse. `tooltip` puts it on the cell instead:
+
+```
+revenue   tooltip note          # rest on a revenue cell, read the note
+revenue   tip note              # the short spelling
+revenue   tooltip by note       # the `by` clause, if that is the habit
+```
+
+Every row reads its own note. A blank note is no note — the cell says
+nothing rather than showing an empty popup.
+
+The note column **keeps showing** unless you also hide it:
+
+```
+revenue   tooltip note
+hide note
+```
+
+That is deliberate. A note column usually is a helper, but `hide` already
+says so out loud, and a rule that quietly removed a column it never
+mentioned is the sort of kindness people then have to work out how to
+undo.
+
+On a **report page** the note becomes the cell's `title`, so it is there
+when the page is opened in a browser or exported as HTML. On paper it
+prints as nothing, which is the honest answer — paper has no hover.
+
+If the column is genuinely a keyword to you — a table with a column
+actually called `tip` — quote it: `"tip" scale green`.
+
 ## Reading a value that did not fit
 
 A column is fitted to its content and then clamped, so a long value is cut
@@ -277,6 +311,13 @@ whose value has been *replaced* — `only`, or a decoration placed `in` —
 offers nothing, since its value was not shortened, it was deliberately not
 shown. A `wrap`ping table offers nothing either: wrapping exists so that
 nothing is cut.
+
+**A cell can have both** — a note, and a value too wide for its column.
+There is one tooltip, so it shows both: the note first, because that is
+the thing somebody deliberately wrote, then the full value quoted
+underneath. Showing either alone would lose the other, and losing the
+value would put the papercut back on exactly the cells someone cared
+enough to annotate.
 
 ## Sharing one look across tables
 

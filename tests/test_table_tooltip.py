@@ -13,6 +13,13 @@ the value. So the view asks the delegate, and the tooltip is offered only
 when the text genuinely did not fit — a tooltip on a cell you can already
 read in full is noise, and noise is what stops people reading the ones that
 matter.
+
+The other half is a **note from another column** (`revenue tooltip note`)
+— a comment that explains a number without spending a column of the table
+to say it. That one is a rule, so it comes from the model; the cut-short
+text cannot, because it depends on how wide the column ended up. A cell
+can have both, and there is one tooltip, so both are shown: the note
+first, because it is the thing somebody deliberately wrote.
 """
 import pytest
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -54,27 +61,27 @@ def value_width(view, row=0, column=0) -> int:
 class TestOnlyWhenSomethingWasCut:
     def test_a_value_that_did_not_fit_offers_the_whole_of_itself(self, qapp):
         view = view_for()
-        assert view._cut_short_text(view.model().index(0, 0)) == LONG
+        assert view._tooltip_text(view.model().index(0, 0)) == LONG
 
     def test_a_value_that_fits_says_nothing(self, qapp):
         view = view_for()
-        assert view._cut_short_text(view.model().index(1, 0)) == ""
+        assert view._tooltip_text(view.model().index(1, 0)) == ""
 
     def test_widening_the_column_takes_the_tooltip_away(self, qapp):
         view = view_for(width=2000)
-        assert view._cut_short_text(view.model().index(0, 0)) == ""
+        assert view._tooltip_text(view.model().index(0, 0)) == ""
 
     def test_an_empty_cell_has_nothing_to_add(self, qapp):
         frame = pd.DataFrame({"note": [None]})
         view = view_for(frame)
-        assert view._cut_short_text(view.model().index(0, 0)) == ""
+        assert view._tooltip_text(view.model().index(0, 0)) == ""
 
     def test_a_wrapping_table_is_left_alone(self, qapp):
         """`wrap` exists precisely so that nothing is cut off. Measuring a
         wrapped cell on one line would fire on text that is perfectly
         readable, several lines further down."""
         view = view_for(rules_text="wrap")
-        assert view._cut_short_text(view.model().index(0, 0)) == ""
+        assert view._tooltip_text(view.model().index(0, 0)) == ""
 
 
 class TestWhatTheDecorationsTook:
@@ -98,13 +105,14 @@ class TestWhatTheDecorationsTook:
         which is what `only` and `in` were asked for."""
         view = view_for(rules_text="note if region = South => icon ✓ green in")
         assert value_width(view) == -1
-        assert view._cut_short_text(view.model().index(0, 0)) == ""
+        assert view._tooltip_text(view.model().index(0, 0)) == ""
 
 
 class TestItDoesNotTalkOverAnyoneElse:
-    def test_a_tooltip_the_model_supplies_wins_outright(self, qapp):
-        """A model that has something to say knows why it is talking; this
-        only knows that some text is wide."""
+    def test_a_tooltip_the_model_supplies_comes_first(self, qapp):
+        """A model that has something to say knows why it is talking, so it
+        leads — but on a cut cell the value still has to be reachable, or
+        the papercut comes back on exactly the cells someone annotated."""
         from PySide6.QtGui import QStandardItem, QStandardItemModel
         model = QStandardItemModel(1, 1)
         item = QStandardItem(LONG)
@@ -114,13 +122,69 @@ class TestItDoesNotTalkOverAnyoneElse:
         view.setModel(model)
         view.resize(400, 200)
         view.setColumnWidth(0, 90)
-        assert view._cut_short_text(model.index(0, 0)) == "the model's own words"
+        text = view._tooltip_text(model.index(0, 0))
+        assert text.startswith("the model's own words")
+        assert LONG in text
 
     def test_the_header_still_explains_its_column(self, qapp):
         """The dtype tooltip on a header predates this and is a different
         question — the two must not have become one."""
         model = PandasModel(FRAME)
         assert "dtype" in model.headerData(0, Qt.Horizontal, Qt.ToolTipRole)
+
+
+class TestANoteFromAnotherColumn:
+    """`revenue tooltip note` — a comment that explains a number without
+    spending a column of the table to say it."""
+
+    def test_the_note_shows_on_a_cell_that_fits_perfectly_well(self, qapp):
+        view = view_for(rules_text="region tooltip note", width=200)
+        assert view._tooltip_text(view.model().index(1, 1)) == "ok"
+
+    def test_a_blank_note_says_nothing(self, qapp):
+        """An empty note is no note, not an empty tooltip hovering over
+        the cell."""
+        frame = pd.DataFrame({"region": ["South", "North"],
+                              "note": ["", "why this one is late"]})
+        view = view_for(frame, "region tooltip note", width=200)
+        assert view._tooltip_text(view.model().index(0, 0)) == ""
+        assert view._tooltip_text(view.model().index(1, 0)) == (
+            "why this one is late")
+
+    def test_a_cell_with_both_shows_the_note_then_the_value(self, qapp):
+        """There is one tooltip and two things want it. Showing either
+        alone loses the other."""
+        frame = pd.DataFrame({"note": [LONG], "why": ["second shift"]})
+        view = view_for(frame, "note tooltip why", width=90)
+        text = view._tooltip_text(view.model().index(0, 0))
+        assert text.startswith("second shift")
+        assert LONG in text
+        assert text.index("second shift") < text.index(LONG)
+
+    def test_the_note_survives_a_wrapping_table(self, qapp):
+        """`wrap` suppresses the cut-short half, which is measured. It must
+        not suppress a rule somebody wrote."""
+        view = view_for(rules_text="region tooltip note\nwrap", width=200)
+        assert view._tooltip_text(view.model().index(1, 1)) == "ok"
+
+    def test_the_note_column_keeps_showing_unless_hidden(self, qapp):
+        """Deliberate: `hide` says it out loud, and a rule that silently
+        drops a column is a kindness people then have to undo."""
+        view = view_for(rules_text="region tooltip note")
+        heads = [view.model().headerData(i, Qt.Horizontal, Qt.DisplayRole)
+                 for i in range(view.model().columnCount())]
+        assert "note" in heads
+
+    def test_a_note_column_the_table_lacks_paints_nothing(self, qapp):
+        view = view_for(rules_text="region tooltip nosuchcolumn", width=200)
+        assert view._tooltip_text(view.model().index(1, 1)) == ""
+
+    def test_it_prints_as_a_title_attribute(self):
+        """Paper has no hover, but Open in Browser does — and the exported
+        HTML is the same document."""
+        from flograph.core.table_html import frame_to_html
+        html = frame_to_html(FRAME, parse_rules("region tooltip note"))
+        assert 'title="ok"' in html
 
 
 class TestTheEventItself:
