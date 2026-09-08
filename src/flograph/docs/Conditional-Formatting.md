@@ -27,6 +27,7 @@ A rule is `columns  verb  argument`:
 | `icon` (in a `=>`) | `20* = 1 => icon ✓ green` | place one icon where the test passes |
 | `iconmap` | `20* iconmap: 1=✓ green` | map a value to an icon — leave the source out to read the column it draws in |
 | `colormap` | `status colormap: fail=red, ok=green` | map a value to a fill; the ink is worked out unless you give one |
+| `autocolour` | `status autocolour` | every distinct value takes its own colour — nothing named in advance |
 | `format` | `amount format $,.0f` | a Python / d3 number format for the column |
 | `hide` | `hide helper_col` | keep a column in the data (a rule can still read it) but out of the view |
 | `only` | `units bar blue only` | draw the format **instead of** the value — Power BI's "bar only" / "icon only" |
@@ -159,6 +160,46 @@ For a single flag rather than a whole map, a highlight can place an icon:
 
 An icon goes in a cell, so it cannot be combined with `row` — name the
 columns on the left instead.
+
+## Colouring by category, with nothing named
+
+A `colormap` has to be written out, so it can only colour values somebody
+has already seen. When the point is that you *haven't* — a status column
+from a system that invents new ones, a site list that grows — point
+`autocolour` at the column instead:
+
+```
+status    autocolour                 # a lozenge each, from the default palette
+owner     autocolour vivid           # one of the chart palettes
+region    autocolour earth fill      # flood the cell instead
+product   autocolour cool text       # colour the text and nothing else
+product   autocolour by severity     # categories read from another column
+```
+
+Every distinct value in the column gets its own colour. The palettes are
+the same ones `Visual Style` and `Plotly Style` offer — `mixed` (the
+default), `cool`, `warm`, `vivid`, `earth`, `grey` — so a table
+auto-coloured beside a chart of the same categories reads as one picture.
+
+Three things worth knowing:
+
+**The colours are handed out in sorted order**, not in the order the
+values turn up. A new row arriving at the top would otherwise repaint the
+whole column, and a colour you cannot learn is worth less than one nobody
+picked. Add a category in the middle of the alphabet and only the ones
+after it shift.
+
+**A pill is the default**, because that is the shape a category wants: a
+lozenge round each value, rather than a column flooded with one of eight
+saturated chart colours. `fill` and `text` ask for the other two, and
+`text` colours are lifted until they are readable against the card —
+several palette colours are darker than the grid, since they were built to
+be grounds with text on top rather than the text itself.
+
+**More values than the palette has colours and it wraps.** That is honest
+rather than good: a column of two hundred categories cannot be told apart
+by colour whatever anyone does. If that is the column, it probably wants a
+`scale` or a `sort`, not a colour per value.
 
 ## Deciding on another column
 

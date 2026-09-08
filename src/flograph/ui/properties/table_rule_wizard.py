@@ -19,8 +19,8 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core.table_format import (
-    MAX_RULE_WIDTH, MIN_RULE_WIDTH, bar_token, fill_token, parse_rule_lines,
-    quote_column, rule_summary, scale_token,
+    DEFAULT_PALETTE, MAX_RULE_WIDTH, MIN_RULE_WIDTH, PALETTES, bar_token,
+    fill_token, parse_rule_lines, quote_column, rule_summary, scale_token,
 )
 from flograph.ui.emoji_font import apply_emoji_font, with_emoji
 
@@ -55,14 +55,38 @@ _GLYPHS = ["✓", "✗", "!", "●", "▲", "▼", "★", "?", "→", "–"]
 _MAP_COLOURS = ["green", "amber", "red", "blue", "grey", "(none)"]
 _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 
-_KINDS = ["Colour scale", "Data bars", "Highlight cells / rows",
-          "Icons", "Number format", "Hide columns", "Column layout",
-          "Wrap text"]
-# both icon modes share the one "Icons" page (index 3); the page's own
-# Style toggle picks between the graduated set and a value→icon map.
-_MODE_KIND = {"color_scale": 0, "data_bar": 1, "highlight": 2, "icons": 3,
-              "icon_map": 3, "number_format": 4, "hide": 5,
-              "column_width": 6, "align": 6, "header_label": 6, "wrap": 7}
+_KINDS = ["Colour scale", "Auto colour by category", "Data bars",
+          "Highlight cells / rows", "Icons", "Number format",
+          "Hide columns", "Column layout", "Wrap text"]
+
+#: The kind combo's index, by name. The stack's pages are added in this
+#: order and `_line` dispatches on it, so the number appears in three
+#: places at once — which is exactly the sort of thing that survives one
+#: insertion and quietly breaks on the next.
+(K_SCALE, K_AUTO, K_BAR, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_HIDE, K_LAYOUT,
+ K_WRAP) = range(len(_KINDS))
+
+# both icon modes share the one "Icons" page; the page's own Style toggle
+# picks between the graduated set and a value→icon map.
+_MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
+              "data_bar": K_BAR, "highlight": K_HIGHLIGHT, "icons": K_ICONS,
+              "icon_map": K_ICONS, "number_format": K_NUMBER, "hide": K_HIDE,
+              "column_width": K_LAYOUT, "align": K_LAYOUT,
+              "header_label": K_LAYOUT, "wrap": K_WRAP}
+
+#: The palettes an auto colour can spend, newest-friendly names first.
+#: Taken from `PALETTES` rather than listed here, so a palette added to
+#: the chart side turns up in this combo without a second edit.
+_PALETTE_CHOICES = [(name.capitalize(), name) for name in
+                    ([DEFAULT_PALETTE] + sorted(set(PALETTES) -
+                                                {DEFAULT_PALETTE}))]
+
+#: What an auto colour draws. The empty token is the default (a pill),
+#: which is what a category wants: a lozenge round the value rather than a
+#: column flooded with one of eight saturated chart colours.
+_AUTO_SHAPE_CHOICES = [("A pill round each value", ""),
+                       ("Fill the cell", "fill"),
+                       ("Colour the text only", "text")]
 
 
 def _combo(pairs) -> QComboBox:
@@ -239,6 +263,7 @@ class RuleBuilder(QDialog):
 
         self._stack = QStackedWidget()
         self._build_scale_page()
+        self._build_auto_page()
         self._build_bar_page()
         self._build_highlight_page()
         self._build_icons_page()
@@ -379,6 +404,34 @@ class RuleBuilder(QDialog):
         f.addRow("Colour by", self._scale_by)
         self._scale_only = self._only_box("colour only — hide the value")
         f.addRow("", self._scale_only)
+        self._stack.addWidget(page)
+
+    def _build_auto_page(self) -> None:
+        """Auto colour by category — the one rule that names no values.
+
+        There is no value list here on purpose. The whole point is that
+        the categories are not known when the rule is written, so anything
+        this page offered to type would be a map (an `iconmap` /
+        `colormap`) wearing the wrong name.
+        """
+        page = QWidget()
+        f = QFormLayout(page)
+        self._auto_palette = _combo(_PALETTE_CHOICES)
+        self._auto_palette.currentIndexChanged.connect(self._refresh)
+        f.addRow("Palette", self._auto_palette)
+        self._auto_shape = _combo(_AUTO_SHAPE_CHOICES)
+        self._auto_shape.currentIndexChanged.connect(self._refresh)
+        f.addRow("Draw it as", self._auto_shape)
+        self._auto_by = self._other_col_combo()
+        f.addRow("Categories from", self._auto_by)
+        self._auto_only = self._only_box("colour only — hide the value")
+        f.addRow("", self._auto_only)
+        hint = QLabel(
+            "Every distinct value takes its own colour from the palette — "
+            "nothing to name in advance. The colours are handed out in "
+            "sorted order, so they stay put when a new row arrives.")
+        hint.setWordWrap(True)
+        f.addRow("", hint)
         self._stack.addWidget(page)
 
     def _build_bar_page(self) -> None:
@@ -623,10 +676,10 @@ class RuleBuilder(QDialog):
         self._stack.setCurrentIndex(idx)
         # `wrap` is the one rule that takes no columns — offering the picker
         # anyway would promise something the rule cannot keep
-        table_wide = idx == 7
+        table_wide = idx == K_WRAP
         self._col_list.setEnabled(not table_wide)
         self._col_edit.setEnabled(not table_wide)
-        if idx == 3:
+        if idx == K_ICONS:
             self._sync_icon_style()
             return
         self._col_label.setText("Whole table" if table_wide else "Columns")
@@ -679,11 +732,18 @@ class RuleBuilder(QDialog):
         self._kind.setCurrentIndex(_MODE_KIND.get(rule.mode, 0))
         self._on_kind()
         self._select_columns(rule.columns)
-        for box in (self._scale_only, self._bar_only, self._icon_only):
+        for box in (self._scale_only, self._bar_only, self._icon_only,
+                    self._auto_only):
             box.setChecked(bool(rule.hide_value))
         if rule.mode == "color_scale":
             _pick_data(self._scale, scale_token(rule.low, rule.mid, rule.high))
             self._set_other_col(self._scale_by, rule.source)
+        elif rule.mode == "auto_color":
+            _pick_data(self._auto_palette, rule.palette or DEFAULT_PALETTE)
+            _pick_data(self._auto_shape,
+                       "text" if rule.ink_only
+                       else ("" if rule.as_pill else "fill"))
+            self._set_other_col(self._auto_by, rule.source)
         elif rule.mode == "data_bar":
             self._bar.set_value(bar_token(rule.color))
             self._set_other_col(self._bar_by, rule.source)
@@ -747,19 +807,26 @@ class RuleBuilder(QDialog):
     def _line(self) -> str:
         kind = self._kind.currentIndex()
         cols = self._columns_text()
-        if kind == 5:
+        if kind == K_HIDE:
             return f"hide {cols}" if cols else ""
-        if kind == 7:
+        if kind == K_WRAP:
             return "wrap"          # table-wide: it names no columns
         if not cols:
             return ""
-        if kind == 0:
+        if kind == K_SCALE:
             return (f"{cols} scale {self._scale.currentData()}"
                     f"{self._by(self._scale_by)}{_only(self._scale_only)}")
-        if kind == 1:
+        if kind == K_AUTO:
+            # the shape word goes before the `by` clause, or the column
+            # name the clause hands back would swallow it
+            shape = self._auto_shape.currentData()
+            return (f"{cols} autocolour {self._auto_palette.currentData()}"
+                    f"{' ' + shape if shape else ''}"
+                    f"{self._by(self._auto_by)}{_only(self._auto_only)}")
+        if kind == K_BAR:
             return (f"{cols} bar {self._bar.value()}"
                     f"{self._by(self._bar_by)}{_only(self._bar_only)}")
-        if kind == 2:
+        if kind == K_HIGHLIGHT:
             op = self._op.currentData()
             words = {">": ">", ">=": ">=", "<": "<", "<=": "<=", "=": "=",
                      "!=": "!=", "contains": "contains", "starts": "starts with",
@@ -790,7 +857,7 @@ class RuleBuilder(QDialog):
                 tail = f"bg {fill}"
             tail += ", bold" if self._bold.isChecked() else ""
             return f"{cond} => {tail}"
-        if kind == 3:
+        if kind == K_ICONS:
             decider = _other_col_value(self._icon_by)
             if self._icon_style.currentData() == "map":
                 chosen = self._chosen_columns()
@@ -821,10 +888,10 @@ class RuleBuilder(QDialog):
             trail = _pill(self._icon_pill) + _place(self._icon_place)
             return (f"{cols} icons {self._iconset.currentData()}{rev}{trail}"
                     f"{by}{_only(self._icon_only)}")
-        if kind == 4:
+        if kind == K_NUMBER:
             spec = self._numfmt.currentText().strip()
             return f"{cols} format {spec}" if spec else ""
-        if kind == 6:
+        if kind == K_LAYOUT:
             prop = self._layout_prop.currentData()
             if prop == "width":
                 value = self._layout_width.value()

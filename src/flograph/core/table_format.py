@@ -91,6 +91,27 @@ only the one colour to spend. On paper a lozenge prints square-cornered —
 Qt's rich text drops ``border-radius`` — so the colour survives and the
 shape does not.
 
+``autocolour`` needs nothing named at all: point it at a column and
+every distinct value takes its own colour from a palette. That is the one
+thing a ``colormap`` cannot do, because a map has to be written out, and a
+column of statuses nobody has seen yet cannot be::
+
+    status    autocolour                 # a lozenge each, from the default palette
+    owner     autocolour vivid           # a named palette
+    region    autocolour earth fill      # flood the cell instead
+    product   autocolour cool text       # colour the text and nothing else
+    product   autocolour by severity     # categories read from another column
+
+The colours land in **sorted** order of the distinct values, not the order
+they appear in. First-appearance order would repaint the whole column the
+moment a row arrived at the top, and a colour that moves means less than a
+colour nobody picked. More values than the palette has colours and it
+wraps, so a column of hundreds is still drawn — just not usefully.
+
+The default shape is a **pill**, because that is what a category wants: a
+lozenge round each value rather than a flooded column of eight saturated
+chart colours. ``fill`` and ``text`` ask for the other two.
+
 The same list shapes the table as well as painting it. ``width`` / ``align``
 / ``label`` are properties of a *column*, read once rather than per cell,
 and ``wrap`` is the one rule that names no columns — a row is as tall as
@@ -125,6 +146,8 @@ import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from .visual_style import PALETTES
 
 # --------------------------------------------------------------- presets
 
@@ -171,7 +194,7 @@ _ICON_LABELS = {
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
-          "sort", "color_map"}
+          "sort", "color_map", "auto_color"}
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
@@ -281,6 +304,12 @@ class Rule:
     #: (`pill green`). Safe as a bool where `direction` was not, because
     #: here False *is* absence, which is exactly what `to_dict` drops.
     as_pill: bool = False
+    #: auto_color: which palette to spend, by name from
+    #: :data:`flograph.core.visual_style.PALETTES`. None = the default one.
+    palette: Optional[str] = None
+    #: auto_color: colour the *text* rather than the ground behind it.
+    #: A bool for the same reason `as_pill` is one — False is absence.
+    ink_only: bool = False
 
     def to_dict(self) -> dict:
         out = {}
@@ -491,6 +520,72 @@ def readable_fg(bg_hex: str) -> str:
     r, g, b = (c / 255 for c in rgb)
     luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
     return "#1b1c20" if luminance > 0.55 else "#e5e7eb"
+
+
+#: The grid a table cell is painted on.
+CARD_GROUND = "#2a2c33"
+
+#: The contrast an automatically-chosen ink has to reach against it —
+#: WCAG AA for body text, which is what a table cell is.
+INK_CONTRAST = 4.5
+
+
+def _relative_luminance(rgb: tuple) -> float:
+    """WCAG relative luminance — gamma-corrected, unlike the quick
+    weighted average :func:`readable_fg` uses to pick between two fixed
+    inks. Choosing *between* two colours tolerates a rough number;
+    deciding whether one is readable at all does not."""
+    def channel(c: float) -> float:
+        c = c / 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (channel(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast_ratio(a: str, b: str) -> float:
+    """The WCAG contrast between two colours, 1.0 (identical) to 21.0."""
+    ra, rb = _hex_rgb(a), _hex_rgb(b)
+    if ra is None or rb is None:
+        return 21.0
+    hi, lo = sorted((_relative_luminance(ra), _relative_luminance(rb)),
+                    reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def on_dark(colour: str, ground: str = CARD_GROUND,
+            target: float = INK_CONTRAST) -> str:
+    """`colour` made legible as *ink on the card*. The mirror of
+    :func:`on_white`, which darkens ink that would vanish on paper.
+
+    Only used where the colour was chosen **for** somebody rather than by
+    them. A `fg red` rule gets red, because that is what it asked for; an
+    ``autocolour … text`` rule is spending a *chart* palette, and those
+    colours are built to be grounds with text laid on top. Several are
+    darker than the grid they would then have to be read against —
+    ``#1e293b`` on ``#2a2c33`` is 1.05:1, which is not dim, it is
+    invisible.
+
+    Lifted toward white in small steps and stopped at the **first** one
+    that clears `target`, so a colour keeps as much of itself as it can
+    afford. A colour already clear enough is returned untouched, which is
+    most of the brighter half of every palette.
+    """
+    rgb = _hex_rgb(colour)
+    if rgb is None or _hex_rgb(ground) is None:
+        return colour
+    if contrast_ratio(colour, ground) >= target:
+        return colour
+    for step in range(1, _INK_LIFT_STEPS + 1):
+        lifted = _rgb_hex(_lerp(rgb, (255, 255, 255),
+                                step / _INK_LIFT_STEPS))
+        if contrast_ratio(lifted, ground) >= target:
+            return lifted
+    return "#e5e7eb"
+
+
+#: How finely the lift is searched. Twenty is 5% a step — fine enough that
+#: nothing is lightened much past what it needed.
+_INK_LIFT_STEPS = 20
 
 
 # ------------------------------------------------------------------ paper
@@ -734,8 +829,22 @@ def parse_op_value(text: str) -> tuple:
     return ("=", _coerce(raw))
 
 
+#: How "auto colour" may be spelled. Both spellings of the colour, and
+#: the hyphen, because all four get typed and `str.split()` keeps a hyphen
+#: inside the one token. Not a bare ``auto`` — the rightmost-keyword scan
+#: would then read ``region width auto`` as a rule about a column called
+#: "region width".
+_AUTO_KEYWORDS = ("autocolour", "autocolor", "auto-colour", "auto-color")
+
+#: The shapes an auto colour can take, and the words for them. The default
+#: is a pill: a category wants a lozenge round its value, not a column
+#: flooded with one of eight saturated chart colours.
+_AUTO_SHAPES = {"pill": "pill", "pills": "pill", "fill": "fill",
+                "block": "fill", "text": "text", "ink": "text"}
+
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "colormap",
-             "colourmap", "format", "width", "align", "label", "sort")
+             "colourmap", "format", "width", "align", "label", "sort"
+             ) + _AUTO_KEYWORDS
 
 #: The keywords whose argument is a `source: value=…` map. They are the
 #: only ones that may be written with the colon stuck to them — `iconmap:`
@@ -965,6 +1074,17 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         mode = "icon_map" if keyword == "iconmap" else "color_map"
         return Rule(mode, columns, source=source, mapping=mapping,
                     hide_value=only, glyph_where=place, as_pill=pill)
+    if keyword in _AUTO_KEYWORDS:
+        arg, source, only = _split_modifiers(arg)
+        arg, shape = _split_flag(arg, _AUTO_SHAPES)
+        name = arg.strip().lower()
+        if name and name not in PALETTES:
+            raise ValueError(f"line {lineno}: unknown palette {arg!r} "
+                             f"(try {', '.join(sorted(PALETTES))})")
+        return Rule("auto_color", columns, palette=name or None,
+                    source=source, hide_value=only,
+                    as_pill=shape in (None, "pill"),
+                    ink_only=shape == "text")
     if keyword == "scale":
         arg, source, only = _split_modifiers(arg)
         preset = _SCALE_PRESETS.get(arg.lower().replace(" ", "-")
@@ -1311,6 +1431,12 @@ def rule_summary(rule: Rule) -> str:
     if rule.mode == "color_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
         return f"{cols}  ·  colour from {whence}{potted}{only}"
+    if rule.mode == "auto_color":
+        whence = f" from “{rule.source}”" if rule.source else ""
+        shape = ("text" if rule.ink_only else
+                 "a pill each" if rule.as_pill else "a fill each")
+        return (f"{cols}  ·  auto colour{whence} "
+                f"({rule.palette or DEFAULT_PALETTE}, {shape}){only}")
     if rule.mode == "number_format":
         return f"{cols}  ·  number format “{rule.number_spec}”"
     if rule.mode == "hide":
@@ -1457,6 +1583,52 @@ def style_report(style_obj: Any, df=None) -> list[str]:
 
 
 # --------------------------------------------------------------- evaluation
+
+#: The palette an ``autocolour`` rule spends when it is not told one.
+#: "mixed" is the app's own default series palette, so a table auto-coloured
+#: beside a chart of the same categories reads as one picture.
+DEFAULT_PALETTE = "mixed"
+
+
+def auto_colors(values, palette: "str | None" = None) -> dict:
+    """A colour for every distinct value in `values`, naming none of them.
+
+    Returns ``{stringified value: colour}``. Blanks and missing values are
+    left out — an empty cell is not a category, and giving it one paints a
+    block over the hole rather than showing it.
+
+    **Sorted, deliberately.** Ordering by first appearance would repaint
+    the whole column the moment a row arrived at the top, which is the one
+    thing that makes an automatic colour worse than a named one: you can no
+    longer learn it. Values that compare are sorted natively, so 2 comes
+    before 10; a column that mixes types falls back to sorting by text
+    rather than raising, because a table is not the place to be strict
+    about that.
+
+    More distinct values than the palette has colours and it wraps. That is
+    honest rather than good — a column of two hundred categories cannot be
+    told apart by colour whatever we do — and it beats leaving the tail
+    uncoloured, which reads as "these rows are special".
+    """
+    wheel = list(PALETTES.get(str(palette or DEFAULT_PALETTE).strip().lower())
+                 or PALETTES[DEFAULT_PALETTE])
+    seen: list = []
+    keys: set = set()
+    for v in values:
+        if _is_missing(v):
+            continue
+        key = str(v).strip()
+        if not key or key in keys:
+            continue
+        keys.add(key)
+        seen.append(v)
+    try:
+        ordered = sorted(seen)
+    except TypeError:
+        ordered = sorted(seen, key=str)
+    return {str(v).strip(): wheel[i % len(wheel)]
+            for i, v in enumerate(ordered)}
+
 
 def column_stats(series) -> ColumnStats:
     import pandas as pd
@@ -1712,6 +1884,33 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
                             pill=first, pill_fg=second or readable_fg(first))
                     else:
                         contrib[i] = CellStyle(bg=first, fg=second)
+
+        elif rule.mode == "auto_color":
+            # the same three spellings as a map: no source means this
+            # column decides its own, which is the only one that means
+            # anything under a pattern
+            if not rule.source:
+                src = values
+            elif (frame is not None
+                    and rule.source in getattr(frame, "columns", [])):
+                src = list(frame[rule.source])
+            else:
+                src = None
+            if src is not None:
+                wheel = auto_colors(src, rule.palette)
+                for i, v in enumerate(src):
+                    color = wheel.get(str(v).strip()) if not _is_missing(v) else None
+                    if not color:
+                        continue
+                    if rule.ink_only:
+                        # a palette colour is built to be a ground, so as
+                        # ink it has to clear the grid first
+                        contrib[i] = CellStyle(fg=on_dark(color))
+                    elif rule.as_pill:
+                        contrib[i] = CellStyle(pill=color,
+                                               pill_fg=readable_fg(color))
+                    else:
+                        contrib[i] = CellStyle(bg=color, fg=readable_fg(color))
 
         elif rule.mode == "number_format":
             for i, v in enumerate(values):

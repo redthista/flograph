@@ -5,6 +5,8 @@ import pytest
 from flograph.core.table_format import parse_rules
 from flograph.ui.properties.table_rule_wizard import (
     ColorChoice, RuleBuilder, RuleManager,
+    K_AUTO, K_BAR, K_HIDE, K_HIGHLIGHT, K_ICONS, K_LAYOUT,
+    K_NUMBER, K_SCALE, K_WRAP,
 )
 
 COLUMNS = ["revenue", "units", "status", "sla", "gross margin"]
@@ -35,14 +37,14 @@ def _valid(line):
 
 def test_colour_scale(build):
     b = build()
-    b._kind.setCurrentIndex(0)
+    b._kind.setCurrentIndex(K_SCALE)
     _select(b, "revenue")
     assert _valid(b.line()).mode == "color_scale"
 
 
 def test_data_bars_multiple_columns(build):
     b = build()
-    b._kind.setCurrentIndex(1)
+    b._kind.setCurrentIndex(K_BAR)
     _select(b, "revenue", "units")
     rule = _valid(b.line())
     assert rule.mode == "data_bar" and rule.columns == ["revenue", "units"]
@@ -50,7 +52,7 @@ def test_data_bars_multiple_columns(build):
 
 def test_highlight_between_bold(build):
     b = build()
-    b._kind.setCurrentIndex(2)
+    b._kind.setCurrentIndex(K_HIGHLIGHT)
     _select(b, "units")
     idx = [b._op.itemData(i) for i in range(b._op.count())].index("between")
     b._op.setCurrentIndex(idx)
@@ -63,7 +65,7 @@ def test_highlight_between_bold(build):
 
 def test_whole_row_highlight(build):
     b = build()
-    b._kind.setCurrentIndex(2)
+    b._kind.setCurrentIndex(K_HIGHLIGHT)
     _select(b, "status")
     b._op.setCurrentIndex(4)          # equals
     b._val1.setText("fail")
@@ -73,7 +75,7 @@ def test_whole_row_highlight(build):
 
 def test_icons_reverse(build):
     b = build()
-    b._kind.setCurrentIndex(3)
+    b._kind.setCurrentIndex(K_ICONS)
     _select(b, "units")
     b._icon_reverse.setChecked(True)
     assert _valid(b.line()).reverse is True
@@ -81,7 +83,7 @@ def test_icons_reverse(build):
 
 def test_iconmap(build):
     b = build()
-    b._kind.setCurrentIndex(3)                # Icons
+    b._kind.setCurrentIndex(K_ICONS)                # Icons
     b._icon_style.setCurrentIndex(1)          # Map exact values to icons
     _select(b, "units")
     _pick_other(b._icon_by, "sla")
@@ -95,7 +97,7 @@ def test_iconmap(build):
 
 def test_iconmap_free_text_glyph_and_custom_hex_colour(build):
     b = build()
-    b._kind.setCurrentIndex(3)
+    b._kind.setCurrentIndex(K_ICONS)
     b._icon_style.setCurrentIndex(1)
     _select(b, "units")
     _pick_other(b._icon_by, "sla")
@@ -108,7 +110,7 @@ def test_iconmap_free_text_glyph_and_custom_hex_colour(build):
 
 def test_number_format(build):
     b = build()
-    b._kind.setCurrentIndex(4)
+    b._kind.setCurrentIndex(K_NUMBER)
     _select(b, "revenue")
     b._numfmt.setCurrentText("$,.0f")
     assert _valid(b.line()).number_spec == "$,.0f"
@@ -116,7 +118,7 @@ def test_number_format(build):
 
 def test_hide_quotes_a_spaced_name(build):
     b = build()
-    b._kind.setCurrentIndex(5)
+    b._kind.setCurrentIndex(K_HIDE)
     _select(b, "gross margin")
     assert b.line() == 'hide "gross margin"'
 
@@ -124,7 +126,7 @@ def test_hide_quotes_a_spaced_name(build):
 def test_builder_prefills_from_a_rule(build):
     rule = parse_rules("units icons check reverse")[0]
     b = build(rule)
-    assert b._kind.currentIndex() == 3
+    assert b._kind.currentIndex() == K_ICONS
     assert b._chosen_columns() == ["units"]
     assert b._iconset.currentData() == "check"
     assert b._icon_reverse.isChecked() is True
@@ -184,7 +186,7 @@ def _pick_other(box, name):
 
 def test_scale_by_another_column(build):
     b = build()
-    b._kind.setCurrentIndex(0)
+    b._kind.setCurrentIndex(K_SCALE)
     _select(b, "status")
     _pick_other(b._scale_by, "revenue")
     rule = _valid(b.line())
@@ -194,7 +196,7 @@ def test_scale_by_another_column(build):
 
 def test_data_bar_sized_by_another_column(build):
     b = build()
-    b._kind.setCurrentIndex(1)
+    b._kind.setCurrentIndex(K_BAR)
     _select(b, "status")
     _pick_other(b._bar_by, "units")
     assert _valid(b.line()).source == "units"
@@ -202,7 +204,7 @@ def test_data_bar_sized_by_another_column(build):
 
 def test_icons_ranked_by_another_column(build):
     b = build()
-    b._kind.setCurrentIndex(3)
+    b._kind.setCurrentIndex(K_ICONS)
     _select(b, "status")
     _pick_other(b._icon_by, "revenue")
     b._icon_reverse.setChecked(True)
@@ -212,7 +214,7 @@ def test_icons_ranked_by_another_column(build):
 
 def test_highlight_tested_on_another_column(build):
     b = build()
-    b._kind.setCurrentIndex(2)
+    b._kind.setCurrentIndex(K_HIGHLIGHT)
     _select(b, "gross margin")
     _pick_other(b._hl_test, "revenue")
     b._op.setCurrentIndex(2)              # is less than
@@ -238,7 +240,7 @@ def test_if_clause_round_trips_through_the_builder(build):
 
 def test_column_pattern_typed_alongside_the_list(build):
     b = build()
-    b._kind.setCurrentIndex(0)
+    b._kind.setCurrentIndex(K_SCALE)
     _select(b, "revenue")
     b._col_edit.setText("Q?_*, units")
     rule = _valid(b.line())
@@ -249,7 +251,7 @@ def test_column_pattern_typed_alongside_the_list(build):
 def test_builder_prefills_a_pattern_into_the_field(build):
     rule = parse_rules("20* bar blue")[0]
     b = build(rule)
-    assert b._kind.currentIndex() == 1
+    assert b._kind.currentIndex() == K_BAR
     assert b._col_edit.text() == "20*"
     assert b.line() == "20* bar blue"
 
@@ -292,7 +294,7 @@ def test_manager_duplicate_disabled_on_a_note(qtbot):
 def test_free_text_columns_when_none_known(qtbot):
     b = RuleBuilder([])
     qtbot.addWidget(b)
-    b._kind.setCurrentIndex(0)
+    b._kind.setCurrentIndex(K_SCALE)
     b._col_edit.setText("a, b")
     assert b.line() == "a, b scale green"
 
@@ -302,7 +304,7 @@ class TestColumnLayoutPage:
 
     def _page(self, build, prop):
         b = build()
-        b._kind.setCurrentIndex(6)
+        b._kind.setCurrentIndex(K_LAYOUT)
         _select(b, "revenue")
         _pick_other(b._layout_prop, prop)
         return b
@@ -342,7 +344,7 @@ class TestColumnLayoutPage:
 
     def test_wrap_is_its_own_kind_and_names_no_columns(self, build):
         b = build()
-        b._kind.setCurrentIndex(7)
+        b._kind.setCurrentIndex(K_WRAP)
         assert b.line() == "wrap"
         assert _valid(b.line()).mode == "wrap"
 
@@ -352,7 +354,7 @@ class TestValueHidden:
 
     def test_a_bar_only_rule_is_written(self, build):
         b = build()
-        b._kind.setCurrentIndex(1)
+        b._kind.setCurrentIndex(K_BAR)
         _select(b, "units")
         b._bar_only.setChecked(True)
         assert b.line() == "units bar blue only"
@@ -361,7 +363,7 @@ class TestValueHidden:
     def test_an_icon_map_puts_only_before_the_mapping(self, build):
         """A trailing one would be read as the last pair's colour."""
         b = build()
-        b._kind.setCurrentIndex(3)                # Icons
+        b._kind.setCurrentIndex(K_ICONS)                # Icons
         b._icon_style.setCurrentIndex(1)          # Map exact values to icons
         _select(b, "units")
         _pick_other(b._icon_by, "sla")
@@ -398,7 +400,7 @@ def _set_place(box, token):
 
 def test_a_highlight_can_place_its_icon_on_the_right(build):
     b = build()
-    b._kind.setCurrentIndex(2)
+    b._kind.setCurrentIndex(K_HIGHLIGHT)
     _select(b, "status")
     b._op.setCurrentIndex(b._op.findData("="))
     b._val1.setText("breach")
@@ -411,7 +413,7 @@ def test_a_highlight_can_place_its_icon_on_the_right(build):
 
 def test_a_pill_with_no_text_wraps_the_value(build):
     b = build()
-    b._kind.setCurrentIndex(2)
+    b._kind.setCurrentIndex(K_HIGHLIGHT)
     _select(b, "status")
     b._op.setCurrentIndex(b._op.findData("="))
     b._val1.setText("breach")
@@ -424,7 +426,7 @@ def test_left_is_not_spelled_out(build):
     """The default place has an empty token, so the generated line stays
     as short as it was before there was anywhere else to put a mark."""
     b = build()
-    b._kind.setCurrentIndex(2)
+    b._kind.setCurrentIndex(K_HIGHLIGHT)
     _select(b, "status")
     b._op.setCurrentIndex(b._op.findData("="))
     b._val1.setText("breach")
@@ -434,7 +436,7 @@ def test_left_is_not_spelled_out(build):
 
 def test_a_graduated_icon_set_carries_place_and_pill(build):
     b = build()
-    b._kind.setCurrentIndex(3)
+    b._kind.setCurrentIndex(K_ICONS)
     _select(b, "revenue")
     b._icon_style.setCurrentIndex(0)
     b._icon_pill.setChecked(True)
@@ -448,7 +450,7 @@ def test_and_still_does_with_a_by_clause_and_only(build):
     """The place and the pill sit before `by`, or the column name after it
     would swallow them."""
     b = build()
-    b._kind.setCurrentIndex(3)
+    b._kind.setCurrentIndex(K_ICONS)
     _select(b, "revenue")
     b._icon_style.setCurrentIndex(0)
     b._icon_pill.setChecked(True)
@@ -463,7 +465,7 @@ def test_and_still_does_with_a_by_clause_and_only(build):
 
 def test_an_icon_map_carries_them_in_the_leading_block(build):
     b = build()
-    b._kind.setCurrentIndex(3)
+    b._kind.setCurrentIndex(K_ICONS)
     _select(b, "sla")
     b._icon_style.setCurrentIndex(1)
     b._map.item(0, 0).setText("breach")
@@ -476,3 +478,70 @@ def test_an_icon_map_carries_them_in_the_leading_block(build):
     assert (rule.as_pill, rule.glyph_where, rule.hide_value) == \
         (True, "right", True)
     assert rule.mapping
+
+
+class TestAutoColourPage:
+    """T4's page. It offers no value list on purpose — the categories are
+    not known when the rule is written, which is the whole point of the
+    rule. Anything typed here would be a `colormap` wearing another name."""
+
+    def test_the_default_line_is_the_shortest_useful_one(self, build):
+        b = build()
+        b._kind.setCurrentIndex(K_AUTO)
+        _select(b, "status")
+        rule = _valid(b.line())
+        assert rule.mode == "auto_color"
+        assert (rule.as_pill, rule.ink_only) == (True, False)
+
+    @pytest.mark.parametrize("shape,as_pill,ink", [
+        ("", True, False), ("fill", False, False), ("text", False, True)])
+    def test_each_shape_is_written_and_reads_back(self, build, shape,
+                                                  as_pill, ink):
+        b = build()
+        b._kind.setCurrentIndex(K_AUTO)
+        _select(b, "status")
+        b._auto_shape.setCurrentIndex(b._auto_shape.findData(shape))
+        rule = _valid(b.line())
+        assert (rule.as_pill, rule.ink_only) == (as_pill, ink)
+
+    def test_the_palette_is_named_in_the_line(self, build):
+        b = build()
+        b._kind.setCurrentIndex(K_AUTO)
+        _select(b, "status")
+        b._auto_palette.setCurrentIndex(b._auto_palette.findData("vivid"))
+        assert _valid(b.line()).palette == "vivid"
+
+    def test_the_shape_word_goes_before_the_by_clause(self, build):
+        """Written after it, the column name the clause hands back would
+        swallow it — the same trap the icon page has."""
+        b = build()
+        b._kind.setCurrentIndex(K_AUTO)
+        _select(b, "status")
+        b._auto_shape.setCurrentIndex(b._auto_shape.findData("fill"))
+        b._auto_by.setCurrentIndex(b._auto_by.findText("units"))
+        b._auto_only.setChecked(True)
+        rule = _valid(b.line())
+        assert rule.source == "units"
+        assert (rule.as_pill, rule.hide_value) == (False, True)
+
+    @pytest.mark.parametrize("line", [
+        "status autocolour mixed",
+        "status autocolour vivid fill",
+        "status autocolour cool text",
+        "status autocolour mixed by units",
+        "status autocolour vivid fill by units only",
+        "status autocolour earth text by units only",
+    ])
+    def test_every_line_the_page_can_write_loads_back_into_it(self, build,
+                                                              line):
+        rule = parse_rules(line)[0]
+        b = build(rule)
+        assert b._kind.currentIndex() == K_AUTO
+        assert b.line() == line
+
+    def test_the_palette_combo_is_taken_from_the_chart_palettes(self, build):
+        from flograph.core.table_format import PALETTES
+        b = build()
+        offered = {b._auto_palette.itemData(i)
+                   for i in range(b._auto_palette.count())}
+        assert offered == set(PALETTES)
