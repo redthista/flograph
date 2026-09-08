@@ -14,7 +14,7 @@ the duplication is not removable. This is the guard rail instead.
 import pytest
 
 from flograph.core import Graph, NodeRegistry
-from flograph.ui.canvas.node_item import NodeItem
+from flograph.ui.canvas.node_item import SLICER_DROPDOWN_MIN_H, NodeItem
 
 #: Params that state a *card's* size. A node may also have width/height
 #: params meaning something else entirely (a figure's own layout size), so
@@ -88,10 +88,20 @@ class TestTheTwoCeilingsAgree:
 
         A minimum of 0 is exempt: on the Note it is the documented
         "0 = fit text" sentinel, not a size at all.
+
+        And a card whose floor depends on a *param* is compared against the
+        lowest floor it can offer, not the one the default happens to give:
+        a Slicer's is 150 for the list layouts and 66 for the dropdown,
+        which is one button, so its PARAMS has to advertise 66 or the
+        dropdown could never be typed down to its own size.
         """
+        floors = {"flograph.viz.slicer": {"height": SLICER_DROPDOWN_MIN_H}}
         wrong = []
         for type_id, item, params in cards:
             minw, _maxw, minh, _maxh = item._resize_bounds()
+            varies = floors.get(type_id, {})
+            minw = varies.get("width", minw)
+            minh = varies.get("height", minh)
             for name, floor in (("width", minw), ("height", minh)):
                 spec = params.get(name)
                 if spec is None or not spec.minimum:
