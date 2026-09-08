@@ -12,7 +12,7 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q,
-R, T, Y and Z) are where shipped work used to be. Old numbers are kept
+R, T, V, Y and Z) are where shipped work used to be. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -29,10 +29,10 @@ by an entry above — bar the cache bug, which is `issues.md` 8 because it
 needs a repro before it is an idea. Chunk T shipped whole on 2026-09-08
 and the letter retires with it: T1 gave a cell a *list* of decorations
 with a place on each, and T4 then filled that list without anything being
-named in advance. V1 and the first half of V3 shipped the same day —
-`show` picks a table's columns and their order, and a cut-short cell now
-offers the whole of itself on hover; V3 is edited down to the half that
-is left rather than deleted.
+named in advance. Chunk V shipped whole on 2026-09-08 and its
+letter retires too: V1 gave a table a keep-list that fixes its column
+order, and V3 gave a cell two ways to say more than fits — the whole of a
+value that was cut short, and a note read from another column.
 
 ---
 
@@ -254,36 +254,6 @@ Qt's rich text has no z-order and no partial-width background.
   **picture**, the way a web-view card already does. The first keeps the
   table as text; the second gets the card's exact look and gives up
   selectable numbers in that column.
-
----
-
-## V. The table as a view
-
-Show Table's own parameters (`nodes/viz/show_table.py`) and the inspector
-view — how the table is *presented*, as against how its cells are painted.
-
-**V3. A tooltip that explains a cell, from another column** (Dan). What
-is left of the ask now the truncation half has shipped: a note column
-that never shows on its own but explains the cell beside it, written as a
-rule (`revenue tip note`). The mechanism is the one chunk T left behind —
-a cell already carries a list of decorations that each know their place,
-so a tooltip is one more thing a rule can put on a cell rather than a new
-kind of thing.
-
-  Two decisions it still needs, neither guessable from the ask. What
-  happens on a cell that has **both** — the note and a value that was cut
-  short — since there is one tooltip and two things wanting it. And
-  whether naming a source column quietly drops it from the view: a note
-  column is a helper by definition, but `hide` already says that out loud,
-  and doing it silently is the sort of kindness people then have to work
-  out how to undo.
-
-  Note that the truncation half did not land where this entry expected. It
-  is not a `ToolTipRole` in `pandas_model.py`: a model cannot know how wide
-  its column ended up, so the measurement lives on the delegate
-  (`ConditionalFormatDelegate.value_area`) and the view asks it. A rule-
-  driven tooltip is a model-side answer and can go where this entry said —
-  but it will have to agree with that one about which of them is talking.
 
 ---
 
