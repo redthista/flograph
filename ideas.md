@@ -23,7 +23,10 @@ M3, M4, N6 and chunks T–X were triaged out of Dan's 0.1.13 list and
 checked against the code on 2026-09-07 — of which T2, T3, U1, V2, W1,
 X2 and the whole of Y shipped the same day and have left the list. Z1
 was triaged here too and shipped from another branch, so Z retires
-without ever having been listed.
+without ever having been listed. The raw 0.1.13 list itself was cleared on
+2026-09-08: every one of its nineteen bullets is either shipped or carried
+by an entry above — bar the cache bug, which is `issues.md` 8 because it
+needs a repro before it is an idea.
 
 ---
 
@@ -141,25 +144,16 @@ accident is not a bug anybody gets to undo.
 
 ## N. Dashboard pages
 
-**N3. Set the shape a visual takes on a page** (Dan). Asked for as "a wide
-Plotly chart, or a long thin one". The two page kinds answer this
-differently today:
+**N3. Set the shape a visual takes on a dashboard page** (Dan). Asked for
+as "a wide Plotly chart, or a long thin one". On a **report page** this is
+already done: `![[chart|ratio=16:9]]`, and `height=`, `scale=` and `fit`
+beside it, shipped in 0.1.12 — `EMBED_OPTIONS` in `core/report.py` reads
+`("width", "ratio", "height", "scale", "rows", "radius")`.
 
-  On a **report page** (the flowing document), `![[chart|width=50%]]` is
-  the only per-embed control — `EMBED_OPTIONS == ("width",)`, and a test
-  pins it closed. The figure's wide-or-tall shape comes from the figure's
-  own `layout.width` / `layout.height`, set on the chart node or a Plotly
-  Style node; the report only scales the placement width. A `height=` or
-  `ratio=` embed option is the natural addition, plumbed through
-  `parse_options` and `render.plotly_geometry` — but the render code
-  deliberately resists resizing Plotly figures, because the labels do not
-  scale with them. Sits with `ideas_archived.md` #7, which already parks
-  `![[chart|fit]]` and embed alignment.
-
-  On a **dashboard page** (free-form tiles) the capability is already there
-  by dragging a tile's edges; what is missing is a numeric "W:H" input, an
-  aspect lock while resizing, and a few preset ratios — new UI on `TileItem`
-  or the properties panel.
+What is left is the **dashboard page**. Its free-form tiles can already be
+dragged to any shape, but nothing lets you *state* one: no numeric "W:H"
+input, no aspect lock while resizing, no preset ratios — new UI on
+`TileItem` or the properties panel.
 
 **N4. A slicer that greys out values with nothing behind them.** Excel greys
 a slicer value that the *other* slicers have already filtered away, so you
@@ -355,25 +349,3 @@ and the formatting arrives by wiring a style in.
   ask). Already written up as `ideas_archived.md` #4, where it is parked as
   LARGE and undecided — decide it there rather than forking a second note.
   "A node that is its own flow" is the same ask; it lives there too.
-
-## V0.1.13 Fixes & Additions
-- table formatting, we need to be able to put the icons we add via conditional formatting to the right of the text as well as the current left. 
-- color bars formatting on the canvas works well, but when we get to the report page it seperates the bar and the number, and if a number is 1 and 10 then the bars start at different points? can we overlay the bars like we do on the canvas?
-- the table when put on the report page has a white header row as normal but in fit it has a toned header? i like the tonned header, can we make this standard all the time? 
-- add a equiv Matrix Table, so it handles the pivot within the table. 
-- conditional formatting where i say i want columns starting with 20* to all have a green tick where 1 in the cell? but currently it doesnt seem to work when i use 20*
-- when i pivot columns it seems to obay a new sort rather than the tables sort? 
-- can we have a node that can run a flograph file? with the option to bring a output
-- send windows outlook email node? per row send email based on data rows? 
-- ability to install web library from local files? 
-- when i copy and paste from node code, i have to paste as unformatted for it to survuve being sent in an email with the indents. 
-- we still have a restore from cache bug in larger flows, 
-- table conditional formatting needs a rule map table like we have for icons, so i can say if = x then be red, but if x y then be orange etc etc. 
-- now we have the js bridge, can we make the charts so when i click them it filters the dataset? 
-- when adding more than one like if i want to assign multiple icons, like a icon like OT and then a Green Tick at the start , i want to set to rules and have them add together, to the second format add around the first, and after we add right or left, we could have one on the left and one on the right, i think we should also add ontop and below as an option so the row can be heightened and then add the items below, i think also having some "pill" styles would be really nice, so a format where we can add a pill shape with icons, text, or the original col text with a colored pill. either in the original column, in another columns etc etc, 
-- any way we can set a hover tooltip on a table?
-- maybe a simple way to add a auto color from colorpallet to a column in a table, where we can select a column and say auto color, and it colors the text in the cells by look at them as if they were categories and assigning a color to them? pallet control would be nice, 
-- on the show table, instead of hide columne, we need a drop columns option and show columns, and show in the order of selection. and ability to sort the table by default. 
-- expanded limits on sizes of charts and tables / visual nodes. i feel like its limited me a few times where ive tried to make them bigger. 
-- any visual, a where is this used context option that shows me its in use on dashboard page x and report page y 
-- 
