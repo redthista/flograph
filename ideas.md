@@ -12,8 +12,8 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q,
-R, Y and Z) are where shipped work used to be. Old numbers are kept as "(was N)" where
-a code comment still cites them.
+R, T, Y and Z) are where shipped work used to be. Old numbers are kept
+as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
 list. Ideas for *new nodes* live in `node_ideas.md`; only the ones asked for
@@ -26,9 +26,10 @@ was triaged here too and shipped from another branch, so Z retires
 without ever having been listed. The raw 0.1.13 list itself was cleared on
 2026-09-08: every one of its nineteen bullets is either shipped or carried
 by an entry above — bar the cache bug, which is `issues.md` 8 because it
-needs a repro before it is an idea. T1 shipped on 2026-09-08 and has left
-the list; T4 was rewritten the same day, since T1 built the model it
-needed.
+needs a repro before it is an idea. Chunk T shipped whole on 2026-09-08
+and the letter retires with it: T1 gave a cell a *list* of decorations
+with a place on each, and T4 then filled that list without anything being
+named in advance.
 
 ---
 
@@ -227,28 +228,6 @@ guide that ships on the dashboard. What is missing:
 
 ---
 
-## T. Table formatting — what a cell can show
-
-Everything here is `core/table_format.py` (the rule model and its parser),
-`ui/table_delegate.py` (the card) and `core/table_html.py` (paper). T1 has
-shipped, so the model a cell's decorations live in is now a list with a
-place on each entry — T4 writes into that rather than having to build it.
-
-**T4. Auto-colour a column by category** (Dan). Pick a column, say "auto
-colour", and every distinct value takes its own colour from a palette —
-text or fill, palette chosen. The point is that nothing is named in
-advance, which is exactly what a rule map (T2) cannot do. The palettes
-exist already on `Visual Style` and `Plotly Style`; the work is a rule that
-resolves at evaluation time against the column's distinct values, in an
-order stable enough that the colours do not move when a row arrives.
-
-  Cheaper than it was: T1 shipped `colormap pill:`, so the *shape* an auto
-  colour wants — a lozenge round each value rather than a flooded cell —
-  already exists and already prints. What is left is choosing the colours
-  with nothing named.
-
----
-
 ## U. The table on paper
 
 Where the printed table is nearly the card and the gap shows. Lives in
@@ -294,8 +273,10 @@ pinning before building, because there are two features under it. The
 **full value where a cell is truncated** needs no configuration, could
 simply be on, and is a `ToolTipRole` in `pandas_model.py` — half an hour.
 A **tooltip from another column** — a note column that never shows but
-explains the cell — is a rule (`revenue tip note`) and belongs with T1 and
-T4 in the same DSL.
+explains the cell — is a rule (`revenue tip note`), and the DSL it
+belongs in is the one chunk T left behind: a cell already carries a list
+of decorations that each know their place, so a tooltip is one more thing
+a rule can put on a cell rather than a new mechanism.
 
 ---
 
