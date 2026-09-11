@@ -37,7 +37,10 @@ shipped on 2026-09-11: a node's right-click menu now says which pages show
 it, and says so when none do. N3 shipped the same day: a dashboard tile
 can be given a shape, and keeps it when it is resized. So did O1, and
 chunk O retires with it: flograph opens on a start screen of favourite and
-recent workflows.
+recent workflows. Dan's 0.1.14 list (`new_ideas.md`) was triaged here the
+same day: its seventeen bullets are chunks AA–AC, G12, and additions to M3
+and X1. The single letters are used up — I is skipped, it reads as a 1 —
+so chunks carry on at AA.
 
 ---
 
@@ -103,6 +106,17 @@ the sort, none of it kept between opens. A persistent model, or a memoised
 popup is a fixed 280×320 and ~70 rows should not cost this much, so the real
 cause may be Windows popup/paint behaviour rather than the rebuild.
 
+**G12. Open a frame in a tab of its own** (Dan). Right-click a frame ▸ Open
+in New Tab: a canvas tab showing only that frame's nodes, for working on one
+part of a big flow without the rest in view. A *view* onto the same graph,
+not a copy — an edit there is an edit to the flow. Close to metanodes
+(`ideas_archived.md` #4) without being one: nothing is collapsed or nested,
+the frame just gets a canvas to itself. The page bar holds dashboards and
+reports today, so this is a third kind of tab, and the open questions are
+what happens to wires that leave the frame (stubs to a named pin, the way a
+Goto/From reads) and whether the tab is saved with the file or is a
+per-session convenience.
+
 ---
 
 ## L. Version control
@@ -138,6 +152,14 @@ exit code, so the child has to write somewhere the parent reads (name an
 output node, write it to parquet in a temp dir, read it back). Note the
 overlap with `ideas_archived.md` #4: this is "a node that is its own flow"
 with a file in the middle, and the two should not end up built twice.
+
+  Dan's 0.1.14 note adds the cheaper half, which may be the half to build
+  first: take the table from the child file's **saved cache** when it has
+  one, and run the child only when it does not (or when asked). A
+  `.flograph` is a zip carrying its cache (`core/container.py`), one blob
+  per node keyed in `cache/manifest.json`, so reading one node's output is
+  a file read with no engine at all — the question is only what to do when
+  the cached entry is stale against the child's own graph.
 
 **M4. Send an Outlook email, one per row** (Dan). A table in, one email per
 row, subject and body as templates over that row's columns — the
@@ -245,10 +267,106 @@ spreadsheet's pivot table does, instead of needing a Pivot node wired in
 front of it. The arithmetic is already written (`nodes/transform/pivot.py`);
 what is new is a card holding rows / columns / values / aggregation as its
 **own** parameters, so the shape can be changed where you are looking at
-the result. Decide first whether it is a new node or a **mode of Show
-Table**: as a mode it inherits every conditional-formatting rule, which is
-most of what makes the ask worth doing at all; as a node it stays simple
-and the formatting arrives by wiring a style in.
+the result. **Decided (Dan, 0.1.14): a mode of Show Table**, so it inherits
+every conditional-formatting rule — and the rules should be able to read
+the rows *before* the pivot as well as the cells after it. That is his
+reason for wanting it: a table of six values with six checker columns
+beside them, there only to feed six icons, becomes six rules on the source
+rows and a pivot of the result. It is also the hard part — a rule decided
+on a source row has to be carried through the aggregation to the cell it
+ends up in, and a cell built from several rows needs a rule for which of
+their verdicts wins.
+
+---
+
+## AA. Papercuts from the 0.1.14 list
+
+Eight small ones from Dan's list, each a few lines and each tried in
+seconds, so they go together.
+
+**AA1. A plain canvas by default.** The background grid is drawn unless
+Settings ▸ Canvas turns it off (`grid/visible`, default on). Snapping is a
+separate setting and stays on either way.
+
+**AA2. Scroll bars on by default.** `canvas/scrollbars` defaults off; it
+became a setting when right-drag panning came back out (`ideas_archived.md`
+#14).
+
+**AA3. A column header's full name on hover.** The header tooltip names
+the column only when a `label` rule renamed it, and otherwise says just its
+dtype — so a header cut short by a `width` rule or a dragged edge has
+nothing to read it back from. The canvas card and the dashboard tile share
+the model (`ui/inspector/pandas_model.py`), so it is one fix for both.
+
+**AA4. Properties from a node's right-click menu.** The menu has Edit Code,
+Rename and Appearance… but not Properties. Double-click opens them by
+default, which nothing on screen tells you.
+
+**AA5. Every tab in a list, from the tab bar's arrows.** With more pages
+than fit, the page bar scrolls with Qt's `< >` buttons, one tab a click.
+Right-clicking them should list every tab to jump straight to.
+
+**AA6. Hide the row index on Show Table.** The row header is always drawn,
+and a generated 0…n index is noise on a dashboard.
+
+**AA7. A slicer's dropdown opens underneath the card in front of it.** The
+dropdown layout's popup is a `QMenu` owned by a button inside the card's
+`QGraphicsProxyWidget`, and Qt embeds a proxied widget's popups into the
+scene with it — at the card's own stacking level, so a card stacked higher
+covers it. It should always be on top.
+
+**AA8. The start screen's "edited" note on the name's line.** Today it sits
+in a column of its own at the right, which squeezes the folder; beside the
+name it frees the whole second line for the folder.
+
+---
+
+## AB. Getting around a dashboard
+
+A dashboard handed to someone else is a set of tabs, and the tabs are the
+only way round it today. These want deciding together.
+
+**AB1. Notes on dashboard and report pages** (Dan). A Note is a canvas
+card but not a tile kind (`TILE_ABLE_KINDS` in `ui/dashboard/tile_item.py`),
+so a line of explanation beside a chart needs a Markdown Wiki or a report.
+A note tile is the dashboard half. A report page is already Markdown, so
+there the question is whether `![[Note]]` embedding a canvas Note is worth
+having over typing the text into the page.
+
+**AB2. An Action Button that goes to a page** (Dan). On click offers Run
+nodes, Run whole flow, Run frame and Show message; Go to page is a fifth,
+with the page picked from a list rather than typed.
+
+**AB3. Navigation buttons or a bar on a dashboard** (Dan). AB2 gives
+buttons one at a time; a bar is the same thing made once. Decide whether it
+is a card placed on each page (flexible, and it goes stale when a page is
+added) or chrome drawn from the page list (always right, one look).
+
+**AB4. Group the page tabs** (Dan). Sections in the tab bar for a flow
+with many pages. The cheapest model is a group name on `Page`, drawn as a
+divider or a collapsible run of tabs; AA5's list would show the groups too.
+
+---
+
+## AC. What a flow needs installed
+
+**AC1. Install packages from a configured pip repository** (Dan). The
+Packages dialog runs `python -m pip`, which already reads `pip.conf` and
+`PIP_INDEX_URL`, so a machine set up for a private index mostly works. Two
+gaps: the `uv pip` fallback (used when the interpreter has no pip) does not
+read `pip.conf`, and there is nowhere in flograph to *set* an index URL on a
+machine that is not configured. A Packages setting for the index URL (and a
+trusted host), passed to whichever installer runs, closes both. The update
+check already goes through pip's configured index.
+
+**AC2. See what a file needs: pip packages and web libraries** (Dan).
+Nothing declares it today. A node's imports are in its own code — forked
+and custom nodes carry theirs in the file — and the visual nodes name the
+web libraries they load (`weblibs.py`). A scan of both, shown as a list
+with what is missing marked, ideally offered on open when something is. The
+hard part is honest: an import name is not a package name (`sklearn` is
+`scikit-learn`), so it needs a mapping for the common ones and a "could not
+tell" for the rest.
 
 ---
 
