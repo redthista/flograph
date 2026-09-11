@@ -32,7 +32,9 @@ with a place on each, and T4 then filled that list without anything being
 named in advance. Chunk V shipped whole on 2026-09-08 and its
 letter retires too: V1 gave a table a keep-list that fixes its column
 order, and V3 gave a cell two ways to say more than fits — the whole of a
-value that was cut short, and a note read from another column.
+value that was cut short, and a note read from another column. N6
+shipped on 2026-09-11: a node's right-click menu now says which pages show
+it, and says so when none do.
 
 ---
 
@@ -178,15 +180,6 @@ expanded, which is right for two levels and wrong for three over a wide
 column. A pair of buttons in the slicer toolbar (and remembering which
 branches were open, in a param) — small, but only worth it once someone has
 a three-level slicer.
-
-**N6. Where is this visual used?** (Dan) A right-click on any visual node
-that answers "this is on dashboard page X and report page Y", and takes you
-there. The links already exist in both directions — a dashboard tile stores
-the node it shows, and a report page's `![[name]]` embed names it — so this
-is a reverse lookup across the project's pages plus a menu entry, and the
-Navigator dock (`ui/navigator/`) is probably where the answer wants to live
-as well as in the menu. Include **"used by no page"** as an answer: on a
-board that has grown, that is the question people are really asking.
 
 ---
 
