@@ -1284,6 +1284,10 @@ class TestUtilNodes:
     def test_action_button_runs_as_noop(self, registry):
         assert run_node(registry, "flograph.util.action_button", {}) == {}
 
+    def test_page_links_runs_as_noop(self, registry):
+        # a card of buttons drawn from the page list; nothing to compute
+        assert run_node(registry, "flograph.util.page_links", {}) == {}
+
 
 class TestScriptingNodes:
     def test_node_template_registers_with_docs(self, registry):

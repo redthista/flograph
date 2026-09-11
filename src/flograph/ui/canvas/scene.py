@@ -216,6 +216,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     node_rename_requested = Signal(str)  # node_id — header was double-clicked
     wire_dropped = Signal(object, QPointF)  # fixed PortItem, scene pos
     button_fired = Signal(str)          # node_id — an Action Button was clicked
+    page_link_clicked = Signal(str)     # page_id from a Page Links button, or
+                                        # a Note's `page:` link text
     slicer_changed = Signal(str)        # node_id — a Slicer's selection changed
     control_changed = Signal(str)       # node_id — an input control was moved
     view_changed = Signal(str)          # node_id — an interactive web view

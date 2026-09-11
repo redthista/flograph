@@ -49,7 +49,8 @@ Value, Gantt Chart (a project plan that works its own dates out), Image, PDF
 Viewer, Report. Any web-view node has **Open in Browser** on its right-click
 menu.
 
-**Util** — Constant, Reroute, Note, Action Button, Goto, From, Variables.
+**Util** — Constant, Reroute, Note, Action Button, Page Links, Goto, From,
+Variables.
 
 **Scripting** — Python Script, plus Node Template and Control Template to
 fork when writing your own.

@@ -172,6 +172,11 @@ IMAGE_MIN_H, IMAGE_MAX_H = 60.0, CARD_MAX_H
 CONTROL_MIN_W, CONTROL_MAX_W = 120.0, 800.0
 CONTROL_MIN_H, CONTROL_MAX_H = 48.0, 600.0
 
+# Page Links (AB3): an Action Button's behaviour — click to go, right-click
+# to edit — over a strip of buttons wide enough for a page list.
+PAGE_LINKS_MIN_W, PAGE_LINKS_MAX_W = 120.0, CARD_MAX_W
+PAGE_LINKS_MIN_H, PAGE_LINKS_MAX_H = 32.0, CARD_MAX_H
+
 # Rich cards are chosen by a node's declared NODE["card"] kind (carried in its
 # source, so it survives fork/save). This legacy map covers nodes whose source
 # predates the marker — already-forked instances and old project files still
@@ -195,6 +200,19 @@ def card_kind(node) -> Optional[str]:
     """The rich-card kind for a node: its explicit NODE['card'] marker, else a
     legacy fallback keyed on the built-in type_id. None = an ordinary node."""
     return node.spec.card or _LEGACY_CARD_BY_TYPE_ID.get(node.type_id)
+
+
+def note_document(text, text_width: float) -> QTextDocument:
+    """A Note's markdown laid out `text_width` wide. The canvas card and a
+    Note placed on a dashboard (AB1) draw the same document, so the two
+    never disagree about how the text reads."""
+    doc = QTextDocument()
+    font = QFont()
+    font.setPointSizeF(9.5)
+    doc.setDefaultFont(font)
+    doc.setMarkdown(str(text or ""))
+    doc.setTextWidth(text_width)
+    return doc
 
 
 # Card kinds that say what a node *is* without changing how it draws.
@@ -759,7 +777,11 @@ class NodeItem(QGraphicsObject):
         self.compact = kind == "reroute"
         self.note = kind == "note"
         self.table = kind == "grid"
-        self.button = kind == "button"
+        # Page Links rides the Action Button's flag: a left-click goes, a
+        # right-click enters edit mode, and it stays put in a group drag —
+        # everything but the face and what a click does is the button's
+        self.page_links = kind == "pagelinks"
+        self.button = kind == "button" or self.page_links
         # a "webview" card embeds the HTML webview; the attribute keeps its
         # historical name since all the downstream chrome/render code reads it
         self.plotly_card = kind == "webview"
@@ -816,6 +838,9 @@ class NodeItem(QGraphicsObject):
         elif self.table:
             self.width = min(TABLE_MAX_W, max(
                 TABLE_MIN_W, float(node.params.get("width", 320))))
+        elif self.page_links:
+            self.width = min(PAGE_LINKS_MAX_W, max(
+                PAGE_LINKS_MIN_W, float(node.params.get("width", 480))))
         elif self.button:
             self.width = min(BUTTON_MAX_W, max(
                 BUTTON_MIN_W, float(node.params.get("width", BUTTON_W))))
@@ -993,6 +1018,11 @@ class NodeItem(QGraphicsObject):
             return LINK_CARD_H
         if self.compact:
             return 24.0
+        if self.page_links:
+            if self._live_height is not None:
+                return self._live_height
+            fixed = float(self.node.params.get("height", 44) or 44)
+            return min(PAGE_LINKS_MAX_H, max(PAGE_LINKS_MIN_H, fixed))
         if self.button:
             if self._live_height is not None:
                 return self._live_height
@@ -1066,13 +1096,8 @@ class NodeItem(QGraphicsObject):
 
     def _note_document(self) -> QTextDocument:
         if self._note_doc is None:
-            doc = QTextDocument()
-            font = QFont()
-            font.setPointSizeF(9.5)
-            doc.setDefaultFont(font)
-            doc.setMarkdown(str(self.node.params.get("text", "")))
-            doc.setTextWidth(self.width - 2 * NOTE_PAD)
-            self._note_doc = doc
+            self._note_doc = note_document(self.node.params.get("text", ""),
+                                           self.width - 2 * NOTE_PAD)
         return self._note_doc
 
     def note_link_at(self, pos: QPointF) -> str:
@@ -1091,6 +1116,14 @@ class NodeItem(QGraphicsObject):
 
         Only web and mail links are followed — see ``NOTE_LINK_SCHEMES``."""
         if not href or self._note_editor is not None:
+            return
+        from flograph.core.page_nav import is_page_link
+        if is_page_link(href):
+            # [Costs](page:Costs) goes to that page; the window decides
+            # which page the words mean
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "page_link_clicked"):
+                scene.page_link_clicked.emit(href)
             return
         url = QUrl(href)
         if not url.scheme():
@@ -1142,6 +1175,13 @@ class NodeItem(QGraphicsObject):
                 self._expanded_width = self.width
 
     def _params_changed_impl(self, name: Optional[str]) -> None:
+        if self.page_links:
+            # the width, or which pages and which way round — all drawn
+            self.prepareGeometryChange()
+            self.width = min(PAGE_LINKS_MAX_W, max(
+                PAGE_LINKS_MIN_W, float(self.node.params.get("width", 480))))
+            self.update()
+            return
         if self.note:
             self.prepareGeometryChange()
             self.width = min(NOTE_MAX_W, max(
@@ -3285,6 +3325,9 @@ class NodeItem(QGraphicsObject):
         if self.table:
             self._paint_table(painter)
             return
+        if self.page_links:
+            self._paint_page_links(painter)
+            return
         if self.button:
             self._paint_button(painter)
             return
@@ -3580,17 +3623,52 @@ class NodeItem(QGraphicsObject):
                          Qt.AlignCenter | Qt.TextWordWrap,
                          f"▶  {self.node.label}")
 
-        if self._button_edit:
-            # A dashed overlay plus a corner grip signals "editable" — this is
-            # the only cue that the button now moves/resizes instead of firing.
-            painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.2, Qt.DashLine))
-            painter.drawPath(body)
-            painter.setPen(QPen(QColor("#ffffff"), 1.4))
-            handle = self._handle_rect()
-            for i in (4.0, 8.0):
-                painter.drawLine(
-                    QPointF(handle.right() - i, handle.bottom() - 2),
-                    QPointF(handle.right() - 2, handle.bottom() - i))
+        self._paint_button_edit(painter, body)
+
+    def _paint_button_edit(self, painter: QPainter, body: QPainterPath) -> None:
+        """A dashed overlay plus a corner grip signals "editable" — this is
+        the only cue that the button now moves/resizes instead of firing."""
+        if not self._button_edit:
+            return
+        painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.2, Qt.DashLine))
+        painter.drawPath(body)
+        painter.setPen(QPen(QColor("#ffffff"), 1.4))
+        handle = self._handle_rect()
+        for i in (4.0, 8.0):
+            painter.drawLine(
+                QPointF(handle.right() - i, handle.bottom() - 2),
+                QPointF(handle.right() - 2, handle.bottom() - i))
+
+    # ----------------------------------------------------- page links (AB3)
+
+    def _linked_pages(self) -> list:
+        from flograph.core.page_nav import linked_pages
+        graph = getattr(self.scene(), "graph", None)
+        if graph is None:
+            return []
+        # the canvas is no page: nothing to highlight, no group of its own
+        return linked_pages(graph.pages, self.node.params, None)
+
+    def _page_links_vertical(self) -> bool:
+        return str(self.node.params.get("layout", "Row")) == "Column"
+
+    def page_link_at(self, pos: QPointF) -> Optional[str]:
+        """The page whose button is under `pos` (item coordinates)."""
+        if not self.page_links:
+            return None
+        from ..page_links import page_at
+        return page_at(QRectF(0, 0, self.width, self.body_height),
+                       self._linked_pages(), pos, self._page_links_vertical())
+
+    def _paint_page_links(self, painter: QPainter) -> None:
+        from ..page_links import paint_links
+        rect = QRectF(0, 0, self.width, self.body_height)
+        paint_links(painter, rect, self._linked_pages(), None,
+                    self._page_links_vertical(),
+                    selected=self.isSelected(), tint=self.node.color)
+        body = QPainterPath()
+        body.addRoundedRect(rect, 8, 8)
+        self._paint_button_edit(painter, body)
 
     def _paint_kpi(self, painter: QPainter) -> None:
         """The KPI card: the widget-card chrome with a big painted value —
@@ -3719,6 +3797,9 @@ class NodeItem(QGraphicsObject):
         if self.control:
             return (CONTROL_MIN_W, CONTROL_MAX_W,
                     CONTROL_MIN_H, CONTROL_MAX_H)
+        if self.page_links:
+            return (PAGE_LINKS_MIN_W, PAGE_LINKS_MAX_W,
+                    PAGE_LINKS_MIN_H, PAGE_LINKS_MAX_H)
         if self.button:
             return BUTTON_MIN_W, BUTTON_MAX_W, BUTTON_MIN_H, BUTTON_MAX_H
         return NOTE_MIN_W, NOTE_MAX_W, NOTE_MIN_H, NOTE_MAX_H
@@ -3797,6 +3878,9 @@ class NodeItem(QGraphicsObject):
             self.setCursor(Qt.PointingHandCursor)
         elif self.note and self.note_link_at(event.pos()):
             self.setCursor(Qt.PointingHandCursor)  # a clickable Markdown link
+        elif (self.page_links and not self._button_edit
+                and self.page_link_at(event.pos())):
+            self.setCursor(Qt.PointingHandCursor)  # a page to go to
         elif self.button and self._button_edit:
             self.setCursor(Qt.SizeAllCursor)  # whole face drags in edit mode
         elif (not self.compact and not self.button
@@ -3909,7 +3993,12 @@ class NodeItem(QGraphicsObject):
             # Default state: a left-click fires the action. Editing (move and
             # resize) is only reachable via right-click, which enters edit mode.
             scene = self.scene()
-            if scene is not None:
+            if scene is not None and self.page_links:
+                # the page under the click; a click between two is nothing
+                page_id = self.page_link_at(event.pos())
+                if page_id is not None:
+                    scene.page_link_clicked.emit(page_id)
+            elif scene is not None:
                 scene.button_fired.emit(self.node.id)
             event.accept()
             return

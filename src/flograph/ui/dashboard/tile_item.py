@@ -33,7 +33,7 @@ from ..slicer_list import SlicerPanel
 # card kinds that can be placed on a dashboard page
 TILE_ABLE_KINDS = frozenset({
     "webview", "figure", "table_viewer", "kpi", "slicer", "button", "grid",
-    "control", "report", "image", "pdf", "wiki"})
+    "control", "report", "image", "pdf", "wiki", "note", "pagelinks"})
 
 
 def is_tile_able(node) -> bool:
@@ -80,8 +80,15 @@ MIN_W, MIN_H = 160.0, 90.0
 FS_BTN = 16.0  # the maximize/restore glyph box at the right of the title bar
 
 # Kinds with nothing to enlarge: an Action Button is a fixed-size trigger,
-# and a tile whose node was deleted only has the placeholder to show.
-NO_FULLSCREEN_KINDS = frozenset({"button", "missing"})
+# a Note is a line of text beside something else, and a tile whose node was
+# deleted only has the placeholder to show.
+NO_FULLSCREEN_KINDS = frozenset({"button", "note", "pagelinks", "missing"})
+
+# A Note has no title bar and no widget, so it can be as small as its text:
+# a one-line heading is far shorter than the smallest card. Page Links is
+# the same — a strip of buttons with nothing on top of it.
+NOTE_MIN_W, NOTE_MIN_H = 80.0, 36.0
+PAGE_LINKS_MIN_W, PAGE_LINKS_MIN_H = 80.0, 32.0
 
 RUN_PROMPT = "Run the flow to populate this tile."
 MISSING_NODE = ("The node behind this tile was deleted.\n"
@@ -104,6 +111,20 @@ def default_tile_size(node) -> tuple[float, float]:
     kind = card_kind(node)
     if kind == "button":
         return (BUTTON_W, BUTTON_H)
+    if kind == "note":
+        # the card's own width and as tall as its text, so a heading lands
+        # as a heading rather than as a box of empty card
+        from ..canvas.node_item import NOTE_PAD, note_document
+        width = max(NOTE_MIN_W, float(node.params.get("width", 280) or 280))
+        height = float(node.params.get("height", 0) or 0) or (
+            note_document(node.params.get("text", ""),
+                          width - 2 * NOTE_PAD).size().height()
+            + 2 * NOTE_PAD)
+        return (width, max(NOTE_MIN_H, float(round(height))))
+    if kind == "pagelinks":
+        # the card's own size: a strip of links is a strip wherever it goes
+        return (max(PAGE_LINKS_MIN_W, float(node.params.get("width", 480) or 480)),
+                max(PAGE_LINKS_MIN_H, float(node.params.get("height", 44) or 44)))
     if kind == "kpi":
         return (220.0, 120.0)
     if kind == "slicer":
@@ -197,6 +218,18 @@ class TileItem(QGraphicsObject):
         # image tiles paint too — see _card_image; built on first use so a
         # dashboard opened on another page decodes nothing
         self._image = None
+        # and so do notes: the laid-out markdown, and where a press on one
+        # of its links landed (the release opens it if it didn't travel)
+        self._note_doc = None
+        self._note_link_press: Optional[QPointF] = None
+        # The press fired this tile — a button's action, a page link — so
+        # its release is not a click to select it. See mouseReleaseEvent.
+        self._fired = False
+        # Edit mode for the kinds a left-click fires (buttons, page links):
+        # entered by right-click, left by being deselected. Outside it a
+        # left-click always fires, selected or not — a drag-select or a
+        # Select All must not turn a page's buttons into things that move.
+        self._edit = False
         # view mode: the tile can't be moved, resized or selected, but every
         # widget inside it still works. See set_layout_locked.
         self._layout_locked = False
@@ -394,6 +427,8 @@ class TileItem(QGraphicsObject):
             "control": "control",
             "image": "image",
             "pdf": "pdf",
+            "note": "note",
+            "pagelinks": "pagelinks",
         }.get(card_kind(node), "generic")
 
     def _build_host(self) -> None:
@@ -736,8 +771,25 @@ class TileItem(QGraphicsObject):
             # no widget at all: the button face is painted in paint(), and
             # clicks fire in mousePressEvent — exactly like the canvas node
             self._proxy.hide()
-            self.setToolTip("Click to run · right-click to select, then "
-                            "drag to move or press Delete to remove")
+            self.setToolTip(f"{self._button_does()} · right-click to move "
+                            "it (then drag) or press Delete to remove it")
+            self.update()
+            return
+
+        if kind == "note":
+            # painted too, from the same document the canvas card draws —
+            # the text is the node's own param, so there is no run to wait on
+            self._proxy.hide()
+            self._note_doc = None
+            self.update()
+            return
+
+        if kind == "pagelinks":
+            # painted from the page list as it is when drawn — nothing held
+            self._proxy.hide()
+            self.setToolTip("Click a page to go to it · drag it by the gaps, "
+                            "or right-click to move or resize it · Delete "
+                            "removes it")
             self.update()
             return
 
@@ -910,6 +962,8 @@ class TileItem(QGraphicsObject):
         ways to break the layout by accident.
         """
         self._layout_locked = bool(locked)
+        if self._layout_locked:
+            self._edit = False
         # exactly the flags __init__ sets, put back on unlock — every tile
         # kind is movable on a dashboard, buttons included (their press
         # handler is what makes a click fire rather than drag)
@@ -1033,6 +1087,10 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if kind == "kpi":
             self.update()
+        elif kind in ("button", "note", "pagelinks"):
+            # a note's text, what a button says it will do when clicked, or
+            # which pages a strip of links shows
+            self.refresh_content()
         elif kind in ("image", "pdf"):
             # the picture (or the page) *is* a param, so picking a different
             # file — or changing page/fit/scale — has to redraw without a run
@@ -1128,6 +1186,12 @@ class TileItem(QGraphicsObject):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         if self._kind() == "button":
             self._paint_button(painter)
+            return
+        if self._kind() == "note":
+            self._paint_note(painter)
+            return
+        if self._kind() == "pagelinks":
+            self._paint_page_links(painter)
             return
         w, h = self._size
         body = QRectF(0, 0, w, h)
@@ -1273,6 +1337,147 @@ class TileItem(QGraphicsObject):
         painter.drawText(rect.adjusted(8, 4, -8, -4),
                          Qt.AlignCenter | Qt.TextWordWrap,
                          f"▶  {self._title()}")
+        self._paint_edit_mode(painter, body)
+
+    def _paint_edit_mode(self, painter: QPainter, body: QPainterPath) -> None:
+        """The dashed outline that says a click will move this, not fire
+        it — the canvas button's cue for the same mode."""
+        if self._edit:
+            painter.setPen(QPen(theme.SELECTION_OUTLINE, 1.2, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(body)
+
+    def _button_does(self) -> str:
+        """What clicking this button tile does, for its tooltip."""
+        node = self._node()
+        if node is not None and node.params.get("action") == "Go to page":
+            page = self._graph.pages.get(str(node.params.get("page") or ""))
+            return (f"Click to go to {page.title}" if page is not None
+                    else "Click to go to a page (none chosen)")
+        return "Click to run"
+
+    # ---------------------------------------------------------------- notes
+
+    def _note_document(self):
+        """The Note's markdown, laid out to the tile's width. Built once per
+        text (refresh_content drops it) and re-flowed when the tile is
+        resized, which is far cheaper than a fresh parse per paint."""
+        from ..canvas.node_item import NOTE_PAD, note_document
+        width = max(1.0, self._size[0] - 2 * NOTE_PAD)
+        if self._note_doc is None:
+            node = self._node()
+            self._note_doc = note_document(
+                node.params.get("text", "") if node is not None else "", width)
+        elif self._note_doc.textWidth() != width:
+            self._note_doc.setTextWidth(width)
+        return self._note_doc
+
+    def _paint_note(self, painter: QPainter) -> None:
+        """The Note card, the way the canvas paints it — a tinted body, the
+        text inset, and a grip — but with no title bar: a note on a page is
+        the text itself, not a card with a name on top."""
+        from PySide6.QtGui import QAbstractTextDocumentLayout, QPalette
+        from ..canvas.node_item import NOTE_PAD
+        w, h = self._size
+        node = self._node()
+        painter.setRenderHint(QPainter.Antialiasing)
+        body = QColor(theme.tint(theme.NODE_BODY, node.color, theme.TINT_SOFT)
+                      if node is not None and node.color else theme.NODE_BODY)
+        body.setAlphaF(0.75)
+        painter.setBrush(QBrush(body))
+        painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
+                            else theme.GRID_COARSE, 1.4))
+        painter.drawRoundedRect(QRectF(0, 0, w, h), 8, 8)
+
+        painter.save()
+        painter.translate(NOTE_PAD, NOTE_PAD)
+        painter.setClipRect(QRectF(0, 0, w - 2 * NOTE_PAD, h - 2 * NOTE_PAD))
+        context = QAbstractTextDocumentLayout.PaintContext()
+        context.palette.setColor(QPalette.Text, theme.NODE_TEXT)
+        context.palette.setColor(QPalette.Link, theme.SELECTION_OUTLINE)
+        self._note_document().documentLayout().draw(painter, context)
+        painter.restore()
+
+        if not self._layout_locked:
+            painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
+            hr = self._handle_rect()
+            for i in (4.0, 8.0):
+                painter.drawLine(QPointF(hr.right() - i, hr.bottom() - 2),
+                                 QPointF(hr.right() - 2, hr.bottom() - i))
+
+    def _note_link_at(self, pos: QPointF) -> str:
+        """The href of the Markdown link under `pos`, or "" — the canvas
+        card's hit-test, against the tile's own layout of the text."""
+        if self._kind() != "note":
+            return ""
+        from ..canvas.node_item import NOTE_PAD
+        local = QPointF(pos.x() - NOTE_PAD, pos.y() - NOTE_PAD)
+        return self._note_document().documentLayout().anchorAt(local)
+
+    def _open_note_link(self, href: str) -> None:
+        """Web and mail links only, as on the canvas (NOTE_LINK_SCHEMES): a
+        note is text someone else wrote, and a file: link in it should not
+        be one click from running something."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from flograph.core.page_nav import is_page_link
+        from ..canvas.node_item import NOTE_LINK_SCHEMES
+        if is_page_link(href):
+            # [Costs](page:Costs): to another page of this dashboard
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "page_link_clicked"):
+                scene.page_link_clicked.emit(href)
+            return
+        url = QUrl(href)
+        if not url.scheme():
+            url = QUrl.fromUserInput(href)
+        if url.scheme().lower() in NOTE_LINK_SCHEMES:
+            QDesktopServices.openUrl(url)
+
+    # ----------------------------------------------------- page links (AB3)
+
+    def _linked_pages(self) -> list:
+        from flograph.core.page_nav import linked_pages
+        node = self._node()
+        if node is None:
+            return []
+        return linked_pages(self._graph.pages, node.params, self._host_page())
+
+    def _host_page(self) -> Optional[str]:
+        """The page this tile sits on: its links highlight it, and "this
+        page's group" means its group. None off a page (a hover preview)."""
+        return getattr(self.scene(), "page_id", None)
+
+    def _page_links_vertical(self) -> bool:
+        node = self._node()
+        return node is not None and \
+            str(node.params.get("layout", "Row")) == "Column"
+
+    def _page_link_at(self, pos: QPointF) -> Optional[str]:
+        if self._kind() != "pagelinks":
+            return None
+        from ..page_links import page_at
+        w, h = self._size
+        return page_at(QRectF(0, 0, w, h), self._linked_pages(), pos,
+                       self._page_links_vertical())
+
+    def _paint_page_links(self, painter: QPainter) -> None:
+        from ..page_links import paint_links
+        w, h = self._size
+        node = self._node()
+        paint_links(painter, QRectF(0, 0, w, h), self._linked_pages(),
+                    self._host_page(), self._page_links_vertical(),
+                    selected=self.isSelected(),
+                    tint=node.color if node is not None else None)
+        outline = QPainterPath()
+        outline.addRoundedRect(QRectF(0, 0, w, h), 8, 8)
+        self._paint_edit_mode(painter, outline)
+        if not self._layout_locked:
+            painter.setPen(QPen(theme.NODE_SUBTEXT, 1.2))
+            hr = self._handle_rect()
+            for i in (4.0, 8.0):
+                painter.drawLine(QPointF(hr.right() - i, hr.bottom() - 2),
+                                 QPointF(hr.right() - 2, hr.bottom() - i))
 
     # ------------------------------------------------------------ behaviour
 
@@ -1350,7 +1555,9 @@ class TileItem(QGraphicsObject):
         looked right while every card around it wore a move cursor.
         """
         edge = self._edge_at(pos)
-        if self._over_fs_button(pos) or self._pager_at(pos):
+        if (self._over_fs_button(pos) or self._pager_at(pos)
+                or self._note_link_at(pos)
+                or (not self._edit and self._page_link_at(pos))):
             self.setCursor(Qt.PointingHandCursor)
         elif edge == "corner" or (edge and self.tile.aspect):
             # a shaped tile's edges move both sides at once, so they promise
@@ -1360,9 +1567,10 @@ class TileItem(QGraphicsObject):
             self.setCursor(Qt.SizeHorCursor)
         elif edge == "bottom":
             self.setCursor(Qt.SizeVerCursor)
-        elif (pos.y() < TITLE_H and not self._fullscreen
-                and not self._layout_locked):
-            self.setCursor(Qt.SizeAllCursor)  # the title drag bar
+        elif ((pos.y() < TITLE_H or self._kind() in ("note", "pagelinks"))
+                and not self._fullscreen and not self._layout_locked):
+            # the title drag bar — or, for the kinds with none, all of it
+            self.setCursor(Qt.SizeAllCursor)
         else:
             self.setCursor(Qt.ArrowCursor)
 
@@ -1401,6 +1609,11 @@ class TileItem(QGraphicsObject):
             step = grid_step(self.scene())
             x, y = snap_point(value.x(), value.y(), step)
             return QPointF(x, y)
+        if change == QGraphicsItem.ItemSelectedHasChanged and not value \
+                and self._edit:
+            # deselected — clicking anywhere else — ends edit mode
+            self._edit = False
+            self.update()
         if change == QGraphicsItem.ItemVisibleHasChanged:
             # maximizing one tile hides the rest — an animation nobody can
             # see should not be spending frames. A report tile is hidden by
@@ -1413,18 +1626,45 @@ class TileItem(QGraphicsObject):
 
     def mousePressEvent(self, event) -> None:
         if self._kind() == "button":
-            if event.button() == Qt.LeftButton and not self.isSelected():
-                # unselected: a plain left-click fires the action instead of
-                # selecting/dragging — same semantics as the canvas button
+            if event.button() == Qt.LeftButton and not self._edit:
+                # a left-click fires, selected or not — only edit mode (a
+                # right-click) turns the face into something that drags,
+                # the same semantics as the canvas button
+                self._fired = True
                 self._fire_button()
                 event.accept()
                 return
             if event.button() == Qt.RightButton:
-                # no context menu on dashboards: right-click selects, after
-                # which left-drag moves and Delete removes
-                self.setSelected(True)
+                # no context menu on dashboards: right-click is edit mode,
+                # in which left-drag moves and Delete removes
+                self._enter_edit()
                 event.accept()
                 return
+        if self._kind() == "pagelinks":
+            # the Action Button's rules: a click on a page goes there unless
+            # the strip is in edit mode (a right-click), when it drags. The
+            # gaps between the buttons drag it either way.
+            if event.button() == Qt.LeftButton and not self._edit:
+                page_id = self._page_link_at(event.pos())
+                if page_id is not None:
+                    self._fired = True
+                    scene = self.scene()
+                    if scene is not None and hasattr(scene, "page_link_clicked"):
+                        scene.page_link_clicked.emit(page_id)
+                    event.accept()
+                    return
+            if event.button() == Qt.RightButton:
+                self._enter_edit()
+                event.accept()
+                return
+        if (event.button() == Qt.LeftButton and not event.modifiers()
+                and self._note_link_at(event.pos())):
+            # A link in a Note: neither select nor drag, and the release
+            # opens it — the canvas card's gesture. Before the lock check,
+            # like the pager below: a locked page is the one being read.
+            self._note_link_press = QPointF(event.pos())
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._pager_at(event.pos()):
             # Accepted rather than passed on, so paging a document does not
             # also select the tile — and deliberately before the lock check
@@ -1453,8 +1693,10 @@ class TileItem(QGraphicsObject):
         if event.button() == Qt.LeftButton and not self._fullscreen \
                 and not self._layout_locked:
             # Only the title bar starts a move; a press on the body just
-            # selects. Buttons have no title bar, so they drag whole-body.
-            if self._kind() != "button" and event.pos().y() >= TITLE_H:
+            # selects. Buttons and notes have no title bar and no widget
+            # inside to hand the press to, so they drag whole-body.
+            if self._kind() not in ("button", "note", "pagelinks") \
+                    and event.pos().y() >= TITLE_H:
                 self._move_suppressed = True
                 self.setFlag(QGraphicsItem.ItemIsMovable, False)
             else:
@@ -1473,22 +1715,23 @@ class TileItem(QGraphicsObject):
             delta = event.scenePos() - self._press_scene_pos
             snapping = snapping_active(self.scene(), event.modifiers())
             step = grid_step(self.scene())
+            min_w, min_h = self._min_size()
             if edge in ("right", "corner"):
                 width = self._press_size[0] + delta.x()
                 if snapping:
                     width = snap(width, step)
-                width = max(MIN_W, width)
+                width = max(min_w, width)
             if edge in ("bottom", "corner"):
                 height = self._press_size[1] + delta.y()
                 if snapping:
                     height = snap(height, step)
-                height = max(MIN_H, height)
+                height = max(min_h, height)
             aspect = self._drag_aspect(event.modifiers())
             if aspect is not None:
                 from flograph.core.aspect import keep_aspect, leading_side
                 lead = leading_side(edge, self._press_size, (width, height))
                 width, height = keep_aspect(width, height, aspect, lead,
-                                            (MIN_W, MIN_H))
+                                            (min_w, min_h))
             self.prepareGeometryChange()
             self._size = (width, height)
             self._layout_proxy()
@@ -1496,6 +1739,29 @@ class TileItem(QGraphicsObject):
             event.accept()
             return
         super().mouseMoveEvent(event)
+
+    def _min_size(self) -> tuple[float, float]:
+        """How small a resize may make this tile."""
+        if self._kind() == "note":
+            return (NOTE_MIN_W, NOTE_MIN_H)
+        if self._kind() == "pagelinks":
+            return (PAGE_LINKS_MIN_W, PAGE_LINKS_MIN_H)
+        return (MIN_W, MIN_H)
+
+    def _enter_edit(self) -> None:
+        """Right-click on a button or a strip of page links: select it alone
+        and let a left-drag move it (a Page Links strip resizes too) until
+        it is deselected. Nothing on a locked page, which has no layout to
+        change."""
+        if self._layout_locked:
+            return
+        scene = self.scene()
+        if scene is not None:
+            # alone, so a drag of it doesn't carry anything else along
+            scene.clearSelection()
+        self.setSelected(True)
+        self._edit = True
+        self.update()
 
     def _drag_aspect(self, modifiers) -> Optional[float]:
         """The shape a resize drag keeps, or None for a free one.
@@ -1531,6 +1797,25 @@ class TileItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event) -> None:
         scene = self.scene()
+        if self._fired:
+            # The press already did its job. Passed on, the release would
+            # select the tile — Qt selects an item on the release of a click
+            # that didn't move — and a selected button or strip of links
+            # drags instead of firing, so the next click on it (coming back
+            # to a page a link left from, say) moved it. Found by Dan (AB).
+            self._fired = False
+            event.accept()
+            return
+        if self._note_link_press is not None:
+            # the press on a link owned the gesture; a release that didn't
+            # travel off it is a click, anything else changed its mind
+            href = self._note_link_at(event.pos())
+            travelled = (event.pos() - self._note_link_press).manhattanLength()
+            self._note_link_press = None
+            if href and travelled < 4:
+                self._open_note_link(href)
+            event.accept()
+            return
         if self._fs_gesture:
             # ends the toggle gesture, pushing nothing: the geometry either
             # side of it is the view's doing, not a drag

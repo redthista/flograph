@@ -494,6 +494,11 @@ class ParamsPanel(QWidget):
         if spec.type == "node_ref":
             return self._make_node_ref_widget(spec, value)
 
+        if spec.type == "page_ref":
+            if spec.multi:
+                return self._make_page_set_widget(spec, value)
+            return self._make_page_ref_widget(spec, value)
+
         # string / anything else -> line edit
         edit = QLineEdit(str(value or ""))
         edit.setMaxLength(UNCAPPED_TEXT)  # never silently truncate a value
@@ -773,6 +778,104 @@ class ParamsPanel(QWidget):
             combo.setCurrentIndex(max(0, index))
         finally:
             self._updating = False
+
+    def _make_page_ref_widget(self, spec: ParamSpec, value: Any):
+        """Combo of the project's pages, storing the chosen page's *id*
+        while showing its title — the Action Button's Go to page (AB2). The
+        node_ref combo's rules: refilled every time it drops down, and a
+        page that has since been deleted stays visible as missing."""
+        combo = _NodeRefCombo(lambda: self._fill_page_refs(combo))
+        self._fill_page_refs(combo, str(value or ""))
+        combo.activated.connect(
+            lambda _i: self._commit(spec.name, combo.currentData() or ""))
+
+        def set_ref(v, combo=combo):
+            self._fill_page_refs(combo, str(v or ""))
+        return combo, set_ref
+
+    def _fill_page_refs(self, combo: QComboBox,
+                        value: Optional[str] = None) -> None:
+        if value is None:
+            value = combo.currentData() or ""
+        self._updating = True
+        try:
+            combo.clear()
+            combo.addItem("— none —", "")
+            # tab order, the order anyone reading the dashboard knows them by
+            for page in self._graph.pages.values():
+                combo.addItem(page.title, page.id)
+            index = combo.findData(value)
+            if index < 0 and value:
+                combo.addItem("⚠ missing", value)
+                index = combo.count() - 1
+            combo.setCurrentIndex(max(0, index))
+        finally:
+            self._updating = False
+
+    def _make_page_set_widget(self, spec: ParamSpec, value: Any):
+        """Ticks over the project's pages, for a param that names several
+        (Page Links, AB3). Nothing ticked means every page, which is also
+        what keeps up by itself when a page is added — so the button says
+        so rather than looking empty. Stored as a comma list of ids."""
+        from flograph.core.page_nav import join_page_ids, split_page_ids
+        name = spec.name
+        everything = spec.placeholder or "Every page"
+        button = QToolButton()
+        button.setPopupMode(QToolButton.InstantPopup)
+        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        menu = _ColumnsMenu(button)
+        button.setMenu(menu)
+        held = {"ids": split_page_ids(value)}
+
+        def show(v) -> None:
+            held["ids"] = split_page_ids(v)
+            live = [self._graph.pages[i] for i in held["ids"]
+                    if i in self._graph.pages]
+            if not held["ids"]:
+                button.setText(everything)
+            elif len(live) == 1:
+                button.setText(live[0].title)
+            else:
+                button.setText(f"{len(live)} pages")
+            button.setToolTip("\n".join(p.title for p in live) or everything)
+
+        def toggle(page_id: str, checked: bool) -> None:
+            ids = [i for i in held["ids"] if i != page_id]
+            if checked:
+                ids.append(page_id)
+            # kept in tab order, not in the order they were ticked
+            order = list(self._graph.pages)
+            ids.sort(key=lambda i: order.index(i) if i in order else len(order))
+            new = join_page_ids(ids)
+            show(new)
+            self._commit(name, new)
+
+        def every() -> None:
+            show("")
+            self._commit(name, "")
+
+        def fill() -> None:
+            menu.clear()
+            if not self._graph.pages:
+                action = menu.addAction("no pages yet")
+                action.setEnabled(False)
+                return
+            action = menu.addAction(everything)
+            action.setCheckable(True)
+            action.setChecked(not held["ids"])
+            action.triggered.connect(lambda _c=False: every())
+            menu.addSeparator()
+            for page in self._graph.pages.values():
+                action = menu.addAction(page.title)
+                action.setCheckable(True)
+                action.setChecked(page.id in held["ids"])
+                action.setProperty(_STAYS_OPEN, True)
+                action.toggled.connect(
+                    lambda checked, page_id=page.id: toggle(page_id, checked))
+
+        menu.aboutToShow.connect(fill)
+        show(value)
+        return button, show
 
     def _fill_columns_menu(self, menu: QMenu, edit: QLineEdit,
                            spec: ParamSpec) -> None:

@@ -178,6 +178,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "kind": p.kind,
                     "body": p.body,
                     "color": p.color,
+                    # only a page in a group says so, like a tile's aspect
+                    **({"group": p.group} if p.group else {}),
                     "maximized_tile": p.maximized_tile,
                     "view_mode": p.view_mode,
                     "fit_to_window": p.fit_to_window,
@@ -381,6 +383,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             kind=entry.get("kind") or "dashboard",
             body=entry.get("body", ""),
             color=entry.get("color"),
+            # absent before the tab bar had sections, and in any page not in
+            # one — both mean "no group"
+            group=str(entry.get("group") or ""),
             # absent in files written before dashboards could maximize a tile
             maximized_tile=entry.get("maximized_tile"),
             # absent in files written before view mode existed — they were

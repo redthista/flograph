@@ -1572,6 +1572,7 @@ class MainWindow(QMainWindow):
         self.scene.node_rename_requested.connect(self._rename_node)
         self.scene.wire_dropped.connect(self._on_wire_dropped)
         self.scene.button_fired.connect(self._on_button_fired)
+        self.scene.page_link_clicked.connect(self._follow_page_link)
         self.scene.slicer_changed.connect(self._on_slicer_changed)
         self.scene.control_changed.connect(self._on_control_changed)
         self.scene.view_changed.connect(self._on_view_changed)
@@ -1907,6 +1908,8 @@ class MainWindow(QMainWindow):
         self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
         self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
+        self.page_bar.set_page_group_requested.connect(self._set_page_group)
+        self.page_bar.rename_group_requested.connect(self._rename_page_group)
         self.page_bar.set_view_mode_requested.connect(self._set_page_view_mode)
         self.page_bar.set_fit_to_window_requested.connect(
             self._set_page_fit_to_window)
@@ -1917,7 +1920,32 @@ class MainWindow(QMainWindow):
             self._on_current_page_changed)
         self.page_bar.model_tab_double_clicked.connect(self.toggle_all_panels)
 
+    def _refresh_page_links(self) -> None:
+        """Repaint every Page Links card and tile (AB3). They read the page
+        list as they paint, so a page added, removed, renamed, recoloured,
+        regrouped or moved only has to be drawn again."""
+        for item in self.scene.node_items.values():
+            if getattr(item, "page_links", False):
+                item.update()
+        for widget in self._dashboard_pages.values():
+            scene = getattr(widget, "scene", None)
+            for tile in getattr(scene, "tile_items", {}).values():
+                if tile._kind() == "pagelinks":
+                    tile.update()
+
+    def _follow_page_link(self, target: str) -> None:
+        """Go to a page: a Page Links button hands over its id, a Markdown
+        link its `page:` text, which is resolved here, in one place."""
+        from flograph.core.page_nav import page_for_link
+        page_id = (target if target in self.graph.pages
+                   else page_for_link(self.graph.pages, target))
+        if page_id is None:
+            self.show_status(f"No page for the link “{target}”", 5000)
+            return
+        self.page_bar.select_page(page_id)
+
     def _on_page_added(self, page: Page) -> None:
+        self._refresh_page_links()
         if page.kind == "report":
             self._add_report_page(page)
             return
@@ -1925,6 +1953,7 @@ class MainWindow(QMainWindow):
                                page.id, visuals_visible=self.visuals_visible)
         widget.visuals_visibility_changed.connect(self._set_visuals_visible)
         widget.scene.button_fired.connect(self._on_button_fired)
+        widget.scene.page_link_clicked.connect(self._follow_page_link)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
         widget.scene.control_changed.connect(self._on_control_changed)
         widget.scene.view_changed.connect(self._on_view_changed)
@@ -2190,10 +2219,13 @@ class MainWindow(QMainWindow):
             self._canvas_stack.removeWidget(widget)
             widget.deleteLater()
         self.page_bar.remove_page_tab(page_id)
+        self._refresh_page_links()
 
     def _on_page_changed(self, page: Page) -> None:
+        self._refresh_page_links()
         self.page_bar.set_page_title(page.id, page.title)
         self.page_bar.set_page_color(page.id, page.color)
+        self.page_bar.set_page_group(page.id, page.group)
         self.page_bar.set_page_view_mode(page.id, page.view_mode)
         self.page_bar.set_page_fit_to_window(page.id, page.fit_to_window)
         # the model is the source of truth for the mode, so undo/redo and a
@@ -2235,6 +2267,7 @@ class MainWindow(QMainWindow):
 
     def _on_pages_reordered(self, order: list[str]) -> None:
         self.page_bar.set_page_order(order)
+        self._refresh_page_links()
 
     def _on_current_page_changed(self, page_id) -> None:
         # read before the stack moves: choosing a page is also a way off the
@@ -2308,17 +2341,75 @@ class MainWindow(QMainWindow):
             self.undo_stack.push(SetPageColorCommand(self.graph, page_id, color))
 
     def _reorder_pages(self, order: list[str]) -> None:
+        from flograph.core.page_nav import gather_groups
         current = list(self.graph.pages)
         if sorted(order) != sorted(current):
             self.page_bar.set_page_order(current)  # bar drifted; re-sync from graph
             return
+        # a tab dragged out of its group's run goes back into it (AB4): a
+        # group is changed from the tab's Group menu, not by where it lands
+        order = gather_groups(order, self._page_groups())
         if order != current:
             self.undo_stack.push(ReorderPagesCommand(self.graph, order))
+        else:
+            self.page_bar.set_page_order(current)   # the drag came to nothing
+
+    def _page_groups(self) -> dict[str, str]:
+        return {page_id: page.group for page_id, page in self.graph.pages.items()}
+
+    def _set_page_group(self, page_id: str, group: str) -> None:
+        """Put a page in a section of the tab bar (AB4) — and, in the same
+        undo step, next to the rest of that section."""
+        from flograph.core.page_nav import order_after_regroup
+        from .commands import SetPageGroupCommand
+        page = self.graph.pages.get(page_id)
+        group = str(group or "").strip()
+        if page is None or page.group == group:
+            return
+        order = list(self.graph.pages)
+        new_order = order_after_regroup(order, self._page_groups(),
+                                        page_id, group)
+        self.undo_stack.beginMacro("group page" if group else "ungroup page")
+        self.undo_stack.push(SetPageGroupCommand(self.graph, page_id, group))
+        if new_order != order:
+            self.undo_stack.push(ReorderPagesCommand(self.graph, new_order))
+        self.undo_stack.endMacro()
+
+    def _rename_page_group(self, old: str, new: str) -> None:
+        """Rename a section — every page carrying the name — or, with "",
+        take the section away and leave its pages where they are. Renaming
+        onto a name already in use merges the two."""
+        from flograph.core.page_nav import gather_groups
+        from .commands import SetPageGroupCommand
+        new = str(new or "").strip()
+        members = [page_id for page_id, page in self.graph.pages.items()
+                   if page.group == old]
+        if not members or new == old:
+            return
+        order = list(self.graph.pages)
+        groups = {**self._page_groups(), **{page_id: new for page_id in members}}
+        new_order = gather_groups(order, groups)
+        self.undo_stack.beginMacro("rename group" if new else "ungroup")
+        for page_id in members:
+            self.undo_stack.push(SetPageGroupCommand(self.graph, page_id, new))
+        if new_order != order:
+            self.undo_stack.push(ReorderPagesCommand(self.graph, new_order))
+        self.undo_stack.endMacro()
 
     def _duplicate_page(self, page_id: str) -> None:
+        from flograph.core.page_nav import gather_groups
+        # one step: the copy lands last, and a copy of a grouped page then
+        # moves in beside the rest of its group rather than starting a
+        # second section of the same name at the end of the bar
+        self.undo_stack.beginMacro("duplicate page")
         self.undo_stack.push(DuplicatePageCommand(self.graph, page_id))
-        dup = self.graph.pages[self._last_duped_id]
-        self.page_bar.select_page(dup.id)
+        dup_id = self._last_duped_id
+        order = list(self.graph.pages)
+        gathered = gather_groups(order, self._page_groups())
+        if gathered != order:
+            self.undo_stack.push(ReorderPagesCommand(self.graph, gathered))
+        self.undo_stack.endMacro()
+        self.page_bar.select_page(dup_id)
 
     @property
     def _last_duped_id(self) -> str:
@@ -2694,6 +2785,9 @@ class MainWindow(QMainWindow):
         if node is None or card_kind(node) != "button":
             return
         action = node.params.get("action", "Run nodes")
+        if action == "Go to page":
+            self._go_to_page(node)
+            return
         if action != "Show message" and self._cache_still_writing():
             return
         self._flush_pending_edits()
@@ -2718,6 +2812,18 @@ class MainWindow(QMainWindow):
             for target_id in targets:
                 self.graph.mark_dirty(target_id)
         self.engine.run_targets(targets, asked)
+
+    def _go_to_page(self, node) -> None:
+        """An Action Button set to Go to page (AB2): the way round a
+        dashboard for someone who never looks at the tabs. The page is held
+        by id, so a rename follows it; a page that has gone says so rather
+        than the click doing nothing."""
+        page_id = str(node.params.get("page", "") or "")
+        if page_id not in self.graph.pages:
+            why = "its page was deleted" if page_id else "no page chosen"
+            self.show_status(f"{node.label}: {why}", 5000)
+            return
+        self.page_bar.select_page(page_id)
 
     def _on_slicer_changed(self, node_id: str) -> None:
         """A Slicer's ticks changed: re-run it and the visuals that follow.

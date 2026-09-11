@@ -90,6 +90,7 @@ value arrives in `run` via `ctx.params[name]`.
 | `password` | masked entry with a reveal toggle |
 | `file_open` / `file_save` / `folder_open` | text + a browse button |
 | `node_ref` | dropdown of other nodes in the graph, stores a node id |
+| `page_ref` | dropdown of the project's pages, stores a page id |
 
 Extra keys, all optional:
 
@@ -100,7 +101,7 @@ Extra keys, all optional:
 | `placeholder` | text-like | Grey hint shown when empty. |
 | `options` | `choice` | The dropdown values. May also be supplied at runtime by wiring a column into the node. |
 | `min` / `max` | `int`, `float` | Spin-box bounds. |
-| `multi` | `columns` | `False` = pick one column instead of a list. |
+| `multi` | `columns`, `page_ref` | `False` = pick one column instead of a list. A `page_ref` is one page unless it says `True`, when it becomes ticks over the pages, stored as a comma list of ids — nothing ticked means every page. |
 | `ref_kind` | `node_ref` | Restrict the dropdown to nodes with this card kind. |
 | `visible_when` | any | `{"format": ["csv", "auto"]}` — show this row only while another param holds one of those values. Presentational only: `run` still gets every param. |
 | `insert_columns` | `text` | Offer a column-name picker for a box that is *about* columns but isn't a plain list — `"inline"` inserts at the cursor, `"mapping"` treats the box as `column = value` lines. |

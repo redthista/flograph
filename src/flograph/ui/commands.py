@@ -902,6 +902,26 @@ class SetPageColorCommand(QUndoCommand):
         self._graph.set_page_color(self._page_id, self._old)
 
 
+class SetPageGroupCommand(QUndoCommand):
+    """Put a page in a section of the tab bar (AB4), or "" for none. The
+    window pairs it with a ReorderPagesCommand in one macro when the page
+    has to move to sit with the rest of its group."""
+
+    def __init__(self, graph: Graph, page_id: str, group: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("group page" if group else "ungroup page", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).group
+        self._new = str(group or "").strip()
+
+    def redo(self) -> None:
+        self._graph.set_page_group(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_group(self._page_id, self._old)
+
+
 class SetPageMaximizedTileCommand(QUndoCommand):
     """Maximize a tile over its page, or restore the normal layout. Saved
     with the project, so it goes through the undo stack like every other
@@ -1035,6 +1055,9 @@ class DuplicatePageCommand(QUndoCommand):
             body=src.body,
             tiles=new_tiles,
             color=src.color,
+            # a copy lands straight after its original (the window moves it
+            # there), so it belongs to the same section of the tab bar
+            group=src.group,
             # the copy opens looking like the original, remapped to its tiles
             maximized_tile=id_map.get(src.maximized_tile),
             view_mode=src.view_mode,

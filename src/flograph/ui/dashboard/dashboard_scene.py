@@ -26,6 +26,8 @@ from .tile_item import TileItem
 
 class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
     button_fired = Signal(str)  # node_id — an Action Button tile was clicked
+    page_link_clicked = Signal(str)  # page_id from a Page Links tile, or a
+                                     # Note tile's `page:` link text
     slicer_changed = Signal(str)  # node_id — a Slicer tile's selection changed
     sheet_edited = Signal(str)  # node_id — a Table tile's cells were edited
     control_changed = Signal(str)  # node_id — an input control was moved

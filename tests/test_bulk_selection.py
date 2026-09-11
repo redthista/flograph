@@ -395,9 +395,12 @@ class TestAddSelectionToPage:
         window.undo_stack.push(AddPageCommand(
             window.graph, Page(id="p1", title="Board")))
         cards = add_nodes(window, 2, type_id=TABLE)
-        note = window.registry.instantiate("flograph.util.note", pos=(0, 400))
-        window.graph.add_node(note)
-        window.scene.node_items[note.id].setSelected(True)
+        # a plain node — a Note used to stand in here, until notes could go
+        # on a page too (AB1)
+        plain = window.registry.instantiate("flograph.util.constant",
+                                            pos=(0, 400))
+        window.graph.add_node(plain)
+        window.scene.node_items[plain.id].setSelected(True)
         pick(monkeypatch, "Board")
         window._show_node_menu(cards[0].id, QPoint())
         tiles = window.graph.pages["p1"].tiles.values()

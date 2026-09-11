@@ -9,7 +9,7 @@ prints to PDF. Both pull the same charts and numbers — no export step.
 Any node can declare `NODE["card"]` and become a live card on the canvas —
 the node *is* the chart, not a preview elsewhere. Card kinds shipped today:
 `figure`, `webview`, `table_viewer`, `kpi`, `grid`, `slicer`, `button`,
-`note`, `control`, `report`.
+`note`, `control`, `report`, `pagelinks`.
 
 ## Dashboard pages
 
@@ -41,6 +41,45 @@ spreadsheets take typing, a PDF turns its pages, any tile maximises.
 window resizes so the same tiles stay framed, for when a dashboard is opened
 on a different screen than it was built on. Both settings travel with the
 project.
+
+## Getting around a dashboard
+
+A dashboard handed to someone else shouldn't need its tab bar explaining.
+
+**Page Links** (Util) is a strip of buttons, one per page — put one on each
+page and it is the way between them. It reads the page list as it draws,
+so a page added, renamed, moved or recoloured is on every strip at once.
+Show **Every page**, **This page's group** (see below) or **Chosen pages**,
+in a row or a column; the page it sits on is highlighted, and a page's tab
+colour tints its button. A left-click always goes to the page, selected
+or not. To move or resize it, drag it by the gaps between its buttons, or
+right-click it for edit mode (a dashed outline) and drag; clicking anywhere
+else ends edit mode. Action Buttons on a page work the same way: a
+left-click always fires, and a right-click is how to move one.
+
+**Action Button ▸ Go to page** is the same thing a button at a time, with
+whatever label you give it. The page is picked from a list, and a rename
+follows it.
+
+**Notes go on pages too.** Drag a Note from the visuals list and its
+Markdown sits on the page as text, with no title bar — a heading over a row
+of charts, a line saying what a slicer is for. Its links open, even on a
+locked page. Edit the words on the canvas or in Properties.
+
+**A link can go to a page**, in any Note: `[See the costs](page:Costs)`.
+It finds the page by its title, whatever the capitals; a title with spaces
+is written `page:Sales%20North`, or `<page:Sales North>`. Because it goes by
+title, renaming the page breaks the link — a Page Links card or a Go to page
+button follows a rename.
+
+**Group the tabs** from a tab's right-click menu ▸ **Group**: pick a group,
+or start a **New group…**. A group's tabs sit together behind a header, with
+a coloured line under the run. Click the header to fold them away — the
+page you are on stays showing — drag it to move the whole group, and
+right-click it to rename or ungroup.
+The tab list (right-click the tab bar's `<` `>` arrows) shows each group
+under its own heading. The groups travel with the project; which are folded
+is up to whoever is looking.
 
 ## Input controls
 

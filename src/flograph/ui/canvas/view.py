@@ -405,6 +405,13 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .frame_item import FrameItem
         from .connection_item import ConnectionItem
         from .shape_item import ShapeItem
+        if (event.spontaneous()
+                and event.reason() == type(event).Reason.Mouse
+                and not self.viewport().rect().contains(event.pos())):
+            # a right-click elsewhere (a page tab's), delivered here because
+            # the canvas had the focus — see the same guard on DashboardView
+            event.accept()
+            return
         item = self.itemAt(event.pos())
         scene_pos = self.mapToScene(event.pos())
         if item is None:

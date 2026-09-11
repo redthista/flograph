@@ -22,7 +22,9 @@ PARAM_TYPES = {
     "columns",    # free string in v1; column picker later
     "password",   # QLineEdit with masked echo + reveal toggle
     "node_ref",   # QComboBox of other nodes in the graph; stores a node id
-    "date",       # QDateEdit with a calendar popup; stores an ISO "YYYY-MM-DD"
+    "page_ref",   # the project's pages; stores a page id (or, multi, a
+                  # comma list of them — none ticked meaning every page)
+    "date",      # QDateEdit with a calendar popup; stores an ISO "YYYY-MM-DD"
     "color",      # swatch + colour picker; stores "#rrggbb", "" for "theme"
 }
 
@@ -31,7 +33,7 @@ _TYPE_DEFAULTS: dict[str, Any] = {
     "choice": None, "file_open": "", "file_save": "", "columns": "",
     "color": "",
     "folder_open": "",
-    "password": "", "node_ref": "", "date": "",
+    "password": "", "node_ref": "", "page_ref": "", "date": "",
 }
 
 
@@ -67,7 +69,9 @@ class ParamSpec:
     placeholder: str = ""
     minimum: Optional[float] = None
     maximum: Optional[float] = None
-    multi: bool = True  # columns only: comma list (True) or single column
+    # columns: comma list (True) or single column. page_ref: a set of pages
+    # (True) or one page — which is its default, see from_dict.
+    multi: bool = True
     hidden: bool = False  # not shown in the properties panel (edited elsewhere)
     ref_kind: str = ""  # node_ref only: card kind the referenced node must have
     # text only: offer a picker that inserts an upstream column name. For
@@ -152,7 +156,9 @@ class ParamSpec:
             placeholder=d.get("placeholder", ""),
             minimum=d.get("min"),
             maximum=d.get("max"),
-            multi=bool(d.get("multi", True)),
+            # a list is what a columns param is usually for; a page is what a
+            # page_ref usually is, so the set of pages is the one asked for
+            multi=bool(d.get("multi", ptype != "page_ref")),
             hidden=bool(d.get("hidden", False)),
             ref_kind=str(d.get("ref_kind", "")),
             insert_columns=_insert_columns_mode(

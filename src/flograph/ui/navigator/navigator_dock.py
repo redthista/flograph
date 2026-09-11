@@ -244,11 +244,15 @@ class NavigatorPanel(QWidget):
         is used says so whatever it is — a report can embed anything.
         """
         from flograph.core.usage import NOWHERE, summarise
+        from ..canvas.node_item import card_kind
         from ..dashboard.tile_item import is_tile_able
         uses = self._uses.get(node.id, [])
         if uses:
             return summarise(uses)
-        return NOWHERE if is_tile_able(node) else ""
+        # a Note can go on a page (AB1), but most are the canvas's own
+        # headings, and saying "no page" of each would be the same noise
+        return (NOWHERE if is_tile_able(node) and card_kind(node) != "note"
+                else "")
 
     # -------------------------------------------------------------- sorting
 

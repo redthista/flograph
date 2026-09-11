@@ -458,6 +458,15 @@ class DashboardView(ZoomPanGraphicsView):
         is. Right-click selects first (adding to the selection when Ctrl or
         Shift is held), so the menu always acts on what the user is looking
         at — and a right-click on an Action Button still can't fire it."""
+        if (event.spontaneous()
+                and event.reason() == type(event).Reason.Mouse
+                and not self.viewport().rect().contains(event.pos())):
+            # From the platform, for a point that is not on this page: a
+            # right-click somewhere else that Wayland handed to this view
+            # because it had the focus (a page tab's — see
+            # PageTabBar._menu_with_the_focus). Not the page's to answer.
+            event.accept()
+            return
         if self._view_mode:
             # A locked page has no layout to act on, so there is no menu to
             # show — and accepting is the point: passed up, the event walks

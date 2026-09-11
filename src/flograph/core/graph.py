@@ -174,6 +174,11 @@ class Page:
     body: str = ""                # report pages: the markdown source
     tiles: dict[str, Tile] = field(default_factory=dict)
     color: Optional[str] = None   # None = the theme's default tab colour
+    # The section of the tab bar this page sits in (AB4), "" for none. Just
+    # a name: a group exists while some page carries it, so there is no
+    # list of groups to keep in step. Pages of one group are kept next to
+    # each other in tab order by whoever changes it (see core.page_nav).
+    group: str = ""
     # The tile shown maximized over the whole page, or None for the normal
     # layout. Saved with the project so a dashboard travels the way it was
     # laid out. May dangle (the tile was deleted) exactly like Tile.node_id
@@ -1036,6 +1041,15 @@ class Graph:
         theme default" rather than "leave unchanged" (mirrors set_color)."""
         page = self.page(page_id)
         page.color = color or None
+        self.events.page_changed.emit(page)
+        return page
+
+    def set_page_group(self, page_id: str, group: str) -> Page:
+        """Put a page in a section of the tab bar, or "" for none. Separate
+        from update_page for the same reason as set_page_color: "" has to
+        mean "no group", not "leave unchanged"."""
+        page = self.page(page_id)
+        page.group = str(group or "").strip()
         self.events.page_changed.emit(page)
         return page
 

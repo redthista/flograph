@@ -381,9 +381,20 @@ class TestTiles:
         QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, center)
         assert ran == [sorted([node.id, other.id])]
 
-        item.setSelected(True)  # selected: click moves, never fires
+        # selected — by a drag-select, Select All — it still fires: a
+        # button on a dashboard is for clicking (Dan, testing AB)
+        item.setSelected(True)
         QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, center)
-        assert len(ran) == 1
+        assert len(ran) == 2
+
+        # right-click is edit mode: a click then moves it, never fires...
+        QTest.mouseClick(view.viewport(), Qt.RightButton, Qt.NoModifier, center)
+        assert item._edit and item.isSelected()
+        QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, center)
+        assert len(ran) == 2
+        # ...until it is deselected, by a click anywhere else
+        item.setSelected(False)
+        assert not item._edit
 
     def test_drop_path_creates_tile_with_default_port(self, window):
         add_page(window)

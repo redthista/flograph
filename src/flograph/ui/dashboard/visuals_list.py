@@ -40,6 +40,10 @@ _KIND_GLYPHS = {
     # at 9pt
     "control": "⇵",
     "button": "▶",
+    # a pilcrow: a paragraph of text, which is all a note is
+    "note": "¶",
+    # there and back: a way between the pages
+    "pagelinks": "⇆",
 }
 
 def _sort_key(node) -> tuple:
