@@ -1621,8 +1621,13 @@ def style_payload(params: dict) -> dict:
                          direction=("desc" if str(
                              params.get("sort_dir") or "").lower().startswith(
                                  "desc") else "asc")))
-    return {"rules": [r.to_dict() for r in keep], "show": _dedup(show),
-            "hide": _dedup(hide), "errors": errors}
+    payload = {"rules": [r.to_dict() for r in keep], "show": _dedup(show),
+               "hide": _dedup(hide), "errors": errors}
+    # Written only when the index is put away, so a style that says nothing
+    # about it is the payload it always was (AA6).
+    if not params.get("row_index", True):
+        payload["index"] = False
+    return payload
 
 
 def _style_parts(style_obj: Any) -> tuple:
@@ -1650,8 +1655,13 @@ def merge_styles(base: Any, extra: Any) -> dict:
     """
     b_rules, b_show, b_hide, b_err = _style_parts(base)
     e_rules, e_show, e_hide, e_err = _style_parts(extra)
-    return {"rules": b_rules + e_rules, "show": _dedup(b_show + e_show),
-            "hide": _dedup(b_hide + e_hide), "errors": b_err + e_err}
+    merged = {"rules": b_rules + e_rules, "show": _dedup(b_show + e_show),
+              "hide": _dedup(b_hide + e_hide), "errors": b_err + e_err}
+    # the index goes the way a hidden column does: either side can put it
+    # away, and neither can bring it back
+    if not (index_shown(base) and index_shown(extra)):
+        merged["index"] = False
+    return merged
 
 
 def shown_columns(style_obj: Any) -> list[str]:
@@ -1668,6 +1678,12 @@ def hidden_columns(style_obj: Any) -> list[str]:
     if isinstance(style_obj, dict):
         return [str(c) for c in (style_obj.get("hide") or [])]
     return []
+
+
+def index_shown(style_obj: Any) -> bool:
+    """Does the style leave the row index on show? It does unless it says
+    otherwise — the index is the table's own, not something a rule adds."""
+    return not (isinstance(style_obj, dict) and style_obj.get("index") is False)
 
 
 def rules_from_style(style_obj: Any) -> list[Rule]:

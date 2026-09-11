@@ -39,6 +39,12 @@ COLLAPSED_FRAME_Z = 500_000.0
 PENDING_WIRE_Z = 1_000_000.0
 FULLSCREEN_TILE_Z = 1_000_000.0
 
+# A card whose dropdown is open. Qt embeds a proxied widget's popup into the
+# scene as a child of the card, so the popup can only be as high as the card
+# is: the card is lifted here for as long as the popup is showing. Over the
+# collapsed frames, under the two states above that own the view.
+POPUP_HOST_Z = 900_000.0
+
 
 def z_for(band: float, index) -> float:
     """The Qt z-value for an item at stacking `index` within `band`."""

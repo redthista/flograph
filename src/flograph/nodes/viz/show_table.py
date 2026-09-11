@@ -104,11 +104,16 @@ output, and a Show Table also *accepts* a style on its **style** input — so
 you can wire one table's formatting into another, or feed both from a
 **Table Style** node. An incoming style is the base; this card's own rules
 box layers on top.
+
+**The row index.** Untick **Show row index** to lose the numbers down the
+left edge — a generated 0, 1, 2… says nothing on a dashboard. Like the
+column lists it is a view: the table leaving the `table` port keeps its
+index.
 """
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.4",
+    "version": "1.5",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object", {"optional": True})],
@@ -127,6 +132,8 @@ PARAMS = [
      "multi": False, "placeholder": "the order the table opens in"},
     {"name": "sort_dir", "type": "choice", "label": "Direction",
      "options": ["ascending", "descending"], "default": "ascending"},
+    {"name": "row_index", "type": "bool", "label": "Show row index",
+     "default": True},
     {"name": "width", "type": "int", "label": "Width",
      "default": 420, "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
@@ -149,7 +156,8 @@ def run(ctx, table, style=None):
                          "show": ctx.params.get("show", ""),
                          "hide": ctx.params.get("hide", ""),
                          "sort": ctx.params.get("sort", ""),
-                         "sort_dir": ctx.params.get("sort_dir", "")})
+                         "sort_dir": ctx.params.get("sort_dir", ""),
+                         "row_index": ctx.params.get("row_index", True)})
     merged = merge_styles(style, own)
     for message in style_report(merged, table):
         ctx.log(f"conditional formatting — {message}")

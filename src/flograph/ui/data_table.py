@@ -154,6 +154,52 @@ def full_row_count(view: QTableView) -> int:
     return len(frame()) if callable(frame) else model.rowCount()
 
 
+def tooltip_host(widget, global_pos):
+    """The widget a tooltip at `global_pos` should be shown against.
+
+    Normally `widget` itself. But a table on a canvas card or a dashboard
+    tile is embedded in a QGraphicsProxyWidget and has no window of its
+    own, and a tooltip shown against it is placed as if it had none — on
+    Wayland, at the top of the page (AA3). The graphics view drawing the
+    card is a real window, and the pointer's position is already in its
+    terms, so the tooltip is shown against that view instead.
+    """
+    proxy = widget.window().graphicsProxyWidget()
+    scene = proxy.scene() if proxy is not None else None
+    if scene is None:
+        return widget
+    views = scene.views()
+    # the canvas's minimap is a second view of the same scene: take the
+    # one the pointer is actually over
+    for view in views:
+        viewport = view.viewport()
+        if viewport.rect().contains(viewport.mapFromGlobal(global_pos)):
+            return viewport
+    return views[0].viewport() if views else widget
+
+
+def show_tooltip(global_pos, text: str, widget) -> None:
+    QToolTip.showText(global_pos, text, tooltip_host(widget, global_pos))
+
+
+class TooltipHeader(QHeaderView):
+    """The column header, showing its tooltip where the pointer is — see
+    `tooltip_host` for why a plain QHeaderView cannot, on a card."""
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() != QEvent.ToolTip:
+            return super().viewportEvent(event)
+        model = self.model()
+        logical = self.logicalIndexAt(event.pos())
+        text = (model.headerData(logical, self.orientation(), Qt.ToolTipRole)
+                if model is not None and logical >= 0 else None)
+        if text:
+            show_tooltip(event.globalPos(), str(text), self.viewport())
+        else:
+            QToolTip.hideText()
+        return True
+
+
 class DataTableView(QTableView):
     """A read-only table that answers Ctrl+C and offers a copy menu.
 
@@ -174,6 +220,13 @@ class DataTableView(QTableView):
         # harmless on the inspector / spec views that never have one.
         from .table_delegate import ConditionalFormatDelegate
         self.setItemDelegate(ConditionalFormatDelegate(self))
+
+        # Replaced before anything attaches to it. Set up the way QTableView
+        # sets up its own: clickable, and lighting up with the selection.
+        header = TooltipHeader(Qt.Horizontal, self)
+        header.setSectionsClickable(True)
+        header.setHighlightSections(True)
+        self.setHorizontalHeader(header)
 
         from .table_sort import HeaderSortCycler
         self._sort_cycler = HeaderSortCycler(self.horizontalHeader())
@@ -287,7 +340,7 @@ class DataTableView(QTableView):
             return super().viewportEvent(event)
         text = self._tooltip_text(self.indexAt(event.pos()))
         if text:
-            QToolTip.showText(event.globalPos(), text, self.viewport())
+            show_tooltip(event.globalPos(), text, self.viewport())
         else:
             QToolTip.hideText()
         return True

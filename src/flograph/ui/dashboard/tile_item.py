@@ -857,7 +857,8 @@ class TileItem(QGraphicsObject):
             else:
                 from ..inspector.pandas_model import PandasModel
                 from flograph.core.table_format import (
-                    hidden_columns, rules_from_style, shown_columns)
+                    hidden_columns, index_shown, rules_from_style,
+                    shown_columns)
                 style = self._engine.cache.outputs_for(
                     self.tile.node_id).get("style")
                 try:
@@ -869,6 +870,8 @@ class TileItem(QGraphicsObject):
                 self._table_view.setModel(
                     PandasModel(value, parent=self._table_view, rules=rules,
                                 hidden=hidden, shown=shown))
+                self._table_view.verticalHeader().setVisible(
+                    index_shown(style))
                 self._placeholder.hide()
                 widget.show()
             if previous is not None:

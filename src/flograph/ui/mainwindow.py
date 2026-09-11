@@ -230,7 +230,9 @@ class MainWindow(QMainWindow):
         self.snap_enabled = self.settings.value("snap/enabled", True, type=bool)
         self.grid_step = float(
             self.settings.value("snap/step", grid.DEFAULT_STEP))
-        self.grid_visible = self.settings.value("grid/visible", True, type=bool)
+        # a plain canvas by default (AA1); snapping is its own setting and
+        # keeps working with the grid out of sight
+        self.grid_visible = self.settings.value("grid/visible", False, type=bool)
         self._apply_snap_settings()
         self.minimap_enabled = self.settings.value(
             "canvas/minimap_enabled", True, type=bool)
@@ -252,7 +254,7 @@ class MainWindow(QMainWindow):
             type=int))
         self.view.set_reveal_ports_key(self.reveal_ports_key)
         self.scrollbars_enabled = self.settings.value(
-            "canvas/scrollbars", False, type=bool)
+            "canvas/scrollbars", True, type=bool)   # on by default (AA2)
         self.view.set_scrollbars_enabled(self.scrollbars_enabled)
         self.rubber_band_mode = str(self.settings.value(
             "canvas/rubber_band_mode", base_view.DEFAULT_RUBBER_BAND_MODE))
@@ -3589,8 +3591,11 @@ class MainWindow(QMainWindow):
         run_to = menu.addAction("Run These Nodes" if many
                                 else "Run To This Node")
         menu.addSeparator()
-        edit_code = open_window = rename = None
+        edit_code = open_window = rename = properties = None
         if not many:
+            # double-click opens it too, by default — but nothing on screen
+            # says so, and the menu is where people look (AA4)
+            properties = menu.addAction("Properties")
             edit_code = menu.addAction("Edit Code")
             open_window = menu.addAction("Open in Window")
             rename = menu.addAction("Rename")
@@ -3762,6 +3767,9 @@ class MainWindow(QMainWindow):
             self.editor_panel.set_node(node_id)
             self._reveal_dock(self.editor_dock)
             self.editor_panel.editor.setFocus()
+        elif chosen is properties:
+            self.params_panel.set_node(node_id)
+            self._reveal_dock(self.properties_dock)
         elif chosen is open_window:
             self.open_node_window(node_id)
         elif chosen is rename:
@@ -4277,7 +4285,8 @@ class MainWindow(QMainWindow):
         self.set_lod_threshold(DEFAULT_LOD_THRESHOLD)
         self.set_snap_enabled(True)
         self.set_grid_step(grid.DEFAULT_STEP)
-        self.set_grid_visible(True)
+        self.set_grid_visible(False)
+        self.set_scrollbars_enabled(True)
         self.set_minimap_enabled(True)
         self.set_shape_rail_enabled(False)
         self.set_port_labels_enabled(False)

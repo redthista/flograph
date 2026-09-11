@@ -431,8 +431,13 @@ class PandasModel(QAbstractTableModel):
         if role == _TOOLTIP and orientation == _HORIZONTAL:
             col = self._src(section)
             name = str(self._df.columns[col])
-            renamed = f"{name}\n" if col in self._labels else ""
-            return f"{renamed}dtype: {self._df.dtypes.iloc[col]}"
+            # The name in full, always: a header cut short by a `width` rule
+            # or a dragged edge has nowhere else to be read (AA3). A `label`
+            # leads when there is one — it is what the header shows — with
+            # the real name every rule and export goes by under it.
+            label = self._labels.get(col)
+            head = f"{label}\n{name}" if label not in (None, name) else name
+            return f"{head}\ndtype: {self._df.dtypes.iloc[col]}"
         return None
 
     def column_name(self, section: int) -> str:

@@ -16,7 +16,8 @@ from PySide6.QtCore import (QEvent, QItemSelectionModel, QMimeData, QSettings,
                             Qt, QTimer)
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QAbstractItemDelegate, QAbstractItemView,
-                               QApplication, QInputDialog, QMenu, QTableView)
+                               QApplication, QInputDialog, QMenu, QTableView,
+                               QToolTip)
 
 from flograph.core.sheet import COLUMN_TYPES, set_extra_date_formats, translate
 
@@ -68,6 +69,16 @@ _apply_date_formats(date_formats_setting())
 class SpreadsheetView(QTableView):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # Replaced before anything attaches to it, and set up the way
+        # QTableView sets up its own. On a Table card or tile its tooltips
+        # then land by the pointer rather than at the top of the page
+        # (AA3) — see data_table.tooltip_host. Imported here: data_table
+        # is the older module and must not depend on this package loading.
+        from ..data_table import TooltipHeader
+        header = TooltipHeader(Qt.Horizontal, self)
+        header.setSectionsClickable(True)
+        header.setHighlightSections(True)
+        self.setHorizontalHeader(header)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.setEditTriggers(QAbstractItemView.DoubleClicked
@@ -475,6 +486,23 @@ class SpreadsheetView(QTableView):
             return True
         return (event.key() == Qt.Key_D
                 and event.modifiers() & Qt.ControlModifier)
+
+    def viewportEvent(self, event) -> bool:
+        """A cell's tooltip — its formula, or what is wrong with its value —
+        shown by the pointer, which on a card Qt's own tooltip is not
+        (AA3; see data_table.tooltip_host)."""
+        if event.type() != QEvent.ToolTip:
+            return super().viewportEvent(event)
+        from ..data_table import show_tooltip
+        model = self.model()
+        index = self.indexAt(event.pos())
+        text = (model.data(index, Qt.ToolTipRole)
+                if model is not None and index.isValid() else None)
+        if text:
+            show_tooltip(event.globalPos(), str(text), self.viewport())
+        else:
+            QToolTip.hideText()
+        return True
 
     def event(self, event) -> bool:
         # claim these keys before the window-level QActions (Duplicate,

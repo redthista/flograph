@@ -40,6 +40,7 @@ from flograph.core.slicer import (SlicerOptions, TreeNode, dump_paths,
                                   selected_paths)
 
 from . import theme
+from .canvas.stacking import POPUP_HOST_Z
 from .flow_layout import FlowLayout
 
 # How many rows to *build at once*. Not a cap on the slicer: the full value
@@ -887,6 +888,37 @@ class _DropdownView(QWidget):
         self._popup.addAction(action)
         self._button.setMenu(self._popup)
         self.tree.selection_changed.connect(self._on_changed)
+        # Qt embeds a proxied widget's popup into the scene as a child of
+        # the card's proxy, so the popup stacks with its card and a card
+        # placed in front of it covers it (AA7). The card is lifted to the
+        # top while the popup is open and put back after — the item's own
+        # z, never the layer saved on the node, which itemChange leaves be.
+        self._lifted: Optional[tuple] = None
+        self._popup.aboutToShow.connect(self._lift_host)
+        self._popup.aboutToHide.connect(self._drop_host)
+
+    def _host_item(self):
+        """The canvas card or dashboard tile this slicer is drawn in — or
+        None when it is not in a scene at all."""
+        proxy = self.window().graphicsProxyWidget()
+        return proxy.topLevelItem() if proxy is not None else None
+
+    def _lift_host(self) -> None:
+        item = self._host_item()
+        if item is None or self._lifted is not None:
+            return
+        self._lifted = (item, item.zValue())
+        # max: a maximized tile already sits higher than this
+        item.setZValue(max(item.zValue(), POPUP_HOST_Z))
+
+    def _drop_host(self) -> None:
+        if self._lifted is None:
+            return
+        item, z = self._lifted
+        self._lifted = None
+        import shiboken6
+        if shiboken6.isValid(item):
+            item.setZValue(z)
 
     def _apply_style(self) -> None:
         """The button borrows the accent for its border and its open-state

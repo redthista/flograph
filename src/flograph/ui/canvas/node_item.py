@@ -1988,7 +1988,7 @@ class NodeItem(QGraphicsObject):
             self._table_viewer_placeholder.hide()
             from ..inspector.pandas_model import PandasModel
             from flograph.core.table_format import (
-                hidden_columns, rules_from_style, shown_columns)
+                hidden_columns, index_shown, rules_from_style, shown_columns)
             try:
                 rules = rules_from_style(style)
                 hidden = hidden_columns(style)
@@ -1997,6 +1997,7 @@ class NodeItem(QGraphicsObject):
                 rules, hidden, shown = [], [], []
             view.setModel(PandasModel(table, parent=view, rules=rules,
                                       hidden=hidden, shown=shown))
+            view.verticalHeader().setVisible(index_shown(style))
             view.show()
         if previous is not None:
             # setModel swaps models without deleting the old one — Qt does

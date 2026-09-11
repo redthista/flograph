@@ -121,12 +121,12 @@ def _fit_row(row) -> None:
     """Let a switcher row narrow to the column it is in.
 
     In the title bar's menu a row sets the menu's width, so its folder line
-    is elided to a fixed 340px and asks for all of it. On the start screen
-    the column is whatever the docks leave, and a row that insists on its
-    width pushes the "edited" note off the right edge. So here the name and
-    folder give way — clipped at the right, which the folder, already
-    elided in the middle, can afford — and the note and the star keep
-    their room.
+    asks for up to 340px. On the start screen the column is whatever the
+    window leaves, and a row that insists on its width pushes the "edited"
+    note off the right edge. So here the name and folder give way — the
+    name clipped, the folder elided in the middle to whatever width it
+    gets, which is the whole row now the note sits on the name's line —
+    and the note and the star keep their room.
     """
     row.setMinimumWidth(0)
     detail = getattr(row, "detail_label", None)

@@ -258,27 +258,29 @@ class TestSnapSettingsDialog:
 class TestGridVisible:
     """G11: hide the background grid without losing snap-to-grid."""
 
-    def test_defaults_to_visible(self, window):
-        assert window.grid_visible is True
-        assert window.scene.grid_visible is True
+    def test_defaults_to_hidden(self, window):
+        # a plain canvas by default (AA1), with snapping still on
+        assert window.grid_visible is False
+        assert window.scene.grid_visible is False
+        assert window.scene.snap_enabled is True
 
     def test_toggle_applies_to_all_scenes_and_leaves_snap_alone(self, window):
-        window.set_grid_visible(False)
-        assert window.scene.grid_visible is False
+        window.set_grid_visible(True)
+        assert window.scene.grid_visible is True
         assert window.scene.snap_enabled is True  # untouched
 
         window.undo_stack.push(
             AddPageCommand(window.graph, Page(id="pp", title="X")))
-        assert window._dashboard_pages["pp"].scene.grid_visible is False
+        assert window._dashboard_pages["pp"].scene.grid_visible is True
 
     def test_persists_and_is_read_on_construction(self, qtbot, registry,
                                                   window):
-        window.set_grid_visible(False)
-        assert window.settings.value("grid/visible", type=bool) is False
+        window.set_grid_visible(True)
+        assert window.settings.value("grid/visible", type=bool) is True
         second = MainWindow(registry)
         second.confirm_close = False
         qtbot.addWidget(second)
-        assert second.grid_visible is False
+        assert second.grid_visible is True
 
     def test_drawBackground_skips_the_grid_when_hidden(self, window,
                                                       monkeypatch):
@@ -306,17 +308,17 @@ class TestGridVisible:
     def test_checkbox_reflects_and_toggles(self, window):
         dlg = SettingsDialog(window, window)
         checkbox = dlg.findChild(QCheckBox, "grid_visible_checkbox")
-        assert checkbox is not None and checkbox.isChecked() is True
+        assert checkbox is not None and checkbox.isChecked() is False
 
-        checkbox.setChecked(False)
-        assert window.grid_visible is False
-        assert window.scene.grid_visible is False
-
-    def test_reset_restores_the_grid(self, window):
-        window.set_grid_visible(False)
-        window.reset_settings()
+        checkbox.setChecked(True)
         assert window.grid_visible is True
         assert window.scene.grid_visible is True
+
+    def test_reset_puts_the_grid_away_again(self, window):
+        window.set_grid_visible(True)
+        window.reset_settings()
+        assert window.grid_visible is False
+        assert window.scene.grid_visible is False
 
 
 # ------------------------------------------------------------------- frames

@@ -61,10 +61,29 @@ class TestNoApplicationWideFilter:
     def test_nothing_here_filters_the_application(self):
         """The mechanism itself, pinned by name: an application-wide filter
         sees every event in the process, including the ones belonging to
-        WebEngine's internals, and hands each one to Python."""
+        WebEngine's internals, and hands each one to Python.
+
+        The bar does watch one thing: its own two scroll arrows, for a
+        right-click that lists every tab (AA5) — a disabled arrow takes the
+        click and drops it before the bar can see it. That is the only
+        filter allowed here: installed on a button the bar owns, and never
+        removed, because a filter that has to be taken away again is one
+        that could outlive what it was watching."""
         source = inspect.getsource(page_bar_module)
-        assert "installEventFilter" not in source
+        installs = [line.strip() for line in source.splitlines()
+                    if "installEventFilter(" in line]
+        assert installs == ["button.installEventFilter(self)"]
         assert "removeEventFilter" not in source
+
+    def test_the_only_things_watched_are_the_bar_s_own_arrows(self, bar):
+        """What the one filter is on, checked live rather than by reading
+        source: right-clicks on the arrows reach the bar's eventFilter, and
+        nothing about the application is involved."""
+        from PySide6.QtWidgets import QToolButton
+        arrows = [bar.findChild(QToolButton, name)
+                  for name in page_bar_module._SCROLL_BUTTONS]
+        assert all(arrow is not None and arrow.parent() is bar
+                   for arrow in arrows)
 
     def test_no_timer_holds_the_cleanup(self):
         """The filter was removed by a QTimer parented to the tab bar, so a

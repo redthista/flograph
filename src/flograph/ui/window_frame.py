@@ -412,12 +412,55 @@ QToolButton#star_btn:hover { background: #3d404a; }
 _STAR_OFF = QColor("#7f838d")
 
 
+class _ElidedLabel(QLabel):
+    """A line of text elided in the middle to whatever width it is given.
+
+    For a folder, whose two ends — where it starts and the folder the file
+    is in — are the parts that say where a workflow lives. It *asks* for no
+    more than `cap` pixels, so a row in the title bar's menu still sets a
+    sensible menu width; given more, as a start-screen row is, it shows
+    more of the path rather than stopping at the cap (AA8).
+    """
+
+    def __init__(self, text: str, cap: int, parent=None) -> None:
+        super().__init__(parent)
+        self._full = text
+        self._cap = cap
+        self._elide(cap)
+
+    def full_text(self) -> str:
+        return self._full
+
+    def _elide(self, width: int) -> None:
+        super().setText(QFontMetrics(self.font()).elidedText(
+            self._full, Qt.ElideMiddle, max(0, width)))
+
+    def sizeHint(self) -> QSize:
+        width = QFontMetrics(self.font()).horizontalAdvance(self._full)
+        margins = self.contentsMargins()
+        return QSize(min(width, self._cap) + margins.left() + margins.right(),
+                     super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.FontChange:
+            self._elide(self.width() if self.isVisible() else self._cap)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._elide(self.contentsRect().width())
+
+
 class _RecentRow(QWidget):
     """One workflow in the project switcher: its initials tile, its name, and
     the folder it lives in — the shape PyCharm's recent-projects list uses.
     When ``on_toggle_fav`` is given it also carries a star that adds or
     removes the workflow from the Favourites section, and ``detail`` is a
-    quiet line at the right — the start screen's "edited 3 days ago"."""
+    quiet note at the end of the name's line — the start screen's "edited
+    3 days ago" — which leaves the folder the row's whole width."""
 
     def __init__(self, path: str, on_open, *, is_fav: bool = False,
                  on_toggle_fav=None, detail: str = "", parent=None) -> None:
@@ -447,20 +490,27 @@ class _RecentRow(QWidget):
         home = str(Path.home())
         if folder.startswith(home):
             folder = "~" + folder[len(home):]
-        path_label = QLabel()
+        path_label = _ElidedLabel(folder, 340)
         path_label.setObjectName("recent_path")
         path_label.setFont(_smaller(path_label.font()))
-        path_label.setText(QFontMetrics(path_label.font()).elidedText(
-            folder, Qt.ElideMiddle, 340))
-        text.addWidget(name)
-        text.addWidget(path_label)
-        row.addLayout(text, 1)
-
+        self.path_label = path_label
         if detail:
+            # On the name's line, not in a column of its own at the right:
+            # there it took its width out of the folder's line as well
+            # (AA8). Pushed to the end of the line, so the notes of a list
+            # of rows still read down as one column.
+            top = QHBoxLayout()
+            top.setSpacing(9)
+            top.addWidget(name, 1)
             self.detail_label = QLabel(detail)
             self.detail_label.setObjectName("recent_path")
             self.detail_label.setFont(_smaller(self.detail_label.font()))
-            row.addWidget(self.detail_label, 0, Qt.AlignVCenter)
+            top.addWidget(self.detail_label, 0, Qt.AlignVCenter)
+            text.addLayout(top)
+        else:
+            text.addWidget(name)
+        text.addWidget(path_label)
+        row.addLayout(text, 1)
 
         if on_toggle_fav is not None:
             self._star_btn = QToolButton(self)

@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QColorDialog, QInputDialog, QMenu, QStyle, QStyleOptionTab,
-    QStylePainter, QTabBar,
+    QStylePainter, QTabBar, QToolButton,
 )
 
 from flograph.core import Page
@@ -36,6 +36,10 @@ from .. import theme
 # three kinds of tab are told apart by data alone — which survives reordering,
 # unlike an index.
 _PLUS = "\x00plus"
+
+# The `< >` arrows Qt adds when the tabs no longer fit. Qt owns them and
+# names them, so they are looked up rather than kept.
+_SCROLL_BUTTONS = ("ScrollLeftButton", "ScrollRightButton")
 
 
 class PageTabBar(QTabBar):
@@ -81,6 +85,16 @@ class PageTabBar(QTabBar):
         self._kinds: dict[str, str] = {}
         self.currentChanged.connect(self._on_current_changed)
         self.tabMoved.connect(self._on_tab_moved)
+        # A right-click on either arrow lists every tab (AA5). Watched on
+        # the two buttons themselves, because a *disabled* arrow — the left
+        # one, until you have scrolled — takes the click and drops it, so
+        # it never reaches the bar. Two small widgets of the bar's own, not
+        # the application: issue 7 is why that difference matters, and
+        # test_page_bar_context_menu pins it.
+        for name in _SCROLL_BUTTONS:
+            button = self.findChild(QToolButton, name)
+            if button is not None:
+                button.installEventFilter(self)
 
     def _plus_index(self) -> int:
         for i in range(self.count() - 1, -1, -1):
@@ -238,6 +252,38 @@ class PageTabBar(QTabBar):
                 self.moveTab(plus, last)
         finally:
             self._syncing = False
+
+    def eventFilter(self, watched, event) -> bool:
+        """Right-clicks on the scroll arrows, the only thing watched. The
+        press opens the list; its release and the context-menu event the
+        platform sends after it are swallowed, or a second menu follows."""
+        kind = event.type()
+        if (kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease)
+                and event.button() == Qt.RightButton):
+            if kind == QEvent.MouseButtonPress:
+                self.tab_list_menu().exec(event.globalPosition().toPoint())
+            return True
+        if kind == QEvent.ContextMenu:
+            return True
+        return super().eventFilter(watched, event)
+
+    def tab_list_menu(self) -> QMenu:
+        """Every tab in one list, the current one ticked (AA5). With more
+        pages than fit, the arrows step one tab a click — a long way round
+        to the page you already know the name of."""
+        menu = QMenu(self)
+        current = self.currentIndex()
+        for i in range(self.count()):
+            data = self.tabData(i)
+            if data == _PLUS:
+                continue
+            action = menu.addAction(self.tabText(i))
+            action.setCheckable(True)
+            action.setChecked(i == current)
+            # by id, not index: the list is only read when it is picked from
+            action.triggered.connect(
+                lambda _checked=False, page_id=data: self.select_page(page_id))
+        return menu
 
     def mousePressEvent(self, event) -> None:
         index = self.tabAt(event.position().toPoint())
