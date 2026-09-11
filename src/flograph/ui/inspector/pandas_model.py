@@ -456,3 +456,21 @@ class PandasModel(QAbstractTableModel):
         """The `ColumnLayout` for a *visible* column, or None. Read by the
         view, which owns column widths — the model has no say in geometry."""
         return self._layout.get(str(self._df.columns[self._src(section)]))
+
+
+def styled_model(df: pd.DataFrame, style: Any, parent=None) -> PandasModel:
+    """A model for a table under a Show Table's `style` payload — its rules,
+    its keep-list and its hide-list — shared by the card, the dashboard tile
+    and the preview window so the three cannot show one table three ways.
+    A bad payload gives the plain table: this is the render path, where a
+    raise would blank the view."""
+    from flograph.core.table_format import (
+        hidden_columns, rules_from_style, shown_columns)
+    try:
+        rules = rules_from_style(style)
+        hidden = hidden_columns(style)
+        shown = shown_columns(style)
+    except Exception:
+        rules, hidden, shown = [], [], []
+    return PandasModel(df, parent=parent, rules=rules, hidden=hidden,
+                       shown=shown)

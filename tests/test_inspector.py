@@ -156,6 +156,35 @@ class TestInspector:
         qtbot.addWidget(popup)
         assert isinstance(popup._current_widget, FigureView)
 
+    def test_open_preview_of_a_show_table_keeps_its_formatting(
+            self, qtbot, registry, tmp_path):
+        """Dan: Open Preview on a conditionally formatted table showed it
+        plain. The window built its model from the table alone; the card and
+        the tile also read the node's `style` output, so the window has to."""
+        csv = tmp_path / "d.csv"
+        csv.write_text("a,b,helper\n1,2,x\n-3,4,y\n")
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        shown = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        graph.set_param(reader.id, "path", str(csv))
+        graph.set_param(shown.id, "format_rules", "a > 0 => bg green")
+        graph.set_param(shown.id, "hide", "helper")
+        graph.set_param(shown.id, "row_index", False)
+        graph.connect(reader.id, "table", shown.id, "table")
+        self._run(qtbot, engine)
+        assert shown.status.value == "done"
+
+        from flograph.ui.inspector.popup_view import PopupView
+        popup = PopupView(graph, engine, shown.id, "table")
+        qtbot.addWidget(popup)
+        view = popup._current_widget
+        model = view.model()
+        assert model.columnCount() == 2, "the hidden column is kept out"
+        assert model.data(model.index(0, 0), Qt.BackgroundRole) is not None
+        assert model.data(model.index(1, 0), Qt.BackgroundRole) is None
+        assert view.verticalHeader().isHidden()
+
     def test_stale_event_after_close_does_not_crash(
             self, qtbot, registry, tmp_path):
         """Crash report: WA_DeleteOnClose destruction is deferred, and a

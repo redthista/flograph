@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QLabel
 from ..data_table import DataTableView
 from .figure_view import FigureView
 from .object_view import ObjectView
-from .pandas_model import PandasModel
+from .pandas_model import PandasModel, styled_model
 
 FIGURE_ELSEWHERE_MSG = (
     "This node has a canvas card (or dashboard tile) already showing its "
@@ -39,12 +39,18 @@ def is_htmlish(value: Any) -> bool:
     return one(value)
 
 
-def view_for(value: Any, embed_figures: bool = True) -> QWidget:
+def view_for(value: Any, embed_figures: bool = True,
+             style: Any = None) -> QWidget:
+    """`style` is a Show Table's own style output, for a window showing that
+    table: without it the preview drew the frame plain, with none of the
+    formatting, columns or order the card gives it."""
     import sys
     pd = sys.modules.get("pandas")
     if pd is not None and isinstance(value, pd.DataFrame):
+        from flograph.core.table_format import index_shown
         table = DataTableView()
-        table.setModel(PandasModel(value, parent=table))
+        table.setModel(styled_model(value, style, parent=table))
+        table.verticalHeader().setVisible(index_shown(style))
         return table
     if pd is not None and isinstance(value, pd.Series):
         table = DataTableView()

@@ -2026,17 +2026,9 @@ class NodeItem(QGraphicsObject):
             self._table_viewer_placeholder.show()
         else:
             self._table_viewer_placeholder.hide()
-            from ..inspector.pandas_model import PandasModel
-            from flograph.core.table_format import (
-                hidden_columns, index_shown, rules_from_style, shown_columns)
-            try:
-                rules = rules_from_style(style)
-                hidden = hidden_columns(style)
-                shown = shown_columns(style)
-            except Exception:
-                rules, hidden, shown = [], [], []
-            view.setModel(PandasModel(table, parent=view, rules=rules,
-                                      hidden=hidden, shown=shown))
+            from ..inspector.pandas_model import styled_model
+            from flograph.core.table_format import index_shown
+            view.setModel(styled_model(table, style, parent=view))
             view.verticalHeader().setVisible(index_shown(style))
             view.show()
         if previous is not None:

@@ -61,11 +61,15 @@ class PopupView(QDialog):
         # outputs_for, not entry.outputs: a popped-out view is one node the
         # user explicitly opened, so it is worth loading back off disk if the
         # project has not needed it until now.
-        value = self._engine.cache.outputs_for(self._node_id).get(self._port_name)
+        outputs = self._engine.cache.outputs_for(self._node_id)
+        value = outputs.get(self._port_name)
+        # A Show Table puts the look it gives its table on a `style` output
+        # beside it, the one its card and tile read; the window reads it too.
+        style = outputs.get("style") if self._port_name != "style" else None
         if self._current_widget is not None:
             self._layout.removeWidget(self._current_widget)
             self._current_widget.deleteLater()
-        self._current_widget = view_for(value)
+        self._current_widget = view_for(value, style=style)
         self._layout.addWidget(self._current_widget)
         node = self._graph.nodes.get(self._node_id)
         stale = bool(node and node.dirty and value is not None)
