@@ -339,6 +339,11 @@ class Rule:
     #: auto_color: colour the *text* rather than the ground behind it.
     #: A bool for the same reason `as_pill` is one — False is absence.
     ink_only: bool = False
+    #: Columns measured *together* for a scale, bar or icon set, instead of
+    #: the one column being drawn. Never typed: a matrix (core/matrix.py)
+    #: sets it so a heatmap reads across every cell a value built, the way
+    #: a matrix is read, rather than month by month.
+    pool: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         out = {}
@@ -1895,13 +1900,32 @@ def _highlight_style(rule) -> "CellStyle":
     return CellStyle(bold=rule.bold, pill=fill, pill_fg=ink)
 
 
-def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
+def _pooled_stats(rule, frame) -> Optional[ColumnStats]:
+    """Stats over every column in `rule.pool` at once, or None when the rule
+    pools nothing (or `frame` has none of them)."""
+    names = getattr(rule, "pool", None)
+    if not names or frame is None:
+        return None
+    import pandas as pd
+    present = [c for c in names if c in getattr(frame, "columns", [])]
+    if not present:
+        return None
+    return column_stats(pd.concat([frame[c] for c in present],
+                                  ignore_index=True))
+
+
+def evaluate_column(series, rules, stats: ColumnStats, frame=None,
+                    pool_frame=None) -> list:
     """One ``CellStyle | None`` per row of `series`, in its current order.
 
     `frame` is the whole (current-order) DataFrame — needed only by a rule
     that reads a *different* column than the one it draws in: ``iconmap``,
     and any ``scale`` / ``bar`` / ``icons`` / ``highlight`` rule carrying a
     ``by`` / ``if`` clause (its deciding column is ``rule.source``).
+
+    `pool_frame` is where a pooled rule (``Rule.pool``) is measured, when
+    that is more than `frame` holds — a printed table cut to its first rows
+    is still shaded against the whole matrix, as `stats` is.
     """
     import pandas as pd
 
@@ -1911,12 +1935,15 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None) -> list:
 
     def _decide(rule) -> tuple:
         """The series whose values drive `rule`, and stats for it — the
-        drawn column, unless a ``by`` / ``if`` clause named another one."""
+        drawn column, unless a ``by`` / ``if`` clause named another one;
+        measured over `rule.pool` together when it names columns."""
+        pooled = _pooled_stats(
+            rule, pool_frame if pool_frame is not None else frame)
         if (rule.source and frame is not None
                 and rule.source in getattr(frame, "columns", [])):
             other = frame[rule.source]
-            return other, column_stats(other)
-        return series, stats
+            return other, pooled or column_stats(other)
+        return series, pooled or stats
 
     for rule in rules:
         contrib: list = [None] * n

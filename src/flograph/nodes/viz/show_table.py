@@ -96,6 +96,21 @@ a `*` / `?` is a **pattern** — `20* scale green` heatmaps every year
 column, `*_qty bar blue` every quantity column, `hide _tmp_*` every scratch
 column.
 
+**Matrix.** Set **Show as** to *matrix* and the card pivots the table
+itself — **Rows** down the side, **Columns** across the top, **Values** in
+the cells, combined by **Aggregation** — the way a spreadsheet's pivot table
+does, with no Pivot node in front of it. Every rule still applies, and a
+rule can read the rows *before* the pivot: over a long table of `metric,
+quarter, value, status`, the one line `value iconmap status: breach=✗ red,
+ok=✓ green` puts on each cell the icon its own row's status decides. Where
+several rows build one cell, a highlight fires if **any** of them passes, a
+map takes the value **listed first** (write the worst first), and notes are
+joined. A rule about the value alone (`value > 90 => bg green`, `value scale
+green`) is about each cell, and a scale, bar or icon set is measured across
+the whole matrix rather than column by column. The table leaving the
+`table` port is the matrix; the columns carrying a rule's verdicts ride
+along with it, hidden.
+
 The full rule language is in the **Conditional Formatting** handbook page
 (F1), and **Open Example ▸ Conditional Formatting** is a worked flow.
 
@@ -113,13 +128,30 @@ index.
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.5",
+    "version": "1.6",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object", {"optional": True})],
     "outputs": [("table", "dataframe"), ("style", "object")],
 }
+_MATRIX = {"mode": ["matrix"]}
 PARAMS = [
+    {"name": "mode", "type": "choice", "label": "Show as",
+     "options": ["table", "matrix"], "default": "table"},
+    {"name": "matrix_rows", "type": "columns", "label": "Rows", "default": "",
+     "placeholder": "what runs down the side", "visible_when": _MATRIX},
+    {"name": "matrix_columns", "type": "columns", "label": "Columns",
+     "default": "", "placeholder": "what runs across the top",
+     "visible_when": _MATRIX},
+    {"name": "matrix_values", "type": "columns", "label": "Values",
+     "default": "", "placeholder": "empty = every other number",
+     "visible_when": _MATRIX},
+    {"name": "matrix_agg", "type": "choice", "label": "Aggregation",
+     "options": ["sum", "mean", "median", "min", "max", "count", "first"],
+     "default": "sum", "visible_when": _MATRIX},
+    {"name": "matrix_order", "type": "choice", "label": "Order",
+     "options": ["as they appear", "sorted"], "default": "as they appear",
+     "visible_when": _MATRIX},
     {"name": "format_rules", "type": "text", "label": "Conditional formatting",
      "default": "", "rule_wizard": True,
      "placeholder": "revenue scale green\nscore >= 90 => bg green, bold\n"
@@ -159,6 +191,23 @@ def run(ctx, table, style=None):
                          "sort_dir": ctx.params.get("sort_dir", ""),
                          "row_index": ctx.params.get("row_index", True)})
     merged = merge_styles(style, own)
+    if ctx.params.get("mode") == "matrix":
+        from flograph.core.matrix import build_matrix, column_list
+
+        # The rules are carried onto the matrix here, on the worker, so the
+        # card, the tile and a printed page all draw it with the rule engine
+        # they already have — see core/matrix.py.
+        built = build_matrix(
+            table, rows=column_list(ctx.params.get("matrix_rows")),
+            columns=column_list(ctx.params.get("matrix_columns")),
+            values=column_list(ctx.params.get("matrix_values")),
+            agg=ctx.params.get("matrix_agg") or "sum",
+            order=ctx.params.get("matrix_order") or "as they appear",
+            style=merged)
+        for note in built.notes:
+            ctx.log(f"matrix — {note}")
+        ctx.log(f"matrix: {len(table)} rows -> {len(built.frame)} rows")
+        table, merged = built.frame, built.style
     for message in style_report(merged, table):
         ctx.log(f"conditional formatting — {message}")
     return {"table": table, "style": merged}

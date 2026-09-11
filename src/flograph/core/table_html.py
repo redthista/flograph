@@ -214,7 +214,7 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
             if stats is None:
                 stats = column_stats(frame[column])
             evaluated = evaluate_column(shown[column], [rule], stats,
-                                        frame=shown)
+                                        frame=shown, pool_frame=frame)
             for row, style in enumerate(evaluated):
                 add(row, column, order[id(rule)], style)
     for rule in row_rules:

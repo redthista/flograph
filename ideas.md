@@ -12,7 +12,7 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
-Q, R, T, V, Y, Z, AA, AB and AC) are where shipped work used to be. Old numbers are kept
+Q, R, T, V, X, Y, Z, AA, AB and AC) are where shipped work used to be. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -50,7 +50,9 @@ that goes to a page, Notes on dashboard pages and sections in the tab bar.
 The one piece of it left over, N7, shipped the same day: a `page:` link
 works in a *report* page's preview as well as in a Note. Chunk AC shipped
 whole the same day and retires too: a package index of your own that pip
-and uv both install from, and a list of what a flow needs installed.
+and uv both install from, and a list of what a flow needs installed. So
+did chunk X, which retires with it: Show Table pivots into a matrix
+itself, and its rules can read the rows before the pivot.
 
 ---
 
@@ -267,25 +269,6 @@ all nine library and drawn visuals. **Plotly Table** and **Gantt** are the
 ones left out, and both are Plotly figures, so they can have it on exactly
 the same terms. (Show Plot, Chart per Value, KPI Card and Mermaid are
 static by nature — there is no click to catch.)
-
----
-
-## X. Pivoting
-
-**X1. A Matrix Table** (Dan) — a table that pivots inside itself, the way a
-spreadsheet's pivot table does, instead of needing a Pivot node wired in
-front of it. The arithmetic is already written (`nodes/transform/pivot.py`);
-what is new is a card holding rows / columns / values / aggregation as its
-**own** parameters, so the shape can be changed where you are looking at
-the result. **Decided (Dan, 0.1.14): a mode of Show Table**, so it inherits
-every conditional-formatting rule — and the rules should be able to read
-the rows *before* the pivot as well as the cells after it. That is his
-reason for wanting it: a table of six values with six checker columns
-beside them, there only to feed six icons, becomes six rules on the source
-rows and a pivot of the result. It is also the hard part — a rule decided
-on a source row has to be carried through the aggregation to the cell it
-ends up in, and a cell built from several rows needs a rule for which of
-their verdicts wins.
 
 ---
 

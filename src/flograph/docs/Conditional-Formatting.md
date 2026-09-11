@@ -319,6 +319,49 @@ underneath. Showing either alone would lose the other, and losing the
 value would put the papercut back on exactly the cells someone cared
 enough to annotate.
 
+## A matrix: rules before and after the pivot
+
+Set a Show Table's **Show as** to *matrix* and it pivots the table itself:
+**Rows** down the side, **Columns** across the top, **Values** in the
+cells, combined by **Aggregation**. No Pivot node in front of it, and every
+rule still applies.
+
+What makes it worth having is that a rule can read the rows **before** the
+pivot. A table that used to need a checker column beside every value, only
+there to feed an icon, becomes one long table and one line:
+
+```
+# metric | quarter | value | status | note        (one row per metric and quarter)
+value   iconmap status: breach=✗ red, watch=! amber, ok=✓ green
+value   tooltip note
+value   if status = breach => bold
+```
+
+Each cell gets what its own rows decide. The column a rule reads (`status`,
+`note`) doesn't need to be in the matrix, and isn't; it is carried along
+with the values, hidden. Where several rows build one cell:
+
+| rule | the cell gets |
+| --- | --- |
+| a highlight (`if status = breach`) | the style, if **any** of its rows passes |
+| a map (`iconmap`, `colormap`) | the value **listed first** in the map — write the worst first |
+| a note (`tooltip`) | every row's note, each once |
+| `scale` / `bar` / `icons` `by` a column | that column, aggregated like the values |
+
+A rule about the value alone — `value > 90 => bg green`, `value scale
+green` — is about each **cell**, so it tests the aggregated number. A
+`scale`, `bar` or icon set is then measured across the **whole matrix**,
+the way a heatmap of a pivot is read, rather than one column at a time.
+Rules naming the row columns (`region bold`) work as they always did.
+
+Some things have nowhere to go in a matrix, and are left out with a note in
+the log saying so: a rule drawing in a column the pivot used up (`status
+colormap …` — carry it through the value instead), a `sort` or `label` on
+the value (there is a column per quarter now), and `autocolour` by another
+column, whose colours are picked per column and wouldn't agree across the
+matrix. The table leaving the `table` port is the matrix, with the carried
+columns in it.
+
 ## Sharing one look across tables
 
 The rules a Show Table applies come out on its **style** output, and a Show

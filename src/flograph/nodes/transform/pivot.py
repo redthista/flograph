@@ -54,28 +54,14 @@ def run(ctx, table):
     index = cols("index", required=True)
     columns = cols("columns", required=True)
     values = cols("values", required=False)
+    from flograph.core.matrix import pivot
+
     # `.get`, not `[]`: a project saved before this node grew an Order has
     # no such param, and its pivot should keep working.
     ordering = str(ctx.params.get("order") or "as they appear")
-    # pandas sorts both axes unless told not to, and sort=False is exactly
-    # "first seen wins" — for the rows, for the pivot values, and, with
-    # more than one value column, within each of them. So the whole choice
-    # is this keyword; there is nothing to reindex by hand afterwards.
-    pivoted = table.pivot_table(index=index, columns=columns, values=values,
-                                aggfunc=ctx.params["agg"],
-                                sort=ordering == "sorted")
-    if hasattr(pivoted.columns, "levels"):
-        # Drop any column level carrying a single distinct label - the
-        # value-column name when only one value is pivoted - so the output
-        # columns stay as bare pivot values with no forced prefix.
-        while pivoted.columns.nlevels > 1 and \
-                pivoted.columns.get_level_values(0).nunique() == 1:
-            pivoted.columns = pivoted.columns.droplevel(0)
-        if pivoted.columns.nlevels > 1:
-            pivoted.columns = ["_".join(str(part) for part in col)
-                               for col in pivoted.columns]
-        else:
-            pivoted.columns = [str(c) for c in pivoted.columns]
-    pivoted = pivoted.reset_index()
+    # The arithmetic is shared with Show Table's Matrix mode, so the two
+    # cannot come to disagree about names or order.
+    pivoted = pivot(table, index, columns, values, ctx.params["agg"],
+                    ordering)
     ctx.log(f"{len(table)} rows -> {len(pivoted)} x {len(pivoted.columns)}")
     return pivoted
