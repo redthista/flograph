@@ -882,6 +882,18 @@ class TestAPageLinkInMarkdown:
         window.scene.node_items[node.id]._open_note_link("page:Costs")
         assert window.page_bar.current_page_id() == ids[0]
 
+    def test_a_report_page_link_goes_there(self, window):
+        """N7: the report page's preview hands a clicked `page:` link to the
+        window, which resolves it the same way as a Note's."""
+        ids = _pages(window, "Costs")
+        report = Page(id="r1", title="Notes", kind="report",
+                      body="[the costs](page:Costs)")
+        window.undo_stack.push(AddPageCommand(window.graph, report))
+        window.page_bar.select_page(report.id)
+        widget = window._dashboard_pages[report.id]
+        widget.preview.link_activated.emit("page:Costs")
+        assert window.page_bar.current_page_id() == ids[0]
+
     def test_a_link_to_no_page_says_so(self, window, monkeypatch):
         _pages(window, "Costs")
         said = []

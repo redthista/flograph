@@ -1406,24 +1406,18 @@ class TileItem(QGraphicsObject):
         return self._note_document().documentLayout().anchorAt(local)
 
     def _open_note_link(self, href: str) -> None:
-        """Web and mail links only, as on the canvas (NOTE_LINK_SCHEMES): a
+        """Web and mail links only, as on the canvas (ui/web_links.py): a
         note is text someone else wrote, and a file: link in it should not
         be one click from running something."""
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
         from flograph.core.page_nav import is_page_link
-        from ..canvas.node_item import NOTE_LINK_SCHEMES
+        from ..web_links import open_web_link
         if is_page_link(href):
             # [Costs](page:Costs): to another page of this dashboard
             scene = self.scene()
             if scene is not None and hasattr(scene, "page_link_clicked"):
                 scene.page_link_clicked.emit(href)
             return
-        url = QUrl(href)
-        if not url.scheme():
-            url = QUrl.fromUserInput(href)
-        if url.scheme().lower() in NOTE_LINK_SCHEMES:
-            QDesktopServices.openUrl(url)
+        open_web_link(href)
 
     # ----------------------------------------------------- page links (AB3)
 

@@ -1347,7 +1347,8 @@ def source_by_wired_input(graph, node_id: str):
 
 
 def render_report(body: str, graph, cache, image_scale: float = 1.0,
-                  setup=None, page_break_rule: bool = False) -> RenderedReport:
+                  setup=None, page_break_rule: bool = False,
+                  page_links: bool = False) -> RenderedReport:
     """A report *page*: embeds name nodes by label.
 
     Naming a report *card* renders that card's contents onto the page —
@@ -1369,7 +1370,8 @@ def render_report(body: str, graph, cache, image_scale: float = 1.0,
                        source=source_by_label(graph),
                        nested=nested_by_label(graph, cache),
                        page_break_rule=page_break_rule,
-                       page_height=page_height, cache=cache)
+                       page_height=page_height, cache=cache,
+                       page_links=page_links)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -1398,8 +1400,13 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 image_scale: float = 1.0, source=None,
                 nested=None, page_break_rule: bool = False,
                 page_height: "float | None" = None,
-                cache=None) -> RenderedReport:
+                cache=None, page_links: bool = False) -> RenderedReport:
     """Lay a report body out as a document ready to show or print.
+
+    `page_links` keeps a `[Costs](page:Costs)` link a link, and only the
+    on-screen preview of a report page asks for it: that is the one place a
+    click can take it to the page. Everywhere else — the PDF, the HTML, a
+    report card — it would go nowhere, so it is set as the plain words.
 
     `page_break_rule` is for the on-screen preview, which is one
     continuous scroll and so has no page boundary for a forced break to
@@ -1451,11 +1458,50 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
         html = fit_tables(document, html, resolver, page_height, image_width)
     if resolver.fit_marks and page_height:
         _fit_to_page(document, html, resolver, page_height, image_width)
+    if not page_links:
+        # last: the fitting passes above re-set the document from its HTML
+        unlink_page_links(document)
     return RenderedReport(
         document=document, problems=resolver.problems,
         animations=resolver.animations,
         image_widths={i: w for i, w in enumerate(resolver.widths)},
         images=list(resolver.images))
+
+
+def unlink_page_links(document) -> int:
+    """Set every `page:` link in `document` as the words it was written as:
+    no anchor, no underline, no link colour. Returns how many it found.
+
+    Done on the laid-out document rather than the Markdown so that a link
+    written inside a code span, as an example, is left alone. The
+    underline and the colour are all that change, and neither moves a line,
+    so the pages break exactly where the preview's do.
+    """
+    from PySide6.QtGui import QTextCursor, QTextFormat
+    from flograph.core.page_nav import is_page_link
+    spans = []
+    block = document.begin()
+    while block.isValid():
+        pieces = block.begin()
+        while not pieces.atEnd():
+            fragment = pieces.fragment()
+            if fragment.isValid() and is_page_link(
+                    fragment.charFormat().anchorHref()):
+                spans.append((fragment.position(), fragment.length(),
+                              fragment.charFormat()))
+            pieces += 1
+        block = block.next()
+    # applied after the walk: re-formatting merges fragments under it
+    for position, length, fmt in spans:
+        fmt.setAnchor(False)
+        fmt.clearProperty(QTextFormat.AnchorHref)
+        fmt.setFontUnderline(False)
+        fmt.clearForeground()
+        cursor = QTextCursor(document)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.KeepAnchor)
+        cursor.setCharFormat(fmt)
+    return len(spans)
 
 
 #: How far `fit` will shrink a chart before it gives up and lets it start

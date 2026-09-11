@@ -1985,6 +1985,7 @@ class MainWindow(QMainWindow):
         widget.export_requested.connect(self._export_report_pdf)
         widget.page_setup_requested.connect(self._edit_page_setup)
         widget.export_html_requested.connect(self._export_report_html)
+        widget.page_link_clicked.connect(self._follow_page_link)
         # kept in the same dict as dashboards: everything the window does
         # with a page — switching, removing, disposing — is the same for
         # both, and only the two places that need the difference ask

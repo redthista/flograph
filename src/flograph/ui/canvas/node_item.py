@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import (
-    QEvent, QPointF, QRect, QRectF, Qt, QTimer, QUrl, QVariantAnimation,
+    QEvent, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation,
 )
 from PySide6.QtGui import (
     QAbstractTextDocumentLayout, QBrush, QColor, QDesktopServices, QFont,
@@ -25,6 +25,7 @@ from flograph.core.ports import FLOW_INPUT, FLOW_OUTPUT, is_flow
 from .. import theme
 from ..data_table import DataTableView
 from ..slicer_list import SlicerPanel
+from ..web_links import WEB_LINK_SCHEMES, open_web_link
 from . import marks
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
 from .stacking import NODE_Z, z_for
@@ -108,8 +109,9 @@ NOTE_MIN_H, NOTE_MAX_H = 60.0, CARD_MAX_H
 # Schemes a Note-card link may open. A .flograph / .flowf from someone else
 # can carry the link text, so file://, smb://, UNC (\\host\share) and the
 # like — which would open a local file or leak credentials on one click —
-# are never followed.
-NOTE_LINK_SCHEMES = {"http", "https", "mailto"}
+# are never followed. One list, in ui/web_links.py, shared with the dashboard
+# tile and the report preview.
+NOTE_LINK_SCHEMES = WEB_LINK_SCHEMES
 
 TABLE_TYPE = "flograph.io.table"
 TABLE_MIN_W, TABLE_MAX_W = 220.0, CARD_MAX_W
@@ -1125,12 +1127,7 @@ class NodeItem(QGraphicsObject):
             if scene is not None and hasattr(scene, "page_link_clicked"):
                 scene.page_link_clicked.emit(href)
             return
-        url = QUrl(href)
-        if not url.scheme():
-            url = QUrl.fromUserInput(href)  # bare "example.com", "./file.pdf"
-        if url.scheme().lower() not in NOTE_LINK_SCHEMES:
-            return
-        QDesktopServices.openUrl(url)
+        open_web_link(href)
 
     def apply_stacking(self) -> None:
         """Take the node's place in the stacking order — its band sits above

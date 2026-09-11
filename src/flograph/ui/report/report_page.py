@@ -50,6 +50,9 @@ class ReportPage(QWidget):
     page_setup_requested = Signal(str)   # page_id
     #: Save as HTML… was clicked — the window owns the file dialog
     export_html_requested = Signal(str)   # page_id
+    #: a `page:` link was clicked in the preview — the window decides which
+    #: page the words mean, as it does for a Note's
+    page_link_clicked = Signal(str)   # the link, as written
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -81,6 +84,7 @@ class ReportPage(QWidget):
         # cover, the running header and footer, where a page actually ends —
         # is invisible in a continuous view until the PDF comes out.
         self.preview = PagedPreview()
+        self.preview.link_activated.connect(self._follow_link)
 
         self._insert_btn = QToolButton()
         self._insert_btn.setText("Insert embed ▾")
@@ -284,8 +288,10 @@ class ReportPage(QWidget):
         # No page_break_rule any more: the preview is paginated, so a forced
         # break shows as the page actually ending — which is better feedback
         # than a rule standing in for one, and it is what will print.
+        # page_links: this is the one render a click can follow a `page:`
+        # link from; paper and HTML get the plain words
         rendered = render_report(page.body, self._graph, self._engine.cache,
-                                 setup=setup)
+                                 setup=setup, page_links=True)
         # `render_report` **re-enters the event loop** — a web-view embed is
         # printed to PDF, and that waits. So the window can close while this
         # method is part-way through, and the preview we checked above can be
@@ -302,6 +308,16 @@ class ReportPage(QWidget):
         # the preview useless while writing past the first screenful
         self.preview.verticalScrollBar().setValue(position)
         self._status.setText(self._problem_text())
+
+    def _follow_link(self, href: str) -> None:
+        """A link clicked on the paper: `page:` to another page of this
+        project, web and mail links to the browser, anything else nowhere."""
+        from flograph.core.page_nav import is_page_link
+        if is_page_link(href):
+            self.page_link_clicked.emit(href)
+            return
+        from ..web_links import open_web_link
+        open_web_link(href)
 
     def preview_setup(self, setup) -> None:
         """Show the report on `setup`'s paper without committing it.

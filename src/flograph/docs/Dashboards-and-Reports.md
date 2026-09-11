@@ -66,11 +66,13 @@ Markdown sits on the page as text, with no title bar — a heading over a row
 of charts, a line saying what a slicer is for. Its links open, even on a
 locked page. Edit the words on the canvas or in Properties.
 
-**A link can go to a page**, in any Note: `[See the costs](page:Costs)`.
-It finds the page by its title, whatever the capitals; a title with spaces
-is written `page:Sales%20North`, or `<page:Sales North>`. Because it goes by
-title, renaming the page breaks the link — a Page Links card or a Go to page
-button follows a rename.
+**A link can go to a page**, in any Note or report page:
+`[See the costs](page:Costs)`. It finds the page by its title, whatever the
+capitals; a title with spaces is written `page:Sales%20North`, or
+`<page:Sales North>`. Because it goes by title, renaming the page breaks the
+link — a Page Links card or a Go to page button follows a rename. In a
+report it is clicked in the preview; on paper and in saved HTML it would go
+nowhere, so there it prints as the plain words.
 
 **Group the tabs** from a tab's right-click menu ▸ **Group**: pick a group,
 or start a **New group…**, where you name it and can give it a colour. A
@@ -181,6 +183,10 @@ dashboard and a formatted table, on the canvas and on the page.
 The page prints to **PDF** at 300 dpi; the preview and the PDF are literally
 the same document, so they cannot disagree. The report toolbar's **?** button
 opens the full embed-syntax reference.
+
+**Links work in the preview**, locked or not: a web or mail link opens in
+the browser, and `[the costs](page:Costs)` goes to that page (see *Getting
+around a dashboard*). Rest on one to see where it goes.
 
 ## Report card
 

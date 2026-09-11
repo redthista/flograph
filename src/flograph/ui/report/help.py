@@ -115,9 +115,27 @@ warning strip above, rather than leaving a silent gap.</p>
 <p><code># Heading</code>, <code>## Subheading</code>,
 <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>,
 <code>&gt; quote</code>, <code>- bullet</code>, <code>1. numbered</code>,
-tables, and <code>---</code> for a rule. Written on one line, an embed
-renders <b>inline</b> in the sentence; on a line of its own it becomes a
-block.</p>
+tables, <code>[words](https://…)</code> for a link, and <code>---</code> for
+a rule. Written on one line, an embed renders <b>inline</b> in the sentence;
+on a line of its own it becomes a block.</p>
+
+<h3>Links</h3>
+<p>Links in the preview can be clicked, and rest on one to see where it
+goes before you do.</p>
+<table cellspacing="0" cellpadding="4">
+<tr><td><code>[our site](https://example.com)</code></td>
+    <td>opens in the browser &mdash; web and mail links only</td></tr>
+<tr><td><code>[the costs](page:Costs)</code></td>
+    <td>goes to the page called Costs, whatever the capitals</td></tr>
+<tr><td><code>[North](page:Sales%20North)</code></td>
+    <td>a page title with spaces &mdash; or
+        <code>&lt;page:Sales North&gt;</code></td></tr>
+</table>
+<p>A <b>page link</b> finds the page by its title, so renaming the page
+breaks it; a link to no page says so in the status bar. It works on a
+locked page too, which is how a report handed over becomes the way round a
+project. On <b>paper and in saved HTML</b> there is no page to go to, so a
+page link prints as its plain words; a web link stays a link.</p>
 
 <h3>Columns</h3>
 <p>Text on the left, a chart on the right — a fenced <code>columns</code>
@@ -178,8 +196,9 @@ along with <b>Open in Browser</b>.</p>
 <h3>Handing it over</h3>
 <p>Right-click the page tab and tick <b>Locked</b> to hide the editor and
 this toolbar, leaving the document on its own. Locking hides the furniture,
-not the controls — slicers still filter and tables still take typing. Page
-Setup and Export PDF move onto that tab menu while it is locked.</p>
+not the controls — slicers still filter, tables still take typing and links
+still go where they point. Page Setup and Export PDF move onto that tab menu
+while it is locked.</p>
 """
 
 

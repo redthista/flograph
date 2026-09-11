@@ -31,6 +31,15 @@ def is_page_link(href) -> bool:
     return str(href or "").strip().lower().startswith(PAGE_SCHEME)
 
 
+def link_target(href) -> str:
+    """What a page link names — `Sales North` for `page:Sales%20North` or
+    `<page:Sales North>` — or "" when it is not a page link."""
+    from urllib.parse import unquote
+    if not is_page_link(href):
+        return ""
+    return unquote(str(href).strip()[len(PAGE_SCHEME):]).strip("<> \t")
+
+
 def page_for_link(pages: dict, href) -> Optional[str]:
     """The page a Markdown link like `[Costs](page:Costs)` goes to, or None
     when it is not a page link or names no page.
@@ -41,10 +50,7 @@ def page_for_link(pages: dict, href) -> Optional[str]:
     title follows the title, so renaming the page breaks it; a Page Links
     card or a Go to page button is the way to a page that survives that.
     """
-    from urllib.parse import unquote
-    if not is_page_link(href):
-        return None
-    target = unquote(str(href).strip()[len(PAGE_SCHEME):]).strip("<> \t")
+    target = link_target(href)
     if not target:
         return None
     if target in pages:

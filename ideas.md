@@ -47,8 +47,8 @@ letter retires with it: eight papercuts, from a plain canvas by default
 to the start screen's "edited" note on the name's line. Chunk AB shipped
 whole the same day and retires too: a Page Links card, an Action Button
 that goes to a page, Notes on dashboard pages and sections in the tab bar.
-The one piece of it left — a `page:` link that works in a *report* page as
-well as in a Note — is N7.
+The one piece of it left over, N7, shipped the same day: a `page:` link
+works in a *report* page's preview as well as in a Note.
 
 ---
 
@@ -202,16 +202,6 @@ expanded, which is right for two levels and wrong for three over a wide
 column. A pair of buttons in the slicer toolbar (and remembering which
 branches were open, in a param) — small, but only worth it once someone has
 a three-level slicer.
-
-**N7. A `page:` link in a report page** (was part of AB). A Note's Markdown
-link `[Costs](page:Costs)` goes to that page — `core.page_nav.page_for_link`
-resolves it, `MainWindow._follow_page_link` follows it. A report page is
-Markdown too, but its preview (`ui/report/preview.py`) draws laid-out pages
-and takes no clicks on links at all, web links included. The missing piece
-is hit-testing a link in the preview (the document layout's `anchorAt`, the
-way the Note card does it), then sending `page:` to the window and the rest
-to the browser. On paper and in exported HTML a `page:` link goes nowhere,
-so it should print as plain text rather than as a dead link.
 
 ---
 

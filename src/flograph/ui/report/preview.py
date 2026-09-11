@@ -15,13 +15,15 @@ the export, and disagreeing is the only thing a preview must never do.
 
 Text selection is what this costs, and it is the reason the widget keeps a
 `document()` accessor: what is on screen is still one QTextDocument, and
-everything else in the report code goes on treating it as one.
+everything else in the report code goes on treating it as one. Links are
+not lost with it: a click on the paper is mapped back into the document
+(`document_point`) and hit-tested there, the way a Note card does it.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QRectF, QSizeF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QTextDocument
 from PySide6.QtWidgets import QAbstractScrollArea
 
@@ -56,8 +58,22 @@ SHADOW = QColor(0, 0, 0, 60)
 PAPER = QColor("#ffffff")
 
 
+def link_tooltip(href: str) -> str:
+    """What resting on a link says: the page a `page:` link goes to, or the
+    address anything else opens."""
+    from flograph.core.page_nav import is_page_link, link_target
+    if not href:
+        return ""
+    if is_page_link(href):
+        return f"Go to the page “{link_target(href)}”"
+    return href
+
+
 class PagedPreview(QAbstractScrollArea):
     """A rendered report shown as the pages it will print as."""
+
+    #: a link on the paper was clicked: its href, as the report wrote it
+    link_activated = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -76,7 +92,12 @@ class PagedPreview(QAbstractScrollArea):
         self._user_scale: Optional[float] = None
         #: sheets left-to-right and wrapping, rather than in one column
         self._flow = False
+        #: the link a left press landed on, fired if the release does too
+        self._pressed_link = ""
+        #: the link the pointer is resting on, for the cursor and tooltip
+        self._hover_link = ""
         self.viewport().setAutoFillBackground(False)
+        self.viewport().setMouseTracking(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
     # ------------------------------------------------------------- contents
@@ -220,6 +241,70 @@ class PagedPreview(QAbstractScrollArea):
         y = (MARGIN_PX + row * (height + GAP_PX)
              - self.verticalScrollBar().value())
         return QRectF(x, y, width, height)
+
+    # --------------------------------------------------------------- links
+
+    def document_point(self, pos: QPointF) -> Optional[QPointF]:
+        """Where viewport point `pos` falls in the document, or None when it
+        is on no text: between the sheets, in a margin or a running band,
+        or on the cover. The inverse of what `paint_body` does to draw a
+        page, so a click lands on what was drawn under it."""
+        if self._document is None:
+            return None
+        cover = 1 if self._setup.cover else 0
+        body = body_rect(printable_points(self._setup), self._setup)
+        for index in range(self.sheet_count()):
+            rect = self._sheet_rect(index)
+            if not rect.contains(pos):
+                continue
+            if cover and index == 0:
+                return None
+            local = QPointF((pos.x() - rect.left()) / self._scale,
+                            (pos.y() - rect.top()) / self._scale)
+            if not body.contains(local):
+                return None
+            page = index - cover
+            return QPointF(local.x() - body.left(),
+                           local.y() - body.top() + page * body.height())
+        return None
+
+    def link_at(self, pos: QPointF) -> str:
+        """The href of the link under viewport point `pos`, or ""."""
+        point = self.document_point(QPointF(pos))
+        if point is None:
+            return ""
+        return self._document.documentLayout().anchorAt(point)
+
+    def mousePressEvent(self, event) -> None:
+        self._pressed_link = (self.link_at(event.position())
+                              if event.button() == Qt.LeftButton else "")
+        if self._pressed_link:
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        # Fired on the release, and only over the link pressed: pressing a
+        # link and sliding off it is how you change your mind.
+        pressed, self._pressed_link = self._pressed_link, ""
+        if pressed and event.button() == Qt.LeftButton \
+                and self.link_at(event.position()) == pressed:
+            event.accept()
+            self.link_activated.emit(pressed)
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        href = self.link_at(event.position())
+        if href != self._hover_link:
+            self._hover_link = href
+            viewport = self.viewport()
+            if href:
+                viewport.setCursor(Qt.PointingHandCursor)
+            else:
+                viewport.unsetCursor()
+            viewport.setToolTip(link_tooltip(href))
+        super().mouseMoveEvent(event)
 
     # ------------------------------------------------------------ painting
 
