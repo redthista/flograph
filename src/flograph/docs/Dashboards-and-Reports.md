@@ -73,10 +73,13 @@ title, renaming the page breaks the link — a Page Links card or a Go to page
 button follows a rename.
 
 **Group the tabs** from a tab's right-click menu ▸ **Group**: pick a group,
-or start a **New group…**. A group's tabs sit together behind a header, with
-a coloured line under the run. Click the header to fold them away — the
-page you are on stays showing — drag it to move the whole group, and
-right-click it to rename or ungroup.
+or start a **New group…**, where you name it and can give it a colour. A
+group's tabs sit together behind a header, with a line in the group's
+colour under the run. Click the header to fold them away — the page you are
+on stays showing — drag it to move the whole group, and right-click it to
+rename it, **change its colour** or ungroup. A group's colour is its own:
+the pages keep theirs. Left on **Automatic**, a group takes the colour of
+its first coloured page.
 The tab list (right-click the tab bar's `<` `>` arrows) shows each group
 under its own heading. The groups travel with the project; which are folded
 is up to whoever is looking.

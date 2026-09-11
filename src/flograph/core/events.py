@@ -69,6 +69,7 @@ class GraphEvents:
         self.page_changed = Event()    # (page: Page)
         self.page_body_changed = Event()  # (page: Page) — report markdown
         self.pages_reordered = Event()  # (order: list[str]) — page ids, new order
+        self.page_groups_changed = Event()  # () — a tab-bar group's colour
         self.tile_added = Event()      # (page_id: str, tile: Tile)
         self.tile_removed = Event()    # (page_id: str, tile_id: str)
         self.tile_changed = Event()    # (page_id: str, tile: Tile)

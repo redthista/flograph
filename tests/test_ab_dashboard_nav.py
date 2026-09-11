@@ -613,7 +613,11 @@ class TestTabGroups:
             window._set_page_group(page_id, "Sales")
         menu = window.page_bar._group_menu("Sales")
         assert [a.text() for a in menu.actions() if not a.isSeparator()] == \
-            ["Fold away", "Rename group…", "Ungroup"]
+            ["Fold away", "Rename group…", "Change colour…", "Ungroup"]
+        # a group with a colour of its own can go back to borrowing one
+        window._recolor_page_group("Sales", "#123456")
+        menu = window.page_bar._group_menu("Sales")
+        assert "Reset colour" in [a.text() for a in menu.actions()]
 
     def test_rename_and_ungroup(self, window):
         ids = _pages(window, "A", "B", "C")
@@ -678,6 +682,128 @@ class TestTabGroups:
         window._set_page_group(ids[0], "Sales")
         window.undo_stack.push(RemovePageCommand(window.graph, ids[0]))
         assert _shown(window.page_bar) == ["Model", "B", "+"]
+
+
+class TestAGroupsColour:
+    """Dan, testing AB4: a colour for a group, chosen when it is made and
+    changeable after, that leaves the pages' own colours alone."""
+
+    def test_made_with_a_colour_in_one_step(self, window):
+        ids = _pages(window, "A", "B")
+        before = window.undo_stack.count()
+        window._set_page_group(ids[1], "Sales", "#2563eb")
+        assert window.graph.pages[ids[1]].group == "Sales"
+        assert window.graph.page_group_colors == {"Sales": "#2563eb"}
+        assert window.page_bar._group_color("Sales").name() == "#2563eb"
+        assert window.undo_stack.count() == before + 1
+        window.undo_stack.undo()
+        assert window.graph.pages[ids[1]].group == ""
+        assert window.graph.page_group_colors == {}
+
+    def test_it_leaves_the_pages_colours_alone(self, window):
+        ids = _pages(window, "A")
+        window._recolor_page(ids[0], "#b45309")
+        window._set_page_group(ids[0], "Sales", "#2563eb")
+        assert window.graph.pages[ids[0]].color == "#b45309"
+        assert window.page_bar.page_color(ids[0]) == "#b45309"
+        assert window.page_bar._group_color("Sales").name() == "#2563eb"
+
+    def test_without_one_it_borrows_its_first_coloured_page_s(self, window):
+        ids = _pages(window, "A")
+        window._recolor_page(ids[0], "#b45309")
+        window._set_page_group(ids[0], "Sales")
+        assert window.page_bar._group_color("Sales").name() == "#b45309"
+        window._recolor_page_group("Sales", "#2563eb")
+        assert window.page_bar._group_color("Sales").name() == "#2563eb"
+        window._recolor_page_group("Sales", None)   # Reset colour
+        assert window.page_bar._group_color("Sales").name() == "#b45309"
+
+    def test_it_is_muted_like_a_tab(self, window, monkeypatch):
+        """Dan: a group's colour mutes the way a tab's and a card's do —
+        laid over at the Settings ▸ Canvas strength, not drawn raw."""
+        from flograph.ui import theme
+        ids = _pages(window, "A")
+        window._set_page_group(ids[0], "Sales", "#ff0000")
+        bar = window.page_bar
+        ground = bar.palette().color(bar.backgroundRole())
+        muted = bar._muted_group_color("Sales")
+        assert muted.name() != "#ff0000"
+        assert muted == theme.tint(ground, "#ff0000", theme.TINT_STRONG)
+        # the strength is read when it paints, so the setting reaches it
+        monkeypatch.setattr(theme, "TINT_STRONG", 0.2)
+        assert bar._muted_group_color("Sales") == \
+            theme.tint(ground, "#ff0000", 0.2)
+
+    def test_a_rename_keeps_it_and_ungrouping_drops_it(self, window):
+        ids = _pages(window, "A")
+        window._set_page_group(ids[0], "Sales", "#2563eb")
+        window._rename_page_group("Sales", "Revenue")
+        assert window.graph.page_group_colors == {"Revenue": "#2563eb"}
+        window._rename_page_group("Revenue", "")
+        assert window.graph.page_group_colors == {}
+
+    def test_a_merge_keeps_the_colour_of_the_group_merged_into(self, window):
+        ids = _pages(window, "A", "B")
+        window._set_page_group(ids[0], "Sales", "#2563eb")
+        window._set_page_group(ids[1], "Costs", "#b45309")
+        window._rename_page_group("Costs", "Sales")
+        assert window.graph.page_group_colors == {"Sales": "#2563eb"}
+
+    def test_it_is_saved_only_while_a_page_is_in_the_group(self, registry):
+        graph = Graph()
+        graph.add_page(Page(id="p1", title="A", group="Sales"))
+        graph.set_page_group_color("Sales", "#2563eb")
+        graph.set_page_group_color("Gone", "#000000")
+        data = graph_to_dict(graph)
+        assert (data.get("graph") or data)["page_group_colors"] == \
+            {"Sales": "#2563eb"}
+        assert graph_from_dict(data, registry).page_group_colors == \
+            {"Sales": "#2563eb"}
+        plain = Graph()
+        plain.add_page(Page(id="p1", title="A"))
+        assert "page_group_colors" not in \
+            (graph_to_dict(plain).get("graph") or graph_to_dict(plain))
+
+    def test_opening_a_project_brings_its_colours(self, window, registry):
+        loaded = Graph()
+        loaded.add_page(Page(id="p1", title="A", group="Sales"))
+        loaded.set_page_group_color("Sales", "#2563eb")
+        window._replace_graph(loaded)
+        assert window.page_bar._group_color("Sales").name() == "#2563eb"
+
+    def test_new_group_asks_for_a_name_and_a_colour(self, window,
+                                                    monkeypatch):
+        from flograph.ui.dashboard import group_dialog
+
+        class Answered:
+            def __init__(self, parent=None):
+                pass
+
+            def exec(self):
+                return True
+
+            def name(self):
+                return "Sales"
+
+            def colour(self):
+                return "#2563eb"
+        monkeypatch.setattr(group_dialog, "GroupDialog", Answered)
+        ids = _pages(window, "A")
+        window.page_bar._prompt_new_group(ids[0])
+        assert window.graph.pages[ids[0]].group == "Sales"
+        assert window.graph.page_group_colors == {"Sales": "#2563eb"}
+
+    def test_the_dialog(self, qtbot):
+        from flograph.ui.dashboard.group_dialog import AUTOMATIC, GroupDialog
+        dialog = GroupDialog()
+        qtbot.addWidget(dialog)
+        assert not dialog._ok.isEnabled()          # no name, no group
+        dialog.name_edit.setText("  Sales ")
+        assert dialog._ok.isEnabled() and dialog.name() == "Sales"
+        assert dialog.colour() == ""               # automatic
+        assert dialog.colour_row._swatch.text() == AUTOMATIC
+        dialog._set_colour("#2563eb")
+        assert dialog.colour() == "#2563eb"
 
 
 # ------------------------------------------------------- AB3 Page Links

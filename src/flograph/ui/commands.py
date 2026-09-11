@@ -922,6 +922,25 @@ class SetPageGroupCommand(QUndoCommand):
         self._graph.set_page_group(self._page_id, self._old)
 
 
+class SetPageGroupColorCommand(QUndoCommand):
+    """Give a tab-bar group a colour of its own, or None to go back to its
+    first coloured page's. The pages' own colours are not touched."""
+
+    def __init__(self, graph: Graph, group: str, color: Optional[str],
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("group colour", parent)
+        self._graph = graph
+        self._group = group
+        self._old = graph.page_group_colors.get(group)
+        self._new = color or None
+
+    def redo(self) -> None:
+        self._graph.set_page_group_color(self._group, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_group_color(self._group, self._old)
+
+
 class SetPageMaximizedTileCommand(QUndoCommand):
     """Maximize a tile over its page, or restore the normal layout. Saved
     with the project, so it goes through the undo stack like every other

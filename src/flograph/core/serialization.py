@@ -204,8 +204,20 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
             # Where `${env:NAME}` reads its secrets from — the path only.
             # The values stay in that file and never enter this one.
             "env_path": graph.env_path,
+            # the tab bar's group colours, only when there are any
+            **_group_colors_entry(graph),
         },
     }
+
+
+def _group_colors_entry(graph: Graph) -> dict[str, Any]:
+    """`{"page_group_colors": {...}}` for the groups a page is still in, or
+    nothing — a colour left behind by a group that has gone would come
+    back, unasked, on the next group given the same name."""
+    in_use = {page.group for page in graph.pages.values() if page.group}
+    colors = {group: color for group, color in graph.page_group_colors.items()
+              if group in in_use and color}
+    return {"page_group_colors": colors} if colors else {}
 
 
 def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
@@ -232,6 +244,11 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     # Absent in files written before variables existed, which is what the
     # empty default means anyway: use the per-user secrets file.
     graph.env_path = str(payload.get("env_path", "") or "")
+    # absent before groups had colours, and when none has one
+    raw_colors = payload.get("page_group_colors") or {}
+    if isinstance(raw_colors, dict):
+        graph.page_group_colors = {str(g): str(c)
+                                   for g, c in raw_colors.items() if g and c}
     for entry in node_entries:
         type_id = entry["type"]
         code = entry.get("code")

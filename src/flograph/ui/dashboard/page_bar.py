@@ -63,6 +63,9 @@ class PageTabBar(QTabBar):
     recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
     set_page_group_requested = Signal(str, str)   # page_id, group ("" = none)
     rename_group_requested = Signal(str, str)     # old, new ("" = ungroup)
+    recolor_group_requested = Signal(str, object)  # group, "#rrggbb" or None
+    new_group_requested = Signal(str, str, str)   # page_id, name, colour
+                                                  # ("" = automatic)
     set_view_mode_requested = Signal(str, bool)   # page_id, locked
     set_fit_to_window_requested = Signal(str, bool)   # page_id, scaling
     export_page_requested = Signal(str)           # page_id (locked reports)
@@ -102,6 +105,8 @@ class PageTabBar(QTabBar):
         # business — how the strip is being looked at, not the project
         self._groups: dict[str, str] = {}
         self._folded: set[str] = set()
+        # group -> a colour of its own, mirrored from the model
+        self._group_colors: dict[str, str] = {}
         # A press on a group's header, until its release: a click folds the
         # group, a drag moves all of it. Our own drag rather than Qt's — a
         # header is not a tab Qt should make current — so it keeps its
@@ -315,9 +320,21 @@ class PageTabBar(QTabBar):
         rest = [b for b in blocks if b is not moving and b[2].isNull()]
         return [p for b in others + rest for p in b[1]]
 
+    def set_group_colors(self, colors: dict) -> None:
+        """Told by the window whenever a group's colour changes."""
+        self._group_colors = dict(colors)
+        self.update()
+
+    def group_color(self, group: str) -> Optional[str]:
+        """The group's own colour, or None when it borrows one."""
+        return self._group_colors.get(group)
+
     def _group_color(self, group: str) -> QColor:
-        """The first coloured page in the group lends the section its colour;
-        otherwise the accent, so a section reads as one either way."""
+        """The group's own colour; failing that the first coloured page in
+        it lends the section its colour; otherwise the accent, so a section
+        reads as one either way."""
+        if self._group_colors.get(group):
+            return QColor(self._group_colors[group])
         for page_id in self.page_order():
             if self._groups.get(page_id) == group and page_id in self._colors:
                 return QColor(self._colors[page_id])
@@ -426,26 +443,36 @@ class PageTabBar(QTabBar):
                 rect = self.tabRect(i)
                 painter.fillRect(QRect(rect.left(), rect.bottom() - 1,
                                        rect.width(), 2),
-                                 self._group_color(member))
+                                 self._muted_group_color(member))
 
     def _paint_header(self, painter, index: int, group: str) -> None:
-        """A group's header: no tab shape, just its name in the group's
-        colour, a rule in front of it and the section's line beneath."""
+        """A group's header, muted the way a coloured tab is: the group's
+        colour laid over it at the strength a current tab gets, the name in
+        the tabs' own text colour on top — so a loud pick comes out calm,
+        and no pale one can make the name hard to read — and the section's
+        line beneath."""
         rect = self.tabRect(index)
-        color = self._group_color(group)
         painter.save()
+        block = self._group_color(group)
+        block.setAlphaF(theme.TINT_STRONG)
+        painter.fillRect(rect.adjusted(1, 2, -1, 0), block)
         font = QFont(self.font())
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(color)
+        painter.setPen(self.palette().color(QPalette.WindowText))
         painter.drawText(rect.adjusted(8, 0, -4, 0),
                          Qt.AlignVCenter | Qt.AlignLeft, self.tabText(index))
-        painter.fillRect(QRect(rect.left(), rect.top() + 5, 1,
-                               max(0, rect.height() - 10)),
-                         self.palette().color(QPalette.Mid))
-        painter.fillRect(QRect(rect.left() + 3, rect.bottom() - 1,
-                               rect.width() - 3, 2), color)
+        painter.fillRect(QRect(rect.left(), rect.bottom() - 1,
+                               rect.width(), 2),
+                         self._muted_group_color(group))
         painter.restore()
+
+    def _muted_group_color(self, group: str) -> QColor:
+        """The group's colour as a solid line can show it: laid over the
+        bar at the current tab's strength. Read at paint time, like the
+        tabs' tint, so Settings ▸ Canvas reaches it without a restart."""
+        return theme.tint(self.palette().color(self.backgroundRole()),
+                          self._group_color(group).name(), theme.TINT_STRONG)
 
     def tabSizeHint(self, index: int):
         size = super().tabSizeHint(index)
@@ -773,9 +800,18 @@ class PageTabBar(QTabBar):
         return sub
 
     def _prompt_new_group(self, page_id: str) -> None:
-        name, ok = QInputDialog.getText(self, "New group", "Group name:")
-        if ok and name.strip():
-            self.set_page_group_requested.emit(page_id, name.strip())
+        """Name the group and, while at it, give it a colour."""
+        from . import group_dialog
+        dialog = group_dialog.GroupDialog(self)
+        if dialog.exec() and dialog.name():
+            self.new_group_requested.emit(page_id, dialog.name(),
+                                          dialog.colour())
+
+    def _prompt_group_color(self, group: str) -> None:
+        color = QColorDialog.getColor(self._group_color(group), self,
+                                      f"Colour of {group}")
+        if color.isValid():
+            self.recolor_group_requested.emit(group, color.name())
 
     def _group_menu(self, group: str) -> QMenu:
         """A header's own menu: fold, rename, or ungroup."""
@@ -787,6 +823,14 @@ class PageTabBar(QTabBar):
         menu.addSeparator()
         rename_action = menu.addAction("Rename group…")
         rename_action.triggered.connect(lambda: self._prompt_rename_group(group))
+        color_action = menu.addAction("Change colour…")
+        color_action.triggered.connect(lambda: self._prompt_group_color(group))
+        if self._group_colors.get(group):
+            reset_action = menu.addAction("Reset colour")
+            reset_action.setToolTip("Back to the colour of its first "
+                                    "coloured page")
+            reset_action.triggered.connect(
+                lambda: self.recolor_group_requested.emit(group, None))
         ungroup_action = menu.addAction("Ungroup")
         ungroup_action.triggered.connect(
             lambda: self.rename_group_requested.emit(group, ""))

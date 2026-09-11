@@ -229,6 +229,12 @@ class Graph:
         self.frames: dict[str, Frame] = {}
         self.shapes: dict[str, Shape] = {}
         self.pages: dict[str, Page] = {}
+        # A colour of its own for a section of the tab bar (AB4), by group
+        # name. Kept apart from the pages' colours, which it never touches; a
+        # group without one borrows its first coloured page's. May hold a
+        # group no page is in any more (an undo can bring the pages back) —
+        # only the ones in use are saved.
+        self.page_group_colors: dict[str, str] = {}
         # Where this project's secrets live, for `${env:NAME}`. A *path*,
         # relative to the project file where it can be — never the values,
         # which must not enter a file that gets emailed around. Empty means
@@ -1052,6 +1058,24 @@ class Graph:
         page.group = str(group or "").strip()
         self.events.page_changed.emit(page)
         return page
+
+    def set_page_group_color(self, group: str, color: Optional[str]) -> None:
+        """Give a group of the tab bar a colour of its own, or None to go
+        back to borrowing its first coloured page's."""
+        group = str(group or "").strip()
+        if not group:
+            return
+        if color:
+            self.page_group_colors[group] = str(color)
+        else:
+            self.page_group_colors.pop(group, None)
+        self.events.page_groups_changed.emit()
+
+    def set_page_group_colors(self, colors: dict) -> None:
+        """Replace every group's colour at once — a project being opened."""
+        self.page_group_colors = {str(g): str(c) for g, c in colors.items()
+                                  if g and c}
+        self.events.page_groups_changed.emit()
 
     def set_page_body(self, page_id: str, body: str) -> Page:
         """Replace a report page's markdown source. Its own event, not

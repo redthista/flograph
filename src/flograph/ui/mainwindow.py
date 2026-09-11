@@ -1910,6 +1910,11 @@ class MainWindow(QMainWindow):
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
         self.page_bar.set_page_group_requested.connect(self._set_page_group)
         self.page_bar.rename_group_requested.connect(self._rename_page_group)
+        self.page_bar.recolor_group_requested.connect(self._recolor_page_group)
+        self.page_bar.new_group_requested.connect(
+            lambda page_id, name, color:
+            self._set_page_group(page_id, name, color or None))
+        events.page_groups_changed.connect(self._on_page_groups_changed)
         self.page_bar.set_view_mode_requested.connect(self._set_page_view_mode)
         self.page_bar.set_fit_to_window_requested.connect(
             self._set_page_fit_to_window)
@@ -2357,30 +2362,47 @@ class MainWindow(QMainWindow):
     def _page_groups(self) -> dict[str, str]:
         return {page_id: page.group for page_id, page in self.graph.pages.items()}
 
-    def _set_page_group(self, page_id: str, group: str) -> None:
+    def _set_page_group(self, page_id: str, group: str,
+                        color: Optional[str] = None) -> None:
         """Put a page in a section of the tab bar (AB4) — and, in the same
-        undo step, next to the rest of that section."""
+        undo step, next to the rest of that section, and (from New group…)
+        with the colour it was given. No colour leaves the group's alone."""
         from flograph.core.page_nav import order_after_regroup
-        from .commands import SetPageGroupCommand
+        from .commands import SetPageGroupColorCommand, SetPageGroupCommand
         page = self.graph.pages.get(page_id)
         group = str(group or "").strip()
-        if page is None or page.group == group:
+        recolor = bool(group and color
+                       and self.graph.page_group_colors.get(group) != color)
+        if page is None or (page.group == group and not recolor):
             return
         order = list(self.graph.pages)
         new_order = order_after_regroup(order, self._page_groups(),
                                         page_id, group)
         self.undo_stack.beginMacro("group page" if group else "ungroup page")
-        self.undo_stack.push(SetPageGroupCommand(self.graph, page_id, group))
-        if new_order != order:
-            self.undo_stack.push(ReorderPagesCommand(self.graph, new_order))
+        if page.group != group:
+            self.undo_stack.push(SetPageGroupCommand(self.graph, page_id, group))
+            if new_order != order:
+                self.undo_stack.push(ReorderPagesCommand(self.graph, new_order))
+        if recolor:
+            self.undo_stack.push(
+                SetPageGroupColorCommand(self.graph, group, color))
         self.undo_stack.endMacro()
+
+    def _recolor_page_group(self, group: str, color) -> None:
+        from .commands import SetPageGroupColorCommand
+        if self.graph.page_group_colors.get(group) != (color or None):
+            self.undo_stack.push(
+                SetPageGroupColorCommand(self.graph, group, color))
+
+    def _on_page_groups_changed(self) -> None:
+        self.page_bar.set_group_colors(self.graph.page_group_colors)
 
     def _rename_page_group(self, old: str, new: str) -> None:
         """Rename a section — every page carrying the name — or, with "",
         take the section away and leave its pages where they are. Renaming
         onto a name already in use merges the two."""
         from flograph.core.page_nav import gather_groups
-        from .commands import SetPageGroupCommand
+        from .commands import SetPageGroupColorCommand, SetPageGroupCommand
         new = str(new or "").strip()
         members = [page_id for page_id, page in self.graph.pages.items()
                    if page.group == old]
@@ -2389,11 +2411,20 @@ class MainWindow(QMainWindow):
         order = list(self.graph.pages)
         groups = {**self._page_groups(), **{page_id: new for page_id in members}}
         new_order = gather_groups(order, groups)
+        color = self.graph.page_group_colors.get(old)
         self.undo_stack.beginMacro("rename group" if new else "ungroup")
         for page_id in members:
             self.undo_stack.push(SetPageGroupCommand(self.graph, page_id, new))
         if new_order != order:
             self.undo_stack.push(ReorderPagesCommand(self.graph, new_order))
+        if color:
+            # the colour belongs to the section, whatever it is called — and
+            # a merge into a group with a colour of its own keeps that one
+            if new and not self.graph.page_group_colors.get(new):
+                self.undo_stack.push(
+                    SetPageGroupColorCommand(self.graph, new, color))
+            self.undo_stack.push(
+                SetPageGroupColorCommand(self.graph, old, None))
         self.undo_stack.endMacro()
 
     def _duplicate_page(self, page_id: str) -> None:
@@ -5132,6 +5163,8 @@ class MainWindow(QMainWindow):
                                conn.dst_node, conn.dst_port, conn_id=conn.id)
         for frame in loaded.frames.values():
             self.graph.add_frame(frame)
+        # before the pages, so each group's header arrives in its colour
+        self.graph.set_page_group_colors(loaded.page_group_colors)
         for page in loaded.pages.values():
             self.graph.add_page(page)
         self._restoring_pages = False
