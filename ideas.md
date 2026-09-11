@@ -12,7 +12,7 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
-Q, R, T, V, Y, Z and AA) are where shipped work used to be. Old numbers are kept
+Q, R, T, V, Y, Z, AA and AB) are where shipped work used to be. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -44,7 +44,11 @@ so chunks carry on at AA. With every bullet carried here, the raw list
 in `new_ideas.md` was cleared, ready for the next one. Chunk AA shipped
 whole the same day and its
 letter retires with it: eight papercuts, from a plain canvas by default
-to the start screen's "edited" note on the name's line.
+to the start screen's "edited" note on the name's line. Chunk AB shipped
+whole the same day and retires too: a Page Links card, an Action Button
+that goes to a page, Notes on dashboard pages and sections in the tab bar.
+The one piece of it left — a `page:` link that works in a *report* page as
+well as in a Note — is N7.
 
 ---
 
@@ -199,6 +203,16 @@ column. A pair of buttons in the slicer toolbar (and remembering which
 branches were open, in a param) — small, but only worth it once someone has
 a three-level slicer.
 
+**N7. A `page:` link in a report page** (was part of AB). A Note's Markdown
+link `[Costs](page:Costs)` goes to that page — `core.page_nav.page_for_link`
+resolves it, `MainWindow._follow_page_link` follows it. A report page is
+Markdown too, but its preview (`ui/report/preview.py`) draws laid-out pages
+and takes no clicks on links at all, web links included. The missing piece
+is hit-testing a link in the preview (the document layout's `anchorAt`, the
+way the Note card does it), then sending `page:` to the window and the rest
+to the browser. On paper and in exported HTML a `page:` link goes nowhere,
+so it should print as plain text rather than as a dead link.
+
 ---
 
 ## S. Editing in the Markdown Wiki card
@@ -280,33 +294,6 @@ rows and a pivot of the result. It is also the hard part — a rule decided
 on a source row has to be carried through the aggregation to the cell it
 ends up in, and a cell built from several rows needs a rule for which of
 their verdicts wins.
-
----
-
-## AB. Getting around a dashboard
-
-A dashboard handed to someone else is a set of tabs, and the tabs are the
-only way round it today. These want deciding together.
-
-**AB1. Notes on dashboard and report pages** (Dan). A Note is a canvas
-card but not a tile kind (`TILE_ABLE_KINDS` in `ui/dashboard/tile_item.py`),
-so a line of explanation beside a chart needs a Markdown Wiki or a report.
-A note tile is the dashboard half. A report page is already Markdown, so
-there the question is whether `![[Note]]` embedding a canvas Note is worth
-having over typing the text into the page.
-
-**AB2. An Action Button that goes to a page** (Dan). On click offers Run
-nodes, Run whole flow, Run frame and Show message; Go to page is a fifth,
-with the page picked from a list rather than typed.
-
-**AB3. Navigation buttons or a bar on a dashboard** (Dan). AB2 gives
-buttons one at a time; a bar is the same thing made once. Decide whether it
-is a card placed on each page (flexible, and it goes stale when a page is
-added) or chrome drawn from the page list (always right, one look).
-
-**AB4. Group the page tabs** (Dan). Sections in the tab bar for a flow
-with many pages. The cheapest model is a group name on `Page`, drawn as a
-divider or a collapsible run of tabs; AA5's list would show the groups too.
 
 ---
 
