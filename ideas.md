@@ -34,7 +34,8 @@ letter retires too: V1 gave a table a keep-list that fixes its column
 order, and V3 gave a cell two ways to say more than fits — the whole of a
 value that was cut short, and a note read from another column. N6
 shipped on 2026-09-11: a node's right-click menu now says which pages show
-it, and says so when none do.
+it, and says so when none do. N3 shipped the same day: a dashboard tile
+can be given a shape, and keeps it when it is resized.
 
 ---
 
@@ -151,17 +152,6 @@ accident is not a bug anybody gets to undo.
 ---
 
 ## N. Dashboard pages
-
-**N3. Set the shape a visual takes on a dashboard page** (Dan). Asked for
-as "a wide Plotly chart, or a long thin one". On a **report page** this is
-already done: `![[chart|ratio=16:9]]`, and `height=`, `scale=` and `fit`
-beside it, shipped in 0.1.12 — `EMBED_OPTIONS` in `core/report.py` reads
-`("width", "ratio", "height", "scale", "rows", "radius")`.
-
-What is left is the **dashboard page**. Its free-form tiles can already be
-dragged to any shape, but nothing lets you *state* one: no numeric "W:H"
-input, no aspect lock while resizing, no preset ratios — new UI on
-`TileItem` or the properties panel.
 
 **N4. A slicer that greys out values with nothing behind them.** Excel greys
 a slicer value that the *other* slicers have already filtered away, so you
