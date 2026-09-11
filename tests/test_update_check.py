@@ -58,26 +58,26 @@ class TestUpdateStatus:
     def test_reports_a_newer_release(self, monkeypatch):
         monkeypatch.setattr(packages, "installed_version", lambda: "0.1.12")
         monkeypatch.setattr(packages, "latest_available_version",
-                            lambda: "0.1.14")
+                            lambda *a:"0.1.14")
         assert packages.update_status() == ("0.1.12", "0.1.14", True)
 
     def test_not_newer_when_level(self, monkeypatch):
         monkeypatch.setattr(packages, "installed_version", lambda: "0.1.14")
         monkeypatch.setattr(packages, "latest_available_version",
-                            lambda: "0.1.14")
+                            lambda *a:"0.1.14")
         assert packages.update_status() == ("0.1.14", "0.1.14", False)
 
     def test_not_newer_when_ahead(self, monkeypatch):
         """A dev build can be in front of the index — never cry update."""
         monkeypatch.setattr(packages, "installed_version", lambda: "0.2.0")
         monkeypatch.setattr(packages, "latest_available_version",
-                            lambda: "0.1.14")
+                            lambda *a:"0.1.14")
         assert packages.update_status()[2] is False
 
     def test_shrugs_when_the_check_cannot_run(self, monkeypatch):
         monkeypatch.setattr(packages, "installed_version", lambda: "0.1.12")
         monkeypatch.setattr(packages, "latest_available_version",
-                            lambda: None)
+                            lambda *a:None)
         assert packages.update_status() == ("0.1.12", None, False)
 
     def test_never_raises(self, monkeypatch):
@@ -151,7 +151,8 @@ def captured_probe(monkeypatch):
     synchronously, and record every toast raised."""
     state = {"calls": 0, "result": ("0.1.12", "0.1.14", True), "toasts": []}
 
-    def fake_run_probe(on_done):
+    def fake_run_probe(on_done, index=None):
+        state["index"] = index
         state["calls"] += 1
         on_done(*state["result"])
 
@@ -297,7 +298,7 @@ class TestSettingsSurface:
         assert btn is not None and result is not None
 
         monkeypatch.setattr(uc, "run_probe",
-                            lambda cb: cb("0.1.12", "0.1.14", True))
+                            lambda cb, **_: cb("0.1.12", "0.1.14", True))
         btn.click()
         assert "0.1.14" in result.text()
 
@@ -309,7 +310,7 @@ class TestSettingsSurface:
         btn = dialog.findChild(QPushButton, "check_updates_button")
         result = dialog.findChild(QLabel, "update_result_label")
         monkeypatch.setattr(uc, "run_probe",
-                            lambda cb: cb("0.1.14", "0.1.14", False))
+                            lambda cb, **_: cb("0.1.14", "0.1.14", False))
         btn.click()
         assert "latest" in result.text().lower()
 
@@ -321,7 +322,7 @@ class TestSettingsSurface:
         btn = dialog.findChild(QPushButton, "check_updates_button")
         result = dialog.findChild(QLabel, "update_result_label")
         monkeypatch.setattr(uc, "run_probe",
-                            lambda cb: cb("0.1.12", None, False))
+                            lambda cb, **_: cb("0.1.12", None, False))
         btn.click()
         assert "couldn't" in result.text().lower()
 

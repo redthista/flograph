@@ -758,6 +758,8 @@ class MainWindow(QMainWindow):
                                    self._show_packages)
         self.action_weblibs = act("&Web Libraries…", None,
                                   self._show_weblibs)
+        self.action_requirements = act("What This Flow &Needs…", None,
+                                       self._show_requirements)
         self.action_ai_settings = act("AI Assistant &Settings…", None,
                                       self._show_ai_settings)
         self.action_secrets = act("Sec&rets…", None, self._show_secrets)
@@ -807,6 +809,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction(self.action_packages)
         tools_menu.addAction(self.action_weblibs)
+        tools_menu.addAction(self.action_requirements)
         tools_menu.addAction(self.action_ai_settings)
         tools_menu.addAction(self.action_secrets)
 
@@ -2694,6 +2697,49 @@ class MainWindow(QMainWindow):
             self._packages_dialog = dialog
         dialog.show()
         dialog.raise_()
+
+    def show_packages_for(self, names: list) -> None:
+        """Manage Packages with `names` already in its install box — how
+        What This Flow Needs hands over. Installing is still a button the
+        user presses."""
+        self._show_packages()
+        self._packages_dialog.prefill(names)
+
+    def _show_requirements(self) -> None:
+        from .requirements_dialog import RequirementsDialog
+        dialog = getattr(self, "_requirements_dialog", None)
+        if dialog is None:
+            dialog = RequirementsDialog(self)
+            self._requirements_dialog = dialog
+        dialog.refresh()
+        dialog.show()
+        dialog.raise_()
+
+    def _offer_requirements(self) -> None:
+        """Say so when the flow just opened needs something this machine
+        is missing (AC2): a corner notice that goes away by itself, never a
+        dialog, and only for a flow whose nodes would fail without it.
+        Settings ▸ Packages turns it off."""
+        from .packages_dialog import SETTINGS_NOTIFY_MISSING
+        if not self.settings.value(SETTINGS_NOTIFY_MISSING, True, type=bool):
+            return
+        from flograph.requirements import missing
+
+        from .requirements_dialog import flow_needs
+        try:
+            gaps = missing(flow_needs(self.graph, name_installed=False))
+        except Exception:
+            return                  # a scan is never worth failing an open
+        if not gaps:
+            return
+        from . import update_check
+        count = len(gaps)
+        update_check.NoticeToast(
+            self,
+            f"This flow needs {count} thing{'s' if count != 1 else ''} "
+            f"that {'isn’t' if count == 1 else 'aren’t'} installed",
+            "Click to see what", on_click=self._show_requirements,
+            name="requirements_toast").show_in_corner()
 
     def _view_page(self, node_id: str) -> "str | None":
         """The page a webview node is currently showing, or None."""
@@ -4978,6 +5024,7 @@ class MainWindow(QMainWindow):
         self.engine.history.clear()
         for record in cache_persistence.load_run_history(path):
             self.engine.history.add(record)
+        self._offer_requirements()
         return True
 
     def _restore_cache(self, path: str, quiet: bool = False) -> None:

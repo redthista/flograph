@@ -8,6 +8,10 @@ without a restart" are not the same thing: an upgrade cannot reach a module
 the app has already imported, and a fresh install cannot reach a library
 that checked for it at startup and cached its absence — pandas does exactly
 that with pyarrow. Both cases are reported in the log.
+
+Where installs come from is Settings ▸ Packages (AC1): an index URL and
+hosts to trust, over pip's own settings. The dialog says which index is in
+force, and where that came from, above the log.
 """
 from __future__ import annotations
 
@@ -22,6 +26,35 @@ from PySide6.QtWidgets import (
 
 from flograph import packages
 
+#: Settings ▸ Packages — the index an install uses, over pip's own settings
+SETTINGS_INDEX_URL = "packages/index_url"
+SETTINGS_TRUSTED_HOST = "packages/trusted_host"
+#: Settings ▸ Packages — say, on opening a flow, when it needs something
+#: that isn't installed (AC2). On by default: it only ever appears for a
+#: flow that would fail without it.
+SETTINGS_NOTIFY_MISSING = "packages/notify_missing"
+
+
+def configured_index(settings) -> packages.PackageIndex:
+    """flograph's own index setting — empty (and falsy) when none is set,
+    which means "whatever pip is configured with"."""
+    if settings is None:
+        return packages.PackageIndex()
+    return packages.PackageIndex(
+        url=str(settings.value(SETTINGS_INDEX_URL, "") or ""),
+        trusted_host=str(settings.value(SETTINGS_TRUSTED_HOST, "") or ""),
+        source="Settings ▸ Packages")
+
+
+def index_in_force(settings) -> str:
+    """Where installs are coming from, as one line: the setting, pip's own
+    config, uv's own, or PyPI."""
+    configured = configured_index(settings)
+    if not configured and packages.installer_kind() == "uv" \
+            and packages.uv_has_own_index():
+        return "uv's own index settings"
+    return packages.describe_index(packages.effective_index(configured))
+
 
 class PackagesDialog(QDialog):
     def __init__(self, parent=None) -> None:
@@ -29,6 +62,8 @@ class PackagesDialog(QDialog):
         self.setWindowTitle("Manage Packages")
         self.resize(720, 560)
         self._process: QProcess | None = None
+        #: the window's QSettings, where Settings ▸ Packages keeps the index
+        self._settings = getattr(parent, "settings", None)
 
         self._filter = QLineEdit()
         self._filter.setPlaceholderText("Filter installed packages…")
@@ -79,6 +114,14 @@ class PackagesDialog(QDialog):
 
         self._status = QLabel()
         self._status.setTextFormat(Qt.PlainText)
+        self._index_label = QLabel()
+        self._index_label.setObjectName("packages_index_label")
+        self._index_label.setTextFormat(Qt.PlainText)
+        self._index_label.setWordWrap(True)
+        self._index_label.setToolTip(
+            "Set a private index in Settings ▸ Packages. Left blank, pip's "
+            "own settings are used — pip.conf, PIP_INDEX_URL — and handed "
+            "on to uv, which does not read them itself.")
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._filter)
@@ -86,6 +129,7 @@ class PackagesDialog(QDialog):
         layout.addLayout(install_row)
         layout.addLayout(buttons)
         layout.addWidget(self._log, 2)
+        layout.addWidget(self._index_label)
         layout.addWidget(self._status)
 
         kind = packages.installer_kind()
@@ -99,7 +143,25 @@ class PackagesDialog(QDialog):
         else:
             self._status.setText(f"Installer: {kind} — packages land in "
                                  f"flograph's own environment.")
+        self._show_index()
         self.refresh()
+
+    def _show_index(self) -> None:
+        self._index_label.setText(
+            "Installs from: " + index_in_force(self._settings))
+
+    def showEvent(self, event) -> None:
+        # the dialog is kept and reshown, and Settings may have changed
+        # the index since it was last up
+        self._show_index()
+        super().showEvent(event)
+
+    def prefill(self, names: list) -> None:
+        """Put `names` in the install box, ready to install — what What
+        This Flow Needs hands over. Nothing is installed until Install is
+        pressed."""
+        self._install_edit.setText(" ".join(names))
+        self._install_edit.setFocus()
 
     # ---------------------------------------------------------------- table
 
@@ -163,7 +225,8 @@ class PackagesDialog(QDialog):
         if self.busy:
             return
         try:
-            argv = packages.build_command(action, specs)
+            argv = packages.build_command(
+                action, specs, index=configured_index(self._settings))
         except (ValueError, RuntimeError) as exc:
             self._append_log(f"error: {exc}")
             return

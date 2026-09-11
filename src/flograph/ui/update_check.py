@@ -57,16 +57,18 @@ class _ProbeSignals(QObject):
 class _Probe(QRunnable):
     """Runs `packages.update_status()` off the UI thread. The status call
     swallows its own exceptions, but the belt-and-braces guard here means a
-    probe can never take the event loop down with it."""
+    probe can never take the event loop down with it. `index` is Settings ▸
+    Packages' index, read on the UI thread before the probe starts."""
 
-    def __init__(self) -> None:
+    def __init__(self, index=None) -> None:
         super().__init__()
         self.setAutoDelete(False)
+        self._index = index
         self.signals = _ProbeSignals()
 
     def run(self) -> None:
         try:
-            current, latest, newer = packages.update_status()
+            current, latest, newer = packages.update_status(self._index)
         except Exception:
             current, latest, newer = packages.installed_version(), None, False
         self.signals.done.emit(current, latest, newer)
@@ -77,11 +79,12 @@ class _Probe(QRunnable):
 _live_probes: "set[_Probe]" = set()
 
 
-def run_probe(on_done) -> None:
+def run_probe(on_done, index=None) -> None:
     """Start a background probe. `on_done(current, latest, newer)` is called
     on the UI thread when it finishes — `latest` is None when the check
-    could not reach any index."""
-    probe = _Probe()
+    could not reach any index. `index` is the configured package index, if
+    Settings ▸ Packages has one."""
+    probe = _Probe(index)
     _live_probes.add(probe)
 
     def _finished(current: str, latest, newer: bool) -> None:
@@ -92,30 +95,33 @@ def run_probe(on_done) -> None:
     QThreadPool.globalInstance().start(probe)
 
 
-class UpdateToast(QFrame):
-    """A small, non-modal "new version available" notice in the corner of
-    the main window. It closes itself after a while, or when the user
-    clicks it away; clicking the body opens Settings ▸ About for the how-to.
+class NoticeToast(QFrame):
+    """A small, non-modal notice in the corner of the main window. It
+    closes itself after a while, or when the user clicks it away; clicking
+    the body calls `on_click` — the place to read more.
 
-    Deliberately not a QMessageBox: a modal dialog on startup is exactly the
-    "bugs the user" behaviour this feature is meant to avoid.
+    Deliberately not a QMessageBox: a modal dialog on startup or on opening
+    a file is exactly the "bugs the user" behaviour these notices avoid.
     """
 
     DISMISS_MS = 20_000
 
-    def __init__(self, window: QWidget, latest: str) -> None:
+    def __init__(self, window: QWidget, headline: str, sub: str = "",
+                 on_click=None, name: str = "notice_toast") -> None:
         super().__init__(window)
         self._window = window
-        self.setObjectName("update_toast")
+        self._on_click = on_click
+        self.setObjectName(name)
         self.setFrameShape(QFrame.StyledPanel)
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(
-            "#update_toast { background: palette(window); "
+            f"#{name} {{ background: palette(window); "
             "border: 1px solid palette(mid); border-radius: 8px; }"
-            "#update_toast QLabel { border: none; background: transparent; }")
+            f"#{name} QLabel {{ border: none; background: transparent; }}")
 
-        headline = QLabel(f"flograph {latest} is available")
-        sub = QLabel("Click for how to update")
+        headline = QLabel(headline)
+        sub = QLabel(sub)
+        sub.setVisible(bool(sub.text()))
         font = sub.font()
         font.setPointSizeF(font.pointSizeF() * 0.9)
         sub.setFont(font)
@@ -169,12 +175,22 @@ class UpdateToast(QFrame):
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
-            opener = getattr(self._window, "show_update_details", None)
-            if callable(opener):
-                opener()
+            if callable(self._on_click):
+                self._on_click()
             self.close()
         else:
             super().mouseReleaseEvent(event)
+
+
+class UpdateToast(NoticeToast):
+    """The "new version available" notice; clicking it opens Settings ▸
+    About for the how-to."""
+
+    def __init__(self, window: QWidget, latest: str) -> None:
+        super().__init__(window, f"flograph {latest} is available",
+                         "Click for how to update",
+                         on_click=getattr(window, "show_update_details", None),
+                         name="update_toast")
 
 
 def maybe_check_on_startup(window) -> None:
@@ -202,4 +218,5 @@ def maybe_check_on_startup(window) -> None:
         if window.isVisible():
             UpdateToast(window, latest).show_in_corner()
 
-    run_probe(handle)
+    from .packages_dialog import configured_index
+    run_probe(handle, index=configured_index(settings))

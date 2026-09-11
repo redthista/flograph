@@ -203,7 +203,8 @@ class SettingsDialog(QDialog):
             "Keyboard Shortcuts": self._build_shortcuts_page(window),
             "Statistics": self._build_stats_page(window),
             "Table Node": self._build_table_node_page(),
-            "About": self._build_about_page(),
+            "Packages": self._build_packages_page(window),
+            "About": self._build_about_page(window),
         }
         for name in sorted(pages):
             self._add_page(name, pages[name])
@@ -247,6 +248,8 @@ class SettingsDialog(QDialog):
             "table_autosize_checkbox": autosize_default_enabled(),
             "stats_bar_checkbox": window.stats_bar_enabled,
             "stats_sampling_checkbox": window.stats_sampling_enabled,
+            "requirements_notice_checkbox": window.settings.value(
+                "packages/notify_missing", True, type=bool),
         }
         spins = {
             "lod_threshold_spinbox": round(window.lod_threshold * 100),
@@ -309,6 +312,22 @@ class SettingsDialog(QDialog):
                 formats_edit.setText(date_formats_setting())
             finally:
                 formats_edit.blockSignals(blocked)
+
+        from .packages_dialog import (SETTINGS_INDEX_URL,
+                                      SETTINGS_TRUSTED_HOST, index_in_force)
+        for name, key in (("package_index_url_edit", SETTINGS_INDEX_URL),
+                          ("package_trusted_host_edit", SETTINGS_TRUSTED_HOST)):
+            edit = self.findChild(QLineEdit, name)
+            if edit is None:
+                continue
+            blocked = edit.blockSignals(True)
+            try:
+                edit.setText(str(window.settings.value(key, "") or ""))
+            finally:
+                edit.blockSignals(blocked)
+        in_force = self.findChild(QLabel, "package_index_in_force_label")
+        if in_force is not None:
+            in_force.setText(index_in_force(window.settings))
 
         # dependent enablement isn't re-derived by the setters above
         for check_name, dependent in (
@@ -1070,10 +1089,88 @@ class SettingsDialog(QDialog):
         return page
 
     @staticmethod
-    def _build_about_page() -> QWidget:
+    def _build_packages_page(window) -> QWidget:
+        """Where installs come from (AC1), and whether opening a flow says
+        what it needs (AC2)."""
+        from flograph import packages
+
+        from .packages_dialog import (
+            SETTINGS_INDEX_URL, SETTINGS_NOTIFY_MISSING, SETTINGS_TRUSTED_HOST,
+            index_in_force)
+
+        settings = window.settings
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        rows = SettingsGrid()
+        layout.addWidget(rows, 1)
+
+        rows.add_group("Package index")
+
+        url_edit = QLineEdit()
+        url_edit.setObjectName("package_index_url_edit")
+        url_edit.setPlaceholderText("blank: pip's own settings")
+        url_edit.setText(str(settings.value(SETTINGS_INDEX_URL, "") or ""))
+        host_edit = QLineEdit()
+        host_edit.setObjectName("package_trusted_host_edit")
+        host_edit.setPlaceholderText("mirror.example.com")
+        host_edit.setText(str(settings.value(SETTINGS_TRUSTED_HOST, "") or ""))
+        in_force = QLabel(index_in_force(settings))
+        in_force.setObjectName("package_index_in_force_label")
+        in_force.setWordWrap(True)
+        in_force.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        def commit() -> None:
+            url, host = url_edit.text().strip(), host_edit.text().strip()
+            problem = packages.index_problem(url, host)
+            if problem:
+                # not kept: an install from a half-typed address would fail
+                # with pip's error rather than this one
+                in_force.setText("⚠ " + problem)
+                return
+            settings.setValue(SETTINGS_INDEX_URL, url)
+            settings.setValue(SETTINGS_TRUSTED_HOST, host)
+            in_force.setText(index_in_force(settings))
+
+        url_edit.editingFinished.connect(commit)
+        host_edit.editingFinished.connect(commit)
+        rows.add("Index URL", url_edit,
+                 "Where Manage Packages installs from — a private mirror "
+                 "(JFrog, Artifactory, Nexus, devpi) at its simple/ address, "
+                 "e.g. https://mirror.example.com/simple. Blank uses pip's own "
+                 "settings (pip.conf, PIP_INDEX_URL), which flograph also "
+                 "hands to uv, since uv doesn't read them. The update check "
+                 "asks the same index.")
+        rows.add("Trusted hosts", host_edit,
+                 "Hosts to trust without a verified certificate, or over "
+                 "plain http — a mirror with an internal certificate. "
+                 "Separate several with spaces or commas. Given to pip as "
+                 "--trusted-host and to uv as --allow-insecure-host.")
+        rows.add("Installs come from", in_force,
+                 "What an install will actually use, and where that came "
+                 "from: this page, pip's config, uv's own, or PyPI.")
+
+        rows.add_group("Opening a flow")
+
+        notice_check = QCheckBox("Say so when opening a flow")
+        notice_check.setObjectName("requirements_notice_checkbox")
+        notice_check.setChecked(
+            settings.value(SETTINGS_NOTIFY_MISSING, True, type=bool))
+        notice_check.toggled.connect(
+            lambda on: settings.setValue(SETTINGS_NOTIFY_MISSING, bool(on)))
+        rows.add("Missing packages", notice_check,
+                 "When a flow you open uses a Python package or web library "
+                 "this machine doesn't have, a small notice in the corner "
+                 "says so, and goes away by itself. Click it for the list — "
+                 "Tools ▸ What This Flow Needs. Nothing is ever installed "
+                 "without you pressing Install.")
+        return page
+
+    @staticmethod
+    def _build_about_page(window=None) -> QWidget:
         from flograph import packages
 
         from . import update_check
+        from .packages_dialog import configured_index
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -1123,7 +1220,8 @@ class SettingsDialog(QDialog):
         def do_check() -> None:
             check_btn.setEnabled(False)
             result.setText("Checking…")
-            update_check.run_probe(on_result)
+            update_check.run_probe(on_result, index=configured_index(
+                getattr(window, "settings", None)))
 
         check_btn.clicked.connect(do_check)
 

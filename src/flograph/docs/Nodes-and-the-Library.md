@@ -70,3 +70,25 @@ files live.
 flograph's own environment. Nodes run in-process, so a new install is
 importable from `run()` immediately — no restart. flograph's own core
 dependencies are protected from uninstall.
+
+**A private index.** Settings ▸ Packages takes an **Index URL** — a JFrog,
+Artifactory, Nexus or devpi mirror's `simple/` address — and any **Trusted
+hosts**, for a mirror with an internal certificate. Left blank, pip's own
+settings are used (`pip.conf`, `PIP_INDEX_URL`), and flograph hands the same
+index to `uv` when uv is the installer, because uv doesn't read pip's
+settings. Manage Packages says which index an install will use and where
+that came from, and the update check asks the same one.
+
+**What a flow needs.** **Tools ▸ What This Flow Needs** lists the Python
+packages a flow's nodes import and the web libraries its visuals load, read
+from each node's own code, with anything this machine is missing marked and
+the nodes that use it named. **Install Missing Packages…** puts the names in
+Manage Packages' install box for you to check and install; **Web
+Libraries…** opens the library store. An import name isn't always the name
+you install — `import sklearn` is `scikit-learn` — so the common mismatches
+are known, and anything else is marked as a guess. An import with a fallback
+(inside `try … except ImportError`) is listed as optional. Opening a flow
+that needs something missing shows a small notice in the corner that goes
+away by itself; Settings ▸ Packages turns it off. One limit: a package that
+pandas loads for itself, like openpyxl behind Read Excel, is never imported
+by the node, so it isn't listed.

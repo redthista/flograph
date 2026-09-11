@@ -12,7 +12,7 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
-Q, R, T, V, Y, Z, AA and AB) are where shipped work used to be. Old numbers are kept
+Q, R, T, V, Y, Z, AA, AB and AC) are where shipped work used to be. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -48,7 +48,9 @@ to the start screen's "edited" note on the name's line. Chunk AB shipped
 whole the same day and retires too: a Page Links card, an Action Button
 that goes to a page, Notes on dashboard pages and sections in the tab bar.
 The one piece of it left over, N7, shipped the same day: a `page:` link
-works in a *report* page's preview as well as in a Note.
+works in a *report* page's preview as well as in a Note. Chunk AC shipped
+whole the same day and retires too: a package index of your own that pip
+and uv both install from, and a list of what a flow needs installed.
 
 ---
 
@@ -284,28 +286,6 @@ rows and a pivot of the result. It is also the hard part — a rule decided
 on a source row has to be carried through the aggregation to the cell it
 ends up in, and a cell built from several rows needs a rule for which of
 their verdicts wins.
-
----
-
-## AC. What a flow needs installed
-
-**AC1. Install packages from a configured pip repository** (Dan). The
-Packages dialog runs `python -m pip`, which already reads `pip.conf` and
-`PIP_INDEX_URL`, so a machine set up for a private index mostly works. Two
-gaps: the `uv pip` fallback (used when the interpreter has no pip) does not
-read `pip.conf`, and there is nowhere in flograph to *set* an index URL on a
-machine that is not configured. A Packages setting for the index URL (and a
-trusted host), passed to whichever installer runs, closes both. The update
-check already goes through pip's configured index.
-
-**AC2. See what a file needs: pip packages and web libraries** (Dan).
-Nothing declares it today. A node's imports are in its own code — forked
-and custom nodes carry theirs in the file — and the visual nodes name the
-web libraries they load (`weblibs.py`). A scan of both, shown as a list
-with what is missing marked, ideally offered on open when something is. The
-hard part is honest: an import name is not a package name (`sklearn` is
-`scikit-learn`), so it needs a mapping for the common ones and a "could not
-tell" for the rest.
 
 ---
 
