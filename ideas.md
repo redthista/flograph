@@ -11,8 +11,8 @@ holds what is *not* built.
 
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
-reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, P, Q,
-R, T, V, Y and Z) are where shipped work used to be. Old numbers are kept
+reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
+Q, R, T, V, Y and Z) are where shipped work used to be. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -35,7 +35,9 @@ order, and V3 gave a cell two ways to say more than fits — the whole of a
 value that was cut short, and a note read from another column. N6
 shipped on 2026-09-11: a node's right-click menu now says which pages show
 it, and says so when none do. N3 shipped the same day: a dashboard tile
-can be given a shape, and keeps it when it is resized.
+can be given a shape, and keeps it when it is resized. So did O1, and
+chunk O retires with it: flograph opens on a start screen of favourite and
+recent workflows.
 
 ---
 
@@ -170,22 +172,6 @@ expanded, which is right for two levels and wrong for three over a wide
 column. A pair of buttons in the slicer toolbar (and remembering which
 branches were open, in a param) — small, but only worth it once someone has
 a three-level slicer.
-
----
-
-## O. Opening a project
-
-**O1. A start screen, the way PyCharm opens** (Dan). A list of recent
-projects — each with its name, its folder, and a generated initials tile —
-shown when the app has no project open, instead of dropping straight onto an
-empty canvas. Most of the *row* now exists: the title bar's project switcher
-already draws exactly this (`window_frame.initials_pixmap` /
-`initials_for`, and `_RecentRow` — tile, name without `.flograph`, folder
-below), reading `_recent_files_existing()`. What is still missing is the
-**surface** to show them on — the window always holds a live canvas, there
-is no "no project" state — and any per-project detail beyond the path: no
-stored last-opened time, no thumbnail, so those are derived or newly
-recorded. Pairs well with a thumbnail written on save.
 
 ---
 
