@@ -12,7 +12,7 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
-Q, R, T, V, Y and Z) are where shipped work used to be. Old numbers are kept
+Q, R, T, V, Y, Z and AA) are where shipped work used to be. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -40,7 +40,9 @@ chunk O retires with it: flograph opens on a start screen of favourite and
 recent workflows. Dan's 0.1.14 list (`new_ideas.md`) was triaged here the
 same day: its seventeen bullets are chunks AA–AC, G12, and additions to M3
 and X1. The single letters are used up — I is skipped, it reads as a 1 —
-so chunks carry on at AA.
+so chunks carry on at AA. Chunk AA shipped whole the same day and its
+letter retires with it: eight papercuts, from a plain canvas by default
+to the start screen's "edited" note on the name's line.
 
 ---
 
@@ -276,48 +278,6 @@ rows and a pivot of the result. It is also the hard part — a rule decided
 on a source row has to be carried through the aggregation to the cell it
 ends up in, and a cell built from several rows needs a rule for which of
 their verdicts wins.
-
----
-
-## AA. Papercuts from the 0.1.14 list
-
-Eight small ones from Dan's list, each a few lines and each tried in
-seconds, so they go together.
-
-**AA1. A plain canvas by default.** The background grid is drawn unless
-Settings ▸ Canvas turns it off (`grid/visible`, default on). Snapping is a
-separate setting and stays on either way.
-
-**AA2. Scroll bars on by default.** `canvas/scrollbars` defaults off; it
-became a setting when right-drag panning came back out (`ideas_archived.md`
-#14).
-
-**AA3. A column header's full name on hover.** The header tooltip names
-the column only when a `label` rule renamed it, and otherwise says just its
-dtype — so a header cut short by a `width` rule or a dragged edge has
-nothing to read it back from. The canvas card and the dashboard tile share
-the model (`ui/inspector/pandas_model.py`), so it is one fix for both.
-
-**AA4. Properties from a node's right-click menu.** The menu has Edit Code,
-Rename and Appearance… but not Properties. Double-click opens them by
-default, which nothing on screen tells you.
-
-**AA5. Every tab in a list, from the tab bar's arrows.** With more pages
-than fit, the page bar scrolls with Qt's `< >` buttons, one tab a click.
-Right-clicking them should list every tab to jump straight to.
-
-**AA6. Hide the row index on Show Table.** The row header is always drawn,
-and a generated 0…n index is noise on a dashboard.
-
-**AA7. A slicer's dropdown opens underneath the card in front of it.** The
-dropdown layout's popup is a `QMenu` owned by a button inside the card's
-`QGraphicsProxyWidget`, and Qt embeds a proxied widget's popups into the
-scene with it — at the card's own stacking level, so a card stacked higher
-covers it. It should always be on top.
-
-**AA8. The start screen's "edited" note on the name's line.** Today it sits
-in a column of its own at the right, which squeezes the folder; beside the
-name it frees the whole second line for the folder.
 
 ---
 
