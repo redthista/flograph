@@ -110,6 +110,8 @@ class MainWindow(QMainWindow):
         self.view = NodeGraphView(self.scene)
         self._canvas_stack = QStackedWidget()
         self._canvas_stack.addWidget(self.view)
+        # built the first time it is asked for — see show_start_screen
+        self._start_screen = None
         self.page_bar = PageTabBar()
         # docks/toolbars need a real QMainWindow, but the page bar has to
         # live outside that dock system entirely (see _apply_page_bar_position)
@@ -679,6 +681,8 @@ class MainWindow(QMainWindow):
             "&Export Workflow…", None, self._export_workflow)
         self.action_desktop_shortcut = act(
             "Create &Desktop Shortcut…", None, self._create_desktop_shortcut)
+        self.action_start_screen = act(
+            "Start Scree&n", None, self.show_start_screen)
         self.action_quit = act("&Quit", QKeySequence.Quit, self.close)
 
         section["name"] = "Edit"
@@ -763,6 +767,7 @@ class MainWindow(QMainWindow):
         self._recent_menu = file_menu.addMenu("Open &Recent")
         self._rebuild_recent_menu()
         self._build_examples_menu(file_menu)
+        file_menu.addAction(self.action_start_screen)
         file_menu.addSeparator()
         file_menu.addAction(self.action_desktop_shortcut)
         file_menu.addSeparator()
@@ -854,6 +859,7 @@ class MainWindow(QMainWindow):
     def _build_window_chrome(self) -> None:
         """The run actions plus (with a custom frame) our title bar. Native
         frame: a plain toolbar carries the run actions, exactly as before."""
+        self._run_toolbar = None
         if self._custom_frame:
             self._title_bar = window_frame.TitleBar(self, self._menu_root)
             self.setMenuWidget(self._title_bar)
@@ -880,6 +886,7 @@ class MainWindow(QMainWindow):
             toolbar.addSeparator()
             toolbar.addAction(self.action_reset_selected_caches)
             toolbar.addAction(self.action_reset_caches)
+            self._run_toolbar = toolbar
 
     def _recent_files_existing(self) -> list[str]:
         """Recent workflow paths that still exist — for the title bar's
@@ -1483,8 +1490,10 @@ class MainWindow(QMainWindow):
 
         def on_finished(ok: bool) -> None:
             self.action_cancel.setEnabled(False)
-            self.action_run.setEnabled(True)
-            self.action_run_selected.setEnabled(True)
+            # not while the start screen is up: a run that ends behind it
+            # must not hand F5 back to a flow nobody can see
+            self.action_run.setEnabled(not self.start_screen_visible)
+            self.action_run_selected.setEnabled(not self.start_screen_visible)
             self._run_end()
             message = "Run finished" if ok else "Run finished with errors"            # Only pins the graph has moved on from get a mention. A frozen
             # source node — which is most of them — never appears here, so
@@ -2226,35 +2235,47 @@ class MainWindow(QMainWindow):
         self.page_bar.set_page_order(order)
 
     def _on_current_page_changed(self, page_id) -> None:
+        # read before the stack moves: choosing a page is also a way off the
+        # start screen, and the docks need to know where they are coming from
+        was_away = self._docks_away()
         widget = self._dashboard_pages.get(page_id) if page_id else None
         self._canvas_stack.setCurrentWidget(
             widget if widget is not None else self.view)
-        # dashboard/report pages have no node selection to configure, so free
-        # up the screen by hiding the model-only docks
-        is_model_page = page_id is None
-        was_model_page = self._current_page_id is None
-        if is_model_page:
-            # only what was open before, so a round trip through a dashboard
-            # page doesn't reopen a dock someone deliberately closed
-            for dock in self._model_docks:
-                dock.setVisible(dock in self._docks_open_on_model_page)
-        else:
-            # snapshot only when actually leaving the model page: between two
-            # dashboard pages everything is already hidden, and "all hidden"
-            # is also what Hide All Panels leaves behind, so dock visibility
-            # can't tell the two apart on its own
-            if was_model_page:
-                self._docks_open_on_model_page = [
-                    dock for dock in self._model_docks if not dock.isHidden()]
-            for dock in self._model_docks:
-                dock.setVisible(False)
         self._current_page_id = page_id
-        for strip in self._edge_strips.values():
-            strip.set_enabled(is_model_page)
+        self._place_model_docks(was_away)
+        self._sync_start_screen_chrome()
         self._refresh_zoom_indicator()
         if self._project_path and not self._restoring_pages:
             self.settings.setValue(f"active_page/{self._project_path}",
                                    page_id or "")
+
+    def _docks_away(self) -> bool:
+        """Whether the model-only docks are put away for what is showing: a
+        dashboard or report page has no node selection to configure, and the
+        start screen has no canvas at all, so both free up the screen."""
+        return self._current_page_id is not None or self.start_screen_visible
+
+    def _place_model_docks(self, was_away: bool) -> None:
+        """Hide the model docks, or bring them back, to match what is showing
+        now. `was_away` is whether they were already put away before it."""
+        away = self._docks_away()
+        if away:
+            # snapshot only when actually leaving the model canvas: between
+            # two dashboard pages everything is already hidden, and "all
+            # hidden" is also what Hide All Panels leaves behind, so dock
+            # visibility can't tell the two apart on its own
+            if not was_away:
+                self._docks_open_on_model_page = [
+                    dock for dock in self._model_docks if not dock.isHidden()]
+            for dock in self._model_docks:
+                dock.setVisible(False)
+        elif was_away:
+            # only what was open before, so a round trip through a dashboard
+            # page doesn't reopen a dock someone deliberately closed
+            for dock in self._model_docks:
+                dock.setVisible(dock in self._docks_open_on_model_page)
+        for strip in self._edge_strips.values():
+            strip.set_enabled(not away)
 
     def _add_page(self, kind: str = "dashboard") -> None:
         from .report import STARTER_BODY
@@ -4163,7 +4184,23 @@ class MainWindow(QMainWindow):
 
     def _save_window_state(self) -> None:
         self.settings.setValue("window_geometry", self.saveGeometry())
-        self.settings.setValue("dock_state", self._dock_host.saveState())
+        if not self._docks_away():
+            self.settings.setValue("dock_state", self._dock_host.saveState())
+            return
+        # saveState() carries dock visibility, and a dashboard page or the
+        # start screen has every model dock hidden -- saved like that, the
+        # next launch opens with the panels gone. Save the ones that belong
+        # on the canvas instead, put back for the moment it takes to read
+        # them, with painting held so nothing flashes on the way out.
+        self.setUpdatesEnabled(False)
+        try:
+            for dock in self._model_docks:
+                dock.setVisible(dock in self._docks_open_on_model_page)
+            self.settings.setValue("dock_state", self._dock_host.saveState())
+            for dock in self._model_docks:
+                dock.setVisible(False)
+        finally:
+            self.setUpdatesEnabled(True)
 
     def _live_edge_strips(self) -> list:
         """Strips with something on their edge. One whose docks have all been
@@ -4179,11 +4216,12 @@ class MainWindow(QMainWindow):
         """Ctrl+Shift+H: clear every panel off the canvas at once, and put
         them back the same way. Each edge remembers its own pre-collapse
         set, so a panel closed by its own X before this stays closed."""
-        # a dashboard page has already hidden the model docks on purpose;
-        # expanding here would drag them onto a page they don't belong to.
-        # _current_page_id, not the page bar: this asks which page the docks
-        # are currently arranged for, which is what that field tracks.
-        if self._current_page_id is not None:
+        # a dashboard page or the start screen has already hidden the model
+        # docks on purpose; expanding here would drag them onto a screen they
+        # don't belong to. _current_page_id, not the page bar: this asks
+        # which page the docks are currently arranged for, which is what that
+        # field tracks.
+        if self._docks_away():
             return
         strips = self._live_edge_strips()
         if not strips:
@@ -4660,31 +4698,85 @@ class MainWindow(QMainWindow):
             self.open_path(path, confirm=False)
 
     def _build_examples_menu(self, file_menu: QMenu) -> None:
-        import importlib.resources
+        # the start screen lists the same examples; one list feeds both
+        from .start_screen import example_entries
 
         self._examples_menu = file_menu.addMenu("Open &Example")
-        try:
-            root = importlib.resources.files("flograph.templates")
-            entries = [entry for entry in root.iterdir()
-                       if entry.name.endswith(".flograph")]
-        except (ModuleNotFoundError, FileNotFoundError):
-            entries = []
-
-        def _title(name: str) -> str:
-            stem = name[:-len(".flograph")]
-            if stem[:2].isdigit() and "_" in stem:
-                stem = stem.split("_", 1)[1]
-            return stem.replace("_", " ").title()
-
-        items = sorted(
-            ((_title(entry.name), entry) for entry in entries),
-            key=lambda item: item[0].casefold(),
-        )
+        items = example_entries()
         self._examples_menu.setEnabled(bool(items))
-        for title, entry in items:
+        for title, path in items:
             action = self._examples_menu.addAction(title)
             action.triggered.connect(
-                lambda checked=False, p=Path(str(entry)): self._open_example(p))
+                lambda checked=False, p=path: self._open_example(p))
+
+    # ---------------------------------------------------------- start screen
+
+    @property
+    def start_screen_on_launch(self) -> bool:
+        """Whether a launch with no project named opens on the start screen
+        (Settings ▸ General). On unless turned off."""
+        return self.settings.value("start/show_on_launch", True, type=bool)
+
+    def set_start_screen_on_launch(self, on: bool) -> None:
+        self.settings.setValue("start/show_on_launch", bool(on))
+
+    @property
+    def start_screen_visible(self) -> bool:
+        return (self._start_screen is not None
+                and self._canvas_stack.currentWidget() is self._start_screen)
+
+    def show_start_screen(self) -> None:
+        """Put the start screen in front of the canvas (O1).
+
+        A page of the canvas stack, not a window: the canvas behind it is
+        live the whole time, and whatever the screen is used for — New,
+        Open, an example, a recent file — goes through `_replace_graph`,
+        which is what brings the canvas back. Built on first use, so a
+        session that never shows it never builds it. The docks are put away
+        while it shows, the way a dashboard page puts them away, and come
+        back as they were when it goes.
+        """
+        was_away = self._docks_away()
+        if self._start_screen is None:
+            from .start_screen import StartScreen
+            self._start_screen = StartScreen(self)
+            self._canvas_stack.addWidget(self._start_screen)
+        self._start_screen.refresh()
+        self._canvas_stack.setCurrentWidget(self._start_screen)
+        self._place_model_docks(was_away)
+        self._sync_start_screen_chrome()
+
+    def leave_start_screen(self) -> None:
+        """Back to whichever page the tab bar is on — the model canvas, or
+        a dashboard page if the screen was opened from one."""
+        if not self.start_screen_visible:
+            return
+        widget = (self._dashboard_pages.get(self._current_page_id)
+                  if self._current_page_id else None)
+        self._canvas_stack.setCurrentWidget(
+            widget if widget is not None else self.view)
+        self._place_model_docks(was_away=True)
+        self._sync_start_screen_chrome()
+
+    def _sync_start_screen_chrome(self) -> None:
+        """The page tabs and the run buttons belong to a flow, and the start
+        screen has none on show: off while it is up, back when it goes. The
+        run keys go with the buttons, so F5 can't run a project that sits
+        hidden behind the screen."""
+        showing = self.start_screen_visible
+        self.page_bar.setVisible(not showing)
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.set_run_buttons_shown(not showing)
+        toolbar = getattr(self, "_run_toolbar", None)
+        if toolbar is not None:
+            toolbar.setVisible(not showing)
+        idle = not self.engine.active
+        for action in (self.action_run, self.action_run_selected):
+            action.setEnabled(idle and not showing)
+        for action in (self.action_reset_caches,
+                       self.action_reset_selected_caches):
+            action.setEnabled(not showing)
 
     def _open_example(self, path: Path) -> None:
         if self._cache_still_loading():
@@ -4932,6 +5024,9 @@ class MainWindow(QMainWindow):
         self.scene._refresh_collapsed_frames()
         self.undo_stack.clear()
         self.undo_stack.setClean()
+        # New, Open and an example all land here, and each is an answer to
+        # the start screen's question — so this is where it steps aside
+        self.leave_start_screen()
         if loaded.nodes:
             self.view.frame_content()
 

@@ -70,6 +70,10 @@ def main(argv: list[str] | None = None) -> int:
     project = next((a for a in args if a.endswith(".flograph")), None)
     if project:
         window.open_path(project, confirm=False)
+    elif window.start_screen_on_launch:
+        # nothing named to open: offer what was open last rather than an
+        # empty canvas (O1)
+        window.show_start_screen()
     return app.exec()
 
 

@@ -416,10 +416,11 @@ class _RecentRow(QWidget):
     """One workflow in the project switcher: its initials tile, its name, and
     the folder it lives in — the shape PyCharm's recent-projects list uses.
     When ``on_toggle_fav`` is given it also carries a star that adds or
-    removes the workflow from the Favourites section."""
+    removes the workflow from the Favourites section, and ``detail`` is a
+    quiet line at the right — the start screen's "edited 3 days ago"."""
 
     def __init__(self, path: str, on_open, *, is_fav: bool = False,
-                 on_toggle_fav=None, parent=None) -> None:
+                 on_toggle_fav=None, detail: str = "", parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("recent_row")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -454,6 +455,12 @@ class _RecentRow(QWidget):
         text.addWidget(name)
         text.addWidget(path_label)
         row.addLayout(text, 1)
+
+        if detail:
+            self.detail_label = QLabel(detail)
+            self.detail_label.setObjectName("recent_path")
+            self.detail_label.setFont(_smaller(self.detail_label.font()))
+            row.addWidget(self.detail_label, 0, Qt.AlignVCenter)
 
         if on_toggle_fav is not None:
             self._star_btn = QToolButton(self)
@@ -841,6 +848,10 @@ class TitleBar(QWidget):
         for btn in (self._run_btn, self._run_sel_btn, self._clear_cache_btn,
                     self._reset_btn):
             row.addWidget(btn)
+        # off together while there is no flow on screen (the start screen);
+        # the selection pair is remembered so it can come back as it was
+        self._run_shown = True
+        self._selection_count = 0
         self._set_running(False)
         self.on_selection(0)
         window.engine.run_started.connect(lambda: self._set_running(True))
@@ -931,9 +942,18 @@ class TitleBar(QWidget):
     def on_selection(self, count: int) -> None:
         """Run Selected and Reset Selected Caches are only on the bar while
         something is selected."""
-        has = count >= 1
+        self._selection_count = count
+        has = self._run_shown and count >= 1
         self._run_sel_btn.setVisible(has)
         self._clear_cache_btn.setVisible(has)
+
+    def set_run_buttons_shown(self, shown: bool) -> None:
+        """None of the run or cache buttons while there is no flow on
+        screen to run — the start screen (O1)."""
+        self._run_shown = bool(shown)
+        for btn in (self._run_btn, self._reset_btn):
+            btn.setVisible(self._run_shown)
+        self.on_selection(self._selection_count)
 
     # -- compact ---------------------------------------------------
 

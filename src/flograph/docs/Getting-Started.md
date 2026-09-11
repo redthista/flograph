@@ -37,9 +37,21 @@ flograph                          # after install
 python -m flograph                # equivalent
 ```
 
+It opens on the **start screen**: your favourite and recent workflows on
+the right — each with its folder and when it was last edited, and a box to
+search them — and **New Workflow**, **Open…** and the examples on the left.
+Click a workflow to open it, or **Start on an Empty Canvas**. The panels,
+the page tabs and the run buttons step aside while it shows and come back
+as you left them. The star on a
+row is the same one as in the title bar's project switcher. Opening a file
+directly (`flograph sales.flograph`, or double-clicking it) skips the start
+screen; **File ▸ Start Screen** brings it back at any time, and Settings ▸
+General turns it off.
+
 ## Open an example
 
-**File ▸ Open Example** ships around twenty worked projects — filter and
+**File ▸ Open Example**, or the list on the start screen, has around twenty
+worked projects — filter and
 visualise, an aggregate dashboard, a scripted pipeline, join/group-by
 comparisons, an interactive slicer dashboard, and walkthroughs of
 [[Flow Variables]], order edges and report pages. They are the fastest way

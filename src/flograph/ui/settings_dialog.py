@@ -469,6 +469,18 @@ class SettingsDialog(QDialog):
         rows.add("Page bar position", page_bar_combo,
                  "Which edge of the window the Model/page tabs live on.")
 
+        start_check = QCheckBox("Show the start screen when flograph opens")
+        start_check.setObjectName("start_screen_checkbox")
+        start_check.setChecked(window.start_screen_on_launch)
+        start_check.toggled.connect(window.set_start_screen_on_launch)
+        rows.add("Start screen", start_check,
+                 "Open on your favourite and recent workflows, with New, "
+                 "Open and the examples beside them, instead of an empty "
+                 "canvas. Opening a file directly — double-clicking it, or "
+                 "naming it on the command line — goes straight to it "
+                 "either way. File ▸ Start Screen brings it back at any "
+                 "time.")
+
         frame_check = QCheckBox("Use flograph's own title bar")
         frame_check.setObjectName("custom_frame_checkbox")
         frame_check.setChecked(window._custom_frame)

@@ -11,7 +11,23 @@ import os
 # throttle set engine.memory_adapt = True and drive engine.memory_probe.
 os.environ.setdefault("FLOGRAPH_MEMORY_ADAPT", "0")
 
+import atexit
+import shutil
+import tempfile
+
 import pytest
+from PySide6.QtCore import QSettings
+
+# Also before any window exists: every QSettings the suite opens lands in a
+# throwaway folder, one per worker, never in the developer's real
+# flograph.conf. Most tests patch mainwindow.QSettings themselves. The ones
+# that forgot — test_project_lifecycle's saves, for one — were writing their
+# pytest tmp paths into the real recent-files list on every run, and the
+# start screen then offered those as the user's own recent work.
+_SETTINGS_DIR = tempfile.mkdtemp(prefix="flograph-test-settings-")
+for _format in (QSettings.NativeFormat, QSettings.IniFormat):
+    QSettings.setPath(_format, QSettings.UserScope, _SETTINGS_DIR)
+atexit.register(shutil.rmtree, _SETTINGS_DIR, ignore_errors=True)
 
 from flograph.core import Graph, NodeInstance, NodeRegistry, parse_spec
 
