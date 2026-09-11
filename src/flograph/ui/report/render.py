@@ -33,8 +33,8 @@ from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
                                   PAGEBREAK_TOKEN, format_scalar,
                                   frame_to_markdown, inline_markdown,
                                   mark_page_breaks, missing_embed,
-                                  replace_columns, replace_embeds,
-                                  unrun_embed)
+                                  nodes_labelled, replace_columns,
+                                  replace_embeds, unrun_embed)
 from flograph.ui.emoji_font import with_emoji
 
 # Default rendered width of an embedded figure, in points: the printable
@@ -523,10 +523,10 @@ def html_image(value, params, image_width: int, for_print: bool,
         return None
 
 
-def _labelled(graph, ref: str) -> list:
-    """Every node whose label matches `ref`, case-insensitively."""
-    wanted = ref.strip().casefold()
-    return [n for n in graph.nodes.values() if n.label.casefold() == wanted]
+#: One implementation, shared with the reverse lookup in `core.usage` —
+#: two ways of deciding which node a label names is how a "where is this
+#: used?" answer starts disagreeing with the page it is answering about.
+_labelled = nodes_labelled
 
 
 def embeddable_nodes(graph, cache) -> list:

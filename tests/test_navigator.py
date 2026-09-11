@@ -5,7 +5,8 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QDockWidget
 
-from flograph.core import Frame, Graph, NodeRegistry
+from flograph.core import Frame, Graph, NodeRegistry, Page, Tile
+from flograph.core.usage import NOWHERE
 from flograph.engine import ExecutionEngine
 from flograph.ui.canvas import NodeGraphScene
 from flograph.ui.canvas.view import NodeGraphView
@@ -288,3 +289,72 @@ class TestWindowWiring:
         window._navigate_to("node", node.id)
         assert window.scene.frame_items["f1"].isSelected()
         assert not window.scene.node_items[node.id].isSelected()
+
+
+class TestWhereEachNodeIsUsed:
+    """The node menu's Where Is This Used?, on the row's tooltip — from the
+    same `core.usage`, worked out once per rebuild."""
+
+    def test_a_tiled_node_names_its_page(self, env):
+        graph, _, _, _, panel = env
+        node = add_node(graph, "Revenue")
+        graph.add_page(Page(id="p1", title="Today"))
+        graph.add_tile("p1", Tile(id="t1", node_id=node.id))
+        panel._rebuild()
+        assert "Used on Dashboard page “Today”" in \
+            top_item(panel, node.id).toolTip(0)
+
+    def test_a_visual_on_no_page_says_so(self, env):
+        graph, _, _, _, panel = env
+        card = add_node(graph, "Summary", type_id="flograph.viz.report_card")
+        panel._rebuild()
+        assert NOWHERE in top_item(panel, card.id).toolTip(0)
+
+    def test_a_transform_on_no_page_says_nothing_about_pages(self, env):
+        """Every transform is on no page; saying so of all of them would
+        bury the visuals it is worth saying about."""
+        graph, _, _, _, panel = env
+        node = add_node(graph, "Scratch")
+        panel._rebuild()
+        tip = top_item(panel, node.id).toolTip(0)
+        assert NOWHERE not in tip
+        assert "\n" not in tip
+
+    def test_a_report_can_use_a_node_that_could_never_be_a_tile(self, env):
+        graph, _, _, _, panel = env
+        node = add_node(graph, "Target")
+        graph.add_page(Page(id="p1", title="Monthly", kind="report",
+                            body="We aimed for ![[Target]]."))
+        panel._rebuild()
+        assert "Report page “Monthly”" in top_item(panel, node.id).toolTip(0)
+
+    def test_placing_a_tile_updates_the_answer(self, env, qtbot):
+        graph, _, _, _, panel = env
+        node = add_node(graph, "Revenue")
+        graph.add_page(Page(id="p1", title="Today"))
+        panel._rebuild()
+        graph.add_tile("p1", Tile(id="t1", node_id=node.id))
+        qtbot.waitUntil(
+            lambda: "Today" in top_item(panel, node.id).toolTip(0),
+            timeout=2000)
+
+    def test_typing_into_a_report_updates_the_answer(self, env, qtbot):
+        graph, _, _, _, panel = env
+        node = add_node(graph, "Revenue")
+        graph.add_page(Page(id="p1", title="Monthly", kind="report"))
+        panel._rebuild()
+        graph.set_page_body("p1", "![[Revenue]]")
+        qtbot.waitUntil(
+            lambda: "Monthly" in top_item(panel, node.id).toolTip(0),
+            timeout=2000)
+
+    def test_editing_a_report_card_updates_the_answer(self, env, qtbot):
+        graph, _, _, _, panel = env
+        node = add_node(graph, "Revenue")
+        card = add_node(graph, "Summary", type_id="flograph.viz.report_card")
+        panel._rebuild()
+        graph.set_param(card.id, "text", "![[Revenue]]")
+        qtbot.waitUntil(
+            lambda: "Report card “Summary”" in
+            top_item(panel, node.id).toolTip(0),
+            timeout=2000)

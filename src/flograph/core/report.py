@@ -276,6 +276,19 @@ def replace_embeds(text: str, render) -> str:
     return EMBED_RE.sub(substitute, text or "")
 
 
+def nodes_labelled(graph, ref: str) -> list:
+    """Every node an embed's ref names — its label, case-insensitively.
+
+    Labels, not ids, because a page is written by hand (see `by_label` in
+    `ui.report.render` for why that is the right trade). A label is not
+    unique, so this returns a list: more than one match is a real state,
+    which the page shows as a warning and the reverse lookup in
+    `core.usage` reports rather than hides.
+    """
+    wanted = (ref or "").strip().casefold()
+    return [n for n in graph.nodes.values() if n.label.casefold() == wanted]
+
+
 def missing_embed(ref: str) -> str:
     """What an embed that resolves to nothing shows.
 

@@ -17,6 +17,10 @@ Three orderings, applied at every level: by position (top-to-bottom, then
 left-to-right — how the eye scans the canvas), by name, or by runtime (the
 slowest first, so the bottleneck floats to the top). A frame's runtime is the
 sum of its contents'.
+
+A node row's tooltip also says where the node is shown — the same answer
+as the node menu's Where Is This Used?, from the same `core.usage`, worked
+out once per rebuild rather than once per row.
 """
 from __future__ import annotations
 
@@ -60,6 +64,7 @@ class NavigatorPanel(QWidget):
         self._collapsed: set[str] = set()
         self._syncing = False  # guard: canvas -> tree selection echo
         self._runtime_cache: dict = {}  # frame_id -> summed wall time, per build
+        self._uses: dict = {}  # node_id -> [core.usage.Use], per build
 
         self._combo = QComboBox()
         for key, label in _SORTS:
@@ -112,6 +117,13 @@ class NavigatorPanel(QWidget):
                       ev.label_changed, ev.frame_added, ev.frame_removed,
                       ev.frame_changed):
             event.connect(self._schedule)
+        # where a node is shown changes with the pages, not the canvas — a
+        # tile placed, a report typed into — so those rebuild too; the
+        # debounce above absorbs a report body arriving keystroke by keystroke
+        for event in (ev.page_added, ev.page_removed, ev.page_changed,
+                      ev.page_body_changed, ev.tile_added, ev.tile_removed):
+            event.connect(self._schedule)
+        ev.param_changed.connect(self._on_param_changed)
         engine.node_succeeded.connect(self._on_node_ran)
         engine.node_failed.connect(self._on_node_ran)
         scene.selectionChanged.connect(self._sync_selection)
@@ -129,6 +141,13 @@ class NavigatorPanel(QWidget):
         if self._sort == "runtime":
             self._schedule()
 
+    def _on_param_changed(self, _node_id, name, _value) -> None:
+        # a report card's body is a param; nothing else a param holds moves
+        # a row or changes where anything is used
+        from flograph.core.usage import BODY_PARAM
+        if name == BODY_PARAM:
+            self._schedule()
+
     def _on_sort_changed(self) -> None:
         self._sort = self._combo.currentData()
         self._rebuild()
@@ -141,6 +160,9 @@ class NavigatorPanel(QWidget):
             self._tree.clear()
             return
         self._stack.setCurrentIndex(0)
+
+        from flograph.core.usage import all_uses
+        self._uses = all_uses(self._graph)
 
         # frame runtimes feed the runtime ordering, so every level can be
         # sorted before its rows are built
@@ -204,12 +226,29 @@ class NavigatorPanel(QWidget):
         item = QTreeWidgetItem([label, ""])
         item.setData(0, _ROLE, ("node", node_id))
         if node is not None:
-            item.setToolTip(0, f"{node.label} — {node.spec.label}")
+            tip = f"{node.label} — {node.spec.label}"
+            where = self._where_line(node)
+            item.setToolTip(0, f"{tip}\n{where}" if where else tip)
         secs = self._node_runtime(node_id)
         if secs > 0:
             item.setText(1, format_seconds(secs))
             item.setForeground(1, QBrush(QColor("#6b7280")))
         return item
+
+    def _where_line(self, node) -> str:
+        """Where the node is shown, for its tooltip.
+
+        "Used by no page" is said only of a node that *could* be on one:
+        every transform in a flow is on no page, and saying so of all of
+        them would bury the visuals it is worth saying about. A node that
+        is used says so whatever it is — a report can embed anything.
+        """
+        from flograph.core.usage import NOWHERE, summarise
+        from ..dashboard.tile_item import is_tile_able
+        uses = self._uses.get(node.id, [])
+        if uses:
+            return summarise(uses)
+        return NOWHERE if is_tile_able(node) else ""
 
     # -------------------------------------------------------------- sorting
 

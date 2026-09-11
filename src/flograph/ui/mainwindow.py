@@ -3705,6 +3705,19 @@ class MainWindow(QMainWindow):
             if page_actions:
                 submenu.addSeparator()
             new_page_action = submenu.addAction("New Page…")
+        # The reverse of Add to Page. A page names the node it shows and
+        # nothing keeps the answer the other way round, so this asks it —
+        # including "nowhere", which on a board that has grown is the
+        # answer people are really after. A selection has no one answer.
+        where_actions: list = []
+        if not many:
+            from flograph.core.usage import NOWHERE, describe, uses_of
+            where = menu.addMenu("Where Is This Used?")
+            uses = uses_of(self.graph, node_id)
+            for use in uses:
+                where_actions.append((where.addAction(describe(use)), use))
+            if not uses:
+                where.addAction(NOWHERE).setEnabled(False)
         menu.addSeparator()
         copy_action = menu.addAction("Copy")
         delete = menu.addAction("Delete")
@@ -3807,6 +3820,10 @@ class MainWindow(QMainWindow):
             if page_id is not None:
                 self._add_tiles_to_page(page_id, tile_ids)
                 return
+            use = next((u for a, u in where_actions if a is chosen), None)
+            if use is not None:
+                self._go_to_use(use)
+                return
             port_name = next((p for a, p in view_actions if a is chosen), None)
             if port_name is not None:
                 from .inspector.popup_view import PopupView
@@ -3857,6 +3874,54 @@ class MainWindow(QMainWindow):
         if self.page_bar.current_page_id() is not None:
             self.page_bar.select_page(None)
         self.view.go_to_node(node_id)
+
+    def _go_to_use(self, use) -> None:
+        """Take the user to one answer from Where Is This Used?
+
+        A dashboard tile: its page, with the tile selected and in view. A
+        report page: its source, with the first embed naming the node
+        selected — the page may name a dozen things, and leaving the right
+        one to be found by eye is the hunt this exists to save. A report
+        card is a node on the model canvas, so it goes there the way every
+        other jump does.
+        """
+        from PySide6.QtCore import QTimer
+        from PySide6.QtGui import QTextCursor
+        from flograph.core.usage import CARD, DASHBOARD
+        if use.kind == CARD:
+            if use.host_id in self.graph.nodes:
+                self._go_to_node(use.host_id)
+            return
+        widget = self._dashboard_pages.get(use.page_id)
+        if widget is None:
+            return
+        self.page_bar.select_page(use.page_id)
+        if use.kind == DASHBOARD:
+            item = widget.scene.tile_items.get(use.tile_id)
+            if item is None:
+                return
+            widget.scene.clearSelection()
+            item.setSelected(True)
+            # after the switch has laid the page out: a view that has not
+            # been given its size yet centres on the wrong middle
+            QTimer.singleShot(
+                0, lambda: item.scene() is not None
+                and widget.view.center_on_scene(item))
+            return
+        if use.at < 0 or widget.view_mode():
+            # a locked report hides its source, and a selection in hidden
+            # text shows nobody anything — the open page is the answer
+            return
+        editor = widget.editor
+        text = editor.toPlainText()
+        cursor = editor.textCursor()
+        cursor.setPosition(min(use.at, len(text)))
+        end = text.find("]]", use.at)
+        if end >= 0:
+            cursor.setPosition(end + 2, QTextCursor.KeepAnchor)
+        editor.setTextCursor(cursor)
+        editor.centerCursor()
+        editor.setFocus()
 
     def _navigate_to(self, kind: str, ident: str) -> None:
         """A row clicked in the Navigator: bring the model canvas to it. A node

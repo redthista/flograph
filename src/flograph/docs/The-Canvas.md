@@ -79,6 +79,7 @@ its Appearance dialog. Right-click a dashed arc for **What is this?**
 | Run selected | **F6** |
 | Cancel | **Esc** |
 | Run to this node | right-click a node |
+| Find the pages that show a node | right-click it ▸ **Where Is This Used?** |
 
 Execution is a topological walk of the *dirty* subgraph on background
 threads. Independent branches run at the same time, up to a worker limit

@@ -135,6 +135,27 @@ embedding its own wired inputs. It edits in place on the canvas, has a
 right-click Insert menu listing everything embeddable, and tiles onto a
 dashboard — rich prose on a dashboard, which a chart tile cannot do.
 
+## Where is this used?
+
+A page names the node it shows, but nothing on the node says which pages
+show it. Right-click a node ▸ **Where Is This Used?** lists every place it
+appears: each dashboard page that has it as a tile, each report page that
+embeds it, and each report card on the canvas that does. Pick one and you
+are taken there. A tile is selected on its page, a report page opens with
+the embed selected in its source, and a report card is found on the
+canvas.
+
+**Used by no page** is an answer too, and on a board that has grown it is
+usually the one you are looking for: the chart nobody removed when its page
+was redesigned.
+
+Report pages name nodes by *label*, so two nodes with the same name both
+count as used by an embed of that name. The list says **shared with 1 other
+node of this name** when that happens, because the page itself cannot tell
+which of the two you meant. Rename one and the question goes away.
+
+The same answer shows as a tooltip on each node's row in the **Navigator**.
+
 ## Markdown Wiki card
 
 **Viz ▸ Markdown Wiki** shows a whole folder of `.md` files as a navigable
