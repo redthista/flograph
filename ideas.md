@@ -40,7 +40,9 @@ chunk O retires with it: flograph opens on a start screen of favourite and
 recent workflows. Dan's 0.1.14 list (`new_ideas.md`) was triaged here the
 same day: its seventeen bullets are chunks AA–AC, G12, and additions to M3
 and X1. The single letters are used up — I is skipped, it reads as a 1 —
-so chunks carry on at AA. Chunk AA shipped whole the same day and its
+so chunks carry on at AA. With every bullet carried here, the raw list
+in `new_ideas.md` was cleared, ready for the next one. Chunk AA shipped
+whole the same day and its
 letter retires with it: eight papercuts, from a plain canvas by default
 to the start screen's "edited" note on the name's line.
 
