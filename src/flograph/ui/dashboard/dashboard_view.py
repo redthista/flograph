@@ -38,6 +38,7 @@ from ..canvas.base_view import ZoomPanGraphicsView
 from ..canvas.stacking import add_layer_menu, layer_action_for
 from .dashboard_scene import DashboardScene
 from .tile_item import TileItem
+from .tile_shape import add_shape_menu, apply_choice
 from .visuals_list import TILE_NODE_MIME
 
 OVERLAY_TITLE_H = 28
@@ -119,9 +120,10 @@ class DashboardView(ZoomPanGraphicsView):
     # Tiles copied from a right-click menu, waiting to be pasted. A *class*
     # attribute on purpose: every page has its own DashboardView, and pasting
     # onto another page must see what was copied here. Each entry is
-    # (node_id, port, rel_x, rel_y, w, h), where (rel_x, rel_y) is the tile's
-    # position relative to the copied selection's top-left, so a paste on any
-    # page rebuilds the arrangement. None until the user copies something.
+    # (node_id, port, rel_x, rel_y, w, h, aspect), where (rel_x, rel_y) is
+    # the tile's position relative to the copied selection's top-left, so a
+    # paste on any page rebuilds the arrangement — shapes included. None
+    # until the user copies something.
     _tile_clipboard: Optional[tuple] = None
 
     def __init__(self, scene: DashboardScene, parent=None) -> None:
@@ -478,6 +480,9 @@ class DashboardView(ZoomPanGraphicsView):
             item.setSelected(True)
         menu = QMenu(self)
         layer_actions = add_layer_menu(menu)
+        menu.addSeparator()
+        shape_actions = add_shape_menu(
+            menu, self.scene().selected_tile_items())
         browser_action = None
         node = self._browsable_node(item)
         if node is not None:
@@ -497,6 +502,10 @@ class DashboardView(ZoomPanGraphicsView):
             self.scene().delete_selected_tiles()
         elif chosen in layer_actions:
             self.scene().restack_selection(layer_actions[chosen])
+        elif chosen in shape_actions:
+            apply_choice(self.scene(), item,
+                         self.scene().selected_tile_items(),
+                         shape_actions[chosen], parent=self)
         elif browser_action is not None and chosen is browser_action:
             from ..browser import open_node_from
             scene = self.scene()
@@ -530,7 +539,7 @@ class DashboardView(ZoomPanGraphicsView):
         DashboardView._tile_clipboard = tuple(
             (item.tile.node_id, item.tile.port,
              item.tile.rect[0] - min_x, item.tile.rect[1] - min_y,
-             item.tile.rect[2], item.tile.rect[3])
+             item.tile.rect[2], item.tile.rect[3], item.tile.aspect)
             for item in items)
 
     def _paste_tiles(self, scene_pos: Optional[QPointF] = None,
@@ -558,12 +567,13 @@ class DashboardView(ZoomPanGraphicsView):
         from ..commands import AddTileCommand
         scene = self.scene()
         scene.undo_stack.beginMacro("paste tiles")
-        for node_id, port, rel_x, rel_y, w, h in clip:
+        for node_id, port, rel_x, rel_y, w, h, aspect in clip:
             tile = Tile(
                 id=uuid.uuid4().hex,
                 node_id=node_id,
                 port=port,
                 rect=(base_x + rel_x, base_y + rel_y, w, h),
+                aspect=aspect,
             )
             scene.undo_stack.push(
                 AddTileCommand(scene.graph, scene.page_id, tile))

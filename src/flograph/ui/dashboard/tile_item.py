@@ -1349,7 +1349,9 @@ class TileItem(QGraphicsObject):
         edge = self._edge_at(pos)
         if self._over_fs_button(pos) or self._pager_at(pos):
             self.setCursor(Qt.PointingHandCursor)
-        elif edge == "corner":
+        elif edge == "corner" or (edge and self.tile.aspect):
+            # a shaped tile's edges move both sides at once, so they promise
+            # the diagonal rather than the one side they sit on
             self.setCursor(Qt.SizeFDiagCursor)
         elif edge == "right":
             self.setCursor(Qt.SizeHorCursor)
@@ -1478,6 +1480,12 @@ class TileItem(QGraphicsObject):
                 if snapping:
                     height = snap(height, step)
                 height = max(MIN_H, height)
+            aspect = self._drag_aspect(event.modifiers())
+            if aspect is not None:
+                from flograph.core.aspect import keep_aspect, leading_side
+                lead = leading_side(edge, self._press_size, (width, height))
+                width, height = keep_aspect(width, height, aspect, lead,
+                                            (MIN_W, MIN_H))
             self.prepareGeometryChange()
             self._size = (width, height)
             self._layout_proxy()
@@ -1485,6 +1493,22 @@ class TileItem(QGraphicsObject):
             event.accept()
             return
         super().mouseMoveEvent(event)
+
+    def _drag_aspect(self, modifiers) -> Optional[float]:
+        """The shape a resize drag keeps, or None for a free one.
+
+        A tile with a stated shape always keeps it — that is what stating
+        it was for — and a different one is picked from the Shape menu, not
+        dragged into. Holding Shift keeps the shape a *free* tile had when
+        the drag began: the convention drawing programs share, and the one
+        modifier the grid's bypass (Ctrl) leaves spare.
+        """
+        if self.tile.aspect:
+            return self.tile.aspect
+        if modifiers & Qt.ShiftModifier:
+            width, height = self._press_size
+            return width / height if height > 0 else None
+        return None
 
     def mouseDoubleClickEvent(self, event) -> None:
         """Double-clicking the title bar maximizes/restores, the way a window

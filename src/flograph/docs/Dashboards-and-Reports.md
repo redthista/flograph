@@ -19,6 +19,18 @@ arrangeable, showing STALE when its node is dirty. Tiles maximise to
 fullscreen; pages can be renamed, recoloured, reordered by dragging, and
 duplicated.
 
+**Give a tile a shape** from its right-click menu ▸ **Shape**: **Banner**
+3:1, **Wide** 16:9, **Landscape** 4:3, **Square**, **Portrait** 3:4,
+**Tall** 9:16 or **Column** 1:3 — a wide chart, or a long thin one. The tile
+keeps its width and its height follows. From then on it *keeps* that shape:
+drag any edge and the other side comes with it, until you pick **Any
+Shape**. **Size and Shape…** takes numbers instead — a width and a height in
+pixels, and a shape typed the way a report embed's `ratio=` takes one
+(`16:9`, `4x3`, `1.5`). With several tiles selected, each choice applies to
+all of them, which is the quick way to make three charts the same size.
+Holding **Shift** while resizing a tile with no shape keeps the shape it
+had.
+
 **Lock** a finished page from its tab menu and it *is* the dashboard: tiles
 stop moving, the arranging chrome goes, and the page stops behaving like a
 canvas (no zoom, wheel, panning, rubber band, or context menu). What still

@@ -29,6 +29,10 @@ from PySide6.QtCore import QRectF, Qt, QUrl
 from PySide6.QtGui import (QImage, QImageReader, QPainter, QPainterPath,
                            QTextDocument)
 
+# parse_aspect lives in core: a dashboard tile's shape is stated in the same
+# words as a `ratio=` here, and two readers of "16:9" would drift. Imported
+# by name so the renderer, and the tests that reach it through here, keep it.
+from flograph.core.aspect import parse_aspect
 from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
                                   PAGEBREAK_TOKEN, format_scalar,
                                   frame_to_markdown, inline_markdown,
@@ -349,28 +353,6 @@ TABLE_MARK_FILL = "\u200b"
 def table_marker(index: int) -> str:
     return TABLE_MARK + TABLE_MARK_FILL * (index + 1) + TABLE_MARK
 
-
-def parse_aspect(raw: str) -> "float | None":
-    """A `ratio=` value as the single number width / height.
-
-    `16:9`, `4x3` and `3/2` all mean the same thing; a bare `1.5` is taken
-    as that ratio directly. None for anything unparseable or non-positive —
-    the caller reports it rather than drawing a nonsense shape.
-    """
-    text = (raw or "").strip().lower().replace("x", ":").replace("/", ":")
-    if not text:
-        return None
-    try:
-        if ":" in text:
-            left, _, right = text.partition(":")
-            width, height = float(left), float(right)
-            if width <= 0 or height <= 0:
-                return None
-            return width / height
-        value = float(text)
-        return value if value > 0 else None
-    except ValueError:
-        return None
 
 # On screen there is no paper to match, so charts are drawn at twice the
 # width they are placed at — enough to stay sharp on a HiDPI display

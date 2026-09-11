@@ -1024,7 +1024,8 @@ class DuplicatePageCommand(QUndoCommand):
             # new Page), so without it the copy would lose the stacking the
             # original was arranged into
             id_map[tile_id]: Tile(id=id_map[tile_id], node_id=t.node_id,
-                                  port=t.port, rect=t.rect, z=t.z)
+                                  port=t.port, rect=t.rect, z=t.z,
+                                  aspect=t.aspect)
             for tile_id, t in src.tiles.items()
         }
         self._new_page = Page(
@@ -1109,3 +1110,38 @@ class MoveResizeTileCommand(QUndoCommand):
             return False
         self._new = other._new
         return True
+
+
+class SetTileShapeCommand(QUndoCommand):
+    """Give tiles a shape, a size, or take a shape away — one undo step.
+
+    `changes` holds one (tile_id, new_rect, new_aspect) per tile. What each
+    tile was is read when the command is made, so undo restores its size
+    and its shape together: the rect a shape produced means nothing
+    without the shape that produced it. Never merges, unlike a drag —
+    picking a shape and then dragging the tile are two things to undo.
+    """
+
+    def __init__(self, graph: Graph, page_id: str, changes: list,
+                 text: str = "set tile shape",
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__(text, parent)
+        self._graph = graph
+        self._page_id = page_id
+        tiles = graph.page(page_id).tiles
+        self._new = [(tile_id, tuple(rect), aspect)
+                     for tile_id, rect, aspect in changes]
+        self._old = [(tile_id, tuple(tiles[tile_id].rect),
+                      tiles[tile_id].aspect)
+                     for tile_id, _, _ in changes]
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+    def _apply(self, states: list) -> None:
+        for tile_id, rect, aspect in states:
+            self._graph.update_tile(self._page_id, tile_id,
+                                    rect=rect, aspect=aspect)

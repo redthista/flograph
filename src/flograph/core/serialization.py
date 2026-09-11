@@ -30,8 +30,9 @@ the cache too, lives in cache_persistence.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 from ..version import running_version as _running_version
 from . import dotenv
@@ -189,6 +190,9 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                             "port": t.port,
                             "rect": list(t.rect),
                             "z": t.z,
+                            # only a tile given a shape says so, the way
+                            # `setup` only says what was changed
+                            **({"aspect": t.aspect} if t.aspect else {}),
                         }
                         for t in p.tiles.values()
                     ],
@@ -398,8 +402,20 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
                 port=tile_entry.get("port"),
                 rect=tuple(tile_entry.get("rect", (0, 0, 420, 320))),
                 z=tile_entry.get("z"),
+                # absent before tiles had a shape, and on any tile left free
+                aspect=_tile_aspect(tile_entry.get("aspect")),
             ))
     return graph
+
+
+def _tile_aspect(value) -> Optional[float]:
+    """A saved tile shape, or None for anything that is not one. A hand
+    edit that wrote nonsense costs the tile its shape, not the project."""
+    try:
+        aspect = float(value)
+    except (TypeError, ValueError):
+        return None
+    return aspect if aspect > 0 and math.isfinite(aspect) else None
 
 
 def _broken_spec(type_id: str, inputs: Iterable[str],

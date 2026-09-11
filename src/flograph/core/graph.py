@@ -151,6 +151,10 @@ class Tile:
     port: Optional[str] = None  # output port to render; None for action buttons
     rect: tuple[float, float, float, float] = (0.0, 0.0, 420.0, 320.0)
     z: Optional[int] = None   # stacking order on its page; see core.layers
+    # The shape this tile keeps, as width / height (see core.aspect), or
+    # None for any shape. Stated from the tile's Shape menu, and kept by a
+    # resize drag, so a 16:9 chart stays 16:9 however big it is made.
+    aspect: Optional[float] = None
 
 
 @dataclass
@@ -196,6 +200,11 @@ class Page:
     # Its defaults reproduce what reports did before it existed, so a page
     # nobody has set up behaves exactly as before.
     setup: PageSetup = field(default_factory=PageSetup)
+
+
+#: `update_tile`'s "leave it as it is", for the one argument where None is
+#: itself a value worth setting: a tile's aspect, where None means any shape.
+_KEEP = object()
 
 
 class Graph:
@@ -1111,6 +1120,7 @@ class Graph:
 
     def update_tile(self, page_id: str, tile_id: str, *,
                     rect: Optional[tuple[float, float, float, float]] = None,
+                    aspect: Any = _KEEP,
                     ) -> Tile:
         page = self.page(page_id)
         tile = page.tiles.get(tile_id)
@@ -1118,6 +1128,8 @@ class Graph:
             raise GraphError(f"no tile with id {tile_id!r} on page {page_id!r}")
         if rect is not None:
             tile.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
+        if aspect is not _KEEP:
+            tile.aspect = None if aspect is None else float(aspect)
         self.events.tile_changed.emit(page_id, tile)
         return tile
 
