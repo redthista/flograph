@@ -125,6 +125,21 @@ the sort, none of it kept between opens. A persistent model, or a memoised
 popup is a fixed 280×320 and ~70 rows should not cost this much, so the real
 cause may be Windows popup/paint behaviour rather than the rebuild.
 
+  Measured 2026-09-12, and the rebuild is not it. Offscreen on Linux,
+  `popup_at` through show and first paint takes ~2 ms (8 ms the first time),
+  `_refresh` 0.7 ms for today's 118 rows, `registry.search("")` 0.01 ms;
+  `Favorites.contains` is a list lookup and `spec_icon` is cached. So the
+  cost is on the Windows side, and the one Windows-only thing in the path is
+  `ui/win_frame.py`: its Aero Snap filter is installed on the
+  **QApplication**, so every native message in the process — the popup's
+  creation, paint and mouse moves included — is handed to Python, which
+  calls `isVisible()` and `winId()` before checking whether the message is
+  for the main window at all. Issue 7 is what an application-wide Python
+  filter costs. Cheap to tighten (cache the hwnd and compare it first, or
+  move to `MainWindow.nativeEvent`), but it landed 2026-09-02 and this was
+  filed 2026-08-30, so it can make it worse, not explain it. Next step is a
+  timing on the slow machine itself.
+
 ---
 
 ## L. Version control

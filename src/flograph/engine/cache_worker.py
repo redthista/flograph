@@ -94,6 +94,9 @@ class CacheWarmRunnable(QRunnable):
 class CacheSaveSignals(QObject):
     # (done, total) after each planned entry, whatever became of it
     progressed = Signal(int, int)
+    # The node ids whose result could not go into the file (unpicklable, or
+    # a carried blob that had gone), before `finished` and only if any.
+    skipped = Signal(list)
     # The failure to show the user, or "" on success. A message rather than
     # an exception object: the text is chosen where the failure happened,
     # and a full-disk save has its own sentence (save_failure_text).
@@ -108,8 +111,7 @@ class CacheSaveRunnable(QRunnable):
     — editing and running go on while the archive streams out.
 
     `prev_path` is the file to copy unchanged/spilled blobs from — the same
-    path on a plain Save, the old path on Save As. `carry_all` copies every
-    blob the previous file held and re-pickles nothing (the mid-run save).
+    path on a plain Save, the old path on Save As.
 
     An OSError — the disk filling up, most commonly — lands in `finished`
     as its human sentence rather than vanishing: that is K2's whole point.
@@ -118,26 +120,27 @@ class CacheSaveRunnable(QRunnable):
     def __init__(self, project_path: str,
                  plan: "cache_persistence.ProjectSavePlan",
                  signals: CacheSaveSignals, compress: bool = True,
-                 prev_path: "str | None" = None,
-                 carry_all: bool = False) -> None:
+                 prev_path: "str | None" = None) -> None:
         super().__init__()
         self.project_path = project_path
         self.plan = plan
         self.signals = signals
         self.compress = compress
         self.prev_path = prev_path
-        self.carry_all = carry_all
 
     def run(self) -> None:  # executes on a pool thread
+        skipped: list[str] = []
         try:
             cache_persistence.write_project(
                 self.project_path, self.plan,
                 prev_path=self.prev_path, compress=self.compress,
-                carry_all=self.carry_all,
+                skipped=skipped,
                 progress=lambda done, total: self.signals.progressed.emit(
                     done, total))
         except Exception as exc:
             self.signals.finished.emit(
                 cache_persistence.save_failure_text("the project file", exc))
             return
+        if skipped:
+            self.signals.skipped.emit(skipped)
         self.signals.finished.emit("")

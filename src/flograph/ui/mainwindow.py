@@ -164,8 +164,7 @@ class MainWindow(QMainWindow):
         self._warm_watch_timer.setSingleShot(True)
         self._warm_watch_timer.timeout.connect(
             lambda: self._finish_warm_watch(completed=True))
-        self.engine.cache_load_failed.connect(
-            lambda _nid: self._tick_warm_watch())
+        self.engine.cache_load_failed.connect(self._on_cache_load_failed)
         self.settings = QSettings("flograph", "flograph")
         # Light / dark / system chrome. app.py already themed the app from
         # this value at startup; we keep it so Settings can show and change
@@ -199,6 +198,10 @@ class MainWindow(QMainWindow):
         # when idle; while up, Save/Open-a-second-save and starting a run
         # wait for it (see _cache_still_writing) rather than racing it.
         self._cache_save_signals: Optional[CacheSaveSignals] = None
+        # Nodes already told about, this session, as having a result a save
+        # could not store — so a flow that always holds one is told once,
+        # not on every Ctrl+S.
+        self._unsaved_told: set[str] = set()
         # Set at the start of a bundled save: the undo index the archive
         # snapshot was taken at (clean is marked only if editing has not
         # moved past it by the time the write lands), and whether a legacy
@@ -211,6 +214,8 @@ class MainWindow(QMainWindow):
         self._warm_watch: set[str] = set()
         self._warm_watch_active = False
         self._warm_done_message = ""
+        # cached results the open's warm could not read back (they re-run)
+        self._warm_failed: list[str] = []
         # set False to close without the unsaved-changes prompt (tests, scripts)
         self.confirm_close = True
         self._gpu_viewport_checked_on_show = False
@@ -5558,7 +5563,11 @@ class MainWindow(QMainWindow):
         self._finish_warm_watch()       # drop any watch from a prior open
         registered = cache_persistence.register_cache(
             self.graph, self.engine.cache, path)
+        report = cache_persistence.restore_report(self.graph, path, registered)
         if not registered:
+            if (report.cached or report.unreadable) and not quiet:
+                self.show_status(
+                    self._restore_summary(path, registered, report), 8000)
             return
         for node_id in registered:
             self.graph.mark_clean(node_id)
@@ -5570,12 +5579,36 @@ class MainWindow(QMainWindow):
         # feeds a slicer's or control's options.
         warm_ids = self._display_warm_ids(registered)
         done = ("" if quiet else
-                f"Opened {path} — {len(registered)} node(s) restored "
-                f"from cache")
+                self._restore_summary(path, registered, report))
         if warm_ids and self.engine.warm_entries(warm_ids):
             self._begin_warm_watch(warm_ids, done)
         elif done:
             self.show_status(done, 4000)
+
+    def _restore_summary(self, path: str, restored: list[str],
+                         report: "cache_persistence.RestoreReport") -> str:
+        """The 'Opened…' line, and what the cache could not give back.
+
+        Out-of-date results are named by where they start — the topmost of
+        them is where the flow, or the script behind a node, changed. Silent
+        was how a flow losing most of its cache to an upgrade came to look
+        like a cache bug (issue 8)."""
+        line = f"Opened {path} — {len(restored)} node(s) restored from cache"
+        if report.unreadable:
+            return (line + " · the saved results couldn't be read (damaged, "
+                    "or saved by a newer flograph)")
+        if report.stale:
+            line += (f" · {len(report.stale)} out of date and will re-run, "
+                     f"starting at {self._node_names(report.starts)}")
+        return line
+
+    def _node_names(self, node_ids: list[str], limit: int = 3) -> str:
+        """'Slicer, Action Button and 3 more' — node labels for one line."""
+        labels = [self.graph.nodes[n].label for n in node_ids
+                  if n in self.graph.nodes]
+        if len(labels) <= limit:
+            return ", ".join(labels)
+        return f"{', '.join(labels[:limit])} and {len(labels) - limit} more"
 
     def _begin_warm_watch(self, warm_ids: list[str], done_message: str) -> None:
         """Put a 'Restoring cached results…' busy-bar on the status line
@@ -5607,9 +5640,18 @@ class MainWindow(QMainWindow):
         self._warm_watch = roots
         self._warm_watch_active = True
         self._warm_done_message = done_message
+        self._warm_failed = []
         self._restore_bar.show()
         self.show_status("Restoring cached results…")
         self._warm_watch_timer.start(90_000)
+
+    def _on_cache_load_failed(self, node_id: str) -> None:
+        """A cached result would not read back; the engine has dropped it and
+        the node re-runs. Counted while an open's warm is being watched, so
+        the 'Opened…' line can say so."""
+        if self._warm_watch_active:
+            self._warm_failed.append(node_id)
+        self._tick_warm_watch()
 
     def _tick_warm_watch(self) -> None:
         """Drop blobs that have arrived (or failed to); finish when the
@@ -5634,8 +5676,12 @@ class MainWindow(QMainWindow):
         self._warm_watch = set()
         self._restore_bar.hide()
         message, self._warm_done_message = self._warm_done_message, ""
+        failed, self._warm_failed = self._warm_failed, []
         if not (completed and was_active) or self.engine.active:
             return          # a run owns the status line; don't talk over it
+        if message and failed:
+            message += (f" · {len(failed)} couldn't be read back and will "
+                        f"re-run")
         if message:
             self.show_status(message, 4000)
         elif self.status_message() == "Restoring cached results…":
@@ -5789,20 +5835,18 @@ class MainWindow(QMainWindow):
         The snapshot — graph dict, blob plan, run history — is taken here,
         cheaply, so the worker touches only the filesystem (see
         cache_persistence.plan_project_save). While it runs, a second Save,
-        Save As and starting a run wait for it. Mid-run the live cache is
-        not walked: every blob is copied from the previous file instead,
-        exactly as the old JSON-only mid-run save persisted nothing new.
-        `carry_from` is the file unchanged blobs are copied from — the same
-        path on a plain Save, the old path on Save As."""
+        Save As and starting a run wait for it. A save made during a run
+        snapshots the live cache like any other — plan_project_save says why
+        it no longer copies the previous file's. `carry_from` is the file
+        unchanged blobs are copied from — the same path on a plain Save, the
+        old path on Save As."""
         path = self._project_path
-        carry_all = self.engine.active
         plan = cache_persistence.plan_project_save(
-            self.graph, self.engine.cache, self.engine.history,
-            carry_all=carry_all)
+            self.graph, self.engine.cache, self.engine.history)
         self._save_clean_index = self.undo_stack.index()
         self._folded_sidecar = cache_persistence.has_sidecar(path)
 
-        if not plan.blobs and not carry_all:
+        if not plan.blobs:
             # No blobs to pickle — the archive is just project.json and a
             # short manifest. Write it here and now, so a cache-free save
             # stays instant and starts no background thread.
@@ -5821,6 +5865,7 @@ class MainWindow(QMainWindow):
 
         signals = CacheSaveSignals(parent=self)
         signals.progressed.connect(self._on_cache_save_progress)
+        signals.skipped.connect(self._on_cache_save_skipped)
         signals.finished.connect(self._on_cache_save_finished)
         self._cache_save_signals = signals
         self._save_bar.setRange(0, max(1, len(plan.blobs)))
@@ -5830,7 +5875,7 @@ class MainWindow(QMainWindow):
         QThreadPool.globalInstance().start(
             CacheSaveRunnable(path, plan, signals,
                               compress=self.cache_compression_enabled,
-                              prev_path=carry_from, carry_all=carry_all))
+                              prev_path=carry_from))
 
     def _on_cache_save_progress(self, done: int, total: int) -> None:
         self._save_bar.setRange(0, max(1, total))
@@ -5843,6 +5888,7 @@ class MainWindow(QMainWindow):
         self._save_bar.hide()
         if signals is not None:
             signals.progressed.disconnect()
+            signals.skipped.disconnect()
             signals.finished.disconnect()
         if error:
             QMessageBox.critical(self, "Save failed", error)
@@ -5855,6 +5901,26 @@ class MainWindow(QMainWindow):
         if self.engine.active:
             return      # the run line is speaking; do not talk over it
         self._announce_saved()
+
+    def _on_cache_save_skipped(self, node_ids: list) -> None:
+        """Some results could not go into the file — an output Python cannot
+        store, such as an open connection — so those nodes re-run when the
+        project is next opened. Said in the corner rather than on the status
+        line, which a run may own, and once per node per session."""
+        fresh = [n for n in node_ids
+                 if n in self.graph.nodes and n not in self._unsaved_told]
+        if not fresh:
+            return
+        self._unsaved_told.update(fresh)
+        from . import update_check
+        count = len(fresh)
+        update_check.NoticeToast(
+            self,
+            f"{count} result{'s' if count != 1 else ''} couldn't be saved "
+            f"in the file",
+            f"{self._node_names(fresh)} will re-run when the project is "
+            f"next opened",
+            name="unsaved_results_toast").show_in_corner()
 
     def _announce_saved(self) -> None:
         msg = f"Saved {self._project_path}"

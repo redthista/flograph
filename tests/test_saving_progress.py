@@ -6,14 +6,17 @@ watched for running low (K1/K2).
 
 Settings kept off the real store -- see test_minimap_settings.py."""
 import errno
+import threading
 import zlib
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QCheckBox
+from PySide6.QtWidgets import QCheckBox, QFrame
 
 from flograph.core import Graph, NodeRegistry, container, serialization
+from flograph.engine import cache_persistence
+from flograph.engine.cache import OutputCache
 from flograph.ui import mainwindow as mod
 from flograph.ui.settings_dialog import SettingsDialog
 
@@ -108,6 +111,63 @@ class TestBackgroundCacheSave:
         assert window._cache_save_signals is None   # no background thread
         assert container.is_bundle(path)
         assert window.status_message().startswith("Saved ")
+
+
+class TestSaveDuringARun:
+    def test_what_the_run_made_is_what_the_file_holds(self, qtbot, window,
+                                                      cached_constant,
+                                                      tmp_path):
+        # Issue 8: a Save while the engine was busy copied the previous
+        # file's results, so a re-run value reopened as the old one.
+        path = tmp_path / "proj.flograph"
+        window._project_path = str(path)
+        assert window._save() is True
+        qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                        timeout=10000)
+
+        window.engine.cache.set(cached_constant.id, {"value": "re-run"},
+                                wall_time=0.01)
+        window.engine._active = True             # a run is going
+        try:
+            assert window._save() is True
+            qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                            timeout=10000)
+        finally:
+            window.engine._active = False
+
+        reloaded = serialization.load(path, window.registry)
+        fresh = OutputCache()
+        assert cache_persistence.register_cache(reloaded, fresh, path) == [
+            cached_constant.id]
+        assert fresh.outputs_for(cached_constant.id) == {"value": "re-run"}
+
+
+class TestResultsASaveCouldNotStore:
+    def _visible_toasts(self, window):
+        return [t for t in window.findChildren(QFrame, "unsaved_results_toast")
+                if t.isVisibleTo(window)]
+
+    def test_said_in_the_corner_once_per_node(self, qtbot, window, registry,
+                                              tmp_path):
+        const = window.graph.add_node(
+            registry.instantiate("flograph.util.constant"))
+        window.engine.cache.set(const.id, {"value": threading.Lock()},
+                                wall_time=0.01)
+        window._project_path = str(tmp_path / "proj.flograph")
+
+        assert window._save() is True
+        qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                        timeout=10000)
+        toasts = self._visible_toasts(window)
+        assert len(toasts) == 1
+        for toast in toasts:
+            toast.close()
+
+        # the same node on the next save is not news
+        assert window._save() is True
+        qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                        timeout=10000)
+        assert self._visible_toasts(window) == []
 
 
 class TestCompressionSetting:

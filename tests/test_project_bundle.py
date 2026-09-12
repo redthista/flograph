@@ -1,10 +1,11 @@
 """The single-file .flograph bundle: a zip holding project.json plus a
 cache/ tree. Covers the sniff, the reader/writer, and the save/open flow
-through cache_persistence — carry-over of unloaded blobs, Save As, the
-mid-run carry-all save, save-without-cache, and folding in a legacy
-side-car folder.
+through cache_persistence — carry-over of unloaded blobs, Save As, a save
+made during a run, save-without-cache, results a save could not store, what
+a reopen could not restore, and folding in a legacy side-car folder.
 """
 import json
+import threading
 import zipfile
 
 import pandas as pd
@@ -32,11 +33,33 @@ def _two_node_graph(registry):
     return graph, src, dst
 
 
-def _plan_and_write(graph, cache, path, *, prev_path=None, history=None,
-                    carry_all=False):
-    plan = cp.plan_project_save(graph, cache, history or RunHistory(),
-                                carry_all=carry_all)
+def _plan_and_write(graph, cache, path, *, prev_path=None, history=None):
+    plan = cp.plan_project_save(graph, cache, history or RunHistory())
     return cp.write_project(path, plan, prev_path=prev_path)
+
+
+def _chain(registry, length=3):
+    """constant -> reroute -> reroute ..., every link wired `value`."""
+    graph = Graph()
+    nodes = [graph.add_node(registry.instantiate("flograph.util.constant"))]
+    for i in range(1, length):
+        node = graph.add_node(registry.instantiate(
+            "flograph.util.reroute", pos=(200 * i, 0)))
+        graph.connect(nodes[-1].id, "value", node.id, "value")
+        nodes.append(node)
+    return graph, nodes
+
+
+def _rewrite_manifest(path, change):
+    """Rewrite the test's own bundle with its manifest passed through
+    `change` — the one way to fake a file some other flograph wrote."""
+    with zipfile.ZipFile(path) as zin:
+        members = [(info, zin.read(info.filename)) for info in zin.infolist()]
+    with zipfile.ZipFile(path, "w") as zout:
+        for info, data in members:
+            if info.filename == container.MANIFEST_MEMBER:
+                data = json.dumps(change(json.loads(data))).encode()
+            zout.writestr(info, data)
 
 
 class TestSniff:
@@ -139,26 +162,142 @@ class TestCarryOver:
         assert cp.register_cache(graph, OutputCache(), first) == [src.id]
 
 
-class TestCarryAll:
-    def test_mid_run_save_keeps_blobs_and_updates_the_graph(self, tmp_path,
-                                                            registry):
+class TestSaveDuringARun:
+    """Issue 8: a save made mid-run copied the previous file's blobs *and*
+    manifest, so a node re-run since came back with its old value under a
+    fingerprint that still matched."""
+
+    def test_the_value_reopened_is_the_one_the_run_made(self, tmp_path,
+                                                        registry):
         graph, src, dst = _two_node_graph(registry)
         cache = OutputCache()
-        cache.set(src.id, {"value": "v1"}, wall_time=0.01)
+        cache.set(src.id, {"value": "before the run"}, wall_time=0.01)
         path = tmp_path / "proj.flograph"
         _plan_and_write(graph, cache, path)
 
-        # graph changes, cache is "mid-flight" — carry everything, pickle
-        # nothing
+        # re-run with the same params — Reset Caches, or a source that
+        # changed: same fingerprint, new value — and saved before it ends
+        cache.evict(src.id)
+        cache.set(src.id, {"value": "after the run"}, wall_time=0.01)
         graph.set_param(dst.id, "value", "edited during run")
-        plan = cp.plan_project_save(graph, cache, RunHistory(), carry_all=True)
-        assert plan.blobs == []
-        cp.write_project(path, plan, prev_path=path, carry_all=True)
+        _plan_and_write(graph, cache, path, prev_path=path)
 
         reloaded = serialization.load(path, registry)
         assert reloaded.nodes[dst.id].params["value"] == "edited during run"
         fresh = OutputCache()
         assert cp.register_cache(reloaded, fresh, path) == [src.id]
+        assert fresh.outputs_for(src.id) == {"value": "after the run"}
+
+    def test_a_node_still_being_worked_out_re_runs_rather_than_goes_stale(
+            self, tmp_path, registry):
+        graph, src, _ = _two_node_graph(registry)
+        cache = OutputCache()
+        cache.set(src.id, {"value": "old"}, wall_time=0.01)
+        path = tmp_path / "proj.flograph"
+        _plan_and_write(graph, cache, path)
+
+        cache.evict(src.id)          # dirtied for its re-run, not back yet
+        _plan_and_write(graph, cache, path, prev_path=path)
+
+        assert cp.register_cache(graph, OutputCache(), path) == []
+
+
+class TestSkippedResults:
+    def test_a_result_that_cannot_be_stored_is_named(self, tmp_path,
+                                                     registry):
+        graph, src, dst = _two_node_graph(registry)
+        cache = OutputCache()
+        cache.set(src.id, {"value": threading.Lock()}, wall_time=0.01)
+        cache.set(dst.id, {"value": "fine"}, wall_time=0.01)
+        skipped = []
+        plan = cp.plan_project_save(graph, cache, RunHistory())
+
+        recorded = cp.write_project(tmp_path / "p.flograph", plan,
+                                    skipped=skipped)
+
+        assert recorded == 1
+        assert skipped == [src.id]
+
+
+class TestRestoreReport:
+    """Issue 8: what a reopen could not restore, and where it starts."""
+
+    def test_nothing_to_say_when_everything_came_back(self, tmp_path,
+                                                      registry):
+        graph, nodes = _chain(registry)
+        cache = OutputCache()
+        for node in nodes:
+            cache.set(node.id, {"value": 1}, wall_time=0.01)
+        path = tmp_path / "chain.flograph"
+        _plan_and_write(graph, cache, path)
+
+        restored = cp.register_cache(graph, OutputCache(), path)
+        report = cp.restore_report(graph, path, restored)
+
+        assert len(restored) == 3
+        assert (report.cached, report.stale, report.starts) == (3, [], [])
+        assert not report.unreadable
+
+    def test_an_edit_upstream_is_named_where_it_starts(self, tmp_path,
+                                                       registry):
+        graph, (const, middle, last) = _chain(registry)
+        cache = OutputCache()
+        for node in (const, middle, last):
+            cache.set(node.id, {"value": 1}, wall_time=0.01)
+        path = tmp_path / "chain.flograph"
+        _plan_and_write(graph, cache, path)
+
+        graph.set_param(const.id, "value", "changed since the save")
+        restored = cp.register_cache(graph, OutputCache(), path)
+        report = cp.restore_report(graph, path, restored)
+
+        assert restored == []
+        assert report.cached == 3
+        assert set(report.stale) == {const.id, middle.id, last.id}
+        assert report.starts == [const.id]
+
+    def test_the_start_is_found_through_a_node_that_was_never_cached(
+            self, tmp_path, registry):
+        graph, (const, middle, last) = _chain(registry)
+        cache = OutputCache()
+        cache.set(const.id, {"value": 1}, wall_time=0.01)
+        cache.set(last.id, {"value": 1}, wall_time=0.01)   # middle: never
+        path = tmp_path / "chain.flograph"
+        _plan_and_write(graph, cache, path)
+
+        graph.set_param(const.id, "value", "changed since the save")
+        report = cp.restore_report(
+            graph, path, cp.register_cache(graph, OutputCache(), path))
+
+        assert set(report.stale) == {const.id, last.id}
+        assert report.starts == [const.id]
+
+    def test_a_manifest_from_a_newer_flograph_is_unreadable_not_stale(
+            self, tmp_path, registry):
+        graph, nodes = _chain(registry, length=2)
+        cache = OutputCache()
+        for node in nodes:
+            cache.set(node.id, {"value": 1}, wall_time=0.01)
+        path = tmp_path / "chain.flograph"
+        _plan_and_write(graph, cache, path)
+        _rewrite_manifest(path, lambda m: {**m, "cache_schema": 999})
+
+        restored = cp.register_cache(graph, OutputCache(), path)
+        report = cp.restore_report(graph, path, restored)
+
+        assert restored == []
+        assert report.unreadable
+        assert report.cached == 2 and report.stale == []
+
+    def test_no_cache_in_the_file_is_nothing_to_report(self, tmp_path,
+                                                       registry):
+        graph, _ = _chain(registry, length=2)
+        path = tmp_path / "bare.flograph"
+        _plan_and_write(graph, OutputCache(), path)
+
+        report = cp.restore_report(graph, path, [])
+
+        assert report == cp.RestoreReport()
 
 
 class TestWorkflowExport:

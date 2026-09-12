@@ -25,6 +25,24 @@ def _pick_menu_action(monkeypatch, text):
     monkeypatch.setattr(mw, "QMenu", _Picker)
 
 
+def _edit_saved_param(path, node_id, name, value):
+    """Change one param inside the test's own bundle, leaving its cache as
+    it was — a file whose results no longer match its flow."""
+    import zipfile
+    from flograph.core import container
+    with zipfile.ZipFile(path) as zin:
+        members = [(info, zin.read(info.filename)) for info in zin.infolist()]
+    with zipfile.ZipFile(path, "w") as zout:
+        for info, data in members:
+            if info.filename == container.PROJECT_MEMBER:
+                project = json.loads(data)
+                for node in project["graph"]["nodes"]:
+                    if node["id"] == node_id:
+                        node["params"][name] = value
+                data = json.dumps(project).encode()
+            zout.writestr(info, data)
+
+
 @pytest.fixture(scope="module")
 def registry():
     reg = NodeRegistry()
@@ -134,6 +152,32 @@ class TestSaveOpen:
         qtbot.waitUntil(lambda: not window._restore_bar.isVisibleTo(window),
                         timeout=10000)
         assert "restored from cache" in window.status_message()
+
+    def test_reopen_says_what_the_cache_could_not_give_back(
+            self, qtbot, window, tmp_path):
+        # Issue 8: an out-of-date result used to be skipped in silence, so
+        # a flow losing most of its cache looked like a cache bug.
+        reg = window.registry
+        const = reg.instantiate("flograph.util.constant", pos=(0, 0))
+        window.graph.add_node(const)
+        window.engine.cache.set(const.id, {"value": "cached"}, wall_time=0.01)
+        path = str(tmp_path / "stale.flograph")
+        window._project_path = path
+        assert window._save()
+        qtbot.waitUntil(lambda: window._cache_save_signals is None,
+                        timeout=5000)
+
+        # the flow changes but the file's results don't: open that
+        _edit_saved_param(path, const.id, "value", "edited")
+
+        from flograph.core import Graph
+        window._replace_graph(Graph())
+        assert window.open_path(path, confirm=False)
+
+        message = window.status_message()
+        assert "0 node(s) restored from cache" in message
+        assert "1 out of date and will re-run" in message
+        assert const.spec.label in message
 
     def test_save_reopen_after_param_edit_only_that_chain_dirty(
             self, qtbot, window, tmp_path):

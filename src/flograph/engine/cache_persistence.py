@@ -47,9 +47,9 @@ import pickle
 import shutil
 import zipfile
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any, Optional
+from typing import IO, Any, Iterable, Optional
 
 from flograph.core import container
 from flograph.core.graph import Graph
@@ -328,6 +328,29 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
         # and runs again — exactly what unfreezing is for.
         memo[node_id] = hashlib.sha256(f"frozen:{node_id}".encode()).hexdigest()
         return
+    parents = _dependencies(graph, node_id)
+    if not resolved:
+        pending = [p for p in parents if p not in memo]
+        if pending:
+            stack.append((node_id, True))
+            stack.extend((p, False) for p in pending)
+            return
+    payload = json.dumps({
+        "type_id": node.type_id,
+        "source": node.source,
+        "params": node.params,
+        "upstream": sorted(memo[p] for p in parents),
+    }, sort_keys=True, default=str)
+    memo[node_id] = hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _dependencies(graph: Graph, node_id: str) -> list[str]:
+    """Every node whose value `node_id`'s cached value follows from.
+
+    What the fingerprint folds in, and what the restore report walks to tell
+    an out-of-date entry from the one that made it so.
+    """
+    node = graph.node(node_id)
     # Port order, and one entry per *connected* port, so two ports fed by the
     # same node still contribute twice — as the recursive version did.
     parents = []
@@ -347,19 +370,7 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
     # step changes, even though nothing was handed to it directly — that is
     # the reason to have drawn the edge at all.
     parents.extend(graph.order_sources(node_id))
-    if not resolved:
-        pending = [p for p in parents if p not in memo]
-        if pending:
-            stack.append((node_id, True))
-            stack.extend((p, False) for p in pending)
-            return
-    payload = json.dumps({
-        "type_id": node.type_id,
-        "source": node.source,
-        "params": node.params,
-        "upstream": sorted(memo[p] for p in parents),
-    }, sort_keys=True, default=str)
-    memo[node_id] = hashlib.sha256(payload.encode()).hexdigest()
+    return parents
 
 
 def freeze_fingerprint(graph: Graph, node_id: str) -> str:
@@ -767,6 +778,70 @@ def resolve_entries(
     return entries
 
 
+@dataclass
+class RestoreReport:
+    """What opening a project got back from its cached results, and why the
+    rest did not come (issue 8).
+
+    `cached` counts the manifest's entries for nodes still in the graph.
+    `stale` is the ones whose fingerprint no longer matches — something that
+    made them changed since the file was saved: a node's settings, anything
+    upstream, or the script behind a node, which a new flograph often
+    changes. `starts` is the topmost of those, the ones no other out-of-date
+    entry feeds: where the change is. `unreadable` is a manifest that is
+    there but could not be used — damaged, or written by a newer cache schema.
+    """
+
+    cached: int = 0
+    stale: list[str] = field(default_factory=list)
+    starts: list[str] = field(default_factory=list)
+    unreadable: bool = False
+
+
+def restore_report(graph: Graph, project_path: str | Path,
+                   restored: Iterable[str]) -> RestoreReport:
+    """Account for the entries `register_cache` did not restore.
+
+    Restoring stays forgiving — an entry that does not match is skipped and
+    its node re-runs. It used to be silent as well, and silent is what made a
+    big flow that had lost most of its cache (every node below one whose
+    script changed in an upgrade) look like a bug in the cache. Never raises.
+    """
+    source = open_cache_source(project_path)
+    try:
+        text = source.read_text("manifest.json")
+    finally:
+        source.close()
+    if text is None:
+        return RestoreReport()
+    try:
+        manifest = json.loads(text)
+        nodes = manifest.get("nodes", {})
+        present = [n for n in nodes if n in graph.nodes]
+    except (ValueError, AttributeError, TypeError):
+        return RestoreReport(unreadable=True)
+    if manifest.get("cache_schema") not in SUPPORTED_SCHEMAS:
+        return RestoreReport(cached=len(present), unreadable=True)
+    back = set(restored)
+    stale = [n for n in present if n not in back]
+    # Where it starts: an out-of-date entry with no out-of-date entry above
+    # it — walked through uncached nodes too, so an edit two steps up is not
+    # blamed on the first cached node below it.
+    children: dict[str, list[str]] = {}
+    for node_id in graph.nodes:
+        for parent in _dependencies(graph, node_id):
+            children.setdefault(parent, []).append(node_id)
+    below: set[str] = set()
+    frontier = list(stale)
+    while frontier:
+        for child in children.get(frontier.pop(), ()):
+            if child not in below:
+                below.add(child)
+                frontier.append(child)
+    return RestoreReport(len(present), stale,
+                         [n for n in stale if n not in below])
+
+
 def sidecar_stats(project_path: str | Path) -> tuple[int, int]:
     """How much room the cached results take and what they held uncompressed.
 
@@ -984,61 +1059,58 @@ class ProjectSavePlan:
     """A save snapshotted away from the live graph and cache.
 
     `project` is `graph_to_dict` output; `blobs` is a `plan_cache_save`
-    plan (empty on a mid-run carry-all save); `runs` is the run-history
-    payload. The graph-only export (a `.flowf` file) does not go through
-    here — it is a plain `serialization.save`.
+    plan; `runs` is the run-history payload. The graph-only export (a
+    `.flowf` file) does not go through here — it is a plain
+    `serialization.save`.
     """
 
     project: dict
     blobs: list[tuple[str, CacheEntry, str, bool]]
     runs: dict
-    carry_all: bool = False
 
 
 def plan_project_save(graph: Graph, cache: OutputCache,
-                      history: "RunHistory | None" = None, *,
-                      carry_all: bool = False) -> ProjectSavePlan:
+                      history: "RunHistory | None" = None) -> ProjectSavePlan:
     """The cheap, GUI-thread half of a save. Mirrors `plan_cache_save`,
     which it reuses for the blob half.
 
-    `carry_all` (the mid-run save, where the live cache is mid-flight and
-    must not be snapshotted) plans no blobs — `write_project` copies every
-    one the previous file held instead, re-pickling nothing.
+    The same during a run as outside one. A save made mid-run used to plan
+    no blobs and copy every one the previous file held, manifest and all —
+    so a node re-run since that file was written (after Reset Caches, or
+    over a source that changed) went into the new file with its *old* value
+    under a fingerprint that still matched, and came back as current on
+    reopen with nothing to say otherwise (issue 8). The live cache needs no
+    such caution: the GUI thread owns it, so this snapshot is one instant of
+    it, and a node dirtied for a re-run was evicted then — it is simply
+    absent, and runs again next open.
     """
     runs = {"runs": []}
     if history is not None:
         runs = {"runs": [r.to_dict() for r in reversed(history.all())]}
-    blobs: list[tuple[str, CacheEntry, str, bool]] = []
-    if not carry_all:
-        blobs = plan_cache_save(graph, cache)
-    return ProjectSavePlan(graph_to_dict(graph), blobs, runs, carry_all)
+    return ProjectSavePlan(graph_to_dict(graph), plan_cache_save(graph, cache),
+                           runs)
 
 
 def write_project(project_path: str | Path, plan: ProjectSavePlan, *,
                   prev_path: "str | Path | None" = None,
                   compress: bool = True, progress: Any = None,
-                  carry_all: "bool | None" = None) -> int:
+                  skipped: "list[str] | None" = None) -> int:
     """Write the whole .flograph bundle, atomically. Returns the number of
     cache entries recorded.
 
-      * `project.json`, then each planned blob streamed out (spilled and
-        unchanged ones copied verbatim from `prev_path` — the same path on
-        a plain Save, the old path on Save As), then the manifest and run
-        history.
-      * `carry_all` → every blob is copied from `prev_path` and nothing is
-        re-pickled: the mid-run save, matching the old JSON-only mid-run
-        behaviour.
+    `project.json`, then each planned blob streamed out (spilled and
+    unchanged ones copied verbatim from `prev_path` — the same path on a
+    plain Save, the old path on Save As), then the manifest and run history.
 
     An `OSError` from the writes propagates (a full disk is the user's to
     fix — see the module docstring); anything else while pickling one entry
-    skips just that entry, which then loads dirty next open.
+    skips just that entry, which then loads dirty next open. Pass a list as
+    `skipped` to hear which: their ids are appended, so the caller can say
+    so now rather than leave it to be found on reopen.
     """
-    if carry_all is None:
-        carry_all = plan.carry_all
-
     prev = open_cache_source(prev_path) if prev_path is not None else None
     done = 0
-    total = _carry_total(prev) if carry_all else len(plan.blobs)
+    total = len(plan.blobs)
 
     def tick() -> None:
         nonlocal done
@@ -1049,11 +1121,8 @@ def write_project(project_path: str | Path, plan: ProjectSavePlan, *,
     try:
         with container.BundleWriter(project_path) as writer:
             writer.write_project(plan.project)
-            if carry_all:
-                manifest = _carry_all_blobs(writer, prev, tick)
-            else:
-                manifest = _write_planned_blobs(
-                    writer, plan.blobs, prev, compress, tick)
+            manifest = _write_planned_blobs(
+                writer, plan.blobs, prev, compress, tick, skipped)
             writer.write_manifest(
                 {"cache_schema": CACHE_SCHEMA, "nodes": manifest})
             writer.write_runs(plan.runs)
@@ -1071,20 +1140,6 @@ def write_project(project_path: str | Path, plan: ProjectSavePlan, *,
 
     discard_sidecar(project_path)
     return len(manifest)
-
-
-def _carry_total(prev: "Any") -> int:
-    """How many manifest entries `prev` holds — the progress total for a
-    carry-all save, where nothing is planned up front."""
-    if prev is None:
-        return 0
-    text = prev.read_text("manifest.json")
-    if text is None:
-        return 0
-    try:
-        return len(json.loads(text).get("nodes", {}))
-    except (ValueError, AttributeError):
-        return 0
 
 
 def _pickle_blob(writer: "container.BundleWriter", node_id: str,
@@ -1124,11 +1179,12 @@ def _copy_spilled(writer: "container.BundleWriter", prev: "Any",
 
 def _write_planned_blobs(writer: "container.BundleWriter",
                          plan: list[tuple[str, CacheEntry, str, bool]],
-                         prev: "Any", compress: bool,
-                         tick: "Any") -> dict[str, Any]:
+                         prev: "Any", compress: bool, tick: "Any",
+                         skipped: "list[str] | None" = None) -> dict[str, Any]:
     """The bundle equivalent of write_cache_plan's loop: one manifest entry
     per planned node, its blob either streamed out or (spilled/unchanged)
-    copied from the previous file."""
+    copied from the previous file. A node that gets no entry is appended to
+    `skipped`, when one is given."""
     manifest: dict[str, Any] = {}
     codec = "zlib" if compress else "raw"
     for node_id, entry, fingerprint, frozen in plan:
@@ -1149,6 +1205,8 @@ def _write_planned_blobs(writer: "container.BundleWriter",
         if not entry.resident:
             size = _copy_spilled(writer, prev, node_id)
             if size < 0:
+                if skipped is not None:
+                    skipped.append(node_id)
                 tick()
                 continue        # source blob gone — loads dirty next open
             manifest[node_id] = {**base, "disk_bytes": size}
@@ -1161,40 +1219,11 @@ def _write_planned_blobs(writer: "container.BundleWriter",
         except OSError:
             raise
         except Exception:
+            if skipped is not None:
+                skipped.append(node_id)
             tick()
             continue            # unpicklable output — loads dirty next open
         manifest[node_id] = {**base, "codec": codec,
                              "raw_bytes": raw_bytes, "disk_bytes": disk_bytes}
         tick()
     return manifest
-
-
-def _carry_all_blobs(writer: "container.BundleWriter", prev: "Any",
-                     tick: "Any") -> dict[str, Any]:
-    """Copy every blob the previous file held, verbatim, and keep its
-    manifest entries — the mid-run save. Nothing is re-pickled."""
-    if prev is None:
-        return {}
-    text = prev.read_text("manifest.json")
-    if text is None:
-        return {}
-    try:
-        nodes = json.loads(text).get("nodes", {})
-    except (ValueError, AttributeError):
-        return {}
-    kept: dict[str, Any] = {}
-    for node_id, meta in nodes.items():
-        if is_alias(meta):
-            kept[node_id] = meta
-            tick()
-            continue
-        try:
-            src = prev.blob_open(node_id)
-        except OSError:
-            tick()
-            continue            # blob gone — that node loads dirty next open
-        with src:
-            writer.copy_blob(src, node_id)
-        kept[node_id] = meta
-        tick()
-    return kept
