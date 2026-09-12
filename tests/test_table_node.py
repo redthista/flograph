@@ -279,6 +279,53 @@ def test_table_linked_input_mirrors_upstream_data(registry):
     assert out["qty"].tolist() == [3, 5]
 
 
+def test_table_refuses_a_linked_input_too_big_for_a_grid(registry):
+    """A sheet is Python cells, not a frame: millions of rows cost gigabytes
+    before anything is drawn, which took the app down. The node stops
+    instead, and says where to look at data that size."""
+    import pytest as _pytest
+    from flograph.core import compile_run
+    from flograph.core.sheet import MAX_LINKED_ROWS
+    from tests.conftest import FakeContext
+
+    spec = registry.get("flograph.io.table")
+    run = compile_run(spec.source, "test-table")
+    huge = pd.DataFrame({"n": range(MAX_LINKED_ROWS + 1)})
+    with _pytest.raises(ValueError) as caught:
+        run(FakeContext(params=spec.default_params()), table=huge)
+    message = str(caught.value)
+    assert f"{MAX_LINKED_ROWS:,}" in message and "Show Table" in message
+
+    fine = pd.DataFrame({"n": range(10)})     # under it, nothing changes
+    assert len(run(FakeContext(params=spec.default_params()),
+                   table=fine)) == 10
+
+
+def test_the_card_does_not_build_a_sheet_from_too_big_an_input(registry):
+    """The same guard on the display side. merged_linked_sheet is what the
+    canvas card, a dashboard tile and Import input into table all go
+    through, and it runs on the UI thread."""
+    from types import SimpleNamespace
+    from flograph.core import Graph
+    from flograph.core.sheet import MAX_LINKED_ROWS
+    from flograph.engine.introspect import merged_linked_sheet
+
+    graph = Graph()
+    source = graph.add_node(registry.instantiate("flograph.io.table"))
+    table = graph.add_node(registry.instantiate("flograph.io.table"))
+    graph.connect(source.id, "table", table.id, "table")
+
+    def cache_of(frame):
+        entry = SimpleNamespace(outputs={"table": frame})
+        return SimpleNamespace(get=lambda node_id: entry)
+
+    assert merged_linked_sheet(
+        graph, cache_of(pd.DataFrame({"n": range(3)})), table.id) is not None
+    assert merged_linked_sheet(
+        graph, cache_of(pd.DataFrame({"n": range(MAX_LINKED_ROWS + 1)})),
+        table.id) is None
+
+
 def test_sheet_from_dataframe_conversion(registry):
     from flograph.core.sheet import sheet_from_dataframe
 

@@ -98,6 +98,11 @@ class NodeInstance:
     code_override: Optional[str] = None
     params: dict[str, Any] = field(default_factory=dict)
     pos: tuple[float, float] = (0.0, 0.0)
+    # Which canvas the node is drawn on (G12): "" is the model canvas, else
+    # the page id of a canvas tab. One flow either way — wires cannot cross
+    # between canvases, but Goto/From links, `${variables}`, report embeds
+    # and every run read the whole graph, canvas or not.
+    canvas: str = ""
     label_override: Optional[str] = None
     description: str = ""
     # Skipped by every run, along with everything downstream of it. The node

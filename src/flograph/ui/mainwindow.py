@@ -128,6 +128,17 @@ class MainWindow(QMainWindow):
         # from "already on a dashboard page", which look identical by dock
         # visibility alone once every panel is collapsed.
         self._current_page_id = None
+        # Whether that page is the canvas: the model tab, or another canvas
+        # tab (G12) — the same canvas, whole or fenced to one frame. Kept
+        # rather than looked up, because a canvas tab closed while showing is
+        # already gone from the graph when the switch away from it arrives.
+        self._on_canvas_tab = True
+        # Each canvas tab's own zoom and place (see view_state), by page id,
+        # None for the model tab: they share one view, so each is put back
+        # as it is switched to.
+        self._canvas_view_states: dict = {}
+        # the canvas tab whose zoom and place the view holds right now
+        self._view_shows_tab = None
         self.engine = ExecutionEngine(self.graph, parent=self)
         # A frame's run flags apply to whatever it holds *now*, and only the
         # canvas can answer that — so the engine asks, once per run, rather
@@ -950,7 +961,9 @@ class MainWindow(QMainWindow):
     def set_minimap_enabled(self, enabled: bool) -> None:
         self.minimap_enabled = enabled
         self.settings.setValue("canvas/minimap_enabled", enabled)
-        self.view.minimap.setVisible(enabled)
+        # a frame's tab keeps it put away: it maps the whole flow, and
+        # clicking it would pan out to what the tab is there to hide
+        self.view.minimap.setVisible(enabled and self.view.fence_frame is None)
 
     def set_shape_rail_enabled(self, enabled: bool) -> None:
         """Show the Miro-style shape tool rail over the model canvas. Off by
@@ -1566,6 +1579,11 @@ class MainWindow(QMainWindow):
         self.view.files_dropped.connect(self._add_reader_nodes_for_files)
         self.view.node_context_requested.connect(self._show_node_menu)
         self.view.frame_context_requested.connect(self._show_frame_menu)
+        # a frame's tab (G12): a jump past the frame goes back to the whole
+        # canvas first, and a wire's label at the edge goes to its far end
+        self.view.fence_escape_requested.connect(
+            lambda: self.page_bar.select_page(None))
+        self.view.fence_node_requested.connect(self._go_to_node)
         self.view.shape_context_requested.connect(self._show_shape_menu)
         self.view.shape_draw_requested.connect(self._push_new_shape)
         self.view.order_context_requested.connect(self._show_order_edge_menu)
@@ -1728,6 +1746,16 @@ class MainWindow(QMainWindow):
         import json as _json
         merged = self._merged_linked_sheet(node_id)
         if merged is None:
+            # With a wire attached, the likeliest reason is an input past
+            # what a grid holds — the node's own run says so, but this menu
+            # item would otherwise appear to do nothing at all.
+            from flograph.core.sheet import MAX_LINKED_ROWS
+            source = self._table_import_source(node_id)
+            if source is not None and len(source) > MAX_LINKED_ROWS:
+                self.show_status(
+                    f"Too big for a grid: {len(source):,} rows, and a Table "
+                    f"holds {MAX_LINKED_ROWS:,}. Use Show Table to look at "
+                    f"it, or filter it down first.", 6000)
             return
         self.undo_stack.push(SetParamCommand(
             self.graph, node_id, "data", _json.dumps(merged), merge=False))
@@ -1905,6 +1933,12 @@ class MainWindow(QMainWindow):
         events.page_removed.connect(self._on_page_removed)
         events.page_changed.connect(self._on_page_changed)
         events.pages_reordered.connect(self._on_pages_reordered)
+        # a frame's tab follows its frame: moved, resized, folded, deleted,
+        # or brought back by an undo (G12). After the scene's own handlers,
+        # which were connected first, so the frame's item is already current.
+        for signal in (events.frame_added, events.frame_removed,
+                       events.frame_changed):
+            signal.connect(lambda *_: self.view.refresh_fence())
         self.page_bar.add_page_requested.connect(self._add_page)
         self.page_bar.rename_page_requested.connect(self._rename_page)
         self.page_bar.delete_page_requested.connect(self._delete_page)
@@ -1953,7 +1987,12 @@ class MainWindow(QMainWindow):
         self.page_bar.select_page(page_id)
 
     def _on_page_added(self, page: Page) -> None:
+        from flograph.core.page_nav import CANVAS_KIND
         self._refresh_page_links()
+        if page.kind == CANVAS_KIND:
+            # a view of the model canvas, not a widget of its own (G12)
+            self.page_bar.add_page_tab(page)
+            return
         if page.kind == "report":
             self._add_report_page(page)
             return
@@ -2227,6 +2266,7 @@ class MainWindow(QMainWindow):
             widget.dispose()  # before deletion: core events hold strong refs
             self._canvas_stack.removeWidget(widget)
             widget.deleteLater()
+        self._canvas_view_states.pop(page_id, None)
         self.page_bar.remove_page_tab(page_id)
         self._refresh_page_links()
 
@@ -2282,10 +2322,17 @@ class MainWindow(QMainWindow):
         # read before the stack moves: choosing a page is also a way off the
         # start screen, and the docks need to know where they are coming from
         was_away = self._docks_away()
+        if self._on_canvas_tab:
+            self._canvas_view_states[self._current_page_id] = \
+                self.view.view_state()
         widget = self._dashboard_pages.get(page_id) if page_id else None
         self._canvas_stack.setCurrentWidget(
             widget if widget is not None else self.view)
         self._current_page_id = page_id
+        canvas_page = self._canvas_page(page_id)
+        self._on_canvas_tab = page_id is None or canvas_page is not None
+        if self._on_canvas_tab:
+            self._show_canvas_tab(page_id, canvas_page)
         self._place_model_docks(was_away)
         self._sync_start_screen_chrome()
         self._refresh_zoom_indicator()
@@ -2296,8 +2343,152 @@ class MainWindow(QMainWindow):
     def _docks_away(self) -> bool:
         """Whether the model-only docks are put away for what is showing: a
         dashboard or report page has no node selection to configure, and the
-        start screen has no canvas at all, so both free up the screen."""
-        return self._current_page_id is not None or self.start_screen_visible
+        start screen has no canvas at all, so both free up the screen. A
+        canvas tab, whole or one frame, is the canvas, so it keeps them."""
+        return not self._on_canvas_tab or self.start_screen_visible
+
+    # ----------------------------------------------------- canvas tabs (G12)
+    #
+    # More tabs onto the model canvas: the whole of it (+ ▸ Model canvas),
+    # or one frame (a frame's Open in New Tab). All of them are this one
+    # view, fenced or not, at a zoom and place kept per tab.
+
+    def _canvas_page(self, page_id):
+        """The canvas tab `page_id` names, or None for any other page."""
+        from flograph.core.page_nav import CANVAS_KIND
+        page = self.graph.pages.get(page_id) if page_id else None
+        return page if page is not None and page.kind == CANVAS_KIND else None
+
+    def _frame_tab_of(self, frame_id: str):
+        """The id of the tab showing `frame_id`, or None if it has none."""
+        from flograph.core.page_nav import CANVAS_KIND
+        return next((page.id for page in self.graph.pages.values()
+                     if page.kind == CANVAS_KIND and page.frame == frame_id),
+                    None)
+
+    def _open_frame_tab(self, frame_id: str) -> None:
+        """Right-click a frame ▸ Open in New Tab. One tab per frame: asking
+        again goes to the tab it already has."""
+        from flograph.core.page_nav import CANVAS_KIND
+        frame = self.graph.frames.get(frame_id)
+        if frame is None:
+            return
+        page_id = self._frame_tab_of(frame_id)
+        if page_id is None:
+            page = Page(id=uuid.uuid4().hex, title=frame.title or "Frame",
+                        kind=CANVAS_KIND, frame=frame_id, color=frame.color)
+            self.undo_stack.push(AddPageCommand(self.graph, page))
+            page_id = page.id
+        self.page_bar.select_page(page_id)
+
+    def _close_canvas_tab(self, page) -> None:
+        """Close a canvas tab. One that only *looks at* a frame closes and
+        leaves the canvas alone. A canvas of its own takes what is on it —
+        once the tab is gone there is no other way to those nodes — after
+        saying how many. One undo step brings back the lot."""
+        if page.frame:
+            self.undo_stack.push(RemovePageCommand(self.graph, page.id))
+            return
+        node_ids = [n.id for n in self.graph.nodes.values()
+                    if n.canvas == page.id]
+        frame_ids = [f.id for f in self.graph.frames.values()
+                     if f.canvas == page.id]
+        shape_ids = [s.id for s in self.graph.shapes.values()
+                     if s.canvas == page.id]
+        if node_ids or frame_ids or shape_ids:
+            answer = QMessageBox.question(
+                self, "Close canvas",
+                f"Close “{page.title}” and delete the {len(node_ids)} node(s) "
+                f"on it?\n\nNothing else can reach them once the tab has "
+                f"gone. Undo brings the canvas and everything on it back.")
+            if answer != QMessageBox.Yes:
+                return
+        self.undo_stack.beginMacro("close canvas")
+        if node_ids or frame_ids or shape_ids:
+            self.scene.delete_items(node_ids, [], frame_ids, shape_ids,
+                                    confirm=False)
+        self.undo_stack.push(RemovePageCommand(self.graph, page.id))
+        self.undo_stack.endMacro()
+
+    def _canvas_payload(self, canvas_id: str) -> Optional[dict]:
+        """Everything on one canvas, in the shape a copy makes — so
+        duplicating a canvas tab (G12) goes through the paste path, which
+        already builds fresh ids and re-points the wires among them."""
+        nodes = [n for n in self.graph.nodes.values() if n.canvas == canvas_id]
+        frames = [f for f in self.graph.frames.values()
+                  if f.canvas == canvas_id]
+        shapes = [s for s in self.graph.shapes.values()
+                  if s.canvas == canvas_id]
+        if not nodes and not frames and not shapes:
+            return None
+        ids = {n.id for n in nodes}
+        frame_ids = {f.id for f in frames}
+        return {
+            _CLIPBOARD_KEY: 1,
+            "nodes": [{
+                "id": n.id, "type": n.type_id, "pos": list(n.pos),
+                "params": dict(n.params), "code": n.code_override,
+                "label": n.label_override, "color": n.color,
+                "description": n.description,
+            } for n in nodes],
+            "connections": [{
+                "src": [c.src_node, c.src_port],
+                "dst": [c.dst_node, c.dst_port],
+            } for c in self.graph.connections.values()
+                if c.src_node in ids and c.dst_node in ids],
+            "frames": [{
+                "id": f.id, "root": True, "title": f.title,
+                "rect": list(f.rect), "color": f.color,
+                "collapsed": f.collapsed,
+                "expanded_size": (list(f.expanded_size)
+                                  if f.expanded_size else None),
+                "members": [m for m in f.members if m in ids],
+                "member_frames": [m for m in f.member_frames
+                                  if m in frame_ids],
+            } for f in frames],
+            "shapes": [{
+                "kind": s.kind, "rect": list(s.rect),
+                "hidden": s.hidden, "stroke": s.stroke, "fill": s.fill,
+                "stroke_width": s.stroke_width, "dashed": s.dashed,
+                "text": s.text, "text_color": s.text_color,
+                "font_size": s.font_size, "flip": s.flip,
+            } for s in shapes],
+        }
+
+    def _show_canvas_tab(self, page_id, canvas_page) -> None:
+        """Put the shared canvas view the way this tab left it: fenced to the
+        tab's frame or not, at the zoom and place it had. A frame's tab seen
+        for the first time opens on its frame; a whole-canvas tab opens
+        wherever the canvas was, which is the view it was made from."""
+        fence = (canvas_page.frame or None) if canvas_page else None
+        if canvas_page is None:
+            canvas_id = ""                       # the model canvas
+        elif fence is not None:
+            # a frame's tab fences whichever canvas the frame itself is on
+            frame = self.graph.frames.get(fence)
+            canvas_id = getattr(frame, "canvas", "") if frame else ""
+        else:
+            canvas_id = canvas_page.id           # a canvas of its own
+        self.scene.set_canvas(canvas_id)
+        self.view.set_fence(fence)
+        self.view.minimap.setVisible(self.minimap_enabled and fence is None)
+        if page_id == self._view_shows_tab:
+            return      # back from a dashboard: the view never moved
+        self._view_shows_tab = page_id
+        state = self._canvas_view_states.get(page_id)
+        if state is not None:
+            self.view.restore_view_state(state)
+        elif fence is not None:
+            self.view.scene().clearSelection()
+            self.view.frame_content()
+
+    def _onto_the_canvas(self) -> None:
+        """Step aside to the model canvas from a dashboard or report page,
+        for something only the canvas can do. A frame's tab already is the
+        canvas, so it stays; a jump to something outside the frame takes
+        itself out (NodeGraphView._escape_fence_for)."""
+        if not self._on_canvas_tab:
+            self.page_bar.select_page(None)
 
     def _place_model_docks(self, was_away: bool) -> None:
         """Hide the model docks, or bring them back, to match what is showing
@@ -2332,9 +2523,11 @@ class MainWindow(QMainWindow):
         self.page_bar.select_page(page.id)
 
     def _next_page_title(self, kind: str = "dashboard") -> str:
-        stem = "Report" if kind == "report" else "Page"
+        stem = {"report": "Report", "canvas": "Model"}.get(kind, "Page")
         titles = {p.title for p in self.graph.pages.values()}
         n = len(self.graph.pages) + 1
+        if kind == "canvas":
+            n = max(n, 2)       # the Model tab itself is the first
         while f"{stem} {n}" in titles:
             n += 1
         return f"{stem} {n}"
@@ -2432,13 +2625,20 @@ class MainWindow(QMainWindow):
         self.undo_stack.endMacro()
 
     def _duplicate_page(self, page_id: str) -> None:
-        from flograph.core.page_nav import gather_groups
+        from flograph.core.page_nav import CANVAS_KIND, gather_groups
+        page = self.graph.pages.get(page_id)
         # one step: the copy lands last, and a copy of a grouped page then
         # moves in beside the rest of its group rather than starting a
         # second section of the same name at the end of the bar
         self.undo_stack.beginMacro("duplicate page")
         self.undo_stack.push(DuplicatePageCommand(self.graph, page_id))
         dup_id = self._last_duped_id
+        if page is not None and page.kind == CANVAS_KIND and not page.frame:
+            # a canvas *is* what is on it, so the copy gets copies of it all
+            payload = self._canvas_payload(page_id)
+            if payload is not None:
+                self._insert_payload(payload, offset=(0.0, 0.0),
+                                     label="duplicate canvas", canvas=dup_id)
         order = list(self.graph.pages)
         gathered = gather_groups(order, self._page_groups())
         if gathered != order:
@@ -2451,8 +2651,12 @@ class MainWindow(QMainWindow):
         return list(self.graph.pages.keys())[-1]
 
     def _delete_page(self, page_id: str) -> None:
+        from flograph.core.page_nav import CANVAS_KIND
         page = self.graph.pages.get(page_id)
         if page is None:
+            return
+        if page.kind == CANVAS_KIND:
+            self._close_canvas_tab(page)
             return
         if page.tiles:
             answer = QMessageBox.question(
@@ -3035,8 +3239,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- add node
 
     def _add_node_at(self, type_id: str, scene_pos: QPointF) -> None:
-        node = self.registry.instantiate(
-            type_id, pos=(scene_pos.x(), scene_pos.y()))
+        node = self.scene.place_here(self.registry.instantiate(
+            type_id, pos=(scene_pos.x(), scene_pos.y())))
         self.undo_stack.push(AddNodeCommand(self.graph, node))
 
     def _add_node_at_view_center(self, type_id: str) -> None:
@@ -3053,10 +3257,10 @@ class MainWindow(QMainWindow):
             "drop file" if len(targets) == 1 else "drop files")
         new_ids = []
         for i, (path, (type_id, param_name)) in enumerate(targets):
-            node = self.registry.instantiate(
+            node = self.scene.place_here(self.registry.instantiate(
                 type_id,
                 pos=(scene_pos.x() + i * PASTE_OFFSET,
-                     scene_pos.y() + i * PASTE_OFFSET))
+                     scene_pos.y() + i * PASTE_OFFSET)))
             self.undo_stack.push(AddNodeCommand(self.graph, node))
             self.undo_stack.push(SetParamCommand(
                 self.graph, node.id, param_name, path))
@@ -3187,9 +3391,9 @@ class MainWindow(QMainWindow):
         # wire-drop flow: add the node and connect it to the dragged wire
         self._pending_wire = None
         src_node_id, port_name, from_output, port_type = pending
-        node = self.registry.instantiate(
+        node = self.scene.place_here(self.registry.instantiate(
             type_id, pos=(self._palette_scene_pos.x(),
-                          self._palette_scene_pos.y()))
+                          self._palette_scene_pos.y())))
         from flograph.core import can_connect
         if from_output:
             match = next((p for p in node.spec.inputs
@@ -3331,6 +3535,10 @@ class MainWindow(QMainWindow):
         run_action.setEnabled(bool(targets))
         if not targets:
             run_action.setToolTip("This frame holds no nodes to run.")
+        # G12: just this frame, on a tab of its own
+        tab_action = menu.addAction(
+            "Go to Its Tab" if self._frame_tab_of(frame_id)
+            else "Open in New Tab")
         menu.addSeparator()
         # The same two run flags the node menu offers, carried by the frame
         # itself rather than stamped onto the nodes that happen to be inside
@@ -3380,6 +3588,8 @@ class MainWindow(QMainWindow):
                 item.toggle_collapsed()
         elif chosen is run_action:
             self._on_frame_run_requested(frame_id)
+        elif chosen is tab_action:
+            self._open_frame_tab(frame_id)
         elif chosen is disable_action:
             self.undo_stack.push(SetFrameFlagCommand(
                 self.graph, frame_id, "active", all_off,
@@ -4053,15 +4263,18 @@ class MainWindow(QMainWindow):
         frame and shape on the model canvas.
 
         Selecting is a model-canvas act, so a dashboard or report page steps
-        aside for it, on the same reasoning as _find_node."""
-        if self.page_bar.current_page_id() is not None:
-            self.page_bar.select_page(None)
+        aside for it, on the same reasoning as _find_node. A frame's tab
+        selects what it shows, never what it has painted over."""
+        self._onto_the_canvas()
+        holds = self.view.fence_holds
         for item in self.scene.node_items.values():
-            item.setSelected(True)
+            if holds(item):
+                item.setSelected(True)
         for item in self.scene.frame_items.values():
-            item.setSelected(True)
+            if holds(item):
+                item.setSelected(True)
         for item in self.scene.shape_items.values():
-            if item.isVisible():
+            if item.isVisible() and holds(item):
                 item.setSelected(True)
 
     def _find_node(self) -> None:
@@ -4071,8 +4284,7 @@ class MainWindow(QMainWindow):
         aside for it: opening the bar over a hidden canvas would look like
         the menu item doing nothing.
         """
-        if self.page_bar.current_page_id() is not None:
-            self.page_bar.select_page(None)
+        self._onto_the_canvas()
         self.view.open_search()
 
     def _go_to_node(self, node_id: str) -> None:
@@ -4084,8 +4296,7 @@ class MainWindow(QMainWindow):
         Jumping is a model-canvas act, so a dashboard or report page steps
         aside for it, on the same reasoning as _find_node: the menu item
         would otherwise appear to do nothing over a hidden canvas."""
-        if self.page_bar.current_page_id() is not None:
-            self.page_bar.select_page(None)
+        self._onto_the_canvas()
         self.view.go_to_node(node_id)
 
     def _go_to_use(self, use) -> None:
@@ -4140,8 +4351,7 @@ class MainWindow(QMainWindow):
         """A row clicked in the Navigator: bring the model canvas to it. A node
         folded inside a collapsed frame lands on the frame — go_to_node sorts
         that out — and a frame row lands on the frame."""
-        if self.page_bar.current_page_id() is not None:
-            self.page_bar.select_page(None)
+        self._onto_the_canvas()
         if kind == "frame":
             self.view.go_to_frame(ident)
         elif kind == "shape":
@@ -4248,6 +4458,7 @@ class MainWindow(QMainWindow):
         nothing.
         """
         from .commands import AddFrameCommand, RestackCommand
+        self.scene.place_here(frame)     # the canvas it was drawn on (G12)
         rect = QRectF(*frame.rect)
         order = self.graph.stacking_order("frame")
         inside = [fid for fid in order
@@ -4291,9 +4502,10 @@ class MainWindow(QMainWindow):
     def _push_new_shape(self, kind: str, rect: QRectF) -> None:
         from flograph.core import Shape
         from .commands import AddShapeCommand
-        shape = Shape(id=uuid.uuid4().hex, kind=kind,
-                      rect=(rect.x(), rect.y(),
-                            max(8.0, rect.width()), max(1.0, rect.height())))
+        shape = self.scene.place_here(Shape(
+            id=uuid.uuid4().hex, kind=kind,
+            rect=(rect.x(), rect.y(),
+                  max(8.0, rect.width()), max(1.0, rect.height()))))
         self.undo_stack.push(AddShapeCommand(self.graph, shape))
         item = self.scene.shape_items.get(shape.id)
         if item is not None:
@@ -4612,8 +4824,8 @@ class MainWindow(QMainWindow):
         if scene_pos is None:
             scene_pos = self.view.mapToScene(
                 self.view.viewport().rect().center())
-        node = self.registry.instantiate(
-            IMAGE_TYPE, pos=(scene_pos.x(), scene_pos.y()))
+        node = self.scene.place_here(self.registry.instantiate(
+            IMAGE_TYPE, pos=(scene_pos.x(), scene_pos.y())))
         self.undo_stack.beginMacro("paste image")
         self.undo_stack.push(AddNodeCommand(self.graph, node))
         self.undo_stack.push(
@@ -4666,7 +4878,8 @@ class MainWindow(QMainWindow):
 
     def _insert_payload(self, payload: dict,
                         offset: Optional[tuple] = None,
-                        label: str = "paste") -> None:
+                        label: str = "paste",
+                        canvas: Optional[str] = None) -> None:
         """Stamp a clipboard-shaped fragment into the graph with fresh ids.
 
         `offset` shifts everything it contains; the default nudge is what
@@ -4757,6 +4970,11 @@ class MainWindow(QMainWindow):
                 flip=bool(entry.get("flip", False))))
         if not new_nodes and not new_frames and not new_shapes:
             return None
+        # onto the canvas being shown, or the one named — a canvas tab
+        # duplicated stamps its copies onto the copy (G12)
+        landing = self.scene.canvas_id if canvas is None else canvas
+        for item in (*new_nodes, *new_frames, *new_shapes):
+            item.canvas = landing
         self.undo_stack.beginMacro(label)
         for node in new_nodes:
             self.undo_stack.push(AddNodeCommand(self.graph, node))
@@ -5200,6 +5418,10 @@ class MainWindow(QMainWindow):
         self.scene._suspend_collapse_refresh = True
         for page_id in list(self.graph.pages):
             self.graph.remove_page(page_id)
+        # where the old project's canvas tabs stood means nothing to this one
+        self._canvas_view_states.clear()
+        self._view_shows_tab = None
+        self.scene.set_canvas("")
         for frame_id in list(self.graph.frames):
             self.graph.remove_frame(frame_id)
         for node_id in list(self.graph.nodes):

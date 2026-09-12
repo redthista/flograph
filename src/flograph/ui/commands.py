@@ -1072,6 +1072,7 @@ class DuplicatePageCommand(QUndoCommand):
             title=f"{src.title} (copy)",
             kind=src.kind,
             body=src.body,
+            frame=src.frame,
             tiles=new_tiles,
             color=src.color,
             # a copy lands straight after its original (the window moves it

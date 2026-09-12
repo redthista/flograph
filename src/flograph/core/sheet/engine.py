@@ -88,6 +88,18 @@ def _import_cell_text(value, col_type: str) -> str:
     return str(value)
 
 
+#: How many rows a Table grid will take from a linked input.
+#:
+#: A sheet is Python cell objects, not a frame: importing one costs a cell
+#: per value, merging holds a second copy, and evaluating holds a third —
+#: measured at ~7 GB for 5 million rows of five columns, before anything is
+#: drawn, and more for a wider file. Past this the app dies rather than
+#: draws, so the node refuses and says so instead. Show Table displays data
+#: of any size; this node is a spreadsheet, and a spreadsheet has a size
+#: past which it is the wrong tool.
+MAX_LINKED_ROWS = 200_000
+
+
 def sheet_from_dataframe(frame) -> Sheet:
     """Import a pandas DataFrame into a typed Sheet: dtypes map to column
     types and values become cell text (dates as ISO, bools as TRUE/FALSE).

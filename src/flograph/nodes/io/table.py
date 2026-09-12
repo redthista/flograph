@@ -26,6 +26,11 @@ columns the input owns (matched by name), while columns you add on top
 survive — their formulas fill down as rows grow. Edits to input-owned
 cells are overwritten on the next run; put your work in your own columns.
 
+A grid holds up to 200,000 linked rows. Past that the node stops with a
+message rather than turning millions of rows into spreadsheet cells, which
+costs gigabytes of memory before anything is drawn — use Show Table to look
+at data that size, or filter it down before the grid.
+
 Disconnect the input and the contents stay — whatever the grid was showing
 is written into the table as your own cells, so the node carries the data
 from there on. Undo puts the wire and the old sheet back together. Right-
@@ -93,6 +98,19 @@ def run(ctx, table=None):
     if table is not None:
         # linked mode: input columns refresh, user-added columns survive
         from flograph.core.sheet import merge_linked_sheet
+        from flograph.core.sheet.engine import MAX_LINKED_ROWS
+        if len(table) > MAX_LINKED_ROWS:
+            # Every row would become spreadsheet cells — held three times
+            # over while the grid refreshes — which is gigabytes before
+            # anything is drawn. Refusing is the kindest answer: the flow
+            # stops on this node with a way forward, rather than the whole
+            # app going down with the data still unseen.
+            raise ValueError(
+                f"a Table grid holds up to {MAX_LINKED_ROWS:,} rows, and this "
+                f"input has {len(table):,}. Every row becomes spreadsheet "
+                f"cells, which needs gigabytes of memory before anything is "
+                f"drawn. Use Show Table to look at data this size, or filter "
+                f"it down before the grid.")
         base = sheet_from_dataframe(table)
         sheet = merge_linked_sheet(base, parse_sheet(ctx.params["data"]))
         extra = sheet.n_cols - base.n_cols

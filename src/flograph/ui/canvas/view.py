@@ -3,10 +3,17 @@ drag & drop, the Tab palette, node keyboard shortcuts, minimap, and the
 node context menu."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication, QRubberBand
+from dataclasses import dataclass
+from typing import Optional
 
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import (QColor, QCursor, QFont, QFontMetricsF, QKeyEvent,
+                           QMouseEvent, QPainter, QPainterPath, QPen,
+                           QTransform)
+from PySide6.QtWidgets import (QApplication, QGraphicsView, QRubberBand,
+                               QToolTip)
+
+from .. import theme
 from .base_view import (ZoomPanGraphicsView, edge_scroll_delta,
                         EDGE_SCROLL_TICK_MS)
 from .file_drop import resolve_dropped_path
@@ -18,6 +25,64 @@ from .stacking import layer_action_for
 # because a letter next to nothing important is cheap to hold with the left
 # hand while the right one is on the mouse.
 DEFAULT_REVEAL_PORTS_KEY = Qt.Key_Q
+
+# A frame's own tab (G12): how far past the frame's edges the view may pan,
+# in scene units — room to breathe at the edge, not a way back to the rest.
+FENCE_PAD = 600.0
+# the labels on wires leaving a fenced frame, in screen pixels
+STUB_GAP = 6.0
+STUB_PAD_X = 8.0
+STUB_PAD_Y = 3.0
+STUB_MAX_W = 200.0
+
+
+@dataclass(frozen=True)
+class FenceStub:
+    """A wire that leaves a fenced frame, at the point it crosses the edge."""
+    conn_id: str
+    node_id: str        # the node at the far end, outside the frame
+    text: str
+    point: QPointF      # where the wire crosses the frame's edge, scene coords
+    outgoing: bool      # True: the wire goes out of the frame to that node
+
+
+def edge_crossing(path: QPainterPath, rect: QRectF) -> Optional[float]:
+    """How far along `path` (0..1) it crosses `rect`'s edge, when exactly one
+    of its ends lies inside; None when both ends are on the same side.
+
+    A binary search on the two ends' sides: a wire that weaves out and back
+    in has more than one crossing, and any of them is a fair place to say
+    where it goes."""
+    if path.isEmpty():
+        return None
+    start_in = rect.contains(path.pointAtPercent(0.0))
+    if start_in == rect.contains(path.pointAtPercent(1.0)):
+        return None
+    lo, hi = 0.0, 1.0
+    for _ in range(16):
+        mid = (lo + hi) / 2
+        if rect.contains(path.pointAtPercent(mid)) == start_in:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def _stub_box(point: QPointF, edges: QRectF, w: float, h: float) -> QRectF:
+    """A label's box, just outside whichever edge of `edges` (the frame, in
+    viewport pixels) `point` is on — so it covers painted-over canvas,
+    never a node inside the frame."""
+    side = min((abs(point.x() - edges.left()), "left"),
+               (abs(point.x() - edges.right()), "right"),
+               (abs(point.y() - edges.top()), "top"),
+               (abs(point.y() - edges.bottom()), "bottom"))[1]
+    if side == "right":
+        return QRectF(point.x() + STUB_GAP, point.y() - h / 2, w, h)
+    if side == "left":
+        return QRectF(point.x() - STUB_GAP - w, point.y() - h / 2, w, h)
+    if side == "top":
+        return QRectF(point.x() - w / 2, point.y() - STUB_GAP - h, w, h)
+    return QRectF(point.x() - w / 2, point.y() + STUB_GAP, w, h)
 
 
 class NodeGraphView(ZoomPanGraphicsView):
@@ -33,6 +98,11 @@ class NodeGraphView(ZoomPanGraphicsView):
     # An order edge only: a data wire has never had a menu, and the one this
     # opens is about what an order edge *is*.
     order_context_requested = Signal(str, QPoint)  # conn_id, global pos
+    # A frame's tab (G12): a jump aimed outside the fenced frame, which the
+    # window answers by going back to the whole canvas; and a label at the
+    # fence edge clicked, naming the node the wire goes to out there.
+    fence_escape_requested = Signal()
+    fence_node_requested = Signal(str)             # node_id
 
     def __init__(self, scene: NodeGraphScene, parent=None) -> None:
         super().__init__(scene, parent)
@@ -67,6 +137,238 @@ class NodeGraphView(ZoomPanGraphicsView):
         self._shape_draw_kind: "str | None" = None
         self._draw_origin: "QPoint | None" = None
         self._draw_band: "QRubberBand | None" = None
+
+        # the frame a frame's tab fences this view to (G12), None for the
+        # whole canvas; and where the last paint put the labels on wires
+        # leaving it, as (viewport rect, node id, text)
+        self._fence_frame: "str | None" = None
+        self._stub_hits: list = []
+        self._stub_cursor = False
+
+    # ------------------------------------------------------- the fence (G12)
+    #
+    # A frame's tab is this same view, on this same scene, fenced to the
+    # frame: everything outside it is painted over and takes no clicks, the
+    # view pans no further than a margin past its edges, and each wire that
+    # leaves it gets a label at the edge naming the node it goes to. One view
+    # and one scene rather than a copy of either, so an edit in the tab is an
+    # edit to the flow by the ordinary route, and every shortcut, menu and
+    # dock that works on the canvas works there without knowing about tabs.
+
+    @property
+    def fence_frame(self) -> "str | None":
+        return self._fence_frame
+
+    def set_fence(self, frame_id: "str | None") -> None:
+        """Fence the view to one frame, or (None) give it the whole canvas."""
+        if frame_id != self._fence_frame:
+            self._fence_frame = frame_id
+            self._stub_hits = []
+            self._set_stub_cursor(False)
+            # the edge labels follow wires that move without the edge being
+            # repainted, so a fenced view redraws whole — it only shows a
+            # frame's worth of flow, which keeps that cheap
+            self.setViewportUpdateMode(
+                QGraphicsView.FullViewportUpdate if frame_id is not None
+                else QGraphicsView.BoundingRectViewportUpdate)
+        self.refresh_fence()
+
+    def fence_rect(self) -> Optional[QRectF]:
+        """The fenced frame's rectangle in scene coordinates: None when the
+        view has the whole canvas, a null rect when the frame is gone."""
+        if self._fence_frame is None:
+            return None
+        item = self.scene().frame_items.get(self._fence_frame)
+        return item.scene_rect() if item is not None else QRectF()
+
+    def refresh_fence(self) -> None:
+        """Follow the frame after it moved, resized, folded, went or came
+        back: the span the view can pan over is the frame plus a margin."""
+        rect = self.fence_rect()
+        if rect is None:
+            self.setSceneRect(QRectF())     # null: follow the scene's again
+        elif not rect.isNull():
+            self.setSceneRect(rect.adjusted(-FENCE_PAD, -FENCE_PAD,
+                                            FENCE_PAD, FENCE_PAD))
+        self.viewport().update()
+
+    def fence_contains(self, scene_pos: QPointF) -> bool:
+        rect = self.fence_rect()
+        return rect is None or rect.contains(scene_pos)
+
+    def fence_holds(self, item) -> bool:
+        """Whether `item` is part of what the fenced view shows: a node or a
+        shape that reaches into the frame, or a frame lying within it — a
+        frame around it is the rest of the flow, and selecting that from
+        here would put it one Delete away without ever being seen."""
+        rect = self.fence_rect()
+        if rect is None:
+            return True
+        if rect.isNull():
+            return False
+        from .frame_item import FrameItem
+        if isinstance(item, FrameItem):
+            return rect.contains(item.scene_rect())
+        return rect.intersects(item.sceneBoundingRect())
+
+    def _escape_fence_for(self, item) -> None:
+        """A jump to something outside the fenced frame leaves the frame's
+        tab for the whole canvas first: landing on painted-over canvas would
+        look like the jump doing nothing."""
+        rect = self.fence_rect()
+        if rect is not None and not rect.contains(
+                item.sceneBoundingRect().center()):
+            self.fence_escape_requested.emit()
+
+    def fence_stubs(self) -> list:
+        """A FenceStub for every drawn wire with one end in the fenced frame
+        and the other outside it."""
+        rect = self.fence_rect()
+        if rect is None or rect.isNull():
+            return []
+        scene = self.scene()
+        stubs = []
+        for conn_id, item in scene.connection_items.items():
+            if not item.isVisible():
+                continue
+            path = item.mapToScene(item.path())
+            t = edge_crossing(path, rect)
+            if t is None:
+                continue
+            conn = item.conn
+            outgoing = rect.contains(path.pointAtPercent(0.0))
+            far = conn.dst_node if outgoing else conn.src_node
+            node = scene.graph.nodes.get(far)
+            name = node.label if node is not None else far
+            stubs.append(FenceStub(conn_id, far,
+                                   f"→ {name}" if outgoing else f"← {name}",
+                                   path.pointAtPercent(t), outgoing))
+        return stubs
+
+    def _stub_at(self, pos) -> "tuple | None":
+        point = QPointF(pos)
+        for hit in self._stub_hits:
+            if hit[0].contains(point):
+                return hit
+        return None
+
+    def _set_stub_cursor(self, on: bool) -> None:
+        if on != self._stub_cursor:
+            self._stub_cursor = on
+            if on:
+                self.viewport().setCursor(Qt.PointingHandCursor)
+            else:
+                self.viewport().unsetCursor()
+
+    def _fence_blocks(self, event) -> bool:
+        """A press the fence answers itself. A click on an edge label goes to
+        the node it names; anything else outside the frame is swallowed —
+        what is out there is painted over, so it must not be picked either.
+        A middle-drag or a Space pan still pans from anywhere."""
+        if (self._fence_frame is None or self._space_held
+                or event.button() == Qt.MiddleButton):
+            return False
+        pos = event.position().toPoint()
+        hit = self._stub_at(pos)
+        if hit is not None:
+            if event.button() == Qt.LeftButton:
+                self.fence_node_requested.emit(hit[1])
+            event.accept()
+            return True
+        if self.fence_contains(self.mapToScene(pos)):
+            return False
+        event.accept()
+        return True
+
+    def _drop_fenced_out_selection(self) -> None:
+        """A drag-select stretched past the frame's edge must not catch what
+        is painted over out there."""
+        for item in self.scene().selectedItems():
+            if not self.fence_holds(item):
+                item.setSelected(False)
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawForeground(painter, rect)
+        fence = self.fence_rect()
+        if fence is None:
+            return
+        outside = QPainterPath()
+        outside.addRect(rect)
+        if not fence.isNull():
+            inside = QPainterPath()
+            inside.addRect(fence)
+            outside = outside.subtracted(inside)
+        painter.fillPath(outside, theme.CANVAS_BG)
+        # the labels in screen pixels, the size of the rest of the chrome
+        # whatever the zoom — map labels, not scene text
+        painter.save()
+        painter.resetTransform()
+        painter.setRenderHint(QPainter.Antialiasing)
+        font = QFont(self.font())
+        font.setPointSizeF(9.0)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        if fence.isNull():
+            self._stub_hits = []
+            painter.setPen(theme.NODE_SUBTEXT)
+            painter.drawText(
+                QRectF(self.viewport().rect()), Qt.AlignCenter | Qt.TextWordWrap,
+                "The frame this tab shows has been deleted.\n"
+                "Undo brings it back; right-click the tab to close it.")
+            painter.restore()
+            return
+        edges = QRectF(self.mapFromScene(fence.topLeft()),
+                       self.mapFromScene(fence.bottomRight()))
+        hits = []
+        for stub in self.fence_stubs():
+            text = metrics.elidedText(stub.text, Qt.ElideRight, STUB_MAX_W)
+            w = metrics.horizontalAdvance(text) + 2 * STUB_PAD_X
+            h = metrics.height() + 2 * STUB_PAD_Y
+            box = _stub_box(QPointF(self.mapFromScene(stub.point)), edges, w, h)
+            # several wires leaving side by side: step each label along the
+            # edge off the ones already placed, rather than stack them
+            along_x = box.center().y() < edges.top() or \
+                box.center().y() > edges.bottom()
+            for _ in range(12):
+                if not any(box.intersects(other[0]) for other in hits):
+                    break
+                box.translate(w + 4 if along_x else 0, 0 if along_x else h + 3)
+            painter.setPen(QPen(QColor(theme.NODE_SUBTEXT), 1.0))
+            painter.setBrush(theme.NODE_BODY)
+            painter.drawRoundedRect(box, h / 2, h / 2)
+            painter.setPen(theme.NODE_TEXT)
+            painter.drawText(box, Qt.AlignCenter, text)
+            hits.append((box, stub.node_id, stub.text))
+        self._stub_hits = hits
+        painter.restore()
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() == QEvent.ToolTip and self._fence_frame is not None:
+            hit = self._stub_at(event.pos())
+            if hit is not None:
+                QToolTip.showText(
+                    event.globalPos(),
+                    f"{hit[2]}\nClick to go to it on the whole canvas.",
+                    self.viewport())
+                return True
+            if not self.fence_contains(self.mapToScene(event.pos())):
+                QToolTip.hideText()     # nothing out there to explain
+                return True
+        return super().viewportEvent(event)
+
+    # ------------------------------------------------ each tab's own place
+
+    def view_state(self) -> tuple:
+        """Where the view stands — zoom and the scene point at its centre —
+        so a tab that shares it can put it back (G12)."""
+        return (self.zoom,
+                self.mapToScene(self.viewport().rect().center()))
+
+    def restore_view_state(self, state: tuple) -> None:
+        zoom, center = state
+        self.setTransform(QTransform.fromScale(zoom, zoom))
+        self.center_on_scene(center)
+        self._zoom_updated()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -119,6 +421,8 @@ class NodeGraphView(ZoomPanGraphicsView):
         return self._draw_band
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._fence_blocks(event):
+            return
         if (self._shape_draw_kind is not None
                 and event.button() == Qt.LeftButton):
             self._draw_origin = event.position().toPoint()
@@ -135,7 +439,15 @@ class NodeGraphView(ZoomPanGraphicsView):
                 QRect(self._draw_origin, event.position().toPoint()).normalized())
             event.accept()
             return
+        if self._fence_frame is not None and not event.buttons():
+            self._set_stub_cursor(
+                self._stub_at(event.position().toPoint()) is not None)
         super().mouseMoveEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self._fence_blocks(event):
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._draw_origin is not None and event.button() == Qt.LeftButton:
@@ -156,6 +468,8 @@ class NodeGraphView(ZoomPanGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+        if self._fence_frame is not None and event.button() == Qt.LeftButton:
+            self._drop_fenced_out_selection()
 
     # ------------------------------------------------------------ edge scroll
 
@@ -242,6 +556,7 @@ class NodeGraphView(ZoomPanGraphicsView):
             frame_item = scene.frame_items.get(owner) if owner else None
             if frame_item is not None:
                 item = frame_item
+        self._escape_fence_for(item)
         scene.clearSelection()
         item.setSelected(True)
         if self.zoom < MIN_REVEAL_ZOOM:
@@ -257,6 +572,7 @@ class NodeGraphView(ZoomPanGraphicsView):
         item = scene.frame_items.get(frame_id)
         if item is None:
             return False
+        self._escape_fence_for(item)
         scene.clearSelection()
         item.setSelected(True)
         if self.zoom < MIN_REVEAL_ZOOM:
@@ -276,6 +592,7 @@ class NodeGraphView(ZoomPanGraphicsView):
         scene.clearSelection()
         if not item.isVisible():
             return True
+        self._escape_fence_for(item)
         item.setSelected(True)
         if self.zoom < MIN_REVEAL_ZOOM:
             self.set_zoom(REVEAL_ZOOM)
@@ -394,6 +711,12 @@ class NodeGraphView(ZoomPanGraphicsView):
         if selected:
             self.fit_items(selected)
             return
+        if self._fence_frame is not None:
+            # a frame's tab: "everything" is the frame
+            item = scene.frame_items.get(self._fence_frame)
+            if item is not None:
+                self.fit_items([item])
+            return
         self.fit_items([item for item in (*scene.node_items.values(),
                                           *scene.frame_items.values())
                         if item.isVisible()])
@@ -411,6 +734,11 @@ class NodeGraphView(ZoomPanGraphicsView):
             # a right-click elsewhere (a page tab's), delivered here because
             # the canvas had the focus — see the same guard on DashboardView
             event.accept()
+            return
+        if self._fence_frame is not None and (
+                self._stub_at(event.pos()) is not None
+                or not self.fence_contains(self.mapToScene(event.pos()))):
+            event.accept()      # painted-over canvas has no menu
             return
         item = self.itemAt(event.pos())
         scene_pos = self.mapToScene(event.pos())

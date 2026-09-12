@@ -53,6 +53,37 @@ data ([[Dashboards and Reports|cards]]) keep their own size.
 **title bar** and its contents come with it. Frames can also gate execution
 (*run only when asked*, *run on its own*) from their right-click menu.
 
+## More canvas tabs
+
+A big flow does not have to be worked on all at once.
+
+- **Right-click a frame's title bar ▸ Open in New Tab** gives the frame a
+  tab of its own. Only the frame shows: the rest of the canvas is out of
+  view and out of reach, so a click, **Ctrl+A** or a drag-select only ever
+  lands on what is in it. A wire that leaves the frame ends at its edge
+  with a label naming the node at the other end — click the label to go
+  there on the **Model** tab.
+  It is the same canvas, not a copy: an edit there is an edit to the flow.
+  A jump to a node outside the frame — Find Node, the Navigator — goes back
+  to the **Model** tab to show it, and **Close Tab** on the tab leaves the
+  frame exactly where it is.
+- **+ ▸ Model canvas** on the page bar adds a canvas *of its own*: another
+  surface, with its own nodes, for a part of the work that does not belong
+  in the middle of everything else. Nodes you add while it is showing land
+  on it, and the **Model** tab does not draw them.
+
+One flow either way. A wire is only ever drawn between two nodes on the
+same canvas, but nothing else stops at the edge: **Goto / From** picks a
+value up on any canvas, `${variables}` reach everywhere, a report page
+embeds `![[Any Node]]` wherever it lives, and **Run All** runs the lot.
+Copy and paste moves work from one canvas to another.
+
+Every canvas tab keeps its own zoom and place and is saved with the
+project. Right-click one for **Rename**, a colour, a group, **Duplicate**
+(a canvas of its own is copied with everything on it) and **Close Tab** —
+which, for a canvas of its own, takes its nodes with it after asking.
+One **Ctrl+Z** brings the whole canvas back.
+
 ## Wires without wires
 
 **Goto / From** nodes carry a value across the canvas without a line: name it

@@ -802,7 +802,8 @@ class ParamsPanel(QWidget):
             combo.clear()
             combo.addItem("— none —", "")
             # tab order, the order anyone reading the dashboard knows them by
-            for page in self._graph.pages.values():
+            from flograph.core.page_nav import reader_pages
+            for page in reader_pages(self._graph.pages):
                 combo.addItem(page.title, page.id)
             index = combo.findData(value)
             if index < 0 and value:
@@ -855,8 +856,10 @@ class ParamsPanel(QWidget):
             self._commit(name, "")
 
         def fill() -> None:
+            from flograph.core.page_nav import reader_pages
             menu.clear()
-            if not self._graph.pages:
+            pages = reader_pages(self._graph.pages)
+            if not pages:
                 action = menu.addAction("no pages yet")
                 action.setEnabled(False)
                 return
@@ -865,7 +868,7 @@ class ParamsPanel(QWidget):
             action.setChecked(not held["ids"])
             action.triggered.connect(lambda _c=False: every())
             menu.addSeparator()
-            for page in self._graph.pages.values():
+            for page in pages:
                 action = menu.addAction(page.title)
                 action.setCheckable(True)
                 action.setChecked(page.id in held["ids"])

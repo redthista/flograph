@@ -100,6 +100,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "code": _portable_code(n),
                     "label": n.label_override,
                     "description": n.description,
+                    # only a node on a canvas of its own says so (G12)
+                    **({"canvas": n.canvas} if n.canvas else {}),
                     "active": n.active,
                     "locked": n.locked,
                     "frozen": n.frozen,
@@ -139,6 +141,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "title": f.title,
                     "rect": list(f.rect),
                     "color": f.color,
+                    **({"canvas": f.canvas} if f.canvas else {}),
                     "z": f.z,
                     "active": f.active,
                     "manual": f.manual,
@@ -158,6 +161,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "id": s.id,
                     "kind": s.kind,
                     "rect": list(s.rect),
+                    **({"canvas": s.canvas} if s.canvas else {}),
                     "z": s.z,
                     "hidden": s.hidden,
                     "stroke": s.stroke,
@@ -177,6 +181,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "title": p.title,
                     "kind": p.kind,
                     "body": p.body,
+                    # only a canvas tab fenced to a frame names one
+                    **({"frame": p.frame} if p.frame else {}),
                     "color": p.color,
                     # only a page in a group says so, like a tile's aspect
                     **({"group": p.group} if p.group else {}),
@@ -334,6 +340,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
                     PortDirection.INPUT, optional=True))
             except (KeyError, ValueError, TypeError):
                 continue
+        # absent in every file written before canvas tabs, and in every node
+        # on the model canvas — both mean the model canvas (G12)
+        node.canvas = str(entry.get("canvas") or "")
         if extras:
             node.adopt_extra_inputs(extras)
         if spec.broken:
@@ -372,6 +381,8 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             nudged=tuple(tuple(n) for n in entry.get("nudged", ())),
             source=entry.get("source", ""),
             source_fingerprint=entry.get("source_fingerprint", ""),
+            # absent before canvas tabs, and on the model canvas (G12)
+            canvas=str(entry.get("canvas") or ""),
         ))
 
     for entry in payload.get("shapes", []):
@@ -389,6 +400,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             text_color=entry.get("text_color", ""),
             font_size=float(entry.get("font_size", 0.0)),
             flip=bool(entry.get("flip", False)),
+            canvas=str(entry.get("canvas") or ""),
         ))
 
     for entry in payload.get("pages", []):
@@ -399,6 +411,8 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # dashboard, which is exactly what those files meant
             kind=entry.get("kind") or "dashboard",
             body=entry.get("body", ""),
+            # absent in every page but a canvas tab fenced to a frame
+            frame=str(entry.get("frame") or ""),
             color=entry.get("color"),
             # absent before the tab bar had sections, and in any page not in
             # one — both mean "no group"

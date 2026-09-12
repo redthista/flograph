@@ -161,14 +161,20 @@ def merged_linked_sheet(graph: Graph, cache: OutputCache,
     (formula sources intact) carried over — as a sheet dict.
 
     None when there's no usable input, which means the node's stored sheet
-    already stands on its own. Every host that displays a Table node's grid
-    goes through here, so the canvas card and a dashboard tile of the same
-    node never disagree about what a run produced."""
+    already stands on its own — and None as well when the input is past
+    what a grid can hold (MAX_LINKED_ROWS), which the node's own run
+    refuses with a message. Turning millions of rows into cells here would
+    take the app down on the UI thread, showing nobody anything.
+
+    Every host that displays a Table node's grid goes through here, so the
+    canvas card and a dashboard tile of the same node never disagree about
+    what a run produced."""
     from flograph.core.sheet import (merge_linked_sheet, parse_sheet,
                                      sheet_from_dataframe, sheet_to_dict)
+    from flograph.core.sheet.engine import MAX_LINKED_ROWS
     frame = linked_table_source(graph, cache, node_id)
     node = graph.nodes.get(node_id)
-    if frame is None or node is None:
+    if frame is None or node is None or len(frame) > MAX_LINKED_ROWS:
         return None
     return sheet_to_dict(merge_linked_sheet(
         sheet_from_dataframe(frame), parse_sheet(node.params.get("data"))))

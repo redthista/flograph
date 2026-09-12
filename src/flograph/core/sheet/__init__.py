@@ -2,8 +2,8 @@
 whole-sheet evaluation. Pure Python — no Qt or pandas at import time, so
 both the UI widgets and the node's run() share it.
 """
-from .engine import (EvalResult, evaluate_sheet, literal_value,
-                     merge_linked_sheet, sheet_from_dataframe)
+from .engine import (MAX_LINKED_ROWS, EvalResult, evaluate_sheet,
+                     literal_value, merge_linked_sheet, sheet_from_dataframe)
 from .formula import (FormulaSyntaxError, cell_name, col_index, col_letters,
                       parse_formula, refs_of, rename_column_in_formulas,
                       translate)
@@ -15,7 +15,7 @@ from .schema import (COLUMN_TYPES, ColumnSpec, Sheet, extra_date_formats,
 from .values import FormulaError, format_value
 
 __all__ = [
-    "COLUMN_TYPES", "ColumnSpec", "EvalResult", "FormulaError",
+    "COLUMN_TYPES", "MAX_LINKED_ROWS", "ColumnSpec", "EvalResult", "FormulaError",
     "FormulaSyntaxError", "FUNCTION_HELP", "FUNCTION_NAMES", "Sheet", "cell_name",
     "col_index", "col_letters", "evaluate_sheet", "format_value",
     "extra_date_formats", "is_formula", "literal_value", "merge_linked_sheet",

@@ -28,6 +28,20 @@ def _version() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A crash inside Qt — an abort, a segfault — leaves nothing behind but an
+    # exit code, and a coredump too truncated to walk. faulthandler catches
+    # those signals and prints the Python stack of every thread to stderr on
+    # the way down, which is the difference between a repro hunt and a line
+    # number. Only on the CLI path, so imports and tests are untouched.
+    # Guarded: it writes to stderr's file descriptor, and a captured stderr
+    # (pytest, a pipe a caller has replaced) has none — a diagnostic must
+    # never be the reason the program won't start.
+    import faulthandler
+    try:
+        faulthandler.enable()
+    except (ValueError, OSError):
+        pass
+
     args = list(sys.argv[1:] if argv is None else argv)
 
     if args and args[0] == "run":

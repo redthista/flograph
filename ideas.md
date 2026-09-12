@@ -52,7 +52,12 @@ works in a *report* page's preview as well as in a Note. Chunk AC shipped
 whole the same day and retires too: a package index of your own that pip
 and uv both install from, and a list of what a flow needs installed. So
 did chunk X, which retires with it: Show Table pivots into a matrix
-itself, and its rules can read the rows before the pivot.
+itself, and its rules can read the rows before the pivot. G12 shipped
+2026-09-12, and grew in the doing: a frame opens in a tab of its own,
+and the page bar's **+** also adds a whole canvas of its own, with its
+own nodes. Turning a frame into such a canvas — a node-like box with
+inputs and outputs you declare, and back again — is the piece still to
+come, and it is written up as G13.
 
 ---
 
@@ -118,16 +123,25 @@ the sort, none of it kept between opens. A persistent model, or a memoised
 popup is a fixed 280×320 and ~70 rows should not cost this much, so the real
 cause may be Windows popup/paint behaviour rather than the rebuild.
 
-**G12. Open a frame in a tab of its own** (Dan). Right-click a frame ▸ Open
-in New Tab: a canvas tab showing only that frame's nodes, for working on one
-part of a big flow without the rest in view. A *view* onto the same graph,
-not a copy — an edit there is an edit to the flow. Close to metanodes
-(`ideas_archived.md` #4) without being one: nothing is collapsed or nested,
-the frame just gets a canvas to itself. The page bar holds dashboards and
-reports today, so this is a third kind of tab, and the open questions are
-what happens to wires that leave the frame (stubs to a named pin, the way a
-Goto/From reads) and whether the tab is saved with the file or is a
-per-session convenience.
+**G13. Turn a frame into a model canvas, and back** (Dan). A frame's
+right-click menu gains *Turn into a Model Canvas*: what is inside it moves
+onto a canvas of its own (G12 shipped those), and a node-like box stands
+where the frame was, on the canvas it left. The box carries **inputs and
+outputs you declare** — a name each, mapped to a port of a node inside —
+rather than the pins a collapsed frame derives from whatever wires happen
+to cross it. *Turn back into a Frame* reverses it, contents and all.
+Frames themselves are untouched, which is the point: a conversion, not a
+new kind of frame.
+
+Much of it exists already. A collapsed frame draws as a box, and a wire
+can be made *through* one of its pins to the node hidden inside
+(`ui/canvas/frame_port.py`, `NodeGraphScene._refresh_collapsed_frames`),
+so the box and its wiring are not new work. What is new: the declared
+interface, saved on the frame (name → inner node and port, so a wire to
+the box is a real wire to that node); the two conversions, one undo step
+each, moving nodes between canvases; and what a box does when a port it
+names loses the node behind it. Close to metanodes (`ideas_archived.md` #4)
+without being one — nothing is nested, and the flow stays one graph.
 
 ---
 

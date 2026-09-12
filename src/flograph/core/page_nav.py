@@ -71,6 +71,17 @@ SHOW_GROUP = "This page's group"
 SHOW_CHOSEN = "Chosen pages"
 
 
+#: Page.kind of a tab onto the model canvas itself (G12): the whole canvas
+#: (+ ▸ Model canvas), or one frame of it (a frame's Open in New Tab).
+CANVAS_KIND = "canvas"
+
+
+def reader_pages(pages: dict) -> list:
+    """The pages someone reading the project can be sent to, in tab order:
+    every dashboard and report, and no canvas tab."""
+    return [page for page in pages.values() if page.kind != CANVAS_KIND]
+
+
 def linked_pages(pages: dict, params: dict,
                  host_page_id: Optional[str] = None) -> list:
     """The pages a Page Links card shows, in tab order.
@@ -82,8 +93,11 @@ def linked_pages(pages: dict, params: dict,
     that is what the picker says it means, and an empty strip is never what
     anyone placed a card of links for. Read at paint time, so a page added
     or renamed is on every card without anyone touching it.
+
+    A canvas tab (G12) is never on one: it is a view of the flow for
+    whoever builds it, not a page of the dashboard.
     """
-    everything = list(pages.values())
+    everything = reader_pages(pages)
     show = params.get("show") or SHOW_EVERY
     if show == SHOW_CHOSEN:
         ids = set(split_page_ids(params.get("pages")))

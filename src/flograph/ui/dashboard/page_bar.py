@@ -100,6 +100,7 @@ class PageTabBar(QTabBar):
         # page_id -> "dashboard" | "report"; only the menu needs it, to offer
         # Export PDF on a locked report
         self._kinds: dict[str, str] = {}
+        self._fenced: dict[str, bool] = {}   # canvas tabs: a view of a frame
         # page_id -> the group it sits in (AB4), mirrored from the model
         # like the rest; and the groups folded away, which is the bar's own
         # business — how the strip is being looked at, not the project
@@ -175,6 +176,9 @@ class PageTabBar(QTabBar):
         self.set_page_view_mode(page.id, page.view_mode)
         self.set_page_fit_to_window(page.id, page.fit_to_window)
         self._kinds[page.id] = page.kind
+        # a canvas tab fenced to a frame is a *view* of a canvas; one without
+        # a frame is a canvas of its own, which can be copied (G12)
+        self._fenced[page.id] = bool(getattr(page, "frame", ""))
         self._groups[page.id] = page.group or ""
         self._rebuild_groups()
 
@@ -374,6 +378,7 @@ class PageTabBar(QTabBar):
         self._view_modes.pop(page_id, None)
         self._fits.pop(page_id, None)
         self._kinds.pop(page_id, None)
+        self._fenced.pop(page_id, None)
         self._groups.pop(page_id, None)
         self._syncing = True
         self.removeTab(index)
@@ -660,16 +665,26 @@ class PageTabBar(QTabBar):
             self._rebuild_groups()
 
     def _show_add_menu(self, global_pos) -> None:
-        """"+" asks what kind of page. A menu rather than two buttons: the
-        strip is a tab bar, and dashboards stay the one-click-away default
-        by being first."""
+        menu, choices = self._add_menu()
+        chosen = menu.exec(global_pos)
+        if chosen in choices:
+            self.add_page_requested.emit(choices[chosen])
+
+    def _add_menu(self) -> tuple:
+        """"+" asks what kind of page. A menu rather than buttons: the strip
+        is a tab bar, and dashboards stay the one-click-away default by being
+        first. A model canvas comes last, after a line — another view of the
+        flow for whoever builds it (G12), not a page for anyone reading it.
+
+        Built apart from showing it, like the tab menu, so what is on it can
+        be asserted without an exec() that would block the suite."""
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
         choices = {menu.addAction("Dashboard page"): "dashboard",
                    menu.addAction("Report page"): "report"}
-        chosen = menu.exec(global_pos)
-        if chosen in choices:
-            self.add_page_requested.emit(choices[chosen])
+        menu.addSeparator()
+        choices[menu.addAction("Model canvas")] = "canvas"
+        return menu, choices
 
     def contextMenuEvent(self, event) -> None:
         """Swallow the context-menu event that follows our own right-click.
@@ -716,10 +731,16 @@ class PageTabBar(QTabBar):
         lock_action.triggered.connect(
             lambda checked: self.set_view_mode_requested.emit(
                 page_id, bool(checked)))
-        menu.addAction(lock_action)
+        # A canvas tab (G12) is the model canvas, whole or fenced to a frame:
+        # nothing on it is laid out to be locked or scaled, and a copy of a
+        # view is only another view. What it has is a name, a colour, a
+        # place in the bar, and a way to close it.
+        canvas_tab = self._kinds.get(page_id) == "canvas"
+        if not canvas_tab:
+            menu.addAction(lock_action)
         # Only dashboards: a report already sits on a page of a declared
         # size, and how that is fitted is the preview's business.
-        if self._kinds.get(page_id) != "report":
+        if self._kinds.get(page_id) not in ("report", "canvas"):
             fit_action = QAction("Scale to fit the window", self)
             fit_action.setCheckable(True)
             fit_action.setChecked(self._fits.get(page_id, False))
@@ -755,14 +776,21 @@ class PageTabBar(QTabBar):
         color_action = QAction("Change colour…", self)
         reset_color_action = (QAction("Reset colour", self)
                               if page_id in self._colors else None)
-        del_action = QAction("Delete", self)
+        del_action = QAction("Close Tab" if canvas_tab else "Delete", self)
+        if canvas_tab:
+            del_action.setToolTip(
+                "Close this tab. The frame and everything in it stay on "
+                "the canvas.")
         rename_action.triggered.connect(
             lambda: self._prompt_rename(index, page_id))
         dup_action.triggered.connect(lambda: self.duplicate_page_requested.emit(page_id))
         color_action.triggered.connect(lambda: self._prompt_color(page_id))
         del_action.triggered.connect(lambda: self.delete_page_requested.emit(page_id))
         menu.addAction(rename_action)
-        menu.addAction(dup_action)
+        # a canvas of its own can be copied, contents and all; a tab that
+        # only *looks at* a frame cannot — a second look is not a copy
+        if not (canvas_tab and self._fenced.get(page_id, False)):
+            menu.addAction(dup_action)
         menu.addAction(color_action)
         if reset_color_action is not None:
             reset_color_action.triggered.connect(

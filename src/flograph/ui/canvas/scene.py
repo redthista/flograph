@@ -115,8 +115,20 @@ class ContentFittedSceneRect:
             self._rect_timer.stop()
         self._fit_scene_rect()
 
+    def _shown_bounds(self) -> QRectF:
+        """What the canvas covers. Every item normally; on a project with
+        more than one canvas (G12) only what the showing one draws, or the
+        span would reach out over another canvas's corner of the scene."""
+        if not getattr(self, "_canvas_split", False):
+            return self.itemsBoundingRect()
+        bounds = QRectF()
+        for item in self.items():
+            if item.isVisible() and item.parentItem() is None:
+                bounds = bounds.united(item.sceneBoundingRect())
+        return bounds
+
     def _fit_scene_rect(self) -> None:
-        target = self.itemsBoundingRect().adjusted(
+        target = self._shown_bounds().adjusted(
             -SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN)
         # wherever the views are right now stays reachable: Esc-restore,
         # a minimap click into empty margin, a jump to the far side — none
@@ -235,6 +247,16 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self.graph = graph
         self.undo_stack = undo_stack
         self.registry = registry
+        # Which canvas is being shown (G12): "" the model canvas, else a
+        # canvas tab's page id. Every canvas's items live in this one scene —
+        # one undo stack, one selection, one engine — and the ones off the
+        # showing canvas are hidden. `_canvas_split` stays False on the
+        # overwhelmingly common project of one canvas, which is what keeps
+        # the visibility rebuild an early return there. First of all the
+        # fields, because the rebuild reads them and the loads below can
+        # reach it.
+        self.canvas_id = ""
+        self._canvas_split = False
         # The engine's OutputCache, injected by the main window once the
         # engine exists. Only used to freeze what a linked Table is showing
         # before its wire is cut (see _push_orphan_snapshots); None simply
@@ -385,7 +407,45 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
 
     # ------------------------------------------------------- event mirrors
 
+    # -------------------------------------------------------- canvases (G12)
+
+    def on_canvas(self, obj) -> bool:
+        """Whether a node, frame or shape belongs to the canvas being shown."""
+        return obj is not None and getattr(obj, "canvas", "") == self.canvas_id
+
+    def set_canvas(self, canvas_id: str) -> None:
+        """Show one canvas: "" the model canvas, else a canvas tab's page id.
+
+        What the others hold stays in the scene and in the flow — it runs,
+        it answers a Goto, a report still embeds it — it is just not drawn
+        here, and so cannot be clicked, banded, or taken in by a frame.
+        """
+        canvas_id = canvas_id or ""
+        if canvas_id == self.canvas_id:
+            return
+        self.canvas_id = canvas_id
+        self._canvas_split = True
+        self._refresh_collapsed_frames()
+        self.refresh_frame_holds()
+        self._queue_rect_fit()
+
+    def place_here(self, *objects):
+        """Stamp new nodes, frames or shapes onto the canvas being shown, so
+        whatever is added lands on the tab it was added from."""
+        for obj in objects:
+            obj.canvas = self.canvas_id
+        if self.canvas_id:
+            self._canvas_split = True
+        return objects[0] if len(objects) == 1 else objects
+
+    def _note_canvas(self, obj) -> None:
+        """A loaded or pasted item from another canvas: from here on the
+        scene has more than one to tell apart."""
+        if getattr(obj, "canvas", ""):
+            self._canvas_split = True
+
     def _on_node_added(self, node: NodeInstance) -> None:
+        self._note_canvas(node)
         item = NodeItem(node)
         item.set_lod(self._flat_state())
         item.apply_compact(compact_on(node, self))
@@ -669,8 +729,13 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             return list(item.frame.members)
         held, _frames = self._already_held()
         rect = item.scene_rect()
+        # its own canvas only (G12): canvases share one coordinate space, so
+        # without this a frame would hold nodes it has never been on a tab
+        # with — and "Run frame" would run them
+        canvas = getattr(item.frame, "canvas", "")
         return [nid for nid, node_item in self.node_items.items()
                 if nid not in held
+                and getattr(self.graph.nodes.get(nid), "canvas", "") == canvas
                 and rect.contains(node_item.sceneBoundingRect().center())]
 
     def _frame_member_frames(self, item) -> list:
@@ -680,8 +745,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         if item.collapsed:
             return list(item.frame.member_frames)
         rect = item.scene_rect()
+        canvas = getattr(item.frame, "canvas", "")     # its own canvas (G12)
         return [fid for fid, other in self.frame_items.items()
                 if other is not item and fid not in held
+                and getattr(other.frame, "canvas", "") == canvas
                 and rect.contains(other.scene_rect())]
 
     def frame_contents(self, item) -> tuple:
@@ -738,8 +805,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         open frames overlap is attributed to the smallest — the same frame the
         eye reads it as being in.
         """
+        # the canvas being shown, which is the one the Navigator is a tree of
         direct: dict = {fid: self.frame_direct_members(fid)
-                        for fid in self.frame_items}
+                        for fid, item in self.frame_items.items()
+                        if self.on_canvas(item.frame)}
 
         def area(fid: str) -> float:
             item = self.frame_items.get(fid)
@@ -764,8 +833,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         for fid, (nids, subs) in direct.items():
             tree[fid] = ([nid for nid in nids if node_owner.get(nid) == fid],
                          [sub for sub in subs if frame_owner.get(sub) == fid])
-        top_nodes = [nid for nid in self.node_items if nid not in node_owner]
-        top_frames = [fid for fid in self.frame_items if fid not in frame_owner]
+        top_nodes = [nid for nid in self.node_items if nid not in node_owner
+                     and self.on_canvas(self.graph.nodes.get(nid))]
+        top_frames = [fid for fid, item in self.frame_items.items()
+                      if fid not in frame_owner and self.on_canvas(item.frame)]
         return (top_nodes, top_frames, tree)
 
     def flagged_frame_members(self) -> dict:
@@ -1076,7 +1147,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         if self._suspend_collapse_refresh:
             return
         collapsed = [f for f in self.graph.frames.values() if f.collapsed]
-        if not collapsed and not self._hidden and not self._frame_pins:
+        if (not collapsed and not self._hidden and not self._frame_pins
+                and not self._canvas_split):
             return      # the overwhelmingly common canvas: nothing to do
 
         # 1. membership — read straight off the model, never recomputed here.
@@ -1096,13 +1168,21 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         hidden_frames = {fid for ids in self._hidden_frames.values()
                          for fid in ids}
 
-        # 2. visibility.
+        # 2. visibility: folded away inside a collapsed frame, or on a canvas
+        #    this tab is not showing (G12) — an item belongs to one canvas,
+        #    and only that canvas draws it.
         for node_id, item in self.node_items.items():
-            item.setVisible(node_id not in hidden_nodes)
+            item.setVisible(node_id not in hidden_nodes
+                            and self.on_canvas(self.graph.nodes.get(node_id)))
         for frame_id, item in self.frame_items.items():
-            item.setVisible(frame_id not in hidden_frames)
+            item.setVisible(frame_id not in hidden_frames
+                            and self.on_canvas(self.graph.frames.get(frame_id)))
             item.set_members(self._hidden.get(frame_id, [])
                              if item.collapsed else [])
+        for shape_id, item in self.shape_items.items():
+            shape = self.graph.shapes.get(shape_id)
+            item.setVisible(shape is not None and not shape.hidden
+                            and self.on_canvas(shape))
 
         # 3. the pins, reconciled by (conn_id, side) so a pin that survives a
         #    rebuild keeps its hover state and stays valid mid-drag.
@@ -1227,25 +1307,29 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
 
     def _reanchor_wires(self, hidden_nodes: set) -> None:
         """Point every wire and link line at wherever its ends now live, and
-        hide the ones that run entirely inside a collapsed frame."""
+        hide the ones with neither end to draw from: both folded inside a
+        collapsed frame, or an end on a canvas this tab is not showing
+        (G12) — a line between two canvases is never drawn."""
+        def reachable(node_id: str, pin) -> bool:
+            if pin is not None:
+                return True     # a frame pin stands in for the folded end
+            item = self.node_items.get(node_id)
+            return item is not None and item.isVisible()
+
         for conn_id, ci in self.connection_items.items():
             conn = ci.conn
             src_pin = self._frame_pins.get((conn_id, "src"))
             dst_pin = self._frame_pins.get((conn_id, "dst"))
-            internal = (conn.src_node in hidden_nodes
-                        and conn.dst_node in hidden_nodes
-                        and src_pin is None and dst_pin is None)
-            ci.setVisible(not internal)
+            ci.setVisible(reachable(conn.src_node, src_pin)
+                          and reachable(conn.dst_node, dst_pin))
             ci.set_anchors(src_pin, dst_pin)
         for link_id, line in self.link_line_items.items():
             src_pin = self._frame_pins.get((link_id, "src"))
             dst_pin = self._frame_pins.get((link_id, "dst"))
             link = self.graph.links.get(link_id)
-            internal = (link is not None
-                        and link.src_node in hidden_nodes
-                        and link.dst_node in hidden_nodes
-                        and src_pin is None and dst_pin is None)
-            line.setVisible(not internal)
+            line.setVisible(link is not None
+                            and reachable(link.src_node, src_pin)
+                            and reachable(link.dst_node, dst_pin))
             line.set_anchors(src_pin, dst_pin)
 
     def frame_item_moved(self, frame_id: Optional[str] = None) -> None:
@@ -1497,6 +1581,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             item.update()
 
     def _on_frame_added(self, frame: Frame) -> None:
+        self._note_canvas(frame)
         item = FrameItem(frame)
         item.run_requested.connect(self.frame_run_requested.emit)
         self.addItem(item)
@@ -1549,9 +1634,11 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     # -------------------------------------------------------------- shapes
 
     def _on_shape_added(self, shape: Shape) -> None:
+        self._note_canvas(shape)
         item = ShapeItem(shape)
         self.addItem(item)
         self.shape_items[shape.id] = item
+        item.setVisible(item.isVisible() and self.on_canvas(shape))
 
     def _on_shape_removed(self, shape_id: str) -> None:
         item = self.shape_items.pop(shape_id, None)
@@ -1968,8 +2055,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         """Split a wire with a reroute dot at the given position."""
         if self.registry is None:
             return
-        node = self.registry.instantiate(
-            REROUTE_TYPE, pos=(scene_pos.x() - 14, scene_pos.y() - 12))
+        node = self.place_here(self.registry.instantiate(
+            REROUTE_TYPE, pos=(scene_pos.x() - 14, scene_pos.y() - 12)))
         self.undo_stack.beginMacro("insert reroute")
         self.undo_stack.push(AddNodeCommand(self.graph, node))
         self.undo_stack.push(DisconnectCommand(self.graph, conn.id))
@@ -2092,8 +2179,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                         if can_connect(p.type, in_spec.type)), None)
         if port_in is None or port_out is None:
             return False
-        node = self.registry.instantiate(
-            type_id, pos=(scene_pos.x(), scene_pos.y()))
+        node = self.place_here(self.registry.instantiate(
+            type_id, pos=(scene_pos.x(), scene_pos.y())))
         self.undo_stack.beginMacro(f"splice in {spec.label}")
         self.undo_stack.push(AddNodeCommand(self.graph, node))
         # free the destination's input before the new wire claims it, so no
@@ -2212,6 +2299,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # order edges first, then the remapped data wires — both as plain
         # connect() arguments with the new node standing where the old was
         node = self.registry.instantiate(type_id, pos=old.pos)
+        node.canvas = getattr(old, "canvas", "")   # where the old one stood
         new_id = node.id
         for conn in incoming:
             if is_flow(conn.dst_port):

@@ -54,6 +54,11 @@ class Frame:
     title: str = "Frame"
     rect: tuple[float, float, float, float] = (0.0, 0.0, 300.0, 200.0)
     color: str = "#33415c"
+    # The canvas it sits on (G12), "" for the model canvas. A frame holds
+    # what is inside it *on its own canvas*: two canvases share one
+    # coordinate space, so without this a frame would claim nodes it has
+    # never been on the same tab as.
+    canvas: str = ""
     z: Optional[int] = None   # stacking order among frames; see core.layers
     # The two run flags a frame carries on behalf of whatever is inside it,
     # with the same meanings they have on a node: `active=False` takes the
@@ -126,6 +131,7 @@ class Shape:
     id: str
     kind: str = "rect"   # rect|rounded|ellipse|diamond|triangle|line|arrow|text
     rect: tuple[float, float, float, float] = (0.0, 0.0, 160.0, 110.0)
+    canvas: str = ""     # the canvas it is drawn on (G12), "" = the model one
     z: Optional[int] = None   # stacking order among shapes; see core.layers
     hidden: bool = False      # kept in the graph, not painted (Selection pane)
     stroke: str = ""          # outline colour; "" = theme default
@@ -167,11 +173,23 @@ class Page:
     the window switches on to build the right widget. A report ignores
     `tiles`/`maximized_tile`; a dashboard ignores `body`. Files written
     before reports existed have no `kind` and load as dashboards.
+
+    A third kind, "canvas" (G12), is another tab onto the model canvas, at
+    a zoom and place of its own: the whole canvas (+ ▸ Model canvas), or
+    one frame of it with the rest of the flow out of view (a frame's Open in
+    New Tab), whose id it keeps in `frame`. It holds nothing else — no
+    tiles, no body. It is a way of looking at the flow for whoever builds
+    it, so the things that list pages for someone *reading* a dashboard
+    (Page Links, Go to page) leave it out.
     """
     id: str
     title: str = "Page"
-    kind: str = "dashboard"       # "dashboard" | "report"
+    kind: str = "dashboard"       # "dashboard" | "report" | "canvas"
     body: str = ""                # report pages: the markdown source
+    # canvas pages: the id of the frame the tab is fenced to, "" for the
+    # whole canvas. May dangle (the frame was deleted) exactly like
+    # Tile.node_id — the tab then says so.
+    frame: str = ""
     tiles: dict[str, Tile] = field(default_factory=dict)
     color: Optional[str] = None   # None = the theme's default tab colour
     # The section of the tab bar this page sits in (AB4), "" for none. Just
