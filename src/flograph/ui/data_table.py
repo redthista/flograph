@@ -479,4 +479,7 @@ class DataTableView(QTableView):
         return menu
 
     def _show_menu(self, pos) -> None:
+        from . import menu_guard
+        if menu_guard.settling():
+            return   # leftovers of a menu that just closed — see menu_guard
         self.build_menu().exec(self.viewport().mapToGlobal(pos))

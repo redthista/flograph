@@ -31,6 +31,14 @@ class DockHost(QMainWindow):
         self._menu_target: Optional[QDockWidget] = None
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        from . import menu_guard
+        if menu_guard.stray(event):
+            # The tail of a menu that has just closed over this window —
+            # answering it puts the dock list on screen for a right-click
+            # nobody made. Anything a child ignores walks up to here, so
+            # this is the last place that leak can come out.
+            event.accept()
+            return
         self._menu_target = self._dock_at(event.pos())
         super().contextMenuEvent(event)
 

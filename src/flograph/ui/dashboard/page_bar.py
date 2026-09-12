@@ -655,10 +655,20 @@ class PageTabBar(QTabBar):
         a report's text. With the focus here it arrives at contextMenuEvent
         below, which swallows it. Taken again afterwards because what the
         menu did can move the focus in between — locking a page hands it to
-        the page, which is how the first version of this still leaked."""
+        the page, which is how the first version of this still leaked.
+
+        The focus is only half of it. This bar runs along the top of the
+        window, so its menus drop *over* the Library dock and the canvas,
+        and the leftover event can be handed to one of those at a position
+        genuinely inside it — which no geometric guard can tell from a
+        right-click made there. So the moment the menu closed is recorded
+        too, and those widgets refuse a context menu for an instant
+        afterwards. See ui/menu_guard."""
+        from .. import menu_guard
         self.setFocus(Qt.MouseFocusReason)
         show()
         self.setFocus(Qt.MouseFocusReason)
+        menu_guard.menu_closed()
 
     def tab_list_menu(self) -> QMenu:
         """Every tab in one list, the current one ticked (AA5). With more
@@ -794,8 +804,18 @@ class PageTabBar(QTabBar):
             self._rebuild_groups()
 
     def _show_add_menu(self, global_pos) -> None:
+        """"+" opens its menu on press like every other menu on this bar, so
+        it goes through the same guard as the rest: the focus held either
+        side of it, and the moment it closed recorded for whatever it was
+        covering."""
         menu, choices = self._add_menu()
-        chosen = menu.exec(global_pos)
+        chosen = None
+
+        def show() -> None:
+            nonlocal chosen
+            chosen = menu.exec(global_pos)
+
+        self._menu_with_the_focus(show)
         if chosen in choices:
             self.add_page_requested.emit(choices[chosen])
 

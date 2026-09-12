@@ -583,6 +583,9 @@ class SpreadsheetView(QTableView):
             model.rename_column(col, name)
 
     def _column_menu(self, pos) -> None:
+        from .. import menu_guard
+        if menu_guard.settling():
+            return   # leftovers of a menu that just closed — see menu_guard
         model = self.sheet_model()
         col = self.horizontalHeader().logicalIndexAt(pos)
         if model is None or col < 0:
@@ -629,6 +632,9 @@ class SpreadsheetView(QTableView):
         menu.exec(self.horizontalHeader().mapToGlobal(pos))
 
     def _row_menu(self, pos) -> None:
+        from .. import menu_guard
+        if menu_guard.settling():
+            return   # leftovers of a menu that just closed — see menu_guard
         model = self.sheet_model()
         row = self.verticalHeader().logicalIndexAt(pos)
         if model is None or row < 0 or model.read_only:

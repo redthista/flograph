@@ -314,6 +314,14 @@ class LibraryTree(QTreeWidget):
             self.insert_frame_requested.emit(frame_id)
 
     def _on_context_menu(self, pos: QPoint) -> None:
+        from flograph.ui import menu_guard
+        if menu_guard.settling():
+            # The leftovers of a menu that has just closed somewhere else —
+            # the page bar's, which drops over this dock — delivered here
+            # by the platform. The position is no help: it lands inside the
+            # tree, which is why a lone "New group…" kept appearing after
+            # folding the canvases away. See ui/menu_guard.
+            return
         menu = self._context_menu_for(pos)
         if menu is not None:
             menu.exec(self.viewport().mapToGlobal(pos))

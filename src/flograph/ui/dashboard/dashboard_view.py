@@ -458,6 +458,13 @@ class DashboardView(ZoomPanGraphicsView):
         is. Right-click selects first (adding to the selection when Ctrl or
         Shift is held), so the menu always acts on what the user is looking
         at — and a right-click on an Action Button still can't fire it."""
+        from .. import menu_guard
+        if menu_guard.stray(event):
+            # the tail of a menu that just closed over this page (the page
+            # bar's), at a point inside the viewport, so the guard below
+            # cannot see it. See ui/menu_guard.
+            event.accept()
+            return
         if (event.spontaneous()
                 and event.reason() == type(event).Reason.Mouse
                 and not self.viewport().rect().contains(event.pos())):

@@ -728,6 +728,13 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .frame_item import FrameItem
         from .connection_item import ConnectionItem
         from .shape_item import ShapeItem
+        from .. import menu_guard
+        if menu_guard.stray(event):
+            # the tail of a menu that just closed over this view (the page
+            # bar's), at a point that is inside the viewport — so only the
+            # timing tells it from a right-click here. See ui/menu_guard.
+            event.accept()
+            return
         if (event.spontaneous()
                 and event.reason() == type(event).Reason.Mouse
                 and not self.viewport().rect().contains(event.pos())):
