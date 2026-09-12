@@ -74,6 +74,44 @@ RUBBER_BAND_INVERT_KEYS = {
 }
 DEFAULT_RUBBER_BAND_INVERT_KEY = "ctrl"
 
+#: What a left-drag on empty canvas does.
+#:
+#: "band" is the canvas as it has always been: the drag draws a rubber band
+#: and panning is middle-drag or Space. "pan" is the other tradition — the
+#: one a map, a PDF reader and most whiteboards use — where dragging the
+#: surface moves the surface, and the band moves to Ctrl (or Shift) held as
+#: the drag starts. Either way a press that lands *on* something still
+#: belongs to that thing: nodes, tiles, wires and frame title bars drag as
+#: they did, and only the canvas between them pans.
+LEFT_DRAG_MODES = ("band", "pan")
+DEFAULT_LEFT_DRAG_MODE = "band"
+
+#: Modifiers that get the rubber band back for one drag while left-drag
+#: pans. Ctrl and Shift, because those are already Qt's "add to the
+#: selection" keys during a band — the gesture and the modifier agree.
+#: Alt is deliberately not among them: on KDE and GNOME an Alt-drag is the
+#: window manager's own move-the-window gesture and never reaches us.
+PAN_BAND_MODIFIERS = Qt.ControlModifier | Qt.ShiftModifier
+
+#: How far a left-drag pan may travel and still count as a click. A click on
+#: empty canvas clears the selection, which is the one thing the swallowed
+#: press would otherwise take away.
+PAN_CLICK_SLOP = 4.0
+
+#: What the wheel does with nothing held.
+#:
+#: "zoom" is the canvas's own default — a notch zooms about the cursor, the
+#: way a node editor behaves. "scroll" is the document reading: the wheel
+#: walks the canvas up and down, Shift walks it sideways, and zoom moves to
+#: Ctrl+wheel. Ctrl+wheel zooms under both, so a flow built by someone on
+#: one setting still zooms for someone on the other.
+WHEEL_ACTIONS = ("zoom", "scroll")
+DEFAULT_WHEEL_ACTION = "zoom"
+
+#: Viewport pixels one notch of the wheel walks in "scroll". A trackpad
+#: sends pixels of its own and is passed through untouched.
+WHEEL_SCROLL_STEP = 60.0
+
 #: The key that carries each modifier, so a press or release *during* a drag
 #: can be read as the modifier going down or coming up. A key event's own
 #: modifiers() is no help for the key being pressed — whether it already
@@ -201,8 +239,15 @@ class ZoomPanGraphicsView(QGraphicsView):
         # _drop_grazed_frames); empty between drags
         self._band_held_frames: frozenset = frozenset()
         self._apply_rubber_band_mode()
+        self._left_drag_mode = DEFAULT_LEFT_DRAG_MODE
+        self._wheel_action = DEFAULT_WHEEL_ACTION
         self._panning = False
         self._pan_last = QPointF()
+        # which button started the pan, so its own release ends it, and how
+        # far it has travelled, so a left-drag pan that never moved can still
+        # be read as the click it was
+        self._pan_button = Qt.MiddleButton
+        self._pan_travel = 0.0
         self._space_held = False
         self.centerOn(0, 0)
 
@@ -275,6 +320,10 @@ class ZoomPanGraphicsView(QGraphicsView):
             # because a locked page is one being *used*.
             event.accept()
             return
+        if (self._wheel_action == "scroll"
+                and not (event.modifiers() & Qt.ControlModifier)):
+            self._wheel_scroll(event)
+            return
         factor = 1.15 ** (event.angleDelta().y() / 120.0)
         new_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self.zoom * factor))
         factor = new_zoom / self.zoom
@@ -287,6 +336,40 @@ class ZoomPanGraphicsView(QGraphicsView):
         delta = after - before
         self.translate(delta.x(), delta.y())
         self._zoom_updated()
+
+    def _wheel_scroll(self, event: QWheelEvent) -> None:
+        """Walk the canvas instead of zooming it — the "scroll" wheel action.
+
+        A trackpad's pixelDelta is taken as it comes, so a two-finger glide
+        moves the canvas the distance the fingers moved; a mouse's notches
+        are worth WHEEL_SCROLL_STEP each. Shift swings a vertical wheel
+        sideways, for the mouse that only has the one wheel — platforms that
+        do that swing themselves send an x delta already, and it is left
+        alone."""
+        pixels = event.pixelDelta()
+        if not pixels.isNull():
+            dx, dy = float(pixels.x()), float(pixels.y())
+        else:
+            angle = event.angleDelta()
+            dx = angle.x() / 120.0 * WHEEL_SCROLL_STEP
+            dy = angle.y() / 120.0 * WHEEL_SCROLL_STEP
+        if event.modifiers() & Qt.ShiftModifier and not dx:
+            dx, dy = dy, 0.0
+        if dx or dy:
+            self.scroll_by(dx, dy)
+        event.accept()
+
+    def set_wheel_action(self, action: str) -> None:
+        """What a plain wheel tick does: "zoom" about the cursor, or
+        "scroll" the canvas up and down (Ctrl+wheel then zooms)."""
+        self._wheel_action = (action if action in WHEEL_ACTIONS
+                              else DEFAULT_WHEEL_ACTION)
+
+    def set_left_drag_mode(self, mode: str) -> None:
+        """What a left-drag on empty canvas does: draw a selection "band",
+        or "pan" the canvas (Ctrl or Shift then draws the band)."""
+        self._left_drag_mode = (mode if mode in LEFT_DRAG_MODES
+                                else DEFAULT_LEFT_DRAG_MODE)
 
     def _scrollable_widget_at(self, pos) -> QWidget | None:
         """The embedded widget under the viewport point that could consume a
@@ -341,12 +424,50 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     # ------------------------------------------------------------------ pan
 
+    def _start_pan(self, event: QMouseEvent) -> None:
+        self._panning = True
+        self._pan_button = event.button()
+        self._pan_last = event.position()
+        self._pan_travel = 0.0
+        self.setCursor(Qt.ClosedHandCursor)
+        event.accept()
+
+    def _left_drag_pans(self, event: QMouseEvent) -> bool:
+        """Whether this left press should take hold of the canvas.
+
+        Only in "pan" mode, only with neither band modifier held, only while
+        the view is otherwise in its ordinary state (a space-pan or a locked
+        page has its own answer), and only over canvas — a press on a node,
+        a tile, a wire or a frame's title bar belongs to that item."""
+        if (self._left_drag_mode != "pan" or self.navigation_locked
+                or self.dragMode() != QGraphicsView.RubberBandDrag):
+            return False
+        if event.modifiers() & PAN_BAND_MODIFIERS:
+            return False
+        return self._press_lands_on_canvas(event.position().toPoint())
+
+    def _press_lands_on_canvas(self, pos: QPoint) -> bool:
+        """Nothing under this viewport point wants the press.
+
+        A frame is the awkward one: its box covers half the screen but only
+        its title bar is the frame — the body is the canvas inside it, and
+        it says so by ignoring presses there (FrameItem.chrome_at). Asking
+        the item the same question keeps a pan working in the middle of a
+        frame, which is where most of a real flow's empty canvas is."""
+        scene_pos = self.mapToScene(pos)
+        for item in self.items(pos):
+            chrome_at = getattr(item, "chrome_at", None)
+            if callable(chrome_at) and not chrome_at(item.mapFromScene(scene_pos)):
+                continue
+            return False
+        return True
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MiddleButton and not self.navigation_locked:
-            self._panning = True
-            self._pan_last = event.position()
-            self.setCursor(Qt.ClosedHandCursor)
-            event.accept()
+            self._start_pan(event)
+            return
+        if event.button() == Qt.LeftButton and self._left_drag_pans(event):
+            self._start_pan(event)
             return
         banding = (event.button() == Qt.LeftButton
                    and self.dragMode() == QGraphicsView.RubberBandDrag)
@@ -364,6 +485,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         if self._panning:
             delta = event.position() - self._pan_last
             self._pan_last = event.position()
+            self._pan_travel += abs(delta.x()) + abs(delta.y())
             self.translate(delta.x() / self.zoom, delta.y() / self.zoom)
             event.accept()
             return
@@ -380,9 +502,17 @@ class ZoomPanGraphicsView(QGraphicsView):
             self._drop_grazed_frames()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MiddleButton and self._panning:
+        if self._panning and event.button() == self._pan_button:
             self._panning = False
             self.unsetCursor()
+            if (event.button() == Qt.LeftButton
+                    and self._pan_travel <= PAN_CLICK_SLOP):
+                # a click, not a pan. The press was swallowed before the base
+                # class could drop the selection, and dropping it is what a
+                # click on empty canvas is for.
+                scene = self.scene()
+                if scene is not None:
+                    scene.clearSelection()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -394,7 +524,7 @@ class ZoomPanGraphicsView(QGraphicsView):
             self._band_held_frames = frozenset()
 
     def cancel_pan(self) -> None:
-        """Drop a middle-drag pan that never got its release — the graph
+        """Drop a drag pan that never got its release — the graph
         being replaced under it, focus lost mid-drag — so the grab cursor
         doesn't stick. Safe to call when nothing is panning."""
         if self._panning:

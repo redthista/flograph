@@ -295,7 +295,9 @@ class SettingsDialog(QDialog):
         for name, value in (
                 ("rubber_band_mode_combo", window.rubber_band_mode),
                 ("rubber_band_invert_key_combo",
-                 window.rubber_band_invert_key)):
+                 window.rubber_band_invert_key),
+                ("left_drag_mode_combo", window.left_drag_mode),
+                ("wheel_action_combo", window.wheel_action)):
             combo = self.findChild(QComboBox, name)
             if combo is None:
                 continue
@@ -767,6 +769,43 @@ class SettingsDialog(QDialog):
                  "ones the canvas already uses (F frames the selection, Tab "
                  "opens the node search, Space pans).")
 
+        rows.add_group("Getting around")
+
+        drag_combo = QComboBox()
+        drag_combo.setObjectName("left_drag_mode_combo")
+        for label, value in (("Draws a selection band", "band"),
+                             ("Moves the canvas", "pan")):
+            drag_combo.addItem(label, value)
+        drag_combo.setCurrentIndex(
+            max(0, drag_combo.findData(window.left_drag_mode)))
+        rows.add("Left-drag on empty canvas", drag_combo,
+                 "Dragging the canvas itself with the left button either "
+                 "draws a rubber band over what it crosses, or takes hold of "
+                 "the canvas and moves it the way a map does. Whichever you "
+                 "pick, the other one is a modifier away: with the band as "
+                 "the drag, middle-drag or hold Space to move around; with "
+                 "the canvas as the drag, hold Ctrl or Shift to draw a band. "
+                 "A press that lands *on* something is untouched either way — "
+                 "nodes, tiles, wires and a frame's title bar still drag, and "
+                 "only the canvas between them moves. Applies to dashboard "
+                 "pages too.")
+
+        wheel_combo = QComboBox()
+        wheel_combo.setObjectName("wheel_action_combo")
+        for label, value in (("Zooms in and out", "zoom"),
+                             ("Scrolls up and down", "scroll")):
+            wheel_combo.addItem(label, value)
+        wheel_combo.setCurrentIndex(
+            max(0, wheel_combo.findData(window.wheel_action)))
+        rows.add("Mouse wheel", wheel_combo,
+                 "A wheel notch with nothing held either zooms about the "
+                 "cursor, the way a node editor does, or walks the canvas up "
+                 "and down, the way a document does — with Shift+wheel going "
+                 "sideways. Ctrl+wheel zooms under both settings, so it is "
+                 "the one that always works. A wheel over something that can "
+                 "scroll on its own — a table card, a web view — still goes "
+                 "to that card, as it always has.")
+
         rows.add_group("Drag-select")
 
         band_combo = QComboBox()
@@ -895,6 +934,12 @@ class SettingsDialog(QDialog):
             lambda index: window.set_double_click_action(
                 dclick_combo.itemData(index)))
         grid_check.toggled.connect(window.set_grid_visible)
+        drag_combo.currentIndexChanged.connect(
+            lambda index: window.set_left_drag_mode(
+                drag_combo.itemData(index)))
+        wheel_combo.currentIndexChanged.connect(
+            lambda index: window.set_wheel_action(
+                wheel_combo.itemData(index)))
         band_combo.currentIndexChanged.connect(
             lambda index: window.set_rubber_band_mode(
                 band_combo.itemData(index)))

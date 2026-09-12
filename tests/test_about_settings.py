@@ -118,7 +118,8 @@ class TestTheSettingsGrid:
         structure now, so a heading inside the page said it twice."""
         _dialog, grid = self.page(window, "Canvas")
         assert all(grid.itemWidget(r, 1) is not None for r in self.rows(grid))
-        assert grid.group_titles() == ["Display", "Drag-select", "Snapping",
+        assert grid.group_titles() == ["Display", "Getting around",
+                                       "Drag-select", "Snapping",
                                        "Custom colour strength"]
 
     def test_tooltips_are_wrapped_over_several_lines(self, window):
@@ -190,8 +191,8 @@ class TestTheNavTreeAndSearch:
     def test_groups_hang_under_their_page(self, window):
         dialog = SettingsDialog(window)
         rows = dict(self.nav_rows(dialog))
-        assert rows["Canvas"] == ["Display", "Drag-select", "Snapping",
-                                  "Custom colour strength"]
+        assert rows["Canvas"] == ["Display", "Getting around", "Drag-select",
+                                  "Snapping", "Custom colour strength"]
         assert rows["General"] == ["Appearance", "Window", "Execution",
                                    "Saving", "Updates", "Reset"]
         assert rows["About"] == []          # prose, no settings
@@ -308,7 +309,8 @@ class TestTheNavTreeAndSearch:
         self.select(dialog, "Canvas", "Display")
         dialog._search.setText("canvas")
         groups = {g for item, g, _h in grid.settings if not item.isHidden()}
-        assert groups == {"Display", "Drag-select", "Snapping"}
+        assert groups == {"Display", "Getting around", "Drag-select",
+                          "Snapping"}
 
     def test_a_search_is_page_wide_despite_a_group_selection(self, window):
         """A match under a group you had not selected would otherwise be

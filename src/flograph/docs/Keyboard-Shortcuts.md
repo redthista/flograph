@@ -43,8 +43,10 @@ on the text, not the graph.
 | Action | Binding |
 | --- | --- |
 | Add node (search palette) | **Tab** or right-click |
-| Pan | middle-drag, or **Space** + drag |
-| Zoom | mouse wheel |
+| Pan | middle-drag, or **Space** + drag (left-drag as well, if Settings ▸ Canvas says so) |
+| Zoom | mouse wheel, or **Ctrl**+wheel when the wheel is set to scroll |
+| Scroll the canvas | wheel when it is set to scroll, **Shift**+wheel for sideways |
+| Drag-select while left-drag pans | **Ctrl** or **Shift** + drag |
 | Frame the graph in view | **F** |
 | Nudge selection | arrow keys |
 | Raise / lower | **Ctrl+]** / **Ctrl+[** — add **Shift** for front / back |

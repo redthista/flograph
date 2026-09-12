@@ -275,6 +275,12 @@ class MainWindow(QMainWindow):
             "canvas/rubber_band_invert_key",
             base_view.DEFAULT_RUBBER_BAND_INVERT_KEY))
         self.view.set_rubber_band_invert_key(self.rubber_band_invert_key)
+        self.left_drag_mode = str(self.settings.value(
+            "canvas/left_drag_mode", base_view.DEFAULT_LEFT_DRAG_MODE))
+        self.view.set_left_drag_mode(self.left_drag_mode)
+        self.wheel_action = str(self.settings.value(
+            "canvas/wheel_action", base_view.DEFAULT_WHEEL_ACTION))
+        self.view.set_wheel_action(self.wheel_action)
         # zlib on the cache side-car trades a little save-time CPU for a lot
         # of disk (ideas_archived.md #16). Off writes raw pickles; both eras
         # read forever either way — load_blob sniffs each blob.
@@ -1026,6 +1032,24 @@ class MainWindow(QMainWindow):
         views = [self.view] + [page.view for page in self._canvas_pages()]
         for view in views:
             view.set_rubber_band_invert_key(name)
+
+    def set_left_drag_mode(self, mode: str) -> None:
+        """Whether a left-drag on empty canvas draws a selection band or
+        moves the canvas, on the main view and every dashboard page's."""
+        self.left_drag_mode = mode
+        self.settings.setValue("canvas/left_drag_mode", mode)
+        views = [self.view] + [page.view for page in self._canvas_pages()]
+        for view in views:
+            view.set_left_drag_mode(mode)
+
+    def set_wheel_action(self, action: str) -> None:
+        """Whether a plain wheel tick zooms or scrolls, on the main view and
+        every dashboard page's."""
+        self.wheel_action = action
+        self.settings.setValue("canvas/wheel_action", action)
+        views = [self.view] + [page.view for page in self._canvas_pages()]
+        for view in views:
+            view.set_wheel_action(action)
 
     def set_cache_compression_enabled(self, enabled: bool) -> None:
         """Whether saving zlib-compresses the cache side-car's blobs.
@@ -2020,6 +2044,8 @@ class MainWindow(QMainWindow):
         widget.view.set_scrollbars_enabled(self.scrollbars_enabled)
         widget.view.set_rubber_band_mode(self.rubber_band_mode)
         widget.view.set_rubber_band_invert_key(self.rubber_band_invert_key)
+        widget.view.set_left_drag_mode(self.left_drag_mode)
+        widget.view.set_wheel_action(self.wheel_action)
         self._set_canvas_viewport(widget.view, self.action_gpu_viewport.isChecked())
         self._canvas_stack.addWidget(widget)
         self.page_bar.add_page_tab(page)
@@ -4949,6 +4975,8 @@ class MainWindow(QMainWindow):
         self.set_reveal_ports_key(canvas_view.DEFAULT_REVEAL_PORTS_KEY)
         self.set_rubber_band_mode(base_view.DEFAULT_RUBBER_BAND_MODE)
         self.set_rubber_band_invert_key(base_view.DEFAULT_RUBBER_BAND_INVERT_KEY)
+        self.set_left_drag_mode(base_view.DEFAULT_LEFT_DRAG_MODE)
+        self.set_wheel_action(base_view.DEFAULT_WHEEL_ACTION)
         self.set_double_click_action("properties")
         self.set_compact_nodes(True)
         self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)

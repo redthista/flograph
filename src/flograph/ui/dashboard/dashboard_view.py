@@ -406,7 +406,13 @@ class DashboardView(ZoomPanGraphicsView):
         super().wheelEvent(event)
 
     def mousePressEvent(self, event) -> None:
-        if self._fs_tile is not None and event.button() == Qt.MiddleButton:
+        # same reason as the wheel above: a maximized tile is pinned to the
+        # viewport, so panning it would only slide it out of sight. Both ways
+        # of asking for a pan are turned away; everything else still lands.
+        if self._fs_tile is not None and (
+                event.button() == Qt.MiddleButton
+                or (event.button() == Qt.LeftButton
+                    and self._left_drag_pans(event))):
             event.accept()
             return
         super().mousePressEvent(event)

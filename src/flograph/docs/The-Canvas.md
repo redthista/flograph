@@ -12,6 +12,16 @@ Blueprint-style surface.
 | Frame the whole graph in view | **F** |
 | Nudge the selection | arrow keys |
 
+Two of those can be swapped for the other tradition in **Settings ▸ Canvas**,
+if the canvas you are used to is a map or a whiteboard rather than a node
+editor. **Left-drag on empty canvas** can *move the canvas* instead of
+drawing a selection band — hold **Ctrl** or **Shift** to draw a band for
+that one drag. **Mouse wheel** can *scroll up and down* instead of zooming,
+with **Shift**+wheel going sideways; **Ctrl**+wheel zooms whichever way that
+is set, so it is the one that always works. Both apply to dashboard pages
+too, and neither changes what a press on a node, a tile, a wire or a frame's
+title bar does — only the canvas between them moves.
+
 A **minimap** (toggle in Settings ▸ Canvas) and a status-bar resource
 monitor keep the scale of a large graph legible.
 
