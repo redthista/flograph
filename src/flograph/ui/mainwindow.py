@@ -5540,17 +5540,25 @@ class MainWindow(QMainWindow):
         if saved_page and saved_page in self.graph.pages:
             self.page_bar.select_page(saved_page)
         broken = sum(1 for n in loaded.nodes.values() if n.spec.broken)
-        if broken:
-            self.show_status(
-                f"Opened {path} — {broken} node(s) couldn't be resolved and "
-                f"were loaded as broken placeholders", 6000)
+        dropped = loaded.dropped_connections
+        if broken or dropped:
+            told = []
+            if broken:
+                told.append(f"{broken} node(s) couldn't be resolved and were "
+                            f"loaded as broken placeholders")
+            if dropped:
+                told.append(
+                    f"{len(dropped)} wire(s) no longer fit their nodes and "
+                    f"were left off: " + "; ".join(dropped[:2])
+                    + (" …" if len(dropped) > 2 else ""))
+            self.show_status(f"Opened {path} — " + " · ".join(told), 12000)
         elif path.endswith(".flowf"):
             self.show_status(
                 f"Opened workflow {path} — Save writes a .flograph project; "
                 f"Export updates this file", 6000)
         else:
             self.show_status(f"Opened {path}", 4000)
-        self._restore_cache(path, quiet=bool(broken))
+        self._restore_cache(path, quiet=bool(broken or dropped))
         # The statistics window opens on this project's saved runs rather
         # than whatever the previous session had in memory.
         self.engine.history.clear()

@@ -295,6 +295,12 @@ class Graph:
         # reference and wrong for offering one: a completion list holding
         # PATH, HOME and everything else the shell exported would be useless.
         self.env_keys: list[str] = []
+        # Wires the file held that no longer fit the nodes they join — a
+        # builtin's port renamed since it was saved, a node id the file does
+        # not contain — one line each, for whoever opened it to be told.
+        # Filled by `graph_from_dict` only; runtime-only, never serialized,
+        # and a save simply does not write the wires that were left off.
+        self.dropped_connections: list[str] = []
         self.events = GraphEvents()
         # Lookup tables over the edge set, rebuilt on demand rather than
         # patched at each mutation: there are only three places edges change

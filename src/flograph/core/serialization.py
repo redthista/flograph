@@ -234,6 +234,12 @@ def _group_colors_entry(graph: Graph) -> dict[str, Any]:
     return {"page_group_colors": colors} if colors else {}
 
 
+def _end_name(graph: Graph, node_id: str, port: str) -> str:
+    """One end of a wire as a person would name it: `Summary Stats.table`."""
+    node = graph.nodes.get(node_id)
+    return f"{node.label if node is not None else node_id}.{port}"
+
+
 def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     data = migrate(data)
     payload = data.get("graph")
@@ -364,8 +370,18 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     for entry in conn_entries:
         src_node, src_port = entry["src"]
         dst_node, dst_port = entry["dst"]
-        graph.connect(src_node, src_port, dst_node, dst_port,
-                      conn_id=entry.get("id"))
+        try:
+            graph.connect(src_node, src_port, dst_node, dst_port,
+                          conn_id=entry.get("id"))
+        except GraphError as exc:
+            # A builtin whose port was renamed since the file was saved
+            # (`Summary Stats` lost `table`) once made the whole project
+            # unopenable (issues 10). An unknown *type* already loads as a
+            # placeholder with its ports regrown; a vanished port on a known
+            # type, or an end the file does not contain, costs the wire.
+            graph.dropped_connections.append(
+                f"{_end_name(graph, src_node, src_port)} → "
+                f"{_end_name(graph, dst_node, dst_port)} ({exc})")
 
     for entry in payload.get("frames", []):
         graph.add_frame(Frame(

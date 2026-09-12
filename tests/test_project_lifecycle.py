@@ -233,6 +233,25 @@ class TestSaveOpen:
         # scene built a card for it too, without raising
         assert window.scene.node_items["gone"].broken
 
+    def test_open_file_with_a_renamed_port_drops_the_wire_and_says_so(
+            self, window, tmp_path):
+        # Issues 10: a builtin's port renamed since the file was saved made
+        # the whole project unopenable.
+        const, script = build_small_project(window)
+        window.graph.connect(const.id, "value", script.id, "in1")
+        data = graph_to_dict(window.graph)
+        for conn in data["graph"]["connections"]:
+            conn["src"][1] = "table"
+        path = tmp_path / "renamed_port.flograph"
+        path.write_text(json.dumps(data))
+
+        assert window.open_path(str(path), confirm=False)
+        assert {const.id, script.id} <= set(window.graph.nodes)
+        assert window.graph.connections == {}
+        message = window.status_message()
+        assert "wire(s) no longer fit their nodes" in message
+        assert "no output port 'table'" in message
+
     def test_recent_files_tracked(self, window, tmp_path):
         path = str(tmp_path / "r.flograph")
         window._project_path = path

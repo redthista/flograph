@@ -97,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     registry.load_builtins()
     registry.load_user_nodes(user_nodes_dir())
     graph = serialization.load(project, registry)
+    for line in graph.dropped_connections:
+        print(f"wire left off, it no longer fits its nodes: {line}",
+              file=sys.stderr)
     try:
         apply_overrides(graph, overrides)
     except ValueError as exc:

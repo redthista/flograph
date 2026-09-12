@@ -185,3 +185,44 @@ def test_grown_spare_ports_survive_round_trip(registry):
     # and the invitation came back on the reloaded node too
     assert reloaded.spec.inputs[-1].name == "more"
     assert graph_to_dict(restored) == data
+
+
+class TestAWireThatNoLongerFits:
+    """Issues 10: one out-of-date wire made the whole project unopenable."""
+
+    def _data(self, registry, src_port="value", dst_node=None):
+        graph = build_project_graph(registry)
+        data = graph_to_dict(graph)
+        conn = data["graph"]["connections"][0]
+        conn["src"][1] = src_port
+        if dst_node is not None:
+            conn["dst"][0] = dst_node
+        return data
+
+    def test_a_renamed_port_costs_the_wire_not_the_project(self, registry):
+        restored = graph_from_dict(self._data(registry, src_port="table"),
+                                   registry)
+        assert len(restored.nodes) == 2
+        assert restored.connections == {}
+        assert len(restored.frames) == 1
+        (line,) = restored.dropped_connections
+        assert "Constant.table" in line and "no output port 'table'" in line
+
+    def test_an_end_the_file_does_not_contain_costs_the_wire(self, registry):
+        restored = graph_from_dict(
+            self._data(registry, dst_node="not-in-this-file"), registry)
+        assert restored.connections == {}
+        (line,) = restored.dropped_connections
+        assert "not-in-this-file.in1" in line
+
+    def test_a_file_that_fits_drops_nothing(self, registry):
+        restored = graph_from_dict(self._data(registry), registry)
+        assert len(restored.connections) == 1
+        assert restored.dropped_connections == []
+
+    def test_a_save_after_leaves_the_wire_out(self, registry, tmp_path):
+        restored = graph_from_dict(self._data(registry, src_port="table"),
+                                   registry)
+        save(restored, tmp_path / "p.json")
+        again = load(tmp_path / "p.json", registry)
+        assert again.connections == {} and again.dropped_connections == []
