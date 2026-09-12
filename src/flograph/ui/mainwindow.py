@@ -1585,6 +1585,7 @@ class MainWindow(QMainWindow):
         engine.node_succeeded.connect(self._on_kpi_node_succeeded)
         engine.node_succeeded.connect(self._on_image_node_succeeded)
         engine.node_succeeded.connect(self._on_slicer_node_succeeded)
+        engine.node_succeeded.connect(self._on_upstream_node_succeeded)
         engine.node_succeeded.connect(self._on_control_node_succeeded)
         engine.node_succeeded.connect(self._on_browser_node_succeeded)
         # cards fade their output previews while a re-run for them is queued;
@@ -1876,6 +1877,25 @@ class MainWindow(QMainWindow):
         from flograph.engine.introspect import slicer_options
         item.set_slicer_options(
             slicer_options(self.graph, self.engine.cache, node_id))
+
+    def _on_upstream_node_succeeded(self, node_id: str) -> None:
+        """Refresh a card that shows what feeds it — a Slicer's values, a
+        control's range, a linked Table, a report — when that input arrives
+        and the card's own node will not run to do it.
+
+        Such a card normally refreshes on its own node's success, reading its
+        inputs then. A node that is already clean does not run, so it never
+        did: after a reopen that refused a stale pass-through (issue 8) the
+        Slicer came back from cache while the nodes feeding it re-ran, and
+        its card sat on "Run the graph to load slicer values" until the
+        Slicer itself was re-run. A dirty reader is left alone — it is about
+        to run and refresh itself, so doing it here would be done twice.
+        """
+        for conn in self.graph.out_connections(node_id):
+            reader = self.graph.nodes.get(conn.dst_node)
+            if (reader is not None and not reader.dirty
+                    and card_kind(reader) in self._CARD_READS_INPUTS):
+                self._refresh_node_card(reader.id)
 
     def _on_preview_enabled_changed(self, node_id: str, enabled: bool) -> None:
         if enabled:

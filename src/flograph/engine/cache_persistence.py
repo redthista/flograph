@@ -481,6 +481,28 @@ def _columns_from(meta: dict[str, Any]) -> Optional[dict[str, tuple[str, ...]]]:
             for port, names in raw.items()}
 
 
+def _alias_matches_source(meta: dict[str, Any],
+                          metas: dict[str, dict[str, Any]]) -> bool:
+    """Whether an alias entry really does re-serve its source's value.
+
+    False when the columns recorded for the two disagree. A node that wrote
+    into its input and handed it back — `df["year"] = ...; return df` — was
+    once recorded as an alias of the node upstream, so its own value was
+    never saved and a reopen rebuilt it without the column (issue 8). The
+    engine no longer does that, but files saved before it still say so, and
+    the manifest has kept each entry's columns all along: an alias whose
+    columns differ from its source's is not restored, and its node re-runs.
+    True when either side predates recorded columns — nothing to compare.
+    """
+    alias = meta.get("alias") or {}
+    source = metas.get(alias.get("node"))
+    mine = _columns_from(meta)
+    theirs = _columns_from(source) if source is not None else None
+    if mine is None or theirs is None:
+        return True
+    return mine.get(alias.get("as")) == theirs.get(alias.get("port"))
+
+
 def restore_aliases(graph: Graph, cache: OutputCache,
                     entries: list[tuple[str, dict[str, Any]]]) -> list[str]:
     """Rebuild the entries that share another node's value, once the blobs
@@ -494,9 +516,12 @@ def restore_aliases(graph: Graph, cache: OutputCache,
     exactly as it would have with no side-car cache at all.
     """
     restored = []
+    metas = dict(entries)
     for node_id, meta in entries:
         alias = meta.get("alias")
         if not isinstance(alias, dict) or node_id not in graph.nodes:
+            continue
+        if not _alias_matches_source(meta, metas):
             continue
         port, out_port = alias.get("port"), alias.get("as")
         outputs = cache.outputs_for(alias.get("node"))
@@ -974,14 +999,27 @@ def register_cache(graph: Graph, cache: OutputCache,
     cache.set_loader(load_outputs)
     project = str(project_path)
     registered = []
+    registered_ids: set[str] = set()
     source = open_cache_source(project_path)
     try:
-        for node_id, meta in resolve_entries(graph, project_path):
+        entries = resolve_entries(graph, project_path)
+        metas = dict(entries)
+        for node_id, meta in entries:
             alias = meta.get("alias") if is_alias(meta) else None
             if alias is not None:
                 # No blob of its own; it resolves through its source, which
                 # is registered too and may itself still be spilled.
                 if alias.get("node") is None or alias.get("as") is None:
+                    continue
+                # ...and only once that source has been. A source refused
+                # above (see _alias_matches_source) leaves every link below
+                # it with nothing to resolve through: registered anyway they
+                # count as done, never load, and hold a card on its
+                # placeholder and the restore bar up for good. The entries
+                # are in the topological order the save wrote, so one pass
+                # carries a whole chain.
+                if (not _alias_matches_source(meta, metas)
+                        or alias["node"] not in registered_ids):
                     continue
                 cache.register_spilled(
                     node_id, None, meta.get("wall_time", 0.0),
@@ -998,6 +1036,7 @@ def register_cache(graph: Graph, cache: OutputCache,
                     column_names=_columns_from(meta),
                 )
             registered.append(node_id)
+            registered_ids.add(node_id)
     finally:
         source.close()
     return registered

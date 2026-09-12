@@ -13,6 +13,7 @@ link waits on the one before it.
 """
 from __future__ import annotations
 
+import operator
 import os
 import sys
 import time
@@ -94,10 +95,11 @@ class _InFlight:
     finishes first must not take another's with it.
     """
     node_id: str
-    # id(shallow copy handed to this node) -> (src_node, src_port), so a
-    # pass-through node returning its input is still recognised as serving
-    # the upstream value rather than one of its own.
-    handed_in: dict[int, tuple[str, str]] = field(default_factory=dict)
+    # id(shallow copy handed to this node) -> (src_node, src_port, token),
+    # so a pass-through node returning its input is still recognised as
+    # serving the upstream value rather than one of its own — and the token
+    # (see _input_token) tells it from a node that wrote into that input.
+    handed_in: dict[int, tuple[str, str, object]] = field(default_factory=dict)
     run: Optional[NodeRun] = None
 
 
@@ -196,6 +198,95 @@ def _read_only_view(value, _nested: bool = False):
         except (ValueError, AttributeError, TypeError):
             return value
     return value
+
+
+def _frame_token(value) -> tuple:
+    """The identity of a pandas value's storage and labels, as handed in.
+
+    Under copy-on-write any write through the shallow copy — a new column, a
+    changed cell, an in-place sort, rename, drop or reset_index — replaces
+    the manager or one of its blocks or axes; a new index or column name or
+    an `attrs` entry changes the labels. Reading changes none of them, so
+    comparing afterwards says whether the node wrote into it, in a fraction
+    of a millisecond whatever the frame's size.
+    """
+    mgr = value._mgr
+    return (mgr, tuple(mgr.blocks), tuple(mgr.axes),
+            tuple(getattr(axis, "name", None) for axis in mgr.axes),
+            getattr(value, "name", None), dict(value.attrs))
+
+
+def _same_frame(value, token: tuple) -> bool:
+    now = _frame_token(value)
+    return (now[0] is token[0]
+            and len(now[1]) == len(token[1])
+            and all(map(operator.is_, now[1], token[1]))
+            and len(now[2]) == len(token[2])
+            and all(map(operator.is_, now[2], token[2]))
+            and now[3:] == token[3:])
+
+
+def _input_token(guarded, original):
+    """What `_untouched` needs, recorded as `guarded` is handed to a node.
+
+    A pass-through is recognised by identity — the node gave back the very
+    copy it was handed — and identity alone cannot tell a Reroute from a
+    script that did `df["year"] = ...` and returned `df`. Taken for an
+    alias, that script's result was never saved: a reopen rebuilt it from
+    the node upstream, without the column (issue 8). None when nothing can
+    be recorded, which `_untouched` reads as "written".
+    """
+    try:
+        if type(guarded) is dict:
+            # a frame inside is a copy of its own, so each one is recorded
+            return ("dict", original, {key: (item, _frame_token(item))
+                                       for key, item in guarded.items()
+                                       if item is not original.get(key)})
+        if type(guarded) in (list, set, bytearray):
+            return ("items", original)
+        np = sys.modules.get("numpy")
+        if np is not None and isinstance(guarded, np.ndarray):
+            return ("array",)
+        return ("pandas", _frame_token(guarded))
+    except Exception:
+        return None
+
+
+def _untouched(value, token) -> bool:
+    """Did the node hand back its guarded input exactly as it received it?
+
+    False whenever it cannot tell: a pass-through that goes unrecognised
+    costs a second copy in the cache file, and one recognised wrongly brings
+    back the wrong value.
+    """
+    if token is None:
+        return False
+    try:
+        kind = token[0]
+        if kind == "pandas":
+            return _same_frame(value, token[1])
+        if kind == "array":
+            # handed over read-only; written only if it was made writable
+            return not value.flags.writeable
+        original = token[1]
+        if kind == "dict":
+            if type(value) is not dict or value.keys() != original.keys():
+                return False
+            guarded = token[2]
+            for key, item in value.items():
+                if key in guarded:
+                    handed, frame = guarded[key]
+                    if item is not handed or not _same_frame(item, frame):
+                        return False
+                elif item is not original[key]:
+                    return False
+            return True
+        if type(value) is list:
+            return (len(value) == len(original)
+                    and all(map(operator.is_, value, original)))
+        return value == original
+    except Exception:
+        return False
 
 
 def _aimed_at(targets: Iterable[str],
@@ -1064,7 +1155,9 @@ class ExecutionEngine(QObject):
             guarded = _read_only_view(value)
             inputs[port.name] = guarded
             if guarded is not value:
-                inflight.handed_in[id(guarded)] = (conn.src_node, conn.src_port)
+                inflight.handed_in[id(guarded)] = (
+                    conn.src_node, conn.src_port,
+                    _input_token(guarded, value))
 
         signals = WorkerSignals()  # created on the GUI thread, before pool.start
         signals.finished.connect(self._on_node_finished)
@@ -1134,12 +1227,18 @@ class ExecutionEngine(QObject):
         (value,) = outputs.values()
         # A pandas input arrives as a copy-on-write shallow copy (see
         # _read_only_view), so a pass-through node hands back that copy rather
-        # than the cached object itself. It is still the same data — the copy
-        # shares every block — so it still aliases; the identity to test is
-        # against what was handed in.
+        # than the cached object itself — the identity to test is against
+        # what was handed in. Handing it back is not enough on its own: a
+        # script that writes `df["year"] = ...` into its input and returns it
+        # hands back the same copy, with a column the upstream value does not
+        # have. Aliased, its result was never saved and a reopen rebuilt it
+        # without the column (issue 8), so it aliases only while untouched.
         handed = handed_in.get(id(value))
         if handed is not None:
-            return handed
+            src_node, src_port, token = handed
+            if _untouched(value, token):
+                return src_node, src_port
+            return None, None
         for port in node.spec.inputs:
             conn = self.graph.input_connection(node_id, port.name)
             if conn is None:

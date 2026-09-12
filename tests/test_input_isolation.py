@@ -382,3 +382,34 @@ class TestArrayInputsRefuseTheWrite:
         engine = run_graph(qtbot, graph)
         assert list(engine.cache.outputs_for(writer.id)["result"]["x"]) == [0, 0, 0]
         assert list(engine.cache.outputs_for(src.id)["result"]["x"]) == [1, 2, 3]
+
+
+class TestAWriteIsNotAPassThrough:
+    """Issue 8: a node that wrote into its input and handed it back was
+    recorded as re-serving the upstream value, so its own result was never
+    saved and a reopen rebuilt it from upstream — without what it added."""
+
+    @pytest.mark.parametrize("code", [ASSIGN_COLUMN, LOC_WRITE, NEW_COLUMN,
+                                      INPLACE_RENAME])
+    def test_a_frame_written_in_place_owns_its_value(self, qtbot, registry,
+                                                     code):
+        graph = Graph()
+        src = graph.add_node(registry.instantiate(SCRIPT))
+        graph.set_code(src.id, SOURCE)
+        writer = graph.add_node(registry.instantiate(SCRIPT))
+        graph.set_code(writer.id, code)
+        graph.connect(src.id, "result", writer.id, "value")
+
+        engine = run_graph(qtbot, graph)
+        assert engine.cache.get(writer.id).alias_of is None
+
+    def test_an_item_appended_in_place_owns_its_value(self, qtbot, registry):
+        graph = Graph()
+        src = graph.add_node(registry.instantiate(SCRIPT))
+        graph.set_code(src.id, emitter("[1, 2, 3]"))
+        adder = graph.add_node(registry.instantiate(SCRIPT))
+        graph.set_code(adder.id, mutator("value.append(4)"))
+        graph.connect(src.id, "result", adder.id, "value")
+
+        engine = run_graph(qtbot, graph)
+        assert engine.cache.get(adder.id).alias_of is None

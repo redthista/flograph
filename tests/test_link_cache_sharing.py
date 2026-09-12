@@ -7,12 +7,15 @@ DataFrame behind a Goto and two Froms reported four times its size, wrote
 four blobs into the side-car cache, and came back from a reopen as four
 independent copies. These tests pin down each of those three.
 """
+import json
+
 import pandas as pd
 import pytest
 from flograph.core import Graph, NodeRegistry
 from flograph.engine.cache import OutputCache
 from flograph.engine.cache_persistence import (
-    is_alias, load_cache, restore_aliases, resolve_entries, save_cache,
+    is_alias, load_cache, register_cache, restore_aliases, resolve_entries,
+    save_cache,
 )
 from flograph.engine.cache_worker import CacheLoadRunnable, CacheLoadSignals
 from flograph.engine.scheduler import ExecutionEngine
@@ -35,6 +38,16 @@ NODE = {"label": "Copy", "category": "Test",
         "inputs": [("value", "any")], "outputs": [("result", "any")]}
 def run(ctx, value):
     return value.copy()
+"""
+
+# Adds a column to the frame it was handed and returns that same frame —
+# how a script written by habit does it, and the shape issue 8 came back as.
+ADD_YEAR = """
+NODE = {"label": "Add Year", "category": "Test",
+        "inputs": [("value", "any")], "outputs": [("result", "any")]}
+def run(ctx, value):
+    value["year"] = 2026
+    return value
 """
 
 
@@ -310,3 +323,69 @@ def run(ctx):
         fresh = OutputCache()
         assert dot.id in load_cache(graph, fresh, project)
         assert fresh.outputs_for(dot.id) == {"value": None}
+
+
+class TestAWriterIsNotReopenedAsAPassThrough:
+    """Issue 8, end to end: the column a script adds in place survives a
+    save and reopen — including from a file saved before the engine could
+    tell such a node from a pass-through."""
+
+    def _flow(self, registry):
+        graph = Graph()
+        src = graph.add_node(registry.instantiate(SCRIPT))
+        graph.set_code(src.id, SOURCE)
+        writer = graph.add_node(registry.instantiate(SCRIPT))
+        graph.set_code(writer.id, ADD_YEAR)
+        graph.connect(src.id, "result", writer.id, "value")
+        return graph, src, writer
+
+    def test_the_added_column_comes_back(self, qtbot, registry, tmp_path):
+        graph, src, writer = self._flow(registry)
+        engine = run_graph(qtbot, graph)
+        project = tmp_path / "p.flograph"
+        save_cache(graph, engine.cache, project)
+
+        fresh = OutputCache()
+        load_cache(graph, fresh, project)
+        assert "year" in fresh.outputs_for(writer.id)["result"].columns
+
+    def test_a_file_that_recorded_it_as_a_pass_through_re_runs_it(
+            self, qtbot, registry, tmp_path):
+        graph, src, writer = self._flow(registry)
+        engine = run_graph(qtbot, graph)
+        project = tmp_path / "p.flograph"
+        save_cache(graph, engine.cache, project)
+        # what an older flograph wrote: the writer as an alias of its source,
+        # with its own columns — `year` among them — recorded beside it
+        manifest_path = tmp_path / "p.flograph.cache" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["nodes"][writer.id]["alias"] = {
+            "node": src.id, "port": "result", "as": "result"}
+        manifest_path.write_text(json.dumps(manifest))
+
+        restored = load_cache(graph, OutputCache(), project)
+        assert src.id in restored and writer.id not in restored
+        assert register_cache(graph, OutputCache(), project) == [src.id]
+
+    def test_links_below_a_refused_pass_through_are_not_left_hanging(
+            self, qtbot, registry, tmp_path):
+        # source -> writer -> reroute, saved by an older flograph as two
+        # aliases. Refusing the writer must refuse the reroute too: left
+        # registered it counts as done but has nothing to load from, which
+        # held a Slicer below it on its placeholder and the restore bar up.
+        graph, src, writer = self._flow(registry)
+        dot = graph.add_node(registry.instantiate(REROUTE))
+        graph.connect(writer.id, "result", dot.id, "value")
+        engine = run_graph(qtbot, graph)
+        project = tmp_path / "p.flograph"
+        save_cache(graph, engine.cache, project)
+        manifest_path = tmp_path / "p.flograph.cache" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["nodes"][writer.id]["alias"] = {
+            "node": src.id, "port": "result", "as": "result"}
+        manifest["nodes"][dot.id]["alias"] = {
+            "node": writer.id, "port": "result", "as": "value"}
+        manifest_path.write_text(json.dumps(manifest))
+
+        assert register_cache(graph, OutputCache(), project) == [src.id]
+        assert load_cache(graph, OutputCache(), project) == [src.id]

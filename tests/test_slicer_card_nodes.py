@@ -1149,3 +1149,31 @@ class TestTableSpecCard:
         model = item._table_viewer_view.model()
         assert model is not None
         assert model.rowCount() == 2  # one spec row per source column
+
+
+class TestAReaderThatDoesNotRun:
+    def test_a_clean_slicer_fills_in_when_its_input_re_runs(self, qtbot,
+                                                            window):
+        """Issue 8: a reopen can bring a Slicer back from cache while the
+        node feeding it has to run again. The Slicer is clean, so it does
+        not run — its card has to fill in when that input arrives."""
+        win = window
+        source, slicer, _shown = _add_sliced_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        item = win.scene.node_items[slicer.id]
+        panel = item._slicer_panel
+
+        # what that reopen leaves: the slicer done and waiting on its card,
+        # the table feeding it still to run
+        item.set_slicer_options(None)
+        win.engine.cache.evict(source.id)
+        source.dirty = True
+        assert not panel.has_options() and not slicer.dirty
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_targets([source.id])
+
+        assert not slicer.dirty
+        assert panel.has_options()
+
