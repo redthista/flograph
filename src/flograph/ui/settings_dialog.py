@@ -16,8 +16,8 @@ import platform
 from PySide6.QtCore import QSize, Qt, qVersion
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
-    QKeySequenceEdit, QLineEdit, QMessageBox, QPushButton, QSpinBox,
+    QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QHBoxLayout, QHeaderView,
+    QLabel, QKeySequenceEdit, QLineEdit, QMessageBox, QPushButton, QSpinBox,
     QStackedWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
     QWidget,
 )
@@ -218,6 +218,7 @@ class SettingsDialog(QDialog):
         build time and live-apply from there, which is right for a user
         turning knobs — but a reset changes the values underneath an already
         open dialog, so it has to be pulled back into sync afterwards."""
+        from .data_table import table_text_size
         from .spreadsheet import autosize_default_enabled, date_formats_setting
 
         combo_values = {
@@ -252,6 +253,7 @@ class SettingsDialog(QDialog):
                 "packages/notify_missing", True, type=bool),
         }
         spins = {
+            "table_text_size_spinbox": table_text_size(),
             "lod_threshold_spinbox": round(window.lod_threshold * 100),
             "tint_soft_spinbox": round(window.tint_soft * 100),
             "tint_strong_spinbox": round(window.tint_strong * 100),
@@ -454,6 +456,8 @@ class SettingsDialog(QDialog):
 
     @staticmethod
     def _build_general_page(window) -> QWidget:
+        from .data_table import set_table_text_size, table_text_size
+
         page = QWidget()
         layout = QVBoxLayout(page)
         rows = SettingsGrid()
@@ -477,6 +481,25 @@ class SettingsDialog(QDialog):
                  "node canvas itself stays dark either way, the way a "
                  "Blueprints-style workspace does. Takes effect straight "
                  "away.")
+
+        text_size_spin = QDoubleSpinBox()
+        text_size_spin.setObjectName("table_text_size_spinbox")
+        text_size_spin.setRange(0.0, 20.0)
+        text_size_spin.setSingleStep(0.5)
+        text_size_spin.setDecimals(1)
+        text_size_spin.setSuffix(" pt")
+        text_size_spin.setSpecialValueText("Default")
+        text_size_spin.setValue(table_text_size())
+        text_size_spin.valueChanged.connect(set_table_text_size)
+        rows.add("Data text size", text_size_spin,
+                 "How big the text is in the data tables — the Inspector, "
+                 "the previews on node cards and dashboard tiles, and the "
+                 "pop-out views. A smaller size fits more rows and columns "
+                 "on screen; rows tighten with it, so the table shows more "
+                 "than the text alone would suggest. \"Default\" leaves each "
+                 "table at the size it has always used. Takes effect straight "
+                 "away in the Inspector; a card or tile takes it on its next "
+                 "redraw.")
 
         rows.add_group("Window")
 

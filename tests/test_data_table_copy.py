@@ -256,7 +256,7 @@ class TestMenu:
     def test_offers_the_copy_actions(self, view):
         labels = [a.text() for a in view.build_menu().actions() if a.text()]
         assert labels == ["Copy", "Copy with Column Names",
-                          "Copy Whole Table", "Select All"]
+                          "Copy Whole Table", "Select All", "Text Size"]
 
     def test_selection_actions_are_off_with_nothing_selected(self, view):
         view.selectionModel().clearSelection()

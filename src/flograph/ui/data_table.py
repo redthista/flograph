@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QFontMetrics, QGuiApplication, QKeySequence
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt, Signal
+from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QHeaderView, QMenu, QMessageBox, QStyleOptionViewItem, QTableView,
     QToolTip,
@@ -53,6 +53,50 @@ BAR_ONLY_WIDTH = 110
 # for every table card. A sample of the first rows sizes a column well
 # enough; a stray wide value further down is a manual drag away.
 FIT_SAMPLE_ROWS = 50
+
+_ORG = "flograph"
+_APP = "flograph"
+#: Settings ▸ General ▸ Appearance ▸ Data text size: the point size for
+#: every read-only data table.
+TEXT_SIZE_SETTING = "tables/text_size_pt"
+#: What the shared grid look has always used, and so what "Default" means
+#: for a table on a card, a tile or the sheet's toolbar preview.
+GRID_FONT_PT = 8.5
+#: What Smaller/Larger on the table's own menu will go down and up to.
+MIN_TEXT_PT = 5.0
+MAX_TEXT_PT = 20.0
+#: Step for one Smaller/Larger.
+TEXT_PT_STEP = 0.5
+#: Room a row needs beyond the text itself. Qt's own default section size
+#: is generous — deliberately, for a touch-sized list — and a data table
+#: asked to fit more on screen wants the tighter one.
+ROW_PADDING = 5
+
+
+class _TextSizeNotifier(QObject):
+    """One signal every open data table listens to, so changing the size in
+    Settings re-fonts what is already on screen instead of only the next
+    table built."""
+    changed = Signal()
+
+
+_text_size_notifier = _TextSizeNotifier()
+
+
+def table_text_size() -> float:
+    """The configured point size for data tables, or 0.0 for "whatever the
+    theme picks" — which is the app font in the inspector and GRID_FONT_PT
+    on a card or tile."""
+    try:
+        return float(QSettings(_ORG, _APP).value(TEXT_SIZE_SETTING, 0.0) or 0.0)
+    except (TypeError, ValueError):      # a hand-edited settings file
+        return 0.0
+
+
+def set_table_text_size(points: float) -> None:
+    """Store the size and push it at every table already open."""
+    QSettings(_ORG, _APP).setValue(TEXT_SIZE_SETTING, float(points))
+    _text_size_notifier.changed.emit()
 
 
 def cell_text(index) -> str:
@@ -232,6 +276,53 @@ class DataTableView(QTableView):
         self._sort_cycler = HeaderSortCycler(self.horizontalHeader())
         self._sort_cycler.sortRequested.connect(self._sort_requested)
 
+        # The font the theme gave this view, kept so that going back to
+        # "Default" in Settings restores it rather than a guess at it.
+        self._theme_font = QFont(self.font())
+        self._wraps = False                # set from the model in setModel
+        self._points_in_force = float(self._theme_font.pointSizeF())
+        self._apply_text_size()
+        _text_size_notifier.changed.connect(self._apply_text_size)
+
+    # -------------------------------------------------------- text size
+
+    def _apply_text_size(self, refit: bool = True) -> None:
+        """Font and row height from Settings ▸ General ▸ Data text size.
+
+        Two routes, because a data table gets its look from two places: the
+        inspector's tables are plain widgets, so setFont is the whole story,
+        while the tables on cards and tiles carry the shared grid stylesheet
+        — and a stylesheet's `font-size` beats any font set on the widget.
+        For those the stylesheet is re-applied instead, through
+        style_scroll_area so the view keeps its scroll-blitting.
+        """
+        points = table_text_size()
+        font = QFont(self._theme_font)
+        if points > 0:
+            font.setPointSizeF(points)
+        self.setFont(font)
+        self.horizontalHeader().setFont(font)
+        self.verticalHeader().setFont(font)
+
+        sheet = self.styleSheet()
+        if "gridline-color" in sheet and "font-size" in sheet:
+            from . import theme
+            theme.style_scroll_area(self, theme.grid_stylesheet())
+            points = points or GRID_FONT_PT
+            font.setPointSizeF(points)
+        # The size actually on screen, whichever route painted it — what
+        # Smaller/Larger steps from.
+        self._points_in_force = points or font.pointSizeF()
+
+        # A `wrap` rule sizes each row to its own content and must keep
+        # doing that; every other table gets the tight height for this font.
+        if not self._wraps:
+            self.verticalHeader().setDefaultSectionSize(
+                QFontMetrics(font).height() + ROW_PADDING)
+        if refit and self.model() is not None \
+                and self.model().columnCount() > 0:
+            self.fit_columns_to_data()
+
     def _sort_requested(self, column: int, mode: str) -> None:
         model = self.model()
         if model is None:
@@ -268,9 +359,11 @@ class DataTableView(QTableView):
         """
         wraps = bool(model is not None
                      and getattr(model, "wraps_text", lambda: False)())
+        self._wraps = wraps
         self.verticalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents if wraps
             else QHeaderView.Interactive)      # Qt's own default otherwise
+        self._apply_text_size(refit=False)   # row height for this font
 
     def fit_columns_to_data(self) -> None:
         """Size each column to the wider of its header and its sampled
@@ -476,7 +569,36 @@ class DataTableView(QTableView):
         select_all.setShortcut(QKeySequence.SelectAll)
         select_all.setEnabled(everything.isEnabled())
         select_all.triggered.connect(self.selectAll)
+
+        # Where you look for it: you are already looking at the table that
+        # is too big. The same preference as Settings ▸ General, so it holds
+        # for every data table and across restarts.
+        menu.addSeparator()
+        # built with an explicit parent rather than menu.addMenu(str):
+        # that returns a QMenu nothing on the Python side holds, and
+        # shiboken collects the wrapper out from under its owner
+        sizes = QMenu("Text Size", menu)
+        menu.addMenu(sizes)
+        smaller = sizes.addAction("Smaller")
+        smaller.triggered.connect(
+            lambda: self.nudge_text_size(-TEXT_PT_STEP))
+        larger = sizes.addAction("Larger")
+        larger.triggered.connect(lambda: self.nudge_text_size(TEXT_PT_STEP))
+        sizes.addSeparator()
+        default = sizes.addAction("Default")
+        default.setEnabled(table_text_size() > 0)
+        default.triggered.connect(lambda: set_table_text_size(0.0))
         return menu
+
+    def nudge_text_size(self, delta: float) -> None:
+        """One step smaller or larger, from the size in force now.
+
+        Which for "Default" is whatever this table happens to be showing,
+        so the first step down is a step down from what is on screen rather
+        than a jump to somewhere else."""
+        points = table_text_size() or self._points_in_force
+        set_table_text_size(
+            max(MIN_TEXT_PT, min(MAX_TEXT_PT, points + delta)))
 
     def _show_menu(self, pos) -> None:
         from . import menu_guard

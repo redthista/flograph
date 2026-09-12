@@ -306,10 +306,17 @@ def grid_stylesheet() -> str:
     """The dark table look shared by canvas cards, dashboard tiles and the
     dashboard's maximized pages — one definition so a grid reads the same
     wherever it appears. Apply it with style_scroll_area, not setStyleSheet.
+
+    The text size is the one from Settings ▸ General when it has been
+    set, so a grid on a card shrinks with the inspector's rather than
+    keeping a size of its own.
     """
+    from .data_table import GRID_FONT_PT, table_text_size
+    points = table_text_size() or GRID_FONT_PT
     return (f"QTableView {{ background: {NODE_BODY.name()};"
             f" color: {NODE_TEXT.name()}; border: none;"
-            f" gridline-color: {NODE_BORDER.name()}; font-size: 8.5pt; }}"
+            f" gridline-color: {NODE_BORDER.name()};"
+            f" font-size: {points:g}pt; }}"
             f"QHeaderView::section {{ background: {NODE_HEADER.name()};"
             f" color: {NODE_SUBTEXT.name()};"
             f" border: 1px solid {NODE_BORDER.name()}; padding: 2px; }}")

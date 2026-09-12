@@ -111,6 +111,123 @@ class TestInspector:
         assert panel._tabs.count() == 1
         assert panel._tabs.tabText(0) == "table"
 
+    def test_one_row_of_chrome_above_a_single_port_table(
+            self, qtbot, registry, tmp_path):
+        """The panel used to spend four rows — dock text, header, port tab,
+        meta line — before the first row of data. Now: no port tab bar for
+        a single port, and everything said on one line that rides in the
+        empty stretch of the Data/Spec bar."""
+        from PySide6.QtWidgets import QTabWidget
+        csv = tmp_path / "d.csv"
+        csv.write_text("a,b\n1,x\n3,y\n")
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        graph.set_param(reader.id, "path", str(csv))
+
+        panel = InspectorPanel(graph, engine)
+        qtbot.addWidget(panel)
+        panel.resize(700, 300)
+        panel.show()
+        panel.show_node(reader.id)
+        self._run(qtbot, engine)
+
+        assert panel._tabs.tabBar().isHidden()          # one port, no tabs
+        line = panel._header.text()
+        for part in ("Read CSV", "table", "dataframe",
+                     "2 rows × 2 cols", "computed in"):
+            assert part in line
+        assert panel._header.toolTip() == line          # nothing lost to elision
+        assert not panel._strip.isVisible()             # no row of its own
+
+        # the line sits inside the Data/Spec bar, past its last tab
+        sub = panel._tabs.widget(0).findChild(QTabWidget)
+        bar = sub.tabBar()
+        assert panel._info.parentWidget() is bar
+        assert panel._info.isVisible()
+        assert panel._info.x() > bar.tabRect(bar.count() - 1).right()
+        assert panel._info.geometry().right() <= bar.width()
+
+    def test_switching_port_tabs_re_says_the_line(self, qtbot, registry,
+                                                  tmp_path):
+        """With several ports the type and size belong to the port being
+        looked at, and the port tabs are worth their row."""
+        csv = tmp_path / "d.csv"
+        csv.write_text("a,b\n1,2\n3,4\n-1,6\n")
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        reader = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        filt = graph.add_node(
+            registry.instantiate("flograph.transform.filter_rows"))
+        graph.set_param(reader.id, "path", str(csv))
+        graph.set_param(filt.id, "query", "a > 0")
+        graph.connect(reader.id, "table", filt.id, "table")
+
+        panel = InspectorPanel(graph, engine)
+        qtbot.addWidget(panel)
+        panel.resize(700, 300)
+        panel.show()
+        panel.show_node(filt.id)
+        self._run(qtbot, engine)
+
+        assert not panel._tabs.tabBar().isHidden()
+        assert panel._info.parentWidget() is panel._tabs.tabBar()
+        assert "filtered" in panel._header.text()
+        assert "2 rows" in panel._header.text()
+
+        panel._tabs.setCurrentIndex(1)
+        assert "rejected" in panel._header.text()
+        assert "1 rows" in panel._header.text()
+
+    def test_value_with_no_bar_to_ride_keeps_its_own_row(
+            self, qtbot, registry, tmp_path):
+        """A lone non-table value has no Data/Spec bar, so the line gets
+        the strip — one row still, and the line is readable."""
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        const = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.set_param(const.id, "value", "42")
+
+        panel = InspectorPanel(graph, engine)
+        qtbot.addWidget(panel)
+        panel.resize(700, 200)
+        panel.show()
+        panel.show_node(const.id)
+        self._run(qtbot, engine)
+
+        assert panel._strip.isVisible()
+        assert panel._info.parentWidget() is panel
+        assert panel._info.isVisible()
+        assert "Constant" in panel._header.text()
+
+    def test_the_line_is_taken_back_before_its_bar_is_deleted(
+            self, qtbot, registry, tmp_path):
+        """The bar carrying the line is the line's parent and is rebuilt on
+        every selection — the line has to be reclaimed first, or the next
+        refresh writes to a deleted label."""
+        csv = tmp_path / "d.csv"
+        csv.write_text("a,b\n1,x\n3,y\n")
+        graph = Graph()
+        engine = ExecutionEngine(graph)
+        first = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        second = graph.add_node(registry.instantiate("flograph.io.read_csv"))
+        graph.set_param(first.id, "path", str(csv))
+        graph.set_param(second.id, "path", str(csv))
+
+        panel = InspectorPanel(graph, engine)
+        qtbot.addWidget(panel)
+        panel.resize(700, 300)
+        panel.show()
+        self._run(qtbot, engine)
+
+        for _ in range(3):                       # back and forth a few times
+            panel.show_node(first.id)
+            qtbot.wait(1)                        # let the deleteLater run
+            panel.show_node(second.id)
+            qtbot.wait(1)
+        assert "Read CSV" in panel._header.text()
+        assert panel._info.isVisible()
+
     def test_figure_output_shows_pointer_not_a_squeezed_copy(
             self, qtbot, registry, tmp_path):
         """The node's canvas card (or dashboard tile) already renders its

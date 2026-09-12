@@ -4981,7 +4981,9 @@ class MainWindow(QMainWindow):
         self.set_compact_nodes(True)
         self.set_tints(theme.DEFAULT_TINT_SOFT, theme.DEFAULT_TINT_STRONG)
         self.action_gpu_viewport.setChecked(False)
+        from .data_table import set_table_text_size
         from .spreadsheet import set_autosize_default, set_date_formats_setting
+        set_table_text_size(0.0)             # back to each table's own size
         set_autosize_default(True)
         set_date_formats_setting("")
         self.reset_window_layout()
