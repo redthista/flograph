@@ -684,6 +684,79 @@ class UpdateFrameCommand(QUndoCommand):
         self._graph.update_frame(self._frame_id, title=title, rect=rect, color=color)
 
 
+class SetFrameCanvasCommand(QUndoCommand):
+    """Turn a frame into a model canvas, or back into a frame (G13).
+
+    Snapshots the conversion whole — the canvas its contents live on, the
+    ports its box shows, the box-sized rect and the size to grow back to —
+    for the reason SetFrameCollapsedCommand does: undoing half of it would
+    leave a box standing for a canvas nothing is on, or a region whose
+    contents are somewhere else.
+
+    Moving the contents between canvases is a separate command per item
+    (SetItemCanvasCommand); the caller puts both in one macro, so one
+    Ctrl+Z is one conversion.
+    """
+
+    def __init__(self, graph: Graph, frame_id: str, own_canvas: str,
+                 ports: tuple = (), box_size: tuple = (60.0, 60.0),
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("turn into a model canvas" if own_canvas
+                         else "turn back into a frame", parent)
+        self._graph = graph
+        self._frame_id = frame_id
+        frame = graph.frames[frame_id]
+        self._old = (frame.own_canvas, frame.ports, frame.rect,
+                     frame.expanded_size)
+        x, y, width, height = frame.rect
+        if own_canvas:
+            # The box stands where the frame's top-left was, and the region
+            # it drew is remembered so turning it back gives it back. A
+            # frame that is *already* a canvas keeps the size it remembered:
+            # re-declaring its ports comes through here too, and the box's
+            # own size is not the region it would grow back into.
+            keep = (frame.expanded_size if frame.own_canvas
+                    else (width, height))
+            self._new = (own_canvas, tuple(ports), (x, y, *box_size), keep)
+        else:
+            grow = frame.expanded_size or (width, height)
+            self._new = ("", (), (x, y, *grow), None)
+
+    def _apply(self, state) -> None:
+        own_canvas, ports, rect, expanded_size = state
+        self._graph.apply_frame_canvas(
+            self._frame_id, own_canvas=own_canvas, ports=ports, rect=rect,
+            expanded_size=expanded_size)
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+
+class SetItemCanvasCommand(QUndoCommand):
+    """Move one node, frame or shape to another canvas (G12/G13). Position
+    and wires are untouched — only which canvas draws it."""
+
+    def __init__(self, graph: Graph, kind: str, item_id: str, canvas: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("move to canvas", parent)
+        self._graph = graph
+        self._kind = kind
+        self._item_id = item_id
+        table = {"node": graph.nodes, "frame": graph.frames,
+                 "shape": graph.shapes}[kind]
+        self._old = getattr(table[item_id], "canvas", "")
+        self._new = canvas
+
+    def redo(self) -> None:
+        self._graph.set_item_canvas(self._kind, self._item_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_item_canvas(self._kind, self._item_id, self._old)
+
+
 class AddShapeCommand(QUndoCommand):
     def __init__(self, graph: Graph, shape: Shape,
                  parent: Optional[QUndoCommand] = None) -> None:

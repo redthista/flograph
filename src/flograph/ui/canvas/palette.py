@@ -314,6 +314,25 @@ class LibraryTree(QTreeWidget):
             self.insert_frame_requested.emit(frame_id)
 
     def _on_context_menu(self, pos: QPoint) -> None:
+        menu = self._context_menu_for(pos)
+        if menu is not None:
+            menu.exec(self.viewport().mapToGlobal(pos))
+
+    def _context_menu_for(self, pos: QPoint) -> "QMenu | None":
+        """The menu for a right-click at `pos`, or None when the click was
+        never on this tree.
+
+        The same guard the canvas views carry, for the same platform
+        behaviour: on Wayland the context event a right press brings is
+        delivered to the *focus* widget, and only after the handler that
+        opened our own menu has returned. So closing a menu somewhere else
+        — the page bar's, folding its canvases away — could be followed by
+        this dock opening its own, at a position taken from somebody else's
+        coordinates. On empty space that menu is a lone "New group…", which
+        is exactly how it was found.
+        """
+        if not self.rect().contains(pos):
+            return None
         item = self.itemAt(pos)
         menu = QMenu(self)
         frame_id = item.data(0, FRAME_ID_ROLE) if item else None
@@ -329,8 +348,7 @@ class LibraryTree(QTreeWidget):
                            lambda: self.move_user_frame_requested.emit(frame_id))
             menu.addAction("Delete",
                            lambda: self.delete_user_frame_requested.emit(frame_id))
-            menu.exec(self.viewport().mapToGlobal(pos))
-            return
+            return menu
         type_id = item.data(0, TYPE_ID_ROLE) if item else None
         if type_id:
             fav_label = ("Remove from Favorites" if
@@ -349,7 +367,7 @@ class LibraryTree(QTreeWidget):
                            lambda: self.delete_user_node_requested.emit(type_id))
             menu.addSeparator()
         menu.addAction("New group…", self.new_group_requested.emit)
-        menu.exec(self.viewport().mapToGlobal(pos))
+        return menu
 
     def keyPressEvent(self, event) -> None:
         if (event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier)

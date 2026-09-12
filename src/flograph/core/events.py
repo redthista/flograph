@@ -58,6 +58,10 @@ class GraphEvents:
         self.status_changed = Event()  # (node_id: str, status: NodeStatus, message: str)
         self.progress_changed = Event()  # (node_id: str, fraction: float)
         self.temp_edit_changed = Event()  # (node_id: str, has_temp_edit: bool)
+        # (kind: "node"|"frame"|"shape", item_id: str) — it moved to another
+        # canvas (G12/G13), so which tab draws it changed. Position and
+        # wires are untouched, which is why this is not node_moved.
+        self.item_canvas_changed = Event()
         self.frame_added = Event()     # (frame: Frame)
         self.frame_removed = Event()   # (frame_id: str)
         self.frame_changed = Event()   # (frame: Frame)

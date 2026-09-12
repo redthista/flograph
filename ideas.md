@@ -55,9 +55,11 @@ did chunk X, which retires with it: Show Table pivots into a matrix
 itself, and its rules can read the rows before the pivot. G12 shipped
 2026-09-12, and grew in the doing: a frame opens in a tab of its own,
 and the page bar's **+** also adds a whole canvas of its own, with its
-own nodes. Turning a frame into such a canvas — a node-like box with
-inputs and outputs you declare, and back again — is the piece still to
-come, and it is written up as G13.
+own nodes. G13 shipped 2026-09-12 too, and closes the chunk's newest
+idea: a frame turns into a model canvas — a node-like box with inputs and
+outputs you declare — and turns back again, and the canvas tabs fold
+under the Model tab that heads them. What is left of G is the three old
+entries, G1, G2 and G10.
 
 ---
 
@@ -122,26 +124,6 @@ the sort, none of it kept between opens. A persistent model, or a memoised
 `registry.all()`, is the lever — but measure on the slow machine first: the
 popup is a fixed 280×320 and ~70 rows should not cost this much, so the real
 cause may be Windows popup/paint behaviour rather than the rebuild.
-
-**G13. Turn a frame into a model canvas, and back** (Dan). A frame's
-right-click menu gains *Turn into a Model Canvas*: what is inside it moves
-onto a canvas of its own (G12 shipped those), and a node-like box stands
-where the frame was, on the canvas it left. The box carries **inputs and
-outputs you declare** — a name each, mapped to a port of a node inside —
-rather than the pins a collapsed frame derives from whatever wires happen
-to cross it. *Turn back into a Frame* reverses it, contents and all.
-Frames themselves are untouched, which is the point: a conversion, not a
-new kind of frame.
-
-Much of it exists already. A collapsed frame draws as a box, and a wire
-can be made *through* one of its pins to the node hidden inside
-(`ui/canvas/frame_port.py`, `NodeGraphScene._refresh_collapsed_frames`),
-so the box and its wiring are not new work. What is new: the declared
-interface, saved on the frame (name → inner node and port, so a wire to
-the box is a real wire to that node); the two conversions, one undo step
-each, moving nodes between canvases; and what a box does when a port it
-names loses the node behind it. Close to metanodes (`ideas_archived.md` #4)
-without being one — nothing is nested, and the flow stays one graph.
 
 ---
 

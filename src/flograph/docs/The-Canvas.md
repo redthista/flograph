@@ -84,6 +84,47 @@ project. Right-click one for **Rename**, a colour, a group, **Duplicate**
 which, for a canvas of its own, takes its nodes with it after asking.
 One **Ctrl+Z** brings the whole canvas back.
 
+Canvas tabs belong to the **Model** tab, which is their header: click the
+chevron on it to fold them away when the bar gets busy, and again to bring
+them back. The count on the tab says how many are put away, and whichever
+one you are looking at stays on the bar. Canvas tabs stay with the Model
+tab: they are not offered a group of their own, and dragging one reorders
+it among the other canvases rather than moving it out.
+
+**Right-click the Model tab** — or any group's header — to read what it
+holds and go straight to one of them. The list is there whether the
+section is folded or not, so a page you know the name of is one
+right-click away rather than an unfold and a hunt.
+
+## A frame as a model canvas
+
+A frame can stop being a region and become a **box**: right-click it ▸
+**Turn into a Model Canvas**. What was inside moves onto a canvas of its
+own, and the frame draws where it stood as a node-sized box standing for
+it — a block of the flow in one square. **Double-click the box** to open
+that canvas; its tab is only a view of it, so **Close Tab** puts the view
+away and changes nothing, and double-clicking the box opens it again.
+**Turn back into a Frame** brings the contents out to the canvas the box
+sits on, laid out from the box's own corner — down and to the right — with
+the region grown to hold them. One **Ctrl+Z** undoes either conversion
+whole.
+
+Inside the box's canvas, each declared port draws a pill beside the port
+it names — `sales →` on the way in, `→ totals` on the way out — so a wire
+that leaves the canvas says where it goes.
+
+The box's edges are its **inputs and outputs**. Every wire that crossed
+the frame's edge becomes a declared port, named after the port it lands
+on; right-click ▸ **Inputs and Outputs…** chooses which ports the box
+shows and what each is called. A wire to a declared port is a real wire to
+the node behind it — the name only decides what the box calls it — so
+nothing about how the flow runs changes, and **Run All** still runs
+everything inside.
+
+Ordinary frames are untouched by all this: a frame still gathers whatever
+sits inside it, still folds to a box with **Collapse frame**, and still
+gates a run.
+
 ## Wires without wires
 
 **Goto / From** nodes carry a value across the canvas without a line: name it

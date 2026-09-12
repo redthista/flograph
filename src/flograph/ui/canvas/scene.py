@@ -237,6 +237,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     view_error = Signal(str, str)       # node_id, message — a web view asked
                                         # for something the node disallows
     frame_run_requested = Signal(str)   # frame_id — a frame's run glyph was clicked
+    # frame_id — a frame that has become a model canvas (G13) was
+    # double-clicked: show what is inside it, which is its own tab
+    frame_canvas_requested = Signal(str)
     tables_kept = Signal(list)          # node_ids — Tables that kept their
                                         # contents as their input was cut
     canvas_drag_changed = Signal(bool)  # a wire or selection drag started / ended
@@ -257,6 +260,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # reach it.
         self.canvas_id = ""
         self._canvas_split = False
+        # The box's declared ports drawn on the canvas they lead into (G13),
+        # keyed (frame_id, port name). Chrome rebuilt with the rest of the
+        # visibility pass, never part of the graph.
+        self._edge_markers: dict = {}
         # The engine's OutputCache, injected by the main window once the
         # engine exists. Only used to freeze what a linked Table is showing
         # before its wire is cut (see _push_orphan_snapshots); None simply
@@ -377,6 +384,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         events.links_changed.connect(self._refresh_port_connections)
         events.links_changed.connect(self._refresh_link_lines)
         events.temp_edit_changed.connect(self._on_temp_edit_changed)
+        events.item_canvas_changed.connect(self._on_item_canvas_changed)
         events.frame_added.connect(self._on_frame_added)
         events.frame_removed.connect(self._on_frame_removed)
         events.frame_changed.connect(self._on_frame_changed)
@@ -443,6 +451,14 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         scene has more than one to tell apart."""
         if getattr(obj, "canvas", ""):
             self._canvas_split = True
+
+    def _on_item_canvas_changed(self, kind: str, item_id: str) -> None:
+        """An item moved to another canvas: what this tab draws has changed,
+        and so has what the frames on it hold."""
+        self._canvas_split = True
+        self._refresh_collapsed_frames()
+        self.refresh_frame_holds()
+        self._queue_rect_fit()
 
     def _on_node_added(self, node: NodeInstance) -> None:
         self._note_canvas(node)
@@ -1187,9 +1203,22 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # 3. the pins, reconciled by (conn_id, side) so a pin that survives a
         #    rebuild keeps its hover state and stays valid mid-drag.
         wanted: dict[tuple, tuple] = {}
+        boxes = self._canvas_boxes()
+
+        def stands_in_for(node_id: str) -> Optional[str]:
+            """The box on this canvas that a node's wire should end on: the
+            collapsed frame that folded it away, or the frame turned into a
+            model canvas whose canvas it lives on (G13)."""
+            owner = self._owner_of(node_id)
+            if owner is not None:
+                return owner
+            node = self.graph.nodes.get(node_id)
+            return (boxes.get(getattr(node, "canvas", ""))
+                    if node is not None else None)
+
         for conn in self.graph.connections.values():
-            src_owner = self._owner_of(conn.src_node)
-            dst_owner = self._owner_of(conn.dst_node)
+            src_owner = stands_in_for(conn.src_node)
+            dst_owner = stands_in_for(conn.dst_node)
             if src_owner is not None and src_owner == dst_owner:
                 continue            # wholly inside one frame: an internal wire
             if src_owner is not None:
@@ -1197,6 +1226,25 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             if dst_owner is not None:
                 wanted[(conn.id, "dst")] = (dst_owner, conn, "dst", False)
         wanted.update(self._wanted_link_pins())
+
+        # A declared port with no wire yet still gets a pin (G13). Declaring
+        # an interface is how you wire *into* a box before its inside is
+        # connected to anything, so the pin has to exist before the wire
+        # does — a pin that only appears once a wire has found it is no use
+        # to the hand holding the wire.
+        covered = set()
+        for owner, conn, side, _link in wanted.values():
+            node_id = conn.src_node if side == "src" else conn.dst_node
+            port = conn.src_port if side == "src" else conn.dst_port
+            covered.add((owner, node_id, port))
+        for frame_id in boxes.values():
+            frame = self.graph.frames.get(frame_id)
+            for declared in getattr(frame, "ports", ()) or ():
+                if (frame_id, declared.node_id, declared.port) in covered:
+                    continue    # a wire already stands for this one
+                wanted[("declared", frame_id, declared.name)] = (
+                    frame_id, declared,
+                    "dst" if declared.side == "input" else "src", False)
 
         self._drop_frame_pins(
             key for key, pin in self._frame_pins.items()
@@ -1210,10 +1258,75 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                 self._frame_pins[key] = pin
 
         # 4. lay the surviving pins out, and point the wires at them.
+        self._refresh_edge_markers()
         self._layout_frame_pins()
         self._reanchor_wires(hidden_nodes)
         for pin in self._frame_pins.values():
             pin.refresh_connected()
+
+    def _refresh_edge_markers(self) -> None:
+        """Draw the box's declared ports on the canvas they lead into (G13).
+
+        Inside a box's canvas the wires that leave it stop at a port with
+        nothing beyond, and nothing says which of them is the block's
+        "sales" input. A pill beside each declared port says it, on the side
+        the data travels.
+        """
+        from .canvas_edge import GAP, CanvasEdgeMarker
+        owner = next((frame for frame in self.graph.frames.values()
+                      if frame.own_canvas and frame.own_canvas
+                      == self.canvas_id), None)
+        wanted = {}
+        if owner is not None:
+            for port in owner.ports or ():
+                node_item = self.node_items.get(port.node_id)
+                if node_item is None or not node_item.isVisible():
+                    continue
+                pin = node_item.port_item(
+                    port.port, "input" if port.side == "input" else "output")
+                if pin is None:
+                    continue
+                wanted[(owner.id, port.name)] = (port, pin)
+
+        for key in [k for k in self._edge_markers if k not in wanted]:
+            marker = self._edge_markers.pop(key)
+            if marker.scene() is self:
+                self.removeItem(marker)
+        for key, (port, pin) in wanted.items():
+            marker = self._edge_markers.get(key)
+            if marker is None or marker.side != port.side:
+                if marker is not None and marker.scene() is self:
+                    self.removeItem(marker)
+                marker = CanvasEdgeMarker(port.name, port.side,
+                                          getattr(owner, "color", ""))
+                self.addItem(marker)
+                self._edge_markers[key] = marker
+            at = pin.scenePos()
+            offset = -GAP if port.side == "input" else GAP
+            marker.setPos(at.x() + offset, at.y())
+
+    def _canvas_boxes(self) -> dict:
+        """`{canvas id: frame id}` for the frames on the canvas being shown
+        that have become model canvases (G13).
+
+        A wire reaching a node on one of those canvases is drawn to the box
+        standing for it, exactly as a wire into a collapsed frame is drawn
+        to that frame — same pins, same wiring, different reason for the
+        node not being here.
+        """
+        return {frame.own_canvas: frame.id
+                for frame in self.graph.frames.values()
+                if frame.own_canvas and self.on_canvas(frame)}
+
+    def declared_port(self, frame_id: str, node_id: str, port: str) -> str:
+        """The name a box gives one of its inner ports, or "" if it has not
+        declared this one — an undeclared crossing still gets a pin, named
+        after the node it reaches, rather than a wire drawn to nothing."""
+        frame = self.graph.frames.get(frame_id)
+        for declared in getattr(frame, "ports", ()) or ():
+            if declared.node_id == node_id and declared.port == port:
+                return declared.name
+        return ""
 
     def _drop_frame_pins(self, keys) -> None:
         """Take these pins off the box and out of the scene.
@@ -1268,8 +1381,16 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         frame_item = self.frame_items.get(frame_id)
         if frame_item is None:
             return None
-        node_id = conn.src_node if side == "src" else conn.dst_node
-        port_name = conn.src_port if side == "src" else conn.dst_port
+        from flograph.core import FramePort
+        if isinstance(conn, FramePort):
+            # a declared port standing on its own, with no wire yet (G13)
+            node_id, port_name, conn_id = conn.node_id, conn.port, ""
+            declared_name = conn.name
+        else:
+            node_id = conn.src_node if side == "src" else conn.dst_node
+            port_name = conn.src_port if side == "src" else conn.dst_port
+            conn_id = getattr(conn, "id", "")
+            declared_name = self.declared_port(frame_id, node_id, port_name)
         node = self.graph.nodes.get(node_id)
         item = self.node_items.get(node_id)
         if node is None or item is None:
@@ -1278,8 +1399,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
                               "output" if side == "src" else "input")
         if port is None:
             return None
-        pin = FramePortItem(frame_item, node, port.spec,
-                            getattr(conn, "id", ""), side, link=is_link)
+        pin = FramePortItem(frame_item, node, port.spec, conn_id, side,
+                            link=is_link, declared=declared_name)
         return pin
 
     def _layout_frame_pins(self) -> None:
@@ -1294,12 +1415,23 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             by_frame.setdefault(pin.frame_item.frame.id, []).append(pin)
         for frame_id, item in self.frame_items.items():
             pins = by_frame.get(frame_id, [])
+            # A box's declared ports (G13) stack in the order they were
+            # declared — that order is a decision someone made about the
+            # block's interface, where a wire's position inside is not.
+            declared_order = {
+                port.name: index for index, port
+                in enumerate(getattr(self.graph.frames.get(frame_id),
+                                     "ports", ()) or ())}
 
-            def order(pin):
+            def order(pin, _declared=declared_order):
+                index = _declared.get(pin.declared) if pin.declared else None
+                if index is not None:
+                    return (0, index, 0.0, "", "")
                 node_item = self.node_items.get(pin.node_id)
                 pos = node_item.pos() if node_item is not None else None
-                return (pos.y() if pos else 0.0, pos.x() if pos else 0.0,
-                        pin.spec.name, pin.conn_id)
+                return (1, 0, pos.y() if pos else 0.0,
+                        f"{pos.x() if pos else 0.0:012.2f}",
+                        f"{pin.spec.name}{pin.conn_id}")
 
             inputs = sorted((p for p in pins if p.side == "dst"), key=order)
             outputs = sorted((p for p in pins if p.side == "src"), key=order)
@@ -1584,6 +1716,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self._note_canvas(frame)
         item = FrameItem(frame)
         item.run_requested.connect(self.frame_run_requested.emit)
+        item.canvas_requested.connect(self.frame_canvas_requested.emit)
         self.addItem(item)
         self.frame_items[frame.id] = item
         item.apply_stacking()

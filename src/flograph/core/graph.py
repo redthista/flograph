@@ -49,6 +49,21 @@ class _EdgeIndex:
 
 
 @dataclass
+class FramePort:
+    """One declared port on a frame that has become a model canvas (G13).
+
+    A name on the box, and the port of an inner node it stands for. A wire
+    to the box is a real wire to that node — the pin only decides where it
+    is drawn — so nothing downstream of here (the engine, a run, a save)
+    learns about boxes at all.
+    """
+    name: str
+    node_id: str
+    port: str
+    side: str = "input"          # "input" | "output", as seen from outside
+
+
+@dataclass
 class Frame:
     id: str
     title: str = "Frame"
@@ -59,6 +74,17 @@ class Frame:
     # coordinate space, so without this a frame would claim nodes it has
     # never been on the same tab as.
     canvas: str = ""
+    # A frame turned into a model canvas (G13) keeps the id of the canvas
+    # its contents moved to, and draws as a node-like box on the canvas it
+    # sits on. "" is an ordinary frame — a region on the canvas, behaving
+    # exactly as frames always have.
+    #
+    # Nothing else changes: the contents are nodes on another canvas, which
+    # the canvas filter already hides here, and the wires that reach them
+    # are the same wires. `ports` is what the box shows for them — declared,
+    # named and ordered, rather than derived from whatever happens to cross.
+    own_canvas: str = ""
+    ports: tuple[FramePort, ...] = ()
     z: Optional[int] = None   # stacking order among frames; see core.layers
     # The two run flags a frame carries on behalf of whatever is inside it,
     # with the same meanings they have on a node: `active=False` takes the
@@ -317,6 +343,23 @@ class Graph:
         node = self.node(node_id)
         node.pos = (float(pos[0]), float(pos[1]))
         self.events.node_moved.emit(node_id, node.pos)
+
+    def set_item_canvas(self, kind: str, item_id: str, canvas: str) -> None:
+        """Move a node, frame or shape to another canvas (G12/G13).
+
+        The item keeps its position — canvases share one coordinate space —
+        so this is only about which canvas draws it. Everything else about
+        it, wires included, is untouched.
+        """
+        table = {"node": self.nodes, "frame": self.frames,
+                 "shape": self.shapes}.get(kind)
+        if table is None:
+            raise GraphError(f"unknown item kind {kind!r}")
+        item = table.get(item_id)
+        if item is None:
+            raise GraphError(f"no {kind} with id {item_id!r}")
+        item.canvas = str(canvas or "")
+        self.events.item_canvas_changed.emit(kind, item_id)
 
     def set_label(self, node_id: str, label: Optional[str]) -> None:
         node = self.node(node_id)
@@ -978,6 +1021,29 @@ class Graph:
         if frame is None:
             raise GraphError(f"no frame with id {frame_id!r}")
         setattr(frame, flag, bool(value))
+        self.events.frame_changed.emit(frame)
+        return frame
+
+    def apply_frame_canvas(self, frame_id: str, *, own_canvas: str,
+                           ports: tuple, rect: tuple[float, float, float, float],
+                           expanded_size: Optional[tuple[float, float]]) -> Frame:
+        """Turn a frame into a model canvas, or back into a frame (G13).
+
+        One call, because the parts only make sense together: the canvas its
+        contents live on, the ports the box shows for the wires that reach
+        them, the box-sized rect, and the size to grow back to. A command
+        that snapshots this tuple can undo the whole conversion exactly —
+        the same reasoning as `apply_frame_collapse`, and deliberately not
+        routed through `update_frame` for the same reason.
+        """
+        frame = self.frames.get(frame_id)
+        if frame is None:
+            raise GraphError(f"no frame with id {frame_id!r}")
+        frame.own_canvas = str(own_canvas or "")
+        frame.ports = tuple(ports)
+        frame.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
+        frame.expanded_size = (tuple(float(v) for v in expanded_size)
+                               if expanded_size is not None else None)
         self.events.frame_changed.emit(frame)
         return frame
 

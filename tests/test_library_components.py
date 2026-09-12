@@ -44,6 +44,19 @@ def tree(qtbot, registry, tmp_path, frames_dir):
     return widget
 
 
+def test_a_context_event_from_elsewhere_opens_no_menu(tree):
+    """Wayland hands a right press's context event to the *focus* widget,
+    after the menu that press opened has closed. Landing here it used to
+    open the library's own menu — on empty space, a lone "New group…" —
+    beside whatever the user had just done somewhere else entirely."""
+    from PySide6.QtCore import QPoint
+
+    assert tree._context_menu_for(QPoint(-20, -20)) is None
+    menu = tree._context_menu_for(QPoint(5, 5))
+    assert menu is not None
+    assert "New group…" in [action.text() for action in menu.actions()]
+
+
 def _frames_section(tree):
     for i in range(tree.topLevelItemCount()):
         top = tree.topLevelItem(i)

@@ -39,8 +39,9 @@ from .commands import (
     AddNodeCommand, AddPageCommand, AddTileCommand, ConnectCommand,
     DuplicatePageCommand, RemovePageCommand, RenamePageCommand,
     ReorderPagesCommand, SetPageColorCommand,
-    SetActiveCommand, SetExclusiveCommand, SetFrameFlagCommand,
-    SetFrameSourceCommand, SetManualCommand,
+    SetActiveCommand, SetExclusiveCommand, SetFrameCanvasCommand,
+    SetFrameFlagCommand, SetFrameSourceCommand, SetItemCanvasCommand,
+    SetManualCommand,
     SetFrozenCommand, SetLabelCommand, SetLockedCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
@@ -1599,6 +1600,8 @@ class MainWindow(QMainWindow):
         self.scene.view_changed.connect(self._on_view_changed)
         self.scene.view_error.connect(self._on_view_error)
         self.scene.frame_run_requested.connect(self._on_frame_run_requested)
+        # a box that stands for a canvas (G13), double-clicked: its tab
+        self.scene.frame_canvas_requested.connect(self._open_frame_canvas)
         self.scene.tables_kept.connect(self._on_tables_kept)
 
     def _on_tables_kept(self, node_ids: list) -> None:
@@ -2389,6 +2392,18 @@ class MainWindow(QMainWindow):
         if page.frame:
             self.undo_stack.push(RemovePageCommand(self.graph, page.id))
             return
+        owner = next((f for f in self.graph.frames.values()
+                      if f.own_canvas == page.id), None)
+        if owner is not None:
+            # A canvas a box stands for (G13) belongs to the box, not to the
+            # tab: closing the tab puts the view away and leaves everything
+            # where it is. Double-clicking the box opens it again, on the
+            # same canvas id, so nothing inside notices.
+            self.undo_stack.push(RemovePageCommand(self.graph, page.id))
+            self.show_status(
+                f"Closed the view of “{owner.title}”. Double-click the box "
+                f"to open it again.", 5000)
+            return
         node_ids = [n.id for n in self.graph.nodes.values()
                     if n.canvas == page.id]
         frame_ids = [f.id for f in self.graph.frames.values()
@@ -2455,6 +2470,227 @@ class MainWindow(QMainWindow):
             } for s in shapes],
         }
 
+    # ------------------------------- a frame as a model canvas (G13)
+    #
+    # A frame turned into a model canvas keeps being one frame in the graph.
+    # What changes is where its contents live — a canvas of their own — and
+    # how it draws: a node-like box with declared ports. The wires are the
+    # same wires; only the end that is drawn moves to the box.
+
+    def _canvas_pages_first(self) -> list:
+        """Page order with the canvas tabs at the front, in the order they
+        are already in. They sit under the Model tab that heads them
+        (G12/G13), so they belong next to it on the bar — the same
+        contiguity a group's pages keep (see core.page_nav)."""
+        from flograph.core.page_nav import CANVAS_KIND
+        ids = list(self.graph.pages)
+        canvases = [page_id for page_id in ids
+                    if self.graph.pages[page_id].kind == CANVAS_KIND]
+        held = set(canvases)
+        return canvases + [page_id for page_id in ids if page_id not in held]
+
+    def _push_canvas_pages_first(self) -> None:
+        """Bring the canvas tabs back together, if a page has just landed
+        between them. Inside whatever macro the caller has open, so one
+        undo takes the page and its placing together."""
+        order = self._canvas_pages_first()
+        if order != list(self.graph.pages):
+            self.undo_stack.push(ReorderPagesCommand(self.graph, order))
+
+    def _open_frame_canvas(self, frame_id: str) -> None:
+        """Show what a box holds: the canvas its contents moved to.
+
+        The tab is only a view of it. Closing the tab leaves the canvas and
+        everything on it exactly where it was, so opening the box again
+        simply puts the tab back — on the same canvas id, which is what the
+        contents carry and what the box points at.
+        """
+        from flograph.core.page_nav import CANVAS_KIND
+        frame = self.graph.frames.get(frame_id)
+        if frame is None or not frame.own_canvas:
+            return
+        if frame.own_canvas not in self.graph.pages:
+            self.undo_stack.beginMacro("open canvas")
+            self.undo_stack.push(AddPageCommand(self.graph, Page(
+                id=frame.own_canvas, title=frame.title or "Canvas",
+                kind=CANVAS_KIND, color=frame.color)))
+            self._push_canvas_pages_first()
+            self.undo_stack.endMacro()
+        self.page_bar.select_page(frame.own_canvas)
+
+    def _crossing_ports(self, inside: set) -> tuple:
+        """A declared port for every wire crossing into `inside`, named
+        after the inner port and kept unique — the interface the block
+        already has, before anybody renames it."""
+        from flograph.core import FramePort
+        ports: list = []
+        seen: set = set()
+        for conn in self.graph.connections.values():
+            src_in = conn.src_node in inside
+            dst_in = conn.dst_node in inside
+            if src_in == dst_in:
+                continue        # wholly inside, or wholly outside
+            node_id, port, side = ((conn.dst_node, conn.dst_port, "input")
+                                   if dst_in else
+                                   (conn.src_node, conn.src_port, "output"))
+            if (node_id, port) in seen:
+                continue        # one port, however many wires reach it
+            seen.add((node_id, port))
+            name = port
+            if any(p.name == name for p in ports):
+                node = self.graph.nodes.get(node_id)
+                name = f"{node.label if node else node_id} {port}"
+            ports.append(FramePort(name=name, node_id=node_id, port=port,
+                                   side=side))
+        return tuple(ports)
+
+    def _frame_to_canvas(self, frame_id: str) -> None:
+        """Right-click a frame ▸ Turn into a Model Canvas."""
+        from flograph.core.page_nav import CANVAS_KIND
+        from .canvas.node_item import COMPACT_MIN_H, COMPACT_W
+        frame = self.graph.frames.get(frame_id)
+        item = self.scene.frame_items.get(frame_id)
+        if frame is None or item is None or frame.own_canvas:
+            return
+        node_ids, frame_ids = self.scene.frame_contents(item)
+        region = item.scene_rect()
+        shape_ids = [
+            shape_id for shape_id, shape_item in self.scene.shape_items.items()
+            if self.scene.on_canvas(self.graph.shapes.get(shape_id))
+            and region.contains(shape_item.sceneBoundingRect().center())]
+        page = Page(id=uuid.uuid4().hex, title=frame.title or "Canvas",
+                    kind=CANVAS_KIND, color=frame.color)
+        ports = self._crossing_ports(set(node_ids))
+        self.undo_stack.beginMacro("turn into a model canvas")
+        self.undo_stack.push(AddPageCommand(self.graph, page))
+        for kind, ids in (("node", node_ids), ("frame", frame_ids),
+                          ("shape", shape_ids)):
+            for item_id in ids:
+                self.undo_stack.push(SetItemCanvasCommand(
+                    self.graph, kind, item_id, page.id))
+        self.undo_stack.push(SetFrameCanvasCommand(
+            self.graph, frame_id, page.id, ports=ports,
+            box_size=(COMPACT_W, COMPACT_MIN_H)))
+        self._push_canvas_pages_first()
+        self.undo_stack.endMacro()
+        self.show_status(
+            f"“{frame.title}” is a model canvas now — double-click the box "
+            f"to open it, or right-click ▸ Inputs and Outputs… to name its "
+            f"edges.", 7000)
+
+    #: Where a block lands when its box becomes a frame again: in from the
+    #: box's own corner, with room above for the title bar it grows back.
+    HOMECOMING_INSET = (40.0, 70.0)
+
+    def _contents_bounds(self, nodes, frames, shapes) -> QRectF:
+        """What a canvas's contents cover. The drawn bounds where the canvas
+        has an item for something (a card is far bigger than its position
+        suggests), the model's own rect otherwise."""
+        bounds = QRectF()
+        for node in nodes:
+            item = self.scene.node_items.get(node.id)
+            bounds = bounds.united(
+                item.sceneBoundingRect() if item is not None
+                else QRectF(node.pos[0], node.pos[1], 60.0, 60.0))
+        for frame in frames:
+            bounds = bounds.united(QRectF(*frame.rect))
+        for shape in shapes:
+            bounds = bounds.united(QRectF(*shape.rect))
+        return bounds
+
+    def _canvas_to_frame(self, frame_id: str) -> None:
+        """Right-click a box ▸ Turn back into a Frame.
+
+        The contents come back to the canvas the box sits on, laid out from
+        the box's own corner — down and to the right — so the block
+        reappears where the box was standing rather than back at whatever
+        coordinates it happened to have before. The region grows to fit
+        them, and the tab goes with it.
+        """
+        from .commands import (MoveNodesCommand, UpdateFrameCommand,
+                               UpdateShapeCommand)
+        frame = self.graph.frames.get(frame_id)
+        if frame is None or not frame.own_canvas:
+            return
+        canvas_id = frame.own_canvas
+        home = frame.canvas
+        nodes = [n for n in self.graph.nodes.values() if n.canvas == canvas_id]
+        frames = [f for f in self.graph.frames.values()
+                  if f.canvas == canvas_id]
+        shapes = [s for s in self.graph.shapes.values()
+                  if s.canvas == canvas_id]
+        bounds = self._contents_bounds(nodes, frames, shapes)
+        inset_x, inset_y = self.HOMECOMING_INSET
+        box_x, box_y = frame.rect[0], frame.rect[1]
+        dx = (box_x + inset_x) - bounds.left() if not bounds.isNull() else 0.0
+        dy = (box_y + inset_y) - bounds.top() if not bounds.isNull() else 0.0
+        region = (box_x, box_y,
+                  max(bounds.width() + 2 * inset_x, 240.0),
+                  max(bounds.height() + inset_y + inset_x, 160.0))
+
+        self.undo_stack.beginMacro("turn back into a frame")
+        if nodes and (dx or dy):
+            self.undo_stack.push(MoveNodesCommand(self.graph, {
+                node.id: (node.pos, (node.pos[0] + dx, node.pos[1] + dy))
+                for node in nodes}))
+        for inner in frames:
+            x, y, width, height = inner.rect
+            self.undo_stack.push(UpdateFrameCommand(
+                self.graph, inner.id, rect=(x + dx, y + dy, width, height)))
+        for shape in shapes:
+            x, y, width, height = shape.rect
+            self.undo_stack.push(UpdateShapeCommand(
+                self.graph, shape.id, label="move shape",
+                rect=(x + dx, y + dy, width, height)))
+        for kind, items in (("node", nodes), ("frame", frames),
+                            ("shape", shapes)):
+            for item in items:
+                self.undo_stack.push(SetItemCanvasCommand(
+                    self.graph, kind, item.id, home))
+        self.undo_stack.push(SetFrameCanvasCommand(self.graph, frame_id, ""))
+        # after the conversion put the remembered region back: the block is
+        # laid out from here now, so the frame is sized to what it holds
+        self.undo_stack.push(UpdateFrameCommand(self.graph, frame_id,
+                                                rect=region))
+        if canvas_id in self.graph.pages:
+            self.undo_stack.push(RemovePageCommand(self.graph, canvas_id))
+        self.undo_stack.endMacro()
+
+    def _frame_port_candidates(self, frame) -> list:
+        """Every port of every node on the box's canvas — what the Inputs
+        and Outputs dialog offers. Inputs first, then outputs, each in node
+        order, so the list reads down the box's left edge and then its
+        right."""
+        rows = []
+        for node in self.graph.nodes.values():
+            if node.canvas != frame.own_canvas:
+                continue
+            for spec in node.spec.inputs:
+                rows.append((node.id, node.label, spec.name, "input"))
+            for spec in node.spec.outputs:
+                rows.append((node.id, node.label, spec.name, "output"))
+        rows.sort(key=lambda row: (row[3] != "input", row[1], row[2]))
+        return rows
+
+    def _edit_frame_ports(self, frame_id: str) -> None:
+        """Right-click a box ▸ Inputs and Outputs…"""
+        from PySide6.QtWidgets import QDialog
+        from .canvas.frame_ports_dialog import FramePortsDialog
+        frame = self.graph.frames.get(frame_id)
+        if frame is None or not frame.own_canvas:
+            return
+        candidates = self._frame_port_candidates(frame)
+        if not candidates:
+            self.show_status(
+                "Nothing on this canvas has ports to show yet.", 5000)
+            return
+        dialog = FramePortsDialog(frame.title, candidates, frame.ports, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self.undo_stack.push(SetFrameCanvasCommand(
+            self.graph, frame_id, frame.own_canvas, ports=dialog.ports(),
+            box_size=(frame.rect[2], frame.rect[3])))
+
     def _show_canvas_tab(self, page_id, canvas_page) -> None:
         """Put the shared canvas view the way this tab left it: fenced to the
         tab's frame or not, at the zoom and place it had. A frame's tab seen
@@ -2519,7 +2755,11 @@ class MainWindow(QMainWindow):
                     # a blank report page is a blank text box with no clue
                     # that ![[...]] is a thing, so it starts with the syntax
                     body=STARTER_BODY if kind == "report" else "")
+        self.undo_stack.beginMacro(f"add {kind} page")
         self.undo_stack.push(AddPageCommand(self.graph, page))
+        # canvas tabs live next to the Model tab that heads them (G12/G13)
+        self._push_canvas_pages_first()
+        self.undo_stack.endMacro()
         self.page_bar.select_page(page.id)
 
     def _next_page_title(self, kind: str = "dashboard") -> str:
@@ -3560,6 +3800,17 @@ class MainWindow(QMainWindow):
             "Keep this frame out of Run All. Its nodes still run when you "
             "run the frame, and everything below them goes on using "
             "whatever they last produced.")
+        # G13: a frame can become a model canvas — a node-like box here, its
+        # contents on a canvas of their own — and be turned back again.
+        menu.addSeparator()
+        if frame.own_canvas:
+            canvas_action = menu.addAction("Open Its Canvas")
+            ports_action = menu.addAction("Inputs and Outputs…")
+            unconvert_action = menu.addAction("Turn back into a Frame")
+            convert_action = None
+        else:
+            convert_action = menu.addAction("Turn into a Model Canvas")
+            canvas_action = ports_action = unconvert_action = None
         menu.addSeparator()
         state = self._component_state(frame_id)
         update_action = None
@@ -3590,6 +3841,14 @@ class MainWindow(QMainWindow):
             self._on_frame_run_requested(frame_id)
         elif chosen is tab_action:
             self._open_frame_tab(frame_id)
+        elif convert_action is not None and chosen is convert_action:
+            self._frame_to_canvas(frame_id)
+        elif canvas_action is not None and chosen is canvas_action:
+            self._open_frame_canvas(frame_id)
+        elif ports_action is not None and chosen is ports_action:
+            self._edit_frame_ports(frame_id)
+        elif unconvert_action is not None and chosen is unconvert_action:
+            self._canvas_to_frame(frame_id)
         elif chosen is disable_action:
             self.undo_stack.push(SetFrameFlagCommand(
                 self.graph, frame_id, "active", all_off,

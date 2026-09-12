@@ -46,6 +46,9 @@ MATRIX_INSET = 8.0
 
 class FrameItem(QGraphicsObject):
     run_requested = Signal(str)  # frame_id — the run glyph was clicked
+    # frame_id — a frame that has become a model canvas (G13) was asked to
+    # show what is inside it: its own tab.
+    canvas_requested = Signal(str)
 
     def __init__(self, frame: Frame) -> None:
         super().__init__()
@@ -95,7 +98,9 @@ class FrameItem(QGraphicsObject):
     def toggle_collapsed(self) -> None:
         """Fold or unfold, through the undo stack — it is saved with the
         project, so it is a graph change, not a view state the canvas can
-        quietly own.
+        quietly own. A frame that has become a model canvas (G13) has
+        nothing here to fold: its contents are on another canvas, and the
+        way in is its tab.
 
         Folding writes down what was inside at that moment; the canvas is
         the only thing that can see it, and once folded the region is not
@@ -104,7 +109,7 @@ class FrameItem(QGraphicsObject):
         the frame and the neighbours back.
         """
         scene = self.scene()
-        if scene is None:
+        if scene is None or self.is_canvas:
             return
         from ..commands import SetFrameCollapsedCommand
         if self.collapsed:
@@ -146,6 +151,15 @@ class FrameItem(QGraphicsObject):
     @property
     def collapsed(self) -> bool:
         return bool(self.frame.collapsed)
+
+    @property
+    def is_canvas(self) -> bool:
+        """Whether this frame has become a model canvas (G13): a node-like
+        box here, its contents on a canvas of their own. It draws like a
+        collapsed frame — same box, same pins — because to everything
+        around it that is exactly what it is: a block of the flow standing
+        in one square."""
+        return bool(getattr(self.frame, "own_canvas", ""))
 
     def scene_rect(self) -> QRectF:
         """The region the frame occupies, in scene coordinates.
@@ -362,7 +376,7 @@ class FrameItem(QGraphicsObject):
         # rather than as pale nodes on a normal backdrop.
         if not self.frame.active:
             painter.setOpacity(DISABLED_FRAME_OPACITY)
-        if self.collapsed:
+        if self.collapsed or self.is_canvas:
             self._paint_collapsed(painter)
             return
         w, h = self._size
@@ -942,6 +956,12 @@ class FrameItem(QGraphicsObject):
         self._grabbed_frames = []
 
     def mouseDoubleClickEvent(self, event) -> None:
+        if self.is_canvas:
+            # its contents are a canvas of their own (G13), and this is the
+            # way in — the same gesture that opens a node's editor
+            self.canvas_requested.emit(self.frame.id)
+            event.accept()
+            return
         if (self._run_button_rect().contains(event.pos())
                 or self._toggle_rect().contains(event.pos())):
             event.accept()

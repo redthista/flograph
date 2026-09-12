@@ -612,8 +612,12 @@ class TestTabGroups:
         for page_id in ids:
             window._set_page_group(page_id, "Sales")
         menu = window.page_bar._group_menu("Sales")
+        # the group's own pages come first (G13): reading what a section
+        # holds — and reaching a page from it without unfolding — is what a
+        # header's menu is asked for most
         assert [a.text() for a in menu.actions() if not a.isSeparator()] == \
-            ["Fold away", "Rename group…", "Change colour…", "Ungroup"]
+            ["A", "B", "Fold away", "Rename group…", "Change colour…",
+             "Ungroup"]
         # a group with a colour of its own can go back to borrowing one
         window._recolor_page_group("Sales", "#123456")
         menu = window.page_bar._group_menu("Sales")

@@ -37,7 +37,8 @@ from typing import Any, Callable, Iterable, Optional
 from ..version import running_version as _running_version
 from . import dotenv
 from .datatypes import PortType
-from .graph import Connection, Frame, Graph, GraphError, Page, Shape, Tile
+from .graph import (Connection, Frame, FramePort, Graph, GraphError, Page,
+                    Shape, Tile)
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .page_setup import PageSetup
 from .ports import PortDirection, PortSpec
@@ -142,6 +143,13 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "rect": list(f.rect),
                     "color": f.color,
                     **({"canvas": f.canvas} if f.canvas else {}),
+                    # a frame that has become a model canvas (G13): the
+                    # canvas its contents live on, and the ports its box
+                    # shows for the wires that reach them
+                    **({"own_canvas": f.own_canvas} if f.own_canvas else {}),
+                    **({"ports": [{"name": p.name, "node": p.node_id,
+                                   "port": p.port, "side": p.side}
+                                  for p in f.ports]} if f.ports else {}),
                     "z": f.z,
                     "active": f.active,
                     "manual": f.manual,
@@ -383,6 +391,15 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             source_fingerprint=entry.get("source_fingerprint", ""),
             # absent before canvas tabs, and on the model canvas (G12)
             canvas=str(entry.get("canvas") or ""),
+            # absent in every frame but one turned into a model canvas (G13)
+            own_canvas=str(entry.get("own_canvas") or ""),
+            ports=tuple(
+                FramePort(name=str(p.get("name") or ""),
+                          node_id=str(p.get("node") or ""),
+                          port=str(p.get("port") or ""),
+                          side=("output" if p.get("side") == "output"
+                                else "input"))
+                for p in (entry.get("ports") or [])),
         ))
 
     for entry in payload.get("shapes", []):

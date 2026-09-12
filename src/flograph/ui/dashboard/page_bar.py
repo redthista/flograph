@@ -40,6 +40,11 @@ _PLUS = "\x00plus"
 # tabData prefix for a group's header (AB4): "\x00group:Sales" heads the run
 # of tabs in the Sales group. A header is not a page — it is never current,
 # never dragged, and a click on it folds its group away.
+#: The first tab: the model canvas itself. Named here because it is also
+#: the header its canvas tabs fold under (G12/G13), which rewrites the text
+#: to carry a chevron and a count.
+MODEL_TAB = "Model"
+
 _HEADER = "\x00group:"
 
 
@@ -81,7 +86,7 @@ class PageTabBar(QTabBar):
         self.setDrawBase(False)
         self.setMovable(True)  # page tabs only; see _enforce_pinned
         self._syncing = True
-        self.addTab("Model")   # tabData None = the modeling canvas
+        self.addTab(MODEL_TAB)  # tabData None = the modeling canvas
         plus = self.addTab("+")
         self.setTabData(plus, _PLUS)
         self.setTabToolTip(plus, "Add a dashboard or report page")
@@ -101,6 +106,11 @@ class PageTabBar(QTabBar):
         # Export PDF on a locked report
         self._kinds: dict[str, str] = {}
         self._fenced: dict[str, bool] = {}   # canvas tabs: a view of a frame
+        # Canvas tabs (G12/G13) are the Model tab's own group: it is the
+        # header, so they fold away under it rather than under a header tab
+        # repeating a name the bar already carries. Bar state, not saved —
+        # the same as a group's fold.
+        self._model_folded = False
         # page_id -> the group it sits in (AB4), mirrored from the model
         # like the rest; and the groups folded away, which is the bar's own
         # business — how the strip is being looked at, not the project
@@ -253,12 +263,90 @@ class PageTabBar(QTabBar):
                         " · right-click to rename or ungroup")
                     i += 1
                 previous = group
-                self._set_visible(
-                    i, not (group in self._folded and page_id != current))
+                # One decision, both folds: a named group's, and the Model
+                # tab's over the canvas tabs it heads (G12/G13). Deciding
+                # them in two places meant the later one winning, which
+                # pulled a grouped canvas tab back onto the bar.
+                away = group in self._folded or (
+                    self._model_folded
+                    and self._kinds.get(page_id) == "canvas")
+                self._set_visible(i, not (away and page_id != current))
                 i += 1
+            self._apply_model_fold()
         finally:
             self._syncing = was_syncing
         self.update()
+
+    # ------------------------------------------ the Model tab as a header
+
+    def _canvas_tabs(self) -> list[int]:
+        """The indexes of the canvas tabs: every one of them.
+
+        A canvas tab is the Model tab's, and only the Model tab's. Letting
+        one be put in a group of its own gave it two headers, and two
+        headers claiming one tab is how it kept being pulled back out of
+        whichever had it last. So the group submenu is off a canvas tab's
+        menu, and a drag reorders it among its own kind.
+        """
+        return [i for i in range(self.count())
+                if self._kinds.get(self.tabData(i)) == "canvas"]
+
+    def _model_chevron_rect(self) -> QRect:
+        """The part of the Model tab that folds its canvases away. A zone
+        rather than the whole tab: clicking Model still means "show me the
+        model canvas", which is what it has always meant."""
+        rect = self.tabRect(self._model_index())
+        return QRect(rect.left(), rect.top(), 18, rect.height())
+
+    def _apply_model_fold(self) -> None:
+        """Say on the Model tab how many canvas tabs it heads and whether
+        they are folded away.
+
+        The label only: which tabs are on show is decided once, in the loop
+        above, so this can never overrule a group's own fold. The caller
+        holds _syncing.
+        """
+        canvases = self._canvas_tabs()
+        index = self._model_index()
+        if not canvases:
+            if self.tabText(index) != MODEL_TAB:
+                self.setTabText(index, MODEL_TAB)
+            return
+        text = (f"▸ {MODEL_TAB}  {len(canvases)}" if self._model_folded
+                else f"▾ {MODEL_TAB}")
+        if self.tabText(index) != text:
+            self.setTabText(index, text)
+        self.setTabToolTip(
+            index,
+            f"The model canvas. Click the chevron to "
+            f"{'show' if self._model_folded else 'fold away'} its "
+            f"{len(canvases)} canvas tab(s).")
+
+    def _model_menu(self) -> QMenu:
+        """The Model tab's own menu: the canvas tabs it heads, and the fold.
+
+        The Model tab is a group header like any other (G12/G13), so it
+        answers a right-click the same way — here is what is in it, go
+        straight to one — without the canvases having to be on show."""
+        menu = QMenu(self)
+        canvases = self._canvas_tabs()
+        if not canvases:
+            return menu      # nothing to list, and nothing to fold
+        self._add_page_entries(menu, [self.tabData(i) for i in canvases])
+        menu.addSeparator()
+        fold_action = menu.addAction("Show the canvases" if self._model_folded
+                                     else "Fold the canvases away")
+        fold_action.triggered.connect(self.toggle_model_fold)
+        return menu
+
+    def toggle_model_fold(self) -> None:
+        """Fold the canvas tabs away under the Model tab, or bring them
+        back. Nothing about the pages changes — this is the bar tidying
+        itself, like folding a group."""
+        if not self._canvas_tabs():
+            return
+        self._model_folded = not self._model_folded
+        self._rebuild_groups()
 
     def _apply_folds(self) -> None:
         """Show the current page's tab even inside a folded group, and put
@@ -498,7 +586,31 @@ class PageTabBar(QTabBar):
         if self._syncing:
             return
         self._enforce_pinned()
+        self._enforce_canvas_run()
         self._reorder_pending = True
+
+    def _enforce_canvas_run(self) -> None:
+        """Canvas tabs stay together, right after the Model tab that heads
+        them (G12/G13).
+
+        A drag reorders them among themselves: one dragged out of the run is
+        shoved back into it, and a page dragged into the run lands past it.
+        The same "put it back as it happens" the pinned tabs get, for the
+        same reason — the bar is telling you what belongs to what, and a tab
+        that can wander says the opposite.
+        """
+        canvases = [self.tabData(i) for i in self._canvas_tabs()]
+        if not canvases:
+            return
+        self._syncing = True
+        try:
+            for target, page_id in enumerate(canvases,
+                                             start=self._model_index() + 1):
+                index = self._index_of_page(page_id)
+                if index >= 0 and index != target:
+                    self.moveTab(index, target)
+        finally:
+            self._syncing = False
 
     def _enforce_pinned(self) -> None:
         """Model stays first, "+" stays last — Qt's drag will happily swap
@@ -615,6 +727,23 @@ class PageTabBar(QTabBar):
                     lambda: self._show_context_menu(index, page_id, where))
                 event.accept()
                 return
+        # right-click on the Model tab: what it heads, and the fold — the
+        # same answer a group header gives (G12/G13)
+        if (event.button() == Qt.RightButton and index == self._model_index()
+                and self._canvas_tabs()):
+            where = event.globalPosition().toPoint()
+            self._menu_with_the_focus(lambda: self._model_menu().exec(where))
+            event.accept()
+            return
+        # the Model tab's chevron folds its canvas tabs away (G12/G13); the
+        # rest of the tab still means "show me the model canvas"
+        if (event.button() == Qt.LeftButton and index == self._model_index()
+                and self._canvas_tabs()
+                and self._model_chevron_rect().contains(
+                    event.position().toPoint())):
+            self.toggle_model_fold()
+            event.accept()
+            return
         # only page tabs are draggable; Model is pinned in place
         self._drag_locked = not self._is_page(index)
         super().mousePressEvent(event)
@@ -796,7 +925,10 @@ class PageTabBar(QTabBar):
             reset_color_action.triggered.connect(
                 lambda: self.recolor_page_requested.emit(page_id, None))
             menu.addAction(reset_color_action)
-        menu.addMenu(self._group_submenu(page_id, menu))
+        # A canvas tab has a header already — the Model tab — so it is not
+        # offered a group of its own (G12/G13).
+        if not canvas_tab:
+            menu.addMenu(self._group_submenu(page_id, menu))
         menu.addAction(del_action)
         return menu
 
@@ -841,9 +973,40 @@ class PageTabBar(QTabBar):
         if color.isValid():
             self.recolor_group_requested.emit(group, color.name())
 
+    def _group_page_ids(self, group: str) -> list:
+        """The pages of a group, in bar order."""
+        return [self.tabData(i) for i in range(self.count())
+                if self._is_page(i)
+                and self._groups.get(self.tabData(i), "") == group]
+
+    def _add_page_entries(self, menu: QMenu, page_ids: list) -> None:
+        """List pages in a menu, the current one ticked — the same entries
+        the tab list builds, so picking a page is one gesture wherever the
+        list was opened from."""
+        current = self.current_page_id()
+        for page_id in page_ids:
+            index = self._index_of_page(page_id)
+            if index < 0:
+                continue
+            action = menu.addAction(self.tabText(index))
+            action.setCheckable(True)
+            action.setChecked(page_id == current)
+            # by id, not index: the list is only read when it is picked from
+            action.triggered.connect(
+                lambda _checked=False, pid=page_id: self.select_page(pid))
+
     def _group_menu(self, group: str) -> QMenu:
-        """A header's own menu: fold, rename, or ungroup."""
+        """A header's own menu: what is in the group, then fold, rename or
+        ungroup.
+
+        The pages come first because a folded section's whole point is not
+        having to open it — right-click, read the list, pick one, and
+        `select_page` brings that one out to be looked at.
+        """
         menu = QMenu(self)
+        self._add_page_entries(menu, self._group_page_ids(group))
+        if not menu.isEmpty():
+            menu.addSeparator()
         folded = group in self._folded
         fold_action = menu.addAction("Unfold" if folded else "Fold away")
         fold_action.triggered.connect(

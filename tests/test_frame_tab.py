@@ -376,6 +376,93 @@ class TestAModelCanvasTab:
         window._go_to_node(source.id)              # nothing to escape from
         assert window.page_bar.current_page_id() == page_id
 
+    def test_the_model_tab_is_their_header(self, window, flow):
+        """Canvas tabs fold away under the **Model** tab itself, rather than
+        under a header tab repeating a name the bar already carries."""
+        bar = window.page_bar
+        model_index = bar._model_index()
+        assert bar.tabText(model_index) == "Model"   # nothing to head yet
+        window._add_page(CANVAS_KIND)
+        page_id = bar.current_page_id()
+        assert bar.tabText(model_index).startswith("▾")
+        bar.select_page(None)                        # off the folding tab
+        bar.toggle_model_fold()
+        assert bar.tabText(model_index).startswith("▸")
+        assert "1" in bar.tabText(model_index)       # how many are away
+        assert not bar.isTabVisible(bar._index_of_page(page_id))
+        bar.toggle_model_fold()
+        assert bar.isTabVisible(bar._index_of_page(page_id))
+        assert bar.tabText(model_index).startswith("▾")
+
+    def test_a_canvas_tab_is_the_model_tab_s_and_nothing_else_s(self, window):
+        """One header per tab (Dan): a canvas tab is never offered a group
+        of its own, and folding the Model tab is what puts it away."""
+        bar = window.page_bar
+        window._add_page(CANVAS_KIND)
+        page_id = bar.current_page_id()
+        index = bar._index_of_page(page_id)
+        texts = [a.text() for a in bar._context_menu(index, page_id).actions()]
+        assert "Group" not in texts
+        bar.select_page(None)
+        assert bar._canvas_tabs() == [index]
+        bar.toggle_model_fold()
+        assert not bar.isTabVisible(bar._index_of_page(page_id))
+        bar.toggle_model_fold()
+        assert bar.isTabVisible(bar._index_of_page(page_id))
+
+    def test_canvas_tabs_reorder_only_among_themselves(self, window):
+        """They sit next to the Model tab that heads them: a drag moves one
+        within the run rather than out of it (Dan)."""
+        bar = window.page_bar
+        window._add_page(CANVAS_KIND)
+        first = bar.current_page_id()
+        window._add_page(CANVAS_KIND)
+        second = bar.current_page_id()
+        window.undo_stack.push(AddPageCommand(
+            window.graph, Page(id="board", title="Board")))
+        assert bar.page_order() == [first, second, "board"]
+
+        # dragged out past the dashboard — and put straight back in the run
+        bar.moveTab(bar._index_of_page(first), bar._index_of_page("board"))
+        assert bar.page_order() == [second, first, "board"]
+
+    def test_the_model_menu_says_nothing_when_it_heads_nothing(self, window):
+        """With no canvas tabs there is nothing to list and nothing to
+        fold, so the menu is empty — it was offering the fold regardless
+        (Dan)."""
+        bar = window.page_bar
+        assert bar._canvas_tabs() == []
+        assert bar._model_menu().isEmpty()
+
+    def test_right_clicking_the_model_tab_lists_its_canvases(self, window):
+        """Read what a group holds and go straight to a page, without
+        unfolding it first."""
+        bar = window.page_bar
+        window._add_page(CANVAS_KIND)
+        page_id = bar.current_page_id()
+        title = bar.tabText(bar._index_of_page(page_id))
+        bar.select_page(None)
+        bar.toggle_model_fold()                       # folded away
+        menu = bar._model_menu()
+        texts = [action.text() for action in menu.actions()]
+        assert title in texts
+        assert "Show the canvases" in texts
+        next(a for a in menu.actions() if a.text() == title).trigger()
+        assert bar.current_page_id() == page_id       # reached while folded
+
+    def test_a_group_header_lists_its_pages_too(self, window):
+        bar = window.page_bar
+        window.undo_stack.push(AddPageCommand(
+            window.graph, Page(id="p_sales", title="Sales")))
+        window._set_page_group("p_sales", "Reports", None)
+        bar.set_group_folded("Reports", True)
+        bar.select_page(None)
+        menu = bar._group_menu("Reports")
+        texts = [action.text() for action in menu.actions()]
+        assert "Sales" in texts and "Unfold" in texts
+        next(a for a in menu.actions() if a.text() == "Sales").trigger()
+        assert bar.current_page_id() == "p_sales"
+
     def test_its_menu_closes_it_and_can_copy_it(self, window):
         """A canvas of its own can be duplicated — contents and all — unlike
         a tab that only looks at a frame. Neither is locked or scaled."""

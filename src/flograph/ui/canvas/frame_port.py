@@ -28,7 +28,8 @@ class FramePortItem(PortItem):
     """One end of one crossing wire, drawn on a collapsed frame's box."""
 
     def __init__(self, frame_item, node, spec: PortSpec,
-                 conn_id: str, side: str, *, link: bool = False) -> None:
+                 conn_id: str, side: str, *, link: bool = False,
+                 declared: str = "") -> None:
         # Parented to the *frame*, not to the node it speaks for. Holding the
         # core NodeInstance rather than the hidden NodeItem matters: a node
         # item is removed from the scene when its node goes, and a pin left
@@ -40,6 +41,11 @@ class FramePortItem(PortItem):
         self.conn_id = conn_id
         self.side = side          # "src" (an output) | "dst" (an input)
         self.link = link          # stands in for a Goto/From line, not a wire
+        # The name a frame-turned-model-canvas gives this port (G13). A
+        # declared name is the whole point of that box: it says what the
+        # thing does, where the derived label can only say which node and
+        # port happen to be behind it.
+        self.declared = declared
         self.setToolTip(self.label_text())
 
     @property
@@ -49,8 +55,11 @@ class FramePortItem(PortItem):
         return self.inner_node.id
 
     def label_text(self) -> str:
-        """Which node's port this is. The port name alone would be useless on
-        a box holding a dozen of them from half as many nodes."""
+        """The declared name where there is one (G13), otherwise which
+        node's port this is. The port name alone would be useless on a box
+        holding a dozen of them from half as many nodes."""
+        if self.declared:
+            return self.declared
         label = getattr(self.inner_node, "label", "") or self.inner_node.id
         return f"{label} · {self.spec.name}"
 
