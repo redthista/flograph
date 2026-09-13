@@ -266,6 +266,14 @@ class TestReporting:
         payload = style_payload({"format_rules": "trend spark from jan..apr"})
         assert style_report(payload, MONTHS) == []
 
+    def test_other_rules_may_use_the_column_it_makes(self):
+        """`trend width 180` and `show region, trend` name a column the
+        table does not have yet — the spark is making it, so neither is a
+        mistake worth a line in the log."""
+        payload = style_payload({"format_rules": (
+            "trend spark from jan..apr\ntrend width 180\nshow region, trend")})
+        assert style_report(payload, MONTHS) == []
+
     def test_a_range_to_nowhere_is_reported(self):
         payload = style_payload({"format_rules": "t spark from jan..dec"})
         messages = " ".join(style_report(payload, MONTHS))

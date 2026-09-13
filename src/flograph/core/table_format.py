@@ -1968,8 +1968,11 @@ def style_report(style_obj: Any, df=None) -> list[str]:
         named: set = set()
         patterns: set = set()
         rules = rules_from_style(style_obj)
-        # a spark drawn in a column the table lacks is *making* that
-        # column, so it is not a missing one
+        # A spark drawn in a column the table lacks is *making* that column,
+        # so it is not a missing one — not on the spark's own line, and not
+        # on a `width`, `label` or `show` line that goes on to use it. The
+        # same resolution the card applies, so the two agree on what exists.
+        known |= set(spark_projection(df, rules)[0].columns.map(str)) - known
         entries = [c for rule in rules for c in rule.columns
                    if rule.mode != "sparkline" or _is_glob(c)]
         entries += [r.source for r in rules if r.source]
