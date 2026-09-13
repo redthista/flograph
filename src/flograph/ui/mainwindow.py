@@ -3906,11 +3906,14 @@ class MainWindow(QMainWindow):
         copy_action = menu.addAction("Copy")
         change_color = menu.addAction("Change colour…")
         layer_actions = add_layer_menu(menu)
+        align_actions = self._add_align_menu(menu)
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
         chosen = menu.exec(global_pos)
         if chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
+        elif chosen in align_actions:
+            self._align(align_actions[chosen])
         elif chosen is fold_action:
             item = self.scene.frame_items.get(frame_id)
             if item is not None:
@@ -4335,6 +4338,7 @@ class MainWindow(QMainWindow):
         # menu changed shape depending on what you right-clicked.
         appearance = menu.addAction("Appearance…")
         rerun = menu.addAction("Mark Dirty")
+        align_actions = self._add_align_menu(menu)
         menu.addSeparator()
         active_action = menu.addAction(
             "Deactivate" if node.active else "Activate")
@@ -4486,6 +4490,8 @@ class MainWindow(QMainWindow):
             return
         if chosen in layer_actions:
             self.scene.restack_selection(layer_actions[chosen])
+        elif chosen in align_actions:
+            self._align(align_actions[chosen])
         elif chosen is run_to:
             self._flush_pending_edits()
             if many:
@@ -4877,6 +4883,24 @@ class MainWindow(QMainWindow):
             self.scene.restack_selection(layer_actions[chosen])
         elif chosen is delete_action:
             self.scene.delete_items([], [], [], [shape_id])
+
+    def _add_align_menu(self, menu: QMenu) -> dict:
+        """Edit ▸ Align's four entries as a submenu of a right-click menu,
+        when there are two or more nodes and frames selected to line up.
+
+        Returns {QAction: mode} for the caller to match against. The menu's
+        own actions rather than the window's: those fire through their own
+        triggered signal as well as through the caller's chain, which would
+        align twice and leave two undo steps."""
+        selected = (len(self.scene.selected_node_items())
+                    + len(self.scene.selected_frame_items()))
+        if selected < 2:
+            return {}
+        submenu = menu.addMenu("Align")
+        return {submenu.addAction(text): mode for text, mode in (
+            ("Align Left", "left"), ("Align Top", "top"),
+            ("Distribute Horizontally", "dist_h"),
+            ("Distribute Vertically", "dist_v"))}
 
     def _align(self, mode: str) -> None:
         # frames line up alongside nodes: a collapsed one is a box in the

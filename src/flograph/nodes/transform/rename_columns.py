@@ -24,7 +24,9 @@ def run(ctx, table):
         if not line or line.startswith("#"):
             continue
         old, sep, new = line.partition("=")
-        old, new = old.strip(), new.strip()
+        # a name may be written in backticks, the way Expression takes it
+        old, new = (s[1:-1] if len(s) > 1 and s[0] == s[-1] == "`" else s
+                    for s in (old.strip(), new.strip()))
         if not sep or not old or not new:
             raise ValueError(f"line {lineno}: expected 'old = new', got {line!r}")
         mapping[old] = new

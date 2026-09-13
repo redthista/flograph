@@ -11,11 +11,15 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 
 from .highlighter import PythonHighlighter
+from .multi_cursor import EXTRA_SELECTION_BG, MultiCaret
 
 GUTTER_BG = QColor("#202226")
 GUTTER_FG = QColor("#5c6370")
 GUTTER_FG_CURRENT = QColor("#9ca3af")
 CURRENT_LINE_BG = QColor("#24262d")
+EDITOR_BG = QColor("#1b1c20")
+EDITOR_FG = QColor("#d7dae0")
+SELECTION_BG = QColor("#264f78")
 ERROR_LINE_BG = QColor("#4b1d24")
 MATCH_BG = QColor("#3b4a2a")          # every hit while the find bar is open
 CURRENT_MATCH_BG = QColor("#6b5a1a")  # the one Enter/F3 just landed on
@@ -43,12 +47,17 @@ class CodeEditor(QPlainTextEdit):
         self.setFont(font)
         self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self._pin_dark_palette()
 
         self.highlighter = PythonHighlighter(self.document())
         self._gutter = _Gutter(self)
         self._error_line: Optional[int] = None
         # (cursor, is_current) pairs owned by the find bar; empty when it's shut
         self._search_hits: list[tuple[QTextCursor, bool]] = []
+        # what a lint found, as objects with .line (1-based), .message and
+        # .severity ("error" / "warning"); see set_diagnostics
+        self._diagnostics: list = []
+        self.carets = MultiCaret(self)
 
         self.blockCountChanged.connect(self._update_gutter_width)
         self.updateRequest.connect(self._update_gutter_area)
@@ -106,6 +115,32 @@ class CodeEditor(QPlainTextEdit):
 
     # -------------------------------------------------------------- errors
 
+    # a lint's marks: red for what the node would refuse, amber for what it
+    # may not mean (a column the table that last ran doesn't have)
+    DIAGNOSTIC_COLORS = {"error": QColor("#ef4444"),
+                         "warning": QColor("#f59e0b")}
+
+    def set_diagnostics(self, diagnostics) -> None:
+        """What a lint found: objects with .line (1-based), .message and
+        .severity. Each line gets a wavy underline and a gutter dot, and its
+        message shows when the pointer rests on it. [] clears them."""
+        self._diagnostics = list(diagnostics)
+        self._update_extra_selections()
+        self._gutter.update()
+
+    def diagnostic_at(self, line: int):
+        """The worst diagnostic on a 1-based line, or None."""
+        found = [d for d in self._diagnostics if d.line == line]
+        return next((d for d in found if d.severity == "error"),
+                    found[0] if found else None)
+
+    def set_highlighter(self, highlighter) -> None:
+        """Swap the Python highlighting for another — a QSyntaxHighlighter
+        already built on this document — or None for plain text."""
+        if self.highlighter is not None:
+            self.highlighter.setDocument(None)
+        self.highlighter = highlighter
+
     def set_error_line(self, line: Optional[int]) -> None:
         """1-based line to mark as the failure site, or None to clear."""
         self._error_line = line
@@ -128,6 +163,29 @@ class CodeEditor(QPlainTextEdit):
     def gutter_width(self) -> int:
         digits = max(2, len(str(max(1, self.blockCount()))))
         return 14 + self.fontMetrics().horizontalAdvance("9") * digits
+
+    def _pin_dark_palette(self) -> None:
+        """Dark text area whatever the chrome theme is. The gutter, the
+        current-line band, the find highlights, the extra carets and both
+        highlighters are all drawn in fixed One Dark colours; on a light
+        palette the current line was a black bar over dark text and a
+        column name pale yellow on white. Every role the text area reads is
+        set, in every group, so nothing of the OS palette shows through."""
+        from PySide6.QtGui import QPalette
+
+        palette = self.palette()
+        roles = {QPalette.Base: EDITOR_BG, QPalette.Window: EDITOR_BG,
+                 QPalette.Text: EDITOR_FG,
+                 QPalette.PlaceholderText: GUTTER_FG,
+                 QPalette.Highlight: SELECTION_BG,
+                 QPalette.HighlightedText: EDITOR_FG}
+        for group in (QPalette.Active, QPalette.Inactive):
+            for role, color in roles.items():
+                palette.setColor(group, role, color)
+        for role, color in roles.items():
+            palette.setColor(QPalette.Disabled, role, color)
+        palette.setColor(QPalette.Disabled, QPalette.Text, GUTTER_FG)
+        self.setPalette(palette)
 
     def _update_gutter_width(self) -> None:
         self.setViewportMargins(self.gutter_width(), 0, 0, 0)
@@ -164,8 +222,13 @@ class CodeEditor(QPlainTextEdit):
                 painter.drawText(0, top, self._gutter.width() - 6,
                                  self.fontMetrics().height(),
                                  Qt.AlignRight, str(number))
-                if self._error_line == number:
-                    painter.setBrush(ERROR_DOT)
+                marked = (self.diagnostic_at(number)
+                          if self._diagnostics else None)
+                if self._error_line == number or marked is not None:
+                    painter.setBrush(
+                        ERROR_DOT if (self._error_line == number
+                                      or marked.severity == "error")
+                        else self.DIAGNOSTIC_COLORS["warning"])
                     painter.setPen(Qt.NoPen)
                     painter.drawEllipse(3, top + self.fontMetrics().height() // 2 - 3,
                                         6, 6)
@@ -195,6 +258,20 @@ class CodeEditor(QPlainTextEdit):
                 error.cursor = QTextCursor(block)
                 selections.append(error)
 
+        from .diagnostics import underline_selections
+
+        # a blank marked line gets no underline; its gutter dot still says so
+        selections.extend(underline_selections(self.document(),
+                                               self._diagnostics))
+
+        # Qt paints only the main caret's selection
+        for cursor in self.carets.extras:
+            if cursor.hasSelection():
+                extra = QTextEdit.ExtraSelection()
+                extra.format.setBackground(EXTRA_SELECTION_BG)
+                extra.cursor = cursor
+                selections.append(extra)
+
         # last, so a match stays visible on the current and error lines
         for cursor, is_current in self._search_hits:
             hit = QTextEdit.ExtraSelection()
@@ -207,7 +284,41 @@ class CodeEditor(QPlainTextEdit):
 
     # ------------------------------------------------------------ keyboard
 
+    def event(self, event) -> bool:
+        # the caret keys (Ctrl+D, Alt+Shift+Down, …) are the editor's while it
+        # has the focus, even where a window shortcut shares one
+        if (event.type() == event.Type.ShortcutOverride
+                and self.carets.wants(event)):
+            event.accept()
+            return True
+        return super().event(event)
+
+    def mousePressEvent(self, event) -> None:
+        if self.carets.mouse_press(event):
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        self.carets.paint()
+
+    def viewportEvent(self, event) -> bool:
+        # rest on a marked line to read what the lint said about it
+        if event.type() == event.Type.ToolTip and self._diagnostics:
+            from PySide6.QtWidgets import QToolTip
+            line = self.cursorForPosition(event.pos()).blockNumber() + 1
+            found = self.diagnostic_at(line)
+            if found is not None:
+                QToolTip.showText(event.globalPos(), found.message,
+                                  self.viewport())
+                return True
+            QToolTip.hideText()
+        return super().viewportEvent(event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self.carets.key_press(event):
+            return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) \
                 and not event.modifiers() & Qt.ControlModifier:
             self._auto_indent_newline()

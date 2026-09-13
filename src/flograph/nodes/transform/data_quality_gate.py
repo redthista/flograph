@@ -18,7 +18,9 @@ One rule per line, `column check [args]`. Blank lines and lines starting with
     country      max_null_pct 2
     @rows        >= 1000
 
-`@rows` is the table-level row count. `max_null_pct N` passes when the column
+A column with a space in its name is written as it is spelled
+(`unit price >= 0`) or in backticks (`` `unit price` not_null ``).
+`@rows` is the table-level row count.`max_null_pct N` passes when the column
 is missing in at most N% of rows. Everything else is a row-level check and
 feeds the **clean** output.
 
@@ -62,17 +64,35 @@ def _num(token):
         raise ValueError(f"expected a number, got {token!r}")
 
 
-def _parse_rules(text):
+def _leading_column(line, spaced):
+    """(column, rest) off the front of a rule line: a name in backticks, a
+    table column with a space in its name, or else the first word."""
+    if line.startswith("`"):
+        end = line.find("`", 1)
+        return (line[1:end], line[end + 1:]) if end != -1 else (None, "")
+    for name in spaced:
+        if line.startswith(name) and line[len(name):len(name) + 1].isspace():
+            return name, line[len(name):]
+    parts = line.split(None, 1)
+    return parts[0], (parts[1] if len(parts) > 1 else "")
+
+
+def _parse_rules(text, columns=()):
+    # longest first, so `unit price usd` is never read as `unit price`
+    spaced = sorted((str(c) for c in columns
+                     if any(ch.isspace() for ch in str(c))),
+                    key=len, reverse=True)
     rules = []
     for lineno, raw in enumerate((text or "").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.split()
-        if len(parts) < 2:
+        column, rest = _leading_column(line, spaced)
+        parts = rest.split()
+        if not column or not parts:
             raise ValueError(
                 f"rule line {lineno}: expected 'column check [args]', got {line!r}")
-        column, check, args = parts[0], parts[1].lower(), parts[2:]
+        check, args = parts[0].lower(), parts[1:]
         rules.append((lineno, line, column, check, args))
     return rules
 
@@ -89,7 +109,7 @@ def _examples(series, mask, limit=5):
 def run(ctx, table):
     import pandas as pd
 
-    rules = _parse_rules(ctx.params.get("rules"))
+    rules = _parse_rules(ctx.params.get("rules"), table.columns)
     if not rules:
         raise ValueError("no rules given — add at least one 'column check' line")
 

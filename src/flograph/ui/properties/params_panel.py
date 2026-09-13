@@ -396,6 +396,7 @@ class ParamsPanel(QWidget):
             text = _ColumnTextEdit(str(value or ""))
             text.setObjectName(f"param_{name}")
             text.setMaximumHeight(90)
+            self._attach_assist(spec, text)
             if spec.placeholder:
                 text.setPlaceholderText(spec.placeholder)
             text.textChanged.connect(
@@ -407,10 +408,12 @@ class ParamsPanel(QWidget):
                 if text.toPlainText() != str(v or ""):
                     self._silently(text.setPlainText, str(v or ""))
             if spec.rule_wizard:
-                return self._with_rule_wizard(spec, text), set_text
-            if spec.insert_columns:
-                return self._with_column_inserter(spec, text), set_text
-            return text, set_text
+                widget = self._with_rule_wizard(spec, text)
+            elif spec.insert_columns:
+                widget = self._with_column_inserter(spec, text)
+            else:
+                widget = text
+            return self._with_pop_out(spec, text, widget), set_text
 
         if spec.type in ("file_open", "file_save", "folder_open"):
             host = QWidget()
@@ -596,8 +599,16 @@ class ParamsPanel(QWidget):
                                            spec.insert_columns))
         row.addWidget(text, 1)
         # top-aligned: centred, the button floats halfway down a 90px box
-        # with nothing to relate it to
-        row.addWidget(pick, 0, Qt.AlignTop)
+        # with nothing to relate it to. A column of its own, so the ⤢ that
+        # every multiline box gets stacks under it (_with_pop_out) instead of
+        # taking a second button's width out of a narrow dock.
+        buttons = QVBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(2)
+        buttons.addWidget(pick)
+        buttons.addStretch(1)
+        row.addLayout(buttons)
+        host.button_column = buttons
         host.setMaximumHeight(text.maximumHeight())
         return host
 
@@ -657,8 +668,253 @@ class ParamsPanel(QWidget):
         # carry on typing the new name rather than back in the menu
         text.setFocus()
 
+    def _with_pop_out(self, spec: ParamSpec, text: QPlainTextEdit,
+                      widget: QWidget) -> QWidget:
+        """Put a ⤢ button beside a multiline box that opens it in a big,
+        resizable editor (text_popout). The box is 90px tall in a narrow
+        dock, and a page of rules or expressions needs more room than that.
+        `widget` is the box as already wrapped — picker, Rules… button."""
+        from PySide6.QtGui import QPalette
+
+        from .text_popout import expand_icon
+
+        button = QToolButton()
+        button.setObjectName(f"param_{spec.name}_popout")
+        button.setIcon(expand_icon(self.palette().color(QPalette.ButtonText)))
+        button.setToolTip("Open in a bigger editor")
+        button.clicked.connect(lambda: self._open_pop_out(spec, text))
+        column = getattr(widget, "button_column", None)
+        if column is not None:
+            # under the column picker, at its width: one button's width out
+            # of a narrow dock rather than two side by side
+            pick = column.itemAt(0).widget()
+            width = max(pick.sizeHint().width(), button.sizeHint().width())
+            pick.setFixedWidth(width)
+            button.setFixedWidth(width)
+            column.insertWidget(1, button)
+            return widget
+        host = QWidget()
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(2)
+        row.addWidget(widget, 1)
+        row.addWidget(button, 0, Qt.AlignTop)
+        # the row sizing in _add_row reads maximumHeight off the widget it is
+        # given, so the wrapper carries whatever cap the box inside it has
+        host.setMaximumHeight(widget.maximumHeight())
+        return host
+
+    def _open_pop_out(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
+        from PySide6.QtWidgets import QDialog
+
+        from .text_popout import TextPopOut
+
+        from flograph.core.text_assist import assist_for
+        from flograph.engine import upstream_columns
+
+        # anything typed and not yet settled is part of what opens
+        self.flush_pending()
+        node_id = self._node_id
+        if node_id is None:
+            return
+        node = self._graph.node(node_id)
+        picker = menu = None
+        if spec.insert_columns:
+            picker = QToolButton()
+            picker.setObjectName("popout_columns")
+            picker.setText("Insert column ▾")
+            picker.setPopupMode(QToolButton.InstantPopup)
+            menu = QMenu(picker)
+            picker.setMenu(menu)
+        columns = (upstream_columns(self._graph, self._cache, node_id)
+                   if self._cache is not None else [])
+        if spec.rule_wizard and not columns:
+            columns = self._wizard_columns()
+        read_only = text.isReadOnly() or not text.isEnabled()
+        dialog = TextPopOut(
+            f"{node.label} — {spec.label or spec.name}", text.toPlainText(),
+            placeholder=spec.placeholder or "",
+            assist=assist_for(node.type_id, spec.name, spec.rule_wizard),
+            columns=columns, sample=self._upstream_sample(node_id),
+            picker=picker, read_only=read_only, parent=self)
+        editor = dialog.editor
+        if menu is not None:
+            menu.aboutToShow.connect(
+                lambda: self._fill_pop_out_menu(menu, editor, spec))
+        if spec.rule_wizard:
+            from flograph.ui.emoji_font import apply_emoji_font
+            apply_emoji_font(editor)
+        accepted = dialog.exec() == QDialog.Accepted
+        new = editor.toPlainText()
+        dialog.deleteLater()
+        # through _commit rather than the box: a run finishing while the
+        # dialog was up can rebuild the panel, and the box with it — and if
+        # the panel has moved to another node, this text isn't that node's
+        if accepted and not read_only and self._node_id == node_id:
+            self._commit(spec.name, new, merge=False)
+
+    def _attach_assist(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
+        """The pop-out's help, in the box itself: completion of the box's
+        own words and the columns coming in, and the lint's wavy underlines
+        with the problems listed on the box's tooltip.
+
+        Completion only where the box has something to offer — a language
+        of its own, or a column picker — so a note or a prompt doesn't pop
+        suggestions up at every word typed. The lint runs as the box appears
+        and again once typing pauses, against the incoming table only if it
+        is already in memory (_resident_sample)."""
+        from flograph.core.text_assist import assist_for
+
+        from ..editor.diagnostics import summary, underline_selections
+        from ..editor.word_completion import WordCompleter
+
+        node_id = self._node_id
+        if node_id is None or node_id not in self._graph.nodes:
+            return
+        assist = assist_for(self._graph.node(node_id).type_id, spec.name,
+                            spec.rule_wizard)
+        if assist.keywords or spec.insert_columns or spec.rule_wizard:
+            def columns() -> list:
+                from flograph.engine import upstream_columns
+                if self._node_id != node_id or self._cache is None:
+                    return []
+                found = upstream_columns(self._graph, self._cache, node_id)
+                return found or (self._wizard_columns() if spec.rule_wizard
+                                 else [])
+            text.completer = WordCompleter(text, assist.keywords, columns,
+                                           assist.quote)
+        if assist.lint is None:
+            return
+        from PySide6.QtGui import QBrush, QIcon
+
+        from ..editor.diagnostics import DIAGNOSTIC_COLORS, dot_icon
+
+        own_tip = text.toolTip()
+        row_look: dict = {}
+
+        def row() -> Optional[QTreeWidgetItem]:
+            for index in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(index)
+                host = self.tree.itemWidget(item, 1)
+                if host is not None and (host is text or host.isAncestorOf(text)):
+                    return item
+            return None
+
+        def mark_row(found: list) -> None:
+            """The row's label in the lint's colour, with a dot: the underline
+            alone is a thin line in a small box, and easy to miss."""
+            item = row()
+            if item is None:
+                return      # not in its row yet; the run queued below marks it
+            if not row_look:
+                row_look.update(ink=item.foreground(0), tip=item.toolTip(0))
+            if found:
+                worst = ("error" if any(d.severity == "error" for d in found)
+                         else "warning")
+                item.setForeground(0, QBrush(DIAGNOSTIC_COLORS[worst]))
+                item.setIcon(0, dot_icon(DIAGNOSTIC_COLORS[worst]))
+                item.setToolTip(0, summary(found))
+            else:
+                item.setForeground(0, row_look["ink"])
+                item.setIcon(0, QIcon())
+                item.setToolTip(0, row_look["tip"])
+
+        def run_lint() -> None:
+            try:
+                found = list(assist.lint(text.toPlainText(),
+                                         self._resident_sample(node_id)))
+            except Exception:   # a lint must never cost the user the box
+                found = []
+            text.diagnostics = found
+            text.setExtraSelections(underline_selections(text.document(), found))
+            text.setToolTip("\n\n".join(tip for tip in (own_tip, summary(found))
+                                        if tip))
+            mark_row(found)
+
+        timer = QTimer(text)
+        timer.setSingleShot(True)
+        timer.setInterval(400)
+        timer.timeout.connect(run_lint)
+        text.textChanged.connect(timer.start)
+        text.run_lint = run_lint
+        run_lint()
+        # the box is built before _rebuild puts it in its row: run once more
+        # after, to mark the label. Tied to the box, so a panel rebuilt in
+        # between drops it rather than reaching for a deleted widget.
+        QTimer.singleShot(0, text, run_lint)
+
+    def _resident_sample(self, node_id: str, rows: int = 200):
+        """_upstream_sample from memory only. The box lints as the panel is
+        built, which happens on every click of a node, and reading a spilled
+        table back from disk for that would make selecting slow."""
+        import pandas as pd
+
+        if self._cache is None or node_id not in self._graph.nodes:
+            return None
+        inputs = {p.name for p in self._graph.node(node_id).spec.inputs}
+        for conn in self._graph.connections.values():
+            if conn.dst_node != node_id or conn.dst_port not in inputs:
+                continue
+            entry = self._cache.get(conn.src_node)
+            if entry is None or not entry.resident:
+                continue
+            value = entry.outputs.get(conn.src_port)
+            if isinstance(value, pd.DataFrame):
+                return value.head(rows)
+        # Nothing in memory — the usual state just after opening a project.
+        # The cache still has the column names on record, and an empty table
+        # carrying them is enough for the lint to catch a column that isn't
+        # there; with no rows, it checks names rather than evaluating.
+        from flograph.engine import upstream_columns
+        names = upstream_columns(self._graph, self._cache, node_id)
+        if names:
+            return pd.DataFrame({name: pd.Series(dtype=object) for name in names})
+        return None
+
+    def _upstream_sample(self, node_id: str, rows: int = 200):
+        """The first rows of the table feeding this node, for the pop-out's
+        lint to try the text against — None when nothing upstream has run.
+        A head, not the table: the lint re-runs as you type."""
+        import pandas as pd
+
+        if self._cache is None or node_id not in self._graph.nodes:
+            return None
+        inputs = {p.name for p in self._graph.node(node_id).spec.inputs}
+        for conn in self._graph.connections.values():
+            if conn.dst_node != node_id or conn.dst_port not in inputs:
+                continue
+            try:
+                outputs = self._cache.outputs_for(conn.src_node) or {}
+            except Exception:
+                continue
+            value = (outputs.get(conn.src_port)
+                     if isinstance(outputs, dict) else None)
+            if isinstance(value, pd.DataFrame):
+                return value.head(rows)
+        return None
+
+    def _fill_pop_out_menu(self, menu: QMenu, editor: QPlainTextEdit,
+                           spec: ParamSpec) -> None:
+        """The column picker, inside the pop-out. It types into the copy and
+        commits nothing, so Cancel still means cancel — which is why this
+        isn't _fill_insert_menu, whose mapping ticks commit as they go. A
+        mapping box gets `column = `, the half you then finish."""
+        from flograph.engine import upstream_columns
+        menu.clear()
+        columns = (upstream_columns(self._graph, self._cache, self._node_id)
+                   if self._cache is not None and self._node_id else [])
+        if not columns:
+            menu.addAction("run upstream nodes to list columns").setEnabled(False)
+            return
+        mapping = spec.insert_columns == "mapping"
+        for column in columns:
+            menu.addAction(column).triggered.connect(
+                lambda _checked=False, c=column: self._insert_column(
+                    editor, f"{c} = " if mapping else c, raw=mapping))
+
     @staticmethod
-    def _insert_column(text: QPlainTextEdit, column: str) -> None:
+    def _insert_column(text: QPlainTextEdit, column: str,
+                       raw: bool = False) -> None:
         cursor = text.textCursor()
         if not getattr(text, "caret_placed", False):
             # nobody has put the caret anywhere, so its position 0 is where
@@ -669,7 +925,11 @@ class ParamsPanel(QWidget):
             cursor.movePosition(QTextCursor.End)
             if cursor.block().text().strip():
                 cursor.insertText("\n")
-        cursor.insertText(column)
+        # bare, the way the name is spelled — an expression puts in the
+        # backticks a name with spaces needs — except one like `price($)`,
+        # which it can only read in backticks
+        from flograph.core.column_refs import as_typed
+        cursor.insertText(column if raw else as_typed(column))
         text.setTextCursor(cursor)
         # carry on typing where the name landed rather than back in the menu
         text.setFocus()
