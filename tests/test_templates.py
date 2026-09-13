@@ -70,11 +70,12 @@ class TestBundledExamples:
             "29_model_canvases.flograph",
             "30_segment_compare_matrix.flograph",
             "31_table_sparklines.flograph",
+            "32_table_pictures.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 31
+        assert len(window._examples_menu.actions()) == 32
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -108,6 +109,8 @@ class TestBundledExamples:
         # 31 draws its sparklines in Python and prints them as SVG, so there
         # is nothing to fetch either
         "31_table_sparklines.flograph",
+        # 32's pictures are base64 in its own table, so nothing to fetch
+        "32_table_pictures.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from
@@ -572,6 +575,56 @@ class TestTheTableSparklinesExample:
         assert html.count("<table") >= 2
         assert "Up/down" in html and "Alice" in html
         assert html.count("data:image/svg+xml") >= 30
+
+
+class TestTheTablePicturesExample:
+    """32_table_pictures: every table's rules parse and name real columns,
+    the pictures are drawn on the card, and the report page prints both of
+    its tables with their pictures and their grid lines."""
+
+    def test_the_rules_parse_and_name_real_columns(self, qtbot, window):
+        window._open_example(template_path("32_table_pictures.flograph"))
+        assert wait_run(qtbot, window.engine)
+        from flograph.core.table_format import (parse_rules_lenient,
+                                                style_report)
+        modes = set()
+        for node_id in ("pd_beside", "pd_gallery", "pd_tiles"):
+            params = window.graph.nodes[node_id].params
+            rules, errors = parse_rules_lenient(params["format_rules"])
+            assert errors == [], node_id
+            modes |= {r.mode for r in rules}
+            outputs = window.engine.cache.outputs_for(node_id)
+            assert style_report(outputs["style"], outputs["table"]) == [], \
+                node_id
+        assert {"image", "icon_map", "highlight", "row_height"} <= modes
+
+    def test_the_card_draws_pictures(self, qtbot, window):
+        window._open_example(template_path("32_table_pictures.flograph"))
+        assert wait_run(qtbot, window.engine)
+        from flograph.ui.inspector.pandas_model import styled_model
+        from flograph.ui.table_delegate import DECOR_ROLE
+        outputs = window.engine.cache.outputs_for("pd_beside")
+        model = styled_model(outputs["table"], outputs["style"])
+        marks = [d for r in range(model.rowCount())
+                 for c in range(model.columnCount())
+                 for d in (model.data(model.index(r, c), DECOR_ROLE)
+                           or ([], None, None))[0]]
+        assert sum(1 for d in marks if d.image) >= 15
+
+    def test_the_report_page_prints_the_pictures(self, qtbot, window):
+        window._open_example(template_path("32_table_pictures.flograph"))
+        assert wait_run(qtbot, window.engine)
+        from flograph.ui.report.render import render_report
+        pages = window.graph.pages
+        pages = pages.values() if isinstance(pages, dict) else pages
+        report = next(p for p in pages if p.kind == "report")
+        html = render_report(report.body, window.graph,
+                             window.engine.cache).document.toHtml()
+        assert html.count("<table") >= 2
+        assert "Northwind" in html and "@@flograph-spark" not in html
+        assert "data-flograph-tile" not in html
+        assert html.count("<img") >= 20
+        assert "border-top:1px" in html
 
 
 class TestTheFlowVariablesExample:

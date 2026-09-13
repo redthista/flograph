@@ -308,6 +308,10 @@ shape** cuts every pasted picture to a shape. The **Pictures** page makes an
 Pictures reach a dashboard tile, print on a **report page** — tile and shape
 included — and appear in **Open in Browser** and exported HTML.
 
+**Open Example ▸ Table Pictures** is a worked flow: logos beside names,
+owner photos cut to circles, SVG badges, pasted icons in an icon map and
+pictures on tiles — on the canvas, a dashboard page and a report page.
+
 ## Order of application
 
 Rules compose **top to bottom, and a later line wins** any attribute it sets —
