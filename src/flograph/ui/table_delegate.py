@@ -22,9 +22,14 @@ where before it needed none.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
+from collections import OrderedDict
+
+from PySide6.QtCore import (
+    QBuffer, QByteArray, QIODevice, QPointF, QRect, QRectF, QSize, Qt,
+)
 from PySide6.QtGui import (
-    QColor, QFontMetrics, QPainter, QPainterPath, QPalette, QPen,
+    QColor, QFontMetrics, QImageReader, QPainter, QPainterPath, QPalette,
+    QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
     QApplication, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
@@ -87,11 +92,131 @@ def _spark(d):
     return getattr(d, "spark", None)
 
 
+def _picture(d):
+    return getattr(d, "image", None)
+
+
+#: Kept clear above and below a picture, so a logo as tall as its row does
+#: not sit on the grid lines.
+_PICTURE_PAD_Y = 1
+#: Decoded pictures, by (address, width, height, pixel ratio). A column of
+#: logos is repainted on every scroll; decoding each one per paint is the
+#: cost this saves, and the bound keeps a long session's scrolling from
+#: holding every size it ever drew.
+_PIXMAPS: "OrderedDict" = OrderedDict()
+_PIXMAP_CACHE = 512
+
+
+def picture_pixmap(uri: str, width: int, height: int,
+                   ratio: float = 1.0) -> "QPixmap | None":
+    """The picture at `uri`, scaled to fit `width` × `height` with its shape
+    kept, for a screen at `ratio` — or None when it will not decode.
+
+    Scaled by the reader rather than after it, so an SVG is drawn at the
+    size it is shown rather than blown up from its own.
+    """
+    key = (uri, int(width), int(height), round(float(ratio), 2))
+    if key in _PIXMAPS:
+        _PIXMAPS.move_to_end(key)
+        return _PIXMAPS[key]
+    from flograph.core.images import parse_data_uri
+    pixmap = None
+    parsed = parse_data_uri(uri) if width > 0 and height > 0 else None
+    if parsed is not None:
+        buffer = QBuffer()
+        buffer.setData(QByteArray(parsed[0]))
+        buffer.open(QIODevice.ReadOnly)
+        reader = QImageReader(buffer)
+        reader.setAutoTransform(True)
+        target = QSize(max(1, round(width * ratio)),
+                       max(1, round(height * ratio)))
+        native = reader.size()
+        if native.isValid() and not native.isEmpty():
+            reader.setScaledSize(native.scaled(target, Qt.KeepAspectRatio))
+        image = reader.read()
+        if not image.isNull():
+            if not native.isValid() or native.isEmpty():
+                image = image.scaled(target, Qt.KeepAspectRatio,
+                                     Qt.SmoothTransformation)
+            pixmap = QPixmap.fromImage(image)
+            pixmap.setDevicePixelRatio(ratio)
+    _PIXMAPS[key] = pixmap
+    while len(_PIXMAPS) > _PIXMAP_CACHE:
+        _PIXMAPS.popitem(last=False)
+    return pixmap
+
+
+def paint_picture(painter, rect: QRectF, uri: str, tile=None, shape=None,
+                  ratio: float = 1.0) -> None:
+    """Draw the picture at `uri` fitted into `rect`: on a tile of colour
+    `tile` when there is one, both cut to `shape`.
+
+    Shared by the card and a report page, which composites a tile into a
+    picture because its rich text cannot draw one — so the two agree on
+    the radius, the inset and where the picture sits.
+    """
+    from flograph.core.images import TILE_INSET, tile_radius
+    rect = QRectF(rect)
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    clip = None
+    if tile or shape:
+        radius = tile_radius(shape, rect.width(), rect.height())
+        clip = QPainterPath()
+        clip.addRoundedRect(rect, radius, radius)
+    inner = rect
+    if tile:
+        painter.fillPath(clip, QColor(tile))
+        pad = min(rect.width(), rect.height()) * TILE_INSET
+        inner = rect.adjusted(pad, pad, -pad, -pad)
+    pixmap = picture_pixmap(uri, max(1, round(inner.width())),
+                            max(1, round(inner.height())), ratio)
+    if pixmap is not None:
+        if clip is not None:
+            painter.setClipPath(clip, Qt.IntersectClip)
+        shown_w = pixmap.width() / pixmap.devicePixelRatio()
+        shown_h = pixmap.height() / pixmap.devicePixelRatio()
+        painter.drawPixmap(QPointF(inner.center().x() - shown_w / 2,
+                                   inner.center().y() - shown_h / 2), pixmap)
+    painter.restore()
+
+
+def _picture_height(d, room: int) -> int:
+    """How tall a picture is drawn in `room` pixels of height: the size its
+    rule named, else all of the room — never more than the room has."""
+    most = max(1, room - 2 * _PICTURE_PAD_Y)
+    return min(d.size, most) if d.size else most
+
+
 def _units(decorations) -> int:
     """How many text lines a stacked line of decorations takes: two when
     it holds a `tall` spark, one otherwise."""
     return 2 if any(_spark(d) is not None and _spark(d).tall
                     for d in decorations) else 1
+
+
+def _line_px(decorations, line_h: int) -> int:
+    """How tall a stacked line of decorations is, in pixels: a line of text
+    (two for a tall spark), or a sized picture's height if that is more."""
+    sized = [d.size + 2 * _PICTURE_PAD_Y for d in decorations
+             if _picture(d) and d.size]
+    return max([line_h * _units(decorations)] + sized)
+
+
+def _grown_px(decorations, line_h: int) -> int:
+    """How much taller the value's own line gets: a line for a `tall`
+    spark beside or in place of it, or what a sized picture there needs
+    beyond a line."""
+    extra = 0
+    for d in decorations:
+        if d.where not in ("left", "right", "in"):
+            continue
+        if _spark(d) is not None and _spark(d).tall:
+            extra = max(extra, line_h)
+        elif _picture(d) and d.size:
+            extra = max(extra, d.size + 2 * _PICTURE_PAD_Y - line_h)
+    return extra
 
 
 def _grows_the_row(decorations) -> bool:
@@ -170,21 +295,22 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         wanted = index.data(HEIGHT_ROLE)
         decor = index.data(DECOR_ROLE)
         lines = 0
-        if decor is not None:
-            above, below = _stacked(decor[0])
-            lines = ((_units(above) if above else 0)
-                     + (_units(below) if below else 0)
-                     + (1 if _grows_the_row(decor[0]) else 0))
-        if not lines and not wanted:
-            return size
-        height = size.height()
-        if lines:
+        if decor is not None and decor[0]:
             opt = QStyleOptionViewItem(option)
             self.initStyleOption(opt, index)
             # measured with the *same* font paint() will use. A glyph falls
             # back to an emoji face that is taller than the UI one, and
             # reserving the shorter of the two clips the mark it reserved for.
-            height += lines * _line_height(opt)
+            line_h = _line_height(opt)
+            above, below = _stacked(decor[0])
+            # in pixels, not lines: a picture asked for at 40px is as tall
+            # as it was asked to be, whatever the font
+            lines = ((_line_px(above, line_h) if above else 0)
+                     + (_line_px(below, line_h) if below else 0)
+                     + _grown_px(decor[0], line_h))
+        if not lines and not wanted:
+            return size
+        height = size.height() + lines
         if wanted:
             # The row is as tall as it was asked to be — shorter than the
             # font's own height too, for a compact table. What it cannot be
@@ -204,10 +330,15 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
 
     # ------------------------------------------------------------ chips
 
-    def _chip_width(self, metrics, d) -> int:
-        """How much room one decoration needs beside the value."""
+    def _chip_width(self, metrics, d, height: "int | None" = None) -> int:
+        """How much room one decoration needs beside the value. `height` is
+        the band it sits in, which a picture is drawn to fit."""
         if _spark(d) is not None:
             return _spark(d).width or _SPARK_BESIDE_W
+        if _picture(d):
+            from flograph.core.images import picture_aspect
+            tall = _picture_height(d, height or metrics.height())
+            return max(1, round(tall * picture_aspect(_picture(d))))
         advance = metrics.horizontalAdvance(str(d.text))
         if d.pill:
             return advance + 2 * _PILL_PAD_X
@@ -216,7 +347,7 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         return max(_ICON_CELL_W, advance)
 
     def _side_widths(self, opt, band_width, decorations, metrics, text,
-                     pill) -> dict:
+                     pill, band_height: "int | None" = None) -> dict:
         """id(decoration) -> the width each mark beside the value takes.
 
         Every mark takes its own fixed width, except a spark nobody gave a
@@ -227,7 +358,8 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         a stub at one end of an empty cell.
         """
         side = [d for d in decorations if d.where in ("left", "right")]
-        widths = {id(d): self._chip_width(metrics, d) for d in side}
+        widths = {id(d): self._chip_width(metrics, d, band_height)
+                  for d in side}
         flexible = [d for d in side
                     if _spark(d) is not None and not _spark(d).width]
         if not flexible:
@@ -246,10 +378,27 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
     def _draw_chip(self, painter, x, band, d, metrics, pen,
                    width: "int | None" = None) -> int:
         """One decoration at `x` within `band`. Returns the width used."""
-        width = width or self._chip_width(metrics, d)
+        width = width or self._chip_width(metrics, d, band.height())
         if _spark(d) is not None:
             paint_spark(painter, QRect(x, band.top(), width, band.height()),
                         _spark(d))
+            return width
+        if _picture(d):
+            from flograph.core.images import picture_aspect
+            device = painter.device()
+            ratio = device.devicePixelRatioF() if device is not None else 1.0
+            aspect = picture_aspect(_picture(d))
+            tall = _picture_height(d, band.height())
+            # the picture's own box, so a tile is the picture's shape and
+            # not the width a narrow column squeezed it into
+            box_w = min(float(width), tall * aspect)
+            box_h = box_w / aspect
+            paint_picture(painter,
+                          QRectF(x + (width - box_w) / 2,
+                                 band.top() + (band.height() - box_h) / 2,
+                                 box_w, box_h),
+                          _picture(d), getattr(d, "tile", None),
+                          getattr(d, "shape", None), ratio)
             return width
         if d.pill:
             height = min(band.height(), metrics.height() + 2 * _PILL_PAD_Y)
@@ -279,11 +428,15 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
             paint_spark(painter, band.adjusted(2, 0, -2, 0),
                         _spark(decorations[0]))
             return
-        widths = [self._chip_width(metrics, d) for d in decorations]
+        # no wider than the band: a picture in place of the value is drawn
+        # to the row's height, and a narrow column shrinks it to fit instead
+        widths = [min(band.width(),
+                      self._chip_width(metrics, d, band.height()))
+                  for d in decorations]
         total = sum(widths) + _ICON_GAP * (len(widths) - 1)
         x = band.left() + max(0, (band.width() - total) // 2)
         for d, width in zip(decorations, widths):
-            self._draw_chip(painter, x, band, d, metrics, pen)
+            self._draw_chip(painter, x, band, d, metrics, pen, width)
             x += width + _ICON_GAP
 
     # --------------------------------------------------------- the value
@@ -299,13 +452,13 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         line_h = metrics.height()
         band = QRect(inner)
         if above:
-            band.setTop(band.top() + line_h * _units(above))
+            band.setTop(band.top() + _line_px(above, line_h))
         if below:
-            band.setBottom(band.bottom() - line_h * _units(below))
+            band.setBottom(band.bottom() - _line_px(below, line_h))
         # each chip costs its own width and the gap after it, which is
         # exactly the step paint() walks below
         widths = self._side_widths(opt, band.width(), decorations, metrics,
-                                   text, pill)
+                                   text, pill, band.height())
         left = sum(widths[id(d)] + _ICON_GAP
                    for d in decorations if d.where == "left")
         right = sum(widths[id(d)] + _ICON_GAP
@@ -395,13 +548,13 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         line_h = metrics.height()
         band = QRect(inner)
         if above:
-            high = line_h * _units(above)
+            high = _line_px(above, line_h)
             self._draw_line(painter, QRect(inner.left(), inner.top(),
                                            inner.width(), high),
                             above, metrics, glyph_pen or text_pen)
             band.setTop(band.top() + high)
         if below:
-            low = line_h * _units(below)
+            low = _line_px(below, line_h)
             self._draw_line(painter, QRect(inner.left(), inner.bottom() - low,
                                            inner.width(), low),
                             below, metrics, glyph_pen or text_pen)
@@ -415,7 +568,7 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # one set of widths for the walk below and for the value's band, so
         # a spark grown into spare room and the text beside it cannot overlap
         widths = self._side_widths(opt, band.width(), decorations, metrics,
-                                   text, pill)
+                                   text, pill, band.height())
         x = band.left()
         for d in left:
             x += self._draw_chip(painter, x, band, d, metrics, pen,

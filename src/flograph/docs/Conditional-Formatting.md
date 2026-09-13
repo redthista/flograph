@@ -254,6 +254,60 @@ draws each row's months.
 of their own, beside a value, on their own scale and on a shared one, with
 row heights — on the canvas, a dashboard page and a report page.
 
+## Pictures
+
+A picture can go anywhere an icon goes — a logo beside a company's name, a
+flag, a photo — as **base64 text**: a column of it, or one pasted into a
+rule.
+
+**A column of pictures.** `image` draws each value as the picture it is,
+in place of the wall of text it was written as. With `from`, the picture
+comes from another column and sits beside this one's value like an icon:
+
+```
+logo      image                                  # the column's own pictures
+company   image from logo hide                   # the logo beside the name
+company   image right 32px circle from logo      # after it, 32px, cut round
+avatar    image circle on white 40px             # photos as round avatars
+```
+
+A value may be bare base64 (`iVBORw0KGgo…`), a `data:image/png;base64,…`
+address, raw **SVG markup** (`<svg …>…</svg>`), or the bytes of a picture.
+PNG, JPEG, GIF, WebP, BMP, ICO and SVG are all recognised from the bytes
+themselves, so nothing has to say which it is. A cell whose value isn't a
+picture shows its text as usual.
+
+| Word | What it does |
+| --- | --- |
+| `left` `right` `above` `below` `in` | Where it goes. A column's own pictures go `in` place of the value; one from another column goes `left` of it. |
+| `32px` | How tall it is drawn. Left out, a picture is as tall as its row — so a `height 48` line makes every picture bigger at once. A size taller than a line makes those rows taller. |
+| `square` `rounded` `circle` | The shape it is cut to. A circle turns a square photo into an avatar. |
+| `on white`, `on #1e1e1e` | A tile of that colour behind the picture, with the picture set in from its edge — for an icon drawn on a clear or plain ground. A tile is a rounded square unless a shape is named. |
+| `only` | With `from`: the picture in place of this column's value. |
+| `hide` | Put the picture column out of view. It is still read. |
+
+**A picture pasted into a rule.** Anywhere a glyph is typed, base64 works
+too, `data:` prefix or not:
+
+```
+status  iconmap circle: ok=iVBORw0KGgo…, late=iVBORw0KGgo… amber
+status = late => icon iVBORw0KGgo… right 28px
+```
+
+A colour given to a pasted picture is its tile. In the Rules dialog you
+don't need base64 at all: **paste a picture straight into an icon cell** of
+the Icons page — a screenshot, an image copied from a browser, a picture
+file copied in a file manager, or base64 / SVG markup — or **drop** a file
+on it. It goes in shrunk to icon size (128 pixels on its longer side, so a
+screenshot costs the flow a few KB, not megabytes) and stored in the rule,
+so the flow carries it wherever it goes; an SVG is kept as it is. The cell
+shows a preview, the rule text shows it as `‹picture · 2 KB›`, and **Picture
+shape** cuts every pasted picture to a shape. The **Pictures** page makes an
+`image` rule.
+
+Pictures reach a dashboard tile, print on a **report page** — tile and shape
+included — and appear in **Open in Browser** and exported HTML.
+
 ## Order of application
 
 Rules compose **top to bottom, and a later line wins** any attribute it sets —

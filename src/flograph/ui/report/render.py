@@ -1325,7 +1325,10 @@ class _Resolver:
         are.
         """
         def swap(match) -> str:
-            self.inline.append(match.group(0))
+            tag = match.group(0)
+            if "data-flograph-tile=" in tag:
+                tag = _tiled_picture(tag)
+            self.inline.append(tag)
             return SPARK_TOKEN.format(len(self.inline) - 1)
         return _SPARK_IMG_RE.sub(swap, html)
 
@@ -1546,9 +1549,60 @@ def unlink_page_links(document) -> int:
 _FIT_FLOOR = 0.45
 
 
-#: What a table's sparkline stands as while the page is markdown.
+#: What a table's sparkline — or picture — stands as while the page is
+#: markdown. Every `data:` picture a table carries, whatever its type: the
+#: markdown pass drops an `<img>` in a table cell however it got there.
 SPARK_TOKEN = "@@flograph-spark-{}@@"
-_SPARK_IMG_RE = re.compile(r'<img src="data:image/svg\+xml;base64,[^"]*"[^>]*>')
+_SPARK_IMG_RE = re.compile(
+    r'<img src="data:image/[\w.+-]+;base64,[^"]*"[^>]*>')
+
+
+#: How much finer than its size on the page a tiled picture is drawn, so a
+#: printed or zoomed page is not a blur — a spark's SVG_DENSITY.
+_TILE_DENSITY = 4
+
+
+def _tiled_picture(tag: str) -> str:
+    """A table picture's tile and shape, drawn into the picture itself.
+
+    The table writes them as CSS — `background-color`, `padding` and
+    `border-radius` on the `<img>` — which a browser honours and Qt's rich
+    text drops, all three. So here, and only for a report page, the tile is
+    painted by the card's own `paint_picture` into a PNG the page can show
+    as it is. A tag that will not parse is left as it came.
+    """
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt
+    from PySide6.QtGui import QImage, QPainter
+
+    from flograph.core.images import to_data_uri
+    from flograph.ui.table_delegate import paint_picture
+
+    src = re.search(r'src="([^"]+)"', tag)
+    width = re.search(r'width="([\d.]+)"', tag)
+    height = re.search(r'height="([\d.]+)"', tag)
+    marker = re.search(r'data-flograph-tile="([^"]*)"', tag)
+    if not (src and width and height and marker):
+        return tag
+    padding = re.search(r"padding:([\d.]+)px", tag)
+    pad = float(padding.group(1)) if padding else 0.0
+    tile, _sep, shape = marker.group(1).partition(";")
+    box_w = float(width.group(1)) + 2 * pad
+    box_h = float(height.group(1)) + 2 * pad
+    image = QImage(max(1, round(box_w * _TILE_DENSITY)),
+                   max(1, round(box_h * _TILE_DENSITY)),
+                   QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    paint_picture(painter, QRectF(0, 0, image.width(), image.height()),
+                  src.group(1), tile or None, shape or None)
+    painter.end()
+    store = QByteArray()
+    buffer = QBuffer(store)
+    buffer.open(QIODevice.WriteOnly)
+    image.save(buffer, "PNG")
+    return (f'<img src="{to_data_uri(bytes(store), "image/png")}" '
+            f'width="{box_w:g}" height="{box_h:g}" '
+            f'style="vertical-align:middle" />')
 
 
 def _img_tag(index: int, width: int) -> str:

@@ -10,20 +10,24 @@ the graph — the caller hands it the column names to offer.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
+from PySide6.QtGui import (
+    QAction, QColor, QFont, QIcon, QKeySequence, QPixmap,
+)
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QDialog,
+    QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox,
+    QDialog,
     QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QPushButton, QSpinBox, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from flograph.core import sparkline as _sparkline
+from flograph.core.images import DATA_PREFIX, picture_uri
 from flograph.core.table_format import (
-    DEFAULT_PALETTE, MAX_ROW_HEIGHT, MAX_RULE_WIDTH, MAX_SPARK_WIDTH,
-    MIN_ROW_HEIGHT, MIN_RULE_WIDTH, MIN_SPARK_WIDTH, PALETTES, _is_glob,
-    bar_token, fill_token, parse_rule_lines, quote_column, rule_summary,
-    scale_token,
+    DEFAULT_PALETTE, MAX_PICTURE_SIZE, MAX_ROW_HEIGHT, MAX_RULE_WIDTH,
+    MAX_SPARK_WIDTH, MIN_PICTURE_SIZE, MIN_ROW_HEIGHT, MIN_RULE_WIDTH,
+    MIN_SPARK_WIDTH, PALETTES, _is_glob, abbreviate_pictures, bar_token,
+    fill_token, parse_rule_lines, quote_column, rule_summary, scale_token,
 )
 from flograph.ui.emoji_font import apply_emoji_font, with_emoji
 
@@ -42,6 +46,10 @@ _FILL_CHOICES = [("Red", "red", "#b3524f"), ("Amber", "amber", "#b0902f"),
 _GLYPH_CHOICES = [("Green", "green", "#5cb85c"), ("Amber", "amber", "#e0a83d"),
                   ("Red", "red", "#d9534f"), ("Blue", "blue", "#4a90d9"),
                   ("Grey", "grey", "#9aa0a6")]
+#: A tile behind a picture: the vivid glyph colours, and the two grounds a
+#: logo is most often drawn for.
+_TILE_CHOICES = ([("White", "white", "#ffffff"), ("Black", "black", "#000000")]
+                 + _GLYPH_CHOICES)
 _BAR_CHOICES = [("Blue", "blue", "#3b6299"), ("Green", "green", "#2e7d46"),
                 ("Orange", "orange", "#b9722e"), ("Purple", "purple", "#7d5aa8"),
                 ("Red", "red", "#a4373a"), ("Grey", "grey", "#5b5f68")]
@@ -59,8 +67,8 @@ _MAP_COLOURS = ["green", "amber", "red", "blue", "grey", "(none)"]
 _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 
 _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
-          "Sparkline", "Highlight cells / rows", "Icons", "Number format",
-          "Tooltip from another column", "Hide columns",
+          "Sparkline", "Highlight cells / rows", "Icons", "Pictures",
+          "Number format", "Tooltip from another column", "Hide columns",
           "Show only these columns", "Column layout", "Wrap text",
           "Row height"]
 
@@ -68,8 +76,23 @@ _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
 #: order and `_line` dispatches on it, so the number appears in three
 #: places at once — which is exactly the sort of thing that survives one
 #: insertion and quietly breaks on the next.
-(K_SCALE, K_AUTO, K_BAR, K_SPARK, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_TIP,
- K_HIDE, K_SHOW, K_LAYOUT, K_WRAP, K_HEIGHT) = range(len(_KINDS))
+(K_SCALE, K_AUTO, K_BAR, K_SPARK, K_HIGHLIGHT, K_ICONS, K_PICTURE, K_NUMBER,
+ K_TIP, K_HIDE, K_SHOW, K_LAYOUT, K_WRAP, K_HEIGHT) = range(len(_KINDS))
+
+#: Where an `image` rule's pictures go. The empty token is "where they
+#: belong": in place of the value when the pictures *are* the column's
+#: values, left of it when they come from another column — which is what
+#: the rule does when it names no place.
+_PICTURE_PLACES = [("in place of its value — or left, from another column",
+                    ""),
+                   ("left of the value", "left"),
+                   ("right of the value", "right"),
+                   ("above the value", "above"),
+                   ("below the value", "below"),
+                   ("in place of the value", "in")]
+#: The shape a picture is cut to; empty draws it as it is.
+_PICTURE_SHAPES = [("as it is", ""), ("square", "square"),
+                   ("rounded square", "rounded"), ("circle", "circle")]
 
 _SPARK_KIND_CHOICES = [("Line", "line"), ("Area", "area"), ("Step", "step"),
                        ("Bars", "bars"), ("Win / loss", "winloss"),
@@ -101,7 +124,7 @@ _MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
               "tooltip": K_TIP, "hide": K_HIDE, "show": K_SHOW,
               "column_width": K_LAYOUT, "align": K_LAYOUT,
               "header_label": K_LAYOUT, "wrap": K_WRAP,
-              "row_height": K_HEIGHT}
+              "row_height": K_HEIGHT, "image": K_PICTURE}
 
 #: The palettes an auto colour can spend, newest-friendly names first.
 #: Taken from `PALETTES` rather than listed here, so a palette added to
@@ -190,6 +213,91 @@ def _cols_text(names) -> str:
 def _looks_hex(token: str) -> bool:
     s = str(token or "").strip()
     return s.startswith("#") and len(s) in (4, 7)
+
+
+def _tile_token(colour) -> str:
+    """A tile colour as the wizard offers it: its preset's name, else the
+    hex, else "(none)"."""
+    if not colour:
+        return "(none)"
+    for _label, token, value in _TILE_CHOICES:
+        if value.lower() == str(colour).lower():
+            return token
+    return str(colour)
+
+
+def _show_picture(edit: QLineEdit) -> None:
+    """A picture pasted into an icon box, previewed at the front of the box
+    — the text in it is only base64, which says nothing to anyone."""
+    for action in list(edit.actions()):
+        edit.removeAction(action)
+    uri = picture_uri(edit.text())
+    edit.setToolTip(abbreviate_pictures(edit.text()) if uri else "")
+    if uri is None:
+        return
+    from flograph.ui.table_delegate import picture_pixmap
+    pixmap = picture_pixmap(uri, 16, 16, edit.devicePixelRatioF())
+    if pixmap is not None:
+        edit.addAction(QIcon(pixmap), QLineEdit.LeadingPosition)
+
+
+class _PictureEdit(QLineEdit):
+    """An icon cell that takes a picture as well as a glyph.
+
+    Paste a picture — a screenshot, an image copied from a browser, a
+    picture file copied in a file manager, base64 or SVG markup — or drop
+    one on it, and it goes in as a small base64 picture, shrunk to icon size
+    so the rule and the flow stay light. Text that isn't a picture pastes
+    as text, as it always did.
+    """
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(text, parent)
+        self.setAcceptDrops(True)
+
+    def take_picture(self, mime) -> bool:
+        """Put the picture `mime` holds in the cell. False when it has none."""
+        from flograph.ui.image_paste import icon_source
+        source = icon_source(mime)
+        if source is None:
+            return False
+        # one mark per cell: a picture replaces whatever was typed
+        self.setText(source)
+        self.setCursorPosition(0)
+        return True
+
+    def keyPressEvent(self, event) -> None:
+        if (event.matches(QKeySequence.Paste)
+                and self.take_picture(QApplication.clipboard().mimeData())):
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        menu = self.createStandardContextMenu()
+        from flograph.ui.image_paste import icon_source
+        if icon_source(QApplication.clipboard().mimeData()) is not None:
+            first = menu.actions()[0] if menu.actions() else None
+            action = QAction("Paste Picture", menu)
+            action.triggered.connect(
+                lambda: self.take_picture(QApplication.clipboard().mimeData()))
+            menu.insertAction(first, action)
+            menu.insertSeparator(first)
+        menu.exec(event.globalPos())
+        menu.deleteLater()
+
+    def dragEnterEvent(self, event) -> None:
+        from flograph.ui.image_paste import icon_source
+        if icon_source(event.mimeData()) is not None:
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if self.take_picture(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
 
 
 def _swatch(colour: str) -> QIcon:
@@ -315,6 +423,7 @@ class RuleBuilder(QDialog):
         self._build_spark_page()
         self._build_highlight_page()
         self._build_icons_page()
+        self._build_picture_page()
         self._build_number_page()
         self._build_tip_page()
         self._build_hide_page()
@@ -820,6 +929,12 @@ class RuleBuilder(QDialog):
         head.addRow("", self._icon_pill)
         self._icon_place = self._place_combo()
         head.addRow("Place", self._icon_place)
+        self._icon_shape = _combo(_PICTURE_SHAPES)
+        self._icon_shape.setToolTip(
+            "For pictures pasted into the map: the shape they are cut to. "
+            "A picture given a colour sits on a tile of that colour.")
+        self._icon_shape.currentIndexChanged.connect(self._refresh)
+        head.addRow("Picture shape", self._icon_shape)
         v.addLayout(head)
 
         # -- graduated set
@@ -839,7 +954,8 @@ class RuleBuilder(QDialog):
         self._icon_map_box = QWidget()
         mv = QVBoxLayout(self._icon_map_box)
         mv.setContentsMargins(0, 0, 0, 0)
-        mv.addWidget(QLabel("Value → icon  (type any character or emoji):"))
+        mv.addWidget(QLabel("Value → icon  (type any character or emoji, "
+                            "or paste a picture as base64):"))
         self._map = QTableWidget(0, 3)
         self._map.setHorizontalHeaderLabels(["value", "icon", "colour"])
         self._map.setMaximumHeight(150)
@@ -868,15 +984,86 @@ class RuleBuilder(QDialog):
         r = self._map.rowCount()
         self._map.insertRow(r)
         self._map.setItem(r, 0, QTableWidgetItem(value))
-        gedit = QLineEdit(glyph)
+        gedit = _PictureEdit(glyph)
         apply_emoji_font(gedit)  # so a typed emoji shows as itself, not a gap
-        gedit.setPlaceholderText("any character / emoji  (e.g. T, →, 🙂)")
+        gedit.setPlaceholderText("a character, an emoji (T, →, 🙂), or "
+                                 "paste / drop a picture")
         gedit.textChanged.connect(self._refresh)
+        gedit.textChanged.connect(lambda _t, e=gedit: _show_picture(e))
+        _show_picture(gedit)
         self._map.setCellWidget(r, 1, gedit)
         cbox = ColorChoice(_GLYPH_CHOICES, allow_none=True)
         cbox.set_value(colour or "(none)")
         cbox.changed.connect(self._refresh)
         self._map.setCellWidget(r, 2, cbox)
+
+    def _build_picture_page(self) -> None:
+        """Pictures from a column: the column's own values drawn as the
+        pictures they are, or another column's beside this one's."""
+        page = QWidget()
+        v = QVBoxLayout(page)
+        f = QFormLayout()
+        f.setContentsMargins(0, 0, 0, 0)
+        self._pic_from = self._other_col_combo()
+        self._pic_from.currentIndexChanged.connect(self._sync_picture)
+        self._pic_from.editTextChanged.connect(self._sync_picture)
+        f.addRow("Pictures from", self._pic_from)
+        self._pic_place = _combo(_PICTURE_PLACES)
+        self._pic_place.currentIndexChanged.connect(self._refresh)
+        f.addRow("Place", self._pic_place)
+        self._pic_size = QSpinBox()
+        self._pic_size.setRange(MIN_PICTURE_SIZE - 1, MAX_PICTURE_SIZE)
+        self._pic_size.setSpecialValueText("as tall as the row")
+        self._pic_size.setValue(MIN_PICTURE_SIZE - 1)
+        self._pic_size.setSuffix(" px")
+        self._pic_size.setToolTip(
+            "How tall each picture is drawn. Taller than a line of text "
+            "makes those rows taller; left alone, a picture fits the row — "
+            "so a Row height rule makes every picture bigger at once.")
+        self._pic_size.valueChanged.connect(self._refresh)
+        f.addRow("Size", self._pic_size)
+        self._pic_shape = _combo(_PICTURE_SHAPES)
+        self._pic_shape.setToolTip(
+            "Cut each picture to a shape — a circle turns a photo into an "
+            "avatar.")
+        self._pic_shape.currentIndexChanged.connect(self._refresh)
+        f.addRow("Shape", self._pic_shape)
+        self._pic_tile = ColorChoice(_TILE_CHOICES, allow_none=True)
+        self._pic_tile.set_value("(none)")
+        self._pic_tile.setToolTip(
+            "A coloured tile behind each picture, with the picture set in "
+            "from its edge — for icons drawn on a plain or clear ground.")
+        self._pic_tile.changed.connect(self._refresh)
+        f.addRow("Tile colour", self._pic_tile)
+        self._pic_hide = QCheckBox("hide the picture column")
+        self._pic_hide.setToolTip(
+            "The pictures are still read from it — the base64 column just "
+            "isn't shown beside them.")
+        self._pic_hide.toggled.connect(self._refresh)
+        f.addRow("", self._pic_hide)
+        v.addLayout(f)
+        hint = QLabel(
+            "A column holding pictures as base64 text — or as data:image "
+            "addresses — shows each one as the picture it is.\n\n"
+            "Pick another column above to put its picture beside this "
+            "column's value, the way an icon sits: a logo beside a name. "
+            "A cell whose value isn't a picture shows its text as usual.\n\n"
+            "For one picture chosen by a value, paste it into an icon cell "
+            "on the Icons page instead.")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        v.addStretch(1)
+        self._stack.addWidget(page)
+        self._sync_picture()
+
+    def _sync_picture(self) -> None:
+        """`hide` names the column the pictures come from, so it is only
+        offered once there is one."""
+        other = bool(_other_col_value(self._pic_from))
+        self._pic_hide.setEnabled(other)
+        if not other:
+            self._pic_hide.setChecked(False)
+        self._refresh()
 
     def _remove_map_row(self) -> None:
         if self._map.rowCount():
@@ -1067,7 +1254,8 @@ class RuleBuilder(QDialog):
             self._sync_icon_style()
             return
         self._col_label.setText("Whole table" if table_wide else
-                                "Draw in" if idx == K_SPARK else "Columns")
+                                "Draw in" if idx in (K_SPARK, K_PICTURE)
+                                else "Columns")
         if self._columns:
             self._col_list.setSelectionMode(_MULTI)
 
@@ -1098,7 +1286,9 @@ class RuleBuilder(QDialog):
         if hasattr(self, "_numfmt_sample"):
             self._numfmt_sample.setText(self._number_sample())
         line = self._line()
-        self._preview.setText(line or "— fill in the fields above —")
+        # a pasted picture is shortened for show — the line itself keeps it
+        self._preview.setText(abbreviate_pictures(line)
+                              or "— fill in the fields above —")
         self._buttons.button(QDialogButtonBox.Ok).setEnabled(bool(line))
 
     def _number_sample(self) -> str:
@@ -1162,6 +1352,7 @@ class RuleBuilder(QDialog):
             # only when it is the single column the icon is drawn in.
             src = rule.source if rule.source not in rule.columns else None
             self._set_other_col(self._icon_by, src)
+            _pick_data(self._icon_shape, rule.picture_shape or "")
             self._map.setRowCount(0)
             for value, pair in (rule.mapping or {}).items():
                 glyph = pair[0] if pair else ""
@@ -1170,6 +1361,17 @@ class RuleBuilder(QDialog):
             if not self._map.rowCount():
                 self._add_map_row()
             self._sync_icon_style()
+        elif rule.mode == "image":
+            self._set_other_col(self._pic_from, rule.source)
+            # `only` from another column is its picture in place of the value
+            place = rule.glyph_where or ("in" if rule.hide_value
+                                         and rule.source else "")
+            _pick_data(self._pic_place, place)
+            self._pic_size.setValue(rule.picture_size or MIN_PICTURE_SIZE - 1)
+            _pick_data(self._pic_shape, rule.picture_shape or "")
+            self._pic_tile.set_value(_tile_token(rule.picture_tile))
+            self._sync_picture()
+            self._pic_hide.setChecked(rule.take_sources == "hide")
         elif rule.mode == "number_format":
             self._numfmt.setCurrentText(rule.number_spec or "")
         elif rule.mode == "row_height":
@@ -1270,7 +1472,18 @@ class RuleBuilder(QDialog):
                 for r in range(self._map.rowCount()):
                     item = self._map.item(r, 0)
                     value = item.text().strip() if item else ""
-                    glyph = "".join(self._map.cellWidget(r, 1).text().split())
+                    if (self._map.cellWidget(r, 1) is None
+                            or self._map.cellWidget(r, 2) is None):
+                        # a row mid-insert: its item is set (which says the
+                        # cell changed) before its editors exist
+                        continue
+                    typed = self._map.cellWidget(r, 1).text()
+                    uri = picture_uri(typed)
+                    # a picture goes in as bare base64: a `data:` prefix
+                    # holds a comma and SVG markup holds spaces, and the
+                    # pairs are split on both. The bytes name the type.
+                    glyph = (DATA_PREFIX.sub("", uri) if uri
+                             else "".join(typed.split()))
                     colour = self._map.cellWidget(r, 2).value()
                     if not value or not glyph:
                         continue
@@ -1284,6 +1497,8 @@ class RuleBuilder(QDialog):
                 where = self._icon_place.currentData()
                 lead = only + (f"{where} " if where else "")
                 lead += "pill " if self._icon_pill.isChecked() else ""
+                shape = self._icon_shape.currentData()
+                lead += f"{shape} " if shape else ""
                 return (f"{cols} iconmap {lead}{source}: "
                         + ", ".join(pairs))
             rev = " reverse" if self._icon_reverse.isChecked() else ""
@@ -1292,6 +1507,20 @@ class RuleBuilder(QDialog):
             trail = _pill(self._icon_pill) + _place(self._icon_place)
             return (f"{cols} icons {self._iconset.currentData()}{rev}{trail}"
                     f"{by}{_only(self._icon_only)}")
+        if kind == K_PICTURE:
+            source = _other_col_value(self._pic_from)
+            place = self._pic_place.currentData()
+            size = self._pic_size.value()
+            shape = self._pic_shape.currentData()
+            tile = self._pic_tile.value()
+            words = ((f" {place}" if place else "")
+                     + (f" {size}px" if size >= MIN_PICTURE_SIZE else "")
+                     + (f" {shape}" if shape else "")
+                     + (f" on {tile}" if tile and tile != "(none)" else ""))
+            if not source:
+                return f"{cols} image{words}"
+            hide = " hide" if self._pic_hide.isChecked() else ""
+            return f"{cols} image{words} from {quote_column(source)}{hide}"
         if kind == K_NUMBER:
             spec = self._numfmt.currentText().strip()
             return f"{cols} format {spec}" if spec else ""
@@ -1374,7 +1603,9 @@ class RuleManager(QDialog):
             if rule is not None:
                 item = QListWidgetItem(rule_summary(rule))
             elif error is not None:
-                item = QListWidgetItem(f"⚠  {raw.strip()}   ({error})")
+                item = QListWidgetItem(
+                    f"⚠  {abbreviate_pictures(raw.strip())}   "
+                    f"({abbreviate_pictures(error)})")
                 item.setForeground(Qt.red)
             else:                                   # comment / blank
                 item = QListWidgetItem(raw.strip() or "(blank line)")

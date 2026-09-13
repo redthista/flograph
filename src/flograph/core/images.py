@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import functools
 import os
 import re
+import struct
 from typing import Optional
 
 # Leading bytes that identify a format. Sniffing beats trusting the
@@ -195,3 +197,162 @@ def embed_source(value: str) -> str:
     except (ValueError, FileNotFoundError, OSError):
         return value
     return to_data_uri(data, mime) if path else value
+
+
+# ------------------------------------------------------ pictures in a table
+
+#: A picture's `data:` prefix, which a rules line is stripped of before it
+#: is read: the prefix carries a comma, and a rules line is split on commas.
+#: The type is sniffed back out of the bytes, so nothing is lost.
+DATA_PREFIX = re.compile(r"data:image/[\w.+-]+;base64,", re.IGNORECASE)
+
+#: How much of a base64 string is decoded to decide what it is — enough for
+#: an SVG's `<?xml …?>` and a comment or two ahead of its `<svg`.
+_SNIFF_CHARS = 1024
+
+
+@functools.lru_cache(maxsize=4096)
+def _picture_uri(text: str) -> Optional[str]:
+    prefix = DATA_PREFIX.match(text)
+    body = text[prefix.end():] if prefix else text
+    if len(body) < _MIN_BASE64_LEN or not _BASE64_ONLY.match(body):
+        return None
+    head = decode_base64(body[:_SNIFF_CHARS])
+    mime = sniff_mime(head) if head else UNKNOWN_MIME
+    if not is_image_mime(mime):
+        return None
+    # the standard alphabet, padded — what a browser and Qt both expect of
+    # a data: address, whatever alphabet the string arrived in
+    packed = body.replace("-", "+").replace("_", "/").rstrip("=")
+    packed += "=" * (-len(packed) % 4)
+    return f"data:{mime};base64,{packed}"
+
+
+def picture_uri(value) -> Optional[str]:
+    """`value` as an image `data:` address when it *is* a picture — a
+    `data:image/…;base64,` URI, a bare base64 string of a PNG, JPEG, GIF,
+    WebP, BMP, ICO or SVG, or the raw bytes of one — else None.
+
+    Cheap for everything that is not one: a number, a short word or a
+    sentence with a space in it is turned away before anything is decoded.
+    A string that is one is remembered, so a column of logos repainted on
+    every scroll is sniffed once per logo, not once per paint.
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        data = bytes(value)
+        mime = sniff_mime(data)
+        return to_data_uri(data, mime) if is_image_mime(mime) else None
+    if not isinstance(value, str) or len(value) < _MIN_BASE64_LEN:
+        return None
+    text = value.strip()
+    if text[:1] == "<":
+        # SVG markup as it is, not encoded — what a design tool copies
+        return _svg_markup_uri(text)
+    if any(ch.isspace() for ch in text[:256]):
+        # a paste wrapped at 76 columns — rare enough to pay for the join
+        text = "".join(text.split())
+    return _picture_uri(text)
+
+
+@functools.lru_cache(maxsize=1024)
+def _svg_markup_uri(text: str) -> Optional[str]:
+    head = text[:4096].lower()
+    if "<svg" not in head or "</svg>" not in text[-64:].lower():
+        return None
+    return to_data_uri(text.encode("utf-8"), "image/svg+xml")
+
+
+#: A picture on a tile sits this far in from the tile's edge, as a share of
+#: its shorter side — room for the colour to read as a ground.
+TILE_INSET = 0.14
+
+
+def tile_radius(shape: Optional[str], width: float, height: float) -> float:
+    """The corner radius a picture's `shape` gives a box this size:
+    square 0, rounded a fifth of the shorter side, circle half of it."""
+    side = min(width, height)
+    return {"circle": side / 2, "rounded": side * 0.22}.get(shape or "", 0.0)
+
+
+def _svg_length(value: "str | None") -> Optional[float]:
+    match = re.fullmatch(r"\s*([0-9]*\.?[0-9]+)\s*(px)?\s*", value or "")
+    return float(match.group(1)) if match else None
+
+
+@functools.lru_cache(maxsize=4096)
+def picture_dimensions(uri: str) -> Optional[tuple]:
+    """(width, height) of the picture in a `data:` address, read from its
+    header — None when the format hides it or the header is broken.
+
+    Header-deep on purpose: a table needs a picture's *shape* to lay out a
+    row, on paper as on the card, and neither should decode a column of
+    logos to find it.
+    """
+    parsed = parse_data_uri(uri)
+    if parsed is None:
+        return None
+    data, mime = parsed
+    try:
+        if data.startswith(b"\x89PNG") and data[12:16] == b"IHDR":
+            return struct.unpack(">II", data[16:24])
+        if data[:3] == b"GIF":
+            return struct.unpack("<HH", data[6:10])
+        if data[:2] == b"BM":
+            w, h = struct.unpack("<ii", data[18:26])
+            return abs(w), abs(h)
+        if data[:4] in (b"\x00\x00\x01\x00", b"\x00\x00\x02\x00"):
+            return data[6] or 256, data[7] or 256
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            chunk = data[12:16]
+            if chunk == b"VP8 ":
+                w, h = struct.unpack("<HH", data[26:30])
+                return w & 0x3FFF, h & 0x3FFF
+            if chunk == b"VP8L":
+                bits = int.from_bytes(data[21:25], "little")
+                return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+            if chunk == b"VP8X":
+                return (int.from_bytes(data[24:27], "little") + 1,
+                        int.from_bytes(data[27:30], "little") + 1)
+            return None
+        if data[:2] == b"\xff\xd8":
+            i = 2
+            while i + 9 < len(data):
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = data[i + 1]
+                if marker in (0xD8, 0x01, 0xFF) or 0xD0 <= marker <= 0xD7:
+                    i += 1 if marker == 0xFF else 2
+                    continue
+                if (0xC0 <= marker <= 0xCF
+                        and marker not in (0xC4, 0xC8, 0xCC)):
+                    h, w = struct.unpack(">HH", data[i + 5:i + 9])
+                    return w, h
+                i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
+            return None
+        if mime == "image/svg+xml":
+            head = data[:4096].decode("utf-8", "replace")
+            tag = re.search(r"<svg\b[^>]*>", head, re.S)
+            if tag is None:
+                return None
+            attrs = dict(re.findall(r'([\w:-]+)\s*=\s*["\']([^"\']*)["\']',
+                                    tag.group(0)))
+            w = _svg_length(attrs.get("width"))
+            h = _svg_length(attrs.get("height"))
+            if w and h:
+                return w, h
+            box = (attrs.get("viewBox") or "").replace(",", " ").split()
+            if len(box) == 4:
+                return float(box[2]), float(box[3])
+    except (struct.error, IndexError, ValueError):
+        return None
+    return None
+
+
+def picture_aspect(uri: str) -> float:
+    """Width over height — 1 when the header will not say — held to
+    between 1:5 and 5:1, so one banner-shaped logo cannot take a column."""
+    size = picture_dimensions(uri)
+    if not size or not size[0] or not size[1]:
+        return 1.0
+    return max(0.2, min(5.0, float(size[0]) / float(size[1])))

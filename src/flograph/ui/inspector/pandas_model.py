@@ -180,6 +180,8 @@ class PandasModel(QAbstractTableModel):
             # a highlight's `height` makes the rows it picks taller, and
             # only the delegate knows which rows those are
             or bool(r.row_height)
+            # a picture drawn taller than a line of text
+            or bool(getattr(r, "picture_size", None))
             for r in self._rules)
         # A style is only honoured on a table small enough to walk per-cell.
         self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS

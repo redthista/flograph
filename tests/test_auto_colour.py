@@ -19,6 +19,8 @@ The third is smaller but real: a chart palette's colours are built to be
 be read against as ink — `#1e293b` on `#2a2c33` is 1.05:1, which is not
 dim, it is invisible. `on_dark` is what stops `text` mode shipping that.
 """
+import re
+
 import pytest
 
 pd = pytest.importorskip("pandas")
@@ -240,7 +242,9 @@ class TestOnPaper:
                              rules=parse_rules("status autocolour fill"),
                              paper=True)
         body = html[html.index("<tbody>"):]
-        assert "<td style=\"background-color" in body
+        # on the cell itself, not a span inside it — after the border a
+        # styled report cell repeats (table_html.CELL_BORDER)
+        assert re.search(r'<td style="[^"]*background-color', body)
 
     def test_ink_lifted_for_the_card_is_darkened_again_for_the_page(self):
         style = styles_for(FRAME, "status", "status autocolour cool text")[0]

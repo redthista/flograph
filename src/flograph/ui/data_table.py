@@ -52,6 +52,8 @@ BAR_ONLY_WIDTH = 110
 #: cell's width, so the column is what decides how long the line reads.
 SPARK_BESIDE_WIDTH = 64
 SPARK_ALONE_WIDTH = 120
+#: How tall a picture with no size of its own is measured at — a line.
+PICTURE_LINE_HEIGHT = 18
 # How many of the paged-in rows the content measure samples. The model is
 # lazy (500-row pages), and measuring every cell through the item delegate
 # costs ~190 ms for a wide frame — far too much to spend on every graph run
@@ -437,6 +439,21 @@ class DataTableView(QTableView):
                             else:
                                 spark_width = max(spark_width, spark.width
                                                   or SPARK_ALONE_WIDTH)
+                        elif getattr(d, "image", None):
+                            # as wide as its shape makes it, at the height
+                            # it is drawn
+                            from flograph.core.images import picture_aspect
+                            # a picture fits its row, and a `height` line
+                            # makes the row — and so the picture — bigger
+                            asked = getattr(model, "row_height",
+                                            lambda: None)()
+                            tall = d.size or max(PICTURE_LINE_HEIGHT,
+                                                 (asked or 0) - 4)
+                            wide = round(tall * picture_aspect(d.image))
+                            if d.where in ("left", "right"):
+                                beside += wide + 6
+                            else:
+                                spark_width = max(spark_width, wide + 10)
                         elif d.where in ("left", "right", "in"):
                             beside += 24
                     icon_pad = max(icon_pad,

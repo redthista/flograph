@@ -218,6 +218,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from . import images as _images
 from . import sparkline as _spark
 from .visual_style import PALETTES
 
@@ -267,7 +268,7 @@ _ICON_LABELS = {
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
           "sort", "color_map", "auto_color", "tooltip", "sparkline",
-          "row_height"}
+          "row_height", "image"}
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
@@ -417,6 +418,15 @@ class Rule:
     #: row_height: how tall every row is. highlight: how tall the rows it
     #: matches are — `status = late => height 40`. Pixels on the card.
     row_height: Optional[int] = None
+    #: image, and an `icon` / `iconmap` whose mark is a pasted picture: how
+    #: tall the picture is drawn, in pixels on the card. None = as tall as
+    #: the line it sits on — which a `height` makes taller.
+    picture_size: Optional[int] = None
+    #: …and the shape it is cut to — "square", "rounded" or "circle" — and
+    #: the colour of the tile behind it. A picture with a plain ground reads
+    #: as an icon on a tile; a photo cut to a circle, as an avatar.
+    picture_shape: Optional[str] = None
+    picture_tile: Optional[str] = None
 
     def to_dict(self) -> dict:
         out = {}
@@ -484,6 +494,15 @@ class Decoration:
     #: sits left, right, above, below or in place of the value exactly as
     #: an icon does, and a cell may carry it beside a tick.
     spark: Optional["_spark.Spark"] = None
+    #: A picture drawn in the decoration's place instead of text — an image
+    #: `data:` address, pasted into a rule or read from a column. `size` is
+    #: its height in card pixels; None fits it to the line it sits on.
+    image: Optional[str] = None
+    size: Optional[int] = None
+    #: The colour of a tile behind the picture, and the shape both are cut
+    #: to: "square", "rounded" or "circle". None and None draw it as it is.
+    tile: Optional[str] = None
+    shape: Optional[str] = None
 
     def to_dict(self) -> dict:
         out = {"text": self.text}
@@ -495,6 +514,14 @@ class Decoration:
             out["where"] = self.where
         if self.spark is not None:
             out["spark"] = self.spark.to_dict()
+        if self.image:
+            out["image"] = self.image
+        if self.size:
+            out["size"] = self.size
+        if self.tile:
+            out["tile"] = self.tile
+        if self.shape:
+            out["shape"] = self.shape
         return out
 
     @classmethod
@@ -509,7 +536,11 @@ class Decoration:
                    pill=d.get("pill"),
                    where=d.get("where") or "left",
                    spark=(_spark.Spark.from_dict(spark)
-                          if isinstance(spark, dict) else None))
+                          if isinstance(spark, dict) else None),
+                   image=d.get("image") or None,
+                   size=d.get("size") or None,
+                   tile=d.get("tile") or None,
+                   shape=d.get("shape") or None)
 
 
 @dataclass
@@ -1064,9 +1095,159 @@ def _row_height(lineno: int, token: Any) -> int:
                          f"{MIN_ROW_HEIGHT}–{MAX_ROW_HEIGHT} pixels")
     return height
 
+
+#: A column of pictures — `logo image`, or `name image from logo`.
+_PICTURE_KEYWORDS = ("image", "picture")
+
+#: How tall a picture may be drawn, in pixels on the card.
+MIN_PICTURE_SIZE, MAX_PICTURE_SIZE = 8, 400
+
+_PICTURE_HELP = ("left|right|above|below|in · a height like 32px · "
+                 "square|rounded|circle · on <colour> · only · "
+                 "from <column> · hide")
+
+#: The shape a picture is cut to, and the words for each.
+_SHAPE_WORDS = {"square": "square", "squared": "square",
+                "rounded": "rounded", "round": "rounded",
+                "circle": "circle", "circular": "circle", "circled": "circle"}
+
+
+def _tile_colour(token: "str | None") -> "str | None":
+    """`token` as the colour of the tile behind a picture — a vivid preset,
+    white, black or a hex — or None."""
+    if not token:
+        return None
+    low = token.lower()
+    if low in ("white", "black"):
+        return "#ffffff" if low == "white" else "#000000"
+    if low in _GLYPH_COLOURS:
+        return _GLYPH_COLOURS[low]
+    if re.fullmatch(r"#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?", token):
+        return token
+    return None
+
+
+def _picture_size(lineno: int, token: Any) -> int:
+    """`"32px"` as a picture's height in pixels, or a ValueError."""
+    value = _spark.number(str(token or "").strip().lower().removesuffix("px"))
+    if value is None:
+        raise ValueError(f"line {lineno}: a picture's size is a height in "
+                         f"pixels — '32px', got {token!r}")
+    size = int(round(value))
+    if not MIN_PICTURE_SIZE <= size <= MAX_PICTURE_SIZE:
+        raise ValueError(f"line {lineno}: a picture {size}px tall is outside "
+                         f"{MIN_PICTURE_SIZE}–{MAX_PICTURE_SIZE} pixels")
+    return size
+
+
+def _split_size(lineno: int, arg: str) -> tuple:
+    """Pull a `32px` off either end of a keyword argument — how tall the
+    pictures an `iconmap` pastes are drawn."""
+    text = arg.strip()
+    lead = re.match(r"(\d+px)(?=[\s:]|$)", text, re.IGNORECASE)
+    if lead:
+        rest = text[lead.end():]
+        # the colon opening a map with no source belongs to the body
+        return (rest if rest.startswith(":") else rest.strip(),
+                _picture_size(lineno, lead.group(1)))
+    trail = re.search(r"\s(\d+px)$", text, re.IGNORECASE)
+    if trail:
+        return text[:trail.start()].strip(), _picture_size(lineno,
+                                                           trail.group(1))
+    return text, None
+
+
+def _parse_picture(lineno: int, columns: list, arg: str) -> Rule:
+    """`"right 32px from logo hide"` → an image rule.
+
+    With no `from`, the column's *own* values are the pictures and each one
+    stands in place of the text it was written as — a wall of base64 is not
+    a value anyone wants to read. With one, the picture comes from that
+    column and sits beside the value like an icon, `left` unless a place is
+    named; `hide` puts the picture column away.
+    """
+    if not columns:
+        raise ValueError(
+            f"line {lineno}: 'image' needs a column to draw in — "
+            f"'logo image', or 'name image from logo'")
+    spans = list(_TOKEN_RE.finditer(arg))
+    cut = next((k for k, m in enumerate(spans)
+                if m.group().lower() in ("from", "by")), None)
+    options = [m.group() for m in (spans if cut is None else spans[:cut])]
+    source = fate = None
+    if cut is not None:
+        tail = arg[spans[cut].end():].strip()
+        # The picture column comes after `from`, and people carry on
+        # writing after it — `from logo hide circle`. Words this rule knows
+        # come back off the end while a column name is left in front of
+        # them; a name that really ends in one is quoted.
+        trailing: list = []
+        while True:
+            words = list(_TOKEN_RE.finditer(tail))
+            if len(words) < 2:
+                break
+            last = words[-1].group()
+            if (len(words) > 2 and words[-2].group().lower()
+                    in ("on", "bg", "tile") and _tile_colour(last)):
+                trailing[:0] = [words[-2].group(), last]
+                tail = tail[:words[-2].start()].rstrip()
+            elif (last.lower() in _PLACE_WORDS or last.lower() in _SHAPE_WORDS
+                    or last.lower() in ("hide", "keep", "only")
+                    or re.fullmatch(r"\d+px", last.lower())):
+                trailing[:0] = [last]
+                tail = tail[:words[-1].start()].rstrip()
+            else:
+                break
+        for word in trailing:
+            if word.lower() == "keep":
+                continue
+            options.append(word)
+        source = _unquote(tail) or None
+        if source is None:
+            raise ValueError(
+                f"line {lineno}: 'image … from' needs the column holding "
+                f"the pictures — 'name image from logo'")
+    place = size = shape = tile = None
+    only = False
+    i = 0
+    while i < len(options):
+        token = options[i]
+        low = token.lower()
+        if low in _PLACE_WORDS:
+            place = _PLACE_WORDS[low]
+        elif re.fullmatch(r"\d+px", low):
+            size = _picture_size(lineno, token)
+        elif low in _SHAPE_WORDS:
+            shape = _SHAPE_WORDS[low]
+        elif low in ("on", "bg", "tile"):
+            following = options[i + 1] if i + 1 < len(options) else None
+            tile = _tile_colour(following)
+            if tile is None:
+                raise ValueError(
+                    f"line {lineno}: '{low}' needs a colour for the tile "
+                    f"behind the picture — 'on white', 'on #1e1e1e'")
+            i += 1
+        elif low == "only":
+            only = True
+        elif low == "hide":
+            fate = "hide"
+        else:
+            raise ValueError(f"line {lineno}: don't understand {token!r} in "
+                             f"an image rule ({_PICTURE_HELP})")
+        i += 1
+    if fate and not source:
+        raise ValueError(
+            f"line {lineno}: 'hide' puts away the column the pictures come "
+            f"from, so name it — 'name image from logo hide'")
+    return Rule("image", columns, source=source, glyph_where=place,
+                picture_size=size, hide_value=only, take_sources=fate,
+                picture_shape=shape, picture_tile=tile)
+
+
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "colormap",
              "colourmap", "format", "width", "align", "label", "sort"
-             ) + _AUTO_KEYWORDS + _TIP_KEYWORDS + _SPARK_KEYWORDS
+             ) + (_AUTO_KEYWORDS + _TIP_KEYWORDS + _SPARK_KEYWORDS
+                  + _PICTURE_KEYWORDS)
 
 #: The keywords whose argument is a `source: value=…` map. They are the
 #: only ones that may be written with the colon stuck to them — `iconmap:`
@@ -1400,6 +1581,16 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         return _parse_spark(lineno, _column_list(" ".join(tokens[:spark_at])),
                             " ".join(tokens[spark_at + 1:]))
 
+    picture_at = next((i for i, t in enumerate(tokens)
+                       if t.lower() in _PICTURE_KEYWORDS), None)
+    if (picture_at and tokens[0].lower() not in _LEADING_KEYWORDS
+            and not any(_keyword_of(t) for t in tokens[:picture_at])):
+        # Before the scan for the same reason a spark is: the column after
+        # `from` is anything at all, `from bar` included.
+        return _parse_picture(
+            lineno, _column_list(" ".join(tokens[:picture_at])),
+            " ".join(tokens[picture_at + 1:]))
+
     if tokens and tokens[0].lower() in _LEADING_KEYWORDS:
         # `hide`/`show` lead their line instead of following a column list,
         # so they are taken before the right-to-left keyword scan rather
@@ -1459,6 +1650,8 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
 
     if keyword in _SPARK_KEYWORDS:
         return _parse_spark(lineno, columns, arg)
+    if keyword in _PICTURE_KEYWORDS:
+        return _parse_picture(lineno, columns, arg)
 
     if keyword in ("iconmap", "colormap", "colourmap"):
         # here the `only` comes off the whole argument: the mapping body is
@@ -1467,11 +1660,14 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         arg, only = _split_only(arg)
         arg, place = _split_place(arg)
         arg, pill = _split_pill(arg)
+        arg, size = _split_size(lineno, arg)
+        arg, shape = _split_flag(arg, _SHAPE_WORDS)
         keyword = "iconmap" if keyword == "iconmap" else "colormap"
         source, mapping = _parse_value_map(lineno, arg, keyword)
         mode = "icon_map" if keyword == "iconmap" else "color_map"
         return Rule(mode, columns, source=source, mapping=mapping,
-                    hide_value=only, glyph_where=place, as_pill=pill)
+                    hide_value=only, glyph_where=place, as_pill=pill,
+                    picture_size=size, picture_shape=shape)
     if keyword == "tooltip":
         # `revenue tooltip note` and `revenue tooltip by note` mean the
         # same thing: the whole argument *is* the source column, and the
@@ -1634,6 +1830,12 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
                 place = _PLACE_WORDS.get(token.lower())
                 if place:
                     out["glyph_where"] = place
+                elif re.fullmatch(r"\d+px", token.lower()):
+                    # how tall a pasted picture is drawn
+                    out["picture_size"] = _picture_size(lineno, token)
+                elif token.lower() in _SHAPE_WORDS:
+                    # …and the shape it is cut to; its colour is the tile
+                    out["picture_shape"] = _SHAPE_WORDS[token.lower()]
                 else:
                     out["glyph_color"] = _resolve_glyph_color(token)
         elif head == "pill":
@@ -1697,7 +1899,9 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                         glyph_where=style.get("glyph_where"),
                         as_pill=bool(style.get("as_pill")),
                         hide_value=bool(style.get("hide_value")),
-                        row_height=style.get("row_height"))
+                        row_height=style.get("row_height"),
+                picture_size=style.get("picture_size"),
+                picture_shape=style.get("picture_shape"))
     # split "column op value": the column is everything up to the operator
     op, value, column = _split_condition(cond)
     if not column:
@@ -1709,7 +1913,9 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                 glyph_where=style.get("glyph_where"),
                 as_pill=bool(style.get("as_pill")),
                 hide_value=bool(style.get("hide_value")),
-                row_height=style.get("row_height"))
+                row_height=style.get("row_height"),
+                picture_size=style.get("picture_size"),
+                picture_shape=style.get("picture_shape"))
 
 
 def _split_condition(cond: str) -> tuple:
@@ -1762,6 +1968,10 @@ def _strip_inline_comment(line: str) -> str:
 
 
 def _parse_one_line(lineno: int, line: str) -> Rule:
+    # A pasted picture's `data:image/png;base64,` prefix holds a comma, and
+    # a rules line is split on commas — so the prefix comes off before
+    # anything else reads the line. The bytes say what type it was.
+    line = _images.DATA_PREFIX.sub("", line)
     line = _strip_inline_comment(line)
     if not line:
         raise ValueError(f"line {lineno}: nothing but a comment")
@@ -1817,6 +2027,26 @@ _PLACE_PHRASE = {"right": "on the right", "above": "above the value",
                  "below": "below the value", "in": "in place of the value"}
 
 
+#: A run long enough to be a pasted picture, with or without its prefix.
+_LONG_BASE64 = re.compile(
+    r"(?:data:image/[\w.+-]+;base64,)?[A-Za-z0-9+/_-]{64,}={0,2}")
+
+
+def abbreviate_pictures(text: Any) -> str:
+    """`text` with each pasted picture in it shortened to ``‹picture · 3 KB›``.
+
+    For *showing* a rule line — a preview, a list, an error — never for
+    keeping one: a 20 KB logo is one unbreakable word, and a label asked to
+    wrap it grows as wide as the logo is long.
+    """
+    def short(match) -> str:
+        if _images.picture_uri(match.group(0)) is None:
+            return match.group(0)
+        kb = max(1, round(len(match.group(0)) * 3 / 4 / 1024))
+        return f"‹picture · {kb} KB›"
+    return _LONG_BASE64.sub(short, str(text or ""))
+
+
 def rule_summary(rule: Rule) -> str:
     """A one-line human description of a rule, for the manager's list."""
     cols = ", ".join(rule.columns) or "every column"
@@ -1834,10 +2064,12 @@ def rule_summary(rule: Rule) -> str:
         tall = f", {rule.row_height}px tall" if rule.row_height else ""
         if rule.glyph:
             test = f"{rule.source} " if rule.source else ""
-            return (f"{cols}  ·  {rule.glyph} when {test}"
+            glyph = ("a picture" if _images.picture_uri(rule.glyph)
+                     else rule.glyph)
+            return (f"{cols}  ·  {glyph} when {test}"
                     f"{_op_phrase(rule.op, rule.value)}" if rule.source else
                     f"{cols} {_op_phrase(rule.op, rule.value)}  ·  "
-                    f"{rule.glyph}{potted}{place}") + tall
+                    f"{glyph}{potted}{place}") + tall
         test = f"{rule.source} " if rule.source else ""
         return (f"{cols}  ·  highlight the {where} when {test}"
                 f"{_op_phrase(rule.op, rule.value)}" if rule.source else
@@ -1870,6 +2102,15 @@ def rule_summary(rule: Rule) -> str:
         return (f"{cols}  ·  {rule.spark_kind or 'line'} sparkline from "
                 f"{', '.join(str(s) for s in rule.series)}{place}{fate}"
                 f"{only}")
+    if rule.mode == "image":
+        size = f", {rule.picture_size}px tall" if rule.picture_size else ""
+        size += f", {rule.picture_shape}" if rule.picture_shape else ""
+        size += f" on {rule.picture_tile}" if rule.picture_tile else ""
+        if not rule.source:
+            return f"{cols}  ·  its values drawn as pictures{place}{size}"
+        fate = ", that column hidden" if rule.take_sources == "hide" else ""
+        return (f"{cols}  ·  picture from “{rule.source}”{place}{size}"
+                f"{fate}{only}")
     if rule.mode == "hide":
         return f"hide  {cols}"
     if rule.mode == "show":
@@ -2205,6 +2446,32 @@ def _place(rule) -> str:
     return where if where in DECOR_PLACES else "left"
 
 
+def _mark(text, *, color=None, pill=None, where="left", size=None,
+          shape=None) -> "Decoration":
+    """The decoration a rule's mark makes: a picture when what was typed as
+    the mark is one — base64 pasted where a glyph goes — else the text.
+
+    A picture brings its own colours, so the colour the rule gave the mark
+    (a lozenge's, or else the ink's) becomes the tile behind it, cut to a
+    rounded square unless a shape was named.
+    """
+    uri = _images.picture_uri(text)
+    if uri is not None:
+        tile = pill or color
+        return Decoration(image=uri, where=where, size=size, tile=tile,
+                          shape=shape or ("rounded" if tile else None))
+    return Decoration(text=text, color=color, pill=pill, where=where)
+
+
+def _picture_place(rule) -> str:
+    """Where an `image` rule's pictures go: where it said, else in place of
+    the value when the pictures *are* the value (or `only` was said), else
+    left of it, like an icon."""
+    if rule.glyph_where in DECOR_PLACES:
+        return rule.glyph_where
+    return "in" if (not rule.source or rule.hide_value) else "left"
+
+
 def _highlight_style(rule) -> "CellStyle":
     """The style a matched `highlight` lays on a cell.
 
@@ -2220,8 +2487,9 @@ def _highlight_style(rule) -> "CellStyle":
     """
     place = _place(rule)
     if not rule.as_pill:
-        deco = ([Decoration(text=rule.glyph, color=rule.glyph_color,
-                            where=place)] if rule.glyph else [])
+        deco = ([_mark(rule.glyph, color=rule.glyph_color, where=place,
+                       size=rule.picture_size, shape=rule.picture_shape)]
+                if rule.glyph else [])
         return CellStyle(
             bg=rule.bg,
             fg=rule.fg or (readable_fg(rule.bg) if rule.bg else None),
@@ -2231,9 +2499,9 @@ def _highlight_style(rule) -> "CellStyle":
     ink = rule.fg or readable_fg(fill)
     if rule.glyph:
         # a pill with something written in it stands beside the value
-        return CellStyle(bold=rule.bold, decorations=[Decoration(
-            text=rule.glyph, color=rule.glyph_color or ink, pill=fill,
-            where=place)])
+        return CellStyle(bold=rule.bold, decorations=[_mark(
+            rule.glyph, color=rule.glyph_color or ink, pill=fill,
+            where=place, size=rule.picture_size, shape=rule.picture_shape)])
     # a pill with nothing written in it wraps what is already there
     return CellStyle(bold=rule.bold, pill=fill, pill_fg=ink)
 
@@ -2387,12 +2655,16 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                         # in a lozenge — there is no third colour in the
                         # map to be both.
                         if rule.as_pill and second:
-                            deco = Decoration(text=first, pill=second,
-                                              color=readable_fg(second),
-                                              where=_place(rule))
+                            deco = _mark(first, pill=second,
+                                         color=readable_fg(second),
+                                         where=_place(rule),
+                                         size=rule.picture_size,
+                                         shape=rule.picture_shape)
                         else:
-                            deco = Decoration(text=first, color=second,
-                                              where=_place(rule))
+                            deco = _mark(first, color=second,
+                                         where=_place(rule),
+                                         size=rule.picture_size,
+                                         shape=rule.picture_shape)
                         contrib[i] = CellStyle(decorations=[deco])
                     elif rule.as_pill:
                         # a category pill: the mapped colour wraps the
@@ -2403,6 +2675,33 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                             pill=first, pill_fg=second or readable_fg(first))
                     else:
                         contrib[i] = CellStyle(bg=first, fg=second)
+
+        elif rule.mode == "image":
+            # a column of pictures: this one's own values, or another
+            # column's drawn beside this one's like an icon
+            if not rule.source:
+                pictures = values
+            elif (frame is not None
+                    and rule.source in getattr(frame, "columns", [])):
+                pictures = list(frame[rule.source])
+            else:
+                pictures = None
+            where = _picture_place(rule)
+            for i, v in enumerate(pictures or ()):
+                uri = _images.picture_uri(v)
+                if uri is None:
+                    continue      # not a picture: the cell shows what it has
+                contrib[i] = CellStyle(
+                    decorations=[Decoration(
+                        image=uri, where=where, size=rule.picture_size,
+                        tile=rule.picture_tile,
+                        shape=(rule.picture_shape
+                               or ("rounded" if rule.picture_tile
+                                   else None)))],
+                    # in place of the value, the base64 it was written as
+                    # goes from the display — and from the width a column
+                    # measures itself by
+                    hide_value=where == "in")
 
         elif rule.mode == "tooltip":
             # the note is a whole other column's value, so there is nothing
@@ -2615,14 +2914,19 @@ def spark_projection(frame, rules) -> tuple:
     other projection here: the table leaving the node's port is untouched.
     """
     rules = list(rules or [])
+    # `name image from logo hide` puts its picture column away the same way
+    # a spark puts its months away — read, drawn beside another, not shown
+    picture_hidden = [str(r.source) for r in rules
+                      if getattr(r, "mode", None) == "image"
+                      and r.take_sources == "hide" and r.source]
     if (frame is None or not hasattr(frame, "columns")
             or not any(getattr(r, "mode", None) == "sparkline"
                        for r in rules)):
-        return frame, rules, []
+        return frame, rules, _dedup(picture_hidden)
     names = [str(c) for c in frame.columns]
     present = set(names)
     added: dict = {}             # new column -> (latest numbers, anchor)
-    hidden: list[str] = []
+    hidden: list[str] = list(picture_hidden)
     out: list = []
     for rule in rules:
         if rule.mode != "sparkline":

@@ -292,6 +292,10 @@ def _cell_text(value, style: "CellStyle | None",
 #: tall row's padding is never less than.
 CELL_PAD_Y = 3
 
+#: A report table cell's border (REPORT_CSS), which a cell with a style of
+#: its own has to repeat or lose.
+CELL_BORDER = "1px solid #999"
+
 #: How much shorter than its row a spark on the value's line is drawn, so a
 #: grown line does not touch the rules above and below it.
 ROW_SPARK_INSET = 10
@@ -326,6 +330,9 @@ def _row_padding(asked: int, row, columns, styles, font_pt) -> float:
             if (getattr(d, "spark", None) is not None
                     and d.where not in ("above", "below")):
                 middle = max(middle, asked - ROW_SPARK_INSET)
+            elif (getattr(d, "image", None)
+                    and d.where not in ("above", "below")):
+                middle = max(middle, _picture_height(d, asked))
         stacked = 0.0
         for place in ("above", "below"):
             marks = style.at(place)
@@ -333,8 +340,10 @@ def _row_padding(asked: int, row, columns, styles, font_pt) -> float:
                 continue
             sparks = [d.spark for d in marks
                       if getattr(d, "spark", None) is not None]
+            pictures = [_picture_height(d) for d in marks
+                        if getattr(d, "image", None)]
             stacked += max([sparkline.PAPER_LINE_HEIGHT * (2 if s.tall else 1)
-                            for s in sparks] + [line])
+                            for s in sparks] + pictures + [line])
         tallest = max(tallest, middle + stacked)
     return round(max(CELL_PAD_Y, (asked - tallest) / 2), 1)
 
@@ -493,6 +502,13 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
             css.append(f"color:{style.fg}")
         if style.bold:
             css.append("font-weight:bold")
+    if css:
+        # Qt's rich text takes a cell's own style *over* the report
+        # stylesheet's border width: give a cell any inline style at all — a
+        # `height`'s padding, a fill, a colour — and its grid lines went,
+        # keeping only their colour (a probe, not a guess). So a styled cell
+        # says its border again, the same one REPORT_CSS gives every cell.
+        css.insert(0, f"border:{CELL_BORDER}")
     attrs = f' style="{";".join(css)}"' if css else ""
     if style is not None and style.tooltip:
         # `title` is what a browser shows on hover, so a note survives Open
@@ -630,11 +646,57 @@ def _spark_img(d, room: "dict | None" = None,
             f'style="vertical-align:middle" />')
 
 
+#: How tall a picture with no size of its own is on paper — a line of the
+#: table's text, the way it is on the card.
+PICTURE_HEIGHT = 13
+
+
+def _picture_height(d, row_height: "int | None" = None) -> float:
+    """How tall a picture decoration prints: the size its rule named (card
+    pixels, as points), else a line — grown with a `height` on the value's
+    line, as a spark is."""
+    if d.size:
+        return round(d.size * 0.75, 1)
+    if row_height and d.where not in ("above", "below"):
+        return float(max(PICTURE_HEIGHT, row_height - ROW_SPARK_INSET))
+    return float(PICTURE_HEIGHT)
+
+
+def _picture_img(d, row_height: "int | None" = None) -> str:
+    """A picture decoration as the `<img>` its `data:` address already is.
+
+    Sized on both axes from the picture's own header, so the page lays the
+    row out before it has decoded a single logo — and a report swaps it for
+    a token round the markdown pass, as it does a spark.
+    """
+    from flograph.core.images import TILE_INSET, picture_aspect, tile_radius
+    height = _picture_height(d, row_height)
+    width = round(height * picture_aspect(d.image), 1)
+    tile, shape = getattr(d, "tile", None), getattr(d, "shape", None)
+    if not tile and not shape:
+        return (f'<img src="{d.image}" width="{width:g}" height="{height:g}" '
+                f'style="vertical-align:middle" />')
+    # A tile and a shape are CSS, which a browser draws as asked. Qt's rich
+    # text drops all three properties, so a report reads the marker and
+    # draws the tile itself (ui/report/render.py) — the same picture on the
+    # page as in an exported file.
+    pad = round(min(width, height) * TILE_INSET, 1) if tile else 0.0
+    css = ["vertical-align:middle",
+           f"border-radius:{tile_radius(shape, width, height):g}px"]
+    if tile:
+        css += [f"background-color:{tile}", f"padding:{pad:g}px"]
+    return (f'<img src="{d.image}" width="{width - 2 * pad:g}" '
+            f'height="{height - 2 * pad:g}" style="{";".join(css)}" '
+            f'data-flograph-tile="{tile or ""};{shape or ""}" />')
+
+
 def _decor_span(d, spark_room: "dict | None" = None,
                 row_height: "int | None" = None) -> str:
     """One decoration as an inline span."""
     if getattr(d, "spark", None) is not None:
         return _spark_img(d, spark_room, row_height)
+    if getattr(d, "image", None):
+        return _picture_img(d, row_height)
     css = []
     if d.color:
         css.append(f"color:{d.color}")
