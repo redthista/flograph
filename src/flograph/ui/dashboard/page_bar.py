@@ -7,7 +7,9 @@ select_page) from graph events, and user gestures come back out as request
 signals — the bar never touches the graph itself.
 
 Page tabs can be dragged to reorder; "Model" and "+" are pinned to the ends
-(see _enforce_pinned), and one drag produces one reorder request."""
+(see _enforce_pinned), and one drag produces one reorder request — or, when
+the tab lands in a different group's section, one move request carrying the
+group it joins (see _landing_group)."""
 from __future__ import annotations
 
 from typing import Optional, Sequence
@@ -65,6 +67,9 @@ class PageTabBar(QTabBar):
     delete_page_requested = Signal(str)        # page_id
     duplicate_page_requested = Signal(str)     # page_id to duplicate
     reorder_pages_requested = Signal(list)     # page_ids in their new order
+    # a dragged tab that lands in another group, or out of its own:
+    # page_ids in their new order, the page, the group it is now in ("" none)
+    move_page_requested = Signal(list, str, str)
     recolor_page_requested = Signal(str, object)  # page_id, "#rrggbb" or None
     set_page_group_requested = Signal(str, str)   # page_id, group ("" = none)
     rename_group_requested = Signal(str, str)     # old, new ("" = ungroup)
@@ -93,6 +98,12 @@ class PageTabBar(QTabBar):
         self._syncing = False
         self._drag_locked = False   # press landed on a tab that can't move
         self._reorder_pending = False
+        # the page tab a press landed on, until its release: which tab a
+        # drag is carrying, so its drop can say what group it landed in
+        self._dragged: Optional[str] = None
+        # while a page tab is dragged into another group, that group — its
+        # header is lit, saying where the drop will put it
+        self._drop_hint: Optional[str] = None
         self._colors: dict[str, str] = {}   # page_id -> "#rrggbb"
         # page_id -> scaling to the window, mirrored for the menu tick the
         # same way the lock below is
@@ -391,6 +402,52 @@ class PageTabBar(QTabBar):
                 blocks.append([None, [data], rect])
         return blocks
 
+    def _landing_group(self, page_id: str, x: Optional[int] = None) -> str:
+        """The group a dragged page tab belongs in, read from where it now
+        sits on the bar — what the header and the line under a section say.
+
+        With the pointer over a group's header (`x`, on the bar), it is in
+        that group: Qt has already slid the tab to the header's near side
+        by then, so where it sits can't say so. Right after a header, or
+        between two of a group's tabs, it is in that group too: dropped
+        onto a section is dropped into it, folded or not. Just past a group's last tab it stays in the group only if it
+        was already there, so a page can still be put down beside a group
+        without joining it. Anywhere else it is in no group, which is how
+        a page is dragged out of one.
+
+        Neighbours are the tabs on show: a folded group's pages are hidden
+        behind its header, and a tab dropped next to that header is next
+        to the group whichever side of the hidden ones Qt put it. A canvas
+        tab has no group to land in (G12/G13).
+        """
+        mine = self._groups.get(page_id, "")
+        index = self._index_of_page(page_id)
+        if index < 0 or self._kinds.get(page_id) == "canvas":
+            return mine
+        if x is not None:
+            for i in range(self.count()):
+                over = _header_group(self.tabData(i))
+                rect = self.tabRect(i)
+                if (over is not None and self.isTabVisible(i)
+                        and rect.left() <= x <= rect.right()):
+                    return over
+
+        def neighbour(step: int):
+            i = index + step
+            while 0 <= i < self.count() and not self.isTabVisible(i):
+                i += step
+            return self.tabData(i) if 0 <= i < self.count() else None
+
+        left, right = neighbour(-1), neighbour(1)
+        heads = _header_group(left)
+        if heads is not None:
+            return heads
+        before = self._groups.get(left, "") if isinstance(left, str) else ""
+        after = self._groups.get(right, "") if isinstance(right, str) else ""
+        if before and (before == after or before == mine):
+            return before
+        return ""
+
     def _group_drop(self, group: str, x: int) -> list[str]:
         """The page order with `group` moved to where `x` is: before the
         first other block whose middle is past it. Asked on every move of a
@@ -549,6 +606,10 @@ class PageTabBar(QTabBar):
         block = self._group_color(group)
         block.setAlphaF(theme.TINT_STRONG)
         painter.fillRect(rect.adjusted(1, 2, -1, 0), block)
+        if group == self._drop_hint:
+            # a page tab is being dragged in: outline the section it joins
+            painter.setPen(self._group_color(group))
+            painter.drawRect(rect.adjusted(1, 2, -2, -1))
         font = QFont(self.font())
         font.setBold(True)
         painter.setFont(font)
@@ -588,6 +649,21 @@ class PageTabBar(QTabBar):
         self._enforce_pinned()
         self._enforce_canvas_run()
         self._reorder_pending = True
+        self._show_drop_hint()
+
+    def _show_drop_hint(self, x: Optional[int] = None) -> None:
+        """Light the header of the group a dragged tab would join, so where
+        a drop puts it is seen before letting go. Nothing is lit for a tab
+        staying in its group, or leaving one for none."""
+        page_id = self._dragged
+        hint = None
+        if page_id is not None and (self._reorder_pending or x is not None):
+            group = self._landing_group(page_id, x)
+            if group and group != self._groups.get(page_id, ""):
+                hint = group
+        if hint != self._drop_hint:
+            self._drop_hint = hint
+            self.update()
 
     def _enforce_canvas_run(self) -> None:
         """Canvas tabs stay together, right after the Model tab that heads
@@ -756,6 +832,9 @@ class PageTabBar(QTabBar):
             return
         # only page tabs are draggable; Model is pinned in place
         self._drag_locked = not self._is_page(index)
+        self._dragged = (self.tabData(index)
+                         if event.button() == Qt.LeftButton
+                         and self._is_page(index) else None)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -778,6 +857,9 @@ class PageTabBar(QTabBar):
             event.accept()
             return
         super().mouseMoveEvent(event)
+        if self._dragged is not None and event.buttons() & Qt.LeftButton:
+            # after Qt's own move, so the tabs are where this drag put them
+            self._show_drop_hint(event.position().toPoint().x())
 
     def mouseReleaseEvent(self, event) -> None:
         drag, self._header_drag = self._header_drag, None
@@ -795,10 +877,26 @@ class PageTabBar(QTabBar):
             return
         super().mouseReleaseEvent(event)
         self._drag_locked = False
-        if self._reorder_pending:
+        dragged, self._dragged = self._dragged, None
+        if self._drop_hint is not None:
+            self._drop_hint = None
+            self.update()
+        over_header = (dragged is not None and self._landing_group(
+            dragged, event.position().toPoint().x())
+            != self._landing_group(dragged))
+        if self._reorder_pending or over_header:
             # one request per drag, not one per swap Qt makes along the way
             self._reorder_pending = False
-            self.reorder_pages_requested.emit(self.page_order())
+            group = (self._landing_group(dragged,
+                                         event.position().toPoint().x())
+                     if dragged is not None else None)
+            if group is not None and group != self._groups.get(dragged, ""):
+                # dropped into a group, or out of its own: one request for
+                # the place and the group both, so it is one undo step
+                self.move_page_requested.emit(self.page_order(), dragged,
+                                              group)
+            else:
+                self.reorder_pages_requested.emit(self.page_order())
             # Qt drags a page straight past a header, which is not a page
             # and so moves in no order the window keeps — put them back
             self._rebuild_groups()

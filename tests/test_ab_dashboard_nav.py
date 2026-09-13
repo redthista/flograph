@@ -1097,3 +1097,108 @@ class TestThePageSetPicker:
         window.params_panel.set_node(node.id)
         with pytest.raises(LookupError):
             _row_widget(window.params_panel, "Pages")
+
+
+class TestDropAPageIntoAGroup:
+    """Dan, after AB4: dragging a page or report tab into a group, or onto
+    its header, puts it in that group — and dragging one out takes it out.
+    Real mouse events through Qt's own tab drag, so the swaps Qt makes past
+    a header are what the drop is read from."""
+
+    def _bar(self, window, qtbot, *titles, group=(1, 2)):
+        ids = _pages(window, *titles)
+        for n in group:
+            window._set_page_group(ids[n], "Sales")
+        window.resize(1400, 700)
+        window.show()
+        qtbot.waitExposed(window)
+        return ids, window.page_bar
+
+    def _drag_to(self, bar, page_id, x, release=True):
+        from PySide6.QtCore import QPoint
+        start = bar.tabRect(bar._index_of_page(page_id)).center()
+        QTest.mousePress(bar, Qt.LeftButton, Qt.NoModifier, start)
+        step = 4 if x > start.x() else -4
+        for at in range(start.x(), x, step):
+            QTest.mouseMove(bar, QPoint(at, start.y()))
+        QTest.mouseMove(bar, QPoint(x, start.y()))
+        if release:
+            QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier,
+                               QPoint(x, start.y()))
+
+    def _run(self, window, group="Sales"):
+        return [p for p, page in window.graph.pages.items()
+                if page.group == group]
+
+    def test_onto_the_header_joins_it(self, window, qtbot):
+        ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
+        self._drag_to(bar, ids[3], bar.tabRect(_header(bar)).center().x())
+        assert window.graph.pages[ids[3]].group == "Sales"
+        assert set(self._run(window)) == {ids[1], ids[2], ids[3]}
+        assert bar.page_group(ids[3]) == "Sales"
+        order = list(window.graph.pages)
+        assert order[0] == ids[0] and order == bar.page_order()
+        # the group and the place, undone together
+        window.undo_stack.undo()
+        assert window.graph.pages[ids[3]].group == ""
+        assert list(window.graph.pages) == ids
+        assert _shown(bar) == ["Model", "A", "▾ Sales", "B", "C", "D", "+"]
+
+    def test_between_its_tabs_joins_it(self, window, qtbot):
+        ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
+        self._drag_to(bar, ids[0],
+                      bar.tabRect(bar._index_of_page(ids[1])).right() - 2)
+        assert window.graph.pages[ids[0]].group == "Sales"
+        assert list(window.graph.pages) == [ids[1], ids[0], ids[2], ids[3]]
+        assert _shown(bar) == ["Model", "▾ Sales", "B", "A", "C", "D", "+"]
+
+    def test_dragged_out_past_its_end_leaves_it(self, window, qtbot):
+        ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
+        self._drag_to(bar, ids[2],
+                      bar.tabRect(bar._index_of_page(ids[3])).right() - 2)
+        assert window.graph.pages[ids[2]].group == ""
+        assert list(window.graph.pages) == [ids[0], ids[1], ids[3], ids[2]]
+        assert _shown(bar) == ["Model", "A", "▾ Sales", "B", "D", "C", "+"]
+        assert window.undo_stack.undoText() == "ungroup page"
+
+    def test_moved_within_its_group_stays_in_it(self, window, qtbot):
+        ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
+        self._drag_to(bar, ids[1],
+                      bar.tabRect(bar._index_of_page(ids[2])).right() - 2)
+        assert window.graph.pages[ids[1]].group == "Sales"
+        assert list(window.graph.pages) == [ids[0], ids[2], ids[1], ids[3]]
+        assert window.undo_stack.undoText() == "reorder pages"
+
+    def test_put_down_beside_a_group_stays_out(self, window, qtbot):
+        ids, bar = self._bar(window, qtbot, "A", "B", "C", "D", "E")
+        self._drag_to(bar, ids[4],
+                      bar.tabRect(bar._index_of_page(ids[3])).left() + 2)
+        assert window.graph.pages[ids[4]].group == ""
+        assert list(window.graph.pages) == [ids[0], ids[1], ids[2], ids[4],
+                                            ids[3]]
+
+    def test_onto_a_folded_group(self, window, qtbot):
+        ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
+        bar.set_group_folded("Sales", True)
+        self._drag_to(bar, ids[3], bar.tabRect(_header(bar)).center().x())
+        assert window.graph.pages[ids[3]].group == "Sales"
+        assert bar.current_page_id() == ids[3]
+        # still folded, and the page dragged in is the one left showing
+        assert _shown(bar) == ["Model", "A", "▸ Sales  3", "D", "+"]
+
+    def test_the_header_lights_while_a_tab_is_over_it(self, window, qtbot):
+        ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
+        header_x = bar.tabRect(_header(bar)).center().x()
+        self._drag_to(bar, ids[3], header_x, release=False)
+        assert bar._drop_hint == "Sales"
+        from PySide6.QtCore import QPoint
+        QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier,
+                           QPoint(header_x, bar.tabRect(0).center().y()))
+        assert bar._drop_hint is None
+
+    def test_a_reorder_that_moves_no_group_still_gathers(self, window):
+        ids = _pages(window, "A", "B", "C")
+        for page_id in ids[:2]:
+            window._set_page_group(page_id, "Sales")
+        window._move_page([ids[0], ids[2], ids[1]], ids[2], "")
+        assert list(window.graph.pages) == ids

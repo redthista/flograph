@@ -79,7 +79,10 @@ or start a **New group…**, where you name it and can give it a colour. A
 group's tabs sit together behind a header, with a line in the group's
 colour under the run. Click the header to fold them away — the page you are
 on stays showing — drag it to move the whole group, and right-click it to
-rename it, **change its colour** or ungroup. A group's colour is its own:
+rename it, **change its colour** or ungroup. **Drag a page's tab onto a
+group's header, or in among its tabs, to put it in that group** — the header
+lights up while you're over it — and drag one out past the group's end to
+take it out. A group's colour is its own:
 the pages keep theirs. Left on **Automatic**, a group takes the colour of
 its first coloured page.
 The tab list (right-click the tab bar's `<` `>` arrows) shows each group

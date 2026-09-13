@@ -1996,6 +1996,7 @@ class MainWindow(QMainWindow):
         self.page_bar.delete_page_requested.connect(self._delete_page)
         self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
         self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
+        self.page_bar.move_page_requested.connect(self._move_page)
         self.page_bar.recolor_page_requested.connect(self._recolor_page)
         self.page_bar.set_page_group_requested.connect(self._set_page_group)
         self.page_bar.rename_group_requested.connect(self._rename_page_group)
@@ -2839,13 +2840,39 @@ class MainWindow(QMainWindow):
         if sorted(order) != sorted(current):
             self.page_bar.set_page_order(current)  # bar drifted; re-sync from graph
             return
-        # a tab dragged out of its group's run goes back into it (AB4): a
-        # group is changed from the tab's Group menu, not by where it lands
+        # an order that splits a group's run is gathered back into one
+        # section (AB4); a drag that changes a tab's group comes through
+        # _move_page instead, with the group it landed in
         order = gather_groups(order, self._page_groups())
         if order != current:
             self.undo_stack.push(ReorderPagesCommand(self.graph, order))
         else:
             self.page_bar.set_page_order(current)   # the drag came to nothing
+
+    def _move_page(self, order: list[str], page_id: str, group: str) -> None:
+        """A page tab dropped where it lands in another group, or out of its
+        own: the group and the place in one undo step. The order is still
+        gathered, so the group it left stays one section."""
+        from flograph.core.page_nav import CANVAS_KIND, gather_groups
+        from .commands import SetPageGroupCommand
+        page = self.graph.pages.get(page_id)
+        group = str(group or "").strip()
+        if page is None or page.kind == CANVAS_KIND or page.group == group:
+            self._reorder_pages(order)
+            return
+        current = list(self.graph.pages)
+        if sorted(order) != sorted(current):
+            self.page_bar.set_page_order(current)  # bar drifted; re-sync
+            return
+        new_order = gather_groups(order, {**self._page_groups(),
+                                          page_id: group})
+        self.undo_stack.beginMacro("group page" if group else "ungroup page")
+        self.undo_stack.push(SetPageGroupCommand(self.graph, page_id, group))
+        if new_order != current:
+            self.undo_stack.push(ReorderPagesCommand(self.graph, new_order))
+        self.undo_stack.endMacro()
+        # the bar already shows the drop; make sure it matches what was kept
+        self.page_bar.set_page_order(list(self.graph.pages))
 
     def _page_groups(self) -> dict[str, str]:
         return {page_id: page.group for page_id, page in self.graph.pages.items()}
