@@ -999,10 +999,10 @@ class SlicerToolbar(QWidget):
     a separate widget so every host and the dropdown's popup can lay it out
     above their view without the view itself changing shape."""
 
-    #: below this widget width the All/None/count row drops under the search
-    #: box instead of sitting beside it — so the card can be made narrow
-    #: without the buttons clipping off the edge
-    WRAP_BELOW = 190
+    #: The least room a search box is worth beside the buttons. Narrower
+    #: than this it cannot show what was typed, so it takes a row of its
+    #: own and the buttons go under it (see _rows_for).
+    SEARCH_MIN = 70
 
     #: the *filter* changed: the view must rebuild, but nothing was ticked,
     #: so nothing downstream needs re-running
@@ -1022,6 +1022,10 @@ class SlicerToolbar(QWidget):
         self._grid.setContentsMargins(0, 0, 0, 2)
         self._grid.setHorizontalSpacing(2)
         self._grid.setVerticalSpacing(2)
+        # rows in use: 1 (all on one), 2 (search above the buttons) or 3
+        # (search, All / None / count, then + and −). `_wrapped` is "the
+        # search has a row of its own".
+        self._rows: int | None = None
         self._wrapped: bool | None = None
 
         search = QLineEdit()
@@ -1062,7 +1066,7 @@ class SlicerToolbar(QWidget):
         count.setToolTip("Values ticked, of the total on this column")
         self._count = count
 
-        self._relayout(wrapped=False)
+        self._relayout(1)
         self._styled_for: Optional[str] = None
         self._apply_style()
 
@@ -1111,31 +1115,89 @@ class SlicerToolbar(QWidget):
                        and model.depth > 1)
         self._expand.setVisible(folding)
         self._collapse.setVisible(folding)
-        # _relayout only re-stretches when the *wrap* changes, and hiding
-        # the search is not that
+        # What fits on a row depends on what is showing, so the rows are
+        # worked out again; _relayout only re-stretches when they change,
+        # and hiding the search need not change them.
+        self._relayout(self._rows_for(self.width()))
         self._apply_stretch()
+        self.updateGeometry()
         return bool(model.show_search or model.show_buttons)
 
-    def _relayout(self, wrapped: bool) -> None:
-        """Place the four widgets in one row (wide) or two (narrow)."""
-        if wrapped == self._wrapped:
+    def _buttons(self) -> tuple:
+        return (self._select_all, self._clear, self._expand, self._collapse,
+                self._count)
+
+    def _span(self, widgets) -> int:
+        """How wide these widgets sit side by side — the ones showing."""
+        try:
+            shown = [w for w in widgets if not w.isHidden()]
+            return (sum(w.sizeHint().width() for w in shown)
+                    + self._grid.horizontalSpacing() * max(0, len(shown) - 1))
+        except RuntimeError:
+            # a layout can still ask for a size while the card is being torn
+            # down, after the buttons' C++ halves are gone
+            return 0
+
+    def _rows_for(self, width: int) -> int:
+        """How many rows the widgets showing need at this width.
+
+        Worked out from what they actually measure rather than a fixed
+        threshold: a fixed one went stale the moment + and − joined the
+        row, and the buttons were cut off at widths it still called wide.
+        """
+        buttons = self._span(self._buttons())
+        search = 0 if self._search.isHidden() else self.SEARCH_MIN
+        gap = self._grid.horizontalSpacing() if search and buttons else 0
+        if width >= search + gap + buttons:
+            return 1
+        if search and width >= buttons:
+            return 2
+        return 3
+
+    def minimumSizeHint(self) -> QSize:
+        """As narrow as the three-row arrangement.
+
+        The grid's own minimum is that of the arrangement it is in *now*,
+        and one row of search, All, None, +, − and a count is 200px: a
+        toolbar reporting that could never be given less, so it never got
+        narrow enough to wrap, and the card cut its buttons off instead.
+        """
+        width = max(self._span((self._select_all, self._clear, self._count)),
+                    self._span((self._expand, self._collapse)))
+        return QSize(width, super().minimumSizeHint().height())
+
+    def _relayout(self, rows: int) -> None:
+        """Place the widgets on one row, two (the search above the buttons)
+        or three (the search, then All / None / count, then + and −)."""
+        if rows == self._rows:
             return
-        self._wrapped = wrapped
-        buttons = (self._select_all, self._clear, self._expand,
-                   self._collapse, self._count)
+        self._rows = rows
+        self._wrapped = rows > 1
+        buttons = self._buttons()
+        firsts = (self._select_all, self._clear, self._count)
+        folds = (self._expand, self._collapse)
         for w in (self._search, *buttons):
             self._grid.removeWidget(w)
-        if wrapped:
+        if rows == 1:
+            self._grid.addWidget(self._search, 0, 0)
+            for column, w in enumerate(buttons, start=1):
+                self._grid.addWidget(w, 0, column)
+            self._tail_column = len(buttons)
+        elif rows == 2:
             self._grid.addWidget(self._search, 0, 0, 1, len(buttons))
             for column, w in enumerate(buttons):
                 self._grid.addWidget(w, 1, column)
             self._tail_column = len(buttons) - 1
         else:
-            self._grid.addWidget(self._search, 0, 0)
-            for column, w in enumerate(buttons, start=1):
-                self._grid.addWidget(w, 0, column)
-            self._tail_column = len(buttons)
+            self._grid.addWidget(self._search, 0, 0, 1, len(firsts))
+            for column, w in enumerate(firsts):
+                self._grid.addWidget(w, 1, column)
+            for column, w in enumerate(folds):
+                self._grid.addWidget(w, 2, column)
+            self._tail_column = len(firsts) - 1
         self._apply_stretch()
+        # the rows it needs changed, and so did the height it wants
+        self.updateGeometry()
 
     def _apply_stretch(self) -> None:
         """Give the spare width to the search box, or — when it is hidden —
@@ -1151,7 +1213,7 @@ class SlicerToolbar(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._relayout(wrapped=event.size().width() < self.WRAP_BELOW)
+        self._relayout(self._rows_for(event.size().width()))
 
     def _on_search(self, text: str) -> None:
         """Typing narrows the list and nothing else. It is emphatically not

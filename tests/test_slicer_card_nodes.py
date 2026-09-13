@@ -1248,3 +1248,50 @@ class TestFoldingADeepTree:
     def test_open_levels_is_presentation_only(self, registry):
         assert registry.get("flograph.viz.slicer").param(
             "open_levels").cosmetic
+
+
+class TestTheToolbarFitsANarrowCard:
+    """Found testing N5: with + and − on it the toolbar was 201px wide and
+    could not be given less, so a card dragged narrower cut the buttons off
+    instead of wrapping them."""
+
+    PATHS = [("north", "alpha"), ("north", "beta"), ("south", "gamma")]
+
+    def _panel(self, qtbot, width):
+        panel = _panel(qtbot, self.PATHS, columns=("region", "store"))
+        panel.resize(width, 240)
+        panel.show()
+        qtbot.waitExposed(panel)
+        return panel
+
+    @staticmethod
+    def _showing(toolbar):
+        return [w for w in (toolbar._search, toolbar._select_all,
+                            toolbar._clear, toolbar._expand,
+                            toolbar._collapse, toolbar._count)
+                if not w.isHidden()]
+
+    def _rows(self, toolbar):
+        grid = toolbar._grid
+        return {grid.getItemPosition(grid.indexOf(w))[0]
+                for w in self._showing(toolbar)}
+
+    @pytest.mark.parametrize("width", [140, 170, 200, 320])
+    def test_nothing_is_cut_off(self, qtbot, width):
+        panel = self._panel(qtbot, width)
+        toolbar = panel.toolbar
+        assert panel.width() == width
+        for w in self._showing(toolbar):
+            # right() is inclusive; one pixel of grid rounding is not a cut
+            assert w.geometry().right() <= toolbar.width(), w.objectName()
+
+    def test_wide_is_one_row_and_narrowest_is_three(self, qtbot):
+        wide = self._panel(qtbot, 320)
+        assert self._rows(wide.toolbar) == {0}
+        narrow = self._panel(qtbot, 140)
+        assert len(self._rows(narrow.toolbar)) == 3
+
+    def test_it_can_be_given_less_than_one_row_needs(self, qtbot):
+        panel = self._panel(qtbot, 320)
+        assert panel.toolbar.minimumSizeHint().width() < 140
+
