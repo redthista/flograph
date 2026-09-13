@@ -114,3 +114,53 @@ def test_caption_yields_to_a_child_widget(monkeypatch):
     frame = _frame(monkeypatch)
     frame._title_bar.childAt = lambda _pt: object()
     assert frame._on_nchittest(_pack(400, 15)) == win_frame._HTCLIENT
+
+
+class _CountingWindow(_FakeWindow):
+    def __init__(self):
+        super().__init__()
+        self.asked = 0
+
+    def isVisible(self):
+        self.asked += 1
+        return True
+
+
+def _filtered(frame, hwnd, message, lparam=0):
+    import ctypes
+    msg = win_frame._MSG(hWnd=hwnd, message=message, wParam=1, lParam=lparam)
+    return frame.nativeEventFilter(b"windows_generic_MSG",
+                                   ctypes.addressof(msg))
+
+
+def test_a_message_for_another_window_never_reaches_qt(monkeypatch):
+    """G10: the filter sees every native message in the process, so one for
+    a window that is not ours must be turned away before any Qt call."""
+    frame = _frame(monkeypatch)
+    frame._window = _CountingWindow()
+    frame._hwnd_cache = 0x1234
+
+    def no_qt():
+        raise AssertionError("asked Qt for the window handle")
+
+    monkeypatch.setattr(frame, "_hwnd", no_qt)
+    assert _filtered(frame, 0x9999, win_frame._WM_NCHITTEST,
+                     _pack(2, 2)) == (False, 0)
+    assert frame._window.asked == 0
+
+
+def test_a_message_for_our_window_is_still_answered(monkeypatch):
+    frame = _frame(monkeypatch)
+    frame._window = _CountingWindow()
+    frame._hwnd_cache = 0x1234
+    monkeypatch.setattr(frame, "_hwnd", lambda: 0x1234)
+    assert _filtered(frame, 0x1234, win_frame._WM_NCHITTEST,
+                     _pack(2, 2)) == (True, win_frame._HTTOPLEFT)
+
+
+def test_nothing_is_answered_before_the_handle_is_known(monkeypatch):
+    frame = _frame(monkeypatch)
+    frame._hwnd_cache = None
+    assert _filtered(frame, 0, win_frame._WM_NCHITTEST,
+                     _pack(2, 2)) == (False, 0)
+

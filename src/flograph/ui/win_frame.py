@@ -143,6 +143,9 @@ class _SnapFrame(QAbstractNativeEventFilter):
         self._window = window
         self._title_bar = title_bar
         self._margin = max(1, resize_margin)
+        # Our window's HWND as of the last time its styles were applied —
+        # see nativeEventFilter for why it is kept rather than asked for.
+        self._hwnd_cache = None
         self._user32 = ctypes.windll.user32
         self._shell32 = ctypes.windll.shell32
         self._get_style = getattr(self._user32, "GetWindowLongPtrW",
@@ -165,6 +168,10 @@ class _SnapFrame(QAbstractNativeEventFilter):
             hwnd = self._hwnd()
         except (RuntimeError, ValueError):
             return
+        # Runs at install and again on Show, WinIdChange and
+        # WindowStateChange (_StyleKeeper), which covers every way the
+        # native window can be replaced by a new one.
+        self._hwnd_cache = hwnd
         style = self._get_style(hwnd, _GWL_STYLE)
         want = (style | _WS_CAPTION | _WS_THICKFRAME | _WS_MAXIMIZEBOX
                 | _WS_MINIMIZEBOX | _WS_SYSMENU)
@@ -272,8 +279,21 @@ class _SnapFrame(QAbstractNativeEventFilter):
         if event_type != b"windows_generic_MSG":
             return False, 0
         try:
-            msg = _MSG.from_address(int(message))
-            if not self._window.isVisible() or msg.hWnd != self._hwnd():
+            # This filter is installed on the application, so *every* native
+            # message in the process comes through here — each paint, each
+            # mouse move, every popup's creation (ideas G10: the canvas
+            # palette opens slowly on Windows). So the first test is the
+            # cheapest one: the HWND is a MSG's first field, read straight
+            # off the pointer and compared with the handle remembered in
+            # _apply_styles. Only a message for our own window goes on to
+            # build a MSG or call into Qt; this used to call isVisible() and
+            # winId() first, for all of them.
+            address = int(message)
+            hwnd = ctypes.c_void_p.from_address(address).value
+            if hwnd is None or hwnd != self._hwnd_cache:
+                return False, 0
+            msg = _MSG.from_address(address)
+            if not self._window.isVisible():
                 return False, 0
             if msg.message == _WM_NCCALCSIZE:
                 if msg.wParam:

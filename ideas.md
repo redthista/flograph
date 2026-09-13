@@ -143,6 +143,14 @@ cause may be Windows popup/paint behaviour rather than the rebuild.
   filed 2026-08-30, so it can make it worse, not explain it. Next step is a
   timing on the slow machine itself.
 
+  Tightened 2026-09-13, unmeasured: the filter now reads the HWND off the
+  message pointer and compares it with the handle `_apply_styles`
+  remembers, so a message for any other window — the palette popup's
+  included — is turned away before a MSG is built or Qt is called
+  (`tests/test_win_frame.py` pins that no Qt call happens). Whether that
+  was the slowness is still for the slow machine to say; leave this entry
+  until it has.
+
 ---
 
 ## L. Version control
