@@ -1,4 +1,6 @@
 """The Show Plotly card: interactive plotly chart in an embedded webview."""
+import json
+
 import pandas as pd
 import pytest
 from PySide6.QtGui import QUndoStack
@@ -153,3 +155,176 @@ class TestCard:
         item.set_plotly_figure(None)
         assert item._figure_placeholder.isVisible()
         assert "Run the graph" in item._figure_placeholder.text()
+
+
+@pytest.fixture
+def sales():
+    return pd.DataFrame({"region": ["n", "s", "n", "s", "e"],
+                         "year": [2022, 2022, 2023, 2023, 2024],
+                         "revenue": [100.0, 150.0, 300.0, 320.0, 90.0],
+                         "units": [1, 2, 3, 4, 5]})
+
+
+def _zoom(**axes):
+    return json.dumps({axis: entry for axis, entry in axes.items()})
+
+
+class TestGroupAndTotal:
+    """Testing W2: a chart that summarises big raw data the way a Power BI
+    visual does, while what flows on stays the raw rows."""
+
+    def test_one_bar_per_x_with_y_summed(self, registry, sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {"kind": "bar", "x": "region",
+                                  "y": "revenue", "summarise": "sum"},
+                       table=sales)
+        bar = out["figure"].data[0]
+        assert list(bar.x) == ["n", "s", "e"]
+        assert list(bar.y) == [400.0, 470.0, 90.0]
+        assert len(out["table"]) == len(sales)      # the raw rows flow on
+
+    @pytest.mark.parametrize("how, expected", [
+        ("average", [200.0, 235.0, 90.0]), ("count", [2, 2, 1]),
+        ("min", [100.0, 150.0, 90.0]), ("max", [300.0, 320.0, 90.0])])
+    def test_the_other_ways_to_total(self, registry, sales, how, expected):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "bar", "x": "region",
+                                  "y": "revenue", "summarise": how},
+                       table=sales)["figure"]
+        assert list(fig.data[0].y) == expected
+
+    def test_colour_keeps_its_split(self, registry, sales):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "bar", "x": "year", "y": "revenue",
+                                  "color": "region", "summarise": "sum"},
+                       table=sales)["figure"]
+        assert {trace.name for trace in fig.data} == {"n", "s", "e"}
+
+    def test_the_axis_says_what_it_shows(self, registry, sales):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "bar", "x": "region",
+                                  "y": "revenue", "summarise": "sum"},
+                       table=sales)["figure"]
+        assert fig.layout.yaxis.title.text == "Sum of revenue"
+
+    def test_horizontal_bars_group_by_y(self, registry, sales):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "bar", "x": "revenue",
+                                  "y": "region", "orientation": "horizontal",
+                                  "summarise": "sum"},
+                       table=sales)["figure"]
+        assert list(fig.data[0].y) == ["n", "s", "e"]
+        assert list(fig.data[0].x) == [400.0, 470.0, 90.0]
+
+    def test_a_column_with_no_value_per_group_is_left_out(self, registry,
+                                                          sales):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "bar", "x": "region",
+                                  "y": "revenue", "hover_data": "units",
+                                  "summarise": "sum"},
+                       table=sales)["figure"]
+        assert len(fig.data[0].x) == 3
+
+    def test_without_an_x_it_draws_every_row(self, registry, sales):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "bar", "y": "revenue",
+                                  "summarise": "sum"}, table=sales)["figure"]
+        assert len(fig.data[0].y) == len(sales)
+
+    def test_it_is_offered_only_where_it_means_something(self, registry):
+        when = registry.get("flograph.viz.show_plotly").param(
+            "summarise").visible_when
+        assert "bar" in when["kind"] and "pie" not in when["kind"]
+
+
+class TestDragToFilter:
+    """Testing W2: dragging a box or lasso picks, and a zoom filters to what
+    is still in view — and survives the chart being redrawn."""
+
+    def test_the_page_listens_for_drags_and_zooms(self, registry, sales):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "scatter", "x": "year",
+                                  "y": "revenue", "on_click": "select many"},
+                       table=sales)["figure"]
+        script = fig._flograph_post_script
+        for event in ("plotly_click", "plotly_selected", "plotly_deselect",
+                      "plotly_relayout"):
+            assert event in script
+        assert 'flograph.set("view_range"' in script
+
+    def test_a_zoom_keeps_the_rows_in_view_and_stays_zoomed(self, registry,
+                                                            sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {
+            "kind": "scatter", "x": "year", "y": "revenue",
+            "on_click": "select many",
+            "view_range": _zoom(x={"range": [2022.5, 2024.5]})}, table=sales)
+        assert list(out["table"]["year"]) == [2023, 2023, 2024]
+        assert list(out["figure"].layout.xaxis.range) == [2022.5, 2024.5]
+
+    def test_a_zoom_on_both_axes_narrows_both(self, registry, sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {
+            "kind": "scatter", "x": "year", "y": "revenue",
+            "on_click": "select many",
+            "view_range": _zoom(x={"range": [2022.5, 2024.5]},
+                                y={"range": [0, 310]})}, table=sales)
+        assert list(out["table"]["revenue"]) == [300.0, 90.0]
+
+    def test_a_category_zoom_keeps_the_categories_in_view(self, registry,
+                                                          sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {
+            "kind": "bar", "x": "region", "y": "revenue",
+            "on_click": "select many", "summarise": "sum",
+            "view_range": _zoom(x={"range": [-0.5, 1.5],
+                                   "values": ["n", "s"]})}, table=sales)
+        assert sorted(set(out["table"]["region"])) == ["n", "s"]
+        assert len(out["table"]) == 4
+
+    def test_a_date_zoom(self, registry):
+        pytest.importorskip("plotly")
+        days = pd.DataFrame({"when": pd.date_range("2026-03-01", periods=5),
+                             "amount": [1, 2, 3, 4, 5]})
+        out = run_node(registry, {
+            "kind": "line", "x": "when", "y": "amount",
+            "on_click": "select many",
+            "view_range": _zoom(x={"range": ["2026-03-01 12:00",
+                                             "2026-03-03 12:00"]})},
+                       table=days)
+        assert list(out["table"]["amount"]) == [2, 3]
+
+    def test_zooming_the_totals_narrows_the_view_not_the_rows(self, registry,
+                                                              sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {
+            "kind": "bar", "x": "region", "y": "revenue",
+            "on_click": "select many", "summarise": "sum",
+            "view_range": _zoom(y={"range": [0, 200]})}, table=sales)
+        assert len(out["table"]) == len(sales)
+        assert list(out["figure"].layout.yaxis.range) == [0, 200]
+
+    def test_a_drag_and_a_zoom_filter_together(self, registry, sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {
+            "kind": "scatter", "x": "year", "y": "revenue",
+            "color": "region", "on_click": "select many",
+            "selected": '["2023", "2024"]',
+            "view_range": _zoom(y={"range": [0, 310]})}, table=sales)
+        assert list(out["table"]["revenue"]) == [300.0, 90.0]
+
+    def test_nothing_is_filtered_while_clicking_is_off(self, registry, sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {
+            "kind": "scatter", "x": "year", "y": "revenue",
+            "view_range": _zoom(x={"range": [2022.5, 2024.5]})}, table=sales)
+        assert len(out["table"]) == len(sales)
+
+    def test_a_zoom_that_cannot_be_read_keeps_every_row(self, registry,
+                                                        sales):
+        pytest.importorskip("plotly")
+        out = run_node(registry, {
+            "kind": "scatter", "x": "year", "y": "revenue",
+            "on_click": "select many", "view_range": "not json"}, table=sales)
+        assert len(out["table"]) == len(sales)
+

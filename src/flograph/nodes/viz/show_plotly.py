@@ -18,6 +18,22 @@ or sunburst, falling back to **Color by**. That means it suits charts whose
 x is a category — clicking a histogram bin gives you the bin's position,
 which matches no row. With nothing clicked, **table** is the whole input.
 
+**Drag** picks many at once: choose Box Select or Lasso Select on the
+chart's toolbar and drag across the marks you want — what the drag catches
+becomes the clicked values, as if each had been clicked. **Zooming filters
+too:** drag to zoom and **table** keeps only the rows still in view on the
+axis you zoomed, and **Zoomed to** remembers it, so the zoom survives the
+chart being redrawn after the run. Double-click the chart to zoom back out
+and let every row through again.
+
+**Group and total** draws one mark per X — and per Color, facet and symbol
+— with Y summed, averaged, counted, or its min, max or median, the way a
+Power BI visual summarises a column (horizontal bars group by Y instead).
+Only the picture is summarised: feed it every raw row, and **table** passes
+those raw rows on, filtered by whatever was clicked, dragged or zoomed.
+Hover data, size and text have no single value per group, so they are left
+out while it is on.
+
 **Kind** picks the chart, and the rest of the panel follows it: only the
 settings that chart actually has appear. Twenty-eight of them, in families:
 
@@ -480,12 +496,29 @@ _ROWS: list[dict[str, Any]] = [
      "default": "",
      "placeholder": 'e.g. ["north"] — blank keeps every row',
      "visible_when": {"on_click": ["select one", "select many"]}},
+    # Written by the chart's own page when it is zoomed: the part of each
+    # zoomed axis still in view. Kept, not just applied, because the card
+    # redraws the page from scratch on every run and the zoom has to go
+    # back on the figure or the chart springs out again.
+    {"name": "view_range", "type": "string", "label": "Zoomed to",
+     "default": "",
+     "placeholder": "blank — the whole chart is in view",
+     "visible_when": {"on_click": ["select one", "select many"]}},
 
     # ---------------------------------------------------- what to plot
     {"name": "x", "type": "columns", "label": "X column", "multi": False,
      "default": "", "placeholder": "(index)", "arg": "x"},
     {"name": "y", "type": "columns", "label": "Y columns", "default": "",
      "placeholder": "comma separated; empty = all numeric", "arg": "y"},
+    # Group the rows and draw one mark per group — Power BI's "sum of
+    # revenue by region". Only the drawing is summarised: `table` still
+    # carries the raw rows, so what flows on is the data, not the picture.
+    {"name": "summarise", "type": "choice", "label": "Group and total",
+     "options": ["none", "sum", "average", "count", "min", "max", "median"],
+     "default": "none",
+     # not scatter: a scatter is one point per row by nature, and it already
+     # sits at the most settings a panel should show (test_plotly_kinds)
+     "kinds": ["line", "bar", "area", "funnel"]},
     {"name": "z", "type": "columns", "label": "Z column", "multi": False,
      "default": "", "placeholder": "the value at each x/y", "arg": "z"},
     {"name": "x_start", "type": "columns", "label": "Start column",
@@ -1652,17 +1685,19 @@ _CLICK_COLUMN_PARAM = {
 #: might draw can never disagree about what is selected.
 _CLICK_JS = """
 var gd = document.getElementById("{plot_id}");
-var picked = %(picked)s, multi = %(multi)s;
-gd.on("plotly_click", function (data) {
-  var point = data.points && data.points[0];
-  if (!point) { return; }
-  // A label on the charts that have one (pie, treemap, sunburst), an x
-  // everywhere else. Both can legitimately be 0 or "", so test for
-  // undefined/null rather than for truthiness.
+var picked = %(picked)s, multi = %(multi)s, view = %(view)s;
+// A label on the charts that have one (pie, treemap, sunburst), an x
+// everywhere else. Both can legitimately be 0 or "", so test for
+// undefined/null rather than for truthiness.
+function valueOf(point) {
   var value = (point.label !== undefined && point.label !== null)
       ? point.label : point.x;
-  if (value === undefined || value === null) { return; }
-  value = String(value);
+  return (value === undefined || value === null) ? null : String(value);
+}
+gd.on("plotly_click", function (data) {
+  var point = data.points && data.points[0];
+  var value = point ? valueOf(point) : null;
+  if (value === null) { return; }
   if (multi) {
     var at = picked.indexOf(value);
     if (at === -1) { picked.push(value); } else { picked.splice(at, 1); }
@@ -1672,6 +1707,53 @@ gd.on("plotly_click", function (data) {
     picked = (picked.length === 1 && picked[0] === value) ? [] : [value];
   }
   flograph.select(picked);
+});
+// Box Select or Lasso Select: everything the drag caught is picked at
+// once — the values a click on each of them would have picked.
+gd.on("plotly_selected", function (data) {
+  if (!data || !data.points) { return; }
+  var caught = [];
+  for (var i = 0; i < data.points.length; i++) {
+    var value = valueOf(data.points[i]);
+    if (value !== null && caught.indexOf(value) === -1) { caught.push(value); }
+  }
+  picked = caught;
+  flograph.select(picked);
+});
+gd.on("plotly_deselect", function () {
+  if (picked.length) { picked = []; flograph.select(picked); }
+});
+// Zoom: what is still in view on each axis the zoom touched, kept beside
+// the other axis's zoom; a double-click (autorange) lets that axis go. A
+// category axis's range is only positions, so its categories go too. A
+// relayout that touches neither axis (a resize) sends nothing.
+gd.on("plotly_relayout", function (event) {
+  var next = {}, touched = false;
+  ["x", "y"].forEach(function (axis) {
+    var name = axis + "axis";
+    if (event[name + ".autorange"]) { touched = true; return; }
+    var lo = event[name + ".range[0]"], hi = event[name + ".range[1]"];
+    if (lo === undefined && event[name + ".range"]) {
+      lo = event[name + ".range"][0]; hi = event[name + ".range"][1];
+    }
+    if (lo === undefined || hi === undefined) {
+      if (view && view[axis]) { next[axis] = view[axis]; }
+      return;
+    }
+    touched = true;
+    var entry = {range: [lo, hi]};
+    var full = gd._fullLayout && gd._fullLayout[name];
+    if (full && full.type === "category" && full._categories) {
+      var from = Math.max(0, Math.ceil(Math.min(lo, hi)));
+      var to = Math.min(full._categories.length - 1,
+                        Math.floor(Math.max(lo, hi)));
+      entry.values = full._categories.slice(from, to + 1).map(String);
+    }
+    next[axis] = entry;
+  });
+  if (!touched) { return; }
+  view = (next.x || next.y) ? next : null;
+  flograph.set("view_range", view || "");
 });
 """
 
@@ -1725,9 +1807,151 @@ def click_script(params) -> "str | None":
     if mode not in ("select one", "select many"):
         return None
     return _CLICK_JS % {
-        "picked": json.dumps(_selected(params.get("selected", ""))),
+        "picked": _script_json(_selected(params.get("selected", ""))),
         "multi": "true" if mode == "select many" else "false",
+        "view": _script_json(_view_range(params.get("view_range", ""))
+                             or None),
     }
+
+
+def _script_json(value) -> str:
+    """JSON to embed in the page's script: "</" is escaped so a value
+    holding "</script>" cannot end the script it rides in."""
+    import json
+
+    return json.dumps(value).replace("</", "<\\/")
+
+
+def _view_range(raw) -> dict:
+    """The zoom a chart's page wrote: axis -> {"range": [lo, hi]}, plus
+    "values" (the categories in view) on a category axis. Empty when
+    nothing is zoomed, or when the text is not that shape."""
+    import json
+
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out = {}
+    for axis in ("x", "y"):
+        entry = parsed.get(axis)
+        if (isinstance(entry, dict) and isinstance(entry.get("range"), list)
+                and len(entry["range"]) == 2):
+            out[axis] = entry
+    return out
+
+
+def _in_view(table, column: str, entry: dict):
+    """Which rows of `table` sit inside the zoomed part of `column`'s axis.
+
+    The categories in view when the page sent them, a date range on dates
+    (or on text that reads as dates, which plotly draws on a date axis),
+    and a number range otherwise. A range that cannot be read keeps every
+    row: a zoom that filtered to nothing over a format question would look
+    like data that vanished.
+    """
+    import pandas as pd
+
+    series = table[column]
+    everything = pd.Series(True, index=series.index)
+    values = entry.get("values")
+    if isinstance(values, list):
+        return series.astype(str).isin([str(v) for v in values])
+    lo, hi = entry["range"]
+    if not pd.api.types.is_datetime64_any_dtype(series):
+        try:
+            low, high = sorted([float(lo), float(hi)])
+            return pd.to_numeric(series, errors="coerce").between(low, high)
+        except (TypeError, ValueError):
+            pass
+    try:
+        low, high = sorted([pd.Timestamp(lo), pd.Timestamp(hi)])
+        dates = pd.to_datetime(series, errors="coerce")
+        tz = getattr(dates.dt, "tz", None)
+        if tz is not None:
+            low = low.tz_localize(tz) if low.tz is None else low
+            high = high.tz_localize(tz) if high.tz is None else high
+        return dates.between(low, high)
+    except (TypeError, ValueError):
+        return everything
+
+
+#: What "Group and total" asks pandas for, and what the axis calls it.
+_SUMMARISE = {"sum": "sum", "average": "mean", "count": "count",
+              "min": "min", "max": "max", "median": "median"}
+_SUMMARISE_WORD = {"sum": "Sum", "average": "Average", "count": "Count",
+                   "min": "Min", "max": "Max", "median": "Median"}
+
+#: The kinds that draw a mark per position along one axis, where a total
+#: per position means something — the kinds the setting is shown for.
+_SUMMARISE_KINDS = ("line", "bar", "area", "funnel")
+
+#: Column arguments that split the marks, so the grouping keeps them.
+_GROUP_ARGS = ("color", "facet_row", "facet_col", "line_group", "symbol",
+               "line_dash", "pattern_shape", "animation_frame")
+
+
+def _summarised(ctx, table, kwargs: dict, kind: str):
+    """(rows to draw, the axis now holding totals or None).
+
+    The table itself, or with "Group and total" set, one row per group:
+    grouped by X — by Y for horizontal bars — and by everything else that
+    splits the marks, with the other axis's columns summarised. Any other
+    column the chart was told to use (hover data, size, text) has no single
+    value per group, so it is taken out of `kwargs` and said so, rather
+    than guessed at.
+    """
+    how = str(ctx.params.get("summarise", "none") or "none")
+    if how not in _SUMMARISE or kind not in _SUMMARISE_KINDS:
+        return table, None
+    along, across = (("y", "x") if kwargs.get("orientation") == "h"
+                     else ("x", "y"))
+    key = kwargs.get(along)
+    if not isinstance(key, str):
+        ctx.log(f"Group and total needs {along.upper()} to be one column to "
+                f"group by — drawing every row")
+        return table, None
+    values = kwargs.get(across)
+    values = [values] if isinstance(values, str) else list(values or [])
+    if not values or key in values:
+        ctx.log(f"Group and total needs a {across.upper()} column other "
+                f"than {key!r} to total — drawing every row")
+        return table, None
+    keys = [key]
+    for arg in _GROUP_ARGS:
+        column = kwargs.get(arg)
+        if isinstance(column, str) and column not in keys + values:
+            keys.append(column)
+    dropped = [arg for arg in list(kwargs)
+               if arg in _COLUMN_ARGS and arg not in _GROUP_ARGS]
+    for arg in dropped:
+        kwargs.pop(arg)
+    if dropped:
+        ctx.log(f"Group and total leaves out {', '.join(dropped)} — those "
+                f"columns have no single value per group")
+
+    import pandas as pd
+
+    frame = table[keys + values]
+    if how != "count":
+        frame = frame.assign(**{c: pd.to_numeric(frame[c], errors="coerce")
+                                for c in values})
+    # a line wants its x in order; a bar keeps the order the rows came in
+    grouped = (frame.groupby(keys, dropna=False, observed=True,
+                             sort=kind not in ("bar", "funnel"))[values]
+               .agg(_SUMMARISE[how]).reset_index())
+    word = _SUMMARISE_WORD[how]
+    if len(values) == 1:
+        kwargs["labels"] = {values[0]: f"{word} of {values[0]}",
+                            **(kwargs.get("labels") or {})}
+    ctx.log(f"grouped {len(table):,} rows into {len(grouped):,} by "
+            f"{', '.join(keys)}: {word.lower()} of {', '.join(values)}")
+    return grouped, across
 
 
 def run(ctx, table):
@@ -1740,10 +1964,12 @@ def run(ctx, table):
 
     kind = ctx.params.get("kind", "line")
     kwargs, ignored = _build(ctx.params, table, px)
+    # Group and total summarises what is drawn; `table` below stays raw.
+    drawn, totalled = _summarised(ctx, table, kwargs, kind)
     try:
         # Building a figure is not thread-safe — see _figure_lock.
         with _figure_lock():
-            fig = getattr(px, kind)(table, **kwargs)
+            fig = getattr(px, kind)(drawn, **kwargs)
     except ImportError as exc:
         # The one px argument with a dependency of its own: a trendline is
         # fitted by statsmodels, which plotly does not install with itself.
@@ -1786,4 +2012,24 @@ def run(ctx, table):
             # would be a guess. The values still flow out of "selected".
             ctx.log("clicked values ignored: this chart has no column to "
                     "filter on — set X (or Labels/Hierarchy/Color by)")
+    if script is not None:
+        for axis, entry in _view_range(ctx.params.get("view_range",
+                                                      "")).items():
+            # The card redraws the page from scratch on every run, so the
+            # zoom it was showing goes back on the figure — or the chart
+            # would spring back out while the table stayed filtered.
+            fig.update_layout({f"{axis}axis": {"range": entry["range"]}})
+            if axis == totalled:
+                ctx.log(f"the zoomed {axis} axis shows totals, so it narrows "
+                        f"the view but not the rows")
+                continue
+            column = kwargs.get(axis)
+            if not isinstance(column, str) or column not in table.columns:
+                ctx.log(f"the zoomed {axis} axis is not one column, so it "
+                        f"narrows the view but not the rows")
+                continue
+            before = len(filtered)
+            filtered = filtered[_in_view(filtered, column, entry)]
+            ctx.log(f"zoomed in on {column!r}: kept {len(filtered):,} of "
+                    f"{before:,} rows")
     return {"figure": fig, "selected": picked, "table": filtered}
