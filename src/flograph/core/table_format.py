@@ -2361,8 +2361,9 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                 alone = rule.hide_value or _place(rule) == "in"
                 for i, row in enumerate(block.itertuples(index=False,
                                                          name=None)):
-                    numbers = [None if _is_missing(v) else float(v)
-                               for v in row]
+                    # number() is None for NaN, pd.NA and anything else that
+                    # is not a finite number — a blank, drawn as a gap
+                    numbers = [_spark.number(v) for v in row]
                     if sum(v is not None for v in numbers) < _spark.MIN_POINTS:
                         continue      # one point is not a trend
                     drawing = _spark.Spark(
@@ -2493,8 +2494,15 @@ def _numeric_block(frame, names):
     positions = [first_at[n] for n in names if n in first_at]
     if not positions:
         return None
-    block = frame.iloc[:, positions]
-    return block.apply(lambda column: pd.to_numeric(column, errors="coerce"))
+    import numpy as np
+    # Plain float64 with NaN for a blank, whatever the column was. The Table
+    # node types numbers `Float64` / `Int64`, whose blank is `pd.NA` — and
+    # `float(pd.NA)` raises, which inside a card's data() crashed the app.
+    arrays = [pd.to_numeric(frame.iloc[:, p], errors="coerce")
+              .to_numpy(dtype="float64", na_value=np.nan) for p in positions]
+    block = pd.DataFrame(np.column_stack(arrays), index=frame.index)
+    block.columns = [str(frame.columns[p]) for p in positions]
+    return block
 
 
 def _extent(block) -> tuple:

@@ -242,8 +242,17 @@ class PandasModel(QAbstractTableModel):
                     stats = self._col_stats.get(col) or column_stats(
                         self._source.iloc[:, col])
                     self._col_stats[col] = stats
-                entry.append((i, evaluate_column(self._df.iloc[:, col], [rule],
-                                                 stats, frame=self._df)))
+                try:
+                    styles = evaluate_column(self._df.iloc[:, col], [rule],
+                                             stats, frame=self._df)
+                except Exception:
+                    # This runs inside data(), which Qt calls from the middle
+                    # of painting and measuring. An exception escaping there
+                    # is not an error message: PySide crashes the process
+                    # printing it. One rule that cannot be drawn is skipped,
+                    # and the rest of the table still is.
+                    continue
+                entry.append((i, styles))
             self._col_cache[col] = entry
         return entry
 

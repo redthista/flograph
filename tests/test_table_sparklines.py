@@ -462,6 +462,57 @@ class TestTheRulesDialog:
         assert dialog.line() == "trend spark hide from sales_*"
 
 
+class TestNullableColumns:
+    """The Table node types a number column `Float64` and an integer one
+    `Int64`, whose blank is `pd.NA` — not None, not NaN. `float(pd.NA)`
+    raises, and raised inside a card's data() it took the app down."""
+
+    FRAME = pd.DataFrame({
+        "region": ["North", "Central"],
+        "jan": pd.array([10.0, 3.0], dtype="Float64"),
+        "feb": pd.array([12.0, None], dtype="Float64"),
+        "mar": pd.array([9, None], dtype="Int64"),
+        "apr": pd.array([15.0, 6.0], dtype="Float64"),
+    })
+
+    @pytest.mark.parametrize("text", [
+        "trend spark from jan..apr",
+        "region spark below tall from jan..apr",
+        "trend spark shared bars ref mean from jan..apr",
+    ])
+    def test_a_blank_is_still_a_gap(self, text):
+        frame, rules, _h = spark_projection(self.FRAME, parse_rules(text))
+        name = rules[0].columns[0]
+        styles = evaluate_column(frame[name], rules, column_stats(frame[name]),
+                                 frame=frame)
+        values = styles[1].decorations[0].spark.values
+        assert values == [3.0, None, None, 6.0]
+
+    def test_the_new_column_holds_a_plain_number(self):
+        frame, _rules, _h = spark_projection(
+            self.FRAME, parse_rules("trend spark from jan..apr"))
+        assert frame["trend"].tolist() == [15.0, 6.0]
+
+    def test_it_prints(self):
+        html = frame_to_html(self.FRAME,
+                             parse_rules("trend spark from jan..apr"))
+        assert html.count("data:image/svg+xml") == 2
+
+    @pytest.mark.usefixtures("qapp")
+    def test_the_card_draws_it(self, qtbot):
+        from flograph.ui.data_table import DataTableView
+        from flograph.ui.inspector.pandas_model import PandasModel
+        from flograph.ui.table_delegate import DECOR_ROLE
+        view = DataTableView()
+        qtbot.addWidget(view)
+        view.setModel(PandasModel(self.FRAME, rules=parse_rules(
+            "region spark below tall from jan..apr")))
+        view.show()
+        marks, _pill, _ink = view.model().data(view.model().index(1, 0),
+                                               DECOR_ROLE)
+        assert marks[0].spark is not None
+
+
 def test_the_rules_box_does_not_mark_a_spark_as_a_mistake():
     from flograph.core.text_assist import lint_table_rules
     assert lint_table_rules("trend spark area last from jan..apr") == []
