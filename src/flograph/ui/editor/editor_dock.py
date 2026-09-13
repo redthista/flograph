@@ -6,10 +6,12 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut, QUndoStack
+from PySide6.QtGui import (
+    QFontMetrics, QKeySequence, QPalette, QShortcut, QUndoStack,
+)
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QInputDialog, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph, NodeRegistry, NodeScriptError, parse_spec
@@ -87,9 +89,21 @@ class EditorPanel(QWidget):
         self._ask_ai_btn.hide()
         self._ask_ai_btn.clicked.connect(self._ask_ai)
 
+        # a lazy import: text_popout lives in ui.properties, whose package
+        # pulls in the params panel
+        from ..properties.text_popout import expand_icon
+        self._popout_btn = QToolButton()
+        self._popout_btn.setObjectName("code_popout_button")
+        self._popout_btn.setIcon(
+            expand_icon(self.palette().color(QPalette.ButtonText)))
+        self._popout_btn.setToolTip("Open the code in a bigger editor")
+        self._popout_btn.hide()
+        self._popout_btn.clicked.connect(self.open_pop_out)
+
         header = QHBoxLayout()
         header.addWidget(self._title, 1)
         header.addWidget(self._badge)
+        header.addWidget(self._popout_btn)
 
         self.editor = CodeEditor(self)
         self.editor.setEnabled(False)
@@ -246,6 +260,7 @@ class EditorPanel(QWidget):
             self._reset_btn.hide()
             self._save_user_btn.hide()
             self._ask_ai_btn.hide()
+            self._popout_btn.hide()
             return
 
         # Check if we have cached temp edits for this node.
@@ -287,6 +302,7 @@ class EditorPanel(QWidget):
         # any bound node's current code can be promoted to a user library node
         self._save_user_btn.setVisible(not node.spec.broken)
         self._ask_ai_btn.setVisible(True)
+        self._popout_btn.setVisible(True)
 
     # --------------------------------------------------------------- apply
 
@@ -311,6 +327,39 @@ class EditorPanel(QWidget):
         self.editor.set_error_line(None)
         self._undo_stack.push(SetCodeCommand(self._graph, self._node_id, source))
         self._show_message("Applied.")
+
+    def open_pop_out(self) -> None:
+        """The code in a window as big as the work needs (code_popout). It
+        opens with what the panel holds, unapplied edits and all, at the same
+        place; OK puts the text back here and applies it, one undo step, the
+        way Apply does."""
+        from PySide6.QtWidgets import QDialog
+
+        from .code_popout import CodePopOut
+
+        node_id = self._node_id
+        if node_id is None:
+            return
+        node = self._graph.node(node_id)
+        read_only = self.editor.isReadOnly()
+        dialog = CodePopOut(f"{node.label} — code", self.editor.toPlainText(),
+                            type_id=node.type_id, read_only=read_only,
+                            parent=self)
+        cursor = dialog.editor.textCursor()
+        cursor.setPosition(min(self.editor.textCursor().position(),
+                               dialog.editor.document().characterCount() - 1))
+        dialog.editor.setTextCursor(cursor)
+        dialog.editor.centerCursor()
+        dialog.editor.set_error_line(self.editor.error_line)
+        accepted = dialog.exec() == QDialog.Accepted
+        new = dialog.editor.toPlainText()
+        dialog.deleteLater()
+        # the node can have gone while the window was up (a run's error
+        # doesn't move the panel, but a delete from elsewhere does)
+        if not accepted or read_only or self._node_id != node_id:
+            return
+        self.editor.setPlainText(new)
+        self.apply_code()
 
     def _save_as_user_node(self) -> None:
         if self._node_id is not None:

@@ -68,6 +68,12 @@ class TextPopOut(QDialog):
     sample: the first rows of the table coming in, for the lint to try the
     text against, or None when nothing upstream has run."""
 
+    HINT = ("Ctrl+Space completes · Ctrl+F finds · "
+            "Alt+Click adds a caret · Ctrl+Enter applies")
+    # said after "No problems found" when there is no table to check against
+    UNCHECKED = (" — columns not checked until the nodes feeding this one "
+                 "have run")
+
     def __init__(self, title: str, text: str, *, placeholder: str = "",
                  assist: Optional[TextAssist] = None,
                  columns: Iterable[str] = (), sample=None,
@@ -90,11 +96,8 @@ class TextPopOut(QDialog):
         if placeholder:
             editor.setPlaceholderText(placeholder)
         editor.setReadOnly(read_only)
-        editor.set_highlighter(RulesHighlighter(
-            editor.document(), self.assist.keywords, columns))
         self.editor = editor
-        self.completer = WordCompleter(editor, self.assist.keywords, columns,
-                                       self.assist.quote)
+        self._assist_editor(editor, columns)
         self.find_bar = FindBar(editor, self)
 
         self.status = QLabel()
@@ -112,8 +115,7 @@ class TextPopOut(QDialog):
         if read_only:
             buttons = QDialogButtonBox(QDialogButtonBox.Close)
         else:
-            hint = QLabel("Ctrl+Space completes · Ctrl+F finds · "
-                          "Alt+Click adds a caret · Ctrl+Enter applies")
+            hint = QLabel(self.HINT)
             hint.setObjectName("text_popout_hint")
             hint.setEnabled(False)
             row.addWidget(hint)
@@ -147,6 +149,15 @@ class TextPopOut(QDialog):
         editor.setTextCursor(cursor)
         editor.setFocus()
 
+    def _assist_editor(self, editor: CodeEditor, columns: list) -> None:
+        """Highlighting and completion for what is being edited: the box's
+        own words and the columns coming in. The code pop-out swaps in the
+        Python ones (editor/code_popout)."""
+        editor.set_highlighter(RulesHighlighter(
+            editor.document(), self.assist.keywords, columns))
+        self.completer = WordCompleter(editor, self.assist.keywords, columns,
+                                       self.assist.quote)
+
     # ---------------------------------------------------------------- lint
 
     def run_lint(self) -> None:
@@ -163,9 +174,7 @@ class TextPopOut(QDialog):
             return
         self.editor.set_diagnostics(found)
         if not found:
-            unchecked = ("" if self._sample is not None else
-                         " — columns not checked until the nodes feeding "
-                         "this one have run")
+            unchecked = "" if self._sample is not None else self.UNCHECKED
             self._say(f"✓ No problems found{unchecked}", OK_INK)
             return
         errors = sum(1 for d in found if d.severity == "error")

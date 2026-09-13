@@ -141,6 +141,10 @@ class CodeEditor(QPlainTextEdit):
             self.highlighter.setDocument(None)
         self.highlighter = highlighter
 
+    @property
+    def error_line(self) -> Optional[int]:
+        return self._error_line
+
     def set_error_line(self, line: Optional[int]) -> None:
         """1-based line to mark as the failure site, or None to clear."""
         self._error_line = line
