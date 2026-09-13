@@ -68,11 +68,13 @@ class TestBundledExamples:
             "27_a_story_that_scrolls.flograph",
             "28_slicer_layouts.flograph",
             "29_model_canvases.flograph",
+            "30_segment_compare_matrix.flograph",
+            "31_table_sparklines.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 29
+        assert len(window._examples_menu.actions()) == 31
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -103,6 +105,9 @@ class TestBundledExamples:
         "27_a_story_that_scrolls.flograph",
         "28_slicer_layouts.flograph",
         "29_model_canvases.flograph",
+        # 31 draws its sparklines in Python and prints them as SVG, so there
+        # is nothing to fetch either
+        "31_table_sparklines.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from
@@ -534,6 +539,39 @@ class TestTheConditionalFormattingExample:
         style = window.engine.cache.outputs_for("n4_show2")["style"]
         assert [r["mode"] for r in style["rules"]] == ["color_scale",
                                                        "number_format"]
+
+
+class TestTheTableSparklinesExample:
+    """31_table_sparklines: every table's rules parse, every column a rule
+    names exists (or is one a spark makes), and the report page carries both
+    of its tables — the one with sparks placed below a value used to vanish
+    from it."""
+
+    def test_the_rules_parse_and_name_real_columns(self, qtbot, window):
+        window._open_example(template_path("31_table_sparklines.flograph"))
+        assert wait_run(qtbot, window.engine)
+        from flograph.core.table_format import (parse_rules_lenient,
+                                                style_report)
+        for node_id in ("sd_own", "sd_beside", "sd_scales"):
+            params = window.graph.nodes[node_id].params
+            _rules, errors = parse_rules_lenient(params["format_rules"])
+            assert errors == [], node_id
+            outputs = window.engine.cache.outputs_for(node_id)
+            assert style_report(outputs["style"], outputs["table"]) == [], \
+                node_id
+
+    def test_the_report_page_has_both_tables(self, qtbot, window):
+        window._open_example(template_path("31_table_sparklines.flograph"))
+        assert wait_run(qtbot, window.engine)
+        from flograph.ui.report.render import render_report
+        pages = window.graph.pages
+        pages = pages.values() if isinstance(pages, dict) else pages
+        report = next(p for p in pages if p.kind == "report")
+        html = render_report(report.body, window.graph,
+                             window.engine.cache).document.toHtml()
+        assert html.count("<table") >= 2
+        assert "Up/down" in html and "Alice" in html
+        assert html.count("data:image/svg+xml") >= 30
 
 
 class TestTheFlowVariablesExample:

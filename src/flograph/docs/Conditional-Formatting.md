@@ -250,6 +250,10 @@ In a [matrix](#a-matrix-rules-before-and-after-the-pivot) the columns the
 pivot made are there to read: `trend spark from *` over a matrix of months
 draws each row's months.
 
+**Open Example ▸ Table Sparklines** is a worked flow: sparklines in columns
+of their own, beside a value, on their own scale and on a shared one, with
+row heights — on the canvas, a dashboard page and a report page.
+
 ## Order of application
 
 Rules compose **top to bottom, and a later line wins** any attribute it sets —

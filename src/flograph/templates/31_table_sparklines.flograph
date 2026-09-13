@@ -1,0 +1,174 @@
+{
+  "flograph_version": "0.1.14",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "sd_data",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"Region\", \"type\": \"text\"}, {\"name\": \"Owner\", \"type\": \"text\"}, {\"name\": \"Total\", \"type\": \"number\"}, {\"name\": \"jan\", \"type\": \"number\"}, {\"name\": \"feb\", \"type\": \"number\"}, {\"name\": \"mar\", \"type\": \"number\"}, {\"name\": \"apr\", \"type\": \"number\"}, {\"name\": \"may\", \"type\": \"number\"}, {\"name\": \"jun\", \"type\": \"number\"}, {\"name\": \"jul\", \"type\": \"number\"}, {\"name\": \"aug\", \"type\": \"number\"}, {\"name\": \"sep\", \"type\": \"number\"}, {\"name\": \"oct\", \"type\": \"number\"}, {\"name\": \"nov\", \"type\": \"number\"}, {\"name\": \"dec\", \"type\": \"number\"}, {\"name\": \"wk01\", \"type\": \"number\"}, {\"name\": \"wk02\", \"type\": \"number\"}, {\"name\": \"wk03\", \"type\": \"number\"}, {\"name\": \"wk04\", \"type\": \"number\"}, {\"name\": \"wk05\", \"type\": \"number\"}, {\"name\": \"wk06\", \"type\": \"number\"}, {\"name\": \"wk07\", \"type\": \"number\"}, {\"name\": \"wk08\", \"type\": \"number\"}, {\"name\": \"wk09\", \"type\": \"number\"}, {\"name\": \"wk10\", \"type\": \"number\"}, {\"name\": \"wk11\", \"type\": \"number\"}, {\"name\": \"wk12\", \"type\": \"number\"}], \"rows\": [[\"North\", \"Alice\", 1836, 120, 126, 132, 138, 144, 150, 156, 162, 168, 174, 180, 186, 0.0, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6], [\"South\", \"Bilal\", 2058, 210, 203, 196, 189, 182, 175, 168, 161, 154, 147, 140, 133, 0.0, -7, -7, -7, -7, -7, -7, -7, -7, -7, -7, -7], [\"East\", \"Chen\", 1460.3, 100.1, 100.9, 104.2, 113.4, 130.8, 150.8, 160.0, 150.8, 130.8, 113.4, 104.2, 100.9, 0.0, 0.8, 3.3, 9.2, 17.4, 20.0, 9.2, -9.2, -20.0, -17.4, -9.2, -3.3], [\"West\", \"Dana\", 1818.9, 150.0, 170.5, 183.2, 183.4, 170.9, 150.6, 130.0, 117.0, 116.4, 128.6, 148.8, 169.5, 0.0, 20.5, 12.7, 0.2, -12.5, -20.3, -20.6, -13.0, -0.6, 12.2, 20.2, 20.7], [\"Central\", \"Ewan\", 1418.8, 90.0, 94.0, 100.6, 108.6, null, null, 139.1, 151.0, 163.5, 176.7, 190.5, 204.8, 0.0, 4.0, 6.6, 8.0, null, null, null, 11.9, 12.5, 13.2, 13.8, 14.3], [\"Coastal\", \"Farah\", 539.4, 46.7, 46.0, 45.3, 44.7, 44.0, 43.3, 42.7, 42.0, 64.7, 40.7, 40.0, 39.3, 0.0, -0.7, -0.7, -0.6, -0.7, -0.7, -0.6, -0.7, 22.7, -24.0, -0.7, -0.7]]}",
+          "width": 460,
+          "height": 300
+        },
+        "code": null,
+        "label": "Monthly sales"
+      },
+      {
+        "id": "sd_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          380
+        ],
+        "params": {
+          "text": "## Table sparklines\n\nA **sparkline** draws a row's numbers as a chart the size of a word,\nread *across the row*: `Trend spark from jan..dec`. Each table's rules\nare in **Properties ▸ Conditional formatting** — or press **Rules…** ▸\n**Add rule** ▸ **Sparkline**.\n\n* **Trends in their own columns** — `Trend` isn't a column, so the rule\n  makes one; `replace` puts it where the twelve months were. Rest on a\n  spark to read what it drew.\n* **Beside a value** — a spark next to a name like an icon: `right`, the\n  default `left`, and `below tall`.\n* **Own vs shared scale** — the same numbers, each row on its own scale\n  and all on one. Coastal is a small region: see where it sits.\n* **Row height** — `height 36` makes every row taller (bigger sparks);\n  `Total < 1000 => row …, height 44` only the rows a test picks.\n* Central has **two missing months**: the line breaks, it doesn't drop.\n* The **Report** page prints two of the tables.\n",
+          "width": 460,
+          "height": 380
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "sd_own",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          620,
+          0
+        ],
+        "params": {
+          "format_rules": "# Sparklines in columns of their own. None of these names are in the\n# table, so each rule makes its column (holding the row's latest number).\nTrend       spark area teal smooth last high green low red from jan..dec replace\nChange      spark bars negative red ref 0 from wk01..wk12\nUp/down     spark winloss from wk01..wk12\nhide wk*\nTotal       format ,.0f\n# Row height: every row a little taller, and the smallest region taller still\nheight 28\nTotal < 1000 => row #3a1e1e, height 44\n",
+          "hide": "",
+          "width": 900,
+          "height": 330,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Trends in their own columns"
+      },
+      {
+        "id": "sd_beside",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          620,
+          420
+        ],
+        "params": {
+          "format_rules": "# Sparklines beside a value, like an icon. These columns exist, so they\n# keep their value and the spark sits next to it.\nRegion      spark right from jan..dec\nTotal       spark bars green from jan..dec\nOwner       spark below tall thick ref mean last from jan..dec\nhide jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec, wk*\nTotal       format ,.0f\n",
+          "hide": "",
+          "width": 900,
+          "height": 420,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Beside a value"
+      },
+      {
+        "id": "sd_scales",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          620,
+          930
+        ],
+        "params": {
+          "format_rules": "# Own scale (the default) shows every row's shape as clearly as possible.\n# Shared puts all rows on one scale, so heights can be compared too.\nOwn scale     spark from jan..dec\nShared scale  spark shared from jan..dec\nDots          spark dots points from jan..dec\nSteps         spark step purple from jan..dec\nshow Region, Own scale, Shared scale, Dots, Steps\nOwn scale     width 160\nShared scale  width 160\n# taller rows, so the difference between the two scales is easy to see\nheight 36\n",
+          "hide": "",
+          "width": 900,
+          "height": 330,
+          "scale": 100
+        },
+        "code": null,
+        "label": "Own vs shared scale"
+      }
+    ],
+    "connections": [
+      {
+        "id": "sc1",
+        "src": [
+          "sd_data",
+          "table"
+        ],
+        "dst": [
+          "sd_own",
+          "table"
+        ]
+      },
+      {
+        "id": "sc2",
+        "src": [
+          "sd_data",
+          "table"
+        ],
+        "dst": [
+          "sd_beside",
+          "table"
+        ]
+      },
+      {
+        "id": "sc3",
+        "src": [
+          "sd_data",
+          "table"
+        ],
+        "dst": [
+          "sd_scales",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "sf",
+        "title": "Table sparklines",
+        "rect": [
+          -60,
+          -80,
+          1640,
+          1420
+        ],
+        "color": "#26415c"
+      }
+    ],
+    "pages": [
+      {
+        "id": "sp_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "st1",
+            "node": "sd_own",
+            "port": "table",
+            "rect": [
+              40,
+              40,
+              940,
+              380
+            ]
+          },
+          {
+            "id": "st2",
+            "node": "sd_beside",
+            "port": "table",
+            "rect": [
+              40,
+              440,
+              940,
+              420
+            ]
+          }
+        ]
+      },
+      {
+        "id": "sp_report",
+        "title": "Report",
+        "kind": "report",
+        "body": "# Sparklines on paper\n\nEach spark prints as a small picture, in colours darkened to read on white.\n\n![[Trends in their own columns]]\n\n## Beside a value\n\n![[Beside a value]]\n"
+      }
+    ]
+  }
+}
