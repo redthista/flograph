@@ -316,7 +316,7 @@ def _table_rule_keywords() -> tuple:
              + tuple(dict.fromkeys(sparkline.KINDS.values()))
              + ("first", "last", "high", "low", "points", "from", "ref",
                 "mean", "median", "negative", "shared", "smooth", "thick",
-                "tall", "replace")
+                "tall", "replace", "height")
              + tuple(sparkline.COLORS))
     return tuple(dict.fromkeys(words))
 

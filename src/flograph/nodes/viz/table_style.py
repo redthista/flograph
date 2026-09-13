@@ -24,6 +24,7 @@ revenue              width 160                  # a fixed column width
 region               align centre               # left / right / centre
 revenue              label "Revenue (£)"        # header text, data untouched
 wrap                                            # long text runs to more lines
+height 40                                       # every row 40px tall
 hide sla                                        # keep a helper column out of view
 show region, revenue, product                   # only these, in that order
 revenue              tooltip note               # rest on a cell, read a note

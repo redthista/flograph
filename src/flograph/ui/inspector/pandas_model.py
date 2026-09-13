@@ -12,7 +12,7 @@ import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QFont
 
-from ..table_delegate import BAR_ROLE, DECOR_ROLE, ICON_ROLE
+from ..table_delegate import BAR_ROLE, DECOR_ROLE, HEIGHT_ROLE, ICON_ROLE
 
 PAGE_SIZE = 500
 FLOAT_PRECISION = 6
@@ -36,6 +36,7 @@ _BACKGROUND = int(Qt.BackgroundRole)
 _FONT = int(Qt.FontRole)
 _ALIGNMENT = int(Qt.TextAlignmentRole)
 _TOOLTIP = int(Qt.ToolTipRole)
+_HEIGHT = HEIGHT_ROLE
 _HORIZONTAL = Qt.Horizontal
 _ALIGN_NUMBER = int(Qt.AlignRight | Qt.AlignVCenter)
 #: What an `align` rule asks for, as a Qt flag.
@@ -140,7 +141,11 @@ class PandasModel(QAbstractTableModel):
 
     def _set_rules(self, rules) -> None:
         from flograph.core.table_format import (
-            LAYOUT_MODES, column_layout, sort_order, wraps_text)
+            LAYOUT_MODES, column_layout, row_height_of, sort_order,
+            wraps_text)
+        # A `height` line is table-wide like `wrap`: one default row height,
+        # read once here and handed to the view.
+        self._row_height = row_height_of(rules)
         # Table-wide like `wrap`, and filtered out of `self._rules` with the
         # other layout modes — so it is read here or not at all.
         self._sort = sort_order(rules)
@@ -172,6 +177,9 @@ class PandasModel(QAbstractTableModel):
         self._grows = any(
             (r.glyph_where in DECOR_LINES)
             or (r.mode == "sparkline" and r.tall)
+            # a highlight's `height` makes the rows it picks taller, and
+            # only the delegate knows which rows those are
+            or bool(r.row_height)
             for r in self._rules)
         # A style is only honoured on a table small enough to walk per-cell.
         self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS
@@ -359,6 +367,8 @@ class PandasModel(QAbstractTableModel):
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
         role = int(role)
+        if role == _HEIGHT:
+            return self._height_at(index)
         # Bail before touching the frame: Qt asks for roles this model has
         # no opinion on, and `iat` is a real pandas lookup, not a free one.
         # `_value_roles` widens to include the format roles only when a
@@ -481,8 +491,24 @@ class PandasModel(QAbstractTableModel):
 
     def grows_rows(self) -> bool:
         """Does a rule make some rows taller — a mark `above` or `below`
-        the value, or a `tall` spark? Like `wraps_text`, for the view."""
+        the value, a `tall` spark, or a highlight's `height`? Like
+        `wraps_text`, for the view."""
         return self._grows and self._cf_active
+
+    def row_height(self) -> "int | None":
+        """How tall a `height` line asks every row to be, or None."""
+        return self._row_height
+
+    def _height_at(self, index) -> "int | None":
+        """How tall this cell's row should be: a highlight's `height` where
+        one matched, else the table's `height` line, else None."""
+        if not index.isValid():
+            return None
+        if self._cf_active:
+            style = self._cell_style(index.row(), self._src(index.column()))
+            if style is not None and style.row_height:
+                return style.row_height
+        return self._row_height
 
     def column_layout(self, section: int):
         """The `ColumnLayout` for a *visible* column, or None. Read by the

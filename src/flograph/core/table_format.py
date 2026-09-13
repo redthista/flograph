@@ -121,7 +121,19 @@ its tallest cell, so wrapping is a fact about the table::
     region    align centre
     revenue   label "Revenue (£)"                 # the header only
     wrap                                          # rows grow to fit
+    height    40                                  # every row 40px tall
     revenue   sort desc                           # the order it opens in
+
+A row can be made taller for the rows a test picks, too — ``height`` is a
+style word after ``=>``, on a cell rule or a ``row`` rule alike, because a
+row is one height across the table either way::
+
+    status = late => row #3a1e1e, height 40
+    score >= 90   => height 48
+
+A mark on a line of its own (``above`` / ``below``) or a ``tall`` spark
+still gets its room, so a row is never cut shorter than what it carries;
+a spark standing in a cell grows to fill the height it is given.
 
 ``sort`` is table-wide for the same reason: there is one row order, so it
 takes one column and a later `sort` line replaces an earlier one rather
@@ -254,12 +266,14 @@ _ICON_LABELS = {
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
-          "sort", "color_map", "auto_color", "tooltip", "sparkline"}
+          "sort", "color_map", "auto_color", "tooltip", "sparkline",
+          "row_height"}
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
 #: nothing on a big frame and are not what makes a style "active".
-LAYOUT_MODES = {"column_width", "align", "header_label", "wrap", "sort"}
+LAYOUT_MODES = {"column_width", "align", "header_label", "wrap", "sort",
+                "row_height"}
 
 _ALIGNMENTS = {"left": "left", "right": "right", "center": "center",
                "centre": "center", "middle": "center"}
@@ -275,6 +289,11 @@ _SORT_WORDS = {"asc": "asc", "ascending": "asc", "up": "asc", "a-z": "asc",
 #: of prose, narrow enough that a fat-fingered `width 5000` cannot push
 #: every other column off the card.
 MIN_RULE_WIDTH, MAX_RULE_WIDTH = 16, 1200
+
+#: Sanity bounds on a typed row height, in pixels. Low enough for a
+#: compact table of short numbers; high enough for a row that is mostly a
+#: sparkline, and no more than a screenful.
+MIN_ROW_HEIGHT, MAX_ROW_HEIGHT = 12, 600
 
 
 def scale_token(low, mid, high) -> str:
@@ -395,6 +414,9 @@ class Rule:
     #: sparkline: what becomes of the columns it reads — None (left alone),
     #: "hide", or "replace" (hidden, with the new column where they were)
     take_sources: Optional[str] = None
+    #: row_height: how tall every row is. highlight: how tall the rows it
+    #: matches are — `status = late => height 40`. Pixels on the card.
+    row_height: Optional[int] = None
 
     def to_dict(self) -> dict:
         out = {}
@@ -512,6 +534,9 @@ class CellStyle:
     #: read from another column. Not drawn, so it costs the cell nothing
     #: until somebody points at it.
     tooltip: Optional[str] = None
+    #: How tall this cell's row should be, from a highlight's `height`. A
+    #: row is as tall as the tallest any of its cells asks for.
+    row_height: Optional[int] = None
 
     def over(self, base: Optional["CellStyle"]) -> "CellStyle":
         """`self` laid on top of `base` — self's set fields win."""
@@ -540,6 +565,7 @@ class CellStyle:
             # one tooltip, and two rules naming a note column is a
             # replacement rather than something to concatenate
             tooltip=self.tooltip or base.tooltip,
+            row_height=self.row_height or base.row_height,
         )
 
     def at(self, where: str) -> list:
@@ -566,7 +592,8 @@ class CellStyle:
         return (self.bg is None and self.fg is None and not self.bold
                 and self.bar is None and not self.decorations
                 and self.pill is None and self.tooltip is None
-                and self.text is None and not self.hide_value)
+                and self.text is None and not self.hide_value
+                and self.row_height is None)
 
 
 @dataclass
@@ -950,7 +977,8 @@ def quote_column(name: str) -> str:
     name = str(name)
     if (any(ch in name for ch in ', "\'')
             or name.lower() in _KEYWORDS
-            or name.lower() in _LEADING_KEYWORDS):
+            or name.lower() in _LEADING_KEYWORDS
+            or name.lower() in _HEIGHT_WORDS):
         return '"' + name.replace('"', "") + '"'
     return name
 
@@ -1016,6 +1044,25 @@ _TIP_KEYWORDS = ("tooltip", "tip")
 
 #: `spark` is what people say; `sparkline` is what Excel calls it.
 _SPARK_KEYWORDS = ("spark", "sparkline")
+
+#: How a row height is spelled — on a line of its own for every row, or
+#: after `=>` for the rows a test picks. Not in `_KEYWORDS`: it never follows
+#: a column list, so the right-to-left scan has no business finding it.
+_HEIGHT_WORDS = ("height", "row-height", "rowheight")
+
+
+def _row_height(lineno: int, token: Any) -> int:
+    """`"40"` / `"40px"` as a row height in pixels, or a ValueError."""
+    text = str(token or "").strip().lower().removesuffix("px")
+    value = _spark.number(text)
+    if value is None:
+        raise ValueError(f"line {lineno}: 'height' wants a number of pixels, "
+                         f"got {token!r}")
+    height = int(round(value))
+    if not MIN_ROW_HEIGHT <= height <= MAX_ROW_HEIGHT:
+        raise ValueError(f"line {lineno}: a row {height}px tall is outside "
+                         f"{MIN_ROW_HEIGHT}–{MAX_ROW_HEIGHT} pixels")
+    return height
 
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "colormap",
              "colourmap", "format", "width", "align", "label", "sort"
@@ -1364,6 +1411,24 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
             raise ValueError(f"line {lineno}: {word!r} needs a column name")
         return Rule(word, cols)
 
+    if len(tokens) == 2 and tokens[0].lower() in _HEIGHT_WORDS:
+        # `height 40` — how tall every row is. Two tokens exactly, so a
+        # column genuinely called "height" (`height scale green`) is still a
+        # column.
+        return Rule("row_height", row_height=_row_height(lineno, tokens[1]))
+    if (len(tokens) >= 3 and tokens[-2].lower() in _HEIGHT_WORDS
+            and _spark.number(tokens[-1].lower().removesuffix("px"))
+            is not None
+            and not any(_keyword_of(t) for t in tokens[:-2])):
+        # `revenue height 40` reads as a column's and cannot be one: a row
+        # is one height across the whole table. Said, rather than applied
+        # to everything the way the line did not say.
+        raise ValueError(
+            f"line {lineno}: 'height' is how tall a *row* is, and a row is "
+            f"one height across the table — put 'height "
+            f"{tokens[-1]}' on a line of its own, or after '=>' for the rows "
+            f"that pass a test ('status = late => height {tokens[-1]}')")
+
     if any(t.lower() == "wrap" for t in tokens):
         # Deliberately not a per-column rule. A row is as tall as its
         # tallest cell, so "let this text wrap" is a fact about the table
@@ -1554,6 +1619,10 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
             # not the value. On its own it blanks the cell where the test
             # passes, which is the honest reading of it.
             out["hide_value"] = True
+        elif head in _HEIGHT_WORDS:
+            # the rows the test picks are this tall — on a cell rule the
+            # cell's row, on a `row` rule the same row; a row is one height
+            out["row_height"] = _row_height(lineno, rest)
         elif head == "icon" and rest:
             # One glyph placed by a condition — distinct from `icons` (a
             # graded set) and `iconmap` (a lookup). Without this there was
@@ -1588,10 +1657,10 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
                 f"line {lineno}: don't understand style {chunk!r} "
                 f"(use 'bg <colour>', 'fg <colour>', 'bold', 'row <colour>', "
                 f"'icon <glyph> [colour] [left|right|above|below|in]', "
-                f"'pill <colour> [\"text\"]', 'only')")
+                f"'pill <colour> [\"text\"]', 'only', 'height <pixels>')")
     if ("bg" not in out and "fg" not in out and "glyph" not in out
             and not out.get("bold") and not out.get("hide_value")
-            and not out.get("as_pill")):
+            and not out.get("as_pill") and not out.get("row_height")):
         raise ValueError(f"line {lineno}: no style after '=>'")
     if (out.get("glyph") or out.get("as_pill")) and out["scope"] == "row":
         # a row highlight paints every cell; a mark in every cell of the
@@ -1627,7 +1696,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                         glyph_color=style.get("glyph_color"),
                         glyph_where=style.get("glyph_where"),
                         as_pill=bool(style.get("as_pill")),
-                        hide_value=bool(style.get("hide_value")))
+                        hide_value=bool(style.get("hide_value")),
+                        row_height=style.get("row_height"))
     # split "column op value": the column is everything up to the operator
     op, value, column = _split_condition(cond)
     if not column:
@@ -1638,7 +1708,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                 glyph_color=style.get("glyph_color"),
                 glyph_where=style.get("glyph_where"),
                 as_pill=bool(style.get("as_pill")),
-                hide_value=bool(style.get("hide_value")))
+                hide_value=bool(style.get("hide_value")),
+                row_height=style.get("row_height"))
 
 
 def _split_condition(cond: str) -> tuple:
@@ -1760,17 +1831,18 @@ def rule_summary(rule: Rule) -> str:
         return f"{cols}  ·  data bar{by}{only}"
     if rule.mode == "highlight":
         where = "row" if rule.scope == "row" else "cell"
+        tall = f", {rule.row_height}px tall" if rule.row_height else ""
         if rule.glyph:
             test = f"{rule.source} " if rule.source else ""
             return (f"{cols}  ·  {rule.glyph} when {test}"
                     f"{_op_phrase(rule.op, rule.value)}" if rule.source else
                     f"{cols} {_op_phrase(rule.op, rule.value)}  ·  "
-                    f"{rule.glyph}{potted}{place}")
+                    f"{rule.glyph}{potted}{place}") + tall
         test = f"{rule.source} " if rule.source else ""
         return (f"{cols}  ·  highlight the {where} when {test}"
                 f"{_op_phrase(rule.op, rule.value)}" if rule.source else
                 f"{cols} {_op_phrase(rule.op, rule.value)}  ·  "
-                f"highlight the {where}")
+                f"highlight the {where}") + tall
     if rule.mode == "icons":
         rev = ", reversed" if rule.reverse else ""
         return (f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev})"
@@ -1811,6 +1883,8 @@ def rule_summary(rule: Rule) -> str:
         return f"{cols}  ·  headed “{rule.label}”"
     if rule.mode == "wrap":
         return "wrap text  ·  rows grow to fit"
+    if rule.mode == "row_height":
+        return f"every row  ·  {rule.row_height}px tall"
     if rule.mode == "sort":
         way = "Z–A" if rule.direction == "desc" else "A–Z"
         return f"{cols}  ·  sorted {way} to start with"
@@ -2258,6 +2332,8 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
             except Exception:
                 mask = pd.Series(False, index=decide.index)
             style = _highlight_style(rule)
+            if rule.row_height:
+                style.row_height = rule.row_height
             for i, hit in enumerate(mask.tolist()):
                 if hit:
                     contrib[i] = style
@@ -2628,7 +2704,8 @@ def evaluate_rows(df, row_rules) -> list:
             continue
         style = CellStyle(bg=rule.bg,
                           fg=rule.fg or (readable_fg(rule.bg) if rule.bg else None),
-                          bold=rule.bold, hide_value=rule.hide_value)
+                          bold=rule.bold, hide_value=rule.hide_value,
+                          row_height=rule.row_height)
         for i, hit in enumerate(mask.tolist()):
             if hit:
                 acc[i] = style.over(acc[i])
@@ -2650,6 +2727,16 @@ def wraps_text(rules) -> bool:
     """Does any rule ask for wrapped text? Table-wide by nature — see the
     `wrap` branch in the parser."""
     return any(getattr(r, "mode", None) == "wrap" for r in rules or [])
+
+
+def row_height_of(rules) -> "int | None":
+    """How tall a `height` line asks every row to be, in pixels, or None.
+    Last one wins, like `sort`: there is one default row height."""
+    found = None
+    for rule in rules or []:
+        if getattr(rule, "mode", None) == "row_height" and rule.row_height:
+            found = int(rule.row_height)
+    return found
 
 
 def sort_order(rules) -> "tuple[str, bool] | None":
@@ -2680,7 +2767,8 @@ def column_layout(rules, columns) -> dict:
     for rule in rules or []:
         # `wrap` and `sort` are layout rules about the *table*, not about a
         # column, so they have no ColumnLayout entry to fill in
-        if rule.mode not in LAYOUT_MODES or rule.mode in ("wrap", "sort"):
+        if rule.mode not in LAYOUT_MODES or rule.mode in ("wrap", "sort",
+                                                          "row_height"):
             continue
         for name in expand_columns(rule.columns, columns):
             entry = out.setdefault(name, ColumnLayout())

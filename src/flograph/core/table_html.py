@@ -35,7 +35,7 @@ from flograph.core.report import format_scalar
 from flograph.core.table_format import (CellStyle, column_layout,
                                         column_matches, column_stats,
                                         evaluate_column, evaluate_rows,
-                                        for_paper, sort_order,
+                                        for_paper, row_height_of, sort_order,
                                         spark_projection, split_rules,
                                         visible_columns)
 from flograph.core import sparkline
@@ -163,7 +163,14 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         head = (marker if index == 0 else "") + _escape(label)
         out.append(f"<th{align}{fixed}>{head}</th>")
     out.append("</tr></thead><tbody>")
+    table_height = row_height_of(rules)
     for row in range(len(shown)):
+        # Qt's rich text has no row height to set — `height` on a row or a
+        # cell, as an attribute or as CSS, is ignored — but it honours a
+        # cell's top and bottom padding. So a tall row is made of padding.
+        asked = _asked_height(row, columns, styles, table_height)
+        pad = (_row_padding(asked, row, columns, styles, font_pt)
+               if asked else None)
         out.append("<tr>")
         for column in columns:
             entry = layout.get(str(column))
@@ -172,7 +179,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                              numeric[column], track, stacked,
                              align=entry.align if entry else None,
                              value_width=value_widths.get(column),
-                             spark_room=rooms.get(column)))
+                             spark_room=rooms.get(column),
+                             pad=pad, row_height=asked))
         out.append("</tr>")
     out.append("</tbody></table>")
     if total > max_rows:
@@ -271,12 +279,64 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
 
 
 def _cell_text(value, style: "CellStyle | None",
-               spark_room: "dict | None" = None) -> str:
+               spark_room: "dict | None" = None,
+               row_height: "int | None" = None) -> str:
     """A cell's text as HTML: formatted, escaped and decorated."""
     text = _escape(_text(value, style))
     if style is not None:
-        text = _decorate(text, style, spark_room)
+        text = _decorate(text, style, spark_room, row_height)
     return text
+
+
+#: A report table cell's own top and bottom padding (REPORT_CSS), which a
+#: tall row's padding is never less than.
+CELL_PAD_Y = 3
+
+#: How much shorter than its row a spark on the value's line is drawn, so a
+#: grown line does not touch the rules above and below it.
+ROW_SPARK_INSET = 10
+
+
+def _asked_height(row, columns, styles, table_height) -> "int | None":
+    """How tall this row was asked to be: the tallest a highlight's `height`
+    asks of any of its cells, else the table's `height` line."""
+    heights = [style.row_height for style in
+               (styles.get((row, column)) for column in columns)
+               if style is not None and style.row_height]
+    return max(heights) if heights else table_height
+
+
+def _row_padding(asked: int, row, columns, styles, font_pt) -> float:
+    """Top and bottom padding that makes a row about `asked` tall.
+
+    The row's content is estimated rather than measured — a line of text at
+    the table's size, a stacked line for a mark above or below, a spark
+    grown to the row — and the padding is what is left, split in two. Never
+    less than the cell's own padding: a height shorter than the content is
+    as short as the content, on paper as on the card.
+    """
+    line = float(font_pt or 11.0) * 1.6
+    tallest = line
+    for column in columns:
+        style = styles.get((row, column))
+        if style is None:
+            continue
+        middle = line
+        for d in style.decorations:
+            if (getattr(d, "spark", None) is not None
+                    and d.where not in ("above", "below")):
+                middle = max(middle, asked - ROW_SPARK_INSET)
+        stacked = 0.0
+        for place in ("above", "below"):
+            marks = style.at(place)
+            if not marks:
+                continue
+            sparks = [d.spark for d in marks
+                      if getattr(d, "spark", None) is not None]
+            stacked += max([sparkline.PAPER_LINE_HEIGHT * (2 if s.tall else 1)
+                            for s in sparks] + [line])
+        tallest = max(tallest, middle + stacked)
+    return round(max(CELL_PAD_Y, (asked - tallest) / 2), 1)
 
 
 #: What Qt spends on a table cell beyond its content, per column, in the
@@ -413,13 +473,19 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
           track: int = BAR_TRACK, stacked: bool = False,
           align: "str | None" = None,
           value_width: "int | None" = None,
-          spark_room: "dict | None" = None) -> str:
-    """One `<td>`: the value, plus whatever the rules said about it."""
-    text = _cell_text(value, style, spark_room)
+          spark_room: "dict | None" = None,
+          pad: "float | None" = None,
+          row_height: "int | None" = None) -> str:
+    """One `<td>`: the value, plus whatever the rules said about it.
+    `pad` is the top and bottom padding that makes its row as tall as a
+    `height` asked; `row_height` is that height, which a spark grows into."""
+    text = _cell_text(value, style, spark_room, row_height)
     if style is not None and style.bar is not None:
         text = _bar(text, style, numeric, track, stacked, value_width)
         numeric = False       # the bar table fills the cell; don't re-align
     css = []
+    if pad is not None:
+        css.append(f"padding-top:{pad:g}px;padding-bottom:{pad:g}px")
     if style is not None:
         if style.bg:
             css.append(f"background-color:{style.bg}")
@@ -527,7 +593,8 @@ def _track(cells) -> str:
 _PILL_PAD = "1px 6px"
 
 
-def _spark_img(d, room: "dict | None" = None) -> str:
+def _spark_img(d, room: "dict | None" = None,
+               row_height: "int | None" = None) -> str:
     """A sparkline as a picture: an SVG in a `data:` address.
 
     A picture, where every other format on the page is text, because Qt's
@@ -552,6 +619,10 @@ def _spark_img(d, room: "dict | None" = None) -> str:
         width = sparkline.PAPER_ALONE
     height = ((sparkline.PAPER_LINE_HEIGHT if d.where in ("above", "below")
                else sparkline.PAPER_HEIGHT) * (2 if spark.tall else 1))
+    if row_height and d.where not in ("above", "below"):
+        # on the value's line a spark grows with a `height` — the same as on
+        # the card, where it is drawn into whatever height the row has
+        height = max(height, row_height - ROW_SPARK_INSET)
     uri = sparkline.data_uri(spark, width, height)
     if uri is None:
         return ""
@@ -559,10 +630,11 @@ def _spark_img(d, room: "dict | None" = None) -> str:
             f'style="vertical-align:middle" />')
 
 
-def _decor_span(d, spark_room: "dict | None" = None) -> str:
+def _decor_span(d, spark_room: "dict | None" = None,
+                row_height: "int | None" = None) -> str:
     """One decoration as an inline span."""
     if getattr(d, "spark", None) is not None:
-        return _spark_img(d, spark_room)
+        return _spark_img(d, spark_room, row_height)
     css = []
     if d.color:
         css.append(f"color:{d.color}")
@@ -584,7 +656,8 @@ def _in_a_pill(text: str, style: "CellStyle") -> str:
 
 
 def _decorate(text: str, style: "CellStyle",
-              spark_room: "dict | None" = None) -> str:
+              spark_room: "dict | None" = None,
+              row_height: "int | None" = None) -> str:
     """`text` with everything the rules hung on it, arranged as the card
     arranges it: a line above, the value between its side marks, a line
     below. `text` is already escaped; the spans added here are not.
@@ -597,7 +670,7 @@ def _decorate(text: str, style: "CellStyle",
         return text
 
     def span(d) -> str:
-        return _decor_span(d, spark_room)
+        return _decor_span(d, spark_room, row_height)
 
     inside = [span(d) for d in style.at("in")]
     if inside:

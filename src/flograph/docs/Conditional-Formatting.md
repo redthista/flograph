@@ -107,6 +107,38 @@ Layout rules travel the `style` port and print in reports like every other
 rule, so a table set up once looks the same on the canvas, on a dashboard
 page and in the PDF.
 
+## Row height
+
+Rows are as tall as a line of text unless a rule says otherwise. **`height`**
+says otherwise, in two places:
+
+```
+height 40                                  # every row 40px tall
+status = late    => row #3a1e1e, height 48 # the rows a test picks
+score  >= 90     => height 56              # a cell rule works too
+```
+
+On a line of its own it is **every row** — taller to give sparklines room,
+or shorter (`height 16`) for a compact table of numbers. After `=>` it is
+**the rows the test picks**, and it does not matter whether the rule
+highlights a cell or the whole row: a row is one height across the table,
+so either way the row grows. Where both apply, the picked rows take their
+own height. It is pixels on the card, from 12 to 600, and `40px` is read the
+same as `40`.
+
+Because a row is one height, **`revenue height 40` is not a rule** — it
+reads like a column's height and cannot be one, so it says so and points at
+the two spellings that work.
+
+A row is never cut shorter than what it carries: a mark placed `above` or
+`below` a value, or a `tall` sparkline, still gets its line. A **sparkline**
+standing in a cell, or beside a value, grows to fill the height it is given
+— which makes `height` the way to get bigger sparklines.
+
+On a **report page** the rows come out the same height. Qt's rich text has
+no row height to set, so each cell of a tall row is given the padding that
+makes it that tall; the text sits at the top of the extra room.
+
 ## Showing the format instead of the value
 
 Add **`only`** to a `scale`, `bar`, `icons` or `iconmap` rule and the cell

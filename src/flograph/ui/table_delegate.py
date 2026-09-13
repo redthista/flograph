@@ -44,6 +44,9 @@ ICON_ROLE = int(Qt.UserRole) + 2     # -> (glyph str, colour hex | None) | None
 #: cell may carry a mark on each side, a line above and below, and a
 #: lozenge around its value, all at once.
 DECOR_ROLE = int(Qt.UserRole) + 3
+#: -> the height this cell's row should be, in pixels, or None — a `height`
+#: line for every row, or a highlight's `height` for the rows it picks
+HEIGHT_ROLE = int(Qt.UserRole) + 4
 
 _ICON_CELL_W = 18
 _ICON_GAP = 4
@@ -164,21 +167,40 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         otherwise spend every row's height.
         """
         size = super().sizeHint(option, index)
+        wanted = index.data(HEIGHT_ROLE)
         decor = index.data(DECOR_ROLE)
-        if decor is None:
+        lines = 0
+        if decor is not None:
+            above, below = _stacked(decor[0])
+            lines = ((_units(above) if above else 0)
+                     + (_units(below) if below else 0)
+                     + (1 if _grows_the_row(decor[0]) else 0))
+        if not lines and not wanted:
             return size
-        above, below = _stacked(decor[0])
-        lines = ((_units(above) if above else 0)
-                 + (_units(below) if below else 0)
-                 + (1 if _grows_the_row(decor[0]) else 0))
-        if not lines:
-            return size
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        # measured with the *same* font paint() will use. A glyph falls
-        # back to an emoji face that is taller than the UI one, and
-        # reserving the shorter of the two clips the mark it reserved for.
-        return QSize(size.width(), size.height() + lines * _line_height(opt))
+        height = size.height()
+        if lines:
+            opt = QStyleOptionViewItem(option)
+            self.initStyleOption(opt, index)
+            # measured with the *same* font paint() will use. A glyph falls
+            # back to an emoji face that is taller than the UI one, and
+            # reserving the shorter of the two clips the mark it reserved for.
+            height += lines * _line_height(opt)
+        if wanted:
+            # The row is as tall as it was asked to be — shorter than the
+            # font's own height too, for a compact table. What it cannot be
+            # is shorter than a mark on a line of its own needs: cutting
+            # that off would be a rule quietly undoing another one.
+            #
+            # Less the grid line: a view sizing rows to their contents adds
+            # it on top of this (QTableView::sizeHintForRow), where a row
+            # at the default section size already includes it. Without
+            # this, `height 40` was 40 on one table and 41 on the next.
+            view = option.widget
+            grid = 1 if (view is not None and hasattr(view, "showGrid")
+                         and view.showGrid()) else 0
+            asked = int(wanted) - grid
+            height = max(asked, height) if lines else asked
+        return QSize(size.width(), height)
 
     # ------------------------------------------------------------ chips
 

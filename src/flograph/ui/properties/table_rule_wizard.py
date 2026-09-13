@@ -20,9 +20,10 @@ from PySide6.QtWidgets import (
 
 from flograph.core import sparkline as _sparkline
 from flograph.core.table_format import (
-    DEFAULT_PALETTE, MAX_RULE_WIDTH, MAX_SPARK_WIDTH, MIN_RULE_WIDTH,
-    MIN_SPARK_WIDTH, PALETTES, _is_glob, bar_token, fill_token,
-    parse_rule_lines, quote_column, rule_summary, scale_token,
+    DEFAULT_PALETTE, MAX_ROW_HEIGHT, MAX_RULE_WIDTH, MAX_SPARK_WIDTH,
+    MIN_ROW_HEIGHT, MIN_RULE_WIDTH, MIN_SPARK_WIDTH, PALETTES, _is_glob,
+    bar_token, fill_token, parse_rule_lines, quote_column, rule_summary,
+    scale_token,
 )
 from flograph.ui.emoji_font import apply_emoji_font, with_emoji
 
@@ -60,14 +61,15 @@ _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
           "Sparkline", "Highlight cells / rows", "Icons", "Number format",
           "Tooltip from another column", "Hide columns",
-          "Show only these columns", "Column layout", "Wrap text"]
+          "Show only these columns", "Column layout", "Wrap text",
+          "Row height"]
 
 #: The kind combo's index, by name. The stack's pages are added in this
 #: order and `_line` dispatches on it, so the number appears in three
 #: places at once — which is exactly the sort of thing that survives one
 #: insertion and quietly breaks on the next.
 (K_SCALE, K_AUTO, K_BAR, K_SPARK, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_TIP,
- K_HIDE, K_SHOW, K_LAYOUT, K_WRAP) = range(len(_KINDS))
+ K_HIDE, K_SHOW, K_LAYOUT, K_WRAP, K_HEIGHT) = range(len(_KINDS))
 
 _SPARK_KIND_CHOICES = [("Line", "line"), ("Area", "area"), ("Step", "step"),
                        ("Bars", "bars"), ("Win / loss", "winloss"),
@@ -98,7 +100,8 @@ _MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
               "icon_map": K_ICONS, "number_format": K_NUMBER,
               "tooltip": K_TIP, "hide": K_HIDE, "show": K_SHOW,
               "column_width": K_LAYOUT, "align": K_LAYOUT,
-              "header_label": K_LAYOUT, "wrap": K_WRAP}
+              "header_label": K_LAYOUT, "wrap": K_WRAP,
+              "row_height": K_HEIGHT}
 
 #: The palettes an auto colour can spend, newest-friendly names first.
 #: Taken from `PALETTES` rather than listed here, so a palette added to
@@ -318,6 +321,7 @@ class RuleBuilder(QDialog):
         self._build_show_page()
         self._build_layout_page()
         self._build_wrap_page()
+        self._build_height_page()
         outer.addWidget(self._stack)
 
         outer.addWidget(QLabel("Rule text:"))
@@ -788,6 +792,11 @@ class RuleBuilder(QDialog):
         f.addRow("Place", self._hl_place)
         f.addRow("Apply to", self._scope)
         f.addRow("", self._bold)
+        self._hl_height = self._height_spin("unchanged")
+        self._hl_height.setToolTip(
+            "Make the rows this test picks taller (or shorter). A row is one "
+            "height, so it applies to the whole row either way.")
+        f.addRow("Row height", self._hl_height)
         self._stack.addWidget(page)
 
     def _build_icons_page(self) -> None:
@@ -950,6 +959,37 @@ class RuleBuilder(QDialog):
         page.findChild(QLabel).setWordWrap(True)
         self._stack.addWidget(page)
 
+    def _height_spin(self, unset: "str | None" = None) -> QSpinBox:
+        """A row height in pixels. With `unset`, one step below the least
+        is that word — how a spin box says "leave it alone"."""
+        box = QSpinBox()
+        box.setRange(MIN_ROW_HEIGHT - (1 if unset else 0), MAX_ROW_HEIGHT)
+        if unset:
+            box.setSpecialValueText(unset)
+            box.setValue(MIN_ROW_HEIGHT - 1)
+        else:
+            box.setValue(40)
+        box.setSuffix(" px")
+        box.valueChanged.connect(self._refresh)
+        return box
+
+    def _build_height_page(self) -> None:
+        """How tall every row is. For only the rows a test picks, the
+        highlight page has a Row height of its own."""
+        page = QWidget()
+        f = QFormLayout(page)
+        self._height = self._height_spin()
+        f.addRow("Every row", self._height)
+        hint = QLabel(
+            "Every row this tall — taller to give sparklines room, or "
+            "shorter for a compact table.\n\nFor only the rows that pass a "
+            "test, use Highlight cells / rows and set its Row height.\n\n"
+            "A mark above or below a value, or a tall sparkline, still gets "
+            "the room it needs, so nothing is cut off.")
+        hint.setWordWrap(True)
+        f.addRow("", hint)
+        self._stack.addWidget(page)
+
     def _build_layout_page(self) -> None:
         """Width, alignment and header label.
 
@@ -1020,7 +1060,7 @@ class RuleBuilder(QDialog):
         self._stack.setCurrentIndex(idx)
         # `wrap` is the one rule that takes no columns — offering the picker
         # anyway would promise something the rule cannot keep
-        table_wide = idx == K_WRAP
+        table_wide = idx in (K_WRAP, K_HEIGHT)
         self._col_list.setEnabled(not table_wide)
         self._col_edit.setEnabled(not table_wide)
         if idx == K_ICONS:
@@ -1107,6 +1147,7 @@ class RuleBuilder(QDialog):
                 self._val1.setText(str(value))
             self._fill.set_value(fill_token(rule.bg))
             self._bold.setChecked(bool(rule.bold))
+            self._hl_height.setValue(rule.row_height or MIN_ROW_HEIGHT - 1)
             self._scope.setCurrentIndex(1 if rule.scope == "row" else 0)
             self._set_other_col(self._hl_test, rule.source)
         elif rule.mode == "icons":
@@ -1131,6 +1172,8 @@ class RuleBuilder(QDialog):
             self._sync_icon_style()
         elif rule.mode == "number_format":
             self._numfmt.setCurrentText(rule.number_spec or "")
+        elif rule.mode == "row_height":
+            self._height.setValue(rule.row_height or 40)
         elif rule.mode == "column_width":
             _pick_data(self._layout_prop, "width")
             self._layout_width.setValue(rule.width or MIN_RULE_WIDTH - 1)
@@ -1166,6 +1209,8 @@ class RuleBuilder(QDialog):
             return f"show {cols}" if cols else ""
         if kind == K_WRAP:
             return "wrap"          # table-wide: it names no columns
+        if kind == K_HEIGHT:
+            return f"height {self._height.value()}"   # table-wide too
         if not cols:
             return ""
         if kind == K_SCALE:
@@ -1204,8 +1249,10 @@ class RuleBuilder(QDialog):
                     return ""
                 cond = f"{subject} {words[op]} {value}"
             fill = self._fill.value() or "grey"
+            asked = self._hl_height.value()
+            tall = f", height {asked}" if asked >= MIN_ROW_HEIGHT else ""
             if self._scope.currentIndex() == 1:
-                return f"{cond} => row {fill}"
+                return f"{cond} => row {fill}{tall}"
             if self._hl_pill.isChecked():
                 badge = self._hl_badge.text().strip()
                 label = f' "{badge}"' if badge else ""
@@ -1213,7 +1260,7 @@ class RuleBuilder(QDialog):
             else:
                 tail = f"bg {fill}"
             tail += ", bold" if self._bold.isChecked() else ""
-            return f"{cond} => {tail}"
+            return f"{cond} => {tail}{tall}"
         if kind == K_ICONS:
             decider = _other_col_value(self._icon_by)
             if self._icon_style.currentData() == "map":

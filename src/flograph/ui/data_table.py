@@ -320,10 +320,21 @@ class DataTableView(QTableView):
         self._points_in_force = points or font.pointSizeF()
 
         # A `wrap` rule sizes each row to its own content and must keep
-        # doing that; every other table gets the tight height for this font.
+        # doing that; every other table gets the tight height for this font
+        # — or the height a `height` line asked for, which may be tighter
+        # still (a compact table), so the header's own minimum is lowered to
+        # let it.
+        model = self.model()
+        asked = (getattr(model, "row_height", lambda: None)()
+                 if model is not None else None)
+        header = self.verticalHeader()
+        if asked:
+            header.setMinimumSectionSize(min(header.minimumSectionSize(),
+                                             int(asked)))
         if not self._wraps:
-            self.verticalHeader().setDefaultSectionSize(
-                QFontMetrics(font).height() + ROW_PADDING)
+            header.setDefaultSectionSize(
+                int(asked) if asked
+                else QFontMetrics(font).height() + ROW_PADDING)
         if refit and self.model() is not None \
                 and self.model().columnCount() > 0:
             self.fit_columns_to_data()

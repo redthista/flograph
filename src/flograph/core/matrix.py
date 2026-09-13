@@ -53,7 +53,8 @@ _AGG_FUNCS = {"distinct count": "nunique"}
 #: modes measured against the spread of values — pooled across a matrix
 _MEASURED = ("color_scale", "data_bar", "icons")
 #: rules that shape the table rather than paint a cell
-_LAYOUT = ("column_width", "align", "header_label", "wrap", "sort")
+_LAYOUT = ("column_width", "align", "header_label", "wrap", "sort",
+           "row_height")
 #: what a highlight's helper holds for a cell one of its rows passed
 _YES = "yes"
 
