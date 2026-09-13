@@ -144,6 +144,9 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     # way they shape the card — a report that reads differently from the
     # dashboard it came off is what this whole path exists to avoid
     layout = column_layout(rules, columns)
+    # how wide each column's sparks may be, from the room the table has
+    rooms = _spark_rooms(shown, columns, styles, width, font_pt, text_width,
+                         layout)
 
     size = f' width="{int(width)}"' if width else ""
     text_size = f' style="font-size:{font_pt:g}pt"' if font_pt else ""
@@ -168,7 +171,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                              styles.get((row, column)),
                              numeric[column], track, stacked,
                              align=entry.align if entry else None,
-                             value_width=value_widths.get(column)))
+                             value_width=value_widths.get(column),
+                             spark_room=rooms.get(column)))
         out.append("</tr>")
     out.append("</tbody></table>")
     if total > max_rows:
@@ -266,12 +270,104 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
     return final
 
 
-def _cell_text(value, style: "CellStyle | None") -> str:
+def _cell_text(value, style: "CellStyle | None",
+               spark_room: "dict | None" = None) -> str:
     """A cell's text as HTML: formatted, escaped and decorated."""
     text = _escape(_text(value, style))
     if style is not None:
-        text = _decorate(text, style)
+        text = _decorate(text, style, spark_room)
     return text
+
+
+#: What Qt spends on a table cell beyond its content, per column, in the
+#: document's units: the report's `padding: 3px 7px`, the 1px rule between
+#: columns, and a little rounding.
+CELL_ROOM = 16
+
+#: Between a spark and the value beside it — the gap, and the space the
+#: two are joined with.
+SPARK_GAP = 12
+
+#: The share of a table's spare width handed to its sparks. Not all of it:
+#: the text is measured in a font that is near the page's rather than
+#: exactly it, and a table promised a hair more than it has is one Qt
+#: squeezes by breaking words ("Nort / h") — far worse than a spark a few
+#: points shorter than it could have been.
+SPARK_SHARE = 0.9
+
+#: Headers set bold, which is wider than the regular text they are
+#: measured in.
+BOLD_WIDER = 1.15
+
+
+def _spark_rooms(shown, columns, styles, width, font_pt, text_width,
+                 layout) -> dict:
+    """column -> {"beside": width, "alone": width} for its sparks, on paper.
+
+    A spark on the card is drawn into the cell it has; on paper it is a
+    picture of a stated size, and a fixed size left a wide column mostly
+    empty round a small line. So the room is worked out from the table:
+
+    * a column with no spark keeps what its widest text needs (or what a
+      `width` rule gives it) and no more;
+    * what the table has left is shared between the columns that draw a
+      spark;
+    * a spark **beside** a value gets its column's share less the widest
+      value in the column — one width for the whole column, so the sparks
+      in it line up; one standing **alone** (in place of the value, above
+      or below it) gets the whole share.
+
+    Empty without a table width to share out, and then every spark takes
+    the fixed defaults. The text is measured with `text_width` when the
+    renderer supplies it and estimated from its length when it does not.
+    """
+    if not width or shown is None or not len(shown):
+        return {}
+
+    def has_spark(column) -> bool:
+        return any(getattr(d, "spark", None) is not None
+                   for row in range(len(shown))
+                   for d in getattr(styles.get((row, column)),
+                                    "decorations", ()) or ())
+
+    sparked = [c for c in columns if has_spark(c)]
+    if not sparked:
+        return {}
+    size = float(font_pt or 11.0)
+
+    def measure(text: str) -> float:
+        if not text:
+            return 0.0
+        got = text_width(text, font_pt) if text_width is not None else None
+        return float(got) if got else len(text) * size * 0.55
+
+    widest: dict = {}
+    natural: dict = {}
+    for column in columns:
+        entry = layout.get(str(column))
+        label = entry.label if entry and entry.label else str(column)
+        values = max((measure(_text(shown[column].iloc[row],
+                                    styles.get((row, column))))
+                      for row in range(len(shown))), default=0.0)
+        widest[column] = values
+        natural[column] = (float(entry.width) if entry and entry.width
+                           else max(measure(label) * BOLD_WIDER, values))
+
+    taken = sum(natural[c] + CELL_ROOM for c in columns if c not in sparked)
+    share = ((float(width) - taken) * SPARK_SHARE / len(sparked)
+             - CELL_ROOM)
+
+    def fit(room: float) -> float:
+        return round(max(sparkline.PAPER_MIN_WIDTH,
+                         min(sparkline.PAPER_MAX_WIDTH, room)), 1)
+
+    rooms = {}
+    for column in sparked:
+        entry = layout.get(str(column))
+        budget = float(entry.width) if entry and entry.width else share
+        rooms[column] = {"beside": fit(budget - widest[column] - SPARK_GAP),
+                         "alone": fit(budget)}
+    return rooms
 
 
 def _value_widths(shown, columns, styles, font_pt, text_width) -> dict:
@@ -316,9 +412,10 @@ def _set_width(html: str, font_pt, text_width) -> float:
 def _cell(value, style: "CellStyle | None", numeric: bool,
           track: int = BAR_TRACK, stacked: bool = False,
           align: "str | None" = None,
-          value_width: "int | None" = None) -> str:
+          value_width: "int | None" = None,
+          spark_room: "dict | None" = None) -> str:
     """One `<td>`: the value, plus whatever the rules said about it."""
-    text = _cell_text(value, style)
+    text = _cell_text(value, style, spark_room)
     if style is not None and style.bar is not None:
         text = _bar(text, style, numeric, track, stacked, value_width)
         numeric = False       # the bar table fills the cell; don't re-align
@@ -430,7 +527,7 @@ def _track(cells) -> str:
 _PILL_PAD = "1px 6px"
 
 
-def _spark_img(d) -> str:
+def _spark_img(d, room: "dict | None" = None) -> str:
     """A sparkline as a picture: an SVG in a `data:` address.
 
     A picture, where every other format on the page is text, because Qt's
@@ -438,15 +535,23 @@ def _spark_img(d) -> str:
     needs no file beside it — it works as it is in a browser and in an
     exported page, and a report swaps it for a token round the markdown
     pass that would otherwise drop it (see ui/report/render.py).
+
+    `room` is what its column can spare (see `_spark_rooms`); a width the
+    rule named outright wins over it, and with neither the spark takes the
+    fixed defaults.
     """
     spark = d.spark
+    beside = d.where in ("left", "right")
     if spark.width:
         width = spark.width * 0.75           # card pixels, as points
-    elif d.where in ("left", "right"):
+    elif room:
+        width = room["beside" if beside else "alone"]
+    elif beside:
         width = sparkline.PAPER_BESIDE
     else:
         width = sparkline.PAPER_ALONE
-    height = sparkline.PAPER_HEIGHT * (2 if spark.tall else 1)
+    height = ((sparkline.PAPER_LINE_HEIGHT if d.where in ("above", "below")
+               else sparkline.PAPER_HEIGHT) * (2 if spark.tall else 1))
     uri = sparkline.data_uri(spark, width, height)
     if uri is None:
         return ""
@@ -454,10 +559,10 @@ def _spark_img(d) -> str:
             f'style="vertical-align:middle" />')
 
 
-def _decor_span(d) -> str:
+def _decor_span(d, spark_room: "dict | None" = None) -> str:
     """One decoration as an inline span."""
     if getattr(d, "spark", None) is not None:
-        return _spark_img(d)
+        return _spark_img(d, spark_room)
     css = []
     if d.color:
         css.append(f"color:{d.color}")
@@ -478,7 +583,8 @@ def _in_a_pill(text: str, style: "CellStyle") -> str:
     return f'<span style="{";".join(css)}">{text}</span>'
 
 
-def _decorate(text: str, style: "CellStyle") -> str:
+def _decorate(text: str, style: "CellStyle",
+              spark_room: "dict | None" = None) -> str:
     """`text` with everything the rules hung on it, arranged as the card
     arranges it: a line above, the value between its side marks, a line
     below. `text` is already escaped; the spans added here are not.
@@ -489,17 +595,21 @@ def _decorate(text: str, style: "CellStyle") -> str:
     """
     if not style.decorations and not style.pill:
         return text
-    inside = [_decor_span(d) for d in style.at("in")]
+
+    def span(d) -> str:
+        return _decor_span(d, spark_room)
+
+    inside = [span(d) for d in style.at("in")]
     if inside:
         middle = " ".join(inside)     # `only` / `in` — instead of the value
     else:
-        parts = ([_decor_span(d) for d in style.at("left")]
+        parts = ([span(d) for d in style.at("left")]
                  + ([_in_a_pill(text, style)] if text or style.pill else [])
-                 + [_decor_span(d) for d in style.at("right")])
+                 + [span(d) for d in style.at("right")])
         middle = " ".join(p for p in parts if p)
-    lines = [" ".join(_decor_span(d) for d in style.at("above")),
+    lines = [" ".join(span(d) for d in style.at("above")),
              middle,
-             " ".join(_decor_span(d) for d in style.at("below"))]
+             " ".join(span(d) for d in style.at("below"))]
     # `<br />`, never a bare `<br>`: Qt's markdown reader, which a report
     # page goes through, throws away the *whole* table a bare `<br>` sits in
     # — no error, the table is simply not on the page. The self-closing

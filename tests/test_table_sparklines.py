@@ -297,6 +297,99 @@ class TestOnPaper:
         assert html.count("data:image/svg+xml;base64,") == 2   # 2 drawable rows
         assert ">trend</th>" in html
 
+    @staticmethod
+    def widths(html):
+        import re
+        return [float(w) for w in re.findall(
+            r'<img src="data:image/svg\+xml;base64,[^"]*" width="([\d.]+)"',
+            html)]
+
+    def test_without_a_table_width_the_fixed_sizes(self):
+        html = frame_to_html(MONTHS, parse_rules(
+            "region spark right from jan..apr"))
+        assert set(self.widths(html)) == {sp.PAPER_BESIDE}
+
+    def test_a_wide_table_gives_a_spark_its_columns_room(self):
+        html = frame_to_html(MONTHS, parse_rules(
+            "region spark right from jan..apr\nhide jan, feb, mar, apr"),
+            width=500)
+        widths = self.widths(html)
+        assert min(widths) > sp.PAPER_BESIDE * 2
+        assert len(set(widths)) == 1          # one width: they line up
+
+    def test_beside_a_value_leaves_the_value_its_room(self):
+        # narrow enough that neither reaches PAPER_MAX_WIDTH, which would
+        # make the two the same width for a reason that isn't the value.
+        # The hidden columns go in the way a report hands them over — a
+        # `hide` line in the rules is the style port's business, not this
+        # builder's, and months left showing would squeeze both to the least.
+        months = ["jan", "feb", "mar", "apr"]
+        beside = self.widths(frame_to_html(
+            MONTHS, parse_rules("region spark right from jan..apr"),
+            hidden=months, width=200))
+        alone = self.widths(frame_to_html(
+            MONTHS, parse_rules("trend spark from jan..apr"),
+            hidden=months + ["region"], width=200))
+        assert sp.PAPER_MIN_WIDTH < beside[0] < alone[0] < sp.PAPER_MAX_WIDTH
+
+    def test_a_narrow_table_still_draws_a_readable_spark(self):
+        html = frame_to_html(MONTHS, parse_rules(
+            "region spark right from jan..apr"), width=120)
+        assert min(self.widths(html)) >= sp.PAPER_MIN_WIDTH
+
+    def test_it_never_grows_past_the_most(self):
+        html = frame_to_html(MONTHS, parse_rules(
+            "trend spark from jan..apr\nhide jan, feb, mar, apr, region"),
+            width=2000)
+        assert max(self.widths(html)) <= sp.PAPER_MAX_WIDTH
+
+    def test_a_named_width_wins(self):
+        html = frame_to_html(MONTHS, parse_rules(
+            "region spark 40px right from jan..apr"), width=500)
+        assert set(self.widths(html)) == {30.0}
+
+    @pytest.mark.usefixtures("qapp")
+    @pytest.mark.parametrize("rules", [
+        # text columns beside three sparks standing alone
+        ("owner spark from jan..apr\nchange spark bars from jan..apr\n"
+         "moves spark winloss from jan..apr\n"
+         "hide jan, feb, mar, apr"),
+        # sparks beside the values of every column
+        ("region spark right from jan..apr\n"
+         "label spark from jan..apr\nhide jan, feb, mar, apr"),
+    ])
+    def test_the_room_given_to_sparks_never_breaks_a_word(self, rules):
+        """Promising the sparks a hair more than the table has makes Qt
+        squeeze the text columns by breaking words: "Regio / n",
+        "Centr / al". Every text line of the page must still be one line."""
+        import re
+
+        from flograph.core import Graph, NodeRegistry
+        from flograph.engine.cache import OutputCache
+        from flograph.ui.report.render import render_report
+
+        frame = MONTHS.assign(region=["Northumberland", "Southampton",
+                                      "East Anglia"],
+                              label=["Central region", "Coastal", "West"])
+        registry = NodeRegistry()
+        registry.load_builtins()
+        graph, cache = Graph(), OutputCache()
+        node = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        graph.set_label(node.id, "Sales")
+        cache.set(node.id, {"table": frame,
+                            "style": style_payload({"format_rules": rules})},
+                  0.0)
+        document = render_report("![[Sales]]", graph, cache).document
+        width = re.search(r'<table[^>]*width="(\d+)"', document.toHtml())
+        document.setTextWidth(float(width.group(1)) if width else 500.0)
+        broken = []
+        block = document.begin()
+        while block.isValid():
+            if block.text().strip() and block.layout().lineCount() > 1:
+                broken.append(block.text())
+            block = block.next()
+        assert broken == []
+
     def test_replace_takes_the_months_off_the_page(self):
         html = frame_to_html(
             MONTHS, parse_rules("trend spark from jan..apr replace"))
@@ -381,7 +474,28 @@ class TestOnTheCard:
         _view, image, cell = self.grab(
             qtbot, "region spark from jan..apr", 0, width=200)
         xs = self.ink(image, cell)
-        assert xs and max(xs) < cell.left() + cell.width() * 0.5
+        assert xs and min(xs) < cell.left() + cell.width() * 0.2
+
+    def test_a_spark_beside_a_value_grows_into_a_wide_cell(self, qtbot):
+        """A fixed 64px left most of a wide cell empty round a stub."""
+        _view, image, cell = self.grab(
+            qtbot, "region spark right from jan..apr", 0, width=400)
+        xs = self.ink(image, cell)
+        assert xs and max(xs) - min(xs) > 64 + 100
+
+    def test_the_value_keeps_its_room_beside_a_grown_spark(self, qtbot):
+        from PySide6.QtGui import QFontMetrics
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        view, _image, _cell = self.grab(
+            qtbot, "region spark right from jan..apr", 0, width=400)
+        index = view.model().index(0, 0)
+        option = QStyleOptionViewItem()
+        option.rect = view.visualRect(index)
+        option.font = view.font()
+        option.widget = view
+        area = view.itemDelegate(index).value_area(option, index)
+        assert area.width() >= QFontMetrics(view.font()).horizontalAdvance(
+            "North")
 
     def test_a_tall_spark_makes_its_row_taller(self, qtbot):
         from flograph.ui.table_delegate import ConditionalFormatDelegate

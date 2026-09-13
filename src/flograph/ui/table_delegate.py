@@ -67,8 +67,14 @@ def _line_height(opt) -> int:
     return QFontMetrics(with_emoji(opt.font)).height()
 
 
-#: How wide a sparkline beside a value is when its rule named no width.
+#: How wide a sparkline beside a value is when its rule named no width —
+#: the least it gets; a wider cell gives it what the value leaves over,
+#: up to the most.
 _SPARK_BESIDE_W = 64
+_SPARK_BESIDE_MAX_W = 240
+#: Kept clear beside the value's text, so a spark grown into the spare room
+#: never sits hard against the last letter.
+_TEXT_SLACK = 8
 #: Breathing room above and below a spark, so a line through its high
 #: point does not touch the grid line of the row above.
 _SPARK_PAD_Y = 2
@@ -187,9 +193,38 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # and drawText clips to its rect, so measure rather than assume
         return max(_ICON_CELL_W, advance)
 
-    def _draw_chip(self, painter, x, band, d, metrics, pen) -> int:
+    def _side_widths(self, opt, band_width, decorations, metrics, text,
+                     pill) -> dict:
+        """id(decoration) -> the width each mark beside the value takes.
+
+        Every mark takes its own fixed width, except a spark nobody gave a
+        width: those share whatever the cell has left once the other marks
+        and the value's own text are paid for — never less than the default
+        and never more than the most. So a spark in a column that ended up
+        wide (a long header, a dragged edge) fills it rather than sitting as
+        a stub at one end of an empty cell.
+        """
+        side = [d for d in decorations if d.where in ("left", "right")]
+        widths = {id(d): self._chip_width(metrics, d) for d in side}
+        flexible = [d for d in side
+                    if _spark(d) is not None and not _spark(d).width]
+        if not flexible:
+            return widths
+        grown = {id(d) for d in flexible}
+        taken = (sum(w for key, w in widths.items() if key not in grown)
+                 + _ICON_GAP * len(side))
+        words = (QFontMetrics(opt.font).horizontalAdvance(text) if text
+                 else 0) + _TEXT_SLACK + (2 * _PILL_PAD_X if pill else 0)
+        each = (band_width - taken - words) // len(flexible)
+        each = max(_SPARK_BESIDE_W, min(_SPARK_BESIDE_MAX_W, each))
+        for d in flexible:
+            widths[id(d)] = each
+        return widths
+
+    def _draw_chip(self, painter, x, band, d, metrics, pen,
+                   width: "int | None" = None) -> int:
         """One decoration at `x` within `band`. Returns the width used."""
-        width = self._chip_width(metrics, d)
+        width = width or self._chip_width(metrics, d)
         if _spark(d) is not None:
             paint_spark(painter, QRect(x, band.top(), width, band.height()),
                         _spark(d))
@@ -231,10 +266,12 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
 
     # --------------------------------------------------------- the value
 
-    def _value_band(self, opt, decorations, metrics) -> QRect:
+    def _value_band(self, opt, decorations, metrics, text: str = "",
+                    pill=None) -> QRect:
         """The room left for the value once the decorations have taken
         theirs — a line above or below costs height, a mark to either side
-        costs width."""
+        costs width. `text` is the value, which a spark beside it grows
+        round (see `_side_widths`)."""
         inner = opt.rect.adjusted(3, 2, -3, -2)
         above, below = _stacked(decorations)
         line_h = metrics.height()
@@ -245,9 +282,11 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
             band.setBottom(band.bottom() - line_h * _units(below))
         # each chip costs its own width and the gap after it, which is
         # exactly the step paint() walks below
-        left = sum(self._chip_width(metrics, d) + _ICON_GAP
+        widths = self._side_widths(opt, band.width(), decorations, metrics,
+                                   text, pill)
+        left = sum(widths[id(d)] + _ICON_GAP
                    for d in decorations if d.where == "left")
-        right = sum(self._chip_width(metrics, d) + _ICON_GAP
+        right = sum(widths[id(d)] + _ICON_GAP
                     for d in decorations if d.where == "right")
         x, end = band.left() + left, band.right() - right
         return QRect(x, band.top(), max(0, end - x), band.height())
@@ -283,8 +322,11 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
                                        opt.widget) + 1
             rect = rect.adjusted(margin, 0, -margin, 0)
         else:
+            shown = index.data(Qt.DisplayRole)
             rect = self._value_band(opt, decorations,
-                                    QFontMetrics(with_emoji(opt.font)))
+                                    QFontMetrics(with_emoji(opt.font)),
+                                    "" if shown is None else str(shown),
+                                    pill)
         if pill:
             # a lozenge pays for its own padding out of the value's room
             rect = rect.adjusted(_PILL_PAD_X, 0, -_PILL_PAD_X, 0)
@@ -348,14 +390,19 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         inside = [d for d in decorations if d.where == "in"]
         pen = glyph_pen or text_pen
 
+        # one set of widths for the walk below and for the value's band, so
+        # a spark grown into spare room and the text beside it cannot overlap
+        widths = self._side_widths(opt, band.width(), decorations, metrics,
+                                   text, pill)
         x = band.left()
         for d in left:
-            x += self._draw_chip(painter, x, band, d, metrics, pen) + _ICON_GAP
+            x += self._draw_chip(painter, x, band, d, metrics, pen,
+                                 widths[id(d)]) + _ICON_GAP
         end = band.right()
         for d in reversed(right):
-            width = self._chip_width(metrics, d)
+            width = widths[id(d)]
             end -= width
-            self._draw_chip(painter, end, band, d, metrics, pen)
+            self._draw_chip(painter, end, band, d, metrics, pen, width)
             end -= _ICON_GAP
 
         # what is left between the two margins belongs to the value —
@@ -365,7 +412,7 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # exact failure the decoration list exists to prevent.
         # the same arithmetic the chips were just walked by, from the
         # one method that owns it
-        middle = self._value_band(opt, decorations, metrics)
+        middle = self._value_band(opt, decorations, metrics, text, pill)
         if inside:
             self._draw_line(painter, middle, inside, metrics, pen)
         else:

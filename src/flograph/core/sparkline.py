@@ -79,12 +79,21 @@ COLORS = {
 #: How wide a spark standing *beside* a value is on the card, in pixels.
 #: One placed above, below or in place of the value takes the cell's width.
 BESIDE_WIDTH = 64
-#: How wide a spark is on paper, in points — beside a value, and standing
-#: on its own (in place of the value, or on a line above or below it).
+#: How wide a spark is on paper, in points, when nothing says how wide the
+#: table is — beside a value, and standing on its own (in place of the
+#: value, or on a line above or below it). A report always says, and then
+#: a spark takes the room its column has instead (table_html._spark_rooms).
 PAPER_BESIDE = 48
 PAPER_ALONE = 72
-#: How tall, in points, on paper. `tall` doubles it.
-PAPER_HEIGHT = 12
+#: The narrowest a spark is squeezed to on paper, and the widest it grows
+#: to. Past the ceiling a line of twelve months stops reading as a word and
+#: starts reading as a chart that forgot its axes.
+PAPER_MIN_WIDTH = 28
+PAPER_MAX_WIDTH = 200
+#: How tall, in points, on paper: about a line of the report's text beside
+#: a value, a little more on a line of its own. `tall` doubles either.
+PAPER_HEIGHT = 13
+PAPER_LINE_HEIGHT = 16
 
 #: A row needs this many numbers before it is a line.
 MIN_POINTS = 2
