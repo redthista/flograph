@@ -67,11 +67,12 @@ class TestBundledExamples:
             "26_drawn_in_python.flograph",
             "27_a_story_that_scrolls.flograph",
             "28_slicer_layouts.flograph",
+            "29_model_canvases.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 28
+        assert len(window._examples_menu.actions()) == 29
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -101,6 +102,7 @@ class TestBundledExamples:
         # Story node sealing them into iframes adds nothing to fetch.
         "27_a_story_that_scrolls.flograph",
         "28_slicer_layouts.flograph",
+        "29_model_canvases.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from
@@ -1817,3 +1819,34 @@ class TestStorageTreemap:
         assert page.kind == "dashboard"
         assert [t.node_id for t in page.tiles.values()] == [
             "n5_tree", "n6_total", "n7_count"]
+
+
+class TestModelCanvasesTemplate:
+    """29: both kinds of canvas tab — a frame turned into a model canvas, and
+    a frame given a tab of its own."""
+
+    def test_the_box_stands_for_a_canvas_of_its_own(self, window):
+        window._open_example(template_path("29_model_canvases.flograph"))
+        graph = window.graph
+        box = graph.frames["f29_clean"]
+        assert graph.pages[box.own_canvas].kind == "canvas"
+        assert [(p.name, p.side) for p in box.ports] == [
+            ("orders", "input"), ("paid orders", "output")]
+        inside = {n.id for n in graph.nodes.values()
+                  if n.canvas == box.own_canvas}
+        assert inside == {"m29_paid", "m29_sort", "m29_inside"}
+
+    def test_the_summaries_frame_has_a_tab_of_its_own(self, window):
+        window._open_example(template_path("29_model_canvases.flograph"))
+        tabs = [page for page in window.graph.pages.values()
+                if page.frame == "f29_summaries"]
+        assert len(tabs) == 1 and tabs[0].kind == "canvas"
+
+    def test_the_wires_through_the_box_carry_the_paid_orders(
+            self, qtbot, window):
+        window._open_example(template_path("29_model_canvases.flograph"))
+        assert wait_run(qtbot, window.engine)
+        totals = window.engine.cache.get("m29_by_region").outputs[
+            "aggregated"]
+        # the three refunded orders never reach the summary
+        assert float(totals["revenue"].sum()) == 3370.0
