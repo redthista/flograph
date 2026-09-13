@@ -394,6 +394,97 @@ class TestEtlNodes:
                         "on_error": "set missing"}, table=t)
         assert out["n"].isna().iloc[1]
 
+    def test_convert_types_european_numbers(self, registry):
+        t = pd.DataFrame({"n": ["1.234,56", "7"]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "n", "to": "float",
+                        "decimal": ",", "thousands": "."}, table=t)
+        assert out["n"].tolist() == [1234.56, 7.0]
+
+    def test_convert_types_currency_percent(self, registry):
+        t = pd.DataFrame({"n": ["$1,234.56", "45%"]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "n", "to": "float", "thousands": ",",
+                        "strip_symbols": "$", "percent": True}, table=t)
+        assert out["n"].tolist() == [1234.56, 0.45]
+
+    def test_convert_types_brackets_int(self, registry):
+        t = pd.DataFrame({"n": ["(123)", "45"]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "n", "to": "int",
+                        "accounting": True}, table=t)
+        assert out["n"].tolist() == [-123, 45]
+
+    def test_convert_types_date_presets(self, registry):
+        t = pd.DataFrame({"d": ["15/03/2024"]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "d", "to": "datetime",
+                        "date_format": "day/month/year (15/03/2024)"},
+                       table=t)
+        assert out["d"].iloc[0] == pd.Timestamp("2024-03-15")
+        t = pd.DataFrame({"d": ["15.03.2024 14:30"]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "d", "to": "datetime",
+                        "date_format": "custom...",
+                        "custom_format": "%d.%m.%Y %H:%M"}, table=t)
+        assert out["d"].iloc[0] == pd.Timestamp("2024-03-15 14:30")
+        t = pd.DataFrame({"d": [0, 44927]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "d", "to": "datetime",
+                        "date_format": "Excel serial days"}, table=t)
+        assert out["d"].iloc[1] == pd.Timestamp("2023-01-01")
+
+    def test_convert_types_date_dayfirst(self, registry):
+        t = pd.DataFrame({"d": ["03/04/2024"]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "d", "to": "datetime",
+                        "dayfirst": True}, table=t)
+        assert out["d"].iloc[0] == pd.Timestamp("2024-04-03")
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "d", "to": "datetime"}, table=t)
+        assert out["d"].iloc[0] == pd.Timestamp("2024-03-04")
+
+    def test_convert_types_bool_words(self, registry):
+        t = pd.DataFrame({"b": ["Yes", "no", "1", "0", None]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "b", "to": "bool"}, table=t)
+        assert out["b"].tolist() == [True, False, True, False, pd.NA]
+        assert str(out["b"].dtype) == "boolean"
+        with pytest.raises(Exception):
+            run_node(registry, "flograph.transform.convert_types",
+                     {"columns": "b", "to": "bool",
+                      "true_values": "oui", "false_values": "non"},
+                     table=pd.DataFrame({"b": ["yes"]}))
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "b", "to": "bool",
+                        "true_values": "oui", "false_values": "non"},
+                       table=pd.DataFrame({"b": ["oui", "non"]}))
+        assert out["b"].tolist() == [True, False]
+
+    def test_convert_types_string_options(self, registry):
+        t = pd.DataFrame({"s": ["  Hi ", None]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "s", "to": "string", "trim": True,
+                        "case": "upper", "on_missing": "empty text"},
+                       table=t)
+        assert out["s"].tolist() == ["HI", ""]
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "s", "to": "string"}, table=t)
+        assert out["s"].isna().iloc[1]  # no literal "nan" strings
+
+    def test_convert_types_category_order(self, registry):
+        t = pd.DataFrame({"c": ["b", "a", "b"]})
+        out = run_node(registry, "flograph.transform.convert_types",
+                       {"columns": "c", "to": "category", "ordered": True,
+                        "categories": "a, b"}, table=t)
+        assert list(out["c"].cat.categories) == ["a", "b"]
+        assert out["c"].cat.ordered
+        with pytest.raises(Exception):
+            run_node(registry, "flograph.transform.convert_types",
+                     {"columns": "c", "to": "category", "ordered": True,
+                      "categories": "a, b"},
+                     table=pd.DataFrame({"c": ["z"]}))
+
     def test_string_manipulation_case(self, registry, table):
         out = run_node(registry, "flograph.transform.string_manipulation",
                        {"column": "region", "operation": "upper"}, table=table)
