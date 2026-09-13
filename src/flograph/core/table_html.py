@@ -27,6 +27,10 @@ core.
 """
 from __future__ import annotations
 
+import math
+import re
+from html import unescape
+
 from flograph.core.report import format_scalar
 from flograph.core.table_format import (CellStyle, column_layout,
                                         column_matches, column_stats,
@@ -62,11 +66,21 @@ STACK_BELOW = 380
 #: without being mistaken for a filled cell.
 BAR_TRACK_COLOR = "#eceef1"
 
+#: Added to a bar column's measured value width: a width exactly the widest
+#: text's leaves nothing for a bold rule, or for a font that sets a hair
+#: wider on the page than it measured.
+VALUE_SLACK = 4
+
+#: The value cell's own right padding, which Qt counts inside a stated
+#: width — so the width written is the text's plus this.
+VALUE_PADDING = 6
+
 
 def frame_to_html(frame, rules=(), hidden=(), shown=(),
                   max_rows: int = MAX_ROWS,
                   width: "int | None" = None, paper: bool = True,
-                  font_pt: "float | None" = None, marker: str = "") -> str:
+                  font_pt: "float | None" = None, marker: str = "",
+                  text_width=None) -> str:
     """`frame` as an HTML table carrying `rules` as cell styling.
 
     `hidden` and `shown` are the card's column projection — what to drop
@@ -81,6 +95,14 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     `marker` is an invisible string tucked into the first header cell so
     the renderer can find *this* table in the laid-out document and
     measure it; it prints as nothing.
+
+    `text_width(text, font_pt)` says how wide plain text sets, for the
+    renderer to pass in — core has no fonts to ask. With it, every data bar
+    in a column gives its value the same width, the widest one's, so the
+    tracks start level and the bars read by length (U2). Without it, or when
+    it returns None, each value cell is sized by its own text as it always
+    was: a guessed width has nothing to catch a short guess, and the markup
+    that does catch one crashed Qt in a process with no GUI application.
     """
     frame = _as_frame(frame)
     if frame is None:
@@ -106,6 +128,10 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     numeric = {c: _is_numeric(frame[c]) for c in columns}
     track = _track_width(width)
     stacked = bool(width) and int(width) < STACK_BELOW
+    # Beside its value, every bar in a column starts where the widest value
+    # ends. Under its value (stacked), they already start level.
+    value_widths = ({} if stacked else
+                    _value_widths(shown, columns, styles, font_pt, text_width))
 
     # `width` / `align` / `label` rules shape the printed table the same
     # way they shape the card — a report that reads differently from the
@@ -134,7 +160,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
             out.append(_cell(shown[column].iloc[row],
                              styles.get((row, column)),
                              numeric[column], track, stacked,
-                             align=entry.align if entry else None))
+                             align=entry.align if entry else None,
+                             value_width=value_widths.get(column)))
         out.append("</tr>")
     out.append("</tbody></table>")
     if total > max_rows:
@@ -232,15 +259,61 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
     return final
 
 
-def _cell(value, style: "CellStyle | None", numeric: bool,
-          track: int = BAR_TRACK, stacked: bool = False,
-          align: "str | None" = None) -> str:
-    """One `<td>`: the value, plus whatever the rules said about it."""
+def _cell_text(value, style: "CellStyle | None") -> str:
+    """A cell's text as HTML: formatted, escaped and decorated."""
     text = _escape(_text(value, style))
     if style is not None:
         text = _decorate(text, style)
+    return text
+
+
+def _value_widths(shown, columns, styles, font_pt, text_width) -> dict:
+    """column -> the width every data bar in it gives its value.
+
+    Each bar is a little table of its own, value then track, and a value
+    cell sized by its own text started `1`'s track further left than
+    `412`'s — so a column of bars could not be read by length, which is the
+    one thing a bar is for (U2). One width per column, the widest value's,
+    puts every track at the same place.
+    """
+    out = {}
+    for column in columns:
+        widest = 0.0
+        for row in range(len(shown)):
+            style = styles.get((row, column))
+            if style is None or style.bar is None:
+                continue
+            width = _set_width(_cell_text(shown[column].iloc[row], style),
+                               font_pt, text_width)
+            if not width:
+                # one value that could not be measured and the column cannot
+                # promise a width to any of them
+                widest = 0.0
+                break
+            widest = max(widest, width)
+        if widest > 0:
+            out[column] = int(math.ceil(widest)) + VALUE_SLACK
+    return out
+
+
+def _set_width(html: str, font_pt, text_width) -> float:
+    """How wide a cell's HTML sets as text, as the caller measured it — 0
+    when there is nothing to measure with (see frame_to_html)."""
+    plain = unescape(re.sub(r"<[^>]+>", "", html))
+    if not plain or text_width is None:
+        return 0.0
+    measured = text_width(plain, font_pt)
+    return float(measured) if measured is not None else 0.0
+
+
+def _cell(value, style: "CellStyle | None", numeric: bool,
+          track: int = BAR_TRACK, stacked: bool = False,
+          align: "str | None" = None,
+          value_width: "int | None" = None) -> str:
+    """One `<td>`: the value, plus whatever the rules said about it."""
+    text = _cell_text(value, style)
     if style is not None and style.bar is not None:
-        text = _bar(text, style, numeric, track, stacked)
+        text = _bar(text, style, numeric, track, stacked, value_width)
         numeric = False       # the bar table fills the cell; don't re-align
     css = []
     if style is not None:
@@ -267,7 +340,8 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
 
 
 def _bar(text: str, style: CellStyle, numeric: bool,
-         track_width: int = BAR_TRACK, stacked: bool = False) -> str:
+         track_width: int = BAR_TRACK, stacked: bool = False,
+         value_width: "int | None" = None) -> str:
     """A data bar and its value.
 
     Beside the value, not behind it: the card paints the bar under the text
@@ -288,13 +362,20 @@ def _bar(text: str, style: CellStyle, numeric: bool,
     if stacked:
         where = "right" if numeric else "left"
         return f'<div align="{where}">{text}</div>{track}'
-    # No width on the outer table, and one only on the track: the value
-    # cell is then sized by its own text, which is what stops Qt stacking
-    # "412" as "4 / 1 / 2". Giving the value a stated width instead makes
-    # it *fixed*, and anything the estimate was short by wraps — worse than
-    # the problem it was meant to fix.
-    return (f'<table cellspacing="0" cellpadding="0"><tr>'
-            f'<td{align} style="border:none;padding:0 6px 0 0">{text}</td>'
+    # No width on the outer table. The value cell states the width its
+    # whole column measured (see _value_widths), so every track starts at
+    # the same place, and `white-space:nowrap` is what makes stating one
+    # safe: a stated width that came up short used to have Qt stack "412"
+    # as "4 / 1 / 2", where now it only widens that one row. Given no width,
+    # the cell is sized by its own text, as it always was.
+    if value_width:
+        value_cell = (f'<td{align} width="{value_width + VALUE_PADDING}" '
+                      f'style="border:none;padding:0 {VALUE_PADDING}px 0 0;'
+                      f'white-space:nowrap">{text}</td>')
+    else:
+        value_cell = (f'<td{align} style="border:none;padding:0 6px 0 0">'
+                      f'{text}</td>')
+    return (f'<table cellspacing="0" cellpadding="0"><tr>{value_cell}'
             f'<td width="{track_width}" style="border:none;padding:0">'
             f"{track}</td></tr></table>")
 

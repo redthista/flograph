@@ -97,6 +97,23 @@ def _document() -> QTextDocument:
     return document
 
 
+def _table_text_width(text: str, font_pt: "float | None") -> "float | None":
+    """How wide plain `text` sets in a report table, for core.table_html —
+    which lines a column's data bars up by it and has no fonts of its own to
+    ask. In the document's layout units, at the table's text size: the
+    body's, unless an embed's `scale=` set one. None without a GUI
+    application, where Qt aborts rather than measure (see fit_tables)."""
+    from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
+    # isinstance, not "is None": instance() is QCoreApplication's, so a
+    # process holding only a QCoreApplication (a headless run) passes an
+    # "is None" test and then aborts in QFont
+    if not isinstance(QGuiApplication.instance(), QGuiApplication):
+        return None
+    font = with_emoji(QFont("sans-serif"))
+    font.setPointSizeF(float(font_pt or REPORT_FONT_PT))
+    return QFontMetricsF(font).horizontalAdvance(text)
+
+
 @dataclass
 class _TablePlacement:
     """One embedded table that has to be measured once the page exists.
@@ -1281,7 +1298,7 @@ class _Resolver:
         def build(rows: int, size: "float | None") -> str:
             return frame_to_html(value, rules, hidden, shown, max_rows=rows,
                                  width=self._image_width, font_pt=size,
-                                 marker=marker)
+                                 marker=marker, text_width=_table_text_width)
 
         try:
             html = build(self._max_rows, font_pt)
@@ -1608,7 +1625,9 @@ def fit_tables(document, html: str, resolver, page_height: "float | None",
     # aborts the process rather than returning something wrong. Nothing is
     # being shown in that case anyway, so the tables keep the size they
     # were written at.
-    if QGuiApplication.instance() is None:
+    # isinstance, not "is None": instance() is QCoreApplication's, and a
+    # bare QCoreApplication (a headless run) would pass and then abort
+    if not isinstance(QGuiApplication.instance(), QGuiApplication):
         return html
     # Nothing can be measured until the document has been laid out at a
     # known width — asking a frame for its rectangle before that aborts Qt

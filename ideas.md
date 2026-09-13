@@ -62,7 +62,9 @@ under the Model tab that heads them. What is left of G is the three old
 entries, G1, G2 and G10. W2 shipped 2026-09-12 and chunk W retires with it: Plotly Table and
 Gantt Chart filter when clicked, like every other visual that can. N5 shipped
 2026-09-13: a deep slicer tree opens and shuts in one go, and arrives
-opened as far as its node says.
+opened as far as its node says. U2 shipped the same day and
+chunk U retires with it: on paper, every data bar in a column starts at
+the same place.
 
 ---
 
@@ -247,32 +249,6 @@ guide that ships on the dashboard. What is missing:
   one-file temp dir) or otherwise not writable: hide the toggle and say why.
   All of it lives in `ui/wiki/` and `core/docpages.py`; the card and tile
   wiring is done.
-
----
-
-## U. The table on paper
-
-Where the printed table is nearly the card and the gap shows. Lives in
-`core/table_html.py` and `ui/report/render.py`.
-
-**U2. A data bar on paper sits beside its number, and starts in a different
-place on every row** (Dan). One cause, and the code says so: `_bar` puts
-the value and the track in a two-cell nested table with the value cell
-deliberately **content-sized**, because giving it a stated width made Qt
-wrap `412` into three stacked digits. Content-sized means `1` and `10`
-produce different-width cells, so the track's left edge moves down the
-column — which is both the "bars start at different points" complaint and
-the reason the column can no longer be read by length at all. Overlaying
-the bar *behind* the text, as the card's delegate does, is not on offer:
-Qt's rich text has no z-order and no partial-width background.
-
-  Two ways out, and this wants deciding rather than guessing. Give the
-  value cell a **measured** width — `fit_tables` already lays the document
-  out for `height=` / `fit`, so a real width is obtainable now in a way it
-  was not when `_bar` was written. Or let a bar column print as a
-  **picture**, the way a web-view card already does. The first keeps the
-  table as text; the second gets the card's exact look and gives up
-  selectable numbers in that column.
 
 ---
 

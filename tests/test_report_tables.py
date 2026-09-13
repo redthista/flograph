@@ -335,3 +335,76 @@ class TestTheHeaderTone:
         fills = self._header_fills(html)
         assert fills, "the header row carries no fill at all"
         assert html.count(f'bgcolor="{fills[0]}"') == len(fills)
+
+
+class TestDataBarsLineUp:
+    """U2: on paper, every data bar in a column starts at the same place, so
+    the column reads by length — and no value wraps to make that room."""
+
+    FRAME = pd.DataFrame({"region": ["a", "b", "c", "d", "e"],
+                          "orders": [1, 10, 412, 12345, 7]})
+
+    def _bars(self, body="![[Sales]]"):
+        """(value, where its track starts, lines the value took) per row."""
+        from PySide6.QtGui import QTextTable
+        graph, cache, _n = table_node("orders bar blue", frame=self.FRAME)
+        document = render_report(body, graph, cache).document
+        layout = document.documentLayout()
+        found = []
+
+        def walk(frame):
+            for child in frame.childFrames():
+                if (isinstance(child, QTextTable) and child.rows() == 1
+                        and child.columns() == 2):
+                    value = document.findBlock(
+                        child.cellAt(0, 0).firstPosition())
+                    track = document.findBlock(
+                        child.cellAt(0, 1).firstPosition())
+                    if value.text().strip():
+                        found.append((value.text().strip(),
+                                      layout.blockBoundingRect(track).x(),
+                                      value.layout().lineCount()))
+                walk(child)
+
+        walk(document.rootFrame())
+        assert len(found) == len(self.FRAME)
+        return found
+
+    @pytest.mark.parametrize("body", ["![[Sales]]", "![[Sales|scale=1.6]]",
+                                      "![[Sales|width=90%]]"])
+    def test_every_track_starts_at_the_same_place(self, qapp, body):
+        starts = {round(x) for _value, x, _lines in self._bars(body)}
+        assert len(starts) == 1
+
+    @pytest.mark.parametrize("body", ["![[Sales]]", "![[Sales|scale=1.6]]"])
+    def test_no_value_wraps_to_make_room(self, qapp, body):
+        assert all(lines == 1 for _value, _x, lines in self._bars(body))
+
+    def test_the_column_gets_its_widest_values_width(self):
+        from flograph.core.table_html import VALUE_PADDING, VALUE_SLACK
+        measured = []
+
+        def ten_a_character(text, _pt):
+            measured.append(text)
+            return 10.0 * len(text)
+
+        html = frame_to_html(self.FRAME, parse_rules("orders bar blue"),
+                             text_width=ten_a_character)
+        # every value is measured as the table prints it, and the widest of
+        # those sets the width stated on all of them
+        assert len(measured) == len(self.FRAME)
+        stated = 10 * max(map(len, measured)) + VALUE_SLACK + VALUE_PADDING
+        assert html.count(f'width="{stated}"') == len(self.FRAME)
+
+    def test_without_fonts_to_ask_it_writes_what_it_always_did(self):
+        """No measurer — a headless run has no GUI application to measure
+        with — means no stated width and no nowrap: that markup crashed
+        Qt's setHtml in exactly such a process."""
+        rules = parse_rules("orders bar blue")
+        html = frame_to_html(self.FRAME, rules)
+        assert "nowrap" not in html
+        assert frame_to_html(self.FRAME, rules,
+                             text_width=lambda _t, _pt: None) == html
+
+    def test_a_table_without_bars_is_untouched(self):
+        assert "nowrap" not in frame_to_html(self.FRAME)
