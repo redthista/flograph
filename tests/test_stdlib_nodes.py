@@ -271,6 +271,90 @@ class TestEtlNodes:
         out = run(FakeContext(params=params), table=self.MONTHS)
         assert list(out.columns) == ["region", "Mar", "Jan", "Feb"]
 
+    def test_a_pivot_saved_before_the_naming_params_still_runs(self, registry):
+        """Version 1.1 wrote no headers/separator/fill/totals params. It
+        must pivot exactly the way it used to: prefixed multi-value names
+        with "_", no fill, no totals."""
+        spec = registry.get("flograph.transform.pivot")
+        params = spec.default_params()
+        params.update({"index": "region", "columns": "month",
+                       "values": "revenue, units"})
+        for name in ("headers", "separator", "fill", "totals",
+                     "total_label"):
+            del params[name]
+        run = compile_run(spec.source, "test-pivot-1.1")
+        out = run(FakeContext(params=params),
+                  table=self.MONTHS.assign(units=[10, 20, 30, 40]))
+        assert list(out.columns) == ["region", "revenue_Mar", "revenue_Jan",
+                                     "revenue_Feb", "units_Mar", "units_Jan",
+                                     "units_Feb"]
+
+    def test_pivot_values_only_drops_the_prefix(self, registry, table):
+        """The Power-Query-style ask: several value columns, bare pivot
+        values, collisions deduped rather than erroring."""
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "units",
+                        "values": "revenue, units", "headers": "values only"},
+                       table=table)
+        assert list(out.columns) == ["region", "10", "20", "30", "40",
+                                     "10 (2)", "20 (2)", "30 (2)", "40 (2)"]
+
+    def test_pivot_pivot_first_and_separator(self, registry, table):
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "units",
+                        "values": "revenue, units", "headers": "pivot first",
+                        "separator": ":"}, table=table)
+        assert "10:revenue" in out.columns and "10:units" in out.columns
+
+    def test_pivot_fill_writes_zero_into_empty_cells(self, registry):
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "month",
+                        "values": "revenue", "fill": "0"},
+                       table=self.MONTHS)
+        south = out.set_index("region").loc["south"]
+        assert south["Feb"] == 0.0
+        assert out["Feb"].dtype.kind == "f", "0 fills as a number, not '0'"
+
+    def test_pivot_keeps_an_all_empty_pivot_value(self, registry):
+        """A pivot value whose cells are all blank stays a column instead
+        of being dropped — filling it then works."""
+        sparse = pd.DataFrame({
+            "region": ["south", "north"],
+            "month": ["Jan", "Feb"],
+            "revenue": [1.0, float("nan")],
+        })
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "month",
+                        "values": "revenue", "agg": "mean", "fill": "0"},
+                       table=sparse)
+        assert list(out.columns) == ["region", "Jan", "Feb"]
+        assert out.set_index("region").loc["north", "Feb"] == 0.0
+
+    def test_pivot_totals_aggregate_the_rows_not_the_cells(self, registry):
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "month",
+                        "values": "revenue", "agg": "mean",
+                        "totals": "rows + columns"}, table=self.MONTHS)
+        assert list(out.columns) == ["region", "Mar", "Jan", "Feb", "Total"]
+        rows = out.set_index("region")
+        # south saw 1.0 and 3.0: the mean of the rows, not of Mar/Jan/Feb
+        assert rows.loc["south", "Total"] == 2.0
+        assert rows.loc["Total", "Mar"] == 1.5
+        assert rows.loc["Total", "Total"] == 2.5
+        assert list(out["region"])[-1] == "Total", "the total row goes last"
+
+    def test_pivot_distinct_count(self, registry):
+        dupes = pd.DataFrame({
+            "region": ["south", "south", "north"],
+            "month": ["Jan", "Jan", "Jan"],
+            "revenue": [5.0, 5.0, 7.0],
+        })
+        out = run_node(registry, "flograph.transform.pivot",
+                       {"index": "region", "columns": "month",
+                        "values": "revenue", "agg": "distinct count"},
+                       table=dupes)
+        assert out.set_index("region").loc["south", "Jan"] == 1
+
     def test_unpivot_roundtrip_shape(self, registry, table):
         out = run_node(registry, "flograph.transform.unpivot",
                        {"id_columns": "region"}, table=table)

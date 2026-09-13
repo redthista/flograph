@@ -41,8 +41,14 @@ from .table_format import (
     column_matches, hidden_columns, index_shown, rule_summary,
     rules_from_style, shown_columns)
 
-AGGREGATIONS = ("sum", "mean", "median", "min", "max", "count", "first")
+AGGREGATIONS = ("sum", "mean", "median", "min", "max", "count",
+                "distinct count", "std", "first")
 ORDERS = ("as they appear", "sorted")
+HEADERS = ("value first", "values only", "pivot first")
+TOTALS = ("off", "rows + columns", "rows only", "columns only")
+
+#: display names the Pivot node offers for pandas aggfuncs under other names
+_AGG_FUNCS = {"distinct count": "nunique"}
 
 #: modes measured against the spread of values — pooled across a matrix
 _MEASURED = ("color_scale", "data_bar", "icons")
@@ -71,21 +77,161 @@ def flat_names(columns) -> list[str]:
     return [str(c) for c in cols]
 
 
+def _unique_names(names) -> list[str]:
+    """`names` with later duplicates suffixed ` (2)`, ` (3)` — a pivot must
+    hand downstream real columns, and bare pivot values collide as soon as
+    two value columns share them."""
+    taken: set[str] = set()
+    out: list[str] = []
+    for name in names:
+        candidate, n = name, 2
+        while candidate in taken:
+            candidate, n = f"{name} ({n})", n + 1
+        taken.add(candidate)
+        out.append(candidate)
+    return out
+
+
+def _missing_key(value):
+    """A dict key for a pivot/index value that survives NaN: NaN never
+    equals itself, so lookups across two groupbys would miss."""
+    return "\x00missing" if _is_missing(value) else value
+
+
 def pivot(table, index, columns, values=None, agg="sum",
-          order="as they appear"):
+          order="as they appear", headers="value first", separator="_",
+          fill=None, totals="off", total_label="Total"):
     """`table` pivoted: a row per `index` group, a column per value of
     `columns`, each cell `agg` of the rows behind it. Shared by the Pivot
     node and Matrix mode, so the two cannot come to disagree.
 
     pandas sorts both axes unless told not to, and `sort=False` is exactly
     "first seen wins" — for the rows, for the pivot values, and, with more
-    than one value column, within each of them.
+    than one value column, within each of them. `dropna=False` keeps a
+    pivot value whose cells are all empty as a blank column rather than
+    dropping it, the way Power Query keeps every pivoted value; `fill`
+    writes a value into those blanks.
+
+    `headers` decides what the new columns are called: with one value
+    column they are always the bare pivot values, with several "value
+    first" (`revenue_Jan`) and "pivot first" (`Jan_revenue`) carry the
+    value name on either side of `separator`, while "values only" drops
+    it and dedupes collisions with ` (2)`, ` (3)`.
+
+    `totals` adds a `total_label` row and/or column aggregated from the
+    underlying rows with the same `agg` — a mean total is the mean of the
+    rows, not of the displayed cells.
     """
+    import pandas as pd
+
+    index, columns = list(index), list(columns)
+    agg = agg if agg in AGGREGATIONS else "sum"
+    func = _AGG_FUNCS.get(agg, agg)
+    order = order if order in ORDERS else ORDERS[0]
+    headers = headers if headers in HEADERS else HEADERS[0]
+    separator = "_" if separator is None else str(separator)
+    totals = totals if totals in TOTALS else TOTALS[0]
+    total_label = str(total_label).strip() or "Total"
+    if values is None:
+        # pandas' own answer to values=None: every column the pivot does
+        # not consume — resolved here so the totals below aggregate the
+        # same columns the cells were built from.
+        taken = set(index) | set(columns)
+        values = [c for c in table.columns if c not in taken]
+        if not values:
+            raise ValueError("no columns left to pivot — list the Value "
+                             "columns explicitly")
+    values = list(values)
+    multi = len(values) > 1
+    by_sort = order == "sorted"
+
     pivoted = table.pivot_table(index=index, columns=columns, values=values,
-                                aggfunc=agg, sort=order == "sorted")
-    if hasattr(pivoted.columns, "levels"):
-        pivoted.columns = flat_names(pivoted.columns)
-    return pivoted.reset_index()
+                                aggfunc=func, sort=by_sort, dropna=False)
+    tuples = [t if isinstance(t, tuple) else (t,) for t in pivoted.columns]
+    raw: list[tuple] = []     # (name, value column, pivot key) per column
+    for tup in tuples:
+        # `tup[0]` is the value's own label only when several are pivoted;
+        # with one, the whole tuple after it is the pivot's values.
+        ivo = tup[0] if multi else values[0]
+        disp = str(ivo)
+        parts = [str(p) for p in tup[1:]] if len(tup) > 1 else [str(tup[0])]
+        across = separator.join(parts)
+        if not multi or headers == "values only":
+            name = across
+        elif headers == "pivot first":
+            name = f"{across}{separator}{disp}" if across else disp
+        else:
+            name = f"{disp}{separator}{across}" if across else disp
+        key = tuple(_missing_key(p) for p in tup[1:]) if len(tup) > 1 \
+            else (_missing_key(tup[0]),)
+        if len(columns) == 1 and isinstance(key, tuple):
+            key = key[0]
+        raw.append((name, ivo, key))
+    names = _unique_names([name for name, _, _ in raw])
+    pivoted.columns = names
+    frame = pivoted.reset_index()
+
+    want_rows = totals in ("rows + columns", "rows only")
+    want_cols = totals in ("rows + columns", "columns only")
+    total_cols: list[str] = []
+    if want_rows:
+        grouped = table.groupby(index, sort=by_sort,
+                                dropna=False)[values].agg(func).reset_index()
+        taken_names = set(frame.columns)
+        rename: dict = {}
+        for value in values:
+            if not multi:
+                base = total_label
+            elif headers == "pivot first":
+                base = f"{total_label}{separator}{value}"
+            else:
+                base = f"{value}{separator}{total_label}"
+            candidate, n = base, 2
+            while candidate in taken_names:
+                candidate, n = f"{base} ({n})", n + 1
+            taken_names.add(candidate)
+            rename[value] = candidate
+            total_cols.append(candidate)
+        frame = frame.merge(grouped.rename(columns=rename), on=index,
+                            how="left")
+
+    if want_cols:
+        per_pivot = table.groupby(columns, sort=by_sort,
+                                  dropna=False)[values].agg(func)
+        lookup: dict = {}
+        for key, row in zip(per_pivot.index, per_pivot.itertuples(
+                index=False, name=None)):
+            if len(columns) == 1:
+                norm = _missing_key(key)
+            else:
+                norm = tuple(_missing_key(p) for p in key)
+            lookup[norm] = dict(zip(values, row))
+        grand: dict = {}
+        for value in values:
+            series = table[value]
+            if func == "first":
+                # a Series has no "first" reduction; GroupBy.first skips
+                # NaN, so the grand total is the first set value.
+                pos = series.first_valid_index()
+                grand[value] = series.loc[pos] if pos is not None else None
+            else:
+                grand[value] = series.agg(func)
+        col_of = dict(zip(names, raw))
+        row = {name: lookup.get(key, {}).get(value)
+               for name, (_label, value, key) in col_of.items()}
+        for value, total in zip(values, total_cols):
+            row[total] = grand[value]
+        total_row = {c: (total_label if pos == 0 else "")
+                     for pos, c in enumerate(index)}
+        for name in list(names) + total_cols:
+            total_row[name] = row.get(name)
+        frame = pd.concat([frame, pd.DataFrame([total_row])],
+                          ignore_index=True)
+
+    if fill is not None:
+        data = [c for c in frame.columns if c not in index]
+        frame[data] = frame[data].fillna(fill)
+    return frame
 
 
 # ----------------------------------------- how several rows become one
