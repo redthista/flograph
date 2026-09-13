@@ -1242,8 +1242,20 @@ class TestFoldingADeepTree:
         assert flat.toolbar._expand.isHidden()
         cards = self._panel(qtbot, layout="cards")
         assert cards.toolbar._expand.isHidden()
-        bare = self._panel(qtbot, show_buttons=False)
-        assert bare.toolbar._collapse.isHidden()
+        no_fold = self._panel(qtbot, show_fold=False)
+        assert no_fold.toolbar._collapse.isHidden()
+        assert not no_fold.toolbar._clear.isHidden()
+
+    def test_hiding_all_none_keeps_the_fold_buttons(self, qtbot):
+        """Asked for testing N5: the two pairs are separate switches."""
+        panel = self._panel(qtbot, show_buttons=False)
+        assert panel.toolbar._clear.isHidden()
+        assert not panel.toolbar._expand.isHidden()
+        # the strip is still wanted, for the + and − alone
+        assert panel.toolbar.refresh_chrome() is True
+
+    def test_show_fold_is_presentation_only(self, registry):
+        assert registry.get("flograph.viz.slicer").param("show_fold").cosmetic
 
     def test_open_levels_is_presentation_only(self, registry):
         assert registry.get("flograph.viz.slicer").param(

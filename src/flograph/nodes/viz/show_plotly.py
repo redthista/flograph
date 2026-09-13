@@ -1896,6 +1896,44 @@ _GROUP_ARGS = ("color", "facet_row", "facet_col", "line_group", "symbol",
                "line_dash", "pattern_shape", "animation_frame")
 
 
+#: The kinds whose text axis lays marks out along it in an order a reader
+#: follows — the ones _order_categories puts in order.
+_ORDERED_KINDS = ("line", "scatter", "bar", "area", "funnel")
+
+
+def _order_categories(kwargs: dict, frame, kind: str) -> None:
+    """Give a text X (or Y) axis the order its values come in the rows.
+
+    Plotly builds a text axis one trace at a time: every value the first
+    colour has, then whatever a later colour adds, tacked on the end. Split
+    by Color, a month only the second series has lands after the last month
+    of the first, and every line zigzags back across the chart — sorting the
+    table first did not help, because the order was per series (reported
+    against a Year Month axis). The rows' own order is the one asked for:
+    the table as it was sorted, or, with Group and total, sorted by X.
+    Number and date axes order themselves and are left alone, and so is an
+    order the chart was already given.
+    """
+    if kind not in _ORDERED_KINDS or "category_orders" not in (
+            _KIND_ARGS.get(kind, set()) | _UNIVERSAL_ARGS):
+        return
+    import pandas as pd
+
+    orders = dict(kwargs.get("category_orders") or {})
+    for axis in ("x", "y"):
+        column = kwargs.get(axis)
+        if (not isinstance(column, str) or column not in frame.columns
+                or column in orders):
+            continue
+        series = frame[column]
+        if (pd.api.types.is_numeric_dtype(series)
+                or pd.api.types.is_datetime64_any_dtype(series)):
+            continue
+        orders[column] = list(dict.fromkeys(series.dropna()))
+    if orders:
+        kwargs["category_orders"] = orders
+
+
 def _summarised(ctx, table, kwargs: dict, kind: str):
     """(rows to draw, the axis now holding totals or None).
 
@@ -1966,6 +2004,7 @@ def run(ctx, table):
     kwargs, ignored = _build(ctx.params, table, px)
     # Group and total summarises what is drawn; `table` below stays raw.
     drawn, totalled = _summarised(ctx, table, kwargs, kind)
+    _order_categories(kwargs, drawn, kind)
     try:
         # Building a figure is not thread-safe — see _figure_lock.
         with _figure_lock():

@@ -328,3 +328,44 @@ class TestDragToFilter:
             "on_click": "select many", "view_range": "not json"}, table=sales)
         assert len(out["table"]) == len(sales)
 
+
+class TestATextAxisKeepsItsOrder:
+    """Reported testing W2: a Year Month axis split by Color put a month only
+    the second series had after the first series' last month, so the lines
+    zigzagged — plotly orders a text axis trace by trace."""
+
+    @pytest.fixture
+    def readings(self):
+        # "2019 01" is only in B, and B comes second
+        return pd.DataFrame({
+            "month": ["2018 03", "2018 04", "2019 01", "2024 06", "2018 03",
+                      "2024 06", "2018 04"],
+            "test": ["A", "A", "B", "A", "B", "B", "A"],
+            "value": [1.0, 2.0, 9.0, 3.0, 5.0, 6.0, 4.0]})
+
+    def test_a_sorted_table_draws_a_sorted_axis(self, registry, readings):
+        pytest.importorskip("plotly")
+        rows = readings.sort_values(["month", "test"])
+        fig = run_node(registry, {"kind": "line", "x": "month",
+                                  "y": "value", "color": "test"},
+                       table=rows)["figure"]
+        assert list(fig.layout.xaxis.categoryarray) == [
+            "2018 03", "2018 04", "2019 01", "2024 06"]
+
+    def test_group_and_total_draws_a_sorted_axis(self, registry, readings):
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "line", "x": "month", "y": "value",
+                                  "color": "test", "summarise": "average"},
+                       table=readings)["figure"]
+        assert list(fig.layout.xaxis.categoryarray) == [
+            "2018 03", "2018 04", "2019 01", "2024 06"]
+        for trace in fig.data:
+            assert list(trace.x) == sorted(trace.x)
+
+    def test_a_number_axis_is_left_to_order_itself(self, registry):
+        pytest.importorskip("plotly")
+        rows = pd.DataFrame({"year": [2024, 2022, 2023],
+                             "value": [1.0, 2.0, 3.0]})
+        fig = run_node(registry, {"kind": "line", "x": "year", "y": "value"},
+                       table=rows)["figure"]
+        assert fig.layout.xaxis.categoryarray is None

@@ -105,6 +105,8 @@ class _Selection:
         self.show_buttons = True
         # how far a tree opens when it arrives — see opens_at
         self.open_levels = 0
+        # the + and − that open or shut every branch
+        self.show_fold = True
         self.accent = ""
         self.filter_text = ""
         self.paths: list[tuple[str, ...]] = []
@@ -1109,8 +1111,9 @@ class SlicerToolbar(QWidget):
         self._clear.setVisible(model.show_buttons)
         self._count.setVisible(model.show_buttons)
         # + and − only where there is something to fold: a tree of more
-        # than one level, drawn as a tree
-        folding = bool(model.show_buttons and self.tree_buttons
+        # than one level, drawn as a tree — and on their own switch, apart
+        # from All / None
+        folding = bool(model.show_fold and self.tree_buttons
                        and getattr(model, "options", None) is not None
                        and model.depth > 1)
         self._expand.setVisible(folding)
@@ -1121,7 +1124,7 @@ class SlicerToolbar(QWidget):
         self._relayout(self._rows_for(self.width()))
         self._apply_stretch()
         self.updateGeometry()
-        return bool(model.show_search or model.show_buttons)
+        return bool(model.show_search or model.show_buttons or folding)
 
     def _buttons(self) -> tuple:
         return (self._select_all, self._clear, self._expand, self._collapse,
@@ -1366,6 +1369,7 @@ class SlicerPanel(QWidget):
         # and must not lose them on load
         self.model.show_search = bool(params.get("show_search", True))
         self.model.show_buttons = bool(params.get("show_buttons", True))
+        self.model.show_fold = bool(params.get("show_fold", True))
         self.model.accent = str(params.get("accent", "") or "")
         try:
             self.model.open_levels = max(0, int(params.get("open_levels", 0)

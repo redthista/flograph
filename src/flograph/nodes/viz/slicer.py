@@ -71,7 +71,7 @@ PARAMS = [
                                    "— blank keeps every row"},
     {"name": "values", "type": "text", "label": "Values (one per line)",
      "default": "", "placeholder": "Used only when no table is connected"},
-    # Presentation only — run() reads none of the eight below, and dirtying
+    # Presentation only — run() reads none of the nine below, and dirtying
     # on one would re-filter the table and re-run every visual downstream to
     # produce the exact same rows.
     {"name": "layout", "type": "choice", "label": "Layout",
@@ -82,6 +82,11 @@ PARAMS = [
     {"name": "show_search", "type": "bool", "label": "Show search box",
      "default": True, "cosmetic": True},
     {"name": "show_buttons", "type": "bool", "label": "Show All / None",
+     "default": True, "cosmetic": True},
+    # the + and − that open or shut every branch; only ever shown on a tree
+    # of more than one level, and on its own switch so a small card can keep
+    # All / None and lose these, or the other way round
+    {"name": "show_fold", "type": "bool", "label": "Show + / −",
      "default": True, "cosmetic": True},
     # How far a tree on several columns opens when it arrives: 0 opens every
     # level, which is how a tree has always arrived; 1 shows the top level
