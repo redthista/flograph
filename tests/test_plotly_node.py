@@ -252,6 +252,21 @@ class TestDragToFilter:
             assert event in script
         assert 'flograph.set("view_range"' in script
 
+    def test_a_double_click_lets_a_saved_selection_go(self, registry, sales):
+        """A selection that came back with a reopened flow is not one plotly
+        drew, so it never sends plotly_deselect for it: the double-click that
+        zooms back out has to clear the picked values itself."""
+        pytest.importorskip("plotly")
+        fig = run_node(registry, {"kind": "scatter", "x": "year",
+                                  "y": "revenue", "on_click": "select many",
+                                  "selected": '["2022"]'},
+                       table=sales)["figure"]
+        script = fig._flograph_post_script
+        assert 'var picked = ["2022"]' in script
+        handler = script.split('gd.on("plotly_doubleclick"', 1)[1]
+        handler = handler.split("});", 1)[0]
+        assert "picked = []" in handler and "flograph.select(picked)" in handler
+
     def test_a_zoom_keeps_the_rows_in_view_and_stays_zoomed(self, registry,
                                                             sales):
         pytest.importorskip("plotly")

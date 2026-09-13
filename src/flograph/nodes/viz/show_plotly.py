@@ -1723,6 +1723,14 @@ gd.on("plotly_selected", function (data) {
 gd.on("plotly_deselect", function () {
   if (picked.length) { picked = []; flograph.select(picked); }
 });
+// A double-click is plotly's reset: it zooms back out, and the selection
+// should go with it. plotly only sends plotly_deselect for a selection it
+// drew in this page, in Box or Lasso mode — never for one that came back
+// with a reopened flow, or survived the card reloading after a run, where
+// the page is back in zoom mode. There the zoom reset and the filter stayed.
+gd.on("plotly_doubleclick", function () {
+  if (picked.length) { picked = []; flograph.select(picked); }
+});
 // Zoom: what is still in view on each axis the zoom touched, kept beside
 // the other axis's zoom; a double-click (autorange) lets that axis go. A
 // category axis's range is only positions, so its categories go too. A

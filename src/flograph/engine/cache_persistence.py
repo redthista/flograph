@@ -82,6 +82,45 @@ SUPPORTED_SCHEMAS = (1, 2, 3)
 CACHE_COMPRESS_LEVEL = 1
 
 
+def _with_post_script(reduced: tuple, script: str) -> Any:
+    """Unpickle a figure _OutputsPickler wrapped: rebuild it the way its own
+    __reduce__ said to, then put back the page script it was carrying."""
+    obj = reduced[0](*reduced[1])
+    obj._flograph_post_script = script
+    return obj
+
+
+class _OutputsPickler(pickle.Pickler):
+    """pickle.Pickler that keeps a chart's page script.
+
+    A plotly figure pickles by rebuilding itself from its data
+    (`Figure.__reduce__`), so an attribute set on it is lost — and
+    `_flograph_post_script` (see core/html) is how a Show Plotly, Plotly
+    Table or Gantt chart's clicks, lassos, zooms and double-clicks reach
+    flograph. A chart restored from a saved project, or read back after a
+    spill, came up with none of them: the saved selection still filtered
+    and nothing on the page could clear it.
+
+    Only a figure carrying a script is touched, and only when its reduce is
+    the plain `(class, args)` pair plotly's is; anything else pickles as
+    before. Must stay importable at this path: the blob names it."""
+
+    def reducer_override(self, obj: Any) -> Any:
+        attrs = getattr(obj, "__dict__", None)
+        script = attrs.get("_flograph_post_script") if isinstance(attrs, dict) else None
+        if not script or not hasattr(obj, "to_plotly_json"):
+            return NotImplemented
+        reduced = obj.__reduce__()
+        if not (isinstance(reduced, tuple) and len(reduced) == 2):
+            return NotImplemented
+        return (_with_post_script, (reduced, script))
+
+
+def _dump(obj: Any, fh: Any) -> None:
+    """pickle.dump, keeping a figure's page script (_OutputsPickler)."""
+    _OutputsPickler(fh, protocol=pickle.HIGHEST_PROTOCOL).dump(obj)
+
+
 class _ZlibSink:
     """A file-object stand-in that pickle.dump can stream compressed into.
 
@@ -695,14 +734,12 @@ def write_cache_plan(project_path: str | Path,
                 if compress:
                     sink = _ZlibSink(fh)
                     try:
-                        pickle.dump(entry.outputs, sink,
-                                    protocol=pickle.HIGHEST_PROTOCOL)
+                        _dump(entry.outputs, sink)
                     finally:
                         fh.write(sink.finish())
                     raw_bytes, disk_bytes = sink.raw_bytes, sink.out_bytes
                 else:
-                    pickle.dump(entry.outputs, fh,
-                                protocol=pickle.HIGHEST_PROTOCOL)
+                    _dump(entry.outputs, fh)
                     raw_bytes = disk_bytes = fh.tell()
         except OSError:
             tmp_path.unlink(missing_ok=True)
@@ -1191,12 +1228,12 @@ def _pickle_blob(writer: "container.BundleWriter", node_id: str,
         if compress:
             sink = _ZlibSink(dst)
             try:
-                pickle.dump(outputs, sink, protocol=pickle.HIGHEST_PROTOCOL)
+                _dump(outputs, sink)
             finally:
                 dst.write(sink.finish())
             return sink.raw_bytes, sink.out_bytes
         counter = _CountingSink(dst)
-        pickle.dump(outputs, counter, protocol=pickle.HIGHEST_PROTOCOL)
+        _dump(outputs, counter)
         return counter.raw_bytes, counter.raw_bytes
 
 
