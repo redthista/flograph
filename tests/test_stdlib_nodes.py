@@ -651,6 +651,67 @@ class TestEtlNodes:
             run_node(registry, "flograph.transform.date_part",
                      {"column": "d", "part": "year"}, table=df)
 
+    def test_date_part_multi_columns_multi_parts(self, registry):
+        df = pd.DataFrame({
+            "d": pd.to_datetime(["2024-04-15", "2025-01-05"]),
+            "e": pd.to_datetime(["2023-12-31", "2024-06-01"]),
+        })
+        out = run_node(registry, "flograph.transform.date_part",
+                       {"column": "d, e", "part": "year",
+                        "extra_parts": "month\nday name"}, table=df)
+        assert out["d.year"].tolist() == [2024, 2025]
+        assert out["e.month"].tolist() == [12, 6]
+        assert out["d.day_name"].tolist() == ["Monday", "Sunday"]
+        assert str(out["d.year"].dtype) == "Int64"
+
+    def test_date_part_extra_parts_bad_name(self, registry):
+        df = pd.DataFrame({"d": pd.to_datetime(["2024-04-15"])})
+        with pytest.raises(ValueError, match="unknown part 'furlong'"):
+            run_node(registry, "flograph.transform.date_part",
+                     {"column": "d", "part": "year",
+                      "extra_parts": "furlong"}, table=df)
+
+    def test_date_part_output_column_needs_single(self, registry):
+        df = pd.DataFrame({"d": pd.to_datetime(["2024-04-15"])})
+        with pytest.raises(ValueError, match="clear it for automatic names"):
+            run_node(registry, "flograph.transform.date_part",
+                     {"column": "d", "part": "year",
+                      "extra_parts": "month",
+                      "output_column": "y"}, table=df)
+
+    def test_date_part_new_parts(self, registry):
+        df = pd.DataFrame({"d": pd.to_datetime(["2024-04-15", "2025-01-05"])})
+        out = run_node(registry, "flograph.transform.date_part",
+                       {"column": "d", "part": "end of week",
+                        "extra_parts": "is weekend\ndays in month\n"
+                                       "fiscal year\nfiscal quarter",
+                        "fiscal_start": 4}, table=df)
+        assert out["d.end_of_week"].tolist() == [
+            pd.Timestamp("2024-04-21"), pd.Timestamp("2025-01-05")]
+        assert out["d.is_weekend"].tolist() == [False, True]
+        assert out["d.days_in_month"].tolist() == [30, 31]
+        assert out["d.fiscal_year"].tolist() == [2025, 2025]
+        assert out["d.fiscal_quarter"].tolist() == [1, 4]
+
+    def test_date_part_unix_and_ages(self, registry):
+        df = pd.DataFrame({"d": pd.to_datetime(["2024-04-15"])})
+        out = run_node(registry, "flograph.transform.date_part",
+                       {"column": "d", "part": "unix seconds",
+                        "extra_parts": "age in days\nage in months\n"
+                                       "age in years"}, table=df)
+        assert out["d.unix_seconds"].iloc[0] == 1713139200
+        today = pd.Timestamp.now().normalize()
+        assert out["d.age_in_days"].iloc[0] == (today - pd.Timestamp("2024-04-15")).days
+        assert out["d.age_in_years"].iloc[0] == (
+            today.year - 2024 - ((today.month, today.day) < (4, 15)))
+
+    def test_date_part_dayfirst(self, registry):
+        df = pd.DataFrame({"d": ["03/04/2024"]})
+        out = run_node(registry, "flograph.transform.date_part",
+                       {"column": "d", "part": "month",
+                        "dayfirst": True}, table=df)
+        assert out["d.month"].tolist() == [4]
+
     def test_conditional_column(self, registry):
         df = pd.DataFrame({"score": [95, 82, 71, 40]})
         out = run_node(registry, "flograph.transform.conditional_column",
