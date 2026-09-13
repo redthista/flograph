@@ -25,6 +25,15 @@ web page, ready to save as an .html file and send to someone who has no
 flograph. plotly.js travels inside it rather than being linked, so it opens
 offline — which is why it is off by default: the page is around 4.5 MB, and
 a chart you are only reading on the canvas should not pay for one.
+
+**On click** turns the chart into a filter: set it to *select one* or
+*select many* and clicking a bar or a milestone writes that task's id into
+**Clicked tasks**, dims every other bar, and re-runs everything downstream.
+**table** is the input filtered to the clicked tasks — matched on Task id,
+or on the task names when there is no id column — and **selected** is the
+bare list of ids. Clicking the selected task again clears it. The schedule
+output always carries the whole plan: a task's dates depend on the tasks
+before it, so a filtered schedule would be a different plan.
 """
 NODE = {
     "label": "Gantt Chart",
@@ -34,9 +43,13 @@ NODE = {
     # own pan and zoom work on the card. The figure goes out on an "object"
     # port, not a "figure" one: "figure" means a matplotlib Figure.
     "card": "webview",
+    # Lets the chart's own page write this node's "selected" param when a
+    # bar is clicked — see "On click" above and flograph.core.bridge.
+    "interactive": True,
     "inputs": [("table", "dataframe")],
     "outputs": [("figure", "object"), ("schedule", "dataframe"),
-                ("html", "string")],
+                ("html", "string"), ("selected", "any"),
+                ("table", "dataframe")],
 }
 PARAMS = [
     {"name": "task", "type": "columns", "label": "Task", "multi": False,
@@ -87,6 +100,15 @@ PARAMS = [
     # pay that for a chart they are only looking at on the canvas.
     {"name": "emit_html", "type": "bool", "label": "Emit HTML",
      "default": False},
+    # ------------------------------------------------------ click to filter
+    {"name": "on_click", "type": "choice", "label": "On click",
+     "options": ["nothing", "select one", "select many"],
+     "default": "nothing"},
+    # Written by the chart's own page when a bar is clicked: task ids.
+    {"name": "selected", "type": "string", "label": "Clicked tasks",
+     "default": "",
+     "placeholder": 'e.g. ["B"] — blank keeps every task',
+     "visible_when": {"on_click": ["select one", "select many"]}},
     {"name": "title", "type": "string", "label": "Title", "default": ""},
     {"name": "width", "type": "int", "label": "Width",
      "default": 560, "min": 260, "max": 4000, "cosmetic": True},
@@ -114,6 +136,32 @@ _PROGRESS_FILL = "rgba(0, 0, 0, 0.38)"
 _BASELINE_FILL = "rgba(100, 116, 139, 0.55)"
 _TODAY = "#ef4444"
 _BAND = "rgba(100, 116, 139, 0.08)"
+#: How far a bar that is not among the clicked tasks fades.
+_UNPICKED_OPACITY = 0.35
+
+#: Run by plotly once the chart is drawn ({plot_id} is its div). Each bar
+#: and milestone carries its task id as customdata, so a click names the
+#: task itself rather than a row position that the sort decides.
+_CLICK_JS = """
+var gd = document.getElementById("{plot_id}");
+var picked = %(picked)s, multi = %(multi)s;
+gd.on("plotly_click", function (data) {
+  var point = data.points && data.points[0];
+  if (!point || point.customdata === undefined || point.customdata === null) {
+    return;
+  }
+  var value = String(point.customdata);
+  if (multi) {
+    var at = picked.indexOf(value);
+    if (at === -1) { picked.push(value); } else { picked.splice(at, 1); }
+  } else {
+    // Clicking the selected one again clears it, so a filter can always be
+    // undone from the visual itself.
+    picked = (picked.length === 1 && picked[0] === value) ? [] : [value];
+  }
+  flograph.select(picked);
+});
+"""
 
 
 def run(ctx, table):
@@ -125,9 +173,13 @@ def run(ctx, table):
         ) from None
     import pandas as pd
 
-    from flograph.core.gantt import schedule
+    from flograph.core.controls import selected_values
+    from flograph.core.gantt import _key, schedule
 
     params = ctx.params
+    mode = str(params.get("on_click", "nothing") or "nothing")
+    clicking = mode in ("select one", "select many")
+    chosen = selected_values(params.get("selected", "")) if clicking else []
     baseline = bool(params.get("show_baseline"))
     plan = schedule(
         table,
@@ -159,7 +211,7 @@ def run(ctx, table):
     # palette off the shared template, and never stamps one on.
     from flograph.core.plotly_spec import FIGURE_LOCK
     with FIGURE_LOCK:
-        figure = _figure(go, pd, plan, rows, params)
+        figure = _figure(go, pd, plan, rows, params, chosen)
     first, last = plan["start"].min(), plan["finish"].max()
     ctx.log(f"{len(plan)} task(s), {first:%d %b %Y} to {last:%d %b %Y}")
     html = ""
@@ -172,8 +224,24 @@ def run(ctx, table):
 
         html = to_html(figure) or ""
         ctx.log(f"HTML page: {len(html) / 1048576:.1f} MB, self-contained")
+    filtered = table
+    if clicking:
+        import json
+
+        figure._flograph_post_script = _CLICK_JS % {
+            "picked": json.dumps(chosen),
+            "multi": "true" if mode == "select many" else "false",
+        }
+        if chosen:
+            # the same column, read the same way, that the ids on the bars
+            # came from
+            column = ((params["task_id"] or "").strip()
+                      or (params["task"] or "").strip())
+            filtered = table[table[column].map(_key).isin(chosen)]
+            ctx.log(f"click filter: kept {len(filtered)} of {len(table)} "
+                    f"task(s)")
     return {"figure": figure, "schedule": plan.drop(columns=["_color"]),
-            "html": html}
+            "html": html, "selected": chosen, "table": filtered}
 
 
 def _color_key(table, plan, params):
@@ -236,18 +304,18 @@ def _rows(plan):
     return rows
 
 
-def _figure(go, pd, plan, rows, params):
+def _figure(go, pd, plan, rows, params, chosen=()):
     y_of = {row["index"]: i for i, row in enumerate(rows)
             if row["index"] is not None}
     series = _series(plan)
     unit = params["duration_unit"]
     figure = go.Figure()
 
-    _add_bars(go, figure, plan, y_of, series, unit)
+    _add_bars(go, figure, plan, y_of, series, unit, chosen)
     _add_progress(go, figure, plan, y_of)
     if "baseline_start" in plan:
         _add_baseline(go, figure, plan, y_of)
-    _add_milestones(go, figure, plan, y_of, unit)
+    _add_milestones(go, figure, plan, y_of, unit, chosen)
     if params.get("show_dependencies"):
         _add_dependencies(go, plan, figure, y_of)
     _add_bands(figure, rows)
@@ -322,7 +390,21 @@ def _width_ms(plan, i):
     return delta.total_seconds() * 1000.0
 
 
-def _add_bars(go, figure, plan, y_of, series, unit):
+def _ids(plan, indices):
+    """The task ids of these rows — what a click on their marks reports."""
+    return [str(plan["id"].iloc[i]) for i in indices]
+
+
+def _opacity(plan, indices, chosen):
+    """Full strength for the clicked tasks and faded for the rest, or None
+    (plotly's own default) when nothing is clicked."""
+    if not chosen:
+        return None
+    return [1.0 if tid in chosen else _UNPICKED_OPACITY
+            for tid in _ids(plan, indices)]
+
+
+def _add_bars(go, figure, plan, y_of, series, unit, chosen=()):
     """One trace per colour, so the legend can switch phases on and off."""
     for name, color, members in series:
         indices = [i for i in members if not plan["is_milestone"].iloc[i]]
@@ -335,7 +417,9 @@ def _add_bars(go, figure, plan, y_of, series, unit):
             base=[plan["start"].iloc[i] for i in indices],
             x=[_width_ms(plan, i) for i in indices],
             width=_BAR,
-            marker={"color": color, "line": {"width": 0}},
+            marker={"color": color, "line": {"width": 0},
+                    "opacity": _opacity(plan, indices, chosen)},
+            customdata=_ids(plan, indices),
             hovertext=[_hover(plan, i, unit) for i in indices],
             hoverinfo="text",
             showlegend=bool(name),
@@ -358,6 +442,7 @@ def _add_progress(go, figure, plan, y_of):
            for i in indices],
         width=_PROGRESS_BAR,
         marker={"color": _PROGRESS_FILL, "line": {"width": 0}},
+        customdata=_ids(plan, indices),
         # The task bar underneath already answers "what is this?" — a second
         # tooltip on the same pixels would only fight it.
         hoverinfo="skip",
@@ -417,7 +502,7 @@ def _slip(plan, i):
     return (f"{abs(days):.0f} days {'late' if days > 0 else 'early'}")
 
 
-def _add_milestones(go, figure, plan, y_of, unit):
+def _add_milestones(go, figure, plan, y_of, unit, chosen=()):
     indices = [i for i in range(len(plan)) if plan["is_milestone"].iloc[i]]
     if not indices:
         return
@@ -427,7 +512,9 @@ def _add_milestones(go, figure, plan, y_of, unit):
         x=[plan["start"].iloc[i] for i in indices],
         y=[y_of[i] for i in indices],
         marker={"symbol": "diamond", "size": 13, "color": _MILESTONE,
-                "line": {"color": "white", "width": 1}},
+                "line": {"color": "white", "width": 1},
+                "opacity": _opacity(plan, indices, chosen)},
+        customdata=_ids(plan, indices),
         hovertext=[_hover(plan, i, unit) for i in indices],
         hoverinfo="text",
         showlegend=False,

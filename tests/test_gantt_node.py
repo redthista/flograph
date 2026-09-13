@@ -59,7 +59,7 @@ class TestSpec:
         spec = registry.get(TYPE_ID)
         assert [p.name for p in spec.inputs] == ["table"]
         assert [p.name for p in spec.outputs] == ["figure", "schedule",
-                                                  "html"]
+                                                  "html", "selected", "table"]
         # An "object" port, not a "figure" one: "figure" means matplotlib.
         assert spec.outputs[0].type == PortType.OBJECT
         assert spec.outputs[1].type == PortType.DATAFRAME
@@ -240,3 +240,52 @@ class TestErrors:
     def test_a_colour_column_that_is_not_there_names_it(self, registry, tasks):
         with pytest.raises(ValueError, match="Color by column 'nope'"):
             gantt(registry, tasks, color="nope")
+
+
+class TestClickToFilter:
+    """W2: clicking a bar filters what is downstream, like Show Plotly."""
+
+    def test_it_is_interactive(self, registry):
+        spec = registry.get(TYPE_ID)
+        assert spec.interactive
+        assert spec.param("on_click") is not None
+        assert spec.param("selected") is not None
+
+    def test_clicking_is_off_until_it_is_on(self, registry, tasks):
+        out, _ = gantt(registry, tasks, selected='["B"]')
+        assert getattr(out["figure"], "_flograph_post_script", None) is None
+        assert out["selected"] == [] and len(out["table"]) == 4
+
+    def test_every_bar_and_milestone_says_which_task_it_is(self, registry,
+                                                           tasks):
+        out, _ = gantt(registry, tasks, on_click="select one")
+        ids = set()
+        for trace in out["figure"].data:
+            if trace.name in ("milestone",) or trace.type == "bar":
+                ids.update(trace.customdata or ())
+        assert {"A", "B", "M", "C"} <= ids
+        assert "plotly_click" in out["figure"]._flograph_post_script
+
+    def test_a_click_filters_the_input_by_task_id(self, registry, tasks):
+        out, _ = gantt(registry, tasks, on_click="select many",
+                       selected='["B", "M"]')
+        assert list(out["table"]["task"]) == ["Build", "Signed off"]
+        assert out["selected"] == ["B", "M"]
+        assert len(out["schedule"]) == 4
+
+    def test_without_an_id_column_the_task_names_are_the_ids(self, registry,
+                                                            tasks):
+        plain = tasks.assign(after=["", "Kickoff", "Build", "Signed off"])
+        out, _ = gantt(registry, plain, task_id="", on_click="select one",
+                       selected='["Ship"]')
+        assert list(out["table"]["id"]) == ["C"]
+
+    def test_the_other_bars_fade(self, registry, tasks):
+        out, _ = gantt(registry, tasks, on_click="select one",
+                       selected='["B"]')
+        bars = [t for t in out["figure"].data
+                if t.type == "bar" and t.customdata is not None
+                and "B" in t.customdata]
+        opacity = dict(zip(bars[0].customdata, bars[0].marker.opacity))
+        assert opacity["B"] == 1.0
+        assert all(v < 1.0 for k, v in opacity.items() if k != "B")

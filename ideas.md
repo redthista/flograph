@@ -59,7 +59,8 @@ own nodes. G13 shipped 2026-09-12 too, and closes the chunk's newest
 idea: a frame turns into a model canvas — a node-like box with inputs and
 outputs you declare — and turns back again, and the canvas tabs fold
 under the Model tab that heads them. What is left of G is the three old
-entries, G1, G2 and G10.
+entries, G1, G2 and G10. W2 shipped 2026-09-12 and chunk W retires with it: Plotly Table and
+Gantt Chart filter when clicked, like every other visual that can.
 
 ---
 
@@ -268,18 +269,6 @@ Qt's rich text has no z-order and no partial-width background.
   **picture**, the way a web-view card already does. The first keeps the
   table as text; the second gets the card's exact look and gives up
   selectable numbers in that column.
-
----
-
-## W. Visual cards
-
-**W2. The two Plotly visuals that don't filter when you click them.**
-Clicking a visual to filter downstream is built and shipped — Show Plotly
-has `On click` with a `selected` output and a filtered `table`, and so do
-all nine library and drawn visuals. **Plotly Table** and **Gantt** are the
-ones left out, and both are Plotly figures, so they can have it on exactly
-the same terms. (Show Plot, Chart per Value, KPI Card and Mermaid are
-static by nature — there is no click to catch.)
 
 ---
 

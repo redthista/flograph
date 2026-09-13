@@ -123,3 +123,66 @@ class TestRun:
             registry.instantiate("flograph.viz.plotly_style"))
         graph.connect(source.id, "figure", style.id, "figure")
         assert len(graph.connections) == 1
+
+
+class TestClickToFilter:
+    """W2: the table filters what is downstream of it when a row is clicked,
+    on the same terms as Show Plotly."""
+
+    def test_it_is_interactive_with_the_click_outputs(self, registry):
+        spec = registry.get(TABLE)
+        assert spec.interactive
+        assert [o.name for o in spec.outputs] == ["figure", "selected",
+                                                  "table"]
+        for name in ("on_click", "click_column", "selected"):
+            assert spec.param(name) is not None
+
+    def test_clicking_is_off_until_it_is_on(self, registry, table):
+        out, _ = run_node(registry, {"selected": '["south"]'}, table=table)
+        assert getattr(out["figure"], "_flograph_post_script", None) is None
+        assert out["selected"] == [] and len(out["table"]) == 3
+
+    def test_a_click_filters_on_the_first_column_by_default(self, registry,
+                                                             table):
+        out, _ = run_node(registry, {"on_click": "select one",
+                                     "selected": '["south"]'}, table=table)
+        assert out["selected"] == ["south"]
+        assert list(out["table"]["region"]) == ["south"]
+
+    def test_the_click_column_is_what_it_filters_on(self, registry, table):
+        out, _ = run_node(registry, {"on_click": "select many",
+                                     "click_column": "units",
+                                     "selected": '["10", "30"]'}, table=table)
+        assert list(out["table"]["region"]) == ["north", "east"]
+
+    def test_it_filters_the_whole_input_not_just_the_rows_drawn(
+            self, registry):
+        big = pd.DataFrame({"k": ["a", "b"] * 10})
+        out, _ = run_node(registry, {"on_click": "select one", "max_rows": 2,
+                                     "selected": '["b"]'}, table=big)
+        assert len(out["table"]) == 10
+
+    def test_the_page_knows_the_value_of_every_row_drawn(self, registry,
+                                                          table):
+        out, _ = run_node(registry, {"on_click": "select many"}, table=table)
+        script = out["figure"]._flograph_post_script
+        assert '["north", "south", "east"]' in script
+        assert "multi = true" in script
+        assert ".column-cell" in script and '"header"' in script
+
+    def test_a_value_cannot_close_the_script_it_rides_in(self, registry):
+        odd = pd.DataFrame({"k": ["</script><b>"]})
+        out, _ = run_node(registry, {"on_click": "select one"}, table=odd)
+        assert "</script>" not in out["figure"]._flograph_post_script
+
+    def test_the_clicked_rows_are_shaded(self, registry, table):
+        out, _ = run_node(registry, {"on_click": "select one",
+                                     "striped": False,
+                                     "selected": '["east"]'}, table=table)
+        fill = out["figure"].data[0].cells.fill.color
+        assert fill[0][2] != fill[0][0] and fill[0][0] == fill[0][1]
+
+    def test_a_click_column_that_is_not_there(self, registry, table):
+        with pytest.raises(ValueError, match="Click column"):
+            run_node(registry, {"on_click": "select one",
+                                "click_column": "nope"}, table=table)

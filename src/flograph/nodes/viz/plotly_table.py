@@ -28,6 +28,14 @@ for money. Text columns are left alone.
 **Striped** shades alternate rows. **Header fill**, **Header text** and
 **Font size** cover the rest; leave them blank to follow the theme.
 
+**On click** turns the table into a filter, the way it does on Show
+Plotly: set it to *select one* or *select many* and clicking a row writes
+that row's value in **Click column** (the first column shown, when blank)
+into **Clicked values**, shades the rows that match, and re-runs everything
+downstream. **table** is the input filtered to those rows and **selected**
+is the bare list. Clicking the selected row again clears it; a header is
+not a row and does nothing.
+
 **This node stands alone.** It imports nothing from flograph that it
 cannot do without, so the file can be copied into a user-nodes folder on an
 older flograph and will work there — including sharing the one figure lock
@@ -42,8 +50,12 @@ NODE = {
     "category": "Viz",
     "version": "1.0",
     "card": "webview",
+    # Lets the table's own page write this node's "selected" param when a row
+    # is clicked — see "On click" above and flograph.core.bridge.
+    "interactive": True,
     "inputs": [("table", "dataframe")],
-    "outputs": [("figure", "object")],
+    "outputs": [("figure", "object"), ("selected", "any"),
+                ("table", "dataframe")],
 }
 PARAMS = [
     {"name": "columns", "type": "columns", "label": "Columns", "default": "",
@@ -71,6 +83,21 @@ PARAMS = [
                  "ggplot2", "seaborn", "simple_white", "presentation",
                  "none"],
      "default": "default"},
+    # ------------------------------------------------------ click to filter
+    {"name": "on_click", "type": "choice", "label": "On click",
+     "options": ["nothing", "select one", "select many"],
+     "default": "nothing"},
+    {"name": "click_column", "type": "columns", "label": "Click column",
+     "multi": False, "default": "",
+     "placeholder": "blank = the first column shown",
+     "visible_when": {"on_click": ["select one", "select many"]}},
+    # Written by the table's own page when a row is clicked. Visible for the
+    # same reason as Show Plotly's: when a click isn't filtering what you
+    # expect, this is where what it sent shows up.
+    {"name": "selected", "type": "string", "label": "Clicked values",
+     "default": "",
+     "placeholder": 'e.g. ["north"] — blank keeps every row',
+     "visible_when": {"on_click": ["select one", "select many"]}},
     {"name": "title", "type": "string", "label": "Title", "default": ""},
     {"name": "width", "type": "int", "label": "Width",
      "default": 460, "min": 260, "max": 4000, "cosmetic": True},
@@ -86,6 +113,47 @@ PARAMS = [
 #: a translucent white rather than a colour: it lightens a dark theme and
 #: darkens nothing, so one value works against every template.
 _STRIPE = "rgba(128, 128, 128, 0.12)"
+
+#: The shade behind a row whose value is among the clicked ones — the only
+#: sign on the table itself of what it is filtering to.
+_PICKED = "rgba(59, 130, 246, 0.30)"
+
+#: Run by plotly once the table is drawn ({plot_id} is its div). A table
+#: trace sends no plotly_click, so this listens on the page itself and asks
+#: the cell what row it is: plotly binds each `.column-cell` its datum, whose
+#: `rowNumber` is the row's place in what was drawn, and `values` is the
+#: click column of exactly those rows. The header is a `.column-block` of
+#: type "header" and is skipped; so is the end of a drag-to-scroll.
+_CLICK_JS = """
+var gd = document.getElementById("{plot_id}");
+var picked = %(picked)s, multi = %(multi)s, values = %(values)s;
+var downX = 0, downY = 0;
+gd.addEventListener("mousedown", function (event) {
+  downX = event.clientX; downY = event.clientY;
+}, true);
+gd.addEventListener("click", function (event) {
+  if (Math.abs(event.clientX - downX) + Math.abs(event.clientY - downY) > 4) {
+    return;
+  }
+  var target = event.target;
+  var cell = target && target.closest ? target.closest(".column-cell") : null;
+  if (!cell || !cell.__data__) { return; }
+  var block = cell.closest(".column-block");
+  if (block && block.__data__ && block.__data__.type === "header") { return; }
+  var row = cell.__data__.rowNumber;
+  if (typeof row !== "number" || row < 0 || row >= values.length) { return; }
+  var value = values[row];
+  if (multi) {
+    var at = picked.indexOf(value);
+    if (at === -1) { picked.push(value); } else { picked.splice(at, 1); }
+  } else {
+    // Clicking the selected one again clears it, so a filter can always be
+    // undone from the visual itself.
+    picked = (picked.length === 1 && picked[0] === value) ? [] : [value];
+  }
+  flograph.select(picked);
+}, true);
+"""
 
 
 def _column_list(value):
@@ -135,6 +203,32 @@ def _figure_lock():
         return module.lock
 
 
+def _selected(raw) -> list:
+    """The clicked values as a list of strings — a JSON array normally (the
+    page's own handler writes that), a comma-separated list for hand edits.
+
+    Guarded like `_figure_lock` above, to keep this file droppable into an
+    older flograph: it carries its own copy for when there is no
+    `core.controls` to borrow from.
+    """
+    try:
+        from flograph.core.controls import selected_values
+        return selected_values(raw)
+    except ImportError:
+        import json
+
+        text = str(raw or "").strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            return [part.strip() for part in text.split(",") if part.strip()]
+        if isinstance(parsed, list):
+            return [str(v) for v in parsed]
+        return [str(parsed)]
+
+
 def run(ctx, table):
     import importlib.util
 
@@ -171,7 +265,19 @@ def run(ctx, table):
 
     cells = {"values": [shown[c].tolist() for c in picked],
              "align": ctx.params.get("align", "left")}
-    fill = _row_fill(ctx.params, len(shown), len(picked))
+
+    mode = str(ctx.params.get("on_click", "nothing") or "nothing")
+    clicking = mode in ("select one", "select many")
+    chosen = _selected(ctx.params.get("selected", "")) if clicking else []
+    click_column = str(ctx.params.get("click_column") or "").strip()
+    click_column = click_column or picked[0]
+    if clicking and click_column not in table.columns:
+        raise ValueError(
+            f"Click column {click_column!r} is not in the table")
+    keys = shown[click_column].astype(str).tolist() if clicking else []
+    marked = {i for i, key in enumerate(keys) if key in chosen}
+
+    fill = _row_fill(ctx.params, len(shown), len(picked), marked)
     if fill is not None:
         cells["fill_color"] = fill
     # A d3 format is per column and means nothing to a column of words, so
@@ -201,19 +307,42 @@ def run(ctx, table):
         figure.update_layout(**layout)
 
     ctx.log(f"{len(shown)} row(s) x {len(picked)} column(s)")
-    return {"figure": figure}
+
+    filtered = table
+    if clicking:
+        import json
+
+        # "</" is escaped so a cell holding "</script>" cannot end the
+        # script it is embedded in.
+        figure._flograph_post_script = _CLICK_JS % {
+            "picked": json.dumps(chosen),
+            "multi": "true" if mode == "select many" else "false",
+            "values": json.dumps(keys).replace("</", "<\\/"),
+        }
+        if chosen:
+            filtered = table[table[click_column].astype(str).isin(chosen)]
+            ctx.log(f"click filter on {click_column!r}: kept "
+                    f"{len(filtered)} of {len(table)} rows")
+    return {"figure": figure, "selected": chosen, "table": filtered}
 
 
-def _row_fill(params, rows, columns):
+def _row_fill(params, rows, columns, marked=()):
     """What to paint behind the cells, or None to leave it to the theme.
 
     Plotly wants one entry per *column*, each either a colour or a list of
     colours down the rows — so striping means building the row pattern once
-    and handing the same list to every column.
+    and handing the same list to every column. `marked` rows, the ones a
+    click is filtering to, are shaded over whatever else they would be.
     """
     plain = str(params.get("row_fill") or "").strip()
-    if not params.get("striped", True):
-        return [plain] * columns if plain else None
     base = plain or "rgba(0, 0, 0, 0)"
-    pattern = [base if index % 2 == 0 else _STRIPE for index in range(rows)]
+    if params.get("striped", True):
+        pattern = [base if index % 2 == 0 else _STRIPE
+                   for index in range(rows)]
+    elif marked:
+        pattern = [base] * rows
+    else:
+        return [plain] * columns if plain else None
+    for index in marked:
+        pattern[index] = _PICKED
     return [pattern] * columns
