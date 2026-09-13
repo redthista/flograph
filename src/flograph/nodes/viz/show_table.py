@@ -34,7 +34,22 @@ revenue              sort desc                  # the order the table opens in
 hide sla                                        # keep a helper column out of view
 show region, revenue, product                   # only these, in that order
 revenue              tooltip note               # rest on a cell, read a note
+trend   spark from jan..dec                     # a row's numbers as a tiny chart
+region  spark area teal last from 2024-*        # …beside a value, like an icon
 ```
+
+**Sparklines.** `spark` draws a row's numbers — read **across the row**
+from the columns after `from`: names, a pattern, or a `jan..dec` range —
+as a chart the size of a word. Drawn in a column the table doesn't have,
+it makes that column (holding the row's latest number, so it still sorts);
+drawn in one it has, it sits beside the value like an icon (`left`,
+`right`, `above`, `below`, `in`). Add `hide` to put the months out of view,
+or `replace` to put the new column where they were. Kinds `line`, `area`,
+`step`, `bars`, `winloss`, `dots`; marks `first`, `last`, `high`, `low`,
+`points`; plus a colour, `ref mean`, `shared` (one scale for every row),
+`smooth`, `thick`, `tall` and a width like `90px`. A blank is a gap, never
+a zero, and resting on a spark that stands alone says what it drew. It
+prints on a report page as a picture.
 
 `scale`, `bar` and `icons` can read their deciding value **from another
 column** with a trailing `by revenue` clause, and a highlight can **test

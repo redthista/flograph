@@ -124,6 +124,100 @@ either end of the rule (`bar only blue`, `bar blue only`), a `by` clause and
 all — and a highlight takes it as a style word, so `score < 0 => bg red,
 only` blanks the failing cells and leaves the rest alone.
 
+## Sparklines
+
+A **sparkline** is a row's numbers drawn as a chart the size of a word —
+twelve months of sales as one line, in the row they belong to. The numbers
+are read **across the row**, from the columns named after `from`:
+
+```
+trend    spark from jan..dec                 # every column from jan to dec
+trend    spark from q1, q2, q3, q4           # these four, in this order
+trend    spark from sales_*                  # every numeric column matching
+```
+
+A **range** (`jan..dec`) takes the columns between its two ends in the
+table's order, both ends included — reversed if you write it right to left.
+A **pattern** takes the numeric columns it matches and never the column
+the spark is drawn in, so `sales_total spark from sales_*` reads the months
+and not the total. Text columns a pattern or range happens to cross are
+left out; a column you name outright is always read.
+
+### Where it goes
+
+The column on the left of `spark` is where it is drawn, and what happens
+depends on whether the table has it.
+
+**A column the table doesn't have becomes one.** `trend spark from
+jan..dec` adds a `trend` column with the spark standing in it on its own.
+The column holds the row's **latest number** underneath, so sorting it
+sorts by the most recent value and copying it copies that number. Place it
+with `show`, name it with `label`, size it with `width` — it is a column
+like any other.
+
+**A column the table has keeps its value, and the spark sits beside it** —
+the way an icon does. That is how a region's name gets its trend right
+next to it:
+
+```
+region   spark area teal from jan..dec          # left of the name
+region   spark right from jan..dec              # after it
+region   spark below tall from jan..dec         # on a line of its own
+revenue  spark in from jan..dec                 # instead of the value
+```
+
+`left` is the default beside a value; `right`, `above`, `below` and `in`
+work as they do for [icons](#showing-the-format-instead-of-the-value).
+Name a place on a **new** column and its latest number shows beside the
+spark.
+
+### The columns it reads
+
+Leave the months showing, or say otherwise at the end of the line:
+
+```
+trend    spark from jan..dec hide        # the months are hidden
+trend    spark from jan..dec replace     # hidden, and trend goes where they were
+```
+
+Hidden is a view, like `hide`: the months are still in the table leaving
+the card, and every other rule can still read them.
+
+### How it's drawn
+
+Everything goes between `spark` and `from`, in any order:
+
+| Word | What it does |
+| --- | --- |
+| `line` `area` `step` `bars` `winloss` `dots` | The kind. `line` is the default. `bars` grow from zero, so a negative hangs below; `winloss` shows only up or down. |
+| `blue` `green` `red` `amber` `orange` `yellow` `purple` `teal` `pink` `grey` `white`, or `#hex` | The colour. |
+| `negative red` | The colour of a bar below zero. |
+| `first` `last` `high` `low` `ends` `points` | Marks. A dot on that point — or, on bars, that bar coloured. Each can take a colour of its own: `high green low red`. `points` marks every value. |
+| `ref mean` `ref median` `ref 100` | A dashed reference line. |
+| `shared` | One scale for the whole column. Without it each row is scaled to its own numbers, which shows every row's **shape** as clearly as it can; with it the lines can be compared by **height** too. |
+| `smooth` | A curve through the points. It never rises above the highest point or dips below the lowest — at this size the height *is* the number. |
+| `thick` | A heavier line and bigger dots. |
+| `tall` | Twice the height — the row grows to fit. |
+| `90px` | A fixed width. Beside a value a spark is 64px; standing alone it takes the column's width. |
+
+```
+trend    spark bars green negative red ref 0 from m01..m12
+region   spark area teal smooth last high green low red right from 2024-*
+change   spark winloss from wk_* replace
+```
+
+A **blank is a gap**, never a zero — a month nobody reported is not a
+month that sold nothing — and a row with fewer than two numbers draws
+nothing. Resting on a spark that stands on its own says what it drew:
+where it started, where it ended, and its high and low, each with the
+column it came from.
+
+A spark prints on a **report page** as a picture, in colours darkened
+enough to read on white, and in **Open in Browser** and exported HTML too.
+In a [matrix](#a-matrix-rules-before-and-after-the-pivot) the columns the
+pivot made are there to read: `trend spark from *` over a matrix of months
+draws each row's months.
+
 ## Order of application
 
 Rules compose **top to bottom, and a later line wins** any attribute it sets —

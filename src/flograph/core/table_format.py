@@ -142,6 +142,36 @@ The note column keeps showing until a ``hide`` line says otherwise, which
 is deliberate: a rule that quietly removed a column it never named is a
 kindness that has to be undone by somebody who cannot see why it happened.
 
+``spark`` (``sparkline``) draws a row's numbers as a chart the size of a
+word. The numbers come **across the row**, from the columns after ``from``
+— named, a pattern, or a ``first..last`` range in table order — and the
+column on the left is where it is drawn::
+
+    trend     spark from jan..dec                  # a column of its own
+    trend     spark bars green from q1, q2, q3, q4
+    region    spark area teal last high low from 2024-*   # beside the name
+    trend     spark from jan..dec replace          # where the months were
+    trend     spark winloss from m_* hide          # the months hidden
+
+A column the table **does not have** becomes one — display only, holding
+the row's latest number so it still sorts and copies — and the spark
+stands in it on its own. A column the table *does* have keeps its value
+and the spark sits beside it like an icon, ``left`` unless a place is
+named (``right`` / ``above`` / ``below`` / ``in``). ``hide`` puts the
+source columns out of view; ``replace`` does that and puts the new column
+where they were.
+
+Kinds: ``line`` (the default), ``area``, ``step``, ``bars``, ``winloss``
+and ``dots``. Marks: ``first``, ``last``, ``high``, ``low``, ``ends`` and
+``points``, each optionally followed by its colour. ``negative <colour>``
+colours a bar below zero, ``ref mean`` / ``ref median`` / ``ref 100``
+draws a dashed reference line, ``shared`` puts every row on one scale (each
+row is scaled to itself otherwise, which shows its shape best), and
+``smooth``, ``thick``, ``tall`` and a width such as ``90px`` shape the
+drawing. A blank is a gap in the line, never a zero, and a row with fewer
+than two numbers draws nothing. A pattern never reads the column the spark
+is drawn in; a range reads everything between its two ends.
+
 ``hide`` and ``show`` are the two ways to say which columns the table
 has, and they are not mirror images. ``hide`` subtracts — name the helper
 columns a rule reads and the reader shouldn't see. ``show`` is the
@@ -176,6 +206,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from . import sparkline as _spark
 from .visual_style import PALETTES
 
 # --------------------------------------------------------------- presets
@@ -223,7 +254,7 @@ _ICON_LABELS = {
 
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
-          "sort", "color_map", "auto_color", "tooltip"}
+          "sort", "color_map", "auto_color", "tooltip", "sparkline"}
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
@@ -344,6 +375,26 @@ class Rule:
     #: sets it so a heatmap reads across every cell a value built, the way
     #: a matrix is read, rather than month by month.
     pool: list = field(default_factory=list)
+    #: sparkline: the columns whose numbers make the line, as typed —
+    #: names, patterns and ``first..last`` ranges. `spark_projection`
+    #: resolves them against the table before anything is drawn.
+    series: list = field(default_factory=list)
+    #: sparkline: one of `sparkline.KINDS`' values. `color` is its colour
+    #: and `negative_color` a bar's below zero, shared with `data_bar`.
+    spark_kind: Optional[str] = None
+    #: sparkline: [[mark, colour | None], …] — first/last/high/low/points
+    marks: list = field(default_factory=list)
+    #: sparkline: a reference line — a number, "mean" or "median"
+    ref: Any = None
+    #: sparkline: one scale down the whole column instead of one per row
+    shared: bool = False
+    tall: bool = False
+    smooth: bool = False
+    thick: bool = False
+    spark_width: Optional[int] = None
+    #: sparkline: what becomes of the columns it reads — None (left alone),
+    #: "hide", or "replace" (hidden, with the new column where they were)
+    take_sources: Optional[str] = None
 
     def to_dict(self) -> dict:
         out = {}
@@ -406,6 +457,11 @@ class Decoration:
     color: Optional[str] = None               # ink
     pill: Optional[str] = None                # lozenge fill; None = bare
     where: str = "left"
+    #: A sparkline drawn in the decoration's place instead of text. It is a
+    #: decoration rather than a field of its own because it *is* one: it
+    #: sits left, right, above, below or in place of the value exactly as
+    #: an icon does, and a cell may carry it beside a tick.
+    spark: Optional["_spark.Spark"] = None
 
     def to_dict(self) -> dict:
         out = {"text": self.text}
@@ -415,6 +471,8 @@ class Decoration:
             out["pill"] = self.pill
         if self.where != "left":
             out["where"] = self.where
+        if self.spark is not None:
+            out["spark"] = self.spark.to_dict()
         return out
 
     @classmethod
@@ -424,9 +482,12 @@ class Decoration:
             return cls(text=str(glyph or ""),
                        color=d[1] if len(d) > 1 else None)
         d = d or {}
+        spark = d.get("spark")
         return cls(text=str(d.get("text") or ""), color=d.get("color"),
                    pill=d.get("pill"),
-                   where=d.get("where") or "left")
+                   where=d.get("where") or "left",
+                   spark=(_spark.Spark.from_dict(spark)
+                          if isinstance(spark, dict) else None))
 
 
 @dataclass
@@ -713,7 +774,29 @@ def _pill_ink_for_paper(ink: Optional[str], tinted: Optional[str]) -> Optional[s
 def _decor_for_paper(d: "Decoration") -> "Decoration":
     pill = paper_tint(d.pill, PAPER_BAR_TINT) if d.pill else None
     return dataclasses.replace(
-        d, pill=pill, color=_pill_ink_for_paper(d.color, pill))
+        d, pill=pill, color=_pill_ink_for_paper(d.color, pill),
+        spark=_spark_for_paper(d.spark) if d.spark is not None else None)
+
+
+def _spark_for_paper(spark: "_spark.Spark") -> "_spark.Spark":
+    """A spark's colours made legible as ink on white.
+
+    A line is ink, not a ground, so it is darkened where it would vanish
+    (amber, yellow, white) rather than tinted the way a fill is. The
+    defaults are resolved first — a colour nobody named still has to
+    survive the page.
+    """
+    line = on_white(spark.color or _spark.DEFAULT_COLOR)
+    marks = []
+    for entry in spark.marks:
+        name = entry[0]
+        chosen = entry[1] if len(entry) > 1 else None
+        marks.append([name, on_white(chosen or _spark.MARK_COLORS.get(name)
+                                     or line)])
+    return dataclasses.replace(
+        spark, color=line, marks=marks,
+        negative_color=on_white(spark.negative_color
+                                or _spark.NEGATIVE_COLOR))
 
 
 def _scale_color(frac: float, low: str, mid: Optional[str], high: str) -> Optional[str]:
@@ -931,9 +1014,12 @@ _LEADING_KEYWORDS = ("hide", "show")
 #: a keyword, so the cost falls on that one table and is handled.
 _TIP_KEYWORDS = ("tooltip", "tip")
 
+#: `spark` is what people say; `sparkline` is what Excel calls it.
+_SPARK_KEYWORDS = ("spark", "sparkline")
+
 _KEYWORDS = ("scale", "bar", "icons", "icon", "iconmap", "colormap",
              "colourmap", "format", "width", "align", "label", "sort"
-             ) + _AUTO_KEYWORDS + _TIP_KEYWORDS
+             ) + _AUTO_KEYWORDS + _TIP_KEYWORDS + _SPARK_KEYWORDS
 
 #: The keywords whose argument is a `source: value=…` map. They are the
 #: only ones that may be written with the colon stuck to them — `iconmap:`
@@ -1117,8 +1203,155 @@ def _parse_value_map(lineno: int, arg: str, keyword: str) -> tuple:
     return source, mapping
 
 
+#: The word that separates a spark's own settings from the columns it
+#: reads. `by` is accepted because every other rule that reads another
+#: column takes it, and `across` because that is what a spark does.
+_SPARK_FROM = ("from", "by", "across")
+
+#: What becomes of the columns a spark reads. `keep` is the default, and
+#: is here so it can be said out loud over an earlier habit.
+_SPARK_FATES = {"hide": "hide", "replace": "replace", "keep": None}
+
+#: A spark's width, in pixels on the card.
+MIN_SPARK_WIDTH, MAX_SPARK_WIDTH = 16, 400
+
+_SPARK_HELP = ("kinds: line, area, step, bars, winloss, dots · marks: "
+               "first, last, high, low, ends, points (each may take a "
+               "colour) · a colour · negative <colour> · ref mean|median|"
+               "<number> · shared · smooth · thick · tall · 90px · "
+               "left|right|above|below|in · only · hide|replace")
+
+
+def _spark_colour(token: "str | None") -> "str | None":
+    """`token` as a spark colour — a vivid preset name or a hex — or None."""
+    if not token:
+        return None
+    low = token.lower()
+    if low in _spark.COLORS:
+        return _spark.COLORS[low]
+    if re.fullmatch(r"#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?", token):
+        return token
+    return None
+
+
+def _parse_spark(lineno: int, columns: list, arg: str) -> Rule:
+    """`"bars green last from jan..dec hide"` → a sparkline rule.
+
+    The column list comes last, after `from`, because it is the one part of
+    the line that can be anything — a name with a space, a pattern, a
+    range. Everything before it is a word this parser knows, in any order,
+    so an unknown word is an error that lists what it could have been
+    rather than a column name nobody meant.
+    """
+    if not columns:
+        raise ValueError(
+            f"line {lineno}: 'spark' needs a column to draw in — "
+            f"'trend spark from jan..dec'")
+    spans = list(_TOKEN_RE.finditer(arg))
+    cut = next((k for k, m in enumerate(spans)
+                if m.group().lower() in _SPARK_FROM), None)
+    if cut is None:
+        raise ValueError(
+            f"line {lineno}: 'spark' needs the columns to read — "
+            f"'… spark from jan..dec', 'from q1, q2, q3' or 'from sales_*'")
+    options = [m.group() for m in spans[:cut]]
+    tail = arg[spans[cut].end():].strip()
+
+    fate = None
+    # a trailing `hide` / `replace` after the column list — only when a
+    # space, not a comma, sets it off, so a column called "hide" in the
+    # list itself survives
+    words = list(_TOKEN_RE.finditer(tail))
+    if len(words) > 1 and words[-1].group().lower() in _SPARK_FATES:
+        before = tail[:words[-1].start()]
+        if before[-1:].isspace() and not before.rstrip().endswith(","):
+            fate = _SPARK_FATES[words[-1].group().lower()]
+            tail = before.rstrip()
+    series = _column_list(tail)
+    if not series:
+        raise ValueError(
+            f"line {lineno}: 'spark … from' needs at least one column")
+
+    kind = colour = negative = width = place = ref = None
+    marks: list = []
+    shared = tall = smooth = thick = only = False
+    i = 0
+    while i < len(options):
+        token = options[i]
+        low = token.lower()
+        following = options[i + 1] if i + 1 < len(options) else None
+        if low in _spark.KINDS:
+            kind = _spark.KINDS[low]
+        elif low in _spark.MARKS:
+            chosen = _spark_colour(following)
+            for name in _spark.MARKS[low]:
+                marks.append([name, chosen])
+            i += 1 if chosen else 0
+        elif low in ("negative", "negatives", "neg"):
+            chosen = _spark_colour(following)
+            if chosen is None:
+                raise ValueError(f"line {lineno}: 'negative' needs a colour "
+                                 f"— 'negative red'")
+            negative = chosen
+            i += 1
+        elif low in ("ref", "reference", "target", "baseline"):
+            spec = (_spark.REFS.get(following.lower())
+                    if following else None)
+            if spec is None:
+                spec = _spark.number(following)
+            if spec is None:
+                raise ValueError(
+                    f"line {lineno}: 'ref' needs mean, median or a number "
+                    f"— 'ref mean', 'ref 100'")
+            ref = spec
+            i += 1
+        elif low in ("shared", "same-scale", "together"):
+            shared = True
+        elif low == "tall":
+            tall = True
+        elif low in ("smooth", "curved", "curve"):
+            smooth = True
+        elif low in ("thick", "bold"):
+            thick = True
+        elif re.fullmatch(r"\d+px", low):
+            width = int(low[:-2])
+            if not MIN_SPARK_WIDTH <= width <= MAX_SPARK_WIDTH:
+                raise ValueError(
+                    f"line {lineno}: a spark {width}px wide is outside "
+                    f"{MIN_SPARK_WIDTH}–{MAX_SPARK_WIDTH} pixels")
+        elif low in _PLACE_WORDS:
+            place = _PLACE_WORDS[low]
+        elif low == "only":
+            only = True
+        elif low in _SPARK_FATES:
+            fate = _SPARK_FATES[low]
+        elif _spark_colour(token) and colour is None:
+            colour = _spark_colour(token)
+        else:
+            raise ValueError(
+                f"line {lineno}: don't understand {token!r} in a spark "
+                f"({_SPARK_HELP})")
+        i += 1
+    return Rule("sparkline", columns, series=series,
+                spark_kind=kind or "line", color=colour,
+                negative_color=negative, marks=marks, ref=ref,
+                shared=shared, tall=tall, smooth=smooth, thick=thick,
+                spark_width=width, glyph_where=place, hide_value=only,
+                take_sources=fate)
+
+
 def _parse_token_line(lineno: int, line: str) -> Rule:
     tokens = line.split()
+
+    spark_at = next((i for i, t in enumerate(tokens)
+                     if t.lower() in _SPARK_KEYWORDS), None)
+    if spark_at and not any(_keyword_of(t) for t in tokens[:spark_at]):
+        # Taken before the right-to-left keyword scan, because a spark's
+        # column list comes *after* its keyword and may hold a name that
+        # reads as one (`from label, sort`). The scan would pick the last
+        # of those and parse a different rule entirely.
+        return _parse_spark(lineno, _column_list(" ".join(tokens[:spark_at])),
+                            " ".join(tokens[spark_at + 1:]))
 
     if tokens and tokens[0].lower() in _LEADING_KEYWORDS:
         # `hide`/`show` lead their line instead of following a column list,
@@ -1158,6 +1391,9 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         # give the map parser back the colon the split took off it, so an
         # absent source still reads as absent rather than as missing
         arg = ":" + arg
+
+    if keyword in _SPARK_KEYWORDS:
+        return _parse_spark(lineno, columns, arg)
 
     if keyword in ("iconmap", "colormap", "colourmap"):
         # here the `only` comes off the whole argument: the mapping body is
@@ -1555,6 +1791,13 @@ def rule_summary(rule: Rule) -> str:
         return f"{cols}  ·  number format “{rule.number_spec}”"
     if rule.mode == "tooltip":
         return f"{cols}  ·  tooltip from “{rule.source}”"
+    if rule.mode == "sparkline":
+        fate = {"hide": ", sources hidden",
+                "replace": ", in place of its sources"}.get(
+                    rule.take_sources, "")
+        return (f"{cols}  ·  {rule.spark_kind or 'line'} sparkline from "
+                f"{', '.join(str(s) for s in rule.series)}{place}{fate}"
+                f"{only}")
     if rule.mode == "hide":
         return f"hide  {cols}"
     if rule.mode == "show":
@@ -1724,9 +1967,27 @@ def style_report(style_obj: Any, df=None) -> list[str]:
         known = {str(c) for c in columns}
         named: set = set()
         patterns: set = set()
-        entries = [c for rule in rules_from_style(style_obj) for c in rule.columns]
-        entries += [r.source for r in rules_from_style(style_obj) if r.source]
+        rules = rules_from_style(style_obj)
+        # a spark drawn in a column the table lacks is *making* that
+        # column, so it is not a missing one
+        entries = [c for rule in rules for c in rule.columns
+                   if rule.mode != "sparkline" or _is_glob(c)]
+        entries += [r.source for r in rules if r.source]
         entries += hidden_columns(style_obj) + shown_columns(style_obj)
+        for rule in rules:
+            if rule.mode != "sparkline":
+                continue
+            for entry in rule.series:
+                entry = str(entry)
+                if entry not in known and ".." in entry:
+                    first, _dots, last = entry.partition("..")
+                    entries += [_unquote(first.strip()),
+                                _unquote(last.strip())]
+                else:
+                    entries.append(entry)
+            if not series_columns(rule.series, df):
+                messages.append(
+                    f"“{rule_summary(rule)}” has no numeric column to read")
         for c in entries:
             (patterns if _is_glob(c) else named).add(str(c))
         missing = sorted(c for c in named if c not in known)
@@ -2077,6 +2338,47 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                         continue        # a blank note is no note, not ""
                     contrib[i] = CellStyle(tooltip=str(note))
 
+        elif rule.mode == "sparkline" and frame is not None:
+            # A pattern never reads the column the spark is drawn in —
+            # `sales_total spark from sales_*` means the months, not the
+            # total beside them. `spark_projection` has usually resolved
+            # the names already; this is for a caller that did not.
+            own = getattr(series, "name", None)
+            cols = series_columns(rule.series, frame,
+                                  exclude=() if own is None else (str(own),))
+            block = _numeric_block(frame, cols)
+            if block is not None:
+                low = high = None
+                if rule.shared:
+                    whole = _numeric_block(
+                        pool_frame if pool_frame is not None else frame,
+                        cols)
+                    low, high = _extent(whole if whole is not None
+                                        else block)
+                alone = rule.hide_value or _place(rule) == "in"
+                for i, row in enumerate(block.itertuples(index=False,
+                                                         name=None)):
+                    numbers = [None if _is_missing(v) else float(v)
+                               for v in row]
+                    if sum(v is not None for v in numbers) < _spark.MIN_POINTS:
+                        continue      # one point is not a trend
+                    drawing = _spark.Spark(
+                        values=numbers, kind=rule.spark_kind or "line",
+                        color=rule.color, negative_color=rule.negative_color,
+                        marks=[list(m) for m in rule.marks],
+                        low=low, high=high,
+                        ref=_spark.reference(rule.ref, numbers),
+                        width=rule.spark_width, tall=rule.tall,
+                        smooth=rule.smooth, thick=rule.thick)
+                    contrib[i] = CellStyle(
+                        decorations=[Decoration(where=_place(rule),
+                                                spark=drawing)],
+                        # a spark standing on its own has no number beside
+                        # it, so resting on it says what it drew; one beside
+                        # a value leaves that cell's tooltip to its own rules
+                        tooltip=(_spark.summary(numbers, cols)
+                                 if alone else None))
+
         elif rule.mode == "auto_color":
             # the same three spellings as a map: no source means this
             # column decides its own, which is the only one that means
@@ -2128,6 +2430,167 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                 acc[i] = contrib[i].over(acc[i])
 
     return acc
+
+
+def _is_numeric_column(frame, position: int) -> bool:
+    from pandas.api.types import is_bool_dtype, is_numeric_dtype
+    column = frame.iloc[:, position]
+    return is_numeric_dtype(column) and not is_bool_dtype(column)
+
+
+def series_columns(entries, frame, exclude=()) -> list[str]:
+    """The columns a spark reads, in the order it reads them.
+
+    * a **name** is taken as it is, numeric or not — it was asked for;
+    * a **pattern** takes the *numeric* columns it matches, in table order,
+      leaving out anything in `exclude` (the column the spark is drawn in);
+    * a ``first..last`` **range** takes the numeric columns between its two
+      ends, both included, in table order — reversed when the first is to
+      the right of the last, so ``dec..jan`` reads the way it is written.
+
+    `frame` may be a plain list of names, when there are no dtypes to ask;
+    then nothing is ruled out for not being a number.
+    """
+    columns = getattr(frame, "columns", None)
+    names = [str(c) for c in (columns if columns is not None else frame or ())]
+    first_at: dict = {}
+    for i, name in enumerate(names):
+        first_at.setdefault(name, i)
+    skip = {str(e) for e in exclude}
+
+    def numeric(name: str) -> bool:
+        return columns is None or _is_numeric_column(frame, first_at[name])
+
+    out: list[str] = []
+    for entry in entries or ():
+        entry = str(entry)
+        if entry in first_at:
+            out.append(entry)
+        elif ".." in entry:
+            start, _dots, end = entry.partition("..")
+            start, end = _unquote(start.strip()), _unquote(end.strip())
+            if start in first_at and end in first_at:
+                a, b = first_at[start], first_at[end]
+                span = names[a:b + 1] if a <= b else names[b:a + 1][::-1]
+                out.extend(c for c in span if numeric(c))
+        elif _is_glob(entry):
+            out.extend(c for c in names if fnmatch.fnmatchcase(c, entry)
+                       and c not in skip and numeric(c))
+    return _dedup(out)
+
+
+def _numeric_block(frame, names):
+    """The named columns as floats, one row per table row — or None."""
+    if frame is None or not names:
+        return None
+    import pandas as pd
+    first_at: dict = {}
+    for i, name in enumerate(str(c) for c in frame.columns):
+        first_at.setdefault(name, i)
+    positions = [first_at[n] for n in names if n in first_at]
+    if not positions:
+        return None
+    block = frame.iloc[:, positions]
+    return block.apply(lambda column: pd.to_numeric(column, errors="coerce"))
+
+
+def _extent(block) -> tuple:
+    """(lowest, highest) number anywhere in `block`, or (None, None)."""
+    stacked = block.stack() if len(block.columns) else block
+    try:
+        stacked = stacked.dropna()
+    except Exception:
+        pass
+    if not len(stacked):
+        return None, None
+    return float(stacked.min()), float(stacked.max())
+
+
+def spark_projection(frame, rules) -> tuple:
+    """``(frame, rules, hidden)`` once every spark has been given its place.
+
+    Three things a `spark` rule can do to a table that no other rule does,
+    all worked out here, once, by both the card and the printed page:
+
+    * **make a column.** A spark drawn in a column the table lacks gets
+      one — display only, holding the row's latest number, so the column
+      still sorts and copies as something. Its spark stands in it on its
+      own (``in``) unless the rule named another place, in which case that
+      latest number shows beside it.
+    * **resolve what it reads.** Patterns and ranges become names, against
+      the table as it arrived — so one spark's new column is never read by
+      another's ``from *``.
+    * **put its sources away.** ``hide`` hides them; ``replace`` hides them
+      and puts the new column where the first of them stood.
+
+    The frame that comes back is a shallow copy with the new columns on it
+    (and the original when no spark adds one), which is a view like every
+    other projection here: the table leaving the node's port is untouched.
+    """
+    rules = list(rules or [])
+    if (frame is None or not hasattr(frame, "columns")
+            or not any(getattr(r, "mode", None) == "sparkline"
+                       for r in rules)):
+        return frame, rules, []
+    names = [str(c) for c in frame.columns]
+    present = set(names)
+    added: dict = {}             # new column -> (latest numbers, anchor)
+    hidden: list[str] = []
+    out: list = []
+    for rule in rules:
+        if rule.mode != "sparkline":
+            out.append(rule)
+            continue
+        drawn = [str(c) for c in rule.columns]
+        sources = series_columns(rule.series, frame, exclude=drawn)
+        # a spark with nothing to read makes no column: an empty column
+        # would look like a spark that failed to draw, where `style_report`
+        # can say what is actually wrong
+        fresh = [c for c in drawn if not _is_glob(c) and c not in present
+                 and sources]
+        existing = [c for c in drawn if c in present or _is_glob(c)]
+        if rule.take_sources in ("hide", "replace"):
+            hidden.extend(c for c in sources if c not in drawn)
+        for name in fresh:
+            if name in added:
+                continue
+            block = _numeric_block(frame, sources)
+            latest = (block.ffill(axis=1).iloc[:, -1] if block is not None
+                      else None)
+            anchor = (sources[0] if rule.take_sources == "replace"
+                      and sources else None)
+            added[name] = (latest, anchor)
+        if existing:
+            out.append(dataclasses.replace(rule, columns=existing,
+                                           series=list(sources)))
+        if fresh:
+            place = rule.glyph_where
+            if place is None and not rule.hide_value:
+                place = "in"
+            out.append(dataclasses.replace(rule, columns=fresh,
+                                           series=list(sources),
+                                           glyph_where=place))
+    if not added:
+        return frame, out, _dedup(hidden)
+
+    import pandas as pd
+    shown = frame.copy(deep=False)
+    order = list(range(len(names)))
+    first_at: dict = {}
+    for i, name in enumerate(names):
+        first_at.setdefault(name, i)
+    for name, (latest, anchor) in added.items():
+        shown[name] = (latest.to_numpy() if latest is not None
+                       else pd.Series([None] * len(frame), dtype="float64",
+                                      index=frame.index).to_numpy())
+        position = len(shown.columns) - 1
+        if anchor is not None and first_at.get(anchor) in order:
+            order.insert(order.index(first_at[anchor]), position)
+        else:
+            order.append(position)
+    if order != list(range(len(shown.columns))):
+        shown = shown.iloc[:, order]
+    return shown, out, _dedup(hidden)
 
 
 def evaluate_rows(df, row_rules) -> list:

@@ -27,6 +27,7 @@ wrap                                            # long text runs to more lines
 hide sla                                        # keep a helper column out of view
 show region, revenue, product                   # only these, in that order
 revenue              tooltip note               # rest on a cell, read a note
+trend   spark from jan..dec                     # a row's numbers as a tiny chart
 ```
 
 `scale`, `bar` and `icons` can take their deciding value **from another

@@ -22,8 +22,10 @@ where before it needed none.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPalette
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import (
+    QColor, QFontMetrics, QPainter, QPainterPath, QPalette, QPen,
+)
 from PySide6.QtWidgets import (
     QApplication, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
 )
@@ -65,6 +67,83 @@ def _line_height(opt) -> int:
     return QFontMetrics(with_emoji(opt.font)).height()
 
 
+#: How wide a sparkline beside a value is when its rule named no width.
+_SPARK_BESIDE_W = 64
+#: Breathing room above and below a spark, so a line through its high
+#: point does not touch the grid line of the row above.
+_SPARK_PAD_Y = 2
+
+
+def _spark(d):
+    return getattr(d, "spark", None)
+
+
+def _units(decorations) -> int:
+    """How many text lines a stacked line of decorations takes: two when
+    it holds a `tall` spark, one otherwise."""
+    return 2 if any(_spark(d) is not None and _spark(d).tall
+                    for d in decorations) else 1
+
+
+def _grows_the_row(decorations) -> bool:
+    """A `tall` spark on the value's own line makes that line taller."""
+    return any(_spark(d) is not None and _spark(d).tall
+               and d.where in ("left", "right", "in") for d in decorations)
+
+
+def _qpath(points, smooth: bool) -> QPainterPath:
+    from flograph.core.sparkline import curve
+    path = QPainterPath(QPointF(*points[0]))
+    if smooth:
+        for c1, c2, end in curve(points):
+            path.cubicTo(QPointF(*c1), QPointF(*c2), QPointF(*end))
+    else:
+        for x, y in points[1:]:
+            path.lineTo(x, y)
+    return path
+
+
+def paint_spark(painter, rect: QRect, spark) -> None:
+    """Draw `spark` into `rect` — the shapes `core.sparkline.geometry`
+    laid out, which are the same ones a printed page gets as SVG."""
+    from flograph.core.sparkline import geometry
+    box = rect.adjusted(0, _SPARK_PAD_Y, 0, -_SPARK_PAD_Y)
+    shapes = geometry(spark, box.width(), box.height())
+    if shapes is None:
+        return
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.translate(box.left(), box.top())
+    for y, colour, dashed in shapes.guides:
+        pen = QPen(QColor(colour))
+        pen.setWidthF(0.8)
+        if dashed:
+            pen.setDashPattern([2.5, 2.5])
+        painter.setPen(pen)
+        painter.drawLine(QPointF(0, y), QPointF(box.width(), y))
+    painter.setPen(Qt.NoPen)
+    for points, base, colour, opacity in shapes.areas:
+        path = _qpath(points, shapes.smooth)
+        path.lineTo(points[-1][0], base)
+        path.lineTo(points[0][0], base)
+        path.closeSubpath()
+        fill = QColor(colour)
+        fill.setAlphaF(opacity)
+        painter.fillPath(path, fill)
+    for x, y, w, h, colour in shapes.rects:
+        painter.fillRect(QRectF(x, y, w, h), QColor(colour))
+    painter.setBrush(Qt.NoBrush)
+    for points, colour, stroke in shapes.lines:
+        painter.setPen(QPen(QColor(colour), stroke, Qt.SolidLine,
+                            Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(_qpath(points, shapes.smooth))
+    painter.setPen(Qt.NoPen)
+    for x, y, r, colour in shapes.dots:
+        painter.setBrush(QColor(colour))
+        painter.drawEllipse(QPointF(x, y), r, r)
+    painter.restore()
+
+
 class ConditionalFormatDelegate(QStyledItemDelegate):
 
     # ------------------------------------------------------------ sizing
@@ -83,7 +162,9 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         if decor is None:
             return size
         above, below = _stacked(decor[0])
-        lines = bool(above) + bool(below)
+        lines = ((_units(above) if above else 0)
+                 + (_units(below) if below else 0)
+                 + (1 if _grows_the_row(decor[0]) else 0))
         if not lines:
             return size
         opt = QStyleOptionViewItem(option)
@@ -97,6 +178,8 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
 
     def _chip_width(self, metrics, d) -> int:
         """How much room one decoration needs beside the value."""
+        if _spark(d) is not None:
+            return _spark(d).width or _SPARK_BESIDE_W
         advance = metrics.horizontalAdvance(str(d.text))
         if d.pill:
             return advance + 2 * _PILL_PAD_X
@@ -107,6 +190,10 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
     def _draw_chip(self, painter, x, band, d, metrics, pen) -> int:
         """One decoration at `x` within `band`. Returns the width used."""
         width = self._chip_width(metrics, d)
+        if _spark(d) is not None:
+            paint_spark(painter, QRect(x, band.top(), width, band.height()),
+                        _spark(d))
+            return width
         if d.pill:
             height = min(band.height(), metrics.height() + 2 * _PILL_PAD_Y)
             top = band.top() + (band.height() - height) // 2
@@ -128,6 +215,13 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         """A whole line of decorations, centred in `band`."""
         if not decorations:
             return
+        if (len(decorations) == 1 and _spark(decorations[0]) is not None
+                and not _spark(decorations[0]).width):
+            # a spark with a line to itself, or the whole cell, takes all
+            # of it: the column's width is what decides how long it reads
+            paint_spark(painter, band.adjusted(2, 0, -2, 0),
+                        _spark(decorations[0]))
+            return
         widths = [self._chip_width(metrics, d) for d in decorations]
         total = sum(widths) + _ICON_GAP * (len(widths) - 1)
         x = band.left() + max(0, (band.width() - total) // 2)
@@ -146,9 +240,9 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         line_h = metrics.height()
         band = QRect(inner)
         if above:
-            band.setTop(band.top() + line_h)
+            band.setTop(band.top() + line_h * _units(above))
         if below:
-            band.setBottom(band.bottom() - line_h)
+            band.setBottom(band.bottom() - line_h * _units(below))
         # each chip costs its own width and the gap after it, which is
         # exactly the step paint() walks below
         left = sum(self._chip_width(metrics, d) + _ICON_GAP
@@ -237,15 +331,17 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         line_h = metrics.height()
         band = QRect(inner)
         if above:
+            high = line_h * _units(above)
             self._draw_line(painter, QRect(inner.left(), inner.top(),
-                                           inner.width(), line_h),
+                                           inner.width(), high),
                             above, metrics, glyph_pen or text_pen)
-            band.setTop(band.top() + line_h)
+            band.setTop(band.top() + high)
         if below:
-            self._draw_line(painter, QRect(inner.left(), inner.bottom() - line_h,
-                                           inner.width(), line_h),
+            low = line_h * _units(below)
+            self._draw_line(painter, QRect(inner.left(), inner.bottom() - low,
+                                           inner.width(), low),
                             below, metrics, glyph_pen or text_pen)
-            band.setBottom(band.bottom() - line_h)
+            band.setBottom(band.bottom() - low)
 
         left = [d for d in decorations if d.where == "left"]
         right = [d for d in decorations if d.where == "right"]

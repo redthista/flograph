@@ -18,9 +18,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from flograph.core import sparkline as _sparkline
 from flograph.core.table_format import (
-    DEFAULT_PALETTE, MAX_RULE_WIDTH, MIN_RULE_WIDTH, PALETTES, bar_token,
-    fill_token, parse_rule_lines, quote_column, rule_summary, scale_token,
+    DEFAULT_PALETTE, MAX_RULE_WIDTH, MAX_SPARK_WIDTH, MIN_RULE_WIDTH,
+    MIN_SPARK_WIDTH, PALETTES, _is_glob, bar_token, fill_token,
+    parse_rule_lines, quote_column, rule_summary, scale_token,
 )
 from flograph.ui.emoji_font import apply_emoji_font, with_emoji
 
@@ -56,7 +58,7 @@ _MAP_COLOURS = ["green", "amber", "red", "blue", "grey", "(none)"]
 _NUMBER_PRESETS = ["", ",.0f", ",.2f", ".1%", "$,.0f", "$,.2f"]
 
 _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
-          "Highlight cells / rows", "Icons", "Number format",
+          "Sparkline", "Highlight cells / rows", "Icons", "Number format",
           "Tooltip from another column", "Hide columns",
           "Show only these columns", "Column layout", "Wrap text"]
 
@@ -64,12 +66,34 @@ _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
 #: order and `_line` dispatches on it, so the number appears in three
 #: places at once — which is exactly the sort of thing that survives one
 #: insertion and quietly breaks on the next.
-(K_SCALE, K_AUTO, K_BAR, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_TIP, K_HIDE,
- K_SHOW, K_LAYOUT, K_WRAP) = range(len(_KINDS))
+(K_SCALE, K_AUTO, K_BAR, K_SPARK, K_HIGHLIGHT, K_ICONS, K_NUMBER, K_TIP,
+ K_HIDE, K_SHOW, K_LAYOUT, K_WRAP) = range(len(_KINDS))
+
+_SPARK_KIND_CHOICES = [("Line", "line"), ("Area", "area"), ("Step", "step"),
+                       ("Bars", "bars"), ("Win / loss", "winloss"),
+                       ("Dots", "dots")]
+_SPARK_CHOICES = [(name.capitalize(), name, _sparkline.COLORS[name])
+                  for name in ("blue", "green", "red", "amber", "orange",
+                               "purple", "teal", "pink", "grey")]
+#: How a spark's columns are chosen. A range is what a wide table of
+#: months wants, and the one a pick-list cannot say without ticking twelve
+#: boxes; a pattern survives next year's columns arriving.
+_SPARK_READ_CHOICES = [("A range of columns", "range"),
+                       ("Columns matching a pattern", "pattern"),
+                       ("These columns", "list")]
+_SPARK_MARKS = [("first", "First"), ("last", "Last"), ("high", "High"),
+                ("low", "Low"), ("points", "Every point")]
+_SPARK_FATE_CHOICES = [("Leave them showing", ""),
+                       ("Hide them", "hide"),
+                       ("Hide them, and put this column where they were",
+                        "replace")]
+#: Typed as well as picked, so the editable combo's *text* is the value.
+_SPARK_REFS = ["none", "0", "mean", "median"]
 
 # both icon modes share the one "Icons" page; the page's own Style toggle
 # picks between the graduated set and a value→icon map.
 _MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
+              "sparkline": K_SPARK,
               "data_bar": K_BAR, "highlight": K_HIGHLIGHT, "icons": K_ICONS,
               "icon_map": K_ICONS, "number_format": K_NUMBER,
               "tooltip": K_TIP, "hide": K_HIDE, "show": K_SHOW,
@@ -126,6 +150,17 @@ def _pick_data(combo: QComboBox, token) -> None:
 
 def _only(box) -> str:
     return " only" if box.isChecked() else ""
+
+
+def _spark_token(colour) -> str:
+    """A spark colour as the rule writes it: its preset name when it has
+    one, else the hex it was given."""
+    if not colour:
+        return ""
+    for name, value in _sparkline.COLORS.items():
+        if value.lower() == str(colour).lower():
+            return name
+    return str(colour)
 
 
 #: Where a mark sits in its cell, as the wizard offers it. "left" is the
@@ -274,6 +309,7 @@ class RuleBuilder(QDialog):
         self._build_scale_page()
         self._build_auto_page()
         self._build_bar_page()
+        self._build_spark_page()
         self._build_highlight_page()
         self._build_icons_page()
         self._build_number_page()
@@ -456,6 +492,261 @@ class RuleBuilder(QDialog):
         self._bar_only = self._only_box("bar only — hide the value")
         f.addRow("", self._bar_only)
         self._stack.addWidget(page)
+
+    def _column_combo(self) -> QComboBox:
+        """A combo of every column — typed into instead where there are no
+        columns to offer (a Table Style node, with no table upstream)."""
+        box = QComboBox()
+        box.setEditable(not self._columns)
+        for name in self._columns:
+            box.addItem(name, name)
+        box.currentIndexChanged.connect(self._refresh)
+        if box.isEditable():
+            box.editTextChanged.connect(self._refresh)
+        return box
+
+    def _build_spark_page(self) -> None:
+        """A sparkline: which columns it reads across the row, and how it is
+        drawn. The column list at the top is where it is *drawn* — so a name
+        the table does not have is a column of its own."""
+        page = QWidget()
+        f = QFormLayout(page)
+        self._spark_read = _combo(_SPARK_READ_CHOICES)
+        self._spark_read.currentIndexChanged.connect(self._sync_spark_read)
+        f.addRow("Read", self._spark_read)
+
+        self._spark_start = self._column_combo()
+        self._spark_end = self._column_combo()
+        # blank until picked: first-to-last would quietly read every
+        # numeric column in the table, totals included
+        self._spark_start.setCurrentIndex(-1)
+        self._spark_end.setCurrentIndex(-1)
+        self._spark_range = QWidget()
+        rl = QHBoxLayout(self._spark_range)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.addWidget(self._spark_start, 1)
+        rl.addWidget(QLabel("to"))
+        rl.addWidget(self._spark_end, 1)
+        f.addRow("Columns", self._spark_range)
+
+        self._spark_pattern = QLineEdit()
+        self._spark_pattern.setPlaceholderText("sales_*   ·   20??   ·   m*")
+        self._spark_pattern.textChanged.connect(self._refresh)
+        f.addRow("Pattern", self._spark_pattern)
+
+        self._spark_pick = QWidget()
+        pl = QVBoxLayout(self._spark_pick)
+        pl.setContentsMargins(0, 0, 0, 0)
+        self._spark_list = QListWidget()
+        self._spark_list.setSelectionMode(_MULTI)
+        self._spark_list.setMaximumHeight(96)
+        for name in self._columns:
+            self._spark_list.addItem(QListWidgetItem(name))
+        self._spark_list.itemSelectionChanged.connect(self._refresh)
+        self._spark_list.setVisible(bool(self._columns))
+        pl.addWidget(self._spark_list)
+        self._spark_names = QLineEdit()
+        self._spark_names.setPlaceholderText(
+            "…or names, comma separated, in the order to read them")
+        self._spark_names.textChanged.connect(self._refresh)
+        pl.addWidget(self._spark_names)
+        f.addRow("These", self._spark_pick)
+
+        self._spark_kind = _combo(_SPARK_KIND_CHOICES)
+        self._spark_kind.currentIndexChanged.connect(self._refresh)
+        f.addRow("Kind", self._spark_kind)
+        self._spark_colour = ColorChoice(_SPARK_CHOICES)
+        self._spark_colour.changed.connect(self._refresh)
+        f.addRow("Colour", self._spark_colour)
+        self._spark_negative = ColorChoice(_SPARK_CHOICES, allow_none=True)
+        self._spark_negative.changed.connect(self._refresh)
+        f.addRow("Below zero", self._spark_negative)
+
+        marks = QWidget()
+        ml = QHBoxLayout(marks)
+        ml.setContentsMargins(0, 0, 0, 0)
+        self._spark_marks: dict = {}
+        for token, label in _SPARK_MARKS:
+            box = QCheckBox(label)
+            box.toggled.connect(self._refresh)
+            ml.addWidget(box)
+            self._spark_marks[token] = box
+        ml.addStretch(1)
+        f.addRow("Mark", marks)
+        #: a mark's colour from a rule being edited — kept so opening and
+        #: saving a hand-typed `high green` does not quietly lose the green
+        self._spark_mark_colours: dict = {}
+
+        self._spark_ref = QComboBox()
+        self._spark_ref.setEditable(True)
+        self._spark_ref.addItems(_SPARK_REFS)
+        self._spark_ref.setToolTip("A dashed line at a number, or at the "
+                                   "row's mean or median")
+        self._spark_ref.editTextChanged.connect(self._refresh)
+        f.addRow("Reference line", self._spark_ref)
+
+        flags = QWidget()
+        fl = QHBoxLayout(flags)
+        fl.setContentsMargins(0, 0, 0, 0)
+        self._spark_shared = QCheckBox("One scale for every row")
+        self._spark_shared.setToolTip(
+            "Off, each row fills its own height, which shows its shape best. "
+            "On, the lines can be compared by height too.")
+        self._spark_smooth = QCheckBox("Smooth")
+        self._spark_thick = QCheckBox("Thick")
+        self._spark_tall = QCheckBox("Tall")
+        for box in (self._spark_shared, self._spark_smooth,
+                    self._spark_thick, self._spark_tall):
+            box.toggled.connect(self._refresh)
+            fl.addWidget(box)
+        fl.addStretch(1)
+        f.addRow("", flags)
+
+        self._spark_width = QSpinBox()
+        self._spark_width.setRange(MIN_SPARK_WIDTH - 1, MAX_SPARK_WIDTH)
+        self._spark_width.setSpecialValueText("auto")
+        self._spark_width.setSuffix(" px")
+        self._spark_width.setValue(MIN_SPARK_WIDTH - 1)
+        self._spark_width.valueChanged.connect(self._refresh)
+        f.addRow("Width", self._spark_width)
+
+        self._spark_place = self._place_combo()
+        f.addRow("Beside a value", self._spark_place)
+        self._spark_fate = _combo(_SPARK_FATE_CHOICES)
+        self._spark_fate.currentIndexChanged.connect(self._refresh)
+        f.addRow("Columns it reads", self._spark_fate)
+
+        hint = QLabel(
+            "Drawn in a column the table doesn't have — type a new name "
+            "above — it gets a column of its own, holding the row's latest "
+            "number. Drawn in one it has, it sits beside the value like an "
+            "icon. A blank is a gap in the line, never a zero.")
+        hint.setWordWrap(True)
+        f.addRow("", hint)
+        self._spark_form = f
+        self._stack.addWidget(page)
+        self._sync_spark_read()
+
+    def _sync_spark_read(self) -> None:
+        """Show only the inputs the chosen way of picking columns uses."""
+        mode = self._spark_read.currentData()
+        for widget, wanted in ((self._spark_range, "range"),
+                               (self._spark_pattern, "pattern"),
+                               (self._spark_pick, "list")):
+            widget.setVisible(mode == wanted)
+            label = self._spark_form.labelForField(widget)
+            if label is not None:
+                label.setVisible(mode == wanted)
+        self._refresh()
+
+    def _spark_series(self) -> str:
+        """The text after `from`, or "" when nothing is chosen yet."""
+        mode = self._spark_read.currentData()
+        if mode == "range":
+            start = self._spark_start.currentText().strip()
+            end = self._spark_end.currentText().strip()
+            return (f"{quote_column(start)}..{quote_column(end)}"
+                    if start and end else "")
+        if mode == "pattern":
+            return self._spark_pattern.text().strip()
+        picks = ([i.text() for i in self._spark_list.selectedItems()]
+                 if self._columns else [])
+        typed = [c.strip() for c in self._spark_names.text().split(",")
+                 if c.strip()]
+        return _cols_text(list(dict.fromkeys(picks + typed)))
+
+    def _load_spark(self, rule) -> None:
+        _pick_data(self._spark_kind, rule.spark_kind or "line")
+        self._spark_colour.set_value(_spark_token(rule.color) or "blue")
+        self._spark_negative.set_value(_spark_token(rule.negative_color)
+                                       or "(none)")
+        self._spark_mark_colours = {}
+        for entry in rule.marks or []:
+            if len(entry) > 1 and entry[1]:
+                self._spark_mark_colours[entry[0]] = entry[1]
+        for token, box in self._spark_marks.items():
+            box.setChecked(any(entry[0] == token
+                               for entry in rule.marks or []))
+        ref = rule.ref
+        self._spark_ref.setCurrentText(
+            "none" if ref is None else
+            (_sparkline.format_number(ref) if isinstance(ref, (int, float))
+             else str(ref)))
+        self._spark_shared.setChecked(bool(rule.shared))
+        self._spark_smooth.setChecked(bool(rule.smooth))
+        self._spark_thick.setChecked(bool(rule.thick))
+        self._spark_tall.setChecked(bool(rule.tall))
+        self._spark_width.setValue(rule.spark_width or MIN_SPARK_WIDTH - 1)
+        place = "in" if rule.hide_value else rule.glyph_where
+        _pick_data(self._spark_place, "" if place in (None, "left") else place)
+        _pick_data(self._spark_fate, rule.take_sources or "")
+
+        entries = [str(e) for e in rule.series or []]
+        known = set(self._columns)
+        if (len(entries) == 1 and ".." in entries[0]
+                and entries[0] not in known):
+            start, _dots, end = entries[0].partition("..")
+            _pick_data(self._spark_read, "range")
+            for box, name in ((self._spark_start, start.strip().strip('"')),
+                              (self._spark_end, end.strip().strip('"'))):
+                idx = box.findData(name)
+                if idx >= 0:
+                    box.setCurrentIndex(idx)
+                elif box.isEditable():
+                    box.setCurrentText(name)
+        elif len(entries) == 1 and _is_glob(entries[0]):
+            _pick_data(self._spark_read, "pattern")
+            self._spark_pattern.setText(entries[0])
+        else:
+            _pick_data(self._spark_read, "list")
+            for i in range(self._spark_list.count()):
+                item = self._spark_list.item(i)
+                item.setSelected(item.text() in entries)
+            self._spark_names.setText(", ".join(
+                e for e in entries if e not in known or not self._columns))
+        self._sync_spark_read()
+
+    def _spark_line(self, cols: str) -> str:
+        series = self._spark_series()
+        if not series:
+            return ""
+        words = [f"{cols} spark"]
+        kind = self._spark_kind.currentData()
+        if kind != "line":
+            words.append(kind)
+        colour = self._spark_colour.value()
+        if colour and colour != "blue":
+            words.append(colour)
+        negative = self._spark_negative.value()
+        if negative and negative != "(none)":
+            words += ["negative", negative]
+        for token, box in self._spark_marks.items():
+            if box.isChecked():
+                words.append(token)
+                chosen = self._spark_mark_colours.get(token)
+                if chosen:
+                    words.append(_spark_token(chosen))
+        ref = self._spark_ref.currentText().strip().lower()
+        if ref and ref != "none":
+            if ref not in ("mean", "median") and _sparkline.number(ref) is None:
+                return ""          # not a line the rule could read
+            words += ["ref", ref]
+        for word, box in (("shared", self._spark_shared),
+                          ("smooth", self._spark_smooth),
+                          ("thick", self._spark_thick),
+                          ("tall", self._spark_tall)):
+            if box.isChecked():
+                words.append(word)
+        width = self._spark_width.value()
+        if width >= MIN_SPARK_WIDTH:
+            words.append(f"{width}px")
+        place = self._spark_place.currentData()
+        if place:
+            words.append(place)
+        fate = self._spark_fate.currentData()
+        if fate:
+            words.append(fate)
+        return " ".join(words) + f" from {series}"
 
     def _build_highlight_page(self) -> None:
         page = QWidget()
@@ -735,7 +1026,8 @@ class RuleBuilder(QDialog):
         if idx == K_ICONS:
             self._sync_icon_style()
             return
-        self._col_label.setText("Whole table" if table_wide else "Columns")
+        self._col_label.setText("Whole table" if table_wide else
+                                "Draw in" if idx == K_SPARK else "Columns")
         if self._columns:
             self._col_list.setSelectionMode(_MULTI)
 
@@ -799,6 +1091,8 @@ class RuleBuilder(QDialog):
             self._set_other_col(self._auto_by, rule.source)
         elif rule.mode == "tooltip":
             self._set_other_col(self._tip_by, rule.source)
+        elif rule.mode == "sparkline":
+            self._load_spark(rule)
         elif rule.mode == "data_bar":
             self._bar.set_value(bar_token(rule.color))
             self._set_other_col(self._bar_by, rule.source)
@@ -884,6 +1178,8 @@ class RuleBuilder(QDialog):
             return (f"{cols} autocolour {self._auto_palette.currentData()}"
                     f"{' ' + shape if shape else ''}"
                     f"{self._by(self._auto_by)}{_only(self._auto_only)}")
+        if kind == K_SPARK:
+            return self._spark_line(cols)
         if kind == K_BAR:
             return (f"{cols} bar {self._bar.value()}"
                     f"{self._by(self._bar_by)}{_only(self._bar_only)}")

@@ -47,6 +47,11 @@ MAX_COL_WIDTH = 360
 #: leaving the bar, which is the entire point of the column, a few pixels
 #: long. Wide enough for the difference between two lengths to read.
 BAR_ONLY_WIDTH = 110
+#: A sparkline beside a value, and one standing on its own (in a column
+#: of its own, or on a line above or below the value). Alone it takes the
+#: cell's width, so the column is what decides how long the line reads.
+SPARK_BESIDE_WIDTH = 64
+SPARK_ALONE_WIDTH = 120
 # How many of the paged-in rows the content measure samples. The model is
 # lazy (500-row pages), and measuring every cell through the item delegate
 # costs ~190 ms for a wide frame — far too much to spend on every graph run
@@ -360,8 +365,14 @@ class DataTableView(QTableView):
         wraps = bool(model is not None
                      and getattr(model, "wraps_text", lambda: False)())
         self._wraps = wraps
+        # A mark above or below a value, or a tall spark, needs the same
+        # thing wrapping does: rows sized by what is in them. Kept apart
+        # from `_wraps`, which also means "nothing is cut short" to the
+        # tooltip, and a taller row says nothing about that.
+        grows = bool(model is not None
+                     and getattr(model, "grows_rows", lambda: False)())
         self.verticalHeader().setSectionResizeMode(
-            QHeaderView.ResizeToContents if wraps
+            QHeaderView.ResizeToContents if wraps or grows
             else QHeaderView.Interactive)      # Qt's own default otherwise
         self._apply_text_size(refit=False)   # row height for this font
 
@@ -388,6 +399,7 @@ class DataTableView(QTableView):
             width = header.sectionSizeHint(col)
             icon_pad = 0
             bar_only = False
+            spark_width = 0
             for row in range(rows):
                 index = model.index(row, col)
                 text = model.data(index, Qt.DisplayRole)
@@ -402,12 +414,25 @@ class DataTableView(QTableView):
                     # `above` / `below` one costs the row height instead,
                     # and a lozenge costs only its padding
                     marks, pill, _ink = decor
-                    beside = sum(1 for d in marks
-                                 if d.where in ("left", "right", "in"))
+                    beside = 0
+                    for d in marks:
+                        spark = getattr(d, "spark", None)
+                        if spark is not None:
+                            # a spark is as wide as it was asked to be, and
+                            # one standing alone wants a column's worth
+                            if d.where in ("left", "right"):
+                                beside += (spark.width
+                                           or SPARK_BESIDE_WIDTH) + 6
+                            else:
+                                spark_width = max(spark_width, spark.width
+                                                  or SPARK_ALONE_WIDTH)
+                        elif d.where in ("left", "right", "in"):
+                            beside += 24
                     icon_pad = max(icon_pad,
-                                   beside * 24 + (14 if pill else 0))
+                                   beside + (14 if pill else 0))
             if bar_only:
                 width = max(width, BAR_ONLY_WIDTH)
+            width = max(width, spark_width)
             self.setColumnWidth(
                 col, max(MIN_COL_WIDTH, min(width + icon_pad, MAX_COL_WIDTH)))
 

@@ -35,8 +35,10 @@ from flograph.core.report import format_scalar
 from flograph.core.table_format import (CellStyle, column_layout,
                                         column_matches, column_stats,
                                         evaluate_column, evaluate_rows,
-                                        for_paper, sort_order, split_rules,
+                                        for_paper, sort_order,
+                                        spark_projection, split_rules,
                                         visible_columns)
+from flograph.core import sparkline
 
 #: Rows shown before a table is cut with a note. The same default
 #: frame_to_markdown uses — a report that quietly showed the first 30 of
@@ -107,6 +109,11 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     frame = _as_frame(frame)
     if frame is None:
         return "> *(not a table)*"
+    # a spark may add a column and put away the ones it reads — the same
+    # function the card calls, before the projection that has to see both
+    frame, rules, spark_hidden = spark_projection(frame, rules)
+    if spark_hidden:
+        hidden = list(hidden) + spark_hidden
     # the same projection the card applies, from the same function: a
     # printed table showing different columns from the dashboard it came
     # off is the exact failure this whole module exists to avoid
@@ -423,8 +430,34 @@ def _track(cells) -> str:
 _PILL_PAD = "1px 6px"
 
 
+def _spark_img(d) -> str:
+    """A sparkline as a picture: an SVG in a `data:` address.
+
+    A picture, where every other format on the page is text, because Qt's
+    rich text has nothing that draws a line. A `data:` address because it
+    needs no file beside it — it works as it is in a browser and in an
+    exported page, and a report swaps it for a token round the markdown
+    pass that would otherwise drop it (see ui/report/render.py).
+    """
+    spark = d.spark
+    if spark.width:
+        width = spark.width * 0.75           # card pixels, as points
+    elif d.where in ("left", "right"):
+        width = sparkline.PAPER_BESIDE
+    else:
+        width = sparkline.PAPER_ALONE
+    height = sparkline.PAPER_HEIGHT * (2 if spark.tall else 1)
+    uri = sparkline.data_uri(spark, width, height)
+    if uri is None:
+        return ""
+    return (f'<img src="{uri}" width="{width:g}" height="{height:g}" '
+            f'style="vertical-align:middle" />')
+
+
 def _decor_span(d) -> str:
     """One decoration as an inline span."""
+    if getattr(d, "spark", None) is not None:
+        return _spark_img(d)
     css = []
     if d.color:
         css.append(f"color:{d.color}")

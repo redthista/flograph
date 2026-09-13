@@ -770,6 +770,11 @@ class _Resolver:
         # one. Needed by the `fit` pass; None makes `fit` a no-op.
         self._page_height = page_height
         self.images: list[QImage] = []
+        # Sparkline pictures from a table, by token. A table's `<img>` does
+        # not survive the markdown pass the page goes through (Qt's reader
+        # drops it, `data:` address, width and all), so it is set aside as
+        # a token of plain text and put back into the HTML afterwards.
+        self.inline: list[str] = []
         # the width each image should be drawn at — per image, because a
         # multi-column grid renders its cells narrower than the page
         self.widths: list[int] = []
@@ -1301,7 +1306,7 @@ class _Resolver:
                                  marker=marker, text_width=_table_text_width)
 
         try:
-            html = build(self._max_rows, font_pt)
+            html = self._set_aside_pictures(build(self._max_rows, font_pt))
         except Exception:
             return frame_to_markdown(value, self._max_rows)
         if measured:
@@ -1310,6 +1315,19 @@ class _Resolver:
                 rows=self._max_rows, font_pt=font_pt,
                 height=self._table_height, fit=self._table_fit))
         return html
+
+    def _set_aside_pictures(self, html: str) -> str:
+        """Every sparkline `<img>` in a table swapped for a text token.
+
+        Only the first build of a table goes through here. A table rebuilt
+        by `fit_tables` is written straight into the finished HTML, which
+        never meets the markdown reader, so its pictures can stay as they
+        are.
+        """
+        def swap(match) -> str:
+            self.inline.append(match.group(0))
+            return SPARK_TOKEN.format(len(self.inline) - 1)
+        return _SPARK_IMG_RE.sub(swap, html)
 
     def _table_style(self, ref: str) -> tuple:
         """(rules, hidden columns, shown columns) for this embed's table.
@@ -1453,6 +1471,8 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     html = staged.toHtml()
     for index, width in enumerate(resolver.widths):
         html = html.replace(IMAGE_TOKEN.format(index), _img_tag(index, width))
+    for index, tag in enumerate(resolver.inline):
+        html = html.replace(SPARK_TOKEN.format(index), tag)
     if page_break_rule:
         html = _PAGEBREAK_P_RE.sub("<hr />", html)
 
@@ -1524,6 +1544,11 @@ def unlink_page_links(document) -> int:
 #: How far `fit` will shrink a chart before it gives up and lets it start
 #: its own page — a fraction of the width the embed was going to be.
 _FIT_FLOOR = 0.45
+
+
+#: What a table's sparkline stands as while the page is markdown.
+SPARK_TOKEN = "@@flograph-spark-{}@@"
+_SPARK_IMG_RE = re.compile(r'<img src="data:image/svg\+xml;base64,[^"]*"[^>]*>')
 
 
 def _img_tag(index: int, width: int) -> str:

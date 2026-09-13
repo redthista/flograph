@@ -304,13 +304,20 @@ def lint_replace_values(text: str, sample=None) -> list[Diagnostic]:
 # --------------------------------------------------------------- table rules
 
 def _table_rule_keywords() -> tuple:
+    from . import sparkline
     from . import table_format as tf
     words = (tf._KEYWORDS + tf._LEADING_KEYWORDS
              + ("between", "contains", "starts", "ends", "matches", "empty",
                 "notempty", "bg", "fg", "bold", "row", "only", "pill", "wrap",
                 "left", "right", "above", "below", "center")
              + tuple(tf._SCALE_PRESETS) + tuple(tf._ICON_SETS)
-             + tuple(tf._FILL_PRESETS))
+             + tuple(tf._FILL_PRESETS)
+             # a spark's own words — the canonical spelling of each
+             + tuple(dict.fromkeys(sparkline.KINDS.values()))
+             + ("first", "last", "high", "low", "points", "from", "ref",
+                "mean", "median", "negative", "shared", "smooth", "thick",
+                "tall", "replace")
+             + tuple(sparkline.COLORS))
     return tuple(dict.fromkeys(words))
 
 

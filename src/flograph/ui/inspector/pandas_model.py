@@ -83,6 +83,15 @@ class PandasModel(QAbstractTableModel):
     def __init__(self, df: pd.DataFrame, parent=None, rules=None,
                  hidden=None, shown=None) -> None:
         super().__init__(parent)
+        # A spark can add a column (drawn in one the table lacks) and put
+        # the columns it reads out of view. Worked out before anything else
+        # here, because every projection below has to see the new column —
+        # and by the same function the printed table calls, so the page and
+        # the card cannot disagree about what a spark made.
+        from flograph.core.table_format import spark_projection
+        df, rules, spark_hidden = spark_projection(df, rules)
+        if spark_hidden:
+            hidden = list(hidden or []) + spark_hidden
         self._df = df
         # The frame as it arrived. sort() reorders a *copy* off this, so
         # ascending/descending/clear all work from a fixed base and the
@@ -155,6 +164,15 @@ class PandasModel(QAbstractTableModel):
                 self._labels[i] = entry.label
         self._rules = [r for r in (rules or [])
                        if r.mode != "hide" and r.mode not in LAYOUT_MODES]
+        # A mark on a line of its own, or a tall spark, asks the delegate
+        # for a taller cell — and Qt only asks the delegate how tall a row
+        # is when the view sizes rows to their contents. Read off the rules
+        # rather than the cells, so it is known before a row is drawn.
+        from flograph.core.table_format import DECOR_LINES
+        self._grows = any(
+            (r.glyph_where in DECOR_LINES)
+            or (r.mode == "sparkline" and r.tall)
+            for r in self._rules)
         # A style is only honoured on a table small enough to walk per-cell.
         self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS
         self._value_roles = _VALUE_ROLES_FMT if self._cf_active else _VALUE_ROLES
@@ -451,6 +469,11 @@ class PandasModel(QAbstractTableModel):
         """Did a rule ask for wrapped text? The view acts on it — row
         heights are geometry, which is the view's business."""
         return self._wraps
+
+    def grows_rows(self) -> bool:
+        """Does a rule make some rows taller — a mark `above` or `below`
+        the value, or a `tall` spark? Like `wraps_text`, for the view."""
+        return self._grows and self._cf_active
 
     def column_layout(self, section: int):
         """The `ColumnLayout` for a *visible* column, or None. Read by the
