@@ -103,6 +103,8 @@ class _Selection:
         # popup, and anything held per-view would have to be handed to both
         self.show_search = True
         self.show_buttons = True
+        # how far a tree opens when it arrives — see opens_at
+        self.open_levels = 0
         self.accent = ""
         self.filter_text = ""
         self.paths: list[tuple[str, ...]] = []
@@ -129,6 +131,12 @@ class _Selection:
     @property
     def depth(self) -> int:
         return self.options.depth
+
+    def opens_at(self, depth: int) -> bool:
+        """Whether a branch at this depth (0 = the top level) arrives open:
+        every one when `open_levels` is 0, otherwise only those whose
+        children still sit within the first `open_levels` levels (N5)."""
+        return self.open_levels <= 0 or depth + 1 < self.open_levels
 
     def node(self, path) -> Optional[TreeNode]:
         return self._index.get(tuple(path))
@@ -495,6 +503,12 @@ class SlicerTreeWidget(QTreeWidget):
         # rebuild(), which must not free rows underneath that delivery
         self._in_change = False
         self._built: list = []
+        # Every path this tree has built, and of those the ones left open.
+        # A branch it has shown keeps the state the hand left it in across a
+        # rebuild; only one it has never shown takes the node's default.
+        self._shown: set = set()
+        self._open: set = set()
+        self._levels_for = None
         self.setHeaderHidden(True)
         self.setColumnCount(1)
         self.setUniformRowHeights(True)
@@ -541,6 +555,13 @@ class SlicerTreeWidget(QTreeWidget):
         self._apply_style()
         self.setRootIsDecorated(self._model.depth > 1)
         self.viewport().update()
+        if self._model.open_levels != self._levels_for:
+            # a new "open levels" re-decides every branch, which a rebuild
+            # of the same rows would otherwise keep exactly as it was
+            self._levels_for = self._model.open_levels
+            self._built = []
+            self._shown = set()
+            self._open = set()
         if signature == self._built:
             # the same rows, drawn differently — a tick, a mode flip, counts
             # switched on. Rebuilding would throw away the scroll position
@@ -554,7 +575,8 @@ class SlicerTreeWidget(QTreeWidget):
             self.refresh_states()
             QTimer.singleShot(0, self.rebuild)
             return
-        expanded = self._expanded_paths()
+        built = {path for path, _depth in self._built if path != "\u2026"}
+        self._open = (self._open - built) | self._expanded_paths()
         self._built = signature
         self._syncing = True
         try:
@@ -574,9 +596,16 @@ class SlicerTreeWidget(QTreeWidget):
                 else:
                     self.addTopLevelItem(item)
                 stack.append((depth, item))
-                # a branch opens by default — a hierarchy that arrives shut
-                # looks like a one-column slicer that lost its values
-                item.setExpanded(not expanded or node.path in expanded)
+                # A branch this tree has shown keeps what the hand left it
+                # as — open, or shut by Collapse all — so a search or a new
+                # run does not spring it back open. One not seen before
+                # opens to "open levels", by default every level: a
+                # hierarchy that arrives shut looks like a one-column slicer
+                # that lost its values.
+                if node.path in self._shown:
+                    item.setExpanded(node.path in self._open)
+                else:
+                    item.setExpanded(self._model.opens_at(depth))
             if hidden:
                 note = QTreeWidgetItem(
                     [f"… {hidden:,} more — search to narrow the list"
@@ -584,6 +613,7 @@ class SlicerTreeWidget(QTreeWidget):
                      else f"… {hidden:,} more match — refine the search"])
                 note.setFlags(Qt.NoItemFlags)
                 self.addTopLevelItem(note)
+            self._shown |= {node.path for node, _depth in rows}
         finally:
             self._syncing = False
 
@@ -880,6 +910,9 @@ class _DropdownView(QWidget):
         self.toolbar = SlicerToolbar(model)
         self.toolbar.filter_changed.connect(self.tree.rebuild)
         self.toolbar.selection_changed.connect(self._refresh_after_toolbar)
+        self.toolbar.expand_requested.connect(
+            lambda open_: self.tree.expandAll() if open_
+            else self.tree.collapseAll())
         inner.addWidget(self.toolbar)
         inner.addWidget(self.tree, 1)
         holder.setMinimumSize(QSize(240, 260))
@@ -976,6 +1009,9 @@ class SlicerToolbar(QWidget):
     filter_changed = Signal()
     #: All / None actually changed what is ticked — commit and re-run
     selection_changed = Signal()
+    #: + (True) or − (False): open or shut every branch of the tree below.
+    #: Nothing is ticked and nothing re-runs.
+    expand_requested = Signal(bool)
 
     def __init__(self, model: _Selection, parent=None) -> None:
         super().__init__(parent)
@@ -1006,6 +1042,21 @@ class SlicerToolbar(QWidget):
         clear.setToolTip("Clear the selection")
         clear.clicked.connect(self._on_none)
         self._clear = clear
+
+        expand = QToolButton()
+        expand.setText("+")
+        expand.setToolTip("Open every branch")
+        expand.clicked.connect(lambda: self.expand_requested.emit(True))
+        self._expand = expand
+
+        collapse = QToolButton()
+        collapse.setText("\u2212")
+        collapse.setToolTip("Close every branch")
+        collapse.clicked.connect(lambda: self.expand_requested.emit(False))
+        self._collapse = collapse
+        #: whether the view below is a tree these two can fold — the host
+        #: says; a cards layout has levels but nothing to open or shut
+        self.tree_buttons = True
 
         count = QLabel("")
         count.setToolTip("Values ticked, of the total on this column")
@@ -1053,6 +1104,13 @@ class SlicerToolbar(QWidget):
                                     and model.mode != "single")
         self._clear.setVisible(model.show_buttons)
         self._count.setVisible(model.show_buttons)
+        # + and − only where there is something to fold: a tree of more
+        # than one level, drawn as a tree
+        folding = bool(model.show_buttons and self.tree_buttons
+                       and getattr(model, "options", None) is not None
+                       and model.depth > 1)
+        self._expand.setVisible(folding)
+        self._collapse.setVisible(folding)
         # _relayout only re-stretches when the *wrap* changes, and hiding
         # the search is not that
         self._apply_stretch()
@@ -1063,20 +1121,20 @@ class SlicerToolbar(QWidget):
         if wrapped == self._wrapped:
             return
         self._wrapped = wrapped
-        for w in (self._search, self._select_all, self._clear, self._count):
+        buttons = (self._select_all, self._clear, self._expand,
+                   self._collapse, self._count)
+        for w in (self._search, *buttons):
             self._grid.removeWidget(w)
         if wrapped:
-            self._grid.addWidget(self._search, 0, 0, 1, 3)
-            self._grid.addWidget(self._select_all, 1, 0)
-            self._grid.addWidget(self._clear, 1, 1)
-            self._grid.addWidget(self._count, 1, 2)
-            self._tail_column = 2
+            self._grid.addWidget(self._search, 0, 0, 1, len(buttons))
+            for column, w in enumerate(buttons):
+                self._grid.addWidget(w, 1, column)
+            self._tail_column = len(buttons) - 1
         else:
             self._grid.addWidget(self._search, 0, 0)
-            self._grid.addWidget(self._select_all, 0, 1)
-            self._grid.addWidget(self._clear, 0, 2)
-            self._grid.addWidget(self._count, 0, 3)
-            self._tail_column = 3
+            for column, w in enumerate(buttons, start=1):
+                self._grid.addWidget(w, 0, column)
+            self._tail_column = len(buttons)
         self._apply_stretch()
 
     def _apply_stretch(self) -> None:
@@ -1084,6 +1142,10 @@ class SlicerToolbar(QWidget):
         to the column after the buttons, so All / None stay on the left with
         the values they act on rather than drifting to the right edge."""
         search = self._search.isVisibleTo(self)
+        # cleared first: the tail moves when the row wraps, and a stretch
+        # left on the old tail would push the buttons apart
+        for column in range(self._grid.columnCount()):
+            self._grid.setColumnStretch(column, 0)
         self._grid.setColumnStretch(0, 1 if search else 0)
         self._grid.setColumnStretch(self._tail_column, 0 if search else 1)
 
@@ -1150,6 +1212,7 @@ class SlicerPanel(QWidget):
         self.toolbar = SlicerToolbar(self.model)
         self.toolbar.filter_changed.connect(self._after_filter)
         self.toolbar.selection_changed.connect(self._after_toolbar)
+        self.toolbar.expand_requested.connect(self._fold_all)
         self.toolbar.hide()
         column.addWidget(self.toolbar)
 
@@ -1242,12 +1305,18 @@ class SlicerPanel(QWidget):
         self.model.show_search = bool(params.get("show_search", True))
         self.model.show_buttons = bool(params.get("show_buttons", True))
         self.model.accent = str(params.get("accent", "") or "")
+        try:
+            self.model.open_levels = max(0, int(params.get("open_levels", 0)
+                                                or 0))
+        except (TypeError, ValueError):
+            self.model.open_levels = 0
 
     def _apply_chrome(self) -> None:
         """Show the toolbar only when it has something left on it, and
         only where it belongs — the dropdown carries its own copy inside
         the popup, and a second one above a single button would be most
         of the card."""
+        self.toolbar.tree_buttons = self._layout_name == "list"
         wanted = self.toolbar.refresh_chrome()
         self.toolbar.setVisible(self._has_options and wanted
                                 and self._layout_name != "dropdown")
@@ -1267,6 +1336,14 @@ class SlicerPanel(QWidget):
 
     def selection_summary(self) -> str:
         return self.model.summary()
+
+    def _fold_all(self, open_: bool) -> None:
+        """+ / − on the toolbar: open or shut every branch of the tree."""
+        if isinstance(self.view, SlicerTreeWidget):
+            if open_:
+                self.view.expandAll()
+            else:
+                self.view.collapseAll()
 
     def _after_filter(self) -> None:
         """A search narrowed the list: redraw it, and stop there."""

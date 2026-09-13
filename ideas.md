@@ -60,7 +60,9 @@ idea: a frame turns into a model canvas — a node-like box with inputs and
 outputs you declare — and turns back again, and the canvas tabs fold
 under the Model tab that heads them. What is left of G is the three old
 entries, G1, G2 and G10. W2 shipped 2026-09-12 and chunk W retires with it: Plotly Table and
-Gantt Chart filter when clicked, like every other visual that can.
+Gantt Chart filter when clicked, like every other visual that can. N5 shipped
+2026-09-13: a deep slicer tree opens and shuts in one go, and arrives
+opened as far as its node says.
 
 ---
 
@@ -212,12 +214,6 @@ the missing half is the *unfiltered* source, which means walking back past
 the slicers above it. Worth doing only if the vanishing turns out to confuse
 people; the counts shipped in 0.1.14 already answer most of "why is that
 gone".
-
-**N5. Expand / collapse all on a deep slicer tree.** A hierarchy opens fully
-expanded, which is right for two levels and wrong for three over a wide
-column. A pair of buttons in the slicer toolbar (and remembering which
-branches were open, in a param) — small, but only worth it once someone has
-a three-level slicer.
 
 ---
 

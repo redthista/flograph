@@ -1177,3 +1177,74 @@ class TestAReaderThatDoesNotRun:
         assert not slicer.dirty
         assert panel.has_options()
 
+
+class TestFoldingADeepTree:
+    """N5: a deep slicer tree opens and shuts in one go, arrives opened as
+    far as the node says, and stays how it was left."""
+
+    PATHS = [("north", "alpha", "till 1"), ("north", "alpha", "till 2"),
+             ("north", "beta", "till 1"), ("south", "gamma", "till 1")]
+    COLUMNS = ("region", "store", "till")
+
+    def _panel(self, qtbot, **params):
+        return _panel(qtbot, self.PATHS, columns=self.COLUMNS, params=params)
+
+    @staticmethod
+    def _open(view):
+        return {item.text(0) for item in _rows(view)
+                if item.childCount() and item.isExpanded()}
+
+    def test_it_arrives_fully_open_by_default(self, qtbot):
+        panel = self._panel(qtbot)
+        assert self._open(panel.view) == {"north", "south", "alpha", "beta",
+                                          "gamma"}
+
+    def test_open_levels_says_how_far(self, qtbot):
+        assert self._open(self._panel(qtbot, open_levels=1).view) == set()
+        assert self._open(self._panel(qtbot, open_levels=2).view) == {
+            "north", "south"}
+
+    def test_the_buttons_open_and_shut_every_branch(self, qtbot):
+        panel = self._panel(qtbot)
+        panel.toolbar._collapse.click()
+        assert self._open(panel.view) == set()
+        panel.toolbar._expand.click()
+        assert self._open(panel.view) == {"north", "south", "alpha", "beta",
+                                          "gamma"}
+
+    def test_shut_stays_shut_through_a_search(self, qtbot):
+        """It used to take "nothing open" for "never built" and open the
+        whole tree again on the next rebuild."""
+        panel = self._panel(qtbot)
+        panel.toolbar._collapse.click()
+        panel.toolbar._search.setText("alpha")
+        panel.toolbar._search.setText("")
+        assert self._open(panel.view) == set()
+
+    def test_a_branch_opened_by_hand_stays_open_through_a_search(self,
+                                                                 qtbot):
+        panel = self._panel(qtbot, open_levels=1)
+        _row(panel.view, "south").setExpanded(True)
+        panel.toolbar._search.setText("gamma")
+        panel.toolbar._search.setText("")
+        assert self._open(panel.view) == {"south"}
+
+    def test_changing_open_levels_re_applies_it(self, qtbot):
+        panel = self._panel(qtbot)
+        panel.sync_params(dict(DEFAULTS, open_levels=1))
+        assert self._open(panel.view) == set()
+
+    def test_the_buttons_only_show_where_there_is_something_to_fold(
+            self, qtbot):
+        tree = self._panel(qtbot)
+        assert not tree.toolbar._expand.isHidden()
+        flat = _panel(qtbot, [("north",), ("south",)])
+        assert flat.toolbar._expand.isHidden()
+        cards = self._panel(qtbot, layout="cards")
+        assert cards.toolbar._expand.isHidden()
+        bare = self._panel(qtbot, show_buttons=False)
+        assert bare.toolbar._collapse.isHidden()
+
+    def test_open_levels_is_presentation_only(self, registry):
+        assert registry.get("flograph.viz.slicer").param(
+            "open_levels").cosmetic

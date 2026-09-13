@@ -71,7 +71,7 @@ PARAMS = [
                                    "— blank keeps every row"},
     {"name": "values", "type": "text", "label": "Values (one per line)",
      "default": "", "placeholder": "Used only when no table is connected"},
-    # Presentation only — run() reads none of the seven below, and dirtying
+    # Presentation only — run() reads none of the eight below, and dirtying
     # on one would re-filter the table and re-run every visual downstream to
     # produce the exact same rows.
     {"name": "layout", "type": "choice", "label": "Layout",
@@ -83,6 +83,12 @@ PARAMS = [
      "default": True, "cosmetic": True},
     {"name": "show_buttons", "type": "bool", "label": "Show All / None",
      "default": True, "cosmetic": True},
+    # How far a tree on several columns opens when it arrives: 0 opens every
+    # level, which is how a tree has always arrived; 1 shows the top level
+    # shut, 2 opens that one level, and so on. The + and − beside All / None
+    # open or shut the lot in one go after that.
+    {"name": "open_levels", "type": "int", "label": "Open levels",
+     "default": 0, "min": 0, "max": 9, "cosmetic": True},
     {"name": "accent", "type": "color", "label": "Accent colour",
      "default": "", "placeholder": "Theme", "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
