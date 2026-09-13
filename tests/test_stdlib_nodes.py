@@ -64,6 +64,53 @@ class TestTransformNodes:
             run_node(registry, "flograph.transform.join", {"on": "nope"},
                      left=table, right=table)
 
+    def test_asof_join_backward_sorts_and_matches(self, registry):
+        # unsorted string timestamps: the node sorts and converts them, and
+        # each event takes the latest rate at or before its own time
+        events = pd.DataFrame({
+            "t": ["2026-01-01 11:30", "2026-01-01 10:05"],
+            "qty": [2, 1],
+        })
+        rates = pd.DataFrame({
+            "t": ["2026-01-01 10:00", "2026-01-01 11:00"],
+            "rate": [1.0, 2.0],
+        })
+        out = run_node(registry, "flograph.transform.asof_join",
+                       {"left_on": "t"}, left=events, right=rates)
+        # After sorting by t, the rows are [10:05, 11:30] → [rate=1.0, rate=2.0]
+        assert list(out["rate"]) == [1.0, 2.0]
+        # Check that the t column is sorted and converted to datetime
+        expected_t = pd.to_datetime(["2026-01-01 10:05", "2026-01-01 11:30"])
+        assert list(out["t"]) == expected_t.tolist()
+
+    def test_asof_join_by_and_tolerance(self, registry):
+        events = pd.DataFrame({
+            "t": ["2026-01-01 10:00", "2026-01-01 10:00"],
+            "sym": ["a", "b"],
+        })
+        rates = pd.DataFrame({
+            "t": ["2026-01-01 09:59", "2026-01-01 09:30"],
+            "sym": ["a", "b"],
+            "rate": [1.0, 2.0],
+        })
+        out = run_node(registry, "flograph.transform.asof_join",
+                       {"left_on": "t", "by": "sym", "tolerance": "5m"},
+                       left=events, right=rates)
+        assert out["rate"].iloc[0] == 1.0   # 1 min old: inside tolerance
+        assert pd.isna(out["rate"].iloc[1])  # 30 min old: out of range
+
+    def test_asof_join_missing_on(self, registry):
+        events = pd.DataFrame({"t": ["2026-01-01"], "x": [1]})
+        with pytest.raises(ValueError, match="no left timestamp column"):
+            run_node(registry, "flograph.transform.asof_join", {},
+                     left=events, right=events)
+
+    def test_asof_join_missing_column(self, registry):
+        events = pd.DataFrame({"t": ["2026-01-01"], "x": [1]})
+        with pytest.raises(ValueError, match="not in the left table"):
+            run_node(registry, "flograph.transform.asof_join",
+                     {"left_on": "nope"}, left=events, right=events)
+
     def test_group_by(self, registry, table):
         out = run_node(registry, "flograph.transform.group_by",
                        {"by": "region", "agg": "sum"}, table=table)
@@ -850,6 +897,208 @@ class TestEtlNodes:
         with pytest.raises(ValueError, match="not in table"):
             run_node(registry, "flograph.transform.explode_column",
                      {"column": "nope"}, table=table)
+
+    def test_numeric_binning_fixed_width_labels(self, registry, table):
+        out = run_node(registry, "flograph.transform.numeric_binning",
+                       {"column": "units", "method": "fixed width", "bins": 2,
+                        "labels": "low, high"}, table=table)
+        assert out["units.bin"].tolist() == ["low", "low", "high", "high"]
+        assert str(out["units.bin"].dtype) == "category"
+
+    def test_numeric_binning_quantile(self, registry, table):
+        out = run_node(registry, "flograph.transform.numeric_binning",
+                       {"column": "units", "method": "quantile", "bins": 4,
+                        "labels": "q1, q2, q3, q4"}, table=table)
+        assert out["units.bin"].tolist() == ["q1", "q2", "q3", "q4"]
+
+    def test_numeric_binning_custom_edges(self, registry, table):
+        out = run_node(registry, "flograph.transform.numeric_binning",
+                       {"column": "revenue", "method": "custom edges",
+                        "edges": "0, 200, 400", "labels": "small, big"},
+                       table=table)
+        assert out["revenue.bin"].tolist() == ["small", "small", "big", "big"]
+
+    def test_numeric_binning_missing_label_and_drop_source(self, registry):
+        df = pd.DataFrame({"v": [1.0, None, 5.0]})
+        out = run_node(registry, "flograph.transform.numeric_binning",
+                       {"column": "v", "bins": 2, "missing_label": "unknown",
+                        "output_column": "tier", "drop_source": True},
+                       table=df)
+        assert list(out.columns) == ["tier"]
+        assert out["tier"].iloc[1] == "unknown"
+        assert out["tier"].iloc[0] != "unknown"
+        assert out["tier"].iloc[2] != "unknown"
+
+    def test_numeric_binning_missing_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flograph.transform.numeric_binning",
+                     {"column": "nope"}, table=table)
+
+    def test_numeric_binning_non_numeric_column(self, registry, table):
+        with pytest.raises(ValueError, match="numbers"):
+            run_node(registry, "flograph.transform.numeric_binning",
+                     {"column": "region"}, table=table)
+
+    def test_numeric_binning_label_count_mismatch(self, registry, table):
+        with pytest.raises(ValueError, match="one label per bin"):
+            run_node(registry, "flograph.transform.numeric_binning",
+                     {"column": "units", "method": "fixed width", "bins": 3,
+                      "labels": "low, high"}, table=table)
+
+    def test_numeric_binning_edges_out_of_range(self, registry, table):
+        with pytest.raises(ValueError, match="outside the edges"):
+            run_node(registry, "flograph.transform.numeric_binning",
+                     {"column": "units", "method": "custom edges",
+                      "edges": "0, 25"}, table=table)
+
+    def test_crosstab_counts_and_as_seen_order(self, registry):
+        df = pd.DataFrame({"device": ["desktop", "mobile", "desktop"],
+                           "browser": ["chrome", "safari", "edge"]})
+        out = run_node(registry, "flograph.transform.crosstab",
+                       {"rows": "device", "cols": "browser"}, table=df)
+        assert list(out.index) == ["desktop", "mobile"]
+        assert list(out.columns) == ["chrome", "safari", "edge"]
+        assert out.loc["desktop", "edge"] == 1
+        assert out.loc["mobile", "safari"] == 1
+        assert out.loc["mobile", "chrome"] == 0
+
+    def test_crosstab_sorted_order(self, registry):
+        df = pd.DataFrame({"device": ["desktop", "mobile", "desktop"],
+                           "browser": ["chrome", "safari", "edge"]})
+        out = run_node(registry, "flograph.transform.crosstab",
+                       {"rows": "device", "cols": "browser",
+                        "order": "sorted"}, table=df)
+        assert list(out.index) == ["desktop", "mobile"]
+
+    def test_crosstab_values_agg(self, registry):
+        df = pd.DataFrame({
+            "device": ["mobile", "mobile", "desktop", "desktop"],
+            "browser": ["chrome", "safari", "chrome", "edge"],
+            "revenue": [1.0, 2.0, 3.0, 4.0]})
+        out = run_node(registry, "flograph.transform.crosstab",
+                       {"rows": "device", "cols": "browser",
+                        "values": "revenue", "agg": "sum"}, table=df)
+        assert out.loc["mobile", "chrome"] == 1.0
+        assert out.loc["mobile", "safari"] == 2.0
+        assert out.loc["desktop", "chrome"] == 3.0
+        assert out.loc["desktop", "edge"] == 4.0
+
+    def test_crosstab_normalise_rows(self, registry):
+        df = pd.DataFrame({"a": ["x", "x", "x", "y"],
+                           "b": ["p", "p", "q", "q"]})
+        out = run_node(registry, "flograph.transform.crosstab",
+                       {"rows": "a", "cols": "b", "normalize": "rows"},
+                       table=df)
+        assert out.loc["x", "p"] == pytest.approx(2 / 3)
+        assert out.loc["x", "q"] == pytest.approx(1 / 3)
+        assert out.loc["y", "q"] == pytest.approx(1)
+
+    def test_crosstab_margins_keep_totals_after_reorder(self, registry):
+        df = pd.DataFrame({"a": ["x", "x", "y"], "b": ["p", "q", "q"]})
+        out = run_node(registry, "flograph.transform.crosstab",
+                       {"rows": "a", "cols": "b", "margins": True},
+                       table=df)
+        assert list(out.index)[-1] == "Total"
+        assert "Total" in out.columns
+        assert out.loc["Total", "p"] == 1
+        assert out.loc["Total", "Total"] == 3
+
+    def test_crosstab_requires_columns(self, registry, table):
+        with pytest.raises(ValueError, match="no row column"):
+            run_node(registry, "flograph.transform.crosstab", {}, table=table)
+        with pytest.raises(ValueError, match="no column column"):
+            run_node(registry, "flograph.transform.crosstab",
+                     {"rows": "region"}, table=table)
+
+    def test_crosstab_missing_column(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flograph.transform.crosstab",
+                     {"rows": "nope", "cols": "region"}, table=table)
+
+    def test_period_comparison_previous_month(self, registry):
+        df = pd.DataFrame({
+            "date": ["2026-01-01", "2026-02-01", "2026-03-01"],
+            "revenue": [100.0, 120.0, 90.0]})
+        out = run_node(registry, "flograph.transform.period_comparison",
+                       {"date_column": "date", "measure": "revenue",
+                        "period": "month", "basis": "previous period"},
+                       table=df)
+        assert pd.isna(out["revenue_previous"].iloc[0])
+        assert out["revenue_previous"].iloc[1] == 100.0
+        assert out["revenue_previous"].iloc[2] == 120.0
+        assert out["revenue_delta"].iloc[1] == 20.0
+        assert out["revenue_delta"].iloc[2] == -30.0
+        assert out["revenue_pct"].iloc[1] == pytest.approx(0.2)
+        assert out["revenue_pct"].iloc[2] == pytest.approx(-0.25)
+
+    def test_period_comparison_same_period_last_year(self, registry):
+        df = pd.DataFrame({
+            "date": ["2024-07-01", "2025-07-01", "2026-07-01"],
+            "revenue": [50.0, 60.0, 78.0]})
+        out = run_node(registry, "flograph.transform.period_comparison",
+                       {"date_column": "date", "measure": "revenue",
+                        "period": "month",
+                        "basis": "same period last year"}, table=df)
+        assert pd.isna(out["revenue_previous"].iloc[0])
+        assert out["revenue_previous"].iloc[1] == 50.0
+        assert out["revenue_previous"].iloc[2] == 60.0
+        assert out["revenue_pct"].iloc[2] == pytest.approx(0.3)
+
+    def test_period_comparison_grouped_compares_own_history(self, registry):
+        df = pd.DataFrame({
+            "region": ["north", "north", "north", "south", "south", "south"],
+            "date": ["2026-01-01", "2026-02-01", "2026-03-01",
+                     "2026-01-01", "2026-02-01", "2026-03-01"],
+            "revenue": [10.0, 20.0, 15.0, 100.0, 120.0, 90.0]})
+        out = run_node(registry, "flograph.transform.period_comparison",
+                       {"date_column": "date", "measure": "revenue",
+                        "group_by": "region", "period": "month"}, table=df)
+        assert out["revenue_previous"].tolist()[1] == 10.0
+        assert out["revenue_previous"].tolist()[4] == 100.0
+        assert out["revenue_delta"].tolist()[4] == 20.0
+
+    def test_period_comparison_aggregates_multiple_rows(self, registry):
+        df = pd.DataFrame({
+            "date": ["2026-01-01", "2026-01-15", "2026-02-01", "2026-02-10"],
+            "revenue": [10.0, 20.0, 5.0, 7.0]})
+        out = run_node(registry, "flograph.transform.period_comparison",
+                       {"date_column": "date", "measure": "revenue",
+                        "period": "month", "agg": "sum"}, table=df)
+        assert len(out) == 4  # every original row comes back
+        assert pd.isna(out["revenue_previous"].iloc[0])
+        assert out["revenue_previous"].tolist()[2:] == [30.0, 30.0]
+        assert out["revenue_delta"].tolist()[2] == -18.0
+
+    def test_period_comparison_zero_prior_gives_no_pct(self, registry):
+        df = pd.DataFrame({"date": ["2026-01-01", "2026-02-01"],
+                           "revenue": [0.0, 10.0]})
+        out = run_node(registry, "flograph.transform.period_comparison",
+                       {"date_column": "date", "measure": "revenue",
+                        "period": "month"}, table=df)
+        assert out["revenue_delta"].iloc[1] == 10.0
+        assert pd.isna(out["revenue_pct"].iloc[1])
+
+    def test_period_comparison_bad_dates(self, registry):
+        df = pd.DataFrame({"date": ["not a date", "2026-01-01"],
+                           "revenue": [1, 2]})
+        with pytest.raises(ValueError, match="parse as dates"):
+            run_node(registry, "flograph.transform.period_comparison",
+                     {"date_column": "date", "measure": "revenue",
+                      "period": "month"}, table=df)
+
+    def test_period_comparison_missing_measure(self, registry, table):
+        with pytest.raises(ValueError, match="not in table"):
+            run_node(registry, "flograph.transform.period_comparison",
+                     {"date_column": "region", "measure": "nope",
+                      "period": "month"}, table=table)
+
+    def test_period_comparison_non_numeric_measure(self, registry):
+        df = pd.DataFrame({"date": ["2026-01-01", "2026-02-01"],
+                           "m": ["a", "b"]})
+        with pytest.raises(ValueError, match="numeric"):
+            run_node(registry, "flograph.transform.period_comparison",
+                     {"date_column": "date", "measure": "m",
+                      "period": "month"}, table=df)
 
 
 class TestIONodes:

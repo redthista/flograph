@@ -15,6 +15,13 @@ Tables**). The same batch also added, off the council's list: SQL Query / SQL
 Write, DuckDB SQL, REST Paginate, List Files, Fuzzy Join, PII Scan, SVG
 Template, Mermaid Diagram, Read HTML Tables, and LLM Enrich / Classify /
 Extract. Numbers are not reused; the gaps stay.
+**Shipped 2026-09-13**, deleted from the list below: #1 **Period Comparison**,
+#7 **Numeric Binning** and #10 **Crosstab** — three Transform nodes with a
+shared example, **Segment Compare Matrix**. Their running mates from the
+analyst batch — Date Bucketing (#2), Date Arithmetic (#3), Complete Date
+Range (#4), Column Splitter (#8), Text Cleaning (#9), Cohort Analysis (#11)
+and Multi-Sheet Excel Export (#50) — are still open. #8 and #14 were already
+answered (as **Split Column** and **Explode Column**).
 
 The existing library is: Input (Slider, Number, Text, Date, Toggle, Choice,
 Between Slider); IO (Read/Write CSV/Excel/Parquet/JSON/SQLite, Table, read
@@ -139,15 +146,6 @@ entirely from library nodes.
 
 ### Transform — dates, periods & time
 
-**1. Period Comparison** — *analyst* — `transform`
-Compare a measure against the prior period or same-period-last-year; adds
-previous value, absolute delta and % change, aligned on a date column plus
-optional group keys.
-`dataframe → dataframe` · params: `date_column`, `measure`, `period`
-(week/month/quarter/year), `basis` (previous / last year).
-*Use: monthly revenue report showing each product line's change vs last month
-and vs the same month last year.*
-
 **2. Date Bucketing** — *analyst* — `transform`
 Floor a datetime column into day/ISO-week/month/quarter/year (or fiscal)
 buckets and add a formattable label column.
@@ -174,14 +172,6 @@ ragged and weekly sums are honest.*
 
 ### Transform — bins
 
-**7. Numeric Binning** — *analyst / power user* — `transform`
-Cut a numeric column into fixed-width, quantile, or custom-edge bins with
-labeled buckets (`<100`, `100–250`, `250+`).
-`dataframe → dataframe` · params: `value_column`, `method` (fixed/quantile/
-custom), `bins`, `edges`, `labels`.
-*Use: bucket customer lifetime value into high/medium/low tiers as a reusable
-segment column for slicers and reports.*
-
 **8. Column Splitter** — *analyst / power user* — `transform`
 Split one text column into several by delimiter, regex, or fixed width, with
 trimming and drop-source options.
@@ -198,14 +188,6 @@ normalisation, strip non-printables, remove URLs/emails, replace NA.
 Expression chain.*
 
 ### Transform — tables, cohorts & quality
-
-**10. Crosstab / Frequency Matrix** — *analyst* — `transform`
-Build a two-dimensional frequency (or weighted) table from two category
-columns, optionally normalised by row/column/grand totals.
-`dataframe → dataframe` · params: `row_column`, `column_column`, `weight`,
-`normalize`, `fill_value`.
-*Use: device-type × browser matrix for a traffic report, row-normalised to
-see each device's browser mix.*
 
 **11. Cohort Analysis** — *analyst* — `transform`
 Label each row with a cohort key (first-seen period) and a period index since
@@ -519,7 +501,7 @@ Strong ideas that didn't make the list but are worth remembering:
 
 ## Suggested build order
 
-1. **Analyst batch** (#1–#4, #7–#11, #13, #14, #50): highest daily
+1. **Analyst batch** (#2–#4, #8, #9, #11, #13, #50): highest daily
    frequency, pure pandas, no new deps — most are near-copies of existing
    node patterns.
 2. **Input controls** (#27–#34): reuses the `card: "control"` host and

@@ -39,7 +39,9 @@ variable, on an order edge after the upload). Each Dataiku node has one
 **Transform** — Select Columns, Filter Rows, Sort, Join, Group By,
 Expression, Concatenate, Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,
-Statistics, Data Profile.
+Statistics, Data Profile, Numeric Binning (fixed-width, quantile or
+hand-named buckets), Crosstab (a two-way frequency matrix), Period
+Comparison (prior period / year-ago deltas and change).
 
 **Viz** — Show Table, Show Plot (matplotlib), Show Plotly (an interactive
 plotly.js chart on the canvas, in any of the 28 Plotly Express chart types),

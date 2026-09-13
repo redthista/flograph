@@ -359,7 +359,9 @@ disconnect.
 **Transform** — Select Columns, Filter Rows, Sort, Join, Group By,
 Expression, Concatenate, Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,
-Statistics, Data Profile.
+Statistics, Data Profile, Numeric Binning (fixed-width, quantile or
+hand-named buckets), Crosstab (a two-way frequency matrix), Period
+Comparison (prior period / year-ago deltas and change).
 
 **Viz** — Show Table, Show Plot (matplotlib, live on-canvas), Show Plotly
 (a real interactive plotly.js chart embedded on the canvas — hover, zoom and

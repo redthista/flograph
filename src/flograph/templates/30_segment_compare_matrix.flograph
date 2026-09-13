@@ -1,0 +1,365 @@
+{
+  "flograph_version": "0.1.14",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "b1_table",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          100
+        ],
+        "params": {
+          "data": "{\"version\":2,\"columns\":[{\"name\":\"date\",\"type\":\"date\"},{\"name\":\"product\",\"type\":\"text\"},{\"name\":\"revenue\",\"type\":\"number\"}],\"rows\":[[\"2026-06-01\",\"Widget\",42],[\"2026-06-01\",\"Gadget\",185],[\"2026-06-03\",\"Gizmo\",640],[\"2026-06-05\",\"Widget\",12],[\"2026-06-08\",\"Gadget\",920],[\"2026-06-09\",\"Widget\",74],[\"2026-06-12\",\"Gizmo\",250],[\"2026-06-14\",\"Gadget\",33],[\"2026-06-16\",\"Widget\",520],[\"2026-06-18\",\"Gizmo\",95],[\"2026-06-20\",\"Gadget\",710],[\"2026-06-22\",\"Widget\",310]]}",
+          "width": 300,
+          "height": 200
+        },
+        "code": null,
+        "label": "Orders"
+      },
+      {
+        "id": "b1_bins",
+        "type": "flograph.transform.numeric_binning",
+        "pos": [
+          540,
+          160
+        ],
+        "params": {
+          "column": "revenue",
+          "method": "custom edges",
+          "edges": "0, 50, 200, 1000",
+          "labels": "small, medium, large",
+          "output_column": "tier"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b1_group",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          840,
+          160
+        ],
+        "params": {
+          "by": "tier",
+          "agg": "sum",
+          "values": "revenue"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b1_chart",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          1140,
+          140
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "tier",
+          "y": "revenue",
+          "title": "Revenue by Order Size",
+          "width": 460,
+          "height": 300,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b2_table",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          700
+        ],
+        "params": {
+          "data": "{\"version\":2,\"columns\":[{\"name\":\"date\",\"type\":\"date\"},{\"name\":\"region\",\"type\":\"text\"},{\"name\":\"revenue\",\"type\":\"number\"}],\"rows\":[[\"2025-01\",\"North\",27.21],[\"2025-01\",\"South\",21.15],[\"2025-01\",\"East\",18.64],[\"2025-01\",\"West\",13.04],[\"2025-02\",\"North\",32.38],[\"2025-02\",\"South\",25.2],[\"2025-02\",\"East\",19.44],[\"2025-02\",\"West\",16.12],[\"2025-03\",\"North\",37.49],[\"2025-03\",\"South\",32.04],[\"2025-03\",\"East\",24.5],[\"2025-03\",\"West\",18.92],[\"2025-04\",\"North\",40.23],[\"2025-04\",\"South\",34.28],[\"2025-04\",\"East\",24.88],[\"2025-04\",\"West\",19.46],[\"2025-05\",\"North\",45.98],[\"2025-05\",\"South\",38.63],[\"2025-05\",\"East\",29.65],[\"2025-05\",\"West\",22.16],[\"2025-06\",\"North\",53.23],[\"2025-06\",\"South\",36.7],[\"2025-06\",\"East\",33.99],[\"2025-06\",\"West\",23.9],[\"2025-07\",\"North\",39.1],[\"2025-07\",\"South\",31.14],[\"2025-07\",\"East\",26.12],[\"2025-07\",\"West\",21.78],[\"2025-08\",\"North\",35.62],[\"2025-08\",\"South\",30.42],[\"2025-08\",\"East\",24.94],[\"2025-08\",\"West\",18.39],[\"2025-09\",\"North\",42.28],[\"2025-09\",\"South\",31.22],[\"2025-09\",\"East\",25.35],[\"2025-09\",\"West\",19.99],[\"2025-10\",\"North\",47.77],[\"2025-10\",\"South\",36.72],[\"2025-10\",\"East\",29.28],[\"2025-10\",\"West\",23.53],[\"2025-11\",\"North\",50.58],[\"2025-11\",\"South\",39.46],[\"2025-11\",\"East\",34.68],[\"2025-11\",\"West\",26.29],[\"2025-12\",\"North\",57.36],[\"2025-12\",\"South\",48.42],[\"2025-12\",\"East\",39.03],[\"2025-12\",\"West\",31.7],[\"2026-01\",\"North\",31.19],[\"2026-01\",\"South\",23.25],[\"2026-01\",\"East\",21.06],[\"2026-01\",\"West\",14.12],[\"2026-02\",\"North\",34.13],[\"2026-02\",\"South\",28.81],[\"2026-02\",\"East\",21.23],[\"2026-02\",\"West\",17.26],[\"2026-03\",\"North\",40.29],[\"2026-03\",\"South\",35.73],[\"2026-03\",\"East\",29.47],[\"2026-03\",\"West\",22.0],[\"2026-04\",\"North\",46.38],[\"2026-04\",\"South\",33.96],[\"2026-04\",\"East\",29.33],[\"2026-04\",\"West\",22.21],[\"2026-05\",\"North\",49.04],[\"2026-05\",\"South\",38.46],[\"2026-05\",\"East\",33.18],[\"2026-05\",\"West\",25.93],[\"2026-06\",\"North\",52.92],[\"2026-06\",\"South\",43.63],[\"2026-06\",\"East\",32.11],[\"2026-06\",\"West\",27.43]]}",
+          "width": 300,
+          "height": 260
+        },
+        "code": null,
+        "label": "Monthly Sales"
+      },
+      {
+        "id": "b2_period",
+        "type": "flograph.transform.period_comparison",
+        "pos": [
+          540,
+          780
+        ],
+        "params": {
+          "date_column": "date",
+          "measure": "revenue",
+          "group_by": "region",
+          "period": "month",
+          "basis": "same period last year",
+          "agg": "sum"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b2_filter",
+        "type": "flograph.transform.filter_rows",
+        "pos": [
+          840,
+          780
+        ],
+        "params": {
+          "query": "date >= \"2026-01-01\""
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b2_group",
+        "type": "flograph.transform.group_by",
+        "pos": [
+          1140,
+          780
+        ],
+        "params": {
+          "by": "region",
+          "agg": "mean",
+          "values": "revenue_pct"
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b2_chart",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          1440,
+          700
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "region",
+          "y": "revenue_pct",
+          "title": "Average Change vs Same Month Last Year (2026)",
+          "y_format": ".1%",
+          "width": 480,
+          "height": 300,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b2_table_view",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1440,
+          1160
+        ],
+        "params": {
+          "width": 480,
+          "height": 280,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b3_table",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          1700
+        ],
+        "params": {
+          "data": "{\"version\":2,\"columns\":[{\"name\":\"region\",\"type\":\"text\"},{\"name\":\"product\",\"type\":\"text\"},{\"name\":\"revenue\",\"type\":\"number\"}],\"rows\":[[\"North\",\"Widget\",8824],[\"North\",\"Gadget\",11938],[\"North\",\"Gizmo\",10397],[\"South\",\"Widget\",5561],[\"South\",\"Gadget\",6472],[\"South\",\"Gizmo\",9018],[\"East\",\"Widget\",3203],[\"East\",\"Gadget\",7155],[\"East\",\"Gizmo\",4512],[\"West\",\"Widget\",4054],[\"West\",\"Gadget\",3531],[\"West\",\"Gizmo\",9914]]}",
+          "width": 300,
+          "height": 220
+        },
+        "code": null,
+        "label": "Revenue Matrix"
+      },
+      {
+        "id": "b3_crosstab",
+        "type": "flograph.transform.crosstab",
+        "pos": [
+          540,
+          1760
+        ],
+        "params": {
+          "rows": "region",
+          "cols": "product",
+          "values": "revenue",
+          "agg": "sum",
+          "margins": true
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "b3_table_view",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          840,
+          1700
+        ],
+        "params": {
+          "width": 460,
+          "height": 320,
+          "scale": 100
+        },
+        "code": null,
+        "label": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "b1c1",
+        "src": [
+          "b1_table",
+          "table"
+        ],
+        "dst": [
+          "b1_bins",
+          "table"
+        ]
+      },
+      {
+        "id": "b1c2",
+        "src": [
+          "b1_bins",
+          "table"
+        ],
+        "dst": [
+          "b1_group",
+          "table"
+        ]
+      },
+      {
+        "id": "b1c3",
+        "src": [
+          "b1_group",
+          "aggregated"
+        ],
+        "dst": [
+          "b1_chart",
+          "table"
+        ]
+      },
+      {
+        "id": "b2c1",
+        "src": [
+          "b2_table",
+          "table"
+        ],
+        "dst": [
+          "b2_period",
+          "table"
+        ]
+      },
+      {
+        "id": "b2c2",
+        "src": [
+          "b2_period",
+          "table"
+        ],
+        "dst": [
+          "b2_filter",
+          "table"
+        ]
+      },
+      {
+        "id": "b2c3",
+        "src": [
+          "b2_filter",
+          "filtered"
+        ],
+        "dst": [
+          "b2_group",
+          "table"
+        ]
+      },
+      {
+        "id": "b2c4",
+        "src": [
+          "b2_filter",
+          "filtered"
+        ],
+        "dst": [
+          "b2_table_view",
+          "table"
+        ]
+      },
+      {
+        "id": "b2c5",
+        "src": [
+          "b2_group",
+          "aggregated"
+        ],
+        "dst": [
+          "b2_chart",
+          "table"
+        ]
+      },
+      {
+        "id": "b3c1",
+        "src": [
+          "b3_table",
+          "table"
+        ],
+        "dst": [
+          "b3_crosstab",
+          "table"
+        ]
+      },
+      {
+        "id": "b3c2",
+        "src": [
+          "b3_crosstab",
+          "table"
+        ],
+        "dst": [
+          "b3_table_view",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "f01",
+        "title": "Order Size Tiers",
+        "rect": [
+          -40,
+          40,
+          1680,
+          440
+        ],
+        "color": "#2563eb"
+      },
+      {
+        "id": "f02",
+        "title": "Month vs Same Month Last Year",
+        "rect": [
+          -40,
+          640,
+          2000,
+          840
+        ],
+        "color": "#0d9488"
+      },
+      {
+        "id": "f03",
+        "title": "Region \u00d7 Product Matrix",
+        "rect": [
+          -40,
+          1640,
+          1380,
+          420
+        ],
+        "color": "#9333ea"
+      }
+    ],
+    "pages": []
+  }
+}
