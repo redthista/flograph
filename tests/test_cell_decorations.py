@@ -250,8 +250,10 @@ class TestOnPaper:
             'name = a => icon A above'))
         # look inside the cell: the table's own markup carries letters too
         cell = html[html.index("<tbody>"):]
-        # above sits on its own line, and the sides bracket the value
-        assert "<br>" in cell
+        # above sits on its own line, and the sides bracket the value. The
+        # break is `<br />`, never a bare `<br>`: Qt's markdown reader drops
+        # the whole table a bare one sits in, so it vanished from reports
+        assert "<br />" in cell and "<br>" not in cell
         assert cell.index("A") < cell.index("L") < cell.index("> a <") \
             < cell.index("R")
 
