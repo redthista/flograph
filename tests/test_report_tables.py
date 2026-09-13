@@ -176,6 +176,30 @@ class TestTheControls:
         assert rendered.problems == []
 
 
+class TestAMarkOnALineOfItsOwn:
+    """A mark `above` or `below` a value puts a line break in the cell, and
+    Qt's markdown reader threw away the whole table for a bare `<br>` — the
+    table was simply missing from the page, with nothing reported."""
+
+    @pytest.mark.parametrize("rules", [
+        "status = fail => icon ✗ red below",
+        "status = fail => icon ✗ red above",
+        "region spark below from revenue, orders",
+        "region spark above tall from revenue, orders",
+    ])
+    def test_the_table_is_still_on_the_page(self, rules):
+        graph, cache, _n = table_node(rules)
+        html = html_of("# Title\n\n![[Sales]]", graph, cache)
+        assert "North" in html and "South" in html and "<table" in html
+
+    def test_the_mark_is_still_on_a_line_of_its_own(self):
+        graph, cache, _n = table_node("status = fail => icon ✗ red below")
+        text = render_report("![[Sales]]", graph,
+                             cache).document.toPlainText()
+        lines = [line.strip() for line in text.splitlines()]
+        assert lines[lines.index("fail") + 1] == "✗"
+
+
 class TestFrameToHtml:
     """The builder itself, without a report around it."""
 

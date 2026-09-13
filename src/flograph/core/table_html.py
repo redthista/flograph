@@ -500,7 +500,12 @@ def _decorate(text: str, style: "CellStyle") -> str:
     lines = [" ".join(_decor_span(d) for d in style.at("above")),
              middle,
              " ".join(_decor_span(d) for d in style.at("below"))]
-    return "<br>".join(line for line in lines if line)
+    # `<br />`, never a bare `<br>`: Qt's markdown reader, which a report
+    # page goes through, throws away the *whole* table a bare `<br>` sits in
+    # — no error, the table is simply not on the page. The self-closing
+    # spellings survive and break the line all the same (a probe, not a
+    # guess: `<br>` 0 tables, `<br/>` and `<br />` 1).
+    return "<br />".join(line for line in lines if line)
 
 
 def _text(value, style: "CellStyle | None") -> str:
