@@ -79,6 +79,11 @@ class ReportPage(QWidget):
         self.editor.setTabChangesFocus(True)
         self.editor.setPlaceholderText(
             "Write the report in markdown, and ![[embed]] what the flow made…")
+        # names as you type: labels after ![[, ports and options after |,
+        # page titles in a (page:) link — Ctrl+Space anywhere
+        from .completion import ReportCompleter, page_vocabulary
+        self.completer = ReportCompleter(
+            self.editor, lambda: page_vocabulary(graph, engine.cache))
 
         # Paper, not a scroll of rich text: everything page setup adds — the
         # cover, the running header and footer, where a page actually ends —

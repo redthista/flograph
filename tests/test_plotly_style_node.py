@@ -22,12 +22,16 @@ def figure():
                   x="region", y="units")
 
 
-def style(registry, params=None, **inputs):
+def outputs(registry, params=None, **inputs):
     spec = registry.get("flograph.viz.plotly_style")
     values = spec.default_params()
     values.update(params or {})
     run = compile_run(spec.source, "test-style")
-    return run(FakeContext(params=values), **inputs)["figure"]
+    return run(FakeContext(params=values), **inputs)
+
+
+def style(registry, params=None, **inputs):
+    return outputs(registry, params, **inputs)["figure"]
 
 
 def test_registered_figure_in_figure_out(registry):
@@ -244,9 +248,12 @@ class TestOtherShapes:
         assert out.layout.shapes == ()
         assert out.layout.annotations[0].text == "ok"
 
-    def test_nothing_wired_in_says_so(self, registry):
-        with pytest.raises(ValueError, match="nothing on the figure input"):
-            style(registry, {}, figure=None)
+    def test_no_figure_passes_the_style_on(self, registry):
+        """The head of a chain is a style and nothing else — it has no
+        chart of its own to style."""
+        out = outputs(registry, {"title": "House"})
+        assert out["figure"] is None
+        assert out["style"]["layers"] == [{"title": "House"}]
 
     def test_something_that_is_not_a_figure_says_so(self, registry):
         with pytest.raises(TypeError, match="not a\n?\\s*Plotly figure"):
@@ -271,4 +278,90 @@ class TestWiring:
         style = graph.add_node(
             registry.instantiate("flograph.viz.plotly_style"))
         graph.connect(producer.id, port, style.id, "figure")
+        assert len(graph.connections) == 1
+
+
+class TestChaining:
+    """A Plotly Style's style output feeds the next one's style input, and
+    the chain applies in order — the same chart as passing the figure
+    through each node in turn."""
+
+    def test_registered_with_optional_style_ports(self, registry):
+        spec = registry.get("flograph.viz.plotly_style")
+        assert [p.name for p in spec.inputs] == ["figure", "style"]
+        assert all(p.optional for p in spec.inputs)
+        assert [p.name for p in spec.outputs] == ["figure", "style"]
+
+    def test_only_what_was_set_travels(self, registry, figure):
+        out = outputs(registry, {"y_format": ",.0f", "width": 900,
+                                 "more": True}, figure=figure)
+        assert out["style"]["layers"] == [{"y_format": ",.0f"}]
+
+    def test_an_untouched_node_adds_nothing_to_a_chain(self, registry):
+        house = outputs(registry, {"template": "plotly_dark"})["style"]
+        out = outputs(registry, {}, style=house)
+        assert out["style"]["layers"] == house["layers"]
+
+    def test_incoming_style_applies_then_this_nodes_own(
+            self, registry, figure):
+        house = outputs(registry, {"template": "simple_white",
+                                   "title": "House title",
+                                   "y_format": ",.0f"})["style"]
+        out = style(registry, {"title": "Sales"}, figure=figure, style=house)
+        assert out.layout.title.text == "Sales"          # later wins
+        assert out.layout.yaxis.tickformat == ",.0f"     # earlier kept
+        assert out.layout.template.layout.plot_bgcolor is not None
+
+    def test_three_deep_matches_passing_the_figure_through_each(
+            self, registry, figure):
+        a = {"template": "plotly_dark", "line_at": "12", "note": "a"}
+        b = {"legend": "hide", "line_at": "15", "line_label": "Target"}
+        c = {"title": "Chained", "layout_json": '{"bargap": 0.4}'}
+        chained = outputs(registry, b, style=outputs(registry, a)["style"])
+        via_styles = style(registry, c, figure=figure,
+                           style=chained["style"])
+        via_figures = style(registry, c, figure=style(
+            registry, b, figure=style(registry, a, figure=figure)))
+        assert via_styles.to_dict()["layout"] == \
+            via_figures.to_dict()["layout"]
+        # both reference lines drawn, as two nodes in a row would
+        assert len(via_styles.layout.shapes) == 2
+
+    def test_the_chain_carries_on_down_the_style_output(
+            self, registry, figure):
+        first = outputs(registry, {"title": "A"})["style"]
+        second = outputs(registry, {"x_title": "B"}, figure=figure,
+                         style=first)["style"]
+        assert second["layers"] == [{"title": "A"}, {"x_title": "B"}]
+
+    def test_the_incoming_style_is_not_modified(self, registry, figure):
+        house = outputs(registry, {"title": "A"})["style"]
+        outputs(registry, {"title": "B"}, figure=figure, style=house)
+        assert house["layers"] == [{"title": "A"}]
+
+    def test_a_table_style_on_the_style_input_says_so(self, registry, figure):
+        with pytest.raises(TypeError, match="not a Plotly Style"):
+            style(registry, {}, figure=figure,
+                  style={"rules": [], "errors": []})
+
+    def test_bad_json_fails_the_style_only_node(self, registry):
+        with pytest.raises(ValueError, match="Layout \\(JSON\\)"):
+            outputs(registry, {"layout_json": "{nope"})
+
+    def test_a_list_of_figures_takes_the_chain(self, registry, figure):
+        import plotly.graph_objects as go
+        house = outputs(registry, {"title": "T"})["style"]
+        out = style(registry, {}, figure=[figure, go.Figure(figure)],
+                    style=house)
+        assert [f.layout.title.text for f in out] == ["T", "T"]
+
+    def test_one_style_wires_into_another(self, registry):
+        from flograph.core import Graph
+
+        graph = Graph()
+        house = graph.add_node(
+            registry.instantiate("flograph.viz.plotly_style"))
+        chart = graph.add_node(
+            registry.instantiate("flograph.viz.plotly_style"))
+        graph.connect(house.id, "style", chart.id, "style")
         assert len(graph.connections) == 1

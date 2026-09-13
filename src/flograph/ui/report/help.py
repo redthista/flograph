@@ -101,6 +101,16 @@ rather than the words out of it. Resize the card to change how it lays out;
 <code>width=</code> then places that picture on the page.</p>
 <p>Use <b>Insert embed &#9662;</b> to pick from the nodes that have
 actually produced something — it also avoids typos in a label.</p>
+<p><b>Or just start typing.</b> After <code>![[</code> a list of node names
+drops down (the ones that have produced something first); after a
+<code>|</code> it offers that node's ports, the options above and
+<code>fit</code>; after <code>ratio=</code> or <code>width=</code>, a few
+values. It also completes page titles in a <code>(page:</code> link,
+<code>columns</code> after <code>```</code>, and <code>\\pagebreak</code>.
+<b>Enter</b> or <b>Tab</b> takes the highlighted entry, <b>Escape</b> puts
+the list away, and <b>Ctrl+Space</b> asks for it wherever the caret is. A
+Report card's editor on the canvas does the same, with the card's own
+inputs at the top.</p>
 <p>What an embed becomes depends on what arrives: a <b>chart</b> is placed
 as a picture, a <b>table</b> as a table, a <b>number</b> inline in your
 sentence, and a <b>string as markdown</b> — so prose composed in a Python

@@ -1319,7 +1319,37 @@ class NodeItem(QGraphicsObject):
             self._report_proxy.hide()   # don't render behind the editor
         self._note_editor = proxy
         self._note_editor_widget = editor
+        if self.report_card:
+            self._attach_report_completer(editor)
         editor.setFocus()
+
+    def _attach_report_completer(self, editor) -> None:
+        """Names as you type in a Report card: its inputs, the nodes on the
+        canvas, ports and options after `|`.
+
+        The list is a popup out of a proxied widget, so Qt embeds it at the
+        card's own height and a card stacked in front would cover it — the
+        card is lifted while the list is open, as a slicer's dropdown is.
+        """
+        from ..report.completion import ReportCompleter, card_vocabulary
+        from .stacking import POPUP_HOST_Z
+
+        def vocabulary():
+            scene = self.scene()
+            return card_vocabulary(getattr(scene, "graph", None),
+                                   getattr(scene, "output_cache", None),
+                                   self.node)
+
+        resting = {}
+
+        def on_popup(shown: bool) -> None:
+            if shown:
+                resting.setdefault("z", self.zValue())
+                self.setZValue(max(self.zValue(), POPUP_HOST_Z))
+            elif "z" in resting:
+                self.setZValue(resting.pop("z"))
+
+        editor.completer = ReportCompleter(editor, vocabulary, on_popup)
 
     def add_insert_menu(self, menu) -> dict:
         """Add "Insert" entries to a Report card editor's context menu.

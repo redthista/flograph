@@ -51,6 +51,19 @@ three cover the rest of plotly, and apply last so an override here wins.
 A list of figures is styled one by one and comes out as a list, so a Chart
 per Value stack can be restyled in one node.
 
+**Chaining styles.** The **style** output carries this node's settings, and
+the **style** input takes another Plotly Style's. Wire one into the next
+and the incoming style is applied first, then this node's own on top — the
+same chart you would get by passing the figure through both nodes in turn,
+so a later title replaces an earlier one, a reference line adds to the
+lines already there, and the JSON boxes merge. That is how a house style
+lives in one node, a family of charts adds its axis formats in a second,
+and each chart sets only its own title in a third.
+
+Both inputs are optional. With no figure wired in, the node is a style and
+nothing else: it passes the chain on down its **style** output, which is
+how the house-style node at the head of a chain needs no chart of its own.
+
 The input figure is never modified: the node styles a copy, because the
 upstream node's output is cached and shared with anything else wired to
 it.
@@ -67,10 +80,11 @@ if it is missing.
 NODE = {
     "label": "Plotly Style",
     "category": "Viz",
-    "version": "1.0",
+    "version": "1.1",
     "card": "webview",
-    "inputs": [("figure", "any")],
-    "outputs": [("figure", "any")],
+    "inputs": [("figure", "any", {"optional": True}),
+               ("style", "object", {"optional": True})],
+    "outputs": [("figure", "any"), ("style", "object")],
 }
 
 # Every choice has a "keep" and every box a blank, both meaning "leave the
@@ -337,8 +351,29 @@ def _figure_lock():
         return module.lock
 
 
-def run(ctx, figure):
+#: What a style payload says it is, so a Table Style or Visual Style wired
+#: into the style input is turned away by name rather than half-applied.
+STYLE_KIND = "flograph.plotly_style"
+
+#: Params that are about this node's card, not about the chart it styles —
+#: they never travel down a style chain.
+_CARD_ONLY = {"more", "width", "height", "scale"}
+
+_JSON_BOXES = (("layout_json", "Layout (JSON)"),
+               ("traces_json", "Traces (JSON)"),
+               ("config_json", "Interactivity (JSON)"))
+
+
+def run(ctx, figure=None, style=None):
     import importlib.util
+
+    layers = _chain(style) + _own_layer(ctx.params)
+    payload = {"kind": STYLE_KIND, "layers": layers}
+
+    if figure is None:
+        ctx.log(f"no figure wired in — passing on a style of "
+                f"{_describe(layers)}")
+        return {"figure": None, "style": payload}
 
     if importlib.util.find_spec("plotly") is None:
         raise RuntimeError(
@@ -346,29 +381,64 @@ def run(ctx, figure):
             "with `pip install flograph[plotly]` or "
             "Tools > Manage Packages > plotly.")
 
-    if figure is None:
-        raise ValueError("nothing on the figure input — wire a node that "
-                         "produces a Plotly figure into it")
-
     # A list in, a list out: a Chart per Value stack is styled in one go
     # and stays a stack.
     if isinstance(figure, (list, tuple)):
         if not figure:
-            return {"figure": []}
+            return {"figure": [], "style": payload}
         styled = []
         for index, one in enumerate(figure):
             ctx.check_cancelled()
             ctx.progress(index / len(figure))
-            styled.append(_style(ctx, one))
-        ctx.log(f"styled {len(styled)} figures")
-        return {"figure": styled}
+            styled.append(_style(one, layers))
+        ctx.log(f"styled {len(styled)} figures with {_describe(layers)}")
+        return {"figure": styled, "style": payload}
 
-    styled = _style(ctx, figure)
-    ctx.log("styled 1 figure")
-    return {"figure": styled}
+    styled = _style(figure, layers)
+    ctx.log(f"styled 1 figure with {_describe(layers)}")
+    return {"figure": styled, "style": payload}
 
 
-def _style(ctx, figure):
+def _chain(style) -> list:
+    """The layers an incoming style carries, oldest first."""
+    if style is None:
+        return []
+    if not (isinstance(style, dict) and style.get("kind") == STYLE_KIND
+            and isinstance(style.get("layers"), list)):
+        raise TypeError(
+            f"the style input holds a {type(style).__name__} that is not a "
+            f"Plotly Style — wire another Plotly Style's style output into "
+            f"it (a Table Style or Visual Style styles something else)")
+    return [dict(layer) for layer in style["layers"]
+            if isinstance(layer, dict)]
+
+
+def _own_layer(params) -> list:
+    """This node's settings as one layer — only what differs from the
+    default, so the style a chain carries reads as what was actually set.
+    Empty when nothing is, so an untouched node adds nothing to a chain.
+
+    The JSON boxes are checked here rather than when a figure is styled,
+    so a typo in a style-only node fails that node, not a chart three
+    wires away."""
+    defaults = {row["name"]: row.get("default") for row in PARAMS}
+    layer = {name: value for name, value in params.items()
+             if name in defaults and name not in _CARD_ONLY
+             and value != defaults[name]}
+    for name, what in _JSON_BOXES:
+        _parsed_json(layer.get(name), what)
+    return [layer] if layer else []
+
+
+def _describe(layers) -> str:
+    settings = sum(len(layer) for layer in layers)
+    if not settings:
+        return "no settings"
+    chained = f" over {len(layers)} chained styles" if len(layers) > 1 else ""
+    return f"{settings} setting(s){chained}"
+
+
+def _style(figure, layers):
     """One figure, restyled onto a copy of itself."""
     import plotly.graph_objects as go
 
@@ -379,21 +449,22 @@ def _style(ctx, figure):
             f"Value (Plotly), Gantt Chart or a script that makes one")
 
     with _figure_lock():
-        return _restyle(go, figure, ctx.params)
+        # Nodes treat inputs as read-only: the upstream node's output is
+        # cached and may be wired to several nodes at once, so styling the
+        # figure in place would restyle somebody else's chart too.
+        fig = go.Figure(figure)
+        for layer in layers:
+            _apply(fig, layer)
+        return fig
 
 
-def _restyle(go, figure, params):
-    """The styling itself, run under the figure lock.
+def _apply(fig, params) -> None:
+    """One layer of styling, in place on a copy, under the figure lock.
 
     Setting a theme stamps the shared template singleton onto the figure,
     which is one half of the race _figure_lock exists for — the other half
     being a px node reading that same object to pick a palette.
     """
-    # Nodes treat inputs as read-only: the upstream node's output is
-    # cached and may be wired to several nodes at once, so styling the
-    # figure in place would restyle somebody else's chart too.
-    fig = go.Figure(figure)
-
     layout = {}
     _theme(params, layout)
     _titles(params, layout)
@@ -411,7 +482,23 @@ def _restyle(go, figure, params):
     if params.get("colorbar_title"):
         fig.update_coloraxes(colorbar_title_text=params["colorbar_title"])
     _raw(params, fig)
-    return fig
+
+
+def _parsed_json(text, what) -> dict:
+    import json
+
+    text = str(text or "").strip()
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"{what}: not valid JSON — {exc}") from None
+    if not isinstance(value, dict):
+        raise ValueError(
+            f'{what}: expected a JSON object like {{"bargap": 0.3}}, got '
+            f"{type(value).__name__}")
+    return value
 
 
 def _raw(params, fig) -> None:
@@ -423,22 +510,7 @@ def _raw(params, fig) -> None:
     the web-view card to hand to plotly.js. Between them they reach all of
     plotly's layout, trace and config surface.
     """
-    import json
-
-    def parsed(text, what):
-        text = str(text or "").strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except ValueError as exc:
-            raise ValueError(f"{what}: not valid JSON — {exc}") from None
-        if not isinstance(value, dict):
-            raise ValueError(
-                f'{what}: expected a JSON object like {{"bargap": 0.3}}, got '
-                f"{type(value).__name__}")
-        return value
-
+    parsed = _parsed_json
     layout = parsed(params.get("layout_json"), "Layout (JSON)")
     if layout:
         fig.update_layout(**layout)

@@ -765,3 +765,62 @@ class TestTheEditorContextMenu:
         menu = QMenu()
         assert item.add_insert_menu(menu) == {}
         assert menu.actions() == []
+
+
+class TestCardEditorCompletion:
+    """A Report card's in-place editor completes names as the report page's
+    does, with the card's own inputs first."""
+
+    @pytest.fixture
+    def editing(self, qtbot, registry):
+        from PySide6.QtGui import QUndoStack
+        from flograph.core import Graph
+        from flograph.engine.cache import OutputCache
+        from flograph.ui.canvas import NodeGraphScene
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        scene.output_cache = OutputCache()
+        card = graph.add_node(registry.instantiate("flograph.viz.report_card"))
+        wired = graph.add_node(registry.instantiate("flograph.util.constant"))
+        graph.set_label(wired.id, "Revenue")
+        graph.connect(wired.id, "value", card.id, "a")
+        scene.output_cache.set(wired.id, {"value": 42}, 0.0)
+        item = scene.node_items[card.id]
+        item.start_note_edit()
+        yield graph, scene, item
+        editor = item._note_editor_widget
+        if editor is not None:
+            editor.completer.popup.hide()
+
+    def test_inputs_come_before_the_nodes_on_the_canvas(self, editing):
+        from flograph.ui.report.completion import card_vocabulary
+        graph, scene, item = editing
+        vocab = card_vocabulary(graph, scene.output_cache, item.node)
+        labels = [name.label for name in vocab.names]
+        assert labels[0] == "a" and vocab.names[0].hint == "input"
+        assert "Revenue" in labels
+        assert item.node.label not in labels   # never itself
+
+    def test_taking_an_entry_completes_the_embed(self, editing):
+        from PySide6.QtGui import QTextCursor
+        from flograph.core.report_assist import Suggestion
+        _graph, _scene, item = editing
+        editor = item._note_editor_widget
+        editor.setPlainText("Total: ![[Rev")
+        editor.moveCursor(QTextCursor.End)
+        editor.completer.insert(Suggestion("Revenue", close="]]"))
+        assert editor.toPlainText() == "Total: ![[Revenue]]"
+
+    def test_the_card_is_lifted_while_the_list_is_open(self, editing):
+        """The list is embedded at the card's own height, so a card in
+        front would cover it — lifted while open, put back after."""
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QApplication
+        from flograph.ui.canvas.stacking import POPUP_HOST_Z
+        _graph, _scene, item = editing
+        resting = item.zValue()
+        popup = item._note_editor_widget.completer.popup
+        QApplication.sendEvent(popup, QEvent(QEvent.Show))
+        assert item.zValue() >= POPUP_HOST_Z
+        QApplication.sendEvent(popup, QEvent(QEvent.Hide))
+        assert item.zValue() == resting
