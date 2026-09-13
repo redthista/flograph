@@ -26,7 +26,7 @@ def env(qtbot, registry):
 def test_show_table_is_registered_with_passthrough_ports(registry):
     spec = registry.get("flograph.viz.show_table")
     assert [p.name for p in spec.inputs] == ["table", "style"]
-    assert [p.name for p in spec.outputs] == ["table", "style"]
+    assert [p.name for p in spec.outputs] == ["table", "style", "filtered"]
     assert spec.inputs[0].type == PortType.DATAFRAME
     assert spec.outputs[0].type == PortType.DATAFRAME
     assert spec.input("style").optional is True
@@ -97,7 +97,7 @@ def test_show_table_item_embeds_a_table_view_with_placeholder(env, registry):
     assert item._table_viewer_placeholder.isVisible()
     assert item._table_viewer_view.isHidden()
     assert list(item.input_ports) == ["table", "style"]
-    assert list(item.output_ports) == ["table", "style"]
+    assert list(item.output_ports) == ["table", "style", "filtered"]
 
 
 def test_show_table_set_table_data_swaps_placeholder_for_grid(env, registry):

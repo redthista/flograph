@@ -3458,12 +3458,13 @@ class MainWindow(QMainWindow):
 
     def _on_view_changed(self, node_id: str) -> None:
         """An interactive web view wrote one of its own params — a bar was
-        clicked, a range was brushed. Re-run it and the visuals it feeds, so
-        clicking inside a chart filters the board the way a Slicer tick
-        does. The SetParamCommand already dirtied the subgraph; request_run
-        coalesces a burst (a drag across a chart) into one run."""
+        clicked, a range was brushed — or a Show Table's pick changed. Re-run
+        it and the visuals it feeds, so clicking inside a chart or a table
+        filters the board the way a Slicer tick does. The SetParamCommand
+        already dirtied the subgraph; request_run coalesces a burst (a drag
+        across a chart) into one run."""
         node = self.graph.nodes.get(node_id)
-        if node is None or card_kind(node) != "webview":
+        if node is None or card_kind(node) not in ("webview", "table_viewer"):
             return
         self.engine.request_run([node_id, *self.graph.downstream(node_id)])
 

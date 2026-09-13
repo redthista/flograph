@@ -1,0 +1,316 @@
+{
+  "flograph_version": "0.1.14",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "cf_data",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "label": "Sales",
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"Region\", \"type\": \"text\"}, {\"name\": \"Product\", \"type\": \"text\"}, {\"name\": \"Rep\", \"type\": \"text\"}, {\"name\": \"Quarter\", \"type\": \"text\"}, {\"name\": \"Units\", \"type\": \"number\"}, {\"name\": \"Revenue\", \"type\": \"number\"}], \"rows\": [[\"North\", \"Widget\", \"Alice\", \"Q1\", 96, 1152], [\"North\", \"Widget\", \"Alice\", \"Q2\", 30, 360], [\"North\", \"Gadget\", \"Alice\", \"Q1\", 110, 3300], [\"North\", \"Gadget\", \"Alice\", \"Q2\", 63, 1890], [\"North\", \"Gizmo\", \"Alice\", \"Q1\", 70, 3850], [\"North\", \"Gizmo\", \"Alice\", \"Q2\", 38, 2090], [\"South\", \"Widget\", \"Bruno\", \"Q1\", 115, 1380], [\"South\", \"Widget\", \"Bruno\", \"Q2\", 54, 648], [\"South\", \"Gadget\", \"Bruno\", \"Q1\", 28, 840], [\"South\", \"Gadget\", \"Bruno\", \"Q2\", 36, 1080], [\"South\", \"Gizmo\", \"Bruno\", \"Q1\", 41, 2255], [\"South\", \"Gizmo\", \"Bruno\", \"Q2\", 32, 1760], [\"East\", \"Widget\", \"Chen\", \"Q1\", 87, 1044], [\"East\", \"Widget\", \"Chen\", \"Q2\", 85, 1020], [\"East\", \"Gadget\", \"Chen\", \"Q1\", 108, 3240], [\"East\", \"Gadget\", \"Chen\", \"Q2\", 86, 2580], [\"East\", \"Gizmo\", \"Chen\", \"Q1\", 48, 2640], [\"East\", \"Gizmo\", \"Chen\", \"Q2\", 97, 5335], [\"West\", \"Widget\", \"Dara\", \"Q1\", 67, 804], [\"West\", \"Widget\", \"Dara\", \"Q2\", 24, 288], [\"West\", \"Gadget\", \"Dara\", \"Q1\", 82, 2460], [\"West\", \"Gadget\", \"Dara\", \"Q2\", 94, 2820], [\"West\", \"Gizmo\", \"Dara\", \"Q1\", 53, 2915], [\"West\", \"Gizmo\", \"Dara\", \"Q2\", 88, 4840]]}",
+          "width": 460,
+          "height": 320
+        },
+        "code": null
+      },
+      {
+        "id": "cf_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          400
+        ],
+        "params": {
+          "text": "## Click a table to filter\n\n**Pick here** has *On click ▸ select many*. Click it and everything wired\nto its **filtered** output follows — the total, the chart and the rows.\n\n- **Click a cell** — keep the rows with that value (`North`).\n- **Ctrl+click more cells** — values in one column add up (North *or*\n  South); columns narrow each other (North *and* Widget).\n- **Click a row number** — keep that row.\n- **Ctrl+click a column header** — keep only that column. A plain click\n  still sorts.\n- **Click the pick again**, press **Esc**, or right-click ▸ **Clear\n  Selection** to let every row back.\n\nWhat you picked shows in **Selected** in the properties panel. **table**\nstays whole, so the card always has every row to pick from.\n\nThe **matrix** below is *select one*: click a region's row and only that\nrow of the matrix goes on.\n",
+          "width": 460,
+          "height": 0
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "cf_pick",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          600,
+          0
+        ],
+        "label": "Pick here",
+        "params": {
+          "on_click": "select many",
+          "selected": "",
+          "format_rules": "Revenue  bar blue\nRevenue  format ,.0f",
+          "width": 640,
+          "height": 420
+        },
+        "code": null
+      },
+      {
+        "id": "cf_total",
+        "type": "flograph.viz.card",
+        "pos": [
+          1360,
+          0
+        ],
+        "label": "Revenue in view",
+        "params": {
+          "column": "Revenue",
+          "aggregation": "Sum",
+          "label": "Revenue in view",
+          "format": ",.0f",
+          "width": 260,
+          "height": 120
+        },
+        "code": null
+      },
+      {
+        "id": "cf_count",
+        "type": "flograph.viz.card",
+        "pos": [
+          1660,
+          0
+        ],
+        "label": "Rows in view",
+        "params": {
+          "column": "Revenue",
+          "aggregation": "Count",
+          "label": "Rows in view",
+          "format": "",
+          "width": 220,
+          "height": 120
+        },
+        "code": null
+      },
+      {
+        "id": "cf_chart",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          1360,
+          180
+        ],
+        "label": "Revenue by product",
+        "params": {
+          "kind": "bar",
+          "x": "Product",
+          "y": "Revenue",
+          "summarise": "sum",
+          "title": "Revenue by product",
+          "width": 520,
+          "height": 340
+        },
+        "code": null
+      },
+      {
+        "id": "cf_rows",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1360,
+          580
+        ],
+        "label": "What passed",
+        "params": {
+          "width": 520,
+          "height": 300
+        },
+        "code": null
+      },
+      {
+        "id": "cf_matrix",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          600,
+          500
+        ],
+        "label": "Matrix — pick one",
+        "params": {
+          "mode": "matrix",
+          "matrix_rows": "Region",
+          "matrix_columns": "Quarter",
+          "matrix_values": "Revenue",
+          "matrix_agg": "sum",
+          "on_click": "select one",
+          "selected": "",
+          "format_rules": "* scale green",
+          "width": 640,
+          "height": 260
+        },
+        "code": null
+      },
+      {
+        "id": "cf_matrix_rows",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          600,
+          820
+        ],
+        "label": "Matrix pick",
+        "params": {
+          "width": 640,
+          "height": 200
+        },
+        "code": null
+      }
+    ],
+    "connections": [
+      {
+        "id": "cc1",
+        "src": [
+          "cf_data",
+          "table"
+        ],
+        "dst": [
+          "cf_pick",
+          "table"
+        ]
+      },
+      {
+        "id": "cc2",
+        "src": [
+          "cf_pick",
+          "filtered"
+        ],
+        "dst": [
+          "cf_total",
+          "table"
+        ]
+      },
+      {
+        "id": "cc3",
+        "src": [
+          "cf_pick",
+          "filtered"
+        ],
+        "dst": [
+          "cf_count",
+          "table"
+        ]
+      },
+      {
+        "id": "cc4",
+        "src": [
+          "cf_pick",
+          "filtered"
+        ],
+        "dst": [
+          "cf_chart",
+          "table"
+        ]
+      },
+      {
+        "id": "cc5",
+        "src": [
+          "cf_pick",
+          "filtered"
+        ],
+        "dst": [
+          "cf_rows",
+          "table"
+        ]
+      },
+      {
+        "id": "cc6",
+        "src": [
+          "cf_data",
+          "table"
+        ],
+        "dst": [
+          "cf_matrix",
+          "table"
+        ]
+      },
+      {
+        "id": "cc7",
+        "src": [
+          "cf_matrix",
+          "filtered"
+        ],
+        "dst": [
+          "cf_matrix_rows",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "cf_frame",
+        "title": "Click a table to filter",
+        "rect": [
+          -60,
+          -80,
+          2000,
+          1180
+        ],
+        "color": "#26415c"
+      }
+    ],
+    "pages": [
+      {
+        "id": "cf_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "ct1",
+            "node": "cf_pick",
+            "port": "table",
+            "rect": [
+              40,
+              40,
+              640,
+              420
+            ]
+          },
+          {
+            "id": "ct2",
+            "node": "cf_total",
+            "port": "value",
+            "rect": [
+              700,
+              40,
+              260,
+              120
+            ]
+          },
+          {
+            "id": "ct3",
+            "node": "cf_count",
+            "port": "value",
+            "rect": [
+              980,
+              40,
+              240,
+              120
+            ]
+          },
+          {
+            "id": "ct4",
+            "node": "cf_chart",
+            "port": "figure",
+            "rect": [
+              700,
+              180,
+              520,
+              280
+            ]
+          },
+          {
+            "id": "ct5",
+            "node": "cf_rows",
+            "port": "table",
+            "rect": [
+              40,
+              480,
+              1180,
+              260
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

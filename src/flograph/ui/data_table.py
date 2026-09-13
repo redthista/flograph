@@ -22,12 +22,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QObject, QSettings, Qt, Signal
+from PySide6.QtCore import (
+    QEvent, QItemSelection, QItemSelectionModel, QObject, QSettings, Qt,
+    QTimer, Signal,
+)
 from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QHeaderView, QMenu, QMessageBox, QStyleOptionViewItem, QTableView,
     QToolTip,
 )
+
+from flograph.core.table_picks import Picks, parse_picks
 
 from .spreadsheet.clipboard import block_to_html, block_to_tsv
 
@@ -78,6 +83,9 @@ TEXT_PT_STEP = 0.5
 #: is generous — deliberately, for a touch-sized list — and a data table
 #: asked to fit more on screen wants the tighter one.
 ROW_PADDING = 5
+#: How long a selection has to sit still before it is committed as a pick.
+#: Long enough that Ctrl+clicking three cells is one re-run, not three.
+PICK_SETTLE_MS = 200
 
 
 class _TextSizeNotifier(QObject):
@@ -259,7 +267,15 @@ class DataTableView(QTableView):
     the middle of a frame does not want a header row, and selecting a
     column plainly does. With nothing selected it copies the whole table,
     headers and all, which is the case the menu is really there for.
+
+    On a Show Table set to filter on click, the selection is also a *pick*
+    (see core/table_picks.py): `picks_committed` carries it out as the
+    node's `selected` text, and `set_picks` puts one back after a run.
     """
+
+    #: The table's pick changed — the new `selected` text, "" for none.
+    #: Only ever emitted once set_pick_mode has turned picking on.
+    picks_committed = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -282,6 +298,20 @@ class DataTableView(QTableView):
         from .table_sort import HeaderSortCycler
         self._sort_cycler = HeaderSortCycler(self.horizontalHeader())
         self._sort_cycler.sortRequested.connect(self._sort_requested)
+
+        # Click to filter. Off until a Show Table's card turns it on, so the
+        # inspector's and every other data table keep a plain selection.
+        self._pick_mode = "nothing"
+        self._picks_text = ""
+        self._applying_picks = False       # our own select(), not a click
+        self._header_pressed = False       # a plain header click: a sort
+        self._last_gesture = "cell"        # what select one keeps
+        self._pick_timer = QTimer(self)
+        self._pick_timer.setSingleShot(True)
+        self._pick_timer.setInterval(PICK_SETTLE_MS)
+        self._pick_timer.timeout.connect(self._commit_picks)
+        header.viewport().installEventFilter(self)
+        self.verticalHeader().viewport().installEventFilter(self)
 
         # The font the theme gave this view, kept so that going back to
         # "Default" in Settings restores it rather than a guess at it.
@@ -366,6 +396,15 @@ class DataTableView(QTableView):
         self._apply_wrapping(model)
         if model is not None and model.columnCount() > 0:
             self.fit_columns_to_data()
+        if model is not None:
+            # a new selection model comes with every model; a sort resets
+            # the model, which empties the selection, and scrolling pages
+            # rows in that the pick has not highlighted yet
+            self.selectionModel().selectionChanged.connect(
+                self._selection_changed)
+            model.modelReset.connect(self._show_picks)
+            model.rowsInserted.connect(self._show_picks)
+            self._show_picks()
 
     def _apply_wrapping(self, model) -> None:
         """A `wrap` rule lets a row grow to fit its text.
@@ -558,7 +597,303 @@ class DataTableView(QTableView):
             self.selectAll()
             event.accept()
             return
+        if (event.key() == Qt.Key_Escape and self._pick_mode != "nothing"
+                and self._picks_text):
+            self.clear_picks()
+            event.accept()
+            return
         super().keyPressEvent(event)
+
+    # ----------------------------------------------------- click to filter
+
+    def pick_mode(self) -> str:
+        return self._pick_mode
+
+    def picks_text(self) -> str:
+        return self._picks_text
+
+    def set_pick_mode(self, mode: str) -> None:
+        """Turn click-to-filter on ("select one" / "select many") or off.
+        Turning it off leaves the selection alone — it is just a selection
+        again."""
+        mode = mode if mode in ("select one", "select many") else "nothing"
+        if mode == self._pick_mode:
+            return
+        self._pick_mode = mode
+        self._pick_timer.stop()
+        self._show_picks()
+
+    def set_picks(self, text: str) -> None:
+        """Show a pick that arrived from outside — the param after an undo,
+        a hand edit, or the other view of the same node. Never emitted back
+        out."""
+        text = str(text or "")
+        if text == self._picks_text:
+            return
+        self._pick_timer.stop()
+        self._picks_text = text
+        self._show_picks()
+
+    def clear_picks(self) -> None:
+        self._put_picks(Picks())
+
+    def _put_picks(self, picks: Picks) -> None:
+        """Make `picks` the table's pick: highlight it, and say so if it is
+        a change."""
+        self._pick_timer.stop()
+        text = picks.to_json()
+        changed = text != self._picks_text
+        self._picks_text = text
+        self._show_picks()
+        if changed:
+            self.picks_committed.emit(text)
+
+    def _show_picks(self, *_) -> None:
+        """Select what the pick matched: its rows, its columns, and every
+        cell holding a picked value — not just the one clicked, so the card
+        shows what the filter will keep. Guarded, so it is not taken for a
+        click."""
+        model = self.model()
+        selection_model = self.selectionModel()
+        if (self._pick_mode == "nothing" or model is None
+                or selection_model is None
+                or not hasattr(model, "pick_texts")):
+            return
+        picks = parse_picks(self._picks_text)
+        rows, cols = model.rowCount(), model.columnCount()
+        selection = QItemSelection()
+
+        def select_runs(first_col: int, last_col: int, hits: list) -> None:
+            start = prev = None
+            for row in hits:
+                if start is not None and row == prev + 1:
+                    prev = row
+                    continue
+                if start is not None:
+                    selection.select(model.index(start, first_col),
+                                     model.index(prev, last_col))
+                start = prev = row
+            if start is not None:
+                selection.select(model.index(start, first_col),
+                                 model.index(prev, last_col))
+
+        if picks and rows and cols:
+            if picks.rows:
+                select_runs(0, cols - 1, model.rows_labelled(picks.rows))
+            seen: set = set()
+            for col in range(cols):
+                name = model.column_name(col)
+                if name in seen:
+                    continue           # the filter reads the first of a name
+                seen.add(name)
+                if name in picks.columns:
+                    selection.select(model.index(0, col),
+                                     model.index(rows - 1, col))
+                elif name in picks.cells:
+                    select_runs(col, col,
+                                model.rows_matching(col, picks.cells[name]))
+        self._applying_picks = True
+        try:
+            selection_model.select(selection,
+                                   QItemSelectionModel.ClearAndSelect)
+        finally:
+            self._applying_picks = False
+
+    def _selection_changed(self, *_) -> None:
+        if (self._applying_picks or self._header_pressed
+                or self._pick_mode == "nothing"):
+            return
+        self._pick_timer.start()
+
+    def _commit_picks(self, force: bool = False) -> None:
+        """The selection has settled: make it the pick."""
+        if self._pick_mode == "nothing" or self.model() is None:
+            return
+        if not force and QGuiApplication.mouseButtons() & Qt.LeftButton:
+            self._pick_timer.start()  # a drag still going: wait for its end
+            return
+        picks = self._picks_from_selection()
+        if self._pick_mode == "select one":
+            picks = self._only_the_last(picks)
+        self._put_picks(picks)
+
+    def _settle_pending(self) -> None:
+        """A click is about to act on the pick: commit the one still waiting
+        on its timer first, or the click would act on the pick before it."""
+        if self._pick_timer.isActive():
+            self._commit_picks(force=True)
+
+    def _picks_from_selection(self) -> Picks:
+        """Read the selection as a pick. Columns only ever come from a
+        Ctrl+click on a header, so a column counts only if it was picked
+        that way and is still selected; a row counts when all of it is
+        selected; everything else selected is cells."""
+        model = self.model()
+        selection_model = self.selectionModel()
+        rows, cols = model.rowCount(), model.columnCount()
+        if selection_model is None or not rows or not cols:
+            return Picks()
+        names = [model.column_name(c) for c in range(cols)]
+        first_of: dict[str, int] = {}
+        for col, name in enumerate(names):
+            first_of.setdefault(name, col)
+        kept = parse_picks(self._picks_text).columns
+        picked_cols = {c for c in range(cols) if names[c] in kept
+                       and selection_model.isColumnSelected(c)}
+        free = cols - len(picked_cols)
+        by_row: dict[int, set] = {}
+        for index in selection_model.selectedIndexes():
+            if index.column() not in picked_cols:
+                by_row.setdefault(index.row(), set()).add(index.column())
+        columns = [names[c] for c in sorted(picked_cols)]
+        full = sorted(r for r, cs in by_row.items()
+                      if free > 1 and len(cs) >= free)
+        if full and len(full) == rows:
+            # Every row: Select All, or a Ctrl+A on the way to a copy. All
+            # of it filters nothing, and a pick of every label would be a
+            # very long way of saying so.
+            return Picks(columns=columns)
+        full_set = set(full)
+        per_column: dict[int, list] = {}
+        for row, cs in by_row.items():
+            if row in full_set:
+                continue
+            for col in cs:
+                per_column.setdefault(col, []).append(row)
+        cells: dict[str, list] = {}
+        for col in sorted(per_column):
+            name = names[col]
+            texts = model.pick_texts(col, sorted(per_column[col]))
+            merged = dict.fromkeys(cells.get(name, []))
+            merged.update(dict.fromkeys(texts))
+            cells[name] = list(merged)
+        labels = []
+        for row in full:
+            # a row the cells already match adds nothing to the filter —
+            # the rows add to what the cells keep
+            if cells and all(
+                    model.pick_texts(first_of[name], [row])[0] in values
+                    for name, values in cells.items()):
+                continue
+            labels.append(model.row_label(row))
+        return Picks(cells=cells, rows=labels, columns=columns)
+
+    def _only_the_last(self, picks: Picks) -> Picks:
+        """Select one: whatever was clicked last, and nothing else."""
+        model = self.model()
+        current = self.currentIndex()
+        if (not picks or not current.isValid()
+                or not self.selectionModel().isSelected(current)):
+            return Picks()
+        if self._last_gesture == "row":
+            return Picks(rows=[model.row_label(current.row())])
+        col = current.column()
+        return Picks(cells={model.column_name(col):
+                            model.pick_texts(col, [current.row()])})
+
+    def _toggle_column(self, col: int) -> None:
+        """Ctrl+click on a header: that column in or out of the pick."""
+        self._settle_pending()
+        name = self.model().column_name(col)
+        picks = parse_picks(self._picks_text)
+        self._last_gesture = "column"
+        if self._pick_mode == "select one":
+            alone = picks.columns == [name] and not picks.cells \
+                and not picks.rows
+            picks = Picks() if alone else Picks(columns=[name])
+        elif name in picks.columns:
+            picks.columns = [c for c in picks.columns if c != name]
+        else:
+            picks.columns = [*picks.columns, name]
+        self._put_picks(picks)
+
+    def _unpick_row(self, row: int, modifiers) -> bool:
+        """A plain click on the one picked row lets every row through."""
+        if modifiers & (Qt.ControlModifier | Qt.ShiftModifier):
+            return False
+        picks = parse_picks(self._picks_text)
+        if picks.cells or picks.rows != [self.model().row_label(row)]:
+            return False
+        self._put_picks(Picks(columns=picks.columns))
+        return True
+
+    def _unpick_cell(self, index, modifiers) -> bool:
+        """Clicking a picked value again: a plain click on the only one
+        clears the pick, the way clicking a chart's selected bar does; a
+        Ctrl+click takes that value out of a longer pick, from every cell
+        showing it."""
+        model = self.model()
+        name = model.column_name(index.column())
+        picks = parse_picks(self._picks_text)
+        values = picks.cells.get(name)
+        if name in picks.columns or not values:
+            return False
+        text = model.pick_texts(index.column(), [index.row()])[0]
+        if text not in values:
+            return False
+        held = modifiers & (Qt.ControlModifier | Qt.ShiftModifier)
+        if held == Qt.ControlModifier:
+            rest = [v for v in values if v != text]
+            if rest:
+                picks.cells[name] = rest
+            else:
+                del picks.cells[name]
+        elif (not held and values == [text] and len(picks.cells) == 1
+              and not picks.rows):
+            picks.cells = {}
+        else:
+            return False
+        self._put_picks(picks)
+        return True
+
+    def mousePressEvent(self, event) -> None:
+        if (self._pick_mode != "nothing" and self.model() is not None
+                and event.button() == Qt.LeftButton):
+            self._settle_pending()
+            self._last_gesture = "cell"
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid() and self._unpick_cell(index,
+                                                     event.modifiers()):
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def eventFilter(self, watched, event) -> bool:
+        """The headers' half of picking, watched from here because a click
+        on a header is handled by the header, not the table.
+
+        A column is picked with Ctrl+click, which is eaten so it does not
+        also sort. A plain click still sorts — but Qt selects the column on
+        the press anyway, so the pick is put back on the release. A row's
+        header needs nothing special: Qt selects the row, and the selection
+        becomes the pick as any other does.
+        """
+        if self._pick_mode != "nothing" and self.model() is not None:
+            kind = event.type()
+            columns = self.horizontalHeader()
+            if watched is columns.viewport():
+                if (kind == QEvent.MouseButtonPress
+                        and event.button() == Qt.LeftButton):
+                    col = columns.logicalIndexAt(event.position().toPoint())
+                    if col >= 0 and event.modifiers() & Qt.ControlModifier:
+                        self._toggle_column(col)
+                        return True
+                    self._settle_pending()
+                    self._header_pressed = True
+                elif kind == QEvent.MouseButtonRelease and self._header_pressed:
+                    self._header_pressed = False
+                    self._show_picks()
+            elif watched is self.verticalHeader().viewport():
+                if (kind == QEvent.MouseButtonPress
+                        and event.button() == Qt.LeftButton):
+                    row = self.verticalHeader().logicalIndexAt(
+                        event.position().toPoint())
+                    if row >= 0:
+                        self._settle_pending()
+                        self._last_gesture = "row"
+                        if self._unpick_row(row, event.modifiers()):
+                            return True
+        return super().eventFilter(watched, event)
 
     # ------------------------------------------------------------- copying
 
@@ -622,6 +957,12 @@ class DataTableView(QTableView):
         select_all.setShortcut(QKeySequence.SelectAll)
         select_all.setEnabled(everything.isEnabled())
         select_all.triggered.connect(self.selectAll)
+
+        if self._pick_mode != "nothing":
+            # the way out of a filter that is keeping nothing you want
+            clear = menu.addAction("Clear Selection")
+            clear.setEnabled(bool(self._picks_text))
+            clear.triggered.connect(self.clear_picks)
 
         # Where you look for it: you are already looking at the table that
         # is too big. The same preference as Settings ▸ General, so it holds

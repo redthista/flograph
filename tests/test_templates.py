@@ -71,11 +71,12 @@ class TestBundledExamples:
             "30_segment_compare_matrix.flograph",
             "31_table_sparklines.flograph",
             "32_table_pictures.flograph",
+            "33_table_click_filter.flograph",
         ]
 
     def test_examples_menu_lists_them_all(self, window):
         assert window._examples_menu.isEnabled()
-        assert len(window._examples_menu.actions()) == 32
+        assert len(window._examples_menu.actions()) == 33
 
     @pytest.mark.parametrize("name", [
         "01_load_filter_visualize.flograph",
@@ -111,6 +112,8 @@ class TestBundledExamples:
         "31_table_sparklines.flograph",
         # 32's pictures are base64 in its own table, so nothing to fetch
         "32_table_pictures.flograph",
+        # 33's data is its own Table node, and its chart is plotly
+        "33_table_click_filter.flograph",
         # 13, 18, 19 and 21 write files, so they run in a tmp_path of their
         # own below.
         # 24 is not here on purpose: its visuals draw with web libraries from

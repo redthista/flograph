@@ -154,6 +154,15 @@ ticks, chosen tiles and the dropdown button, so a filter panel of three
 reads at a glance; leave it on **Theme** to follow the app. None of these
 re-runs the flow — they change the picture, not the filter.
 
+A visual can be the filter too. Set a **Show Plotly** or a **Show Table** to
+**On click ▸ select one** (or *select many*) and clicking it filters what it
+feeds. On a chart you click a bar or drag a box. On a table you click a
+**cell** to keep the rows with that value, a **row's number** to keep the
+row, or **Ctrl+click a column header** to keep only that column. A plain
+header click still sorts. Wire the table's **filtered** output onwards, not
+**table**, which stays whole so there is always every row to pick from.
+Click the pick again, or press Esc, to let everything back through.
+
 The result is a dashboard you hand to someone who never opens the model: they
 turn the knobs, the charts answer. Controls often read a
 [[Flow Variables|Variables]] value for their default.

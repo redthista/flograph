@@ -682,6 +682,7 @@ class TileItem(QGraphicsObject):
         elif kind == "table":
             widget = DataTableView()
             theme.style_scroll_area(widget, theme.grid_stylesheet())
+            widget.picks_committed.connect(self._commit_table_picks)
             self._table_view = widget
         elif kind == "report":
             from PySide6.QtWidgets import QTextBrowser
@@ -1112,10 +1113,19 @@ class TileItem(QGraphicsObject):
                 self._placeholder.setText(RUN_PROMPT)
                 self._placeholder.show()
             else:
-                from ..inspector.pandas_model import styled_model
+                from ..inspector.pandas_model import keeps_table, styled_model
                 from flograph.core.table_format import index_shown
                 style = self._engine.cache.outputs_for(
                     self.tile.node_id).get("style")
+                self._sync_table_picks()
+                if (previous is not None
+                        and self._table_view.pick_mode() != "nothing"
+                        and keeps_table(previous, value, style)):
+                    # the run a pick asked for — see node_item.set_table_data
+                    self._placeholder.hide()
+                    widget.show()
+                    self.update()          # the stale look comes off
+                    return
                 self._table_view.setModel(
                     styled_model(value, style, parent=self._table_view))
                 self._table_view.verticalHeader().setVisible(
@@ -1314,6 +1324,30 @@ class TileItem(QGraphicsObject):
         elif kind == "slicer" and self._slicer_panel is not None \
                 and not self._slicer_panel.isHidden() and node is not None:
             self._slicer_panel.sync_params(node.params)
+        elif kind == "table" and self._table_view is not None:
+            # a pick made on the canvas card, an undo, or a hand edit
+            self._sync_table_picks()
+
+    def _sync_table_picks(self) -> None:
+        node = self._node()
+        if self._table_view is None or node is None:
+            return
+        from flograph.core.table_picks import pick_mode
+        self._table_view.set_pick_mode(pick_mode(node.params))
+        self._table_view.set_picks(str(node.params.get("selected", "") or ""))
+
+    def _commit_table_picks(self, text: str) -> None:
+        """A pick on a table tile: commit it and re-run what it feeds —
+        same flow as the table's canvas card."""
+        scene = self.scene()
+        node = self._node()
+        if scene is None or node is None \
+                or text == node.params.get("selected", ""):
+            return
+        from ..commands import SetParamCommand
+        scene.undo_stack.push(SetParamCommand(
+            self._graph, node.id, "selected", text))
+        scene.view_changed.emit(node.id)
 
     def refresh_render_ratio(self) -> None:
         """Keep embedded matplotlib figures crisp under view zoom and DPR —

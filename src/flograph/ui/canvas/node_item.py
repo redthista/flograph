@@ -1210,6 +1210,7 @@ class NodeItem(QGraphicsObject):
             self.prepareGeometryChange()
             self.width = min(TABLE_VIEWER_MAX_W, max(
                 TABLE_VIEWER_MIN_W, float(self.node.params.get("width", 420))))
+            self._sync_table_picks()
             self._layout_table_viewer_proxy()
             self._ports_follow_width()
             self.update()
@@ -2030,6 +2031,9 @@ class NodeItem(QGraphicsObject):
         view.hide()
         layout.addWidget(view, 1)
         self._table_viewer_view = view
+        # click to filter: a pick is a param write, like a Slicer tick
+        view.picks_committed.connect(self._on_table_picks_committed)
+        self._sync_table_picks()
 
         proxy = self._card_proxy(host)
         self._table_viewer_proxy = proxy
@@ -2053,8 +2057,15 @@ class NodeItem(QGraphicsObject):
             self._table_viewer_placeholder.show()
         else:
             self._table_viewer_placeholder.hide()
-            from ..inspector.pandas_model import styled_model
+            from ..inspector.pandas_model import keeps_table, styled_model
             from flograph.core.table_format import index_shown
+            self._sync_table_picks()
+            if (previous is not None and view.pick_mode() != "nothing"
+                    and keeps_table(previous, table, style)):
+                # the run a pick asked for: the same table, so the card
+                # keeps its scroll position, its sort and its paged-in rows
+                view.show()
+                return
             view.setModel(styled_model(table, style, parent=view))
             view.verticalHeader().setVisible(index_shown(style))
             view.show()
@@ -2064,6 +2075,28 @@ class NodeItem(QGraphicsObject):
             # was re-fed every run was pinning every previous frame it had
             # ever shown until the card itself was destroyed.
             previous.deleteLater()
+
+    def _sync_table_picks(self) -> None:
+        """On click and Selected, from the params onto the table — after a
+        run, an undo, or an edit in the properties panel."""
+        view = self._table_viewer_view
+        if view is None:
+            return
+        from flograph.core.table_picks import pick_mode
+        view.set_pick_mode(pick_mode(self.node.params))
+        view.set_picks(str(self.node.params.get("selected", "") or ""))
+
+    def _on_table_picks_committed(self, text: str) -> None:
+        """A cell, row or column was picked: commit it (dirtying this node
+        and everything downstream) and ask the window to re-run from here,
+        so what the table feeds follows the click."""
+        scene = self.scene()
+        if scene is None or text == self.node.params.get("selected", ""):
+            return
+        from ..commands import SetParamCommand
+        scene.undo_stack.push(SetParamCommand(
+            scene.graph, self.node.id, "selected", text))
+        scene.view_changed.emit(self.node.id)
 
     # ------------------------------------------------------------- kpi card
 

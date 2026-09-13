@@ -137,6 +137,26 @@ you can wire one table's formatting into another, or feed both from a
 **Table Style** node. An incoming style is the base; this card's own rules
 box layers on top.
 
+**Click to filter.** Set **On click** to *select one* or *select many*
+and the table becomes a filter, the way a Show Plotly chart does: what you
+pick is written into **Selected**, everything downstream re-runs, and the
+**filtered** output is the table narrowed to it. **table** stays the whole
+table, so the card keeps every row there to pick from.
+
+* **Click a cell** to keep the rows holding that value in that column.
+  Pick more (Ctrl+click, or drag) and values in one column add up —
+  north *or* south — while columns narrow each other: north *and* widget.
+* **Click a row's number** to keep that row. Rows add to what the cells
+  match.
+* **Ctrl+click a column header** to keep only that column; a plain click
+  still sorts. A picked column never changes which rows are kept.
+
+Click the one picked cell or row again, press Esc, or right-click ▸ **Clear
+Selection** to let every row through. *Select one* keeps only the last
+thing clicked. A pick shows every cell it matched, survives a re-run and a
+sort, and works the same on a dashboard tile. In matrix mode it filters the
+matrix you see.
+
 **The row index.** Untick **Show row index** to lose the numbers down the
 left edge — a generated 0, 1, 2… says nothing on a dashboard. Like the
 column lists it is a view: the table leaving the `table` port keeps its
@@ -145,11 +165,14 @@ index.
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.6",
+    "version": "1.7",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object", {"optional": True})],
-    "outputs": [("table", "dataframe"), ("style", "object")],
+    # "filtered" last, so a flow wired before click-to-filter existed keeps
+    # every wire on the port it was on
+    "outputs": [("table", "dataframe"), ("style", "object"),
+                ("filtered", "dataframe")],
 }
 _MATRIX = {"mode": ["matrix"]}
 PARAMS = [
@@ -169,6 +192,17 @@ PARAMS = [
     {"name": "matrix_order", "type": "choice", "label": "Order",
      "options": ["as they appear", "sorted"], "default": "as they appear",
      "visible_when": _MATRIX},
+    {"name": "on_click", "type": "choice", "label": "On click",
+     "options": ["nothing", "select one", "select many"],
+     "default": "nothing"},
+    # Written by the card when a cell, row or column is picked. Visible for
+    # the reason Show Plotly's Clicked values is: when the filter keeps the
+    # wrong rows, the first question is what the card actually sent.
+    {"name": "selected", "type": "string", "label": "Selected",
+     "default": "",
+     "placeholder": 'e.g. {"cells": {"region": ["north"]}} — blank keeps '
+                    'every row',
+     "visible_when": {"on_click": ["select one", "select many"]}},
     {"name": "format_rules", "type": "text", "label": "Conditional formatting",
      "default": "", "rule_wizard": True,
      "placeholder": "revenue scale green\nscore >= 90 => bg green, bold\n"
@@ -227,4 +261,19 @@ def run(ctx, table, style=None):
         table, merged = built.frame, built.style
     for message in style_report(merged, table):
         ctx.log(f"conditional formatting — {message}")
-    return {"table": table, "style": merged}
+    # Click to filter: the card writes what was picked into "selected", and
+    # the filter below reads it back through the same module the card uses
+    # to highlight it — see core/table_picks.py.
+    filtered = table
+    if ctx.params.get("on_click") in ("select one", "select many"):
+        from flograph.core.table_picks import (
+            describe, filter_frame, parse_picks)
+
+        picks = parse_picks(ctx.params.get("selected", ""))
+        if picks:
+            filtered, notes = filter_frame(table, picks)
+            for note in notes:
+                ctx.log(f"selection — {note}")
+            ctx.log(f"selection ({describe(picks)}): kept {len(filtered):,} "
+                    f"of {len(table):,} rows")
+    return {"table": table, "style": merged, "filtered": filtered}

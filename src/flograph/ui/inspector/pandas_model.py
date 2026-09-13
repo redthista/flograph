@@ -90,6 +90,9 @@ class PandasModel(QAbstractTableModel):
         # and by the same function the printed table calls, so the page and
         # the card cannot disagree about what a spark made.
         from flograph.core.table_format import spark_projection
+        # the frame as handed over, before a spark adds to it — what
+        # `keeps_table` compares a re-run's table against
+        self._input = df
         df, rules, spark_hidden = spark_projection(df, rules)
         if spark_hidden:
             hidden = list(hidden or []) + spark_hidden
@@ -517,6 +520,75 @@ class PandasModel(QAbstractTableModel):
         view, which owns column widths — the model has no say in geometry."""
         return self._layout.get(str(self._df.columns[self._src(section)]))
 
+    # ----------------------------------------------------- click to filter
+
+    def row_label(self, row: int) -> str:
+        """A row's index label as text — what a row pick keeps it by."""
+        return str(self._df.index[row])
+
+    def _column_texts(self, section: int):
+        """A visible column as text, converted whole and kept.
+
+        Whole, because `astype(str)` formats a column as one: a datetime
+        column with a single time of day in it prints every value with a
+        time, so a slice converted alone could print a picked value
+        differently from the node's table — and match nothing. Kept, because
+        highlighting a pick asks for the same column again on every click.
+        """
+        src = self._src(section)
+        cache = getattr(self, "_texts_cache", None)
+        if cache is None or cache[0] is not self._df:
+            cache = (self._df, {})
+            self._texts_cache = cache
+        texts = cache[1].get(src)
+        if texts is None:
+            texts = self._df.iloc[:, src].astype(str).to_numpy()
+            cache[1][src] = texts
+        return texts
+
+    def pick_texts(self, section: int, rows) -> list[str]:
+        """The values at `rows` of a visible column, as a pick records them
+        — the way core.table_picks reads the node's table."""
+        texts = self._column_texts(section)
+        return [str(texts[r]) for r in rows]
+
+    def rows_matching(self, section: int, values) -> list[int]:
+        """The paged-in rows whose value in a visible column is one of
+        `values` (as text)."""
+        wanted = set(values)
+        texts = self._column_texts(section)[:self._loaded]
+        return [r for r, text in enumerate(texts) if text in wanted]
+
+    def rows_labelled(self, labels) -> list[int]:
+        """The paged-in rows whose index label is one of `labels`."""
+        wanted = set(labels)
+        index = self._df.index[:self._loaded].astype(str)
+        return [r for r, label in enumerate(index) if label in wanted]
+
+
+def keeps_table(model, table, style) -> bool:
+    """Is `model` already showing `table` under `style`?
+
+    A pick re-runs its own node, and the node passes the table through —
+    as a shallow copy, so not the same object, but the same table. Building
+    a new model for it would throw away the scroll position, a header sort
+    and the paged-in rows on every click; a card that asks this first keeps
+    them. Any doubt is a no: rebuilding is always correct, only slower."""
+    try:
+        if getattr(model, "style_payload", None) != style:
+            return False
+        old = getattr(model, "_input", None)
+        if old is None:
+            return False
+        if old is table:
+            return True
+        return (old.shape == table.shape
+                and old.columns.equals(table.columns)
+                and old.index.equals(table.index)
+                and old.equals(table))
+    except Exception:
+        return False
+
 
 def styled_model(df: pd.DataFrame, style: Any, parent=None) -> PandasModel:
     """A model for a table under a Show Table's `style` payload — its rules,
@@ -532,5 +604,7 @@ def styled_model(df: pd.DataFrame, style: Any, parent=None) -> PandasModel:
         shown = shown_columns(style)
     except Exception:
         rules, hidden, shown = [], [], []
-    return PandasModel(df, parent=parent, rules=rules, hidden=hidden,
-                       shown=shown)
+    model = PandasModel(df, parent=parent, rules=rules, hidden=hidden,
+                        shown=shown)
+    model.style_payload = style        # for keeps_table
+    return model
