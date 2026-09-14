@@ -37,6 +37,9 @@ class AddNodeCommand(QUndoCommand):
 
     def redo(self) -> None:
         self._graph.add_node(self._node)
+        # A redo after an undo brings back a node whose outputs the engine
+        # threw away when the undo removed it — see RemoveSelectionCommand.
+        self._graph.mark_dirty(self._node.id)
 
     def undo(self) -> None:
         self._graph.remove_node(self._node.id)
@@ -76,6 +79,18 @@ class RemoveSelectionCommand(QUndoCommand):
         for conn in self._connections.values():
             self._graph.connect(conn.src_node, conn.src_port,
                                 conn.dst_node, conn.dst_port, conn_id=conn.id)
+        # The engine dropped these nodes' outputs the moment they were
+        # deleted (node_removed -> cache.evict), but the objects coming back
+        # still carry the dirty flag they had then: clean, for a node that
+        # had run. Clean with nothing cached, Run All skipped them — and
+        # every node downstream sat dirty waiting for an output that was
+        # never going to come, so nothing ran until Reset Caches. Found by
+        # Dan. Marked here rather than by the engine on node_added, because
+        # opening a project adds every node to a cleared cache too, and
+        # its saved outputs are restored only afterwards.
+        for node in self._nodes:
+            if node.id in self._graph.nodes:
+                self._graph.mark_dirty(node.id)
 
 
 class ConnectCommand(QUndoCommand):

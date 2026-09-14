@@ -159,6 +159,15 @@ def tile_pixmap(graph, engine, node, max_size: QSize = MAX_SIZE,
             # an item that is about to go is a crash, not a stale picture
             item.dispose()
             scene.removeItem(item)
+            # Destroyed here, on the main thread, rather than left to Python.
+            # A tile and the widget it builds hold each other through signal
+            # connections, so dropping the last name for it frees nothing:
+            # only the cycle collector can, and that runs on whichever thread
+            # happens to allocate — a flow's worker thread included — where
+            # deleting a Qt widget segfaults the app. Found by Dan: hover a
+            # slicer in the Visuals panel, press Run All.
+            import shiboken6
+            shiboken6.delete(item)
 
 
 class VisualPreviewPopup(QFrame):

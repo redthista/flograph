@@ -129,6 +129,14 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
             # QMovie writing into a deleted document is a crash
             item.dispose()
             self.removeItem(item)
+            # Destroyed by the event loop, on the main thread, and not left
+            # to Python: a tile and its content widget reference each other
+            # through signal connections, so only the cycle collector would
+            # free them, on whatever thread it happened to run — a flow's
+            # worker thread segfaults deleting a widget. Later rather than
+            # now, because a removal can start inside the tile's own event
+            # handling. See visual_preview.tile_pixmap.
+            item.deleteLater()
             self.queue_view_fit()
 
     def set_animations_playing(self, playing: bool) -> None:
