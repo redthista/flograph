@@ -192,3 +192,37 @@ class TestThePopup:
         assert not page.completer.popup.isVisible()
         qtbot.keyClick(page.editor, Qt.Key_Space, Qt.ControlModifier)
         assert page.completer.popup.isVisible()
+
+    def test_the_list_stays_put_while_a_name_is_typed(
+            self, qtbot, page, registry):
+        """It used to follow the caret and refit itself to every row it
+        refilled: eight moves a letter, and on Wayland a popup that moves is
+        closed and opened again — a stall on every key typed."""
+        from PySide6.QtCore import QEvent, QObject
+
+        class Moves(QObject):
+            count = 0
+
+            def eventFilter(self, _obj, event):
+                if event.type() in (QEvent.Move, QEvent.Resize):
+                    Moves.count += 1
+                return False
+
+        for label in ("Total Units", "Total Returns"):
+            node = page._graph.add_node(
+                registry.instantiate("flograph.util.constant"))
+            page._graph.set_label(node.id, label)
+        self.type_(qtbot, page, "![[")
+        popup = page.completer.popup
+        assert popup.isVisible()
+        where = popup.pos()
+        moves = Moves()
+        popup.installEventFilter(moves)
+        for key in "tot":
+            # real keys reach the popup first while it is open
+            qtbot.keyClick(popup, key)
+            qtbot.wait(10)
+        assert popup.isVisible()
+        assert popup.pos() == where
+        assert Moves.count == 0
+        assert len(page.completer._shown) == 3

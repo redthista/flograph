@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Autocomplete keeps up with typing** in Properties boxes and the report editors | In a Properties box the suggestion list opened on the first letter and then stayed exactly as it opened: while it is up the keyboard goes to the list, and the list never saw the letters that followed. It didn't narrow, didn't close on a space, and kept the keyboard even after you clicked another node — so the next keys could still land in the box you had left and be saved into the node you had just selected. It now narrows with every letter, closes when nothing fits, and a box you have left can no longer write to another node. In a report page or a Report card, the list moved and resized itself several times for every letter typed inside `![[`, following the caret and refitting to each row as it refilled. On Wayland a list can't be moved while it is open, only closed and opened again, so each letter stalled. Both lists now open under the start of the word and stay put while it is typed. |
 
 ## 0.1.14.1
 

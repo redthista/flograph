@@ -400,7 +400,8 @@ class ParamsPanel(QWidget):
             if spec.placeholder:
                 text.setPlaceholderText(spec.placeholder)
             text.textChanged.connect(
-                lambda: self._commit_typed(name, text.toPlainText()))
+                lambda owner=self._node_id: self._commit_typed(
+                    name, text.toPlainText(), owner))
 
             def set_text(v, text=text):
                 # echoing the user's own keystroke back through setPlainText
@@ -459,7 +460,9 @@ class ParamsPanel(QWidget):
             edit.setEchoMode(QLineEdit.Password)
             if spec.placeholder:
                 edit.setPlaceholderText(spec.placeholder)
-            edit.textEdited.connect(lambda v: self._commit_typed(name, v))
+            edit.textEdited.connect(
+                lambda v, owner=self._node_id: self._commit_typed(
+                    name, v, owner))
             # leaving the field (focus-out or Enter) is a settled
             # value — don't make it wait out the timer
             edit.editingFinished.connect(self.flush_pending)
@@ -507,7 +510,8 @@ class ParamsPanel(QWidget):
         edit.setMaxLength(UNCAPPED_TEXT)  # never silently truncate a value
         if spec.placeholder:
             edit.setPlaceholderText(spec.placeholder)
-        edit.textEdited.connect(lambda v: self._commit_typed(name, v))
+        edit.textEdited.connect(
+            lambda v, owner=self._node_id: self._commit_typed(name, v, owner))
         # leaving the field (focus-out or Enter) is a settled
         # value — don't make it wait out the timer
         edit.editingFinished.connect(self.flush_pending)
@@ -975,7 +979,8 @@ class ParamsPanel(QWidget):
         edit.setMaxLength(UNCAPPED_TEXT)  # a wide table's column list is long
         if spec.placeholder:
             edit.setPlaceholderText(spec.placeholder)
-        edit.textEdited.connect(lambda v: self._commit_typed(name, v))
+        edit.textEdited.connect(
+            lambda v, owner=self._node_id: self._commit_typed(name, v, owner))
         # leaving the field (focus-out or Enter) is a settled
         # value — don't make it wait out the timer
         edit.editingFinished.connect(self.flush_pending)
@@ -1215,7 +1220,8 @@ class ParamsPanel(QWidget):
 
     # --------------------------------------------------------------- commit
 
-    def _commit_typed(self, name: str, value: Any) -> None:
+    def _commit_typed(self, name: str, value: Any,
+                      owner: Optional[str] = None) -> None:
         """A keystroke. Held back until typing pauses.
 
         Committing per character is what a QLineEdit invites, and it is far
@@ -1228,6 +1234,11 @@ class ParamsPanel(QWidget):
         consecutive edits of the same param into one step.
         """
         if self._updating or self._node_id is None:
+            return
+        # `owner` is the node the box was built for. A box the panel has
+        # moved on from can still be typed into — a completion list left
+        # open holds the keyboard — and its text is no other node's.
+        if owner is not None and owner != self._node_id:
             return
         self._pending[name] = value
         self._typing.start()

@@ -163,6 +163,79 @@ class TestCompletionInTheBox:
         text.completer.show(force=True)
         assert "and" in _offered_by(text.completer)
 
+    @staticmethod
+    def _focused_rules_box(qtbot, registry):
+        from PySide6.QtGui import QUndoStack
+
+        from flograph.core import Graph
+        from flograph.ui.properties.params_panel import ParamsPanel
+
+        graph = Graph()
+        node = graph.add_node(registry.instantiate(CONDITIONAL[0]))
+        panel = ParamsPanel(graph, QUndoStack())
+        qtbot.addWidget(panel)
+        panel.show()
+        panel.set_node(node.id)
+        text = panel.findChild(QPlainTextEdit, "param_rules")
+        panel.activateWindow()
+        text.setFocus()
+        qtbot.waitUntil(text.hasFocus)
+        return text
+
+    @staticmethod
+    def _type(qtbot, text, keys):
+        """Keys the way a real keyboard sends them: to the list while it is
+        open — Qt's popup grab — and to the box otherwise. QCompleter passes
+        them on with a direct event() call, which no filter on the box sees."""
+        popup = text.completer.popup
+        for key in keys:
+            qtbot.keyClick(popup if popup.isVisible() else text, key)
+            qtbot.wait(5)
+
+    def test_the_list_follows_the_word_typed_into_it(self, qtbot, registry):
+        """A list opened on the first letter used to stay exactly as it was
+        opened — never narrowing, never closing, holding the keyboard."""
+        text = self._focused_rules_box(qtbot, registry)
+        popup = text.completer.popup
+        self._type(qtbot, text, "score > 1 an")
+        assert popup.isVisible()
+        assert _offered_by(text.completer) == ["and"]
+        self._type(qtbot, text, "d ")
+        assert not popup.isVisible()
+        self._type(qtbot, text, "co")
+        assert popup.isVisible()
+        where = popup.pos()
+        self._type(qtbot, text, "nt")
+        assert _offered_by(text.completer) == ["contains"]
+        assert popup.pos() == where   # put at the word, not the caret
+        assert text.toPlainText() == "score > 1 and cont"
+        popup.hide()
+
+    def test_a_box_left_behind_types_into_no_other_node(self, qtbot, registry):
+        """Two nodes with the same param: keys still reaching the first
+        one's box after the panel moved on must not rewrite the second."""
+        import shiboken6
+        from PySide6.QtGui import QUndoStack
+
+        from flograph.core import Graph
+        from flograph.ui.properties.params_panel import ParamsPanel
+
+        graph = Graph()
+        first = graph.add_node(registry.instantiate(CONDITIONAL[0]))
+        second = graph.add_node(registry.instantiate(CONDITIONAL[0]))
+        graph.set_param(first.id, "rules", "a > 1 => x")
+        graph.set_param(second.id, "rules", "b > 2 => y")
+        panel = ParamsPanel(graph, QUndoStack())
+        qtbot.addWidget(panel)
+        panel.set_node(first.id)
+        left_behind = panel.findChild(QPlainTextEdit, "param_rules")
+        panel.set_node(second.id)
+        assert shiboken6.isValid(left_behind)
+        left_behind.setPlainText("typed after moving on")
+        panel.flush_pending()
+        assert graph.node(second.id).params["rules"] == "b > 2 => y"
+        assert graph.node(first.id).params["rules"] == "a > 1 => x"
+
 
 class TestLintInTheBox:
     """The pop-out's lint in the Properties box: the same wavy underlines,

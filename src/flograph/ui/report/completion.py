@@ -44,6 +44,9 @@ class ReportCompleter(QObject):
         self._completer.activated[QModelIndex].connect(self._activated)
         self._completer.popup().installEventFilter(self)
         editor.installEventFilter(self)
+        #: what the list holds, and where it was opened — see refresh
+        self._shown: tuple = ()
+        self._anchor: Optional[tuple] = None
         # textChanged also fires on an undo or a load from the model, so
         # the refresh checks focus: nobody typed, nothing should pop up
         editor.textChanged.connect(self._on_text_changed)
@@ -109,13 +112,25 @@ class ReportCompleter(QObject):
             completion = suggest(before, after, self._vocabulary())
         except Exception:   # completion is a nicety; never break typing
             completion = None
-        if completion is None or (
+        if completion is None or not completion.items or (
                 not force and not completion.eager and not completion.prefix):
             self.popup.hide()
             return
+        self._fill(completion.items)
+        self._place(completion.start)
+        self.popup.setCurrentIndex(
+            self._completer.completionModel().index(0, 0))
 
-        self._model.clear()
-        for suggestion in completion.items:
+    def _fill(self, suggestions) -> None:
+        """Put `suggestions` in the list, row by row in place.
+
+        Not clear() and append: the popup refits itself to every row
+        inserted, so a list of seven moved and resized eight times per
+        letter typed — and on Wayland each of those is the popup closed
+        and opened again. Resizing the model changes the row count once;
+        setting an item changes only what the row says."""
+        self._model.setRowCount(len(suggestions))
+        for row, suggestion in enumerate(suggestions):
             shown = suggestion.label or suggestion.text
             item = QStandardItem(
                 f"{shown}    {suggestion.hint}" if suggestion.hint else shown)
@@ -123,15 +138,25 @@ class ReportCompleter(QObject):
             item.setEditable(False)
             if suggestion.hint:
                 item.setToolTip(suggestion.hint)
-            self._model.appendRow(item)
+            self._model.setItem(row, 0, item)
+        self._shown = tuple(s.label or s.text for s in suggestions)
 
-        rect = self._editor.cursorRect()
+    def _place(self, start: int) -> None:
+        """Open the list under where the name being typed starts — or, when
+        it is open there already, leave it be. Following the caret moved an
+        open list on every letter."""
+        block = self._editor.textCursor().block()
+        at = QTextCursor(block)
+        at.setPosition(block.position() + start)
+        rect = self._editor.cursorRect(at)
+        anchor = (rect.left(), rect.top())
+        if self.popup.isVisible() and anchor == self._anchor:
+            return
+        self._anchor = anchor
         rect.setWidth(min(520, self.popup.sizeHintForColumn(0)
                           + self.popup.verticalScrollBar().sizeHint().width()
                           + 8))
         self._completer.complete(rect)
-        self.popup.setCurrentIndex(
-            self._completer.completionModel().index(0, 0))
 
     def _activated(self, index) -> None:
         suggestion = index.data(SUGGESTION_ROLE)
