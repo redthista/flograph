@@ -302,6 +302,8 @@ class MainWindow(QMainWindow):
         # the user did with the toggle becomes the start state for new pages
         self.visuals_visible = self.settings.value(
             "dashboard/visuals_visible", False, type=bool)
+        self.format_visible = self.settings.value(
+            "dashboard/format_visible", False, type=bool)
 
         self._palette_popup = NodePalettePopup(registry, self.favorites, self)
         self._palette_scene_pos = QPointF()
@@ -2050,8 +2052,10 @@ class MainWindow(QMainWindow):
             self._add_report_page(page)
             return
         widget = DashboardPage(self.graph, self.engine, self.undo_stack,
-                               page.id, visuals_visible=self.visuals_visible)
+                               page.id, visuals_visible=self.visuals_visible,
+                               format_visible=self.format_visible)
         widget.visuals_visibility_changed.connect(self._set_visuals_visible)
+        widget.format_visibility_changed.connect(self._set_format_visible)
         widget.scene.button_fired.connect(self._on_button_fired)
         widget.scene.page_link_clicked.connect(self._follow_page_link)
         widget.scene.slicer_changed.connect(self._on_slicer_changed)
@@ -2368,6 +2372,12 @@ class MainWindow(QMainWindow):
         it starts from."""
         self.visuals_visible = visible
         self.settings.setValue("dashboard/visuals_visible", visible)
+
+    def _set_format_visible(self, visible: bool) -> None:
+        """The Format pane's toggle, remembered the same way as the visuals
+        panel's: the start state for pages made later."""
+        self.format_visible = visible
+        self.settings.setValue("dashboard/format_visible", visible)
 
     def _on_pages_reordered(self, order: list[str]) -> None:
         self.page_bar.set_page_order(order)

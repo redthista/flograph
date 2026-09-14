@@ -1,8 +1,9 @@
 """VisualsList: the flow's tile-able nodes (Show* visuals and Action
-Buttons), draggable onto the dashboard page beside it."""
+Buttons), draggable onto the dashboard page beside it — searchable by name,
+filterable by type, and sorted by name or by type."""
 from __future__ import annotations
 
-from PySide6.QtCore import QMimeData, QPoint, QTimer, Qt
+from PySide6.QtCore import QMimeData, QPoint, QTimer, Qt, Signal
 from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem
 
 from flograph.core import Graph
@@ -46,6 +47,41 @@ _KIND_GLYPHS = {
     "pagelinks": "⇆",
 }
 
+#: What each sort of visual is called where a person picks it: the type
+#: filter, the tooltips, and a search (typing "slicer" finds the slicers).
+KIND_LABELS = {
+    "figure": "Static chart",
+    "webview": "Interactive visual",
+    "table_viewer": "Table",
+    "grid": "Spreadsheet",
+    "kpi": "KPI",
+    "image": "Image",
+    "pdf": "PDF",
+    "report": "Report",
+    "wiki": "Wiki",
+    "slicer": "Slicer",
+    "control": "Input control",
+    "button": "Button",
+    "note": "Note",
+    "pagelinks": "Page links",
+}
+
+SORT_NAME = "name"
+SORT_NAME_DESC = "name_desc"
+SORT_KIND = "kind"
+#: The sort choices, in the order the panel offers them.
+SORT_MODES = {SORT_NAME: "Name A–Z", SORT_NAME_DESC: "Name Z–A",
+              SORT_KIND: "Type"}
+
+
+def kind_label(kind) -> str:
+    return KIND_LABELS.get(kind, "Other")
+
+
+def kind_glyph(kind) -> str:
+    return _KIND_GLYPHS.get(kind, "")
+
+
 def _sort_key(node) -> tuple:
     """One flat alphabetical run, case-blind.
 
@@ -60,11 +96,35 @@ def _sort_key(node) -> tuple:
     return (node.label.casefold(), node.id)
 
 
+def sort_nodes(nodes, mode: str = SORT_NAME) -> list:
+    """`nodes` in the panel's order. Name A–Z is the default for the reason
+    above; Type is there for the long list where the sort of thing wanted
+    *is* known — every slicer, say — and keeps names A–Z within each type."""
+    from ..canvas.node_item import card_kind
+    if mode == SORT_NAME_DESC:
+        return sorted(nodes, key=_sort_key, reverse=True)
+    if mode == SORT_KIND:
+        return sorted(nodes, key=lambda node: (
+            kind_label(card_kind(node)).casefold(), *_sort_key(node)))
+    return sorted(nodes, key=_sort_key)
+
+
 class VisualsList(QListWidget):
+    #: the search, the type filter or the sort changed, or the list was
+    #: rebuilt — whatever shows counts or an empty message re-reads it
+    filters_changed = Signal()
+
     def __init__(self, graph: Graph, engine=None, parent=None) -> None:
         super().__init__(parent)
         self._graph = graph
         self._engine = engine
+        # What is being looked for. The type filter works the way a slicer
+        # does: the kinds ticked are the ones shown, and nothing ticked
+        # shows every kind.
+        self._search = ""
+        self._kinds: frozenset = frozenset()
+        self._sort = SORT_NAME
+        self._present: dict = {}   # kind -> how many the flow has
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragOnly)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -115,12 +175,90 @@ class VisualsList(QListWidget):
         self.clear()
         nodes = [node for node in self._graph.nodes.values()
                  if is_tile_able(node)]
-        for node in sorted(nodes, key=_sort_key):
-            glyph = _KIND_GLYPHS.get(card_kind(node), "")
-            item = QListWidgetItem(f"{glyph} {node.label}".strip())
+        present: dict = {}
+        for node in nodes:
+            kind = card_kind(node)
+            present[kind] = present.get(kind, 0) + 1
+        self._present = present
+        shown = [node for node in nodes if self._passes(node, card_kind(node))]
+        for node in sort_nodes(shown, self._sort):
+            kind = card_kind(node)
+            item = QListWidgetItem(f"{kind_glyph(kind)} {node.label}".strip())
             item.setData(Qt.UserRole, node.id)
-            item.setToolTip("Drag onto the page to place this visual")
+            item.setToolTip(f"{kind_label(kind)}\n"
+                            "Drag onto the page to place this visual")
             self.addItem(item)
+        self.filters_changed.emit()
+
+    def _passes(self, node, kind) -> bool:
+        """Whether a visual survives the type filter and the search. Every
+        word typed has to be found, in its name or in its type's name, so
+        "sales slicer" narrows rather than widens."""
+        if self._kinds and kind not in self._kinds:
+            return False
+        words = self._search.casefold().split()
+        if not words:
+            return True
+        haystack = f"{node.label} {kind_label(kind)}".casefold()
+        return all(word in haystack for word in words)
+
+    # --------------------------------------------------- search and filter
+
+    def set_search(self, text: str) -> None:
+        text = str(text or "")
+        if text == self._search:
+            return
+        self._search = text
+        self._rebuild()
+
+    def search(self) -> str:
+        return self._search
+
+    def set_kinds(self, kinds) -> None:
+        """Show only these kinds of visual; empty for every kind."""
+        kinds = frozenset(kinds or ())
+        if kinds == self._kinds:
+            return
+        self._kinds = kinds
+        self._rebuild()
+
+    def kinds(self) -> frozenset:
+        return self._kinds
+
+    def set_sort(self, mode: str) -> None:
+        if mode not in SORT_MODES:
+            raise ValueError(f"unknown sort {mode!r}")
+        if mode == self._sort:
+            return
+        self._sort = mode
+        self._rebuild()
+
+    def sort_mode(self) -> str:
+        return self._sort
+
+    def clear_filters(self) -> None:
+        """Back to every visual: no search, no type ticked. The sort is a
+        way of reading the list, not a filter on it, so it stays."""
+        if not self.is_filtered():
+            return
+        self._search = ""
+        self._kinds = frozenset()
+        self._rebuild()
+
+    def is_filtered(self) -> bool:
+        return bool(self._search.strip()) or bool(self._kinds)
+
+    def kinds_present(self) -> list:
+        """(kind, label, count) for each sort of visual the flow has, by
+        label — what the type filter offers."""
+        return [(kind, kind_label(kind), count)
+                for kind, count in sorted(
+                    self._present.items(),
+                    key=lambda entry: kind_label(entry[0]).casefold())]
+
+    def total_count(self) -> int:
+        """How many visuals the flow has, whatever is filtered out."""
+        return sum(self._present.values())
 
     # ------------------------------------------------------- hover preview
 

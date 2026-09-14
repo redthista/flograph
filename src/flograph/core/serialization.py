@@ -41,6 +41,7 @@ from .graph import (Connection, Frame, FramePort, Graph, GraphError, Page,
                     Shape, Tile)
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .page_setup import PageSetup
+from .tile_style import TileStyle, clean_background
 from .ports import PortDirection, PortSpec
 from .ports import PortDirection, PortSpec, is_flow
 from .registry import NodeRegistry
@@ -199,6 +200,10 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "fit_to_window": p.fit_to_window,
                     # only what the user changed — see PageSetup.to_dict
                     "setup": p.setup.to_dict(),
+                    # a dashboard's look, only once someone has set one
+                    **({"background": p.background} if p.background else {}),
+                    **({"tile_style": p.tile_style.to_dict()}
+                       if not p.tile_style.is_empty() else {}),
                     "tiles": [
                         {
                             "id": t.id,
@@ -209,6 +214,9 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                             # only a tile given a shape says so, the way
                             # `setup` only says what was changed
                             **({"aspect": t.aspect} if t.aspect else {}),
+                            # and only a tile formatted apart from its page
+                            **({"style": t.style.to_dict()}
+                               if not t.style.is_empty() else {}),
                         }
                         for t in p.tiles.values()
                     ],
@@ -461,6 +469,10 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent in files written before page setup existed, and absent
             # in any page left at the defaults — both mean "the defaults"
             setup=PageSetup.from_dict(entry.get("setup")),
+            # absent before dashboards could be formatted, and on any page
+            # nobody has — both mean the theme's look
+            background=clean_background(entry.get("background")),
+            tile_style=TileStyle.from_dict(entry.get("tile_style")),
         ))
         # tiles referencing missing nodes load as-is: the dashboard shows a
         # placeholder for them, mirroring the _broken_spec philosophy
@@ -473,6 +485,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
                 z=tile_entry.get("z"),
                 # absent before tiles had a shape, and on any tile left free
                 aspect=_tile_aspect(tile_entry.get("aspect")),
+                style=TileStyle.from_dict(tile_entry.get("style")),
             ))
     return graph
 

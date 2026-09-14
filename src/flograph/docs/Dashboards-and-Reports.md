@@ -31,6 +31,46 @@ all of them, which is the quick way to make three charts the same size.
 Holding **Shift** while resizing a tile with no shape keeps the shape it
 had.
 
+**Format the page** from the **Format** pane down the right of a dashboard
+page. The arrow at the page's right edge opens it, and so do right-click a
+tile ▸ **Format…** and right-click the empty page ▸ **Format Page…**.
+**Page** sets the page's **background** and the look *every* tile on it
+takes:
+
+* **Title** — shown or not, its text size, bold, alignment, text colour and
+  the bar's colour (Transparent for a title with no bar under it).
+* **Frame** — on or off, its colour and width, and the **corners**, from
+  square to round.
+* **Background** — the tile's **fill** (a colour, or Transparent so the
+  page shows through), **padding** around its content, and a **shadow**.
+* **Buttons** — whether the **maximize button** shows. Hidden, the tile
+  can't be maximized at all (no double-click on its title either), so a
+  finished page isn't blown up a tile at a time.
+
+Select a tile and **Selected Visual** formats it on its own. Anything left
+on *Page* follows the page, **Reset to the Page's Format** puts it back,
+and **Title text** renames the tile without renaming its node. So a page
+is set up once and only the exceptions change: frames off and a
+transparent title bar for a clean look, a Note with a transparent fill and
+no frame for a heading over a row of charts. A Note's words take the title's
+text colour, so they can still be read on a light page. With several tiles
+selected, a change applies to all of them. Buttons and Page Links draw their
+own face and take no format.
+
+A tile with no title bar still moves while the page is being arranged: a
+grip appears along its top under the pointer, beside its maximize button,
+and STALE shows in that corner. A frameless tile shows a faint dashed
+edge only while the pointer is over it, so it can still be found without
+the page being covered in boxes, and locking the page puts the Format pane
+and its arrow away with the rest of the arranging tools. Every change is one
+undo step, and copy, paste and Duplicate Page keep a tile's format.
+
+**Find a visual** in the Visuals panel by typing in **Search visuals** — a
+name, or a type (`slicer`); every word has to match. **All types** works like
+a slicer: nothing ticked shows every type, and ticking types narrows the list
+to them. The sort box orders the list **Name A–Z**, **Name Z–A** or by
+**Type**, and **✕** clears the search and the type filter.
+
 **Lock** a finished page from its tab menu and it *is* the dashboard: tiles
 stop moving, the arranging chrome goes, and the page stops behaving like a
 canvas (no zoom, wheel, panning, rubber band, or context menu). What still

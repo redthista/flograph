@@ -29,7 +29,7 @@ from typing import Optional
 
 import shiboken6 as shiboken
 from PySide6.QtCore import QPointF, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QPalette
+from PySide6.QtGui import QColor, QKeyEvent, QPalette
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -116,11 +116,12 @@ class FullscreenOverlay(QWidget):
 class DashboardView(ZoomPanGraphicsView):
     tile_dropped = Signal(str, QPointF)  # node_id, scene pos
     fullscreen_changed = Signal(bool)    # a tile was maximized / restored
+    format_requested = Signal()          # a menu asked for the Format pane
 
     # Tiles copied from a right-click menu, waiting to be pasted. A *class*
     # attribute on purpose: every page has its own DashboardView, and pasting
     # onto another page must see what was copied here. Each entry is
-    # (node_id, port, rel_x, rel_y, w, h, aspect), where (rel_x, rel_y) is
+    # (node_id, port, rel_x, rel_y, w, h, aspect, style), where (rel_x, rel_y) is
     # the tile's position relative to the copied selection's top-left, so a
     # paste on any page rebuilds the arrangement — shapes included. None
     # until the user copies something.
@@ -142,6 +143,27 @@ class DashboardView(ZoomPanGraphicsView):
         self._fs_tile: Optional[TileItem] = None
         self._fs_restore: Optional[tuple] = None  # (transform, scene centre)
         self._fs_overlay: Optional[FullscreenOverlay] = None
+
+    def background_colour(self):
+        """The page's own background, once it has been given one."""
+        scene = self.scene()
+        graph = getattr(scene, "graph", None)
+        page = (graph.pages.get(getattr(scene, "page_id", None))
+                if graph is not None else None)
+        if page is not None and page.background:
+            return QColor(page.background)
+        return super().background_colour()
+
+    def grid_colours(self) -> tuple:
+        """The theme's grid is drawn for its dark canvas, and on a light
+        page background it comes out as heavy black mesh. A page with a
+        background of its own gets lines of its own ground's contrast,
+        faint enough to arrange by without reading as part of the page."""
+        colour = self.background_colour()
+        if colour == theme.CANVAS_BG:
+            return super().grid_colours()
+        ink = 0 if colour.lightnessF() > 0.5 else 255
+        return QColor(ink, ink, ink, 14), QColor(ink, ink, ink, 34)
 
     # ----------------------------------------------------------- view mode
 
@@ -505,6 +527,9 @@ class DashboardView(ZoomPanGraphicsView):
         menu.addSeparator()
         shape_actions = add_shape_menu(
             menu, self.scene().selected_tile_items())
+        format_action = menu.addAction("Format…")
+        format_action.setToolTip("Open the Format pane for the selected "
+                                 "visuals: frame, title, fill and corners")
         browser_action = None
         node = self._browsable_node(item)
         if node is not None:
@@ -522,6 +547,8 @@ class DashboardView(ZoomPanGraphicsView):
             self._paste_tiles(anchor=item)
         elif chosen is delete_action:
             self.scene().delete_selected_tiles()
+        elif chosen is format_action:
+            self.format_requested.emit()
         elif chosen in layer_actions:
             self.scene().restack_selection(layer_actions[chosen])
         elif chosen in shape_actions:
@@ -536,16 +563,21 @@ class DashboardView(ZoomPanGraphicsView):
         event.accept()
 
     def _show_canvas_menu(self, event) -> None:
-        """Right-click on empty canvas: the paste menu. The one thing an
-        empty page has to offer is putting down what was copied, and it must
-        not leak up to the main window's own menu the way a bare right-click
-        used to."""
+        """Right-click on empty canvas: Paste, and the page's format. An
+        empty page has little to offer beyond putting down what was copied
+        and how the page looks, and it must not leak up to the main
+        window's own menu the way a bare right-click used to."""
+        self.scene().clearSelection()   # so the pane shows the page
         menu = QMenu(self)
         paste_action = menu.addAction("Paste")
         paste_action.setEnabled(bool(DashboardView._tile_clipboard))
+        menu.addSeparator()
+        format_action = menu.addAction("Format Page…")
         chosen = menu.exec(event.globalPos())
         if chosen is paste_action and DashboardView._tile_clipboard:
             self._paste_tiles(scene_pos=self.mapToScene(event.pos()))
+        elif chosen is format_action:
+            self.format_requested.emit()
         event.accept()
 
     def _copy_tiles(self, anchor: TileItem) -> None:
@@ -561,7 +593,8 @@ class DashboardView(ZoomPanGraphicsView):
         DashboardView._tile_clipboard = tuple(
             (item.tile.node_id, item.tile.port,
              item.tile.rect[0] - min_x, item.tile.rect[1] - min_y,
-             item.tile.rect[2], item.tile.rect[3], item.tile.aspect)
+             item.tile.rect[2], item.tile.rect[3], item.tile.aspect,
+             item.tile.style.copy())
             for item in items)
 
     def _paste_tiles(self, scene_pos: Optional[QPointF] = None,
@@ -589,13 +622,16 @@ class DashboardView(ZoomPanGraphicsView):
         from ..commands import AddTileCommand
         scene = self.scene()
         scene.undo_stack.beginMacro("paste tiles")
-        for node_id, port, rel_x, rel_y, w, h, aspect in clip:
+        for node_id, port, rel_x, rel_y, w, h, aspect, style in clip:
             tile = Tile(
                 id=uuid.uuid4().hex,
                 node_id=node_id,
                 port=port,
                 rect=(base_x + rel_x, base_y + rel_y, w, h),
                 aspect=aspect,
+                # a pasted tile keeps its own format; the page it lands on
+                # supplies the rest
+                style=style.copy(),
             )
             scene.undo_stack.push(
                 AddTileCommand(scene.graph, scene.page_id, tile))

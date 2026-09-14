@@ -818,15 +818,26 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     # ------------------------------------------------------------------ bg
 
+    def background_colour(self):
+        """What the canvas is painted with under its grid. A dashboard page
+        with a background of its own answers differently."""
+        return theme.CANVAS_BG
+
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
-        painter.fillRect(rect, theme.CANVAS_BG)
+        painter.fillRect(rect, self.background_colour())
         from .grid import grid_step, grid_visible
         if not grid_visible(self.scene()):
             return  # grid hidden; snapping (a scene preference) is untouched
         fine = grid_step(self.scene())  # follows the chosen snap resolution
+        fine_colour, coarse_colour = self.grid_colours()
         if self.zoom >= FINE_GRID_LOD:
-            self._draw_grid(painter, rect, fine, theme.GRID_FINE)
-        self._draw_grid(painter, rect, GRID_COARSE, theme.GRID_COARSE)
+            self._draw_grid(painter, rect, fine, fine_colour)
+        self._draw_grid(painter, rect, GRID_COARSE, coarse_colour)
+
+    def grid_colours(self) -> tuple:
+        """(fine, coarse) grid line colours — the theme's, drawn for its
+        dark canvas. A view with a background of its own answers to suit."""
+        return theme.GRID_FINE, theme.GRID_COARSE
 
     @staticmethod
     def _draw_grid(painter: QPainter, rect: QRectF, step: float, color) -> None:

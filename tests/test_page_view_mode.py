@@ -567,7 +567,7 @@ class TestTileContextMenu:
         before = set(page.scene.tile_items)
         scene_pos = QPointF(500.0, 400.0)
         shown = self._right_click_scene(page, monkeypatch, scene_pos)
-        assert [label for label, _ in shown if label] == ["Paste"]
+        assert [label for label, _ in shown if label] == ["Paste", "Format Page…"]
         self._right_click_scene(page, monkeypatch, scene_pos, pick="Paste")
         after = set(page.scene.tile_items)
         assert len(after) == len(before) + 1

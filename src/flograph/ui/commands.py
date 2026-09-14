@@ -24,6 +24,8 @@ _ID_PAGE_BODY = 1005
 # things, so merging keeps clicking through sixteen swatches to find the
 # right one a single undo step rather than sixteen.
 _ID_MARK = 1006
+_ID_PAGE_LOOK = 1007
+_ID_TILE_STYLE = 1008
 
 
 class AddNodeCommand(QUndoCommand):
@@ -1137,7 +1139,7 @@ class DuplicatePageCommand(QUndoCommand):
             # original was arranged into
             id_map[tile_id]: Tile(id=id_map[tile_id], node_id=t.node_id,
                                   port=t.port, rect=t.rect, z=t.z,
-                                  aspect=t.aspect)
+                                  aspect=t.aspect, style=t.style.copy())
             for tile_id, t in src.tiles.items()
         }
         self._new_page = Page(
@@ -1157,6 +1159,8 @@ class DuplicatePageCommand(QUndoCommand):
             # copied, not shared: two pages pointing at one mutable setup
             # would mean editing either one changed both
             setup=src.setup.copy(),
+            background=src.background,
+            tile_style=src.tile_style.copy(),
         )
         self._graph.add_page(self._new_page)
 
@@ -1261,3 +1265,96 @@ class SetTileShapeCommand(QUndoCommand):
         for tile_id, rect, aspect in states:
             self._graph.update_tile(self._page_id, tile_id,
                                     rect=rect, aspect=aspect)
+
+
+class SetPageLookCommand(QUndoCommand):
+    """Change a dashboard page's background or the look its tiles share.
+
+    `key` names what changed ("background", or a style field) so a run of
+    edits to one setting — a spin box stepped five times — merges into one
+    undo step, while a different setting starts a new one.
+    """
+
+    _KEEP = object()
+
+    def __init__(self, graph: Graph, page_id: str, *, background: Any = _KEEP,
+                 tile_style: Any = _KEEP, key: str = "",
+                 text: str = "format page",
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__(text, parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._key = key
+        page = graph.page(page_id)
+        self._old = (page.background, page.tile_style.copy())
+        self._new = (
+            page.background if background is self._KEEP else background,
+            page.tile_style.copy() if tile_style is self._KEEP
+            else tile_style.copy())
+
+    def id(self) -> int:
+        return _ID_PAGE_LOOK
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+    def _apply(self, state: tuple) -> None:
+        background, tile_style = state
+        self._graph.set_page_look(self._page_id, background=background,
+                                  tile_style=tile_style)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (not isinstance(other, SetPageLookCommand) or not self._key
+                or other._page_id != self._page_id
+                or other._key != self._key):
+            return False
+        self._new = other._new
+        return True
+
+
+class SetTileStylesCommand(QUndoCommand):
+    """Give one or more tiles a new style — one undo step.
+
+    `styles` maps tile id to the tile's whole new style; what each had is
+    read when the command is made. Merges with the next edit of the same
+    setting on the same tiles, like SetPageLookCommand.
+    """
+
+    def __init__(self, graph: Graph, page_id: str, styles: dict,
+                 key: str = "", text: str = "format visual",
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__(text, parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._key = key
+        tiles = graph.page(page_id).tiles
+        self._new = {tile_id: style.copy() for tile_id, style in styles.items()}
+        self._old = {tile_id: tiles[tile_id].style.copy()
+                     for tile_id in self._new}
+
+    def id(self) -> int:
+        return _ID_TILE_STYLE
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+    def _apply(self, styles: dict) -> None:
+        page = self._graph.pages.get(self._page_id)
+        for tile_id, style in styles.items():
+            if page is not None and tile_id in page.tiles:
+                self._graph.update_tile(self._page_id, tile_id, style=style)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (not isinstance(other, SetTileStylesCommand) or not self._key
+                or other._page_id != self._page_id
+                or other._key != self._key
+                or set(other._new) != set(self._new)):
+            return False
+        self._new = other._new
+        return True

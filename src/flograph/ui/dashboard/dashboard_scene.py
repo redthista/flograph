@@ -139,6 +139,12 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
 
     def _on_page_changed(self, page) -> None:
         if page.id == self.page_id:
+            # the page's format is half of every tile's look, and its
+            # background is the view's — neither says when only it changed
+            for item in self.tile_items.values():
+                item.restyle()
+            for view in self.views():
+                view.viewport().update()
             self.sync_fullscreen()
 
     def _on_tile_changed(self, page_id: str, tile: Tile) -> None:
@@ -146,6 +152,7 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
             return
         item = self.tile_items.get(tile.id)
         if item is not None:
+            item.restyle()
             item.sync_from_model()
             # a tile moved or resized changes what "the whole page" is
             self.queue_view_fit()

@@ -17,6 +17,7 @@ from .events import GraphEvents
 from .layers import next_z, order_of
 from .node import NodeInstance, NodeStatus, NodeSpec
 from .page_setup import PageSetup
+from .tile_style import TileStyle, clean_background
 from .ports import PortDirection, PortSpec, is_flow
 
 
@@ -187,6 +188,10 @@ class Tile:
     # None for any shape. Stated from the tile's Shape menu, and kept by a
     # resize drag, so a 16:9 chart stays 16:9 however big it is made.
     aspect: Optional[float] = None
+    # How this tile looks where it differs from its page: frame, corners,
+    # fill, padding, shadow, title. Empty means "as the page says" — see
+    # core.tile_style.
+    style: TileStyle = field(default_factory=TileStyle)
 
 
 @dataclass
@@ -249,6 +254,11 @@ class Page:
     # Its defaults reproduce what reports did before it existed, so a page
     # nobody has set up behaves exactly as before.
     setup: PageSetup = field(default_factory=PageSetup)
+    # Dashboard pages: the colour behind the tiles ("#rrggbb"), None for the
+    # theme's canvas, and the look every tile on the page takes unless it
+    # says otherwise. A report ignores both.
+    background: Optional[str] = None
+    tile_style: TileStyle = field(default_factory=TileStyle)
 
 
 #: `update_tile`'s "leave it as it is", for the one argument where None is
@@ -1207,6 +1217,21 @@ class Graph:
         self.events.page_changed.emit(page)
         return page
 
+    def set_page_look(self, page_id: str, *, background: Any = _KEEP,
+                      tile_style: Any = _KEEP) -> Page:
+        """A dashboard page's background and the look its tiles share.
+        Separate from update_page for the same reason as set_page_color:
+        None has to mean "the theme's", not "leave unchanged". Copies are
+        stored, so the undo stack's before and after never share one."""
+        page = self.page(page_id)
+        if background is not _KEEP:
+            page.background = clean_background(background)
+        if tile_style is not _KEEP:
+            page.tile_style = (tile_style.copy() if tile_style is not None
+                               else TileStyle())
+        self.events.page_changed.emit(page)
+        return page
+
     def set_page_maximized_tile(self, page_id: str,
                                 tile_id: Optional[str]) -> Page:
         """Maximize `tile_id` over the page, or None for the normal layout.
@@ -1249,6 +1274,7 @@ class Graph:
     def update_tile(self, page_id: str, tile_id: str, *,
                     rect: Optional[tuple[float, float, float, float]] = None,
                     aspect: Any = _KEEP,
+                    style: Any = _KEEP,
                     ) -> Tile:
         page = self.page(page_id)
         tile = page.tiles.get(tile_id)
@@ -1258,6 +1284,8 @@ class Graph:
             tile.rect = tuple(float(v) for v in rect)  # type: ignore[assignment]
         if aspect is not _KEEP:
             tile.aspect = None if aspect is None else float(aspect)
+        if style is not _KEEP:
+            tile.style = style.copy() if style is not None else TileStyle()
         self.events.tile_changed.emit(page_id, tile)
         return tile
 

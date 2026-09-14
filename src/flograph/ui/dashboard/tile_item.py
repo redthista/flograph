@@ -11,13 +11,15 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget, QHBoxLayout, QLabel,
     QTableView, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import NodeStatus, Tile
+from flograph.core.tile_style import (CARD_LOOK, NOTE_LOOK, TRANSPARENT,
+                                      resolve)
 
 from .. import theme
 from ..data_table import DataTableView
@@ -78,6 +80,15 @@ TITLE_H = 24.0
 HANDLE = 14.0
 MIN_W, MIN_H = 160.0, 90.0
 FS_BTN = 16.0  # the maximize/restore glyph box at the right of the title bar
+# A tile formatted with no title bar still has to be moved while the page
+# is being arranged: this strip along its top appears under the pointer and
+# drags it (see TileItem.grip_live).
+GRIP_H = 14.0
+# Room outside the tile a drop shadow is drawn into.
+SHADOW_PAD = 12.0
+# Kinds that draw their own face and take no format: a button is the
+# button, a strip of page links is its buttons.
+STYLE_FREE_KINDS = frozenset({"button", "pagelinks"})
 
 # Kinds with nothing to enlarge: an Action Button is a fixed-size trigger,
 # a Note is a line of text beside something else, and a tile whose node was
@@ -233,8 +244,16 @@ class TileItem(QGraphicsObject):
         # view mode: the tile can't be moved, resized or selected, but every
         # widget inside it still works. See set_layout_locked.
         self._layout_locked = False
+        # the page's look over the tile's own, resolved once per change of
+        # either (see look / restyle), and what the content host was last
+        # filled with, so a restyle that changes nothing restyles nothing
+        self._look_cache = None
+        self._host_bg = theme.NODE_BODY.name()
+        self._hovered = False
+        self._built = False   # itemChange can arrive before __init__ is done
 
         self._build_host()
+        self._built = True
         self.apply_stacking()
         self.refresh_content()
 
@@ -254,7 +273,9 @@ class TileItem(QGraphicsObject):
         self.update()
 
     def boundingRect(self) -> QRectF:
-        return QRectF(-1, -1, self._size[0] + 2, self._size[1] + 2)
+        margin = SHADOW_PAD if self._casts_shadow() else 1.0
+        return QRectF(-margin, -margin, self._size[0] + 2 * margin,
+                      self._size[1] + 2 * margin)
 
     def _handle_rect(self) -> QRectF:
         w, h = self._size
@@ -262,15 +283,33 @@ class TileItem(QGraphicsObject):
 
     def _fs_button_rect(self) -> QRectF:
         w, _ = self._size
-        return QRectF(w - FS_BTN - 6.0, (TITLE_H - FS_BTN) / 2.0,
+        title_h = self._title_h()
+        if not title_h:
+            # no bar to sit in: the top corner, over the content
+            return QRectF(w - FS_BTN - 6.0, 4.0, FS_BTN, FS_BTN)
+        return QRectF(w - FS_BTN - 6.0, (title_h - FS_BTN) / 2.0,
                       FS_BTN, FS_BTN)
 
     def _content_rect(self) -> QRectF:
         w, h = self._size
+        look = self.look()
+        if self._fullscreen:
+            # square and flush to the viewport — see paint
+            side = 1.0 + look.padding
+        else:
+            # Clear of the frame, and of the corners: a proxied widget is
+            # a rectangle, and 0.3 of the radius in from both edges is where
+            # its corner meets the curve instead of poking through it.
+            edge = look.frame_width if look.frame else 0.0
+            side = max(1.0, edge, 0.3 * look.radius) + look.padding
+        title_h = self._title_h()
+        top = title_h + look.padding if title_h else side
         # the strip along the bottom is room for the resize grip, which a
         # maximized tile doesn't draw — there, the content runs to the edge
         foot = 1.0 if self._fullscreen else HANDLE / 2 + 1
-        return QRectF(1, TITLE_H, w - 2, max(0.0, h - TITLE_H - foot))
+        bottom = max(foot, side)
+        return QRectF(side, top, max(0.0, w - 2 * side),
+                      max(0.0, h - top - bottom))
 
     def _layout_proxy(self) -> None:
         self._proxy.setGeometry(self._content_rect())
@@ -283,8 +322,12 @@ class TileItem(QGraphicsObject):
 
     def can_fullscreen(self) -> bool:
         # already maximized always counts: deleting the node behind a
-        # maximized tile must not strand it without a restore button
-        return self._fullscreen or self._kind() not in NO_FULLSCREEN_KINDS
+        # maximized tile — or hiding its button — must not strand it
+        # without a way back
+        if self._fullscreen:
+            return True
+        return (self._kind() not in NO_FULLSCREEN_KINDS
+                and bool(self.look().maximize))
 
     def apply_stacking(self) -> None:
         """Take the tile's place in the page's stacking order — except while
@@ -330,6 +373,156 @@ class TileItem(QGraphicsObject):
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.sync_from_model()
         self.refresh_render_ratio()
+
+    # ----------------------------------------------------------------- look
+
+    def styleable(self) -> bool:
+        """Whether the page's format and the Format pane apply to this
+        tile."""
+        return self._kind() not in STYLE_FREE_KINDS
+
+    def _page_style(self):
+        scene = self.scene()
+        page_id = getattr(scene, "page_id", None) if scene is not None else None
+        page = self._graph.pages.get(page_id) if page_id else None
+        return page.tile_style if page is not None else None
+
+    def look(self):
+        """How this tile is drawn: its own format over its page's over the
+        card it always was (see core.tile_style)."""
+        if self._look_cache is None:
+            if not self.styleable():
+                self._look_cache = CARD_LOOK
+            else:
+                base = NOTE_LOOK if self._kind() == "note" else CARD_LOOK
+                self._look_cache = resolve(self._page_style(),
+                                           self.tile.style, base)
+        return self._look_cache
+
+    def restyle(self) -> None:
+        """The page's format or the tile's own changed: draw it again, and
+        lay the content out again, since a title or padding moves it."""
+        self._look_cache = None
+        self.prepareGeometryChange()
+        self._apply_host_background()
+        self._layout_proxy()
+        self.update()
+
+    def _apply_host_background(self) -> None:
+        """Fill the widget the content sits in with the tile's colour, so a
+        slicer or a control takes the tile's ground rather than a patch of
+        the old one. A stylesheet cascades into the whole widget tree, so
+        it is only set again when the colour really changed."""
+        fill = self.look().background
+        css = "transparent" if fill in (None, TRANSPARENT) else fill
+        if css != self._host_bg:
+            self._host_bg = css
+            self._proxy.widget().setStyleSheet(f"background: {css};")
+
+    def _casts_shadow(self) -> bool:
+        """A shadow needs something to cast it: a transparent tile is text
+        or a chart straight on the page, and a shadow under it draws as a
+        dark slab with nothing on top. Nor does a maximized tile, which is
+        flush to the edges of the page."""
+        look = self.look()
+        return (bool(look.shadow) and look.background != TRANSPARENT
+                and not self._fullscreen)
+
+    def _title_h(self) -> float:
+        """How tall the title bar is: 0 for none, and taller than the
+        default for a title made bigger than the bar was drawn for."""
+        if self._kind() in ("button", "note", "pagelinks"):
+            return 0.0
+        look = self.look()
+        if not look.title:
+            return 0.0
+        return max(TITLE_H, round(look.title_size * 96.0 / 72.0 * 1.5 + 6.0))
+
+    def _grab_h(self) -> float:
+        """How far down from the top a press moves the tile: the title bar,
+        or the grip strip that stands in for one."""
+        return self._title_h() or GRIP_H
+
+    def has_title_bar(self) -> bool:
+        return self._title_h() > 0
+
+    def grip_active(self) -> bool:
+        """Whether this tile draws its own grip, maximize glyph and STALE
+        pill over its content — a formatted tile with no title bar to put
+        them in. A Note moves by its body and has none of them."""
+        return (self.styleable() and self._kind() != "note"
+                and not self.has_title_bar())
+
+    def grip_live(self) -> bool:
+        """The grip strip moves the tile: only while the page is being
+        arranged, and never while it is maximized."""
+        return (self.grip_active() and not self._layout_locked
+                and not self._fullscreen)
+
+    def _grip_rect(self) -> QRectF:
+        return QRectF(0.0, 0.0, self._size[0], GRIP_H)
+
+    def shape(self) -> QPainterPath:
+        """What a press, a hover or a rubber band finds of this tile.
+
+        The whole tile, except where its content widget is showing. The
+        proxy stacks *behind* the tile (see _build_host), so a tile shaped
+        like its rectangle would take every click, wheel and hover a chart
+        or a table is owed; over the content the pointer has to find the
+        content instead. The grip strip and the maximize glyph of a tile
+        with no title bar are put back, since those are the tile's to
+        answer.
+
+        A rubber band is tested against this shape too, which changes
+        nothing in practice: a band dragged from empty page crosses a
+        tile's edge, and the edge is always in it.
+        """
+        w, h = self._size
+        path = QPainterPath()
+        # the pieces overlap, and WindingFill unites them where OddEven
+        # would punch holes at every overlap
+        path.setFillRule(Qt.WindingFill)
+        if not self._proxy.isVisible():
+            path.addRect(QRectF(0.0, 0.0, w, h))
+            return path
+        c = self._content_rect()
+        path.addRect(QRectF(0.0, 0.0, w, c.top()))
+        path.addRect(QRectF(0.0, c.bottom(), w, h - c.bottom()))
+        path.addRect(QRectF(0.0, c.top(), c.left(), c.height()))
+        path.addRect(QRectF(c.right(), c.top(), w - c.right(), c.height()))
+        if self.grip_live():
+            path.addRect(self._grip_rect())
+        if self.grip_active() and self.can_fullscreen():
+            path.addRect(self._fs_button_rect())
+        return path
+
+    def _fill_path(self, outline: QPainterPath) -> QPainterPath:
+        """Where the tile paints its fill. The proxy stacks behind the tile,
+        so a fill across the content would cover it: the content's host is
+        filled with the same colour (_apply_host_background), and the tile
+        fills only the ring around it — reaching a pixel over the host, so
+        no line of page shows where the two meet."""
+        if not self._proxy.isVisible():
+            return outline
+        hole = QPainterPath()
+        hole.addRect(self._content_rect().adjusted(1.0, 1.0, -1.0, -1.0))
+        return outline.subtracted(hole)
+
+    def _set_hovered(self, hovered: bool) -> None:
+        if hovered == self._hovered:
+            return
+        self._hovered = hovered
+        # the grip, and a frameless tile's edge, are drawn only under the
+        # pointer
+        if self.grip_active() or not self.look().frame:
+            self.update()
+
+    def hoverEnterEvent(self, event) -> None:
+        # Enter and leave arrive for the proxied content too — an item's
+        # parents are hovered with it — which is what lets a title-less
+        # tile show its grip whichever part of it the pointer is over.
+        self._set_hovered(True)
+        super().hoverEnterEvent(event)
 
     def _request_fullscreen(self) -> None:
         scene = self.scene()
@@ -402,7 +595,7 @@ class TileItem(QGraphicsObject):
 
     def fullscreen_title(self) -> str:
         node = self._node()
-        return node.label if node is not None else "Tile"
+        return self._title() if node is not None else "Tile"
 
     # -------------------------------------------------------------- content
 
@@ -447,6 +640,14 @@ class TileItem(QGraphicsObject):
         self._host_layout = layout
 
         self._proxy = QGraphicsProxyWidget(self)
+        # Behind the tile's own painting rather than above it, so a tile with
+        # no title bar can draw its grip, maximize glyph and STALE pill over
+        # its content from paint(). Those were a Python child item of their
+        # own, stacked above the proxy, and painting that item through a
+        # wrapper PySide had already let go of crashed the app. A tile now
+        # has no child item but this stock one. shape() is what keeps the
+        # content's clicks going to the content.
+        self._proxy.setFlag(QGraphicsItem.ItemStacksBehindParent, True)
         self._proxy.setWidget(host)
         self._layout_proxy()
 
@@ -755,6 +956,10 @@ class TileItem(QGraphicsObject):
     def refresh_content(self) -> None:
         """Pull the node's cached output into the content widget — called on
         build, on node success/failure, and when the node is (un)deleted."""
+        # a node deleted or restored changes kind, and a kind is what says
+        # whether the tile has a title bar, and takes a format, at all
+        self._look_cache = None
+        self._layout_proxy()
         kind = self._kind()
         node = self._node()
         if kind == "missing":
@@ -1021,7 +1226,9 @@ class TileItem(QGraphicsObject):
 
     def _paint_image(self, painter: QPainter) -> None:
         w, h = self._size
-        rect = QRectF(2, TITLE_H, w - 4, max(0.0, h - TITLE_H - 2))
+        content = self._content_rect()
+        rect = QRectF(content.left(), content.top(), content.width(),
+                      max(0.0, h - content.top() - max(2.0, content.left())))
         self._pager = None    # re-established below if chevrons get drawn
         if rect.isEmpty():
             return
@@ -1172,7 +1379,11 @@ class TileItem(QGraphicsObject):
 
     def _title(self) -> str:
         node = self._node()
-        return node.label if node is not None else "(deleted node)"
+        if node is None:
+            return "(deleted node)"
+        if self.styleable() and self.look().title_text:
+            return self.look().title_text
+        return node.label
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         if self._kind() == "button":
@@ -1185,49 +1396,35 @@ class TileItem(QGraphicsObject):
             self._paint_page_links(painter)
             return
         w, h = self._size
+        look = self.look()
         body = QRectF(0, 0, w, h)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QBrush(theme.NODE_BODY))
-        painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
-                            else theme.NODE_BORDER, 1.5))
         # square while maximized: the tile is flush to the viewport there, so
         # rounded corners would leave four notches of canvas showing at the
         # edges of the screen — which is exactly what the native overlay (a
         # plain rectangular widget) never does
-        radius = 0.0 if self._fullscreen else 6.0
-        painter.drawRoundedRect(body, radius, radius)
+        radius = 0.0 if self._fullscreen else look.radius
+        if self._casts_shadow():
+            self._paint_shadow(painter, body, radius)
+        outline = QPainterPath()
+        outline.addRoundedRect(body, radius, radius)
+        if look.background not in (None, TRANSPARENT):
+            painter.fillPath(self._fill_path(outline),
+                             QColor(look.background))
 
-        painter.setBrush(QBrush(theme.NODE_HEADER))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(QRectF(0, 0, w, TITLE_H), radius, radius)
+        title_h = self._title_h()
+        if title_h and look.title_background not in (None, TRANSPARENT):
+            # clipped to the body, so the bar's lower corners are square
+            # whatever shows beneath them — a transparent tile included
+            painter.save()
+            painter.setClipPath(outline)
+            painter.fillRect(QRectF(0, 0, w, title_h),
+                             QColor(look.title_background))
+            painter.restore()
+        self._paint_outline(painter, body, radius, theme.NODE_BORDER)
 
-        painter.setPen(QPen(theme.NODE_TEXT))
-        font = painter.font()
-        font.setBold(True)
-        font.setPointSizeF(9.0)
-        painter.setFont(font)
-        stale = self._is_stale()
-        updating = stale and self._is_updating()
-        # "UPDATING" is the longer word and needs the wider reservation
-        stale_w = (62.0 if updating else 44.0) if stale else 0.0
-        glyph_w = FS_BTN + 8.0 if self.can_fullscreen() else 0.0
-        painter.drawText(QRectF(10, 0, w - 20 - stale_w - glyph_w, TITLE_H),
-                         Qt.AlignVCenter | Qt.AlignLeft, self._title())
-        if stale:
-            # amber for "you changed something and nothing is coming", the
-            # calmer blue for "it is being recomputed" — one is a prompt to
-            # act, the other a reason not to
-            painter.setPen(QPen(QColor("#60a5fa") if updating
-                                else QColor("#eab308")))
-            small = painter.font()
-            small.setPointSizeF(7.5)
-            painter.setFont(small)
-            painter.drawText(
-                QRectF(0, 0, w - 10 - glyph_w, TITLE_H),
-                Qt.AlignVCenter | Qt.AlignRight,
-                "UPDATING" if updating else "STALE")
-        if self.can_fullscreen():
-            self._paint_fullscreen_glyph(painter)
+        if title_h:
+            self._paint_title(painter, look, title_h)
 
         if not self._layout_locked and not self._fullscreen:
             # the grip is an invitation to resize; on a locked page, and on a
@@ -1243,11 +1440,183 @@ class TileItem(QGraphicsObject):
         if self._kind() == "kpi" and self._kpi_has_value:
             # a KPI is painted rather than widget-backed, so it fades here
             # instead of through the proxy's opacity
+            updating = self._is_stale() and self._is_updating()
             painter.setOpacity(0.45 if updating else 1.0)
             self._paint_kpi_value(painter)
             painter.setOpacity(1.0)
         elif self._kind() in ("image", "pdf"):
             self._paint_image(painter)
+        if self.grip_active():
+            self._paint_grip(painter)
+
+    def _paint_grip(self, painter: QPainter) -> None:
+        """A title-less tile's furniture, over its content: the STALE pill
+        always, and under the pointer the grip strip (while the page is
+        being arranged) and the maximize glyph."""
+        self.paint_stale_pill(painter)
+        if not self._hovered:
+            return
+        width = self._size[0]
+        if self.grip_live():
+            ground = QColor(theme.NODE_HEADER)
+            ground.setAlphaF(0.85)
+            radius = 0.0 if self._fullscreen else self.look().radius
+            body = QPainterPath()
+            body.addRoundedRect(QRectF(0, 0, width, self._size[1]),
+                                radius, radius)
+            painter.save()
+            painter.setClipPath(body)
+            painter.fillRect(self._grip_rect(), ground)
+            painter.restore()
+            # six dots, the grip every toolkit draws for "drag me"
+            painter.save()
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.NODE_SUBTEXT)
+            centre = width / 2.0
+            for dx in (-6.0, 0.0, 6.0):
+                for y in (4.5, 9.5):
+                    painter.drawEllipse(QPointF(centre + dx, y), 1.2, 1.2)
+            painter.restore()
+        if self.can_fullscreen():
+            box = self._fs_button_rect().adjusted(-2, -2, 2, 2)
+            ground = QColor(theme.NODE_HEADER)
+            ground.setAlphaF(0.92)
+            painter.save()
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ground)
+            painter.drawRoundedRect(box, 4.0, 4.0)
+            painter.restore()
+            self._paint_fullscreen_glyph(painter)
+
+    def _paint_title(self, painter: QPainter, look, title_h: float) -> None:
+        w, _ = self._size
+        stale = self._is_stale()
+        updating = stale and self._is_updating()
+        # "UPDATING" is the longer word and needs the wider reservation
+        stale_w = (62.0 if updating else 44.0) if stale else 0.0
+        glyph_w = FS_BTN + 8.0 if self.can_fullscreen() else 0.0
+        painter.setPen(QPen(QColor(look.title_color)))
+        font = painter.font()
+        font.setBold(bool(look.title_bold))
+        font.setPointSizeF(look.title_size)
+        painter.setFont(font)
+        reserved = stale_w + glyph_w
+        if look.title_align == "center":
+            # the same room off both sides, or a centred title sits left of
+            # the middle by the width of the badges
+            rect = QRectF(10 + reserved, 0, w - 20 - 2 * reserved, title_h)
+            align = Qt.AlignHCenter
+        else:
+            rect = QRectF(10, 0, w - 20 - reserved, title_h)
+            align = (Qt.AlignRight if look.title_align == "right"
+                     else Qt.AlignLeft)
+        text = painter.fontMetrics().elidedText(
+            self._title(), Qt.ElideRight, int(max(0.0, rect.width())))
+        painter.drawText(rect, Qt.AlignVCenter | align, text)
+        if stale:
+            # amber for "you changed something and nothing is coming", the
+            # calmer blue for "it is being recomputed" — one is a prompt to
+            # act, the other a reason not to
+            painter.setPen(QPen(QColor("#60a5fa") if updating
+                                else QColor("#eab308")))
+            small = painter.font()
+            small.setBold(True)
+            small.setPointSizeF(7.5)
+            painter.setFont(small)
+            painter.drawText(
+                QRectF(0, 0, w - 10 - glyph_w, title_h),
+                Qt.AlignVCenter | Qt.AlignRight,
+                "UPDATING" if updating else "STALE")
+        if self.can_fullscreen():
+            self._paint_fullscreen_glyph(painter)
+
+    def paint_stale_pill(self, painter: QPainter) -> None:
+        """STALE / UPDATING for a tile with no title bar to say it in: a
+        small pill in the top corner, over the content."""
+        if not self._is_stale():
+            return
+        updating = self._is_updating()
+        word = "UPDATING" if updating else "STALE"
+        glyph_w = FS_BTN + 8.0 if self.can_fullscreen() else 0.0
+        painter.save()
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSizeF(7.0)
+        painter.setFont(font)
+        width = painter.fontMetrics().horizontalAdvance(word) + 12.0
+        rect = QRectF(self._size[0] - 6.0 - glyph_w - width, 5.0, width, 14.0)
+        ground = QColor(theme.NODE_HEADER)
+        ground.setAlphaF(0.92)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(ground)
+        painter.drawRoundedRect(rect, 7.0, 7.0)
+        painter.setPen(QPen(QColor("#60a5fa") if updating
+                            else QColor("#eab308")))
+        painter.drawText(rect, Qt.AlignCenter, word)
+        painter.restore()
+
+    def outline_pen(self, default_colour=None) -> Optional[QPen]:
+        """The pen the tile's edge is drawn with, or None for no edge: the
+        selection, its frame, or — for a frameless tile under the pointer
+        while the page is being arranged — a faint dashed line, so there is
+        something to find it by. Only under the pointer: a frameless page
+        is meant to look frameless while it is being built, not covered in
+        dashed boxes. A locked page draws none."""
+        look = self.look()
+        if self.isSelected():
+            return QPen(theme.SELECTION_OUTLINE,
+                        max(1.5, look.frame_width if look.frame else 1.5))
+        if look.frame:
+            return QPen(QColor(look.frame_color) if look.frame_color
+                        else (default_colour or theme.NODE_BORDER),
+                        look.frame_width)
+        if self._hovered and not self._layout_locked and not self._fullscreen:
+            faint = QColor(theme.NODE_SUBTEXT)
+            faint.setAlphaF(0.55)
+            return QPen(faint, 1.0, Qt.DashLine)
+        return None
+
+    def _paint_outline(self, painter: QPainter, rect: QRectF, radius: float,
+                       default_colour) -> None:
+        pen = self.outline_pen(default_colour)
+        if pen is None:
+            return
+        # drawn inside the edge, so a wide frame never spills past the tile
+        # into its neighbour or outside the bounding rect
+        half = pen.widthF() / 2.0
+        inner = max(0.0, radius - half)
+        painter.save()
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect.adjusted(half, half, -half, -half),
+                                inner, inner)
+        painter.restore()
+
+    @staticmethod
+    def _paint_shadow(painter: QPainter, rect: QRectF, radius: float) -> None:
+        """A soft drop shadow: rings of faint black, dropped a little, which
+        a raster blur would do better and at many times the cost per paint.
+
+        Clipped to outside the tile. The tile paints over its content (the
+        proxy stacks behind it), so rings drawn across the whole rect lay
+        six veils of black over a chart — which turned a white tile's
+        content grey."""
+        painter.save()
+        outside = QPainterPath()
+        outside.addRect(rect.adjusted(-SHADOW_PAD, -SHADOW_PAD,
+                                      SHADOW_PAD, SHADOW_PAD))
+        body = QPainterPath()
+        body.addRoundedRect(rect, radius, radius)
+        painter.setClipPath(outside.subtracted(body), Qt.IntersectClip)
+        painter.setPen(Qt.NoPen)
+        steps = 6
+        for i in range(steps, 0, -1):
+            grow = i * 1.4
+            painter.setBrush(QColor(0, 0, 0, 9 + (steps - i) * 5))
+            painter.drawRoundedRect(rect.adjusted(-grow, -grow + 3.0,
+                                                  grow, grow + 3.0),
+                                    radius + grow, radius + grow)
+        painter.restore()
 
     def _paint_fullscreen_glyph(self, painter: QPainter) -> None:
         """Four corner brackets, like a video player's fullscreen toggle:
@@ -1372,19 +1741,31 @@ class TileItem(QGraphicsObject):
         w, h = self._size
         node = self._node()
         painter.setRenderHint(QPainter.Antialiasing)
-        body = QColor(theme.tint(theme.NODE_BODY, node.color, theme.TINT_SOFT)
-                      if node is not None and node.color else theme.NODE_BODY)
-        body.setAlphaF(0.75)
-        painter.setBrush(QBrush(body))
-        painter.setPen(QPen(theme.SELECTION_OUTLINE if self.isSelected()
-                            else theme.GRID_COARSE, 1.4))
-        painter.drawRoundedRect(QRectF(0, 0, w, h), 8, 8)
+        look = self.look()
+        rect = QRectF(0, 0, w, h)
+        outline = QPainterPath()
+        outline.addRoundedRect(rect, look.radius, look.radius)
+        if self._casts_shadow():
+            self._paint_shadow(painter, rect, look.radius)
+        if look.background is None:
+            # a note's own ground: its node's colour, tinted, see-through
+            body = QColor(theme.tint(theme.NODE_BODY, node.color,
+                                     theme.TINT_SOFT)
+                          if node is not None and node.color
+                          else theme.NODE_BODY)
+            body.setAlphaF(0.75)
+            painter.fillPath(outline, body)
+        elif look.background != TRANSPARENT:
+            painter.fillPath(outline, QColor(look.background))
+        self._paint_outline(painter, rect, look.radius, theme.GRID_COARSE)
 
         painter.save()
         painter.translate(NOTE_PAD, NOTE_PAD)
         painter.setClipRect(QRectF(0, 0, w - 2 * NOTE_PAD, h - 2 * NOTE_PAD))
         context = QAbstractTextDocumentLayout.PaintContext()
-        context.palette.setColor(QPalette.Text, theme.NODE_TEXT)
+        context.palette.setColor(
+            QPalette.Text, QColor(look.title_color) if look.title_color
+            else theme.NODE_TEXT)
         context.palette.setColor(QPalette.Link, theme.SELECTION_OUTLINE)
         self._note_document().documentLayout().draw(painter, context)
         painter.restore()
@@ -1552,7 +1933,9 @@ class TileItem(QGraphicsObject):
             self.setCursor(Qt.SizeHorCursor)
         elif edge == "bottom":
             self.setCursor(Qt.SizeVerCursor)
-        elif ((pos.y() < TITLE_H or self._kind() in ("note", "pagelinks"))
+        elif ((pos.y() < self._title_h()
+               or (self.grip_live() and self._grip_rect().contains(pos))
+               or self._kind() in ("note", "pagelinks"))
                 and not self._fullscreen and not self._layout_locked):
             # the title drag bar — or, for the kinds with none, all of it
             self.setCursor(Qt.SizeAllCursor)
@@ -1569,6 +1952,7 @@ class TileItem(QGraphicsObject):
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
+        self._set_hovered(False)
         self._set_fs_hover(False)
         self._set_pager_hover(0)
         self.unsetCursor()
@@ -1589,6 +1973,9 @@ class TileItem(QGraphicsObject):
         self.update()
 
     def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemSceneHasChanged and self._built:
+            # the page a tile lands on is where half its look comes from
+            self.restyle()
         if change == QGraphicsItem.ItemPositionChange and self._dragging \
                 and snapping_active(self.scene()):
             step = grid_step(self.scene())
@@ -1681,7 +2068,7 @@ class TileItem(QGraphicsObject):
             # selects. Buttons and notes have no title bar and no widget
             # inside to hand the press to, so they drag whole-body.
             if self._kind() not in ("button", "note", "pagelinks") \
-                    and event.pos().y() >= TITLE_H:
+                    and event.pos().y() >= self._grab_h():
                 self._move_suppressed = True
                 self.setFlag(QGraphicsItem.ItemIsMovable, False)
             else:
@@ -1769,7 +2156,7 @@ class TileItem(QGraphicsObject):
         title bar does. The body belongs to the embedded widget (the proxy
         sits on top of it), so its double-clicks never reach us."""
         if event.button() == Qt.LeftButton and self.can_fullscreen() \
-                and event.pos().y() < TITLE_H:
+                and event.pos().y() < self._grab_h():
             # same gesture ownership as the button: the release that follows
             # a double-click must not push the toggled geometry as a move
             self._fs_gesture = True
