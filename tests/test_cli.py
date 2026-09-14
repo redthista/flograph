@@ -112,6 +112,18 @@ class TestDispatch:
         cli.main(["some.flograph"])
         assert called.get("gui") and "headless" not in called
 
+    def test_starts_with_no_stderr_as_under_pythonw(self):
+        # pythonw.exe — what every Windows shortcut launches — gives the
+        # process no stdout or stderr, and faulthandler.enable() raises
+        # RuntimeError there. A subprocess, because enabling faulthandler
+        # inside pytest's own process would fight its plugin.
+        code = ("import sys; sys.stdout = None; sys.stderr = None\n"
+                "from flograph import cli\n"
+                "raise SystemExit(cli.main(['--version']))")
+        proc = subprocess.run([sys.executable, "-c", code],
+                              capture_output=True, text=True, timeout=120)
+        assert proc.returncode == 0
+
     def test_version(self, capsys):
         assert cli.main(["--version"]) == 0
         assert capsys.readouterr().out.startswith("flograph ")

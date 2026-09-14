@@ -35,11 +35,14 @@ def main(argv: list[str] | None = None) -> int:
     # number. Only on the CLI path, so imports and tests are untouched.
     # Guarded: it writes to stderr's file descriptor, and a captured stderr
     # (pytest, a pipe a caller has replaced) has none — a diagnostic must
-    # never be the reason the program won't start.
+    # never be the reason the program won't start. Under pythonw.exe, which
+    # is what every Windows shortcut launches, there is no stderr at all and
+    # enable() raises RuntimeError; uncaught, the app died before its first
+    # window with nowhere to say why.
     import faulthandler
     try:
         faulthandler.enable()
-    except (ValueError, OSError):
+    except (ValueError, OSError, RuntimeError):
         pass
 
     args = list(sys.argv[1:] if argv is None else argv)

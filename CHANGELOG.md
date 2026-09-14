@@ -5,6 +5,14 @@
 | Category | Change | Details |
 | --- | --- | --- |
 
+## 0.1.14.1
+
+A hotfix to 0.1.14.
+
+| Category | Change | Details |
+| --- | --- | --- |
+| Fix | A **desktop shortcut** or **Start Menu** entry opens flograph on Windows again | In 0.1.14 double-clicking either did nothing at all, while running the same file by hand worked. A shortcut starts flograph with `pythonw.exe`, so no console window trails behind the app, and a `pythonw` process has no stderr. 0.1.14 began switching on Python's crash reporter at startup, which writes to stderr and raises when there is none; it was guarded against a stderr it couldn't use, not against one that isn't there, so the app quit before its first window with nowhere to say why. That case is now caught, and a test starts flograph with no stdout or stderr the way a shortcut does. A shortcut already made starts again once the file it points at is this version or later; one made from a pip install starts again after upgrading. |
+
 ## 0.1.14
 
 | Category | Change | Details |
