@@ -357,7 +357,8 @@ copy/paste, and an optional linked input that keeps its contents when you
 disconnect.
 
 **Transform** — Select Columns, Filter Rows, Sort, Join, Group By,
-Expression, Concatenate, Missing Values, Duplicate Row Filter, Rename
+AsOf Join (match on the nearest timestamp), Expression, Concatenate,
+Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,
 Statistics, Data Profile, Numeric Binning (fixed-width, quantile or
 hand-named buckets), Crosstab (a two-way frequency matrix), Period

@@ -37,7 +37,8 @@ variable, on an order edge after the upload). Each Dataiku node has one
 **API key** blank to read `$DKU_API_KEY`. Needs `dataiku-api-client`.
 
 **Transform** — Select Columns, Filter Rows, Sort, Join, Group By,
-Expression, Concatenate, Missing Values, Duplicate Row Filter, Rename
+AsOf Join (match on the nearest timestamp), Expression, Concatenate,
+Missing Values, Duplicate Row Filter, Rename
 Columns, Pivot, Unpivot, Row Sampling, Convert Types, String Manipulation,
 Statistics, Data Profile, Numeric Binning (fixed-width, quantile or
 hand-named buckets), Crosstab (a two-way frequency matrix), Period
