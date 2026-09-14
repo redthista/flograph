@@ -2082,7 +2082,8 @@ class NodeItem(QGraphicsObject):
         view = self._table_viewer_view
         if view is None:
             return
-        from flograph.core.table_picks import pick_mode
+        from flograph.core.table_picks import pick_by, pick_mode
+        view.set_pick_by(pick_by(self.node.params))
         view.set_pick_mode(pick_mode(self.node.params))
         view.set_picks(str(self.node.params.get("selected", "") or ""))
 

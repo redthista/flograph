@@ -26,7 +26,7 @@
           400
         ],
         "params": {
-          "text": "## Click a table to filter\n\n**Pick here** has *On click ▸ select many*. Click it and everything wired\nto its **filtered** output follows — the total, the chart and the rows.\n\n- **Click a cell** — keep the rows with that value (`North`).\n- **Ctrl+click more cells** — values in one column add up (North *or*\n  South); columns narrow each other (North *and* Widget).\n- **Click a row number** — keep that row.\n- **Ctrl+click a column header** — keep only that column. A plain click\n  still sorts.\n- **Click the pick again**, press **Esc**, or right-click ▸ **Clear\n  Selection** to let every row back.\n\nWhat you picked shows in **Selected** in the properties panel. **table**\nstays whole, so the card always has every row to pick from.\n\nThe **matrix** below is *select one*: click a region's row and only that\nrow of the matrix goes on.\n",
+          "text": "## Click a table to filter\n\n**Pick here** has *On click ▸ select many*. Click it and everything wired\nto its **filtered** output follows — the total, the chart and the rows.\n\n- **Click a cell** — keep the rows with that value (`North`).\n- **Ctrl+click more cells** — values in one column add up (North *or*\n  South); columns narrow each other (North *and* Widget).\n- **Click a row number** — keep that row.\n- **Ctrl+click a column header** — keep only that column. A plain click\n  still sorts.\n- **Click the pick again**, press **Esc**, or right-click ▸ **Clear\n  Selection** to let every row back.\n\nWhat you picked shows in **Selected** in the properties panel. **table**\nstays whole, so the card always has every row to pick from.\n\n**Pick rows** has *Select ▸ row*: a click lights the whole row and lets\njust that row through. It is *select many*, so **Ctrl+click** adds rows\nand **dragging** down the table picks every row the drag covered when you\nlet go.\n\nThe **matrix** is *select one* by row: click a region and only that row of\nthe matrix goes on.\n",
           "width": 460,
           "height": 0
         },
@@ -134,6 +134,7 @@
           "matrix_values": "Revenue",
           "matrix_agg": "sum",
           "on_click": "select one",
+          "select_by": "row",
           "selected": "",
           "format_rules": "* scale green",
           "width": 640,
@@ -152,6 +153,38 @@
         "params": {
           "width": 640,
           "height": 200
+        },
+        "code": null
+      },
+      {
+        "id": "cf_rowpick",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          600,
+          1120
+        ],
+        "label": "Pick rows",
+        "params": {
+          "on_click": "select many",
+          "select_by": "row",
+          "selected": "",
+          "format_rules": "Revenue  format ,.0f",
+          "width": 640,
+          "height": 360
+        },
+        "code": null
+      },
+      {
+        "id": "cf_rowpicked",
+        "type": "flograph.viz.show_table",
+        "pos": [
+          1360,
+          1120
+        ],
+        "label": "Rows picked",
+        "params": {
+          "width": 520,
+          "height": 360
         },
         "code": null
       }
@@ -233,6 +266,28 @@
           "cf_matrix_rows",
           "table"
         ]
+      },
+      {
+        "id": "cc8",
+        "src": [
+          "cf_data",
+          "table"
+        ],
+        "dst": [
+          "cf_rowpick",
+          "table"
+        ]
+      },
+      {
+        "id": "cc9",
+        "src": [
+          "cf_rowpick",
+          "filtered"
+        ],
+        "dst": [
+          "cf_rowpicked",
+          "table"
+        ]
       }
     ],
     "frames": [
@@ -243,7 +298,7 @@
           -60,
           -80,
           2000,
-          1180
+          1640
         ],
         "color": "#26415c"
       }
@@ -307,6 +362,28 @@
               480,
               1180,
               260
+            ]
+          },
+          {
+            "id": "ct6",
+            "node": "cf_rowpick",
+            "port": "table",
+            "rect": [
+              40,
+              760,
+              640,
+              320
+            ]
+          },
+          {
+            "id": "ct7",
+            "node": "cf_rowpicked",
+            "port": "table",
+            "rect": [
+              700,
+              760,
+              520,
+              320
             ]
           }
         ]

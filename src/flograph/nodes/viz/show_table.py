@@ -151,6 +151,11 @@ table, so the card keeps every row there to pick from.
 * **Ctrl+click a column header** to keep only that column; a plain click
   still sorts. A picked column never changes which rows are kept.
 
+Set **Select** to *row* and a click takes the whole row instead: the row
+lights up across the table, and only the rows you pick go on. With *select
+many*, Ctrl+click adds a row, and dragging down the table picks every row
+the drag covered when you let go. Row mode picks rows only, never columns.
+
 Click the one picked cell or row again, press Esc, or right-click ▸ **Clear
 Selection** to let every row through. *Select one* keeps only the last
 thing clicked. A pick shows every cell it matched, survives a re-run and a
@@ -195,6 +200,9 @@ PARAMS = [
     {"name": "on_click", "type": "choice", "label": "On click",
      "options": ["nothing", "select one", "select many"],
      "default": "nothing"},
+    {"name": "select_by", "type": "choice", "label": "Select",
+     "options": ["cell", "row"], "default": "cell",
+     "visible_when": {"on_click": ["select one", "select many"]}},
     # Written by the card when a cell, row or column is picked. Visible for
     # the reason Show Plotly's Clicked values is: when the filter keeps the
     # wrong rows, the first question is what the card actually sent.
@@ -264,16 +272,14 @@ def run(ctx, table, style=None):
     # Click to filter: the card writes what was picked into "selected", and
     # the filter below reads it back through the same module the card uses
     # to highlight it — see core/table_picks.py.
-    filtered = table
-    if ctx.params.get("on_click") in ("select one", "select many"):
-        from flograph.core.table_picks import (
-            describe, filter_frame, parse_picks)
+    from flograph.core.table_picks import active_picks, describe, filter_frame
 
-        picks = parse_picks(ctx.params.get("selected", ""))
-        if picks:
-            filtered, notes = filter_frame(table, picks)
-            for note in notes:
-                ctx.log(f"selection — {note}")
-            ctx.log(f"selection ({describe(picks)}): kept {len(filtered):,} "
-                    f"of {len(table):,} rows")
+    picks = active_picks(ctx.params)
+    filtered = table
+    if picks:
+        filtered, notes = filter_frame(table, picks)
+        for note in notes:
+            ctx.log(f"selection — {note}")
+        ctx.log(f"selection ({describe(picks)}): kept {len(filtered):,} "
+                f"of {len(table):,} rows")
     return {"table": table, "style": merged, "filtered": filtered}

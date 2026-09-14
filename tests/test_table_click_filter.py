@@ -322,6 +322,109 @@ class TestGestures:
         menu.deleteLater()
 
 
+def _drag(view, from_row, to_row, col=0):
+    """Press on one row, move down with the button held, let go — sent to
+    the view's own handlers, since a QTest move cannot carry a held button
+    offscreen (see test_rubber_band_selection.py)."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    viewport = view.viewport()
+    QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier,
+                     _cell(view, from_row, col))
+    step = 1 if to_row >= from_row else -1
+    for row in range(from_row, to_row + step, step):
+        pos = QPointF(_cell(view, row, col))
+        view.mouseMoveEvent(QMouseEvent(QEvent.MouseMove, pos, pos,
+                                        Qt.NoButton, Qt.LeftButton,
+                                        Qt.NoModifier))
+    QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier,
+                       _cell(view, to_row, col))
+
+
+def _selected_rows(view):
+    return sorted({i.row() for i in view.selectionModel().selectedIndexes()})
+
+
+class TestRowMode:
+    @pytest.fixture
+    def rows_view(self, view):
+        view.set_pick_by("row")
+        return view
+
+    def test_a_click_picks_and_lights_the_whole_row(self, qtbot, rows_view):
+        picks = _committed(qtbot, rows_view,
+                           lambda: _click_cell(qtbot, rows_view, 1, 1))
+        assert picks == Picks(rows=["1"])
+        assert _selected_cells(rows_view) == [(1, 0), (1, 1), (1, 2)]
+
+    def test_ctrl_click_adds_a_row(self, qtbot, rows_view):
+        _committed(qtbot, rows_view, lambda: _click_cell(qtbot, rows_view, 1, 0))
+        picks = _committed(qtbot, rows_view, lambda: _click_cell(
+            qtbot, rows_view, 3, 2, Qt.ControlModifier))
+        assert picks == Picks(rows=["1", "3"])
+
+    def test_a_drag_picks_every_row_it_covered(self, qtbot, rows_view):
+        seen = []
+        rows_view.picks_committed.connect(seen.append)
+        picks = _committed(qtbot, rows_view, lambda: _drag(rows_view, 1, 3))
+        assert picks == Picks(rows=["1", "2", "3"])
+        assert _selected_rows(rows_view) == [1, 2, 3]
+        qtbot.wait(400)
+        assert len(seen) == 1                   # one pick for one drag
+
+    def test_select_one_keeps_the_row_the_drag_ended_on(self, qtbot,
+                                                         rows_view):
+        rows_view.set_pick_mode("select one")
+        picks = _committed(qtbot, rows_view, lambda: _drag(rows_view, 1, 3))
+        assert picks == Picks(rows=["3"])
+        assert _selected_rows(rows_view) == [3]
+
+    def test_clicking_the_picked_row_again_clears(self, qtbot, rows_view):
+        _committed(qtbot, rows_view, lambda: _click_cell(qtbot, rows_view, 2, 0))
+        picks = _committed(qtbot, rows_view,
+                           lambda: _click_cell(qtbot, rows_view, 2, 2))
+        assert not picks
+        assert _selected_cells(rows_view) == []
+
+    def test_a_leftover_cell_pick_is_not_shown(self, qtbot, rows_view):
+        rows_view.set_picks('{"cells": {"region": ["north"]}, "rows": ["4"]}')
+        assert _selected_rows(rows_view) == [4]
+
+    def test_ctrl_click_on_a_header_is_not_a_column_pick(self, qtbot,
+                                                         rows_view):
+        seen = []
+        rows_view.picks_committed.connect(seen.append)
+        QTest.mouseClick(rows_view.horizontalHeader().viewport(),
+                         Qt.LeftButton, Qt.ControlModifier,
+                         _column_header(rows_view, 2))
+        qtbot.wait(700)
+        assert all("columns" not in text for text in seen)
+
+    def test_cell_mode_drag_picks_the_values_it_covered(self, qtbot, view):
+        picks = _committed(qtbot, view, lambda: _drag(view, 0, 1))
+        assert picks == Picks(cells={"region": ["north", "south"]})
+
+
+def test_active_picks_in_row_mode_are_rows_only():
+    from flograph.core.table_picks import active_picks, pick_by
+
+    params = {"on_click": "select many", "select_by": "row",
+              "selected": '{"cells": {"region": ["north"]}, "rows": ["2"], '
+                          '"columns": ["units"]}'}
+    assert pick_by(params) == "row"
+    assert active_picks(params) == Picks(rows=["2"])
+    assert not active_picks(dict(params, on_click="nothing"))
+    assert pick_by({}) == "cell"
+
+
+def test_the_node_in_row_mode_lets_through_just_the_rows(registry):
+    out = _run(registry, on_click="select many", select_by="row",
+               selected='{"cells": {"region": ["north"]}, "rows": ["1", "3"]}')
+    assert list(out["filtered"]["units"]) == [20, 40]
+    assert list(out["filtered"].columns) == ["region", "product", "units"]
+
+
 def test_keeps_table_accepts_an_equal_copy_and_rejects_a_change(qtbot):
     from flograph.ui.inspector.pandas_model import keeps_table, styled_model
 

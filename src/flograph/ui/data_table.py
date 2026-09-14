@@ -302,6 +302,7 @@ class DataTableView(QTableView):
         # Click to filter. Off until a Show Table's card turns it on, so the
         # inspector's and every other data table keep a plain selection.
         self._pick_mode = "nothing"
+        self._pick_by = "cell"             # or "row": a click takes the row
         self._picks_text = ""
         self._applying_picks = False       # our own select(), not a click
         self._header_pressed = False       # a plain header click: a sort
@@ -621,7 +622,26 @@ class DataTableView(QTableView):
             return
         self._pick_mode = mode
         self._pick_timer.stop()
+        self._apply_pick_behaviour()
         self._show_picks()
+
+    def set_pick_by(self, by: str) -> None:
+        """What a click picks: "cell", or the whole "row"."""
+        by = "row" if by == "row" else "cell"
+        if by == self._pick_by:
+            return
+        self._pick_by = by
+        self._pick_timer.stop()
+        self._apply_pick_behaviour()
+        self._show_picks()
+
+    def _apply_pick_behaviour(self) -> None:
+        """Row mode is Qt's own row selection — a click, a Ctrl+click and a
+        drag all take whole rows, and the highlight runs end to end. Only
+        while picking is on: a table that just copies keeps its cells."""
+        rows = self._pick_mode != "nothing" and self._pick_by == "row"
+        self.setSelectionBehavior(QTableView.SelectRows if rows
+                                  else QTableView.SelectItems)
 
     def set_picks(self, text: str) -> None:
         """Show a pick that arrived from outside — the param after an undo,
@@ -681,7 +701,8 @@ class DataTableView(QTableView):
             if picks.rows:
                 select_runs(0, cols - 1, model.rows_labelled(picks.rows))
             seen: set = set()
-            for col in range(cols):
+            # row mode shows rows and nothing else — see active_picks
+            for col in range(cols if self._pick_by == "cell" else 0):
                 name = model.column_name(col)
                 if name in seen:
                     continue           # the filter reads the first of a name
@@ -733,6 +754,11 @@ class DataTableView(QTableView):
         rows, cols = model.rowCount(), model.columnCount()
         if selection_model is None or not rows or not cols:
             return Picks()
+        if self._pick_by == "row":
+            picked = sorted({i.row() for i in selection_model.selectedIndexes()})
+            if len(picked) == rows:
+                return Picks()             # every row: Select All
+            return Picks(rows=[model.row_label(r) for r in picked])
         names = [model.column_name(c) for c in range(cols)]
         first_of: dict[str, int] = {}
         for col, name in enumerate(names):
@@ -785,7 +811,7 @@ class DataTableView(QTableView):
         if (not picks or not current.isValid()
                 or not self.selectionModel().isSelected(current)):
             return Picks()
-        if self._last_gesture == "row":
+        if self._last_gesture == "row" or self._pick_by == "row":
             return Picks(rows=[model.row_label(current.row())])
         col = current.column()
         return Picks(cells={model.column_name(col):
@@ -812,7 +838,8 @@ class DataTableView(QTableView):
         if modifiers & (Qt.ControlModifier | Qt.ShiftModifier):
             return False
         picks = parse_picks(self._picks_text)
-        if picks.cells or picks.rows != [self.model().row_label(row)]:
+        if ((picks.cells and self._pick_by == "cell")
+                or picks.rows != [self.model().row_label(row)]):
             return False
         self._put_picks(Picks(columns=picks.columns))
         return True
@@ -822,6 +849,9 @@ class DataTableView(QTableView):
         clears the pick, the way clicking a chart's selected bar does; a
         Ctrl+click takes that value out of a longer pick, from every cell
         showing it."""
+        if self._pick_by == "row":
+            # a click anywhere on the one picked row is a click on the row
+            return self._unpick_row(index.row(), modifiers)
         model = self.model()
         name = model.column_name(index.column())
         picks = parse_picks(self._picks_text)
@@ -875,7 +905,8 @@ class DataTableView(QTableView):
                 if (kind == QEvent.MouseButtonPress
                         and event.button() == Qt.LeftButton):
                     col = columns.logicalIndexAt(event.position().toPoint())
-                    if col >= 0 and event.modifiers() & Qt.ControlModifier:
+                    if (col >= 0 and self._pick_by == "cell"
+                            and event.modifiers() & Qt.ControlModifier):
                         self._toggle_column(col)
                         return True
                     self._settle_pending()

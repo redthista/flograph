@@ -1332,7 +1332,8 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if self._table_view is None or node is None:
             return
-        from flograph.core.table_picks import pick_mode
+        from flograph.core.table_picks import pick_by, pick_mode
+        self._table_view.set_pick_by(pick_by(node.params))
         self._table_view.set_pick_mode(pick_mode(node.params))
         self._table_view.set_picks(str(node.params.get("selected", "") or ""))
 

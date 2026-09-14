@@ -174,3 +174,25 @@ def describe(picks: Any) -> str:
     if picks.columns:
         parts.append(f"columns {', '.join(picks.columns)}")
     return "; ".join(parts)
+
+
+#: What a click picks: a cell (a row by its number, a column by Ctrl+click
+#: on its header), or always the whole row.
+PICK_BY = ("cell", "row")
+
+
+def pick_by(params: dict) -> str:
+    by = params.get("select_by")
+    return by if by in PICK_BY else "cell"
+
+
+def active_picks(params: dict) -> Picks:
+    """The pick a node's params filter on. Nothing while On click is off;
+    in row mode only the rows, so a pick left over from cell mode is shown
+    nowhere and obeyed nowhere."""
+    if pick_mode(params) == "nothing":
+        return Picks()
+    picks = parse_picks(params.get("selected", ""))
+    if pick_by(params) == "row":
+        return Picks(rows=picks.rows)
+    return picks

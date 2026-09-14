@@ -159,7 +159,9 @@ A visual can be the filter too. Set a **Show Plotly** or a **Show Table** to
 feeds. On a chart you click a bar or drag a box. On a table you click a
 **cell** to keep the rows with that value, a **row's number** to keep the
 row, or **Ctrl+click a column header** to keep only that column. A plain
-header click still sorts. Wire the table's **filtered** output onwards, not
+header click still sorts. Set the table's **Select** to *row* and a click
+takes the whole row instead; with *select many*, a drag down the table
+picks every row it covered. Wire the table's **filtered** output onwards, not
 **table**, which stays whole so there is always every row to pick from.
 Click the pick again, or press Esc, to let everything back through.
 
