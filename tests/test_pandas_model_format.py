@@ -231,3 +231,47 @@ class TestLayoutRules:
         assert model.column_layout(1).width == 200
         assert model.column_layout(0) is None
         assert model.wraps_text() is True
+
+
+def test_cells_read_a_block_at_a_time_show_what_the_cell_holds(
+        qtbot, monkeypatch):
+    """data() reads a column's values a block of rows at a time instead of
+    `iat` per cell. What it shows has to be what `iat` would have shown —
+    across dtypes whose numpy scalar differs from pandas' own (a datetime64
+    is not a Timestamp), across a block boundary, and after a sort."""
+    import numpy as np
+    import pandas as pd
+    from PySide6.QtCore import Qt
+
+    from flograph.ui.inspector.pandas_model import _BLOCK, PandasModel
+
+    rows = _BLOCK + 5
+    df = pd.DataFrame({
+        "n": np.arange(rows, dtype="int64")[::-1],
+        "x": np.linspace(0.0, 1.0, rows),
+        "when": pd.date_range("2024-01-01", periods=rows, freq="h"),
+        "took": pd.to_timedelta(np.arange(rows), unit="s"),
+        "maybe": pd.array([None if i % 7 == 0 else i for i in range(rows)],
+                          dtype="Int64"),
+        "name": pd.Series([f"r{i}" for i in range(rows)],
+                          dtype="string[pyarrow]"),
+        "flag": np.arange(rows) % 2 == 0,
+    })
+    cached = PandasModel(df)
+    plain = PandasModel(df)
+    monkeypatch.setattr(plain, "_value", lambda r, c: plain._df.iat[r, c])
+
+    def cells(model):
+        while model.canFetchMore():
+            model.fetchMore()
+        return [model.data(model.index(r, c), role)
+                for r in (0, 1, _BLOCK - 1, _BLOCK, rows - 1)
+                for c in range(model.columnCount())
+                for role in (Qt.DisplayRole, Qt.EditRole,
+                             Qt.TextAlignmentRole, Qt.ForegroundRole)]
+
+    assert cells(cached) == cells(plain)
+    for model in (cached, plain):
+        model.sort(0, Qt.AscendingOrder)
+    assert cells(cached) == cells(plain)
+    assert cached.data(cached.index(0, 0), Qt.DisplayRole) == "0"

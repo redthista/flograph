@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from typing import Any, Optional
 
+import numpy as np
 import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QFont
@@ -15,6 +16,18 @@ from PySide6.QtGui import QColor, QFont
 from ..table_delegate import BAR_ROLE, DECOR_ROLE, HEIGHT_ROLE, ICON_ROLE
 
 PAGE_SIZE = 500
+
+# Values are read out of the frame this many rows at a time and kept: one
+# `iat` costs ~7us, Qt asks data() for about ten roles of every visible cell
+# on every paint, and a formatted table asks for them all — so reading a
+# cell straight from the frame each time was most of what a formatted table
+# cost to paint and scroll. A block rather than a whole column, so a
+# million-row frame pays only for the rows looked at.
+_BLOCK = 1024
+# How many cells' combined styles are kept before the cache starts over. A
+# screenful is a few hundred; this is a table scrolled end to end, many times.
+_STYLE_CACHE_LIMIT = 200_000
+_UNSET = object()
 FLOAT_PRECISION = 6
 
 # Above this row count a conditional-format style is not evaluated: the
@@ -97,6 +110,8 @@ class PandasModel(QAbstractTableModel):
         if spark_hidden:
             hidden = list(hidden or []) + spark_hidden
         self._df = df
+        #: (column, block) -> that block's values, as `iat` would box them
+        self._values: dict = {}
         # The frame as it arrived. sort() reorders a *copy* off this, so
         # ascending/descending/clear all work from a fixed base and the
         # source (and anything downstream sharing it) is never touched.
@@ -139,6 +154,26 @@ class PandasModel(QAbstractTableModel):
     def _src(self, col: int) -> int:
         """A visible column index -> its position in the underlying frame."""
         return col if self._visible is None else self._visible[col]
+
+    def _value(self, row: int, col: int):
+        """`self._df.iat[row, col]`, from a block of the column read once.
+
+        The same object `iat` gives: a numpy column's own scalars, and for
+        dates, durations and extension types what their array boxes them as
+        — a numpy datetime64 would print differently from the Timestamp
+        `iat` returns, so those go through the pandas array too."""
+        key = (col, row // _BLOCK)
+        block = self._values.get(key)
+        if block is None:
+            start = key[1] * _BLOCK
+            series = self._df.iloc[start:start + _BLOCK, col]
+            dtype = series.dtype
+            if isinstance(dtype, np.dtype) and dtype.kind not in "mM":
+                block = series.to_numpy()
+            else:
+                block = list(series.array)
+            self._values[key] = block
+        return block[row - key[1] * _BLOCK]
 
     # ----------------------------------------------- conditional formatting
 
@@ -193,6 +228,8 @@ class PandasModel(QAbstractTableModel):
         # col index -> [(rule index, [CellStyle | None] down the rows)]
         self._col_cache: dict = {}
         self._row_cache = None              # {rule index: [CellStyle | None]}
+        #: (row, col) -> the combined CellStyle (or None) — see _cell_style
+        self._styles_at: dict = {}
 
     def set_rules(self, rules) -> None:
         """Swap the formatting rules and repaint — no model rebuild, so a
@@ -226,6 +263,8 @@ class PandasModel(QAbstractTableModel):
         self._loaded = min(PAGE_SIZE, len(self._df))
         self._col_cache.clear()
         self._row_cache = None
+        self._values.clear()
+        self._styles_at.clear()
 
     def _is_row_rule(self, rule) -> bool:
         return rule.mode == "highlight" and rule.scope == "row"
@@ -275,6 +314,18 @@ class PandasModel(QAbstractTableModel):
         highlight or a single-cell one."""
         if not self._cf_active:
             return None
+        # Asked for once per role per cell per paint, and the answer only
+        # changes with the rules or the row order — both of which clear this.
+        key = (row, col)
+        found = self._styles_at.get(key, _UNSET)
+        if found is not _UNSET:
+            return found
+        if len(self._styles_at) >= _STYLE_CACHE_LIMIT:
+            self._styles_at.clear()
+        self._styles_at[key] = found = self._combined_style(row, col)
+        return found
+
+    def _combined_style(self, row: int, col: int):
         parts = []                         # (rule index, CellStyle)
         for i, styles in self._col_styles(col):
             if row < len(styles) and styles[row] is not None:
@@ -342,6 +393,8 @@ class PandasModel(QAbstractTableModel):
         # old order, the column stats (whole-column min/max/…) still hold
         self._col_cache.clear()
         self._row_cache = None
+        self._values.clear()
+        self._styles_at.clear()
         self.endResetModel()
 
     # ------------------------------------------------------------- shape
@@ -381,7 +434,7 @@ class PandasModel(QAbstractTableModel):
         if role not in self._value_roles or not index.isValid():
             return None
         col = self._src(index.column())
-        value = self._df.iat[index.row(), col]
+        value = self._value(index.row(), col)
         style = self._cell_style(index.row(), col) if self._cf_active else None
         if role == _DISPLAY:
             if style is not None and style.hide_value:

@@ -110,7 +110,9 @@ class NavigatorPanel(QWidget):
         self._pending = QTimer(self)
         self._pending.setSingleShot(True)
         self._pending.setInterval(120)
-        self._pending.timeout.connect(self._rebuild)
+        self._pending.timeout.connect(self._rebuild_if_shown)
+        #: something changed while the panel was closed — see _rebuild_if_shown
+        self._stale = False
 
         ev = graph.events
         for event in (ev.node_added, ev.node_removed, ev.node_moved,
@@ -134,6 +136,22 @@ class NavigatorPanel(QWidget):
 
     def _schedule(self, *_args) -> None:
         self._pending.start()  # restart: rebuild after the events stop coming
+
+    def _rebuild_if_shown(self) -> None:
+        """The debounced rebuild — skipped while the panel is closed, which
+        it is by default. A report typed into, a node dragged: each of those
+        rebuilt a tree nobody could see, and walked every frame's bounds to
+        do it. Opening the panel rebuilds whatever it missed."""
+        if self.isVisible():
+            self._rebuild()
+        else:
+            self._stale = True
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._stale:
+            self._stale = False
+            self._rebuild()
 
     def _on_node_ran(self, *_args) -> None:
         # timings only matter to the runtime ordering; leave the tree alone

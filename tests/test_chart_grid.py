@@ -467,8 +467,11 @@ class TestCosmeticChangesStillReachTheViews:
         qtbot.addWidget(win)
         return win
 
-    def test_a_report_page_re_renders(self, window, qtbot):
+    def test_a_report_page_re_renders(self, window, qtbot, monkeypatch):
         from flograph.core import Page
+        from flograph.ui.report import ReportPage
+        # a page on screen — one out of sight renders once it is shown
+        monkeypatch.setattr(ReportPage, "isVisible", lambda self: True)
         source = window.graph.add_node(
             window.registry.instantiate("flograph.viz.chart_per_value"))
         window.graph.set_label(source.id, "Split")

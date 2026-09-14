@@ -161,6 +161,8 @@ class ReportPage(QWidget):
         self._timer.setSingleShot(True)
         self._timer.setInterval(PREVIEW_DELAY_MS)
         self._timer.timeout.connect(self.refresh_preview)
+        #: something changed while the page was hidden — see _schedule_preview
+        self._preview_stale = False
 
         # Locking lives on the page tab's right-click menu and nowhere else.
         # There used to be a 🔒 here as well, which put the control that
@@ -265,20 +267,30 @@ class ReportPage(QWidget):
             moved = self.editor.textCursor()
             moved.setPosition(min(cursor, len(page.body)))
             self.editor.setTextCursor(moved)
-        self._timer.start()
+        self._schedule_preview()
 
     def _on_node_ran(self, *_args) -> None:
         """A run finished, so the embeds have new content to show."""
-        self._timer.start()
+        self._schedule_preview()
 
     def _on_param_changed(self, *_args) -> None:
         """Any node's param changed — it may be one this report embeds."""
-        self._timer.start()
+        self._schedule_preview()
 
     def _on_page_changed(self, page) -> None:
         """This page's own settings changed — page setup, most of all."""
         if page.id == self.page_id:
+            self._schedule_preview()
+
+    def _schedule_preview(self) -> None:
+        """Re-render soon — or, on a page nobody is looking at, once it is
+        looked at. Every param typed into Properties lands here, for every
+        report page in the project, and rendering one that is out of sight
+        was all cost and nothing to see."""
+        if self.isVisible():
             self._timer.start()
+        else:
+            self._preview_stale = True
 
     # ---------------------------------------------------------- the preview
 
@@ -353,8 +365,12 @@ class ReportPage(QWidget):
 
     def showEvent(self, event) -> None:
         """Switching to this tab resumes its animations, and away pauses
-        them — a report nobody is looking at should cost nothing."""
+        them — a report nobody is looking at should cost nothing. Anything
+        that changed while it was away is rendered now."""
         super().showEvent(event)
+        if self._preview_stale:
+            self._preview_stale = False
+            self._timer.start()
         if self._animator is not None:
             self._animator.set_playing(True)
 

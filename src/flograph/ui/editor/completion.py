@@ -66,6 +66,8 @@ class CompletionController(QObject):
         self._editor = editor
         self._request_id = 0
         self._suffixes: dict[str, str] = {}
+        #: where the open list was put — see _on_completions
+        self._anchor = None
 
         self._thread = QThread(self)
         self._worker = JediWorker()
@@ -76,7 +78,8 @@ class CompletionController(QObject):
         self._worker.signatures_ready.connect(self._on_signatures)
         self._thread.start()
 
-        self._completer = QCompleter([], editor)
+        self._model = QStringListModel([], self)
+        self._completer = QCompleter(self._model, editor)
         self._completer.setWidget(editor)
         self._completer.setCompletionMode(QCompleter.PopupCompletion)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive)
@@ -177,15 +180,29 @@ class CompletionController(QObject):
         if not self._editor.hasFocus():
             return
         self._suffixes = dict(payload)
-        self._completer.setModel(QStringListModel([name for name, _ in payload]))
-        self._completer.setCompletionPrefix(self._current_prefix())
+        # into the model the list already has: QCompleter.setModel hides an
+        # open list, so a new model per reply closed and reopened it per key
+        names = [name for name, _ in payload]
+        if self._model.stringList() != names:
+            self._model.setStringList(names)
+        prefix = self._current_prefix()
+        self._completer.setCompletionPrefix(prefix)
+        popup = self._completer.popup()
         if self._completer.completionCount() == 0:
-            self._completer.popup().hide()
+            popup.hide()
             return
-        rect = self._editor.cursorRect()
-        rect.setWidth(self._completer.popup().sizeHintForColumn(0)
-                      + self._completer.popup().verticalScrollBar().sizeHint().width())
-        self._completer.complete(rect)
+        # under the start of the name rather than the caret, so an open list
+        # stays put while the name is typed — moving an open popup on
+        # Wayland closes it and opens it again
+        at = self._editor.textCursor()
+        at.setPosition(at.position() - len(prefix))
+        rect = self._editor.cursorRect(at)
+        anchor = (rect.left(), rect.top())
+        if not (popup.isVisible() and anchor == self._anchor):
+            self._anchor = anchor
+            rect.setWidth(popup.sizeHintForColumn(0)
+                          + popup.verticalScrollBar().sizeHint().width())
+            self._completer.complete(rect)
         # highlight the first suggestion so a bare Enter/Tab accepts it
         self._completer.popup().setCurrentIndex(
             self._completer.completionModel().index(0, 0))

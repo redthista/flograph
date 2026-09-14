@@ -52,11 +52,14 @@ class VariableCompleter(QObject):
         self._editor = editor
         self._names = names
 
-        self._completer = QCompleter([], editor)
+        self._model = QStringListModel([], self)
+        self._completer = QCompleter(self._model, editor)
         self._completer.setWidget(editor)
         self._completer.setCompletionMode(QCompleter.PopupCompletion)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive)
         self._completer.activated.connect(self._insert)
+        #: where the open list was put — see _refresh
+        self._anchor = None
         # installed after QCompleter's own popup filter, so this runs first
         self._completer.popup().installEventFilter(self)
 
@@ -136,17 +139,28 @@ class VariableCompleter(QObject):
         if not items:
             popup.hide()
             return
-        self._completer.setModel(QStringListModel(items, self._completer))
+        # The names go into the model the list already has. A new model
+        # every key was a new popup every key: QCompleter.setModel hides the
+        # list it is showing, so it closed and opened again on each letter.
+        if self._model.stringList() != items:
+            self._model.setStringList(items)
         self._completer.setCompletionPrefix(match.group(1))
         if self._completer.completionCount() == 0:
             popup.hide()
             return
         if isinstance(self._editor, QPlainTextEdit):
-            rect = self._editor.cursorRect()
-            rect.setWidth(popup.sizeHintForColumn(0)
-                          + popup.verticalScrollBar().sizeHint().width())
-            self._completer.complete(rect)
-        else:
+            # under the start of the name, not the caret, so an open list
+            # stays where it is while the name is typed
+            at = self._editor.textCursor()
+            at.setPosition(pos - len(match.group(1)))
+            rect = self._editor.cursorRect(at)
+            anchor = (rect.left(), rect.top())
+            if not (popup.isVisible() and anchor == self._anchor):
+                self._anchor = anchor
+                rect.setWidth(popup.sizeHintForColumn(0)
+                              + popup.verticalScrollBar().sizeHint().width())
+                self._completer.complete(rect)
+        elif not popup.isVisible():
             self._completer.complete()
         # highlight the first suggestion so a bare Enter/Tab accepts it
         popup.setCurrentIndex(self._completer.completionModel().index(0, 0))

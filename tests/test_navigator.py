@@ -328,8 +328,10 @@ class TestWhereEachNodeIsUsed:
         panel._rebuild()
         assert "Report page “Monthly”" in top_item(panel, node.id).toolTip(0)
 
-    def test_placing_a_tile_updates_the_answer(self, env, qtbot):
+    def test_placing_a_tile_updates_the_answer(self, env, qtbot, monkeypatch):
         graph, _, _, _, panel = env
+        # an open panel: a closed one waits until it is opened
+        monkeypatch.setattr(type(panel), "isVisible", lambda self: True)
         node = add_node(graph, "Revenue")
         graph.add_page(Page(id="p1", title="Today"))
         panel._rebuild()
@@ -338,8 +340,10 @@ class TestWhereEachNodeIsUsed:
             lambda: "Today" in top_item(panel, node.id).toolTip(0),
             timeout=2000)
 
-    def test_typing_into_a_report_updates_the_answer(self, env, qtbot):
+    def test_typing_into_a_report_updates_the_answer(self, env, qtbot, monkeypatch):
         graph, _, _, _, panel = env
+        # an open panel: a closed one waits until it is opened
+        monkeypatch.setattr(type(panel), "isVisible", lambda self: True)
         node = add_node(graph, "Revenue")
         graph.add_page(Page(id="p1", title="Monthly", kind="report"))
         panel._rebuild()
@@ -348,8 +352,10 @@ class TestWhereEachNodeIsUsed:
             lambda: "Monthly" in top_item(panel, node.id).toolTip(0),
             timeout=2000)
 
-    def test_editing_a_report_card_updates_the_answer(self, env, qtbot):
+    def test_editing_a_report_card_updates_the_answer(self, env, qtbot, monkeypatch):
         graph, _, _, _, panel = env
+        # an open panel: a closed one waits until it is opened
+        monkeypatch.setattr(type(panel), "isVisible", lambda self: True)
         node = add_node(graph, "Revenue")
         card = add_node(graph, "Summary", type_id="flograph.viz.report_card")
         panel._rebuild()
@@ -358,3 +364,18 @@ class TestWhereEachNodeIsUsed:
             lambda: "Report card “Summary”" in
             top_item(panel, node.id).toolTip(0),
             timeout=2000)
+
+    def test_a_closed_panel_catches_up_when_it_opens(self, env, qtbot):
+        """Closed, as it is by default, the panel skips the rebuilds it is
+        sent — a report typed into rebuilt a tree nobody could see — and
+        opening it rebuilds what it missed."""
+        from PySide6.QtGui import QShowEvent
+
+        graph, _, _, _, panel = env
+        panel._rebuild()
+        assert not panel.isVisible()
+        node = add_node(graph, "Late")
+        qtbot.waitUntil(lambda: not panel._pending.isActive(), timeout=2000)
+        assert ("node", node.id) not in flat(panel)
+        panel.showEvent(QShowEvent())
+        assert ("node", node.id) in flat(panel)

@@ -477,13 +477,30 @@ class TestInTheWindow:
             widget._setup_btn.click()
         assert blocker.args == [page_id]
 
-    def test_changing_the_setup_re_renders_the_preview(self, window):
+    def test_changing_the_setup_re_renders_the_preview(self, window,
+                                                        monkeypatch):
         """The preview draws its charts at the body width, so a new paper
         size has to reach it — otherwise it keeps the old proportions."""
         page_id = self.report_page(window)
         widget = window._dashboard_pages[page_id]
+        # a page on screen; one out of sight waits — see the next test
+        monkeypatch.setattr(type(widget), "isVisible", lambda self: True)
         widget._timer.stop()
         window.graph.set_page_setup(page_id, PageSetup(size="A3"))
+        assert widget._timer.isActive()
+
+    def test_a_page_out_of_sight_renders_when_it_is_shown(self, window):
+        """Every param typed anywhere re-rendered every report page, looked
+        at or not. One out of sight now renders what it missed once shown."""
+        from PySide6.QtGui import QShowEvent
+
+        page_id = self.report_page(window)
+        widget = window._dashboard_pages[page_id]
+        assert not widget.isVisible()
+        widget._timer.stop()
+        window.graph.set_page_setup(page_id, PageSetup(size="A3"))
+        assert not widget._timer.isActive()
+        widget.showEvent(QShowEvent())
         assert widget._timer.isActive()
 
     def test_the_export_uses_the_page_setup(self, window, monkeypatch,
