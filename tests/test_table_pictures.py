@@ -345,6 +345,16 @@ class TestOnTheCard:
 class TestTheRulesDialog:
     COLUMNS = ["name", "logo", "status"]
 
+    @pytest.fixture(autouse=True)
+    def _clear_the_clipboard(self):
+        """The clipboard owns the QMimeData a paste test puts on it, and
+        Python's handle to it is gone by the time the application is torn
+        down: left there, the process segfaulted on exit."""
+        yield
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is not None:
+            QApplication.clipboard().clear()
+
     def test_the_pictures_page_writes_a_line_that_comes_back(self, qtbot):
         from flograph.ui.properties.table_rule_wizard import (K_PICTURE,
                                                               RuleBuilder)
@@ -432,7 +442,7 @@ class TestTheRulesDialog:
         QApplication.clipboard().setMimeData(mime)
         _dialog, edit = self.cell(qtbot)
         edit.setFocus()
-        qtbot.keyClick(edit, Qt.Key_V, Qt.ControlModifier)
+        _press_paste(edit)
         uri = images.picture_uri(edit.text())
         assert uri is not None
         assert max(images.picture_dimensions(uri)) == 128
@@ -451,8 +461,29 @@ class TestTheRulesDialog:
         QApplication.clipboard().setMimeData(mime)
         _dialog, edit = self.cell(qtbot)
         edit.setFocus()
-        qtbot.keyClick(edit, Qt.Key_V, Qt.ControlModifier)
+        _press_paste(edit)
         assert edit.text() == "✓"
+
+
+def _press_paste(widget) -> None:
+    """Press Ctrl+V on `widget`, leaving no modifier held afterwards.
+
+    A qtbot.keyClick with Ctrl left the application believing Ctrl was
+    still down, and every later test in the same process inherited it:
+    grid snapping reads the held modifiers, and five of its tests failed
+    whenever they ran after these on one worker."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+    QApplication.sendEvent(
+        widget, QKeyEvent(QEvent.KeyPress, Qt.Key_V, Qt.ControlModifier))
+    # Qt takes the application's held modifiers from the key *presses* it
+    # delivers — releases and mouse moves leave them be (measured) — so a
+    # press carrying Ctrl leaves Ctrl held until some press doesn't. A key
+    # press of nothing, with nothing held, puts it back without typing.
+    for kind in (QEvent.KeyPress, QEvent.KeyRelease):
+        QApplication.sendEvent(
+            widget, QKeyEvent(kind, Qt.Key_unknown, Qt.NoModifier))
 
 
 class TestIconSizedPictures:
