@@ -4,10 +4,11 @@ so two nodes that are never on screen together can still be wired without
 letting go, panning, and starting again."""
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import QUndoStack
+from PySide6.QtGui import QContextMenuEvent, QUndoStack
 from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
 from flograph.core import Frame, Graph
+import flograph.ui.canvas.view as view_module
 from flograph.ui.canvas import NodeGraphScene, NodeGraphView
 from flograph.ui.canvas.base_view import (EDGE_SCROLL_MARGIN,
                                           edge_scroll_delta)
@@ -317,3 +318,110 @@ class TestStaleDragState:
         scene.cancel_active_drags()
         assert not scene.wire_drag_active
         assert not scene.canvas_drag_active
+
+
+def _button_event(item, kind, pos, button, buttons):
+    event = QGraphicsSceneMouseEvent(kind)
+    event.setPos(pos)
+    event.setScenePos(item.mapToScene(pos))
+    event.setButton(button)
+    event.setButtons(buttons)
+    event.setModifiers(Qt.NoModifier)
+    event.setAccepted(True)
+    return event
+
+
+HEADER = QPointF(40.0, 8.0)
+PRESS = QEvent.GraphicsSceneMousePress
+RELEASE = QEvent.GraphicsSceneMouseRelease
+
+
+class TestAStrandedDragLetsGo:
+    """The user's report: after a while the model canvas kept scrolling at
+    the border with nothing held, until the app was restarted. A drag armed
+    on a press and ended only by its own release, so any release that went
+    astray pinned the edge-scroll on for good."""
+
+    def test_a_right_click_mid_drag_does_not_count_a_second_drag(self, env):
+        _graph, scene, view, a, _b = env
+        item = scene.node_items[a.id]
+        both = Qt.LeftButton | Qt.RightButton
+        item.mousePressEvent(
+            _button_event(item, PRESS, HEADER, Qt.LeftButton, Qt.LeftButton))
+        assert view._edge_timer.isActive()
+        item.mousePressEvent(
+            _button_event(item, PRESS, HEADER, Qt.RightButton, both))
+        item.mouseReleaseEvent(
+            _button_event(item, RELEASE, HEADER, Qt.RightButton, Qt.LeftButton))
+        assert scene.canvas_drag_active      # still the left button's drag
+        item.mouseReleaseEvent(
+            _button_event(item, RELEASE, HEADER, Qt.LeftButton, Qt.NoButton))
+        assert not scene.canvas_drag_active
+        assert not view._edge_timer.isActive()
+
+    def test_no_context_menu_while_something_is_dragged(self, env,
+                                                        monkeypatch):
+        """The menu's event loop is what swallows the left release."""
+        _graph, scene, view, a, _b = env
+        item = scene.node_items[a.id]
+        asked = []
+        view.node_context_requested.connect(lambda *args: asked.append(args))
+        pos = view.mapFromScene(item.mapToScene(QPointF(40.0, 30.0)))
+
+        def right_click():
+            view.contextMenuEvent(QContextMenuEvent(
+                QContextMenuEvent.Reason.Mouse, pos,
+                view.viewport().mapToGlobal(pos)))
+
+        monkeypatch.setattr(view_module, "held_mouse_buttons",
+                            lambda: Qt.LeftButton | Qt.RightButton)
+        item.mousePressEvent(
+            _button_event(item, PRESS, HEADER, Qt.LeftButton, Qt.LeftButton))
+        right_click()
+        assert asked == []
+        item.mouseReleaseEvent(
+            _button_event(item, RELEASE, HEADER, Qt.LeftButton, Qt.NoButton))
+        monkeypatch.setattr(view_module, "held_mouse_buttons",
+                            lambda: Qt.RightButton)
+        right_click()                        # no drag: the menu is back
+        assert len(asked) == 1
+
+    def test_a_drag_whose_release_never_came_ends_and_keeps_its_move(
+            self, env, monkeypatch):
+        _graph, scene, view, a, _b = env
+        scene.snap_enabled = False
+        item = scene.node_items[a.id]
+        item.mousePressEvent(
+            _button_event(item, PRESS, HEADER, Qt.LeftButton, Qt.LeftButton))
+        item.setPos(item.pos() + QPointF(140.0, 60.0))   # Qt carried it
+        monkeypatch.setattr(view_module, "held_mouse_buttons",
+                            lambda: Qt.LeftButton)
+        view._edge_scroll_tick()
+        assert scene.canvas_drag_active      # button still down: carry on
+        # ...then a menu or dialog takes the release
+        monkeypatch.setattr(view_module, "held_mouse_buttons",
+                            lambda: Qt.NoButton)
+        view._edge_scroll_tick()
+        assert not scene.canvas_drag_active
+        assert not view._edge_timer.isActive()
+        assert item._dragging is False and item._group_starts is None
+        assert scene.undo_stack.count() == 1  # the move was kept
+        scene.undo_stack.clear()
+
+    def test_a_stranded_lone_frame_drag_keeps_its_move(self, env,
+                                                       monkeypatch):
+        graph, scene, view, *_ = env
+        scene.snap_enabled = False
+        graph.add_frame(Frame(id="fr", title="Stage", rect=(0, 0, 300, 200)))
+        item = scene.frame_items["fr"]
+        item.mousePressEvent(_scene_press(item, QPointF(150.0, 6.0)))
+        assert view._edge_timer.isActive()
+        item.setPos(item.pos() + QPointF(80.0, 40.0))
+        monkeypatch.setattr(view_module, "held_mouse_buttons",
+                            lambda: Qt.NoButton)
+        view._edge_scroll_tick()
+        assert not scene.canvas_drag_active
+        assert not view._edge_timer.isActive()
+        assert item._edge_scrolling is False
+        assert graph.frames["fr"].rect[:2] == (80.0, 40.0)
+        scene.undo_stack.clear()

@@ -1930,6 +1930,31 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
             item._group_starts = None
             item._grab = None
 
+    def end_stranded_drags(self) -> None:
+        """Finish drags whose mouse release never arrived, found with no
+        button held (the view's edge-scroll tick is what notices).
+
+        The release goes astray when something takes the mouse mid-drag — a
+        context menu or dialog opening, a canvas tab hiding the item holding
+        it. Unlike cancel_active_drags, which is for a graph going away, the
+        items are still here and sit where the user left them on screen, so
+        what moved is committed rather than dropped. Qt's grab for the
+        release that never came is let go as well, or the next press
+        anywhere on the canvas would be delivered to that item."""
+        for item in (*self.node_items.values(), *self.frame_items.values(),
+                     *self.shape_items.values()):
+            starts = getattr(item, "_group_starts", None)
+            if starts is not None:
+                item._group_starts = None
+                self.commit_group_move(starts)
+        for item in self.frame_items.values():
+            if item._edge_scrolling:
+                item.commit_carried_move(self)
+        grabber = self.mouseGrabberItem()
+        if grabber is not None:
+            grabber.ungrabMouse()
+        self.cancel_active_drags()
+
     def begin_group_drag(self) -> dict:
         """Arm every selected node/frame for a group drag: flag each as
         dragging so its own itemChange snaps (Qt moves the whole selection by

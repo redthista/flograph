@@ -20,6 +20,15 @@ from .file_drop import resolve_dropped_path
 from .scene import NodeGraphScene
 from .stacking import layer_action_for
 
+
+def held_mouse_buttons():
+    """The mouse buttons down right now, by the application's record.
+
+    A seam for tests: a synthetic press sent straight to an item or widget
+    never reaches QGuiApplication's record, so tests say what is held."""
+    return QApplication.mouseButtons()
+
+
 # Hold this to see every port's name. Q because the canvas has already spent
 # F (frame), Tab (palette), Space (pan), Delete/Backspace and the arrows, and
 # because a letter next to nothing important is cheap to hold with the left
@@ -485,6 +494,13 @@ class NodeGraphView(ZoomPanGraphicsView):
             # a belt for the signal being missed (scene swapped mid-drag)
             self._edge_timer.stop()
             return
+        if held_mouse_buttons() == Qt.NoButton:
+            # A drag with no button down is one whose release went somewhere
+            # else — a menu or dialog that opened mid-drag took it — so no
+            # release handler will ever end it. Left alone the canvas goes on
+            # gliding at every border until the flow is reopened.
+            scene.end_stranded_drags()
+            return
         if self._panning:
             # a middle-drag pan is its own way of reaching the edge; it must
             # never also trigger the drag-a-thing-to-the-border scroll, even
@@ -729,6 +745,13 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .connection_item import ConnectionItem
         from .shape_item import ShapeItem
         from .. import menu_guard
+        scene = self.scene()
+        if (scene is not None and scene.canvas_drag_active
+                and held_mouse_buttons() & Qt.LeftButton):
+            # a right-click while dragging something: a menu opening now
+            # would take the left button's release and strand the drag
+            event.accept()
+            return
         if menu_guard.stray(event):
             # the tail of a menu that just closed over this view (the page
             # bar's), at a point that is inside the viewport — so only the

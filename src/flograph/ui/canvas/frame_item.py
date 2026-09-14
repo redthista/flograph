@@ -822,6 +822,10 @@ class FrameItem(QGraphicsObject):
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton and event.buttons() & Qt.LeftButton:
+            # a second button mid-drag; see NodeItem.mousePressEvent
+            event.accept()
+            return
         if self._toggle_rect().contains(event.pos()):
             # same button-style deal as the run glyph below: act on release
             # so a slightly sloppy click doesn't also drag the frame
@@ -911,6 +915,9 @@ class FrameItem(QGraphicsObject):
         # does it for this frame and for each one riding along
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton and event.buttons() & Qt.LeftButton:
+            super().mouseReleaseEvent(event)   # not the drag's end
+            return
         scene = self.scene()
         self._dragging = False
         if self._edge_scrolling:
@@ -941,6 +948,13 @@ class FrameItem(QGraphicsObject):
             scene.commit_group_move(self._group_starts)
             self._group_starts = None
             return
+        self.commit_carried_move(scene)
+
+    def commit_carried_move(self, scene) -> None:
+        """Push a lone frame drag — the box and everything it carried — as
+        one move, and let go of what it carried. The release does this, and
+        so does the scene for a drag whose release never came
+        (NodeGraphScene.end_stranded_drags)."""
         if self.pos() != self._press_pos:
             moves = {}
             for item, offset in self._grabbed:

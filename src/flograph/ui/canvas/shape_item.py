@@ -297,6 +297,10 @@ class ShapeItem(QGraphicsObject):
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton and event.buttons() & Qt.LeftButton:
+            # a second button mid-drag; see NodeItem.mousePressEvent
+            event.accept()
+            return
         self._press_pos = self.pos()
         self._press_size = (self._w, self._h)
         self._press_scene = event.scenePos()
@@ -366,6 +370,9 @@ class ShapeItem(QGraphicsObject):
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton and event.buttons() & Qt.LeftButton:
+            super().mouseReleaseEvent(event)   # not the drag's end
+            return
         scene = self.scene()
         if self._group_starts is not None and scene is not None:
             scene.commit_group_move(self._group_starts)

@@ -4015,6 +4015,13 @@ class NodeItem(QGraphicsObject):
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton and event.buttons() & Qt.LeftButton:
+            # A second button pressed while the left one holds a drag — a
+            # right-click mid-move. The gesture stays the left button's:
+            # arming it again here counted two drags that one release could
+            # never end, and the canvas edge-scrolled from then on.
+            event.accept()
+            return
         fold = self._fold_toggle_rect()
         if (event.button() == Qt.LeftButton and fold is not None
                 # generous: an 11x10 glyph is a small target, and a mistaken
@@ -4207,6 +4214,10 @@ class NodeItem(QGraphicsObject):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton and event.buttons() & Qt.LeftButton:
+            # that second button letting go: not the end of the drag
+            super().mouseReleaseEvent(event)
+            return
         if self._note_link_press is not None:
             press, self._note_link_press = self._note_link_press, None
             href = self.note_link_at(event.pos())
