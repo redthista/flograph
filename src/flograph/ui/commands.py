@@ -20,6 +20,7 @@ _ID_PARAM = 1002
 _ID_TILE_RECT = 1003
 _ID_DESCRIPTION = 1004
 _ID_PAGE_BODY = 1005
+_ID_PAGE_CSS = 1006
 # The mark is live-applied from the Appearance dialog as the user tries
 # things, so merging keeps clicking through sixteen swatches to find the
 # right one a single undo step rather than sixteen.
@@ -976,6 +977,34 @@ class SetPageBodyCommand(QUndoCommand):
         return True
 
 
+class SetPageCustomCssCommand(QUndoCommand):
+    """One report stylesheet edit, merged like Markdown body edits."""
+
+    def __init__(self, graph: Graph, page_id: str, css: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("edit report CSS", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).custom_css
+        self._new = css
+
+    def id(self) -> int:
+        return _ID_PAGE_CSS
+
+    def redo(self) -> None:
+        self._graph.set_page_custom_css(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_custom_css(self._page_id, self._old)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (not isinstance(other, SetPageCustomCssCommand)
+                or other._page_id != self._page_id):
+            return False
+        self._new = other._new
+        return True
+
+
 class SetPageColorCommand(QUndoCommand):
     def __init__(self, graph: Graph, page_id: str, color: Optional[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -1115,6 +1144,26 @@ class SetPageSetupCommand(QUndoCommand):
         self._graph.set_page_setup(self._page_id, self._old)
 
 
+class SetPagePreviewModeCommand(QUndoCommand):
+    """Select the report preview target, saved with the page."""
+
+    def __init__(self, graph: Graph, page_id: str, mode: str,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        mode = "web" if mode == "web" else "pages"
+        super().__init__("web preview" if mode == "web"
+                         else "pages preview", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).preview_mode
+        self._new = mode
+
+    def redo(self) -> None:
+        self._graph.set_page_preview_mode(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_preview_mode(self._page_id, self._old)
+
+
 class ReorderPagesCommand(QUndoCommand):
     def __init__(self, graph: Graph, order: list[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -1162,6 +1211,7 @@ class DuplicatePageCommand(QUndoCommand):
             title=f"{src.title} (copy)",
             kind=src.kind,
             body=src.body,
+            custom_css=src.custom_css,
             frame=src.frame,
             tiles=new_tiles,
             color=src.color,
@@ -1174,6 +1224,7 @@ class DuplicatePageCommand(QUndoCommand):
             # copied, not shared: two pages pointing at one mutable setup
             # would mean editing either one changed both
             setup=src.setup.copy(),
+            preview_mode=src.preview_mode,
             background=src.background,
             tile_style=src.tile_style.copy(),
         )

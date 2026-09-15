@@ -190,6 +190,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "title": p.title,
                     "kind": p.kind,
                     "body": p.body,
+                    **({"custom_css": p.custom_css} if p.custom_css else {}),
                     # only a canvas tab fenced to a frame names one
                     **({"frame": p.frame} if p.frame else {}),
                     "color": p.color,
@@ -200,6 +201,7 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "fit_to_window": p.fit_to_window,
                     # only what the user changed — see PageSetup.to_dict
                     "setup": p.setup.to_dict(),
+                    "preview_mode": p.preview_mode,
                     # a dashboard's look, only once someone has set one
                     **({"background": p.background} if p.background else {}),
                     **({"tile_style": p.tile_style.to_dict()}
@@ -452,6 +454,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # dashboard, which is exactly what those files meant
             kind=entry.get("kind") or "dashboard",
             body=entry.get("body", ""),
+            custom_css=str(entry.get("custom_css") or ""),
             # absent in every page but a canvas tab fenced to a frame
             frame=str(entry.get("frame") or ""),
             color=entry.get("color"),
@@ -469,6 +472,8 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # absent in files written before page setup existed, and absent
             # in any page left at the defaults — both mean "the defaults"
             setup=PageSetup.from_dict(entry.get("setup")),
+            preview_mode=("web" if entry.get("preview_mode") == "web"
+                          else "pages"),
             # absent before dashboards could be formatted, and on any page
             # nobody has — both mean the theme's look
             background=clean_background(entry.get("background")),

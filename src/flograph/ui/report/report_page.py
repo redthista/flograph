@@ -14,15 +14,17 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QTextCursor, QUndoStack
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton, QSplitter,
-    QToolButton, QVBoxLayout, QWidget,
+    QComboBox, QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton,
+    QSplitter, QStackedWidget, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph
 
-from ..commands import SetPageBodyCommand
+from ..commands import (SetPageBodyCommand, SetPageCustomCssCommand,
+                        SetPagePreviewModeCommand)
 from .preview import PagedPreview
 from .render import render_report
+from .web_preview import WebPreview
 
 # How long typing has to pause before the preview re-renders. Re-rendering
 # is cheap for text but redraws every embedded chart, so it is not something
@@ -79,6 +81,46 @@ class ReportPage(QWidget):
         self.editor.setTabChangesFocus(True)
         self.editor.setPlaceholderText(
             "Write the report in markdown, and ![[embed]] what the flow made…")
+        self.css_editor = QPlainTextEdit()
+        self.css_editor.setObjectName("report_css_source")
+        self.css_editor.setFont(font)
+        self.css_editor.setPlaceholderText(
+            "CSS used by Web preview and saved HTML, for example:\n\n"
+            "body { font-family: sans-serif; }\n"
+            ".flograph-table th { background: #1d4ed8; color: white; }")
+        from .html import CSS_TEMPLATES
+        from .css_snippets import list_snippets, read_snippet
+        self._css_template = QComboBox()
+        self._css_template.addItem("Choose a starter theme…")
+        self._css_sources = {}
+        for name, css in CSS_TEMPLATES.items():
+            self._css_template.addItem(name)
+            self._css_sources[name] = css
+        for path in list_snippets():
+            label = f"Saved: {path.stem}"
+            self._css_template.addItem(label)
+            self._css_sources[label] = read_snippet(path)
+        self._css_apply = QPushButton("Insert")
+        self._css_apply.setToolTip(
+            "Insert the selected CSS at the editor cursor")
+        self._css_apply.clicked.connect(self._insert_css_template)
+        self._css_save = QPushButton("Save snippet…")
+        self._css_save.setToolTip("Save the current CSS for reuse in another report")
+        self._css_save.clicked.connect(self._save_css_snippet)
+        css_panel = QWidget()
+        css_layout = QVBoxLayout(css_panel)
+        css_layout.setContentsMargins(0, 0, 0, 0)
+        css_toolbar = QHBoxLayout()
+        css_toolbar.addWidget(QLabel("Starter theme:"))
+        css_toolbar.addWidget(self._css_template)
+        css_toolbar.addWidget(self._css_apply)
+        css_toolbar.addWidget(self._css_save)
+        css_toolbar.addStretch(1)
+        css_layout.addLayout(css_toolbar)
+        css_layout.addWidget(self.css_editor, 1)
+        self._editor_tabs = QTabWidget()
+        self._editor_tabs.addTab(self.editor, "Markdown")
+        self._editor_tabs.addTab(css_panel, "CSS")
         # names as you type: labels after ![[, ports and options after |,
         # page titles in a (page:) link — Ctrl+Space anywhere
         from .completion import ReportCompleter, page_vocabulary
@@ -90,6 +132,17 @@ class ReportPage(QWidget):
         # is invisible in a continuous view until the PDF comes out.
         self.preview = PagedPreview()
         self.preview.link_activated.connect(self._follow_link)
+        self.web_preview = WebPreview()
+        self._preview_stack = QStackedWidget()
+        self._preview_stack.addWidget(self.preview)
+        self._preview_stack.addWidget(self.web_preview)
+        self._preview_mode = QComboBox()
+        self._preview_mode.addItem("Pages", "pages")
+        self._preview_mode.addItem("Web", "web")
+        self._preview_mode.setToolTip(
+            "Choose the PDF-faithful paged preview or the scrolling browser preview")
+        self._preview_mode.currentIndexChanged.connect(
+            self._preview_mode_changed)
 
         self._insert_btn = QToolButton()
         self._insert_btn.setText("Insert embed ▾")
@@ -138,6 +191,8 @@ class ReportPage(QWidget):
         toolbar.setContentsMargins(6, 4, 6, 0)
         toolbar.addWidget(self._insert_btn)
         toolbar.addWidget(self._flow_btn)
+        toolbar.addWidget(QLabel("Preview:"))
+        toolbar.addWidget(self._preview_mode)
         toolbar.addWidget(self._help_btn)
         toolbar.addWidget(self._status, 1)
         toolbar.addWidget(self._setup_btn)
@@ -145,8 +200,8 @@ class ReportPage(QWidget):
         toolbar.addWidget(self._export_btn)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self.editor)
-        splitter.addWidget(self.preview)
+        splitter.addWidget(self._editor_tabs)
+        splitter.addWidget(self._preview_stack)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([520, 620])
@@ -170,6 +225,7 @@ class ReportPage(QWidget):
         # once, and getting back needed the tab menu anyway. One door in and
         # the same door out.
         self.editor.textChanged.connect(self._on_text_changed)
+        self.css_editor.textChanged.connect(self._on_css_changed)
 
         self._event_subs = [
             (graph.events.page_body_changed, self._on_body_changed),
@@ -193,6 +249,9 @@ class ReportPage(QWidget):
         self._load_from_model()
         page = self._page()
         self.set_view_mode(page.view_mode if page is not None else False)
+        self._set_preview_mode(page.preview_mode if page is not None else "pages")
+        if page is not None and page.preview_mode == "web":
+            self.refresh_preview()
 
     # ------------------------------------------------------------- the mode
 
@@ -210,7 +269,7 @@ class ReportPage(QWidget):
         so the one surface that is always reachable carries all of it.
         """
         self._view_mode = bool(view_mode)
-        self.editor.setVisible(not self._view_mode)
+        self._editor_tabs.setVisible(not self._view_mode)
         self._toolbar.setVisible(not self._view_mode)
 
     def view_mode(self) -> bool:
@@ -238,6 +297,7 @@ class ReportPage(QWidget):
             return
         self._loading = True
         self.editor.setPlainText(page.body)
+        self.css_editor.setPlainText(page.custom_css)
         self._loading = False
         self.refresh_preview()
 
@@ -252,6 +312,50 @@ class ReportPage(QWidget):
         self._undo_stack.push(
             SetPageBodyCommand(self._graph, self.page_id, text))
         self._timer.start()
+
+    def _on_css_changed(self) -> None:
+        if self._loading:
+            return
+        page = self._page()
+        text = self.css_editor.toPlainText()
+        if page is None or text == page.custom_css:
+            return
+        self._undo_stack.push(
+            SetPageCustomCssCommand(self._graph, self.page_id, text))
+        self._timer.start()
+
+    def _insert_css_template(self) -> None:
+        name = self._css_template.currentText()
+        css = self._css_sources.get(name)
+        if css is None:
+            return
+        cursor = self.css_editor.textCursor()
+        prefix = "" if cursor.atBlockStart() else "\n\n"
+        cursor.insertText(prefix + css.rstrip() + "\n")
+        self.css_editor.setFocus()
+
+    def _save_css_snippet(self) -> None:
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        from .css_snippets import save_snippet
+        css = self.css_editor.toPlainText()
+        if not css.strip():
+            QMessageBox.information(self, "Save CSS snippet",
+                                    "Add some CSS before saving a snippet.")
+            return
+        name, accepted = QInputDialog.getText(
+            self, "Save CSS snippet", "Snippet name:")
+        if not accepted or not name.strip():
+            return
+        try:
+            path = save_snippet(name, css)
+        except OSError as exc:
+            QMessageBox.warning(self, "Save CSS snippet", str(exc))
+            return
+        label = f"Saved: {path.stem}"
+        self._css_sources[label] = css
+        if self._css_template.findText(label) < 0:
+            self._css_template.addItem(label)
+        self._css_template.setCurrentText(label)
 
     def _on_body_changed(self, page) -> None:
         """An undo, a redo, or a load changed the body under us. Only touch
@@ -280,6 +384,11 @@ class ReportPage(QWidget):
     def _on_page_changed(self, page) -> None:
         """This page's own settings changed — page setup, most of all."""
         if page.id == self.page_id:
+            if self.css_editor.toPlainText() != page.custom_css:
+                self._loading = True
+                self.css_editor.setPlainText(page.custom_css)
+                self._loading = False
+            self._set_preview_mode(page.preview_mode)
             self._schedule_preview()
 
     def _schedule_preview(self) -> None:
@@ -316,6 +425,14 @@ class ReportPage(QWidget):
         if not shiboken6.isValid(self.preview):
             return
         self.problems = rendered.problems
+        if self.preview_mode() == "web":
+            from .html import report_html
+            self._stop_animations()
+            self.web_preview.set_html(
+                report_html(rendered, page.title, setup=setup,
+                            custom_css=page.custom_css))
+            self._status.setText(self._problem_text())
+            return
         # Before the old document goes: a running QMovie writing frames into
         # a deleted document is a crash, not a stale picture.
         self._stop_animations()
@@ -325,6 +442,34 @@ class ReportPage(QWidget):
         # the preview useless while writing past the first screenful
         self.preview.verticalScrollBar().setValue(position)
         self._status.setText(self._problem_text())
+
+    def preview_mode(self) -> str:
+        return self._preview_mode.currentData() or "pages"
+
+    def _set_preview_mode(self, mode: str) -> None:
+        mode = "web" if mode == "web" else "pages"
+        index = self._preview_mode.findData(mode)
+        if index >= 0:
+            self._preview_mode.blockSignals(True)
+            self._preview_mode.setCurrentIndex(index)
+            self._preview_mode.blockSignals(False)
+        self._preview_stack.setCurrentIndex(1 if mode == "web" else 0)
+        self._flow_btn.setVisible(mode == "pages")
+        self._editor_tabs.tabBar().setVisible(mode == "web")
+        self._editor_tabs.tabBar().setTabVisible(1, mode == "web")
+        if mode == "pages" and self._editor_tabs.currentIndex() == 1:
+            self._editor_tabs.setCurrentIndex(0)
+
+    def _preview_mode_changed(self, _index: int) -> None:
+        page = self._page()
+        if page is None:
+            return
+        mode = self.preview_mode()
+        if page.preview_mode != mode:
+            self._undo_stack.push(
+                SetPagePreviewModeCommand(self._graph, self.page_id, mode))
+        self._set_preview_mode(mode)
+        self.refresh_preview()
 
     def _follow_link(self, href: str) -> None:
         """A link clicked on the paper: `page:` to another page of this

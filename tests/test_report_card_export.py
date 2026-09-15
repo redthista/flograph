@@ -16,7 +16,7 @@ import pytest
 
 from flograph.core import Graph
 from flograph.core.page_setup import PageSetup
-from flograph.ui.report.html import report_html
+from flograph.ui.report.html import CSS_TEMPLATES, report_html
 from flograph.ui.report.render import render_body, render_card
 
 
@@ -136,6 +136,11 @@ class TestItLooksLikeTheReport:
         later in the head to win on a tie — and still be inside the head."""
         html = report_html(self.plain(), "R", setup=PageSetup())
         assert html.index("<style") < html.index("@page") < html.index("</head>")
+
+    def test_a_starter_theme_is_included_after_the_built_in_style(self):
+        html = report_html(self.plain(), "R", custom_css=CSS_TEMPLATES["Clean"])
+        assert ".flograph-table th" in html
+        assert html.rfind("<style>") > html.find("@page")
 
 
 class TestAutoRefresh:

@@ -29,6 +29,119 @@ import re
 _SRC = 'src="{}"'
 
 
+# Starter styles are deliberately ordinary browser CSS. They are inserted
+# into the page's custom stylesheet, so a user can edit the result rather
+# than being locked into a theme.
+CSS_TEMPLATES = {
+    "Clean": """body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  color: #1f2937;
+  background: #f3f4f6;
+}
+body > * { max-width: 100%; }
+h1, h2, h3 { color: #111827; }
+h1 { border-bottom: 2px solid #2563eb; padding-bottom: 0.3em; }
+h2 { margin-top: 1.6em; color: #1d4ed8; }
+table { width: 100%; margin: 1.2em 0; }
+table thead,
+table thead tr,
+table thead th,
+table thead td {
+  background-color: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+.flograph-table thead th *, .flograph-table thead td *,
+table thead td p, table thead td span {
+  color: #ffffff !important;
+  background-color: #1d4ed8 !important;
+}
+.flograph-table tr:nth-child(even) { background: #eff6ff; }
+td, th { padding: 7px 9px; }
+img { display: block; margin: 1.5em auto; }
+""",
+    "Editorial": """body {
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.65;
+  color: #292524;
+  background: #fafaf9;
+}
+h1, h2, h3 { font-family: system-ui, sans-serif; color: #292524; }
+h1 { font-size: 2.2em; letter-spacing: -0.02em; }
+h2 { margin-top: 2em; border-bottom: 1px solid #d6d3d1; padding-bottom: 0.2em; }
+blockquote { border-left: 4px solid #a16207; background: #fefce8; padding: 0.7em 1em; }
+table { width: 100%; margin: 1.5em 0; }
+table thead,
+table thead tr,
+table thead th,
+table thead td {
+  background-color: #44403c !important;
+  color: #ffffff !important;
+}
+.flograph-table thead th *, .flograph-table thead td *,
+table thead td p, table thead td span {
+  color: #ffffff !important;
+  background-color: #44403c !important;
+}
+.flograph-table tr:nth-child(even) { background: #f5f5f4; }
+td, th { padding: 8px 10px; }
+img { display: block; margin: 2em auto; }
+""",
+    "Slate": """body {
+  font-family: Inter, system-ui, sans-serif;
+  line-height: 1.5;
+  color: #e2e8f0;
+  background: #0f172a;
+}
+h1, h2, h3 { color: #f8fafc; }
+h1 { border-bottom: 2px solid #38bdf8; padding-bottom: 0.3em; }
+h2 { color: #7dd3fc; margin-top: 1.6em; }
+a { color: #67e8f9; }
+blockquote { color: #fde68a; border-left-color: #f59e0b; }
+table { width: 100%; margin: 1.2em 0; }
+.flograph-table { background: #1e293b; }
+table thead,
+table thead tr,
+table thead th,
+table thead td {
+  background-color: #0369a1 !important;
+  color: #ffffff !important;
+}
+.flograph-table thead th *, .flograph-table thead td *,
+table thead td p, table thead td span {
+  color: #ffffff !important;
+  background-color: #0369a1 !important;
+}
+.flograph-table tbody td:not([bgcolor]),
+table tbody td:not([bgcolor]),
+table > tr > td[style*="border-top"]:not([bgcolor]):not([style*="background"]) {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+}
+.flograph-table tbody td:not([bgcolor]) *,
+table tbody td:not([bgcolor]) *,
+table > tr > td[style*="border-top"]:not([bgcolor]):not([style*="background"]) * {
+  color: #1f2937 !important;
+}
+.flograph-table tbody tr:nth-child(even) td:not([bgcolor]),
+table tbody tr:nth-child(even) td:not([bgcolor]),
+table > tr:nth-of-type(odd) > td[style*="border-top"]:not([bgcolor]):not([style*="background"]) {
+  background-color: #f1f5f9 !important;
+}
+/* Data bars use a nested layout table. Its value cell must inherit the
+   outer row's colour; only the track itself should have a light background. */
+table table td:not([bgcolor]) {
+  background-color: transparent !important;
+}
+table table > tr > td:first-child {
+  background-color: inherit !important;
+}
+.flograph-table tr:nth-child(even) { background: #273449; }
+td, th { padding: 7px 9px; }
+""",
+}
+
+
 def _data_uri(payload: bytes, mime: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(payload).decode('ascii')}"
 
@@ -107,7 +220,7 @@ table {{ border-collapse: collapse; }}
 
 
 def report_html(rendered, title: str = "", setup=None,
-                auto_refresh: bool = False) -> str:
+                auto_refresh: bool = False, custom_css: str = "") -> str:
     """`rendered` as a standalone HTML document.
 
     An animation is written out as the file it arrived as, so a GIF that
@@ -128,6 +241,8 @@ def report_html(rendered, title: str = "", setup=None,
         html = html.replace(_SRC.format(f"embed:{index}"), _SRC.format(uri))
     if setup is not None:
         html = _styled(html, page_style(setup))
+    if custom_css:
+        html = _styled(html, custom_css)
     if auto_refresh:
         html = _styled(html, "", head_extra=_AUTO_REFRESH)
     return _titled(html, title)

@@ -2257,11 +2257,12 @@ class MainWindow(QMainWindow):
         return path if path.lower().endswith(suffix) else path + suffix
 
     def _write_html(self, rendered, path: str, title: str,
-                    setup=None) -> None:
+                    setup=None, custom_css: str = "") -> None:
         """Shared by the page's Save HTML and the card's."""
         from .report import report_html
         try:
-            Path(path).write_text(report_html(rendered, title, setup=setup),
+            Path(path).write_text(report_html(
+                rendered, title, setup=setup, custom_css=custom_css),
                                   encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
@@ -2290,7 +2291,7 @@ class MainWindow(QMainWindow):
         if path is None:
             return
         self._write_html(widget.rendered(for_print=True), path, page.title,
-                         setup=page.setup)
+                         setup=page.setup, custom_css=page.custom_css)
 
     def _export_report_pdf(self, page_id: str) -> None:
         page = self.graph.pages.get(page_id)

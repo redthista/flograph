@@ -421,6 +421,28 @@ class TestThePageModel:
         assert page.kind == "report"
         assert page.body == "# Q3\n\n![[Sales]]\n"
 
+    def test_web_preview_mode_round_trips(self, registry):
+        graph = Graph()
+        graph.add_page(Page(id="p1", kind="report", preview_mode="web"))
+        data = json.loads(json.dumps(graph_to_dict(graph)))
+        page = graph_from_dict(data, registry).pages["p1"]
+        assert page.preview_mode == "web"
+
+    def test_unknown_preview_mode_defaults_to_pages(self, registry):
+        graph = Graph()
+        graph.add_page(Page(id="p1", kind="report", preview_mode="web"))
+        data = json.loads(json.dumps(graph_to_dict(graph)))
+        data["graph"]["pages"][0]["preview_mode"] = "unknown"
+        page = graph_from_dict(data, registry).pages["p1"]
+        assert page.preview_mode == "pages"
+
+    def test_custom_css_round_trips(self, registry):
+        graph = Graph()
+        graph.add_page(Page(id="p1", kind="report", custom_css="body { color: red; }"))
+        data = json.loads(json.dumps(graph_to_dict(graph)))
+        page = graph_from_dict(data, registry).pages["p1"]
+        assert page.custom_css == "body { color: red; }"
+
     def test_a_file_written_before_reports_loads_as_a_dashboard(self, registry):
         graph = Graph()
         graph.add_page(Page(id="p1", title="Board"))
@@ -493,6 +515,28 @@ class TestTheWidget:
         page.editor.setPlainText("Answer: ![[Total]]")
         page.refresh_preview()
         assert "42" in page.preview.document().toHtml()
+
+    def test_switching_preview_mode_is_undoable(self, env):
+        page, graph, stack, _tmp = env
+        page._preview_mode.setCurrentIndex(1)
+        assert graph.pages["p1"].preview_mode == "web"
+        stack.undo()
+        assert graph.pages["p1"].preview_mode == "pages"
+
+    def test_css_edit_is_undoable(self, env):
+        page, graph, stack, _tmp = env
+        page.css_editor.setPlainText("body { color: red; }")
+        assert graph.pages["p1"].custom_css == "body { color: red; }"
+        stack.undo()
+        assert graph.pages["p1"].custom_css == ""
+
+    def test_css_starter_theme_replaces_editor_contents(self, env):
+        page, graph, _stack, _tmp = env
+        page._preview_mode.setCurrentIndex(1)
+        page._css_template.setCurrentText("Clean")
+        page._insert_css_template()
+        assert "flograph-table" in page.css_editor.toPlainText()
+        assert graph.pages["p1"].custom_css == page.css_editor.toPlainText()
 
     def test_problems_are_shown_beside_the_toolbar(self, env):
         page, _graph, _stack, _tmp = env

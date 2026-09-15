@@ -217,6 +217,7 @@ class Page:
     title: str = "Page"
     kind: str = "dashboard"       # "dashboard" | "report" | "canvas"
     body: str = ""                # report pages: the markdown source
+    custom_css: str = ""           # report pages: browser-preview stylesheet
     # canvas pages: the id of the frame the tab is fenced to, "" for the
     # whole canvas. May dangle (the frame was deleted) exactly like
     # Tile.node_id — the tab then says so.
@@ -254,6 +255,9 @@ class Page:
     # Its defaults reproduce what reports did before it existed, so a page
     # nobody has set up behaves exactly as before.
     setup: PageSetup = field(default_factory=PageSetup)
+    # Report pages: the preview target. Pages is the PDF-faithful view;
+    # web is the continuously scrolling browser view.
+    preview_mode: str = "pages"
     # Dashboard pages: the colour behind the tiles ("#rrggbb"), None for the
     # theme's canvas, and the look every tile on the page takes unless it
     # says otherwise. A report ignores both.
@@ -1186,6 +1190,13 @@ class Graph:
         self.events.page_body_changed.emit(page)
         return page
 
+    def set_page_custom_css(self, page_id: str, css: str) -> Page:
+        """Replace a report page's browser stylesheet."""
+        page = self.page(page_id)
+        page.custom_css = css or ""
+        self.events.page_changed.emit(page)
+        return page
+
     def set_page_view_mode(self, page_id: str, view_mode: bool) -> Page:
         """Switch a page between edit and view mode. Separate from
         update_page for the same reason as set_page_color: False has to mean
@@ -1214,6 +1225,13 @@ class Graph:
         """
         page = self.page(page_id)
         page.setup = setup.copy() if setup is not None else PageSetup()
+        self.events.page_changed.emit(page)
+        return page
+
+    def set_page_preview_mode(self, page_id: str, mode: str) -> Page:
+        """Set a report's preview target, with a safe file-format default."""
+        page = self.page(page_id)
+        page.preview_mode = "web" if mode == "web" else "pages"
         self.events.page_changed.emit(page)
         return page
 
