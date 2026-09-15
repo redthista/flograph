@@ -225,6 +225,32 @@ in, at the size the card is set to. The design comes with it: layout, CSS,
 colours, web fonts. Resize the card to change how the HTML lays out;
 `width=` places the result on the page.
 
+### Web report preview
+
+The report toolbar's **Preview** selector has two targets:
+
+* **Pages** shows the PDF-faithful paginated document. It is the default and
+  remains the right view for checking paper size, page breaks, covers and
+  running headers or footers.
+* **Web** shows the report as a continuously scrolling browser document. It
+  uses the same HTML path as the saved HTML file, so browser CSS is applied
+  as it will be outside flograph.
+
+When **Web** is selected, a **CSS** tab appears beside the Markdown editor.
+CSS is saved with the report page and applies to Web preview and saved HTML;
+it does not change the Pages preview or PDF export. The CSS tab includes
+starter themes (Clean, Editorial and Slate). Selecting **Insert** adds the
+theme at the CSS cursor, so it can be combined with existing rules and edited.
+
+Use **Save snippet...** to store the current stylesheet for reuse. Snippets
+are kept in flograph's user data directory as `.css` files and appear in the
+starter-theme picker on future report pages.
+
+Plotly outputs in report pages currently remain static pictures, including in
+Web preview. Interactive Plotly charts are available on Show Plotly cards;
+interactive Plotly report embeds are planned for the browser-native export
+target.
+
 An embed written **inside code** — `![[Sales]]` in backticks, or in a
 fenced block — is left exactly as typed. That is how a page explains its own
 syntax to whoever reads it, rather than quietly turning the example into
