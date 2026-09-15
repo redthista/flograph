@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | **Web preview and CSS styling for report pages** | Report pages can switch between the existing PDF-faithful **Pages** preview and a continuously scrolling **Web** preview. Web reports support per-page custom CSS, built-in Clean, Editorial and Slate starter themes, and reusable CSS snippets saved in the user's flograph data folder. CSS edits, preview mode and styling persist with the project and participate in undo/redo; Pages and PDF output remain unchanged. |
 
 ## 0.1.14.2
 
