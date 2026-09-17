@@ -224,6 +224,65 @@ class TestBuildSettings:
                      color_sequence="Bold"), table, px)
         assert kwargs["color_discrete_sequence"] == px.colors.qualitative.Bold
 
+    def test_color_map_column_maps_legend_categories_to_colors(self, ps, table):
+        table = table.assign(firm=["A", "B", "A", "B", "A", "B"],
+                             color=["red", "Amber", "red", "Amber", "red",
+                                    "Amber"])
+        kwargs, _ = ps.build(
+            defaults(ps, kind="bar", x="region", y="units", color="firm",
+                     color_map_column="color"), table, px)
+        assert kwargs["color_discrete_map"] == {
+            "A": "#ef4444", "B": "#f59e0b"}
+
+    def test_color_map_column_alone_colors_by_itself(self, ps, table):
+        table = table.assign(rag=["red", "green", "#123456", "red", "green",
+                                  "#123456"])
+        kwargs, _ = ps.build(
+            defaults(ps, kind="bar", x="region", y="units",
+                     color_map_column="rag"), table, px)
+        assert kwargs["color"] == "rag"
+        assert kwargs["color_discrete_map"] == {
+            "red": "#ef4444", "green": "#22c55e", "#123456": "#123456"}
+        px.bar(table, **kwargs)  # plotly takes it
+
+    def test_color_map_column_with_two_colors_for_one_category(self, ps, table):
+        table = table.assign(firm=["A"] * 6,
+                             color=["red", "green"] * 3)
+        with pytest.raises(ValueError, match="more than one color"):
+            ps.build(defaults(ps, kind="bar", x="region", y="units",
+                              color="firm", color_map_column="color"),
+                     table, px)
+
+    def test_explicit_color_map_json_overrides_the_column(self, ps, table):
+        table = table.assign(firm=["A", "B", "A", "B", "A", "B"],
+                             color=["red"] * 6)
+        kwargs, _ = ps.build(
+            defaults(ps, kind="bar", x="region", y="units", color="firm",
+                     color_map_column="color",
+                     color_map_json='{"A": "#123456", "B": "amber"}'),
+            table, px)
+        assert kwargs["color_discrete_map"] == {
+            "A": "#123456", "B": "#f59e0b"}
+
+    def test_color_map_json_keys_match_non_text_categories(self, ps, table):
+        table = table.assign(year=[2024, 2025] * 3)
+        kwargs, _ = ps.build(
+            defaults(ps, kind="bar", x="region", y="units", color="year",
+                     color_map_json='{"2024": "red"}'), table, px)
+        assert kwargs["color_discrete_map"] == {2024: "#ef4444"}
+
+    def test_color_map_on_a_kind_without_categories_is_reported(self, ps, table):
+        kwargs, ignored = ps.build(
+            defaults(ps, kind="density_heatmap", x="units", y="units",
+                     color_map_json='{"A": "red"}'), table, px)
+        assert "color_discrete_map" not in kwargs
+        assert "Color map (JSON)" in ignored
+
+    def test_bad_color_map_json_is_named(self, ps, table):
+        with pytest.raises(ValueError, match="Color map \\(JSON\\)"):
+            ps.build(defaults(ps, kind="bar", x="region", y="units",
+                              color_map_json="[1, 2]"), table, px)
+
     def test_rename_axes_lines_become_a_mapping(self, ps, table):
         kwargs, _ = ps.build(
             defaults(ps, kind="bar", x="region", y="units",

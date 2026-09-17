@@ -278,7 +278,9 @@ class TestThePropertiesPanel:
     def test_no_kind_shows_everything_at_once(self, qtbot, registry):
         for kind in KINDS:
             rows = self._rows(self._panel(qtbot, registry, kind, more=True))
-            assert len(rows) < 50, kind
+            # Out of 100-odd rows. Scatter, which takes the most, is at 51
+            # since Color from column and Color map (JSON).
+            assert len(rows) < 55, kind
 
 
 class TestGraphsSavedBeforeThis:

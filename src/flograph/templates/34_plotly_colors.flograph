@@ -1,0 +1,232 @@
+{
+  "flograph_version": "0.1.14",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "pc_data",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"Project\", \"type\": \"text\"}, {\"name\": \"Region\", \"type\": \"text\"}, {\"name\": \"Score\", \"type\": \"number\"}, {\"name\": \"Status\", \"type\": \"text\"}, {\"name\": \"Region colour\", \"type\": \"text\"}], \"rows\": [[\"Atlas\", \"North\", 88, \"green\", \"#2563eb\"], [\"Beacon\", \"North\", 52, \"amber\", \"#2563eb\"], [\"Cobalt\", \"North\", 31, \"red\", \"#2563eb\"], [\"Delta\", \"South\", 76, \"green\", \"#db2777\"], [\"Ember\", \"South\", 44, \"red\", \"#db2777\"], [\"Falcon\", \"South\", 61, \"amber\", \"#db2777\"], [\"Granite\", \"East\", 93, \"green\", \"#0d9488\"], [\"Harbor\", \"East\", 58, \"amber\", \"#0d9488\"], [\"Iris\", \"East\", 81, \"green\", \"#0d9488\"], [\"Juniper\", \"West\", 27, \"red\", \"#7c3aed\"], [\"Kestrel\", \"West\", 66, \"amber\", \"#7c3aed\"], [\"Lumen\", \"West\", 84, \"green\", \"#7c3aed\"]]}",
+          "width": 560,
+          "height": 380
+        },
+        "code": null,
+        "label": "Projects"
+      },
+      {
+        "id": "pc_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          500
+        ],
+        "params": {
+          "text": "## Choose each category's colour\n\nEvery chart here is in **More options**.\n\n**1 \u00b7 Status in RAG colours** \u2014 *Color from column* = `Status`. The column holds `red`, `amber`, `green`, so the bars are those colours. Color by is empty, so the chart is coloured by Status itself.\n\n**2 \u00b7 Regions in brand colours** \u2014 *Color by* = `Region`, *Color from column* = `Region colour`, a column of `#hex` codes.\n\n**3 \u00b7 Named in JSON** \u2014 *Color map (JSON)*: `{\"green\": \"#16a34a\", \"amber\": \"orange\", \"red\": \"crimson\"}`. Wins over a column where both name a category.\n\n**4 \u00b7 Chart per Value** takes the same settings: one chart per region, still in RAG colours.\n\nA colour can be red, amber, green, orange, yellow, blue, purple, pink, brown, grey, black, white, any CSS name, `#hex` or `rgb()`.",
+          "width": 560,
+          "height": 300
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "pc_rag",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          800,
+          0
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "Project",
+          "y": "Score",
+          "more": true,
+          "color_map_column": "Status",
+          "title": "Project score, coloured by status",
+          "width": 560,
+          "height": 360
+        },
+        "code": null,
+        "label": "1 \u00b7 Status in RAG colours"
+      },
+      {
+        "id": "pc_brand",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          800,
+          520
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "Region",
+          "y": "Score",
+          "summarise": "average",
+          "color": "Region",
+          "more": true,
+          "color_map_column": "Region colour",
+          "title": "Average score by region",
+          "width": 560,
+          "height": 360
+        },
+        "code": null,
+        "label": "2 \u00b7 Regions in brand colours"
+      },
+      {
+        "id": "pc_json",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          800,
+          1040
+        ],
+        "params": {
+          "kind": "pie",
+          "names": "Status",
+          "more": true,
+          "color": "Status",
+          "color_map_json": "{\"green\": \"#16a34a\", \"amber\": \"orange\", \"red\": \"crimson\"}",
+          "title": "Projects by status",
+          "width": 560,
+          "height": 360
+        },
+        "code": null,
+        "label": "3 \u00b7 Named in JSON"
+      },
+      {
+        "id": "pc_per",
+        "type": "flograph.viz.chart_per_value_plotly",
+        "pos": [
+          800,
+          1560
+        ],
+        "params": {
+          "split_by": "Region",
+          "kind": "bar",
+          "x": "Project",
+          "y": "Score",
+          "more": true,
+          "color_map_column": "Status",
+          "width": 560,
+          "height": 1000
+        },
+        "code": null,
+        "label": "4 \u00b7 Chart per region"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1",
+        "src": [
+          "pc_data",
+          "table"
+        ],
+        "dst": [
+          "pc_rag",
+          "table"
+        ]
+      },
+      {
+        "id": "c2",
+        "src": [
+          "pc_data",
+          "table"
+        ],
+        "dst": [
+          "pc_brand",
+          "table"
+        ]
+      },
+      {
+        "id": "c3",
+        "src": [
+          "pc_data",
+          "table"
+        ],
+        "dst": [
+          "pc_json",
+          "table"
+        ]
+      },
+      {
+        "id": "c4",
+        "src": [
+          "pc_data",
+          "table"
+        ],
+        "dst": [
+          "pc_per",
+          "table"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "pc_frame",
+        "title": "Plotly colours \u2014 from a column or JSON",
+        "rect": [
+          -60,
+          -80,
+          1480,
+          2720
+        ],
+        "color": "#26415c"
+      }
+    ],
+    "pages": [
+      {
+        "id": "pc_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "pt1",
+            "node": "pc_rag",
+            "port": "figure",
+            "rect": [
+              40,
+              40,
+              560,
+              340
+            ]
+          },
+          {
+            "id": "pt2",
+            "node": "pc_brand",
+            "port": "figure",
+            "rect": [
+              640,
+              40,
+              560,
+              340
+            ]
+          },
+          {
+            "id": "pt3",
+            "node": "pc_json",
+            "port": "figure",
+            "rect": [
+              40,
+              420,
+              560,
+              340
+            ]
+          },
+          {
+            "id": "pt4",
+            "node": "pc_data",
+            "port": "table",
+            "rect": [
+              640,
+              420,
+              560,
+              340
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

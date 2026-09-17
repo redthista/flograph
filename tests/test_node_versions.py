@@ -83,11 +83,11 @@ class TestEveryBuiltinDeclaresOne:
         # from a handful of params to the full Plotly Express surface, and
         # a user looking at one needs to see which of those they have.
         # Deliberately exact, so a bump has to be a decision someone made
-        # rather than something that drifted. Show Plotly went to 2.1 when
-        # its clicks learned to filter (two new outputs, two new params).
+        # rather than something that drifted. Both nodes are bumped together
+        # when their shared Plotly Express surface gains a user-facing option.
         by_id = {s.type_id: s.version for s in builtin_specs}
-        assert by_id["flograph.viz.show_plotly"] == "2.1"
-        assert by_id["flograph.viz.chart_per_value_plotly"] == "2.0"
+        assert by_id["flograph.viz.show_plotly"] == "2.2"
+        assert by_id["flograph.viz.chart_per_value_plotly"] == "2.1"
 
 
 class TestOlderFlographsIgnoreIt:

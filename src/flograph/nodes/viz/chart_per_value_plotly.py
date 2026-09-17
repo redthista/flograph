@@ -3,6 +3,8 @@
 One interactive chart for every distinct value of a column — the same plot
 repeated across regions, products, months — shown as a stack on the card
 and on a dashboard tile, each one with Plotly's own hover, zoom and pan.
+The chart's **Color by**, **Color from column** and **Color map (JSON)**
+settings work the same way as Show Plotly.
 
 Set "Split by" to the column to loop over and set up the chart as you would
 on Show Plotly. Each chart sees only that group's rows.
@@ -99,7 +101,7 @@ from typing import Any, Iterable, Optional
 NODE = {
     "label": "Chart per Value (Plotly)",
     "category": "Viz",
-    "version": "2.0",
+    "version": "2.1",
     "card": "webview",
     "inputs": [("table", "dataframe")],
     "outputs": [("figures", "any")],
@@ -496,6 +498,11 @@ _ROWS: list[dict[str, Any]] = [
     {"name": "color", "type": "columns", "label": "Color by", "multi": False,
      "default": "", "placeholder": "optional grouping column",
      "arg": "color"},
+    {"name": "color_map_column", "type": "columns",
+     "label": "Color from column", "multi": False, "default": "",
+     "placeholder": "a column of colors: red, amber, #22c55e",
+     "kinds": _kinds_taking("color_discrete_map"),
+     "advanced": True},
     {"name": "size", "type": "columns", "label": "Size by", "multi": False,
      "default": "", "placeholder": "marker size from a column",
      "arg": "size"},
@@ -702,6 +709,11 @@ _ROWS: list[dict[str, Any]] = [
     {"name": "color_sequence", "type": "choice", "label": "Palette",
      "options": ["default", *_COLOR_SEQUENCES], "default": "default",
      "arg": "color_discrete_sequence", "advanced": True},
+    {"name": "color_map_json", "type": "text", "label": "Color map (JSON)",
+     "default": "", "placeholder":
+     '{"North": "red", "South": "amber", "East": "#22c55e"}',
+     "kinds": _kinds_taking("color_discrete_map"),
+     "advanced": True},
     {"name": "color_scale", "type": "choice", "label": "Color scale",
      "options": ["default", *_COLOR_SCALES], "default": "default",
      "arg": "color_continuous_scale", "advanced": True},
@@ -835,6 +847,93 @@ def _column_value(name: str, raw: Any) -> Any:
     if name in _MULTI and not (name in _COLLAPSE_SINGLE and len(picked) == 1):
         return picked
     return picked[0]
+
+
+#: Traffic-light and everyday names, as the colours they mean on a chart.
+#: A name plotly already knows ("red") is still mapped so red, amber and
+#: green read as one set — plotly has no "amber" at all. Anything not in
+#: here (a CSS name, #hex, rgb()) goes to plotly as written.
+_BASIC_COLORS = {
+    "red": "#ef4444", "amber": "#f59e0b", "orange": "#f97316",
+    "yellow": "#eab308", "green": "#22c55e", "blue": "#3b82f6",
+    "purple": "#a855f7", "pink": "#ec4899", "brown": "#92400e",
+    "black": "#000000", "white": "#ffffff", "gray": "#6b7280",
+    "grey": "#6b7280",
+}
+
+
+def _named_color(text: str) -> str:
+    return _BASIC_COLORS.get(text.strip().lower(), text.strip())
+
+
+def _color_discrete_map(values: dict[str, Any], table,
+                        kwargs: dict[str, Any], accepted: frozenset[str] | set[str],
+                        ignored: list[str]) -> None:
+    """Fill in `color_discrete_map` from a colour column and/or JSON.
+
+    The column gives each Color by category the colour on its rows; with
+    no Color by, the colour column is what the chart is coloured by, so a
+    RAG column draws as red, amber and green on its own. JSON is applied
+    on top, so it can correct one category the column got wrong.
+
+    Keys are the table's own values, not their text: plotly matches a
+    category by equality, so a year or a True/False would never match
+    "2024" or "True". JSON keys are matched to them by their text.
+    """
+    map_column = _column_value("color_map_column",
+                               values.get("color_map_column"))
+    raw_json = str(values.get("color_map_json") or "").strip()
+    if not map_column and not raw_json:
+        return
+    if "color_discrete_map" not in accepted:
+        ignored.extend(_LABEL_OF[name]
+                       for name in ("color_map_column", "color_map_json")
+                       if values.get(name))
+        return
+
+    explicit: dict[str, Any] = {}
+    if raw_json:
+        try:
+            explicit = json.loads(raw_json)
+        except ValueError as exc:
+            raise ValueError(
+                f"Color map (JSON): not valid JSON — {exc}") from None
+        if not isinstance(explicit, dict) or not all(
+                isinstance(value, str) for value in explicit.values()):
+            raise ValueError(
+                'Color map (JSON): expected an object like '
+                '{"North": "red", "South": "#22c55e"}')
+
+    mapping: dict[Any, str] = {}
+    if map_column:
+        if map_column not in table.columns:
+            raise ValueError(
+                f"Color map column: column {map_column!r} not in table")
+        kwargs.setdefault("color", map_column)
+        color_column = kwargs["color"]
+        if not isinstance(color_column, str) or color_column not in table.columns:
+            raise ValueError("Color map column needs Color by to be a column")
+        pairs = table[[color_column, map_column]].dropna().drop_duplicates()
+        for category, color in pairs.itertuples(index=False, name=None):
+            color = str(color).strip()
+            if not color:
+                continue
+            color = _named_color(color)
+            previous = mapping.setdefault(category, color)
+            if previous != color:
+                raise ValueError(
+                    f"Color map column {map_column!r} gives {category!r} "
+                    f"more than one color ({previous} and {color})")
+
+    color_column = kwargs.get("color")
+    by_text: dict[str, Any] = {}
+    if isinstance(color_column, str) and color_column in table.columns:
+        for category in table[color_column].dropna().unique():
+            by_text.setdefault(str(category), category)
+    for key, color in explicit.items():
+        mapping[by_text.get(key, key)] = _named_color(color)
+    if mapping:
+        kwargs["color_discrete_map"] = mapping
 
 
 def _default_columns(table, values: dict[str, Any],
@@ -1000,6 +1099,8 @@ def _build(values: dict[str, Any], table, px,
                 px.colors.qualitative, str(value))
         else:
             kwargs[arg] = value
+
+    _color_discrete_map(values, table, kwargs, accepted, ignored)
 
     # A half-given range is no range: plotly wants both ends, and there is
     # nothing sensible to put in the other one — an axis pinned at the
