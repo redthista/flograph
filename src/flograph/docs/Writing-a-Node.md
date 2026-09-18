@@ -87,6 +87,7 @@ value arrives in `run` via `ctx.params[name]`.
 | `choice` | dropdown — needs `"options": [...]` |
 | `columns` | comma list of column names, with a ▾ picker of the input's columns |
 | `date` | calendar picker, stores `"YYYY-MM-DD"` |
+| `color` | swatch + colour picker, stores `"#rrggbb"` (`""` = the theme's own colour) |
 | `password` | masked entry with a reveal toggle |
 | `file_open` / `file_save` / `folder_open` | text + a browse button |
 | `node_ref` | dropdown of other nodes in the graph, stores a node id |
@@ -100,11 +101,13 @@ Extra keys, all optional:
 | `default` | any | Starting value. |
 | `placeholder` | text-like | Grey hint shown when empty. |
 | `options` | `choice` | The dropdown values. May also be supplied at runtime by wiring a column into the node. |
+| `unset_label` | `choice` | A friendlier label for the option that means "leave this alone" — so a sentinel like `keep` doesn't read as a real choice. The stored value is unchanged. |
 | `min` / `max` | `int`, `float` | Spin-box bounds. |
 | `multi` | `columns`, `page_ref` | `False` = pick one column instead of a list. A `page_ref` is one page unless it says `True`, when it becomes ticks over the pages, stored as a comma list of ids — nothing ticked means every page. |
 | `ref_kind` | `node_ref` | Restrict the dropdown to nodes with this card kind. |
 | `visible_when` | any | `{"format": ["csv", "auto"]}` — show this row only while another param holds one of those values. Presentational only: `run` still gets every param. |
 | `insert_columns` | `text` | Offer a column-name picker for a box that is *about* columns but isn't a plain list — `"inline"` inserts at the cursor, `"mapping"` treats the box as `column = value` lines. |
+| `wizard` | `text` | Which builder sits beside the box: `"table"` for the conditional-formatting rules manager (`[[Conditional Formatting]]`), `"chart"` for the chart-rules one (`[[Chart Rules]]`). `rule_wizard: True` is the older spelling of `"table"`. |
 | `hidden` | any | Not shown in the panel (edited elsewhere). |
 | `cosmetic` | any | Changing it does **not** mark the node dirty — its cached output survives. For things that only affect arrangement, like how a list of charts is laid out. |
 | `section` | any | `"Legend"` — put the row under a heading of that name in the Properties panel, which folds. Rows sharing a section gather under its first heading; rows with none stay at the top. A node that declares no sections shows a plain list. |
@@ -363,7 +366,10 @@ the code, and it repairs itself.
 
 Fork **Node Template**, **Control Template** or **Web View Template**
 (Scripting category) for a commented starting point, or copy a finished one
-from the [[Node Cookbook]].
+from the [[Node Cookbook]]. Node Template carries this whole page in its
+comments, and declares one row of every param type under two folded
+Reference sections — open them in the Properties panel to see each widget,
+then delete the rows you don't want.
 
 ## Editing with AI (optional)
 

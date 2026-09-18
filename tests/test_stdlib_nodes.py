@@ -1797,6 +1797,41 @@ class TestScriptingNodes:
             run_node(registry, "flograph.scripting.node_template",
                      {"source": "nope"}, table=table)
 
+    def test_node_template_declares_every_param_type(self, registry):
+        # The template is the reference somebody forks to learn the param
+        # vocabulary, so a type it never shows is a type nobody finds. This
+        # is the test that fails the day a new one is added to PARAM_TYPES.
+        from flograph.core.params import PARAM_TYPES
+
+        spec = registry.get("flograph.scripting.node_template")
+        assert PARAM_TYPES - {p.type for p in spec.params} == set()
+
+    def test_node_template_shows_each_extra_key(self, registry):
+        # Same argument for the keys that decorate a row. Each is only worth
+        # pinning once — one row carrying it is the whole claim.
+        spec = registry.get("flograph.scripting.node_template")
+        assert any(p.placeholder for p in spec.params)
+        assert any(p.unset_label for p in spec.params)
+        assert any(p.minimum is not None and p.maximum is not None
+                   for p in spec.params)
+        assert any(p.type == "columns" and not p.multi for p in spec.params)
+        assert any(p.ref_kind for p in spec.params)
+        assert any(p.visible_when for p in spec.params)
+        assert {"inline", "mapping"} <= {p.insert_columns for p in spec.params}
+        assert any(p.hidden for p in spec.params)
+        assert any(p.cosmetic for p in spec.params)
+        assert any(p.folded for p in spec.params)
+        assert len({p.section for p in spec.params if p.section}) >= 2
+
+    def test_node_template_reference_rows_stay_out_of_the_way(self, registry):
+        # They are a reference, not the example: the four rows the worked
+        # example uses are the ones a freshly dropped node shows, and every
+        # other row is tucked under a folded section (or hidden outright).
+        spec = registry.get("flograph.scripting.node_template")
+        top_level = [p.name for p in spec.params if not p.section
+                     and not p.hidden]
+        assert top_level == ["source", "operation", "factor", "new_column"]
+
 
 READ_FILE = "flograph.io.read_file"
 
