@@ -144,6 +144,10 @@ Ordinary frames are untouched by all this: a frame still gathers whatever
 sits inside it, still folds to a box with **Collapse frame**, and still
 gates a run.
 
+Resting on a folded frame's chevron **outlines where it would reopen to**,
+in the frame's own colour, so what it is about to grow back over — and take
+in — is visible before you click rather than after.
+
 A frame **reopening does not rearrange the canvas**. It grows back over
 whatever has been put in the space it vacated, and anything the region now
 covers is inside the frame — drawn inside it, and folded into it next time

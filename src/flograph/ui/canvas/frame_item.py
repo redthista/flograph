@@ -121,6 +121,7 @@ class FrameItem(QGraphicsObject):
         scene = self.scene()
         if scene is None or self.is_canvas:
             return
+        self._clear_expand_preview()
         from ..commands import SetFrameCollapsedCommand
         if self.collapsed:
             frame_rects = scene.grow_enclosing(self.frame.id,
@@ -764,11 +765,17 @@ class FrameItem(QGraphicsObject):
             self.setCursor(Qt.PointingHandCursor)
             self.setToolTip("Expand this frame" if self.collapsed
                             else "Collapse this frame to a single box")
+            # show where it would reopen to while the pointer is on the
+            # chevron. Reopening does not move the neighbours (0.1.15), so
+            # whatever the region lands on ends up inside the frame — this
+            # is the look before the leap.
+            self._show_expand_preview()
             if self._hover_run:
                 self._hover_run = False
                 self.update()
             super().hoverMoveEvent(event)
             return
+        self._clear_expand_preview()
         hovering = self._run_button_rect().contains(event.pos())
         if hovering != self._hover_run:
             self._hover_run = hovering
@@ -794,7 +801,23 @@ class FrameItem(QGraphicsObject):
                 self.setCursor(Qt.ArrowCursor)
         super().hoverMoveEvent(event)
 
+    def _show_expand_preview(self) -> None:
+        """Outline the region this frame would grow back into. Only while
+        collapsed: an expanded frame is already showing you its region."""
+        scene = self.scene()
+        if not self.collapsed or self.is_canvas or scene is None:
+            return
+        if hasattr(scene, "set_expand_preview"):
+            scene.set_expand_preview(self.expanded_rect(),
+                                     QColor(self.frame.color))
+
+    def _clear_expand_preview(self) -> None:
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "set_expand_preview"):
+            scene.set_expand_preview(None)
+
     def hoverLeaveEvent(self, event) -> None:
+        self._clear_expand_preview()
         if self._hover_run:
             self._hover_run = False
             self.update()

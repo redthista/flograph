@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QPointF, QRectF, QTimer, Signal
-from PySide6.QtGui import QUndoStack
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QUndoStack
 from PySide6.QtWidgets import QGraphicsScene
 
 from flograph.core import (
@@ -34,6 +34,7 @@ from .node_item import (
     DEFAULT_LOD_THRESHOLD, NodeItem, PortItem, compact_on,
 )
 from .stacking import LAYER_LABELS
+from .. import theme
 
 #: The half-extent of the world-sized span used whenever the scroll bars are
 #: hidden. Large enough that a drag pan never reaches an edge, so the canvas
@@ -302,6 +303,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # what a node dragged from the library is currently hovering over,
         # as graphics items — see drop_target_at / set_drop_hint
         self._drop_hint_conn: Optional[ConnectionItem] = None
+        # where a collapsed frame under the pointer would reopen to, drawn
+        # in the foreground — see set_expand_preview
+        self._expand_preview: Optional[QRectF] = None
+        self._expand_preview_color = None
         self._drop_hint_node: Optional[NodeItem] = None
 
         events = graph.events
@@ -1684,6 +1689,55 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
 
     def end_edge_scroll(self) -> None:
         self._bump_group_drags(-1)
+
+    # ------------------------------------------- what an expand would cover
+
+    def set_expand_preview(self, rect: Optional[QRectF] = None,
+                           color=None) -> None:
+        """Outline where a collapsed frame would reopen to, or clear it.
+
+        Drawn by the *scene* rather than by the frame that asked for it:
+        the region is many times the size of the little box, and growing a
+        `boundingRect` to hold it would put a giant invisible rectangle
+        into hit-testing and the minimap for as long as the pointer rested
+        on a chevron (`NodeItem.boundingRect` has the story of the last
+        time something did that).
+
+        It matters more since 0.1.15: reopening no longer pushes the
+        neighbours aside, so what the region lands on is what ends up
+        inside the frame. This is how you see that before clicking rather
+        than after.
+        """
+        if rect is None and self._expand_preview is None:
+            return
+        old = self._expand_preview
+        self._expand_preview = None if rect is None else QRectF(rect)
+        self._expand_preview_color = color
+        for area in (old, self._expand_preview):
+            if area is not None:
+                # the pen straddles the edge, so redraw a little outside it
+                self.invalidate(area.adjusted(-4, -4, 4, 4),
+                                QGraphicsScene.ForegroundLayer)
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawForeground(painter, rect)
+        area = self._expand_preview
+        if area is None or not area.intersects(rect):
+            return
+        color = QColor(self._expand_preview_color or theme.SELECTION_OUTLINE)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        fill = QColor(color)
+        fill.setAlphaF(0.10)
+        painter.setBrush(QBrush(fill))
+        pen = QPen(color, 1.5)
+        pen.setStyle(Qt.DashLine)
+        # in scene units, so the dashes stay the same length on screen at
+        # any zoom rather than turning into a solid line when zoomed out
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawRoundedRect(area, 6, 6)
+        painter.restore()
 
     def cancel_active_drags(self) -> None:
         """Drop every in-progress wire / group / frame drag without a commit.

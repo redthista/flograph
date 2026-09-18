@@ -1042,6 +1042,110 @@ class TestParkedOverOtherNodes:
         assert graph.nodes["left"].pos == before
 
 
+def _hover(item, pos):
+    event = QGraphicsSceneHoverEvent(QEvent.GraphicsSceneHoverMove)
+    event.setPos(QPointF(pos))
+    item.hoverMoveEvent(event)
+
+
+class TestSeeingWhereItWouldReopen:
+    """Rest on a collapsed frame's chevron and the canvas outlines the
+    region it would grow back into.
+
+    It earns its place *because* reopening no longer pushes anything aside
+    (see `TestReopeningMovesNothingElse`): what the region lands on is what
+    ends up inside the frame, so the question "what am I about to take in?"
+    now has consequences, and this is how it gets answered before the click
+    rather than after it.
+    """
+
+    def _folded(self, env, registry):
+        graph, stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 620, 380),
+                              color="#33415c"))
+        add_node(graph, registry, "inside", pos=(40.0, 60.0))
+        collapse(scene, "f1")
+        # dropped into the space the fold left — what the preview is for
+        add_node(graph, registry, "squatter", pos=(300.0, 200.0))
+        return graph, stack, scene, scene.frame_items["f1"]
+
+    def test_hovering_the_chevron_outlines_the_region(self, env, registry):
+        _graph, _stack, scene, item = self._folded(env, registry)
+        assert scene._expand_preview is None
+        _hover(item, item._toggle_rect().center())
+        assert scene._expand_preview == item.expanded_rect()
+
+    def test_it_covers_what_the_reopen_would_take_in(self, env, registry):
+        """The point of it, as a property rather than a rectangle: the node
+        sitting in the vacated space is inside what gets outlined."""
+        _graph, _stack, scene, item = self._folded(env, registry)
+        _hover(item, item._toggle_rect().center())
+        squatter = scene.node_items["squatter"].sceneBoundingRect().center()
+        assert scene._expand_preview.contains(squatter)
+
+    def test_moving_off_the_chevron_takes_it_away(self, env, registry):
+        _graph, _stack, scene, item = self._folded(env, registry)
+        _hover(item, item._toggle_rect().center())
+        _hover(item, QPointF(item.display_size()[0] - 2, 2))
+        assert scene._expand_preview is None
+
+    def test_leaving_the_frame_takes_it_away(self, env, registry):
+        _graph, _stack, scene, item = self._folded(env, registry)
+        _hover(item, item._toggle_rect().center())
+        item.hoverLeaveEvent(QGraphicsSceneHoverEvent(
+            QEvent.GraphicsSceneHoverLeave))
+        assert scene._expand_preview is None
+
+    def test_clicking_it_takes_it_away(self, env, registry):
+        """The region stops being a guess the moment it is real."""
+        _graph, _stack, scene, item = self._folded(env, registry)
+        _hover(item, item._toggle_rect().center())
+        item.toggle_collapsed()
+        assert scene._expand_preview is None
+
+    def test_an_expanded_frame_offers_none(self, env, registry):
+        """It is already showing you its region; a dashed copy of the edge
+        it is drawing would say nothing."""
+        graph, _stack, scene = env
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 620, 380)))
+        add_node(graph, registry, "inside", pos=(40.0, 60.0))
+        item = scene.frame_items["f1"]
+        _hover(item, item._toggle_rect().center())
+        assert scene._expand_preview is None
+
+    def test_it_borrows_the_frames_own_colour(self, env, registry):
+        _graph, _stack, scene, item = self._folded(env, registry)
+        _hover(item, item._toggle_rect().center())
+        assert scene._expand_preview_color.name() == "#33415c"
+
+    def test_it_paints_outside_the_little_box(self, env, registry):
+        """Pixels, not state: the region is many times the size of the box,
+        so it has to be drawn by the scene — a frame painting it would be
+        clipped to its own bounds (see `set_expand_preview`)."""
+        _graph, _stack, scene, item = self._folded(env, registry)
+        area = QRectF(-20, -20, 700, 460)
+
+        def shot():
+            image = QImage(360, 240, QImage.Format_ARGB32)
+            image.fill(0xFF1B1E27)
+            painter = QPainter(image)
+            scene.render(painter, QRectF(image.rect()), area)
+            painter.end()
+            return image
+
+        before = shot()
+        _hover(item, item._toggle_rect().center())
+        after = shot()
+        assert after != before
+        # and in the far corner of the image, a long way outside the 60px
+        # box the collapsed frame is drawn as. Counted over a patch rather
+        # than read at one point: the outline is dashed, so any single
+        # pixel of it may fall in a gap.
+        changed = sum(1 for x in range(240, 360) for y in range(160, 240)
+                      if after.pixel(x, y) != before.pixel(x, y))
+        assert changed > 0, "nothing was drawn outside the collapsed box"
+
+
 class TestReopeningMovesNothingElse:
     """0.1.15: reopening a frame does not rearrange the canvas.
 
