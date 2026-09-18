@@ -309,14 +309,8 @@ class PageTabBar(QTabBar):
                         " · right-click to rename or ungroup")
                     i += 1
                 previous = group
-                # One decision, both folds: a named group's, and the Model
-                # tab's over the canvas tabs it heads (G12/G13). Deciding
-                # them in two places meant the later one winning, which
-                # pulled a grouped canvas tab back onto the bar.
-                away = group in self._folded or (
-                    self._model_folded
-                    and self._kinds.get(page_id) == "canvas")
-                self._set_visible(i, not (away and page_id != current))
+                self._set_visible(
+                    i, not (self._folded_away(page_id) and page_id != current))
                 i += 1
             self._apply_model_fold()
         finally:
@@ -400,6 +394,23 @@ class PageTabBar(QTabBar):
         self._model_folded = not self._model_folded
         self._rebuild_groups()
 
+    def _folded_away(self, page_id) -> bool:
+        """Whether a fold is currently putting this page's tab away — its
+        section's fold, or the Model tab's over the canvas tabs it heads
+        (G12/G13).
+
+        **One decision, both folds, in one place.** Deciding it twice meant
+        the later one winning: it first pulled a grouped canvas tab back
+        onto the bar, and then — because only one of the two copies knew
+        about the Model tab — dragging a page to reorder it unfolded every
+        canvas mid-drag, since a drag changes which tab is current and that
+        runs `_apply_folds` (0.1.15 #11).
+        """
+        group = self._groups.get(page_id, "")
+        if group and group in self._folded:
+            return True
+        return self._model_folded and self._kinds.get(page_id) == "canvas"
+
     def _apply_folds(self) -> None:
         """Show the current page's tab even inside a folded group, and put
         away the one that was current before."""
@@ -408,9 +419,8 @@ class PageTabBar(QTabBar):
             data = self.tabData(i)
             if data in (None, _PLUS) or _header_group(data) is not None:
                 continue
-            group = self._groups.get(data, "")
             self._set_visible(
-                i, not (group in self._folded and data != current))
+                i, not (self._folded_away(data) and data != current))
 
     def _set_visible(self, index: int, visible: bool) -> None:
         """setTabVisible, only when it changes something. Qt's own resets

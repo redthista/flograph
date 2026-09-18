@@ -395,6 +395,74 @@ class TestAModelCanvasTab:
         assert bar.isTabVisible(bar._index_of_page(page_id))
         assert bar.tabText(model_index).startswith("▾")
 
+    def test_dragging_a_page_leaves_the_canvases_folded(self, window):
+        """0.1.15 #11: "dragging around pages to reorder them causes the
+        model to expand and makes the dragging annoying."
+
+        A drag changes which tab is current, which runs `_apply_folds` —
+        and that knew about a *section's* fold but not the Model tab's, so
+        every canvas tab came back onto the bar mid-drag and the tabs
+        shuffled under the pointer. Both folds are one decision now
+        (`_folded_away`).
+        """
+        bar = window.page_bar
+        for i in range(3):
+            window.undo_stack.push(AddPageCommand(
+                window.graph, Page(id=f"pp{i}", title=f"Page {i}")))
+        window._add_page(CANVAS_KIND)
+        canvas_id = bar.current_page_id()
+        bar.select_page("pp0")
+        bar.toggle_model_fold()
+        assert not bar.isTabVisible(bar._index_of_page(canvas_id))
+
+        # drive the drag the way Qt does: move the tab, and let the bar
+        # react to each step through the signal it connects
+        bar._dragged = "pp0"
+        for target in (bar._index_of_page("pp0") + 1,
+                       bar._index_of_page("pp0") + 2):
+            bar.moveTab(bar._index_of_page("pp0"), target)
+            bar._on_tab_moved(target - 1, target)
+            assert not bar.isTabVisible(bar._index_of_page(canvas_id)), \
+                "the canvases unfolded mid-drag"
+        bar._dragged = None
+        bar._rebuild_groups()
+        assert bar.model_folded() is True
+        assert not bar.isTabVisible(bar._index_of_page(canvas_id))
+
+    def test_applying_the_folds_alone_does_not_unfold_them(self, window):
+        """The narrowest statement of the same bug, so a future caller of
+        `_apply_folds` cannot bring it back."""
+        bar = window.page_bar
+        window.undo_stack.push(AddPageCommand(
+            window.graph, Page(id="pp0", title="Page 0")))
+        window._add_page(CANVAS_KIND)
+        canvas_id = bar.current_page_id()
+        bar.select_page("pp0")
+        bar.toggle_model_fold()
+        bar._apply_folds()
+        assert not bar.isTabVisible(bar._index_of_page(canvas_id))
+
+    def test_the_canvas_tab_being_looked_at_still_shows_through(self, window):
+        """The fold hides the others, never the one you are on — that is
+        what `_apply_folds` is *for*, and it still does it."""
+        bar = window.page_bar
+        window._add_page(CANVAS_KIND)
+        canvas_id = bar.current_page_id()
+        bar.toggle_model_fold()
+        assert bar.isTabVisible(bar._index_of_page(canvas_id))
+
+    def test_a_folded_section_is_unaffected_by_the_shared_rule(self, window):
+        """The other half of `_folded_away`, still working."""
+        bar = window.page_bar
+        for i in range(2):
+            window.undo_stack.push(AddPageCommand(
+                window.graph, Page(id=f"pp{i}", title=f"P{i}",
+                                   group="Sales")))
+        bar.select_page("pp0")
+        bar.set_group_folded("Sales", True)
+        assert bar.isTabVisible(bar._index_of_page("pp0"))     # the current
+        assert not bar.isTabVisible(bar._index_of_page("pp1"))
+
     def test_a_canvas_tab_is_the_model_tab_s_and_nothing_else_s(self, window):
         """One header per tab (Dan): a canvas tab is never offered a group
         of its own, and folding the Model tab is what puts it away."""
