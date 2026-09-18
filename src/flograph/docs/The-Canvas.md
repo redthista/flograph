@@ -135,6 +135,13 @@ Ordinary frames are untouched by all this: a frame still gathers whatever
 sits inside it, still folds to a box with **Collapse frame**, and still
 gates a run.
 
+A frame **reopening does not rearrange the canvas**. It grows back over
+whatever has been put in the space it vacated, and anything the region now
+covers is inside the frame — drawn inside it, and folded into it next time
+it folds, which one Ctrl+Z undoes. The one thing that gives way is a frame
+this one is *inside*: a parent stretches to hold a child that comes back
+bigger than the room it is in, and stays that size afterwards.
+
 ## Wires without wires
 
 **Goto / From** nodes carry a value across the canvas without a line: name it

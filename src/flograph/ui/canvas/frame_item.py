@@ -104,41 +104,39 @@ class FrameItem(QGraphicsObject):
 
         Folding writes down what was inside at that moment; the canvas is
         the only thing that can see it, and once folded the region is not
-        there to be read again. Unfolding pushes aside whatever the returning
-        region would land on, in the same undo step, so one Ctrl+Z puts both
-        the frame and the neighbours back.
+        there to be read again.
+
+        Reopening moves **nothing else on the canvas**. It used to shove
+        every node and frame at or beyond it to the right to clear room,
+        write down how far each went, and take that displacement back off
+        when the frame folded again. That is gone (0.1.15): a displacement
+        applied "wherever the thing has since got to" slid things somebody
+        had deliberately moved, and fold/unfold cycles compounded it, which
+        is how nodes ended up walking off to the right for no reason anyone
+        could point at. A frame now reopens over its neighbours and the
+        canvas is arranged by the person using it. The one thing that still
+        gives way is a frame this one is *inside*, which stretches to hold
+        it — see `NodeGraphScene.grow_enclosing`.
         """
         scene = self.scene()
         if scene is None or self.is_canvas:
             return
         from ..commands import SetFrameCollapsedCommand
         if self.collapsed:
-            # its own contents belong inside the region and must sit still;
-            # read before the command clears the membership
-            keep = set(self.frame.members)
-            keep_frames = set(self.frame.member_frames)
-            # planned against the region it is *about* to occupy, so what got
-            # moved can be recorded by the same command that does the fold
-            record, moves, frame_rects = scene.plan_expand_nudge(
-                self.frame.id, self.scene_rect(), self.expanded_rect(),
-                keep, keep_frames)
+            frame_rects = scene.grow_enclosing(self.frame.id,
+                                               self.expanded_rect())
             scene.undo_stack.beginMacro("expand frame")
             scene.undo_stack.push(SetFrameCollapsedCommand(
-                scene.graph, self.frame.id, False, nudged=record))
-            scene.apply_nudge(moves, frame_rects)
+                scene.graph, self.frame.id, False))
+            scene.apply_placement({}, frame_rects)
             scene.undo_stack.endMacro()
             return
         nodes, frames = self.carried_items()
-        # folding puts back whatever reopening it shoved aside
-        moves, frame_rects = scene.unnudge_plan(self.frame.id)
-        scene.undo_stack.beginMacro("collapse frame")
         scene.undo_stack.push(SetFrameCollapsedCommand(
             scene.graph, self.frame.id, True,
             members=tuple(item.node.id for item, _off in nodes),
             member_frames=tuple(item.frame.id for item, _off in frames),
             collapsed_size=(COMPACT_W, COMPACT_MIN_H)))
-        scene.apply_nudge(moves, frame_rects)
-        scene.undo_stack.endMacro()
 
     def apply_stacking(self) -> None:
         """Take the frame's place in the stacking order. Frames have their

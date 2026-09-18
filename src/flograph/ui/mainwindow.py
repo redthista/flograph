@@ -4966,7 +4966,7 @@ class MainWindow(QMainWindow):
         if not moves and not frame_rects:
             return
         self.undo_stack.beginMacro(f"align {mode}")
-        self.scene.apply_nudge(moves, frame_rects)
+        self.scene.apply_placement(moves, frame_rects)
         self.undo_stack.endMacro()
 
     # -------------------------------------------------------- window state
@@ -5162,9 +5162,6 @@ class MainWindow(QMainWindow):
                 "members": [m for m in f.members if m in ids],
                 "member_frames": [m for m in f.member_frames
                                   if m in frame_ids],
-                # `nudged` is deliberately not copied: it records what this
-                # frame shoved aside *on this canvas*, which the copy has
-                # displaced nothing of.
             } for f in frames],
             "shapes": [{
                 "kind": s.kind, "rect": list(s.rect),

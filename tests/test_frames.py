@@ -934,8 +934,20 @@ class _FakeDoubleClick:
 
 
 class TestParkedOverOtherNodes:
-    """The two things a folded frame must never do to whatever it is
-    sitting on: absorb it, or drag it around."""
+    """What a folded frame does to whatever it is sitting on.
+
+    It must never *drag it around*: a drag carries the frame's own members
+    and nothing else, and it was carrying bystanders as a side effect,
+    which is the bug behind "ctrl-z didn't put them back".
+
+    It no longer pushes them out of the way when it reopens (0.1.15) — see
+    `TestReopeningMovesNothingElse`. The consequence, stated plainly
+    because it is a real one: a frame reopened over a node now has that
+    node inside it, drawn inside it, and folding again takes it in. That is
+    what the canvas is showing you before you fold, which is the part that
+    makes it fair; the nudge hid the question by shoving the node away
+    first, at a price paid everywhere else.
+    """
 
     def _folded_over_bystanders(self, env, registry):
         graph, stack, scene = env
@@ -951,14 +963,27 @@ class TestParkedOverOtherNodes:
         graph.move_node("inside", (930.0, 930.0))
         return graph, stack, scene, item
 
-    def test_folding_again_does_not_absorb_what_it_sits_on(self, env, registry):
+    def test_what_the_reopened_frame_is_drawn_around_folds_into_it(
+            self, env, registry):
+        """A node the reopened region covers is inside the frame, and one
+        Ctrl+Z is the way back out."""
         graph, stack, scene, item = self._folded_over_bystanders(env, registry)
         expand(scene, "f1")            # region reappears over the bystanders
-        collapse(scene, "f1")          # and folds again
-        assert "bystander1" not in item.member_ids()
-        assert "bystander2" not in item.member_ids()
+        assert item.scene_rect().contains(
+            scene.node_items["bystander1"].sceneBoundingRect().center())
+        collapse(scene, "f1")
+        assert "bystander1" in item.member_ids()
+        stack.undo()
         assert scene.node_items["bystander1"].isVisible()
-        assert scene.node_items["bystander2"].isVisible()
+
+    def test_one_it_is_merely_near_is_left_out(self, env, registry):
+        """Covered is covered; beside it is not."""
+        graph, stack, scene, item = self._folded_over_bystanders(env, registry)
+        script_node(graph, registry, "clear_of_it", (5000.0, 5000.0))
+        expand(scene, "f1")
+        collapse(scene, "f1")
+        assert "clear_of_it" not in item.member_ids()
+        assert scene.node_items["clear_of_it"].isVisible()
 
     def test_dragging_it_does_not_carry_what_it_sits_on(self, env, registry):
         """The bug behind 'ctrl-z didn't put them back': the drag moved
@@ -970,17 +995,15 @@ class TestParkedOverOtherNodes:
         assert carried == {"inside"}
         assert "bystander1" not in carried and "bystander2" not in carried
 
-    def test_expanding_pushes_the_bystanders_clear(self, env, registry):
+    def test_expanding_leaves_the_bystanders_exactly_where_they_are(
+            self, env, registry):
         graph, stack, scene, item = self._folded_over_bystanders(env, registry)
-        before = graph.nodes["bystander1"].pos
+        before = {n: graph.nodes[n].pos
+                  for n in ("bystander1", "bystander2")}
         expand(scene, "f1")
-        region = item.scene_rect()
-        for name in ("bystander1", "bystander2"):
-            assert not region.intersects(
-                scene.node_items[name].sceneBoundingRect())
-        assert graph.nodes["bystander1"].pos != before
+        assert {n: graph.nodes[n].pos for n in before} == before
         # and its own contents were left exactly where they were
-        assert region.contains(
+        assert item.scene_rect().contains(
             scene.node_items["inside"].sceneBoundingRect().center())
 
     def test_one_undo_puts_the_frame_and_the_bystanders_back(self, env, registry):
@@ -990,31 +1013,6 @@ class TestParkedOverOtherNodes:
         expand(scene, "f1")
         stack.undo()
         assert graph.frames["f1"].collapsed is True
-        assert {n: graph.nodes[n].pos for n in before} == before
-
-    def test_a_blocked_expand_shifts_the_far_side_by_the_same_amount(
-            self, env, registry):
-        """Who moves and how far are separate questions.
-
-        How far is the least that clears whatever is actually in the way.
-        Who is everything beyond the line, near or far — so the layout to the
-        right of the frame keeps its shape exactly rather than being locally
-        squeezed, and folding again is an exact reversal.
-        """
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 300, 200)))
-        script_node(graph, registry, "inside", (50.0, 50.0))
-        collapse(scene, "f1")
-        # dropped into the space the fold vacated: this is what blocks
-        script_node(graph, registry, "squatter", (150.0, 20.0))
-        script_node(graph, registry, "far", (5000.0, 20.0))
-        before = {n: graph.nodes[n].pos for n in ("squatter", "far")}
-        expand(scene, "f1")
-        moved = {n: graph.nodes[n].pos[0] - before[n][0]
-                 for n in ("squatter", "far")}
-        assert moved["squatter"] > 0
-        assert moved["far"] == moved["squatter"]
-        collapse(scene, "f1")
         assert {n: graph.nodes[n].pos for n in before} == before
 
     def test_folding_and_reopening_changes_nothing_at_all(self, env, registry):
@@ -1044,292 +1042,105 @@ class TestParkedOverOtherNodes:
         assert graph.nodes["left"].pos == before
 
 
-class TestNudgePlan:
-    """The displacement arithmetic, without a canvas.
+class TestReopeningMovesNothingElse:
+    """0.1.15: reopening a frame does not rearrange the canvas.
 
-    An expand inserts space rather than resolving collisions: draw a line
-    down from the folded square's bottom-right corner, everything beyond it
-    slides right by the width gained, everything below it in the frame's
-    column slides down by the height gained.
+    It used to. `plan_nudge` shoved every node and frame at or beyond the
+    returning region to the right, recorded how far each went on
+    `Frame.nudged`, and `unnudge_plan` took that displacement back off when
+    the frame folded again — *wherever the thing had got to since*, which
+    its own docstring admitted: "a thing moved somewhere deliberate since
+    the expand still slides back by the shift when the frame folds". So a
+    node you had placed yourself slid sideways for reasons you could not
+    see, and fold/unfold cycles compounded it. That is Dan's "nodes lose
+    track of their location and shoot off to the right".
+
+    These are the tests that would have caught it. They are deliberately
+    about *positions not changing*, because the whole class of bug is the
+    canvas moving something nobody asked it to.
     """
 
-    BOX = (0, 0, 60, 60)
-
-    def plan(self, region, units, box=None):
-        from flograph.ui.canvas.scene import plan_nudge
-        return plan_nudge(QRectF(*(box or self.BOX)), QRectF(*region),
-                          [(k, QRectF(*r)) for k, r in units])
-
-    def test_nothing_in_the_way_moves_nothing(self):
-        assert self.plan((0, 0, 60, 60), [("a", (500, 500, 50, 50))]) == {}
-
-    def test_beyond_the_line_slides_right_just_clear_of_the_region(self):
-        from flograph.ui.canvas.scene import NUDGE_GAP
-        plan = self.plan((0, 0, 300, 200), [("a", (80, 10, 50, 50))])
-        # 300 - 80 to clear it, and the clearance gap, and nothing more
-        assert plan["a"] == (220.0 + NUDGE_GAP, 0.0)
-
-    def test_left_of_the_line_is_left_alone(self):
-        """The complaint was a frame expanding and dragging along something
-        that was never in front of it."""
-        assert self.plan((0, 0, 300, 200), [("a", (-200, 10, 50, 50))]) == {}
-
-    def test_above_is_left_alone(self):
-        assert self.plan((0, 0, 300, 200), [("a", (10, -200, 50, 50))]) == {}
-
-    def test_below_in_the_column_slides_down_just_clear_of_the_region(self):
-        from flograph.ui.canvas.scene import NUDGE_GAP
-        plan = self.plan((0, 0, 300, 200), [("a", (10, 80, 50, 50))])
-        assert plan["a"] == (0.0, 120.0 + NUDGE_GAP)   # 200 - 80, plus gap
-
-    def test_what_is_pushed_lands_clear_of_the_frame_not_against_it(self):
-        """Landing exactly on the edge is arithmetically right and reads as a
-        collision — the node looks stuck to the frame rather than beside it."""
-        from flograph.ui.canvas.scene import NUDGE_GAP
-        region = QRectF(0, 0, 300, 200)
-        for start, expect_axis in (((80, 10, 50, 50), "x"),
-                                   ((10, 80, 50, 50), "y")):
-            plan = self.plan((0, 0, 300, 200), [("a", start)])
-            landed = QRectF(*start).translated(*plan["a"])
-            gap = (landed.left() - region.right() if expect_axis == "x"
-                   else landed.top() - region.bottom())
-            assert gap == NUDGE_GAP, f"{start} landed {gap} from the edge"
-
-    def test_a_clear_region_moves_nothing_at_all(self):
-        """The ratchet. A frame folding and reopening with nothing else
-        changed is growing back into the space it just vacated, so there is
-        nothing to push and it must land exactly where it was — shifting by
-        the width gained regardless walks the canvas right a little further
-        on every cycle, and the fold cannot pull it back."""
-        assert self.plan((0, 0, 300, 200),
-                         [("a", (400, 10, 50, 50)),      # beyond the region
-                          ("b", (10, 300, 50, 50))]) == {}   # below it
-
-    def test_below_but_clear_of_the_column_is_left_alone(self):
-        assert self.plan((0, 0, 300, 200),
-                         [("a", (-200, 80, 50, 50))]) == {}
-
-    def test_a_row_moves_as_one_and_keeps_its_spacing(self):
-        """The compounding bug: each was shoved clear of the one before it,
-        so the far end of a tidy row came back flung twice as far as it
-        should have been."""
-        plan = self.plan((0, 0, 300, 200),
-                         [("a", (80, 10, 50, 50)), ("b", (280, 10, 50, 50)),
-                          ("c", (480, 10, 50, 50))])
-        # a needs the most room (300 - 80, plus the clearance gap); everything
-        # beyond the line goes with it, including c, which was not itself in
-        # the way
-        from flograph.ui.canvas.scene import NUDGE_GAP
-        assert plan["a"] == plan["b"] == plan["c"] == (220.0 + NUDGE_GAP, 0.0)
-
-    def test_no_gaps_are_opened_or_closed(self):
-        units = [("a", (80, 10, 50, 50)), ("b", (280, 10, 50, 50))]
-        plan = self.plan((0, 0, 300, 200), units)
-        gap_before = 280 - (80 + 50)
-        a, b = (QRectF(*r).translated(*plan[k]) for k, r in units)
-        assert b.left() - a.right() == gap_before
-
-    def test_a_frame_growing_by_nothing_moves_nothing(self):
-        assert self.plan((0, 0, 60, 60),
-                         [("a", (80, 10, 50, 50)),
-                          ("b", (10, 80, 50, 50))]) == {}
-
-    def test_anything_clear_of_the_square_ends_clear_of_the_region(self):
-        """The invariant the two rules exist to hold. Sampled over a grid
-        rather than argued at: every start clear of the folded square has to
-        finish clear of what the frame grew into."""
-        box, region = QRectF(0, 0, 60, 60), QRectF(0, 0, 300, 200)
-        for x in range(-260, 400, 20):
-            for y in range(-260, 400, 20):
-                rect = QRectF(x, y, 50, 50)
-                if rect.intersects(box):
-                    continue
-                plan = self.plan((0, 0, 300, 200), [("a", (x, y, 50, 50))])
-                dx, dy = plan.get("a", (0.0, 0.0))
-                assert not rect.translated(dx, dy).intersects(region), \
-                    f"({x},{y}) moved by ({dx},{dy}) and still overlaps"
-
-    def test_something_under_the_square_is_pushed_right_clear_of_the_region(self):
-        """A uniform shift cannot free it — it started further into the
-        region than the shift is long — so it is pushed clear outright, or
-        the next fold would claim it as a member."""
-        plan = self.plan((0, 0, 300, 200), [("a", (30, 30, 50, 50))])
-        dx, dy = plan["a"]
-        assert dy == 0 and 30 + dx >= 300
-
-    def test_a_unit_is_never_pulled_left_or_up(self):
-        for pos in ((80, 10), (10, 80), (500, 500), (30, 30), (-100, -100)):
-            plan = self.plan((0, 0, 300, 200), [("a", (*pos, 50, 50))])
-            dx, dy = plan.get("a", (0.0, 0.0))
-            assert dx >= 0 and dy >= 0
-
-
-class TestNudgeRespectsFrames:
-    def test_expanding_over_a_frame_moves_it_whole(self, env, registry):
-        """The 'it stole some of the nodes' report: the neighbour used to sit
-        still while its contents were shoved out from under it."""
+    def _frame_with_neighbours(self, env, registry):
         graph, stack, scene = env
-        graph.add_frame(Frame(id="mine", rect=(0, 0, 300, 200)))
-        script_node(graph, registry, "own", (50.0, 50.0))
-        collapse(scene, "mine")
+        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
+        script_node(graph, registry, "inside", (40.0, 40.0))
+        collapse(scene, "f1")
+        # three neighbours in the space the fold vacated and beyond it —
+        # each of these used to be displaced
+        script_node(graph, registry, "in_the_way", (150.0, 40.0))
+        script_node(graph, registry, "beyond", (600.0, 40.0))
+        script_node(graph, registry, "below", (40.0, 500.0))
+        graph.add_frame(Frame(id="neighbour", rect=(700, 0, 200, 150)))
+        script_node(graph, registry, "theirs", (740.0, 40.0))
+        return graph, stack, scene
 
-        # a neighbour with two nodes, overlapping where 'mine' will reopen
-        graph.add_frame(Frame(id="theirs", rect=(200, 40, 260, 180)))
-        script_node(graph, registry, "their1", (240.0, 80.0))
-        script_node(graph, registry, "their2", (330.0, 120.0))
-        before = {n: graph.nodes[n].pos for n in ("their1", "their2")}
-        their_rect = graph.frames["theirs"].rect
+    def _positions(self, graph):
+        return ({n: graph.nodes[n].pos for n in graph.nodes},
+                {f: graph.frames[f].rect for f in graph.frames
+                 if f != "f1"})
 
-        expand(scene, "mine")
+    def test_reopening_moves_no_node_and_no_frame(self, env, registry):
+        graph, stack, scene = self._frame_with_neighbours(env, registry)
+        before = self._positions(graph)
+        expand(scene, "f1")
+        assert self._positions(graph) == before
 
-        # the frame moved, and its nodes went with it by the same amount
-        assert graph.frames["theirs"].rect != their_rect
-        dx = graph.frames["theirs"].rect[0] - their_rect[0]
-        dy = graph.frames["theirs"].rect[1] - their_rect[1]
-        for name in ("their1", "their2"):
-            assert graph.nodes[name].pos == (before[name][0] + dx,
-                                             before[name][1] + dy)
-        # so the neighbour still holds exactly what it did
-        rect = QRectF(*graph.frames["theirs"].rect)
-        held = [n for n in ("their1", "their2")
-                if rect.contains(
-                    scene.node_items[n].sceneBoundingRect().center())]
-        assert held == ["their1", "their2"]
+    def test_and_folding_it_again_moves_nothing_either(self, env, registry):
+        graph, stack, scene = self._frame_with_neighbours(env, registry)
+        expand(scene, "f1")
+        before = self._positions(graph)
+        collapse(scene, "f1")
+        assert self._positions(graph)[1] == before[1]
 
-    def test_one_undo_puts_the_neighbouring_frame_back(self, env, registry):
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="mine", rect=(0, 0, 300, 200)))
-        script_node(graph, registry, "own", (50.0, 50.0))
-        collapse(scene, "mine")
-        graph.add_frame(Frame(id="theirs", rect=(200, 40, 260, 180)))
-        script_node(graph, registry, "their1", (240.0, 80.0))
-        before_rect = graph.frames["theirs"].rect
-        before_pos = graph.nodes["their1"].pos
+    def test_ten_cycles_leave_the_canvas_where_it_started(self, env, registry):
+        """The ratchet. Each fold/unfold used to add another displacement
+        that the next fold subtracted from somewhere else."""
+        graph, stack, scene = self._frame_with_neighbours(env, registry)
+        before = self._positions(graph)
+        for _ in range(10):
+            expand(scene, "f1")
+            collapse(scene, "f1")
+        expand(scene, "f1")
+        assert self._positions(graph) == before
 
-        expand(scene, "mine")
+    def test_a_node_moved_while_the_frame_was_open_keeps_its_place(
+            self, env, registry):
+        """The exact failure the old docstring owned up to: a deliberate
+        move, then a fold, and the node slid by a shift it never had."""
+        graph, stack, scene = self._frame_with_neighbours(env, registry)
+        expand(scene, "f1")
+        graph.move_node("beyond", (1234.0, 567.0))
+        collapse(scene, "f1")
+        assert graph.nodes["beyond"].pos == (1234.0, 567.0)
+        expand(scene, "f1")
+        assert graph.nodes["beyond"].pos == (1234.0, 567.0)
+
+    def test_expanding_is_one_undo_step(self, env, registry):
+        graph, stack, scene = self._frame_with_neighbours(env, registry)
+        before = stack.count()
+        expand(scene, "f1")
+        assert stack.count() == before + 1
         stack.undo()
-        assert graph.frames["theirs"].rect == before_rect
-        assert graph.nodes["their1"].pos == before_pos
+        assert graph.frames["f1"].collapsed is True
 
-    def test_its_own_contents_never_travel_with_a_neighbour(self, env, registry):
-        """Frames overlap, and membership is geometric, so a neighbour can
-        legally claim nodes belonging to the frame being expanded. Letting
-        them travel with it dragged the expanding frame's own contents out
-        from under it — and only the ones under the overlap, which looked
-        like 'every child but the first'."""
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="mine", rect=(0, 0, 500, 200)))
-        for i in range(4):
-            script_node(graph, registry, f"child{i}", (40.0 + i * 110, 60.0))
-        collapse(scene, "mine")
-        # a neighbour overlapping where 'mine' reopens, so the later
-        # children fall inside it too
-        graph.add_frame(Frame(id="theirs", rect=(200, 20, 500, 260)))
-        script_node(graph, registry, "theirs1", (600.0, 100.0))
-
-        before = {n: graph.nodes[n].pos for n in graph.nodes}
-        expand(scene, "mine")
-        for i in range(4):
-            assert graph.nodes[f"child{i}"].pos == before[f"child{i}"], \
-                f"child{i} was dragged along by the overlapping neighbour"
-        assert graph.nodes["theirs1"].pos != before["theirs1"]
-
-    def test_collapsing_puts_back_what_expanding_moved(self, env, registry):
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
-        script_node(graph, registry, "inside", (50.0, 50.0))
-        collapse(scene, "f1")
-        script_node(graph, registry, "bystander", (100.0, 100.0))
-        where = graph.nodes["bystander"].pos
-
+    def test_nothing_writes_a_displacement_record_any_more(self, env,
+                                                           registry):
+        """The mechanism, not just the behaviour: the field is gone from
+        the model, so nothing can quietly start recording again."""
+        graph, stack, scene = self._frame_with_neighbours(env, registry)
         expand(scene, "f1")
-        assert graph.nodes["bystander"].pos != where     # shoved aside
-        assert graph.frames["f1"].nudged                 # and written down
-        collapse(scene, "f1")
-        assert graph.nodes["bystander"].pos == where     # and put back
-        assert graph.frames["f1"].nudged == ()           # record spent
+        assert not hasattr(graph.frames["f1"], "nudged")
 
-    def test_a_node_you_moved_yourself_keeps_your_move(self, env, registry):
-        """The shift comes off wherever the thing has got to, so your own
-        move survives it — as an offset from where the thing would have
-        been, which is what you meant by making it."""
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
-        script_node(graph, registry, "inside", (50.0, 50.0))
-        collapse(scene, "f1")
-        script_node(graph, registry, "bystander", (100.0, 100.0))
-
-        expand(scene, "f1")
-        shifted = graph.nodes["bystander"].pos
-        graph.move_node("bystander", (shifted[0] + 40.0, shifted[1] + 90.0))
-        collapse(scene, "f1")
-        assert graph.nodes["bystander"].pos == (140.0, 190.0)
-
-    def test_everything_displaced_comes_back_or_nothing_does(self, env,
-                                                             registry):
-        """The reported inconsistency: displace two, move one of them, fold
-        again, and one came home while the other stayed behind — which reads
-        as the fold simply forgetting about it. A systematic shift has to be
-        reversible as a whole."""
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
-        script_node(graph, registry, "inside", (50.0, 50.0))
-        collapse(scene, "f1")
-        a = script_node(graph, registry, "a", (100.0, 40.0))
-        b = script_node(graph, registry, "b", (100.0, 180.0))
-
-        expand(scene, "f1")
-        moved = graph.nodes["a"].pos[0] - 100.0
-        assert moved > 0
-        # you drag one of them somewhere of your own while it is open
-        graph.move_node("b", (graph.nodes["b"].pos[0], 900.0))
-        collapse(scene, "f1")
-        assert graph.nodes["a"].pos == (100.0, 40.0)     # untouched: home
-        assert graph.nodes["b"].pos == (100.0, 900.0)    # moved: also home,
-        #                                    keeping the drag you made of it
-
-    def test_the_put_back_is_one_undo_step(self, env, registry):
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
-        script_node(graph, registry, "inside", (50.0, 50.0))
-        collapse(scene, "f1")
-        script_node(graph, registry, "bystander", (100.0, 100.0))
-        expand(scene, "f1")
-        shoved = graph.nodes["bystander"].pos
-
-        depth = stack.index()
-        collapse(scene, "f1")
-        assert stack.index() == depth + 1
-        stack.undo()
-        assert graph.frames["f1"].collapsed is False
-        assert graph.nodes["bystander"].pos == shoved
-
-    def test_a_pushed_frame_is_put_back_with_its_contents(self, env, registry):
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="mine", rect=(0, 0, 400, 300)))
-        script_node(graph, registry, "own", (50.0, 50.0))
-        collapse(scene, "mine")
-        graph.add_frame(Frame(id="theirs", rect=(150, 40, 260, 180)))
-        script_node(graph, registry, "their1", (200.0, 80.0))
-        rect_before = graph.frames["theirs"].rect
-        pos_before = graph.nodes["their1"].pos
-
-        expand(scene, "mine")
-        assert graph.frames["theirs"].rect != rect_before
-        collapse(scene, "mine")
-        assert graph.frames["theirs"].rect == rect_before
-        assert graph.nodes["their1"].pos == pos_before
-
-    def test_its_own_nested_frame_is_not_pushed_away(self, env, registry):
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="outer", rect=(0, 0, 400, 300)))
-        graph.add_frame(Frame(id="inner", rect=(50, 50, 100, 100)))
-        script_node(graph, registry, "deep", (70.0, 70.0))
-        collapse(scene, "outer")
-        assert "inner" in graph.frames["outer"].member_frames
-        inner_rect = graph.frames["inner"].rect
-        expand(scene, "outer")
-        assert graph.frames["inner"].rect == inner_rect
+    def test_a_file_written_before_this_still_opens(self, env, registry):
+        """Old projects carry a "nudged" key on their frames. It is read
+        past, and nothing it says is acted on."""
+        graph, stack, scene = self._frame_with_neighbours(env, registry)
+        data = graph_to_dict(graph)
+        frames = data["graph"]["frames"]
+        assert all("nudged" not in f for f in frames)
+        frames[0]["nudged"] = [["node", "beyond", 500.0, 0.0, 1100.0, 40.0]]
+        reloaded = graph_from_dict(data, registry)
+        assert reloaded.nodes["beyond"].pos == (600.0, 40.0)
 
 
 class TestNestedCollapse:
@@ -1481,13 +1292,16 @@ class TestNestedExpand:
         assert graph.nodes["o1"].pos == (40.0, 60.0)     # left of the line
         assert graph.nodes["o2"].pos == (460.0, 160.0)   # beyond the region
 
-    def test_a_sibling_in_the_way_shuffles_along_inside_the_parent(
+    def test_a_sibling_in_the_way_is_left_exactly_where_it_is(
             self, env, registry):
+        """It used to be shoved right to clear the returning region. A
+        frame reopens over its neighbours now (0.1.15) — see
+        `TestReopeningMovesNothingElse` for why."""
         graph, stack, scene = self._nested(env, registry)
         # parked in the space the fold vacated, inside the shared parent
         add_node(graph, registry, "squatter", pos=(300.0, 230.0))
         expand(scene, "inner")
-        assert graph.nodes["squatter"].pos[0] > 300.0
+        assert graph.nodes["squatter"].pos == (300.0, 230.0)
         assert graph.nodes["o1"].pos == (40.0, 60.0)
 
     def test_the_parent_grows_to_keep_hold_of_what_it_had(self, env, registry):
@@ -1533,61 +1347,6 @@ class TestNestedExpand:
         # a big frame overlapping the box but not containing it
         graph.add_frame(Frame(id="over", rect=(30, 30, 400, 300)))
         assert "over" not in scene.enclosing_frames("f1")
-
-
-class TestRowSpacing:
-    """The compounding bug, on a real canvas: expanding a frame into a row of
-    collapsed ones used to fling the far end twice as far as the near end,
-    because each was shoved clear of the one before it."""
-
-    def _row_with_the_box_moved_in(self, env, registry):
-        """Collapse a frame, drag it over to where a row of collapsed frames
-        is, then expand — the sequence the row bug was reported from."""
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="main", rect=(0, 0, 400, 220)))
-        add_node(graph, registry, "a", pos=(40.0, 60.0))
-        for i, x in enumerate((400.0, 700.0)):
-            graph.add_frame(Frame(id=f"r{i}", rect=(x, 0, 160, 140)))
-            add_node(graph, registry, f"r{i}n", pos=(x + 30, 40.0))
-            collapse(scene, f"r{i}")
-        collapse(scene, "main")
-        graph.update_frame("main", rect=(300.0, 0.0, COMPACT_W, COMPACT_MIN_H))
-        graph.move_node("a", (340.0, 60.0))
-        return graph, stack, scene
-
-    def test_a_row_of_collapsed_frames_keeps_its_spacing(self, env, registry):
-        graph, stack, scene = self._row_with_the_box_moved_in(env, registry)
-        starts = [graph.frames[f"r{i}"].rect[0] for i in (0, 1)]
-        gap_before = starts[1] - starts[0]
-        expand(scene, "main")
-        moved = [graph.frames[f"r{i}"].rect[0] for i in (0, 1)]
-        assert moved[0] > starts[0], "the near one was in the way and stayed"
-        assert moved[1] - moved[0] == gap_before, "the row fanned out"
-        assert moved[1] - starts[1] == moved[0] - starts[0]
-
-    def test_the_row_ends_clear_of_the_reopened_frame(self, env, registry):
-        graph, stack, scene = self._row_with_the_box_moved_in(env, registry)
-        expand(scene, "main")
-        region = scene.frame_items["main"].scene_rect()
-        for i in (0, 1):
-            assert not region.intersects(
-                scene.frame_items[f"r{i}"].scene_rect())
-
-    def test_and_puts_them_both_back_on_the_fold(self, env, registry):
-        graph, stack, scene = self._row_with_the_box_moved_in(env, registry)
-        before = {f"r{i}": graph.frames[f"r{i}"].rect for i in (0, 1)}
-        expand(scene, "main")
-        collapse(scene, "main")
-        assert {f"r{i}": graph.frames[f"r{i}"].rect for i in (0, 1)} == before
-
-    def test_their_hidden_contents_travel_with_them(self, env, registry):
-        graph, stack, scene = self._row_with_the_box_moved_in(env, registry)
-        before = {f"r{i}n": graph.nodes[f"r{i}n"].pos for i in (0, 1)}
-        expand(scene, "main")
-        for i in (0, 1):
-            shift = graph.frames[f"r{i}"].rect[0] - (400.0 + 300.0 * i)
-            assert graph.nodes[f"r{i}n"].pos[0] == \
-                before[f"r{i}n"][0] + shift
 
 
 class TestWiresFollowAMovingBox:
@@ -1785,12 +1544,21 @@ class TestAParentThatMustStretch:
         assert graph.frames["outer"].rect[:2] == (0.0, 0.0)
         assert graph.frames["outer"].rect[2] > 300.0
 
-    def test_folding_again_shrinks_it_back(self, env, registry):
+    def test_folding_again_leaves_it_stretched(self, env, registry):
+        """The stretch is not taken back. Reversing it needed a record of
+        what the expand did and a rule for applying that record to whatever
+        the frame had become since — the machinery that slid things nobody
+        had touched, and which went in 0.1.15. A size you can see and drag
+        staying as it is beats one that changes behind you; Ctrl+Z still
+        takes the whole expand back (`test_one_undo_puts_the_parent_back`).
+        """
         graph, stack, scene = self._too_big_for_its_parent(env, registry)
         before = graph.frames["outer"].rect
         expand(scene, "inner")
+        grown = graph.frames["outer"].rect
+        assert grown[2] > before[2] or grown[3] > before[3]
         collapse(scene, "inner")
-        assert graph.frames["outer"].rect == before
+        assert graph.frames["outer"].rect == grown
 
     def test_one_undo_puts_the_parent_back(self, env, registry):
         graph, stack, scene = self._too_big_for_its_parent(env, registry)
@@ -1800,22 +1568,15 @@ class TestAParentThatMustStretch:
         assert graph.frames["outer"].rect == before
         assert graph.frames["inner"].collapsed is True
 
-    def test_a_parent_the_user_has_resized_since_keeps_the_resize(
+    def test_a_parent_the_user_has_resized_since_is_not_touched(
             self, env, registry):
-        """Same rule as a node you have dragged: the stretch comes off
-        whatever size the frame is now, so your own resize survives it."""
+        """Nothing goes looking for the stretch to undo, so a size chosen
+        afterwards is simply the size."""
         graph, stack, scene = self._too_big_for_its_parent(env, registry)
-        before = graph.frames["outer"].rect
         expand(scene, "inner")
-        grown = graph.frames["outer"].rect
-        stretch = (grown[2] - before[2], grown[3] - before[3])
-        assert stretch[0] > 0 or stretch[1] > 0
-        graph.update_frame("outer", rect=(0.0, 0.0, grown[2] + 200.0,
-                                          grown[3] + 100.0))
+        graph.update_frame("outer", rect=(0.0, 0.0, 900.0, 700.0))
         collapse(scene, "inner")
-        assert graph.frames["outer"].rect == (0.0, 0.0,
-                                              before[2] + 200.0,
-                                              before[3] + 100.0)
+        assert graph.frames["outer"].rect == (0.0, 0.0, 900.0, 700.0)
 
     def test_undoing_a_stretch_cannot_turn_a_frame_inside_out(self, env,
                                                               registry):
@@ -1852,75 +1613,6 @@ def wires_anchored_to_hidden(scene):
             if anchor is not None and not owner_visible(anchor):
                 bad.append(f"{ci.conn.src_node}->{ci.conn.dst_node} ({side})")
     return bad
-
-
-class TestNothingToTheLeftEverMoves:
-    """A frame only ever grows right and down, so its left-hand neighbour
-    cannot be in its way — not even one wide enough to overlap the folded
-    square, which used to be flung the whole width of the region."""
-
-    def _left_neighbour(self, env, registry):
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="mid", rect=(400, 100, 380, 240)))
-        add_node(graph, registry, "m1", pos=(430.0, 160.0))
-        # wide enough that its right-hand edge covers where the box will sit
-        graph.add_frame(Frame(id="left", rect=(60, 100, 380, 240)))
-        add_node(graph, registry, "l1", pos=(100.0, 160.0))
-        collapse(scene, "mid")
-        return graph, stack, scene
-
-    def test_a_left_frame_overlapping_the_box_stays_put(self, env, registry):
-        graph, stack, scene = self._left_neighbour(env, registry)
-        before = graph.frames["left"].rect
-        expand(scene, "mid")
-        assert graph.frames["left"].rect == before
-
-    def test_its_contents_stay_put_too(self, env, registry):
-        graph, stack, scene = self._left_neighbour(env, registry)
-        before = graph.nodes["l1"].pos
-        expand(scene, "mid")
-        assert graph.nodes["l1"].pos == before
-
-    def test_a_node_overlapping_the_box_from_the_left_stays_put(self, env,
-                                                               registry):
-        graph, stack, scene = env
-        graph.add_frame(Frame(id="f1", rect=(400, 100, 380, 240)))
-        add_node(graph, registry, "inside", pos=(430.0, 160.0))
-        collapse(scene, "f1")
-        # sits across the box's left edge
-        left = add_node(graph, registry, "left", pos=(360.0, 110.0))
-        before = graph.nodes["left"].pos
-        expand(scene, "f1")
-        assert graph.nodes["left"].pos == before
-
-    def test_the_plan_never_moves_anything_starting_left_of_the_box(self):
-        from flograph.ui.canvas.scene import plan_nudge
-        box, region = QRectF(400, 100, 60, 60), QRectF(400, 100, 380, 240)
-        for x in range(0, 400, 20):
-            plan = plan_nudge(box, region, [("a", QRectF(x, 100, 380, 240))])
-            assert plan == {}, f"a unit starting at x={x} was moved"
-
-
-class TestAFoldedFrameOccupiesOnlyItsBox:
-    """Its members are hidden and occupy no canvas, so the unit an expanding
-    neighbour has to reckon with is the little square and nothing else."""
-
-    def test_its_hidden_members_do_not_stretch_it(self, env, registry):
-        graph, stack, scene = env
-        # a folded frame parked well clear, whose members are still recorded
-        # at positions overlapping the frame about to expand
-        graph.add_frame(Frame(id="far", rect=(0, 0, 400, 260)))
-        add_node(graph, registry, "farnode", pos=(40.0, 40.0))
-        collapse(scene, "far")
-        graph.update_frame("far", rect=(2000.0, 0.0, COMPACT_W, COMPACT_MIN_H))
-        # 'farnode' is left behind at (40, 40) on purpose: the folded box is
-        # what occupies canvas, not where its contents used to be
-        graph.add_frame(Frame(id="f1", rect=(600, 0, 300, 200)))
-        add_node(graph, registry, "inside", pos=(640.0, 40.0))
-        collapse(scene, "f1")
-        units = scene._nudge_units("f1", {"inside"}, set())
-        rect = next(r for key, r, _n, _f in units if key == ("frame", "far"))
-        assert rect.width() == COMPACT_W and rect.height() == COMPACT_MIN_H
 
 
 class TestAFrameCarriesWhatItsNestedFramesHold:
@@ -2296,28 +1988,6 @@ class TestCopyingAFrameTakesItsFrames:
         assert len(copy_outer.member_frames) == 1
         assert copy_outer.member_frames[0] in frames
         assert copy_outer.member_frames[0] != "inner"
-
-    def test_the_displacement_record_is_not_copied(self, window, registry):
-        """It records what the frame shoved aside on *this* canvas; the copy
-        has displaced nothing."""
-        graph, scene = window.graph, window.scene
-        graph.add_frame(Frame(id="f1", rect=(0, 0, 400, 300)))
-        node = registry.instantiate("flograph.scripting.python_script",
-                                    pos=(40.0, 40.0))
-        node.id = "inside"
-        graph.add_node(node)
-        scene.frame_items["f1"].toggle_collapsed()
-        # parked in the space the fold vacated, so reopening has to shove it
-        squatter = registry.instantiate("flograph.scripting.python_script",
-                                        pos=(150.0, 40.0))
-        squatter.id = "squatter"
-        graph.add_node(squatter)
-        scene.frame_items["f1"].toggle_collapsed()      # records a nudge
-        assert graph.frames["f1"].nudged
-        scene.clearSelection()
-        scene.frame_items["f1"].setSelected(True)
-        frames, _nodes = self._paste(window, window._selection_payload())
-        assert graph.frames[frames[0]].nudged == ()
 
     def test_an_old_clipboard_fragment_without_frame_ids_still_pastes(
             self, window, registry):

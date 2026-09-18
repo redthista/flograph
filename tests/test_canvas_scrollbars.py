@@ -7,11 +7,12 @@ fitted to the flow (plus a margin) rather than world-sized — otherwise one
 pixel of bar is thousands of canvas pixels and the smallest drag sends
 everything past like a bullet."""
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QUndoStack
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QUndoStack, QWheelEvent
 
 from flograph.core import Graph
 from flograph.ui.canvas import NodeGraphScene, NodeGraphView
+from flograph.ui.canvas.base_view import ZOOM_MIN
 from flograph.ui.canvas.scene import SCENE_MARGIN
 from flograph.ui.dashboard.dashboard_view import DashboardView
 
@@ -117,3 +118,122 @@ class TestFittedSpan:
         # five percent of the whole bar ≈ a small slide across the margin,
         # not a jump to another county
         assert abs(after - before) < SCENE_MARGIN / 2
+
+
+class TestTheSpanDoesNotDriftTheView:
+    """0.1.15: "when I have the scroll bars on and I zoom out the page can
+    slowly move without me asking it to."
+
+    A view cannot scroll outside the scene rect, and Qt applies that the
+    instant the transform changes — inside `scale()`. With the bars on the
+    span is fitted to the flow, so zooming out far enough that the viewport
+    no longer fits in it left the zoom half-applied: Qt pulled the view back
+    inside, the 250 ms refit grew the span to match, and the next tick did
+    it again. Measured on the unfixed code, the scene point under the
+    cursor wandered from (638, 148) to (-1669, -1222) over sixteen wheel
+    ticks — the canvas sliding out from under the pointer.
+
+    The invariant these hold to is the one a zoom actually promises: **the
+    point under the cursor stays under the cursor**. Asserting on the view
+    centre instead would pass for a zoom that was wrong in a different way,
+    since the centre is *supposed* to move when the anchor is off-centre.
+    """
+
+    ANCHOR = QPoint(180, 140)     # off-centre, as a real cursor is
+
+    def _view_on_a_flow(self, qtbot, registry):
+        graph = Graph()
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        view = NodeGraphView(scene)
+        view.resize(900, 600)
+        view.show()
+        qtbot.addWidget(view)
+        for pos in ((0, 0), (900, 600), (1800, 200)):
+            graph.add_node(registry.instantiate(JOIN, pos=pos))
+        view.set_scrollbars_enabled(True)
+        qtbot.waitUntil(lambda: scene.sceneRect().width() < 5000,
+                        timeout=2000)
+        view.set_zoom(1.0)
+        view.centerOn(900, 300)
+        scene.flush_rect_fit()
+        return graph, scene, view
+
+    def _wheel_out(self, view, scene, ticks=16):
+        """Zoom out a tick at a time, refitting between as the debounce
+        does, and report where the anchored scene point ended up."""
+        where = QPointF(self.ANCHOR)
+        for _ in range(ticks):
+            if view.zoom <= ZOOM_MIN:
+                break        # the limit is not drift; stop before it
+            view.wheelEvent(QWheelEvent(
+                where, view.mapToGlobal(self.ANCHOR), QPoint(0, 0),
+                QPoint(0, -120), Qt.NoButton, Qt.NoModifier,
+                Qt.ScrollUpdate, False))
+            scene.flush_rect_fit()
+        return view.mapToScene(self.ANCHOR)
+
+    def test_what_is_under_the_cursor_stays_under_the_cursor(self, qtbot,
+                                                             registry):
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        before = view.mapToScene(self.ANCHOR)
+        after = self._wheel_out(view, scene)
+        assert abs(after.x() - before.x()) < 1.0
+        assert abs(after.y() - before.y()) < 1.0
+
+    def test_it_holds_with_the_bars_off_too(self, qtbot, registry):
+        """The span is world-sized then, so there was never anything to
+        clamp — this is the control, and it passed before the fix."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        view.set_scrollbars_enabled(False)
+        before = view.mapToScene(self.ANCHOR)
+        after = self._wheel_out(view, scene)
+        assert abs(after.x() - before.x()) < 1.0
+
+    def test_the_span_keeps_up_with_the_zoom_rather_than_lagging(
+            self, qtbot, registry):
+        """The cause, named: the span has to cover what the view shows at
+        the moment the transform changes, not a beat later."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        self._wheel_out(view, scene, ticks=12)
+        visible = view.mapToScene(view.viewport().rect()).boundingRect()
+        assert scene.sceneRect().contains(visible)
+
+    def test_sitting_still_and_refitting_moves_nothing(self, qtbot,
+                                                        registry):
+        """A refit must be a fixed point, or each one feeds the next."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        self._wheel_out(view, scene, ticks=8)
+        before = view.mapToScene(view.viewport().rect().center())
+        span = scene.sceneRect()
+        for _ in range(5):
+            scene.flush_rect_fit()
+        assert view.mapToScene(view.viewport().rect().center()) == before
+        assert scene.sceneRect() == span
+
+    def test_zooming_back_in_comes_back_to_where_it_started(self, qtbot,
+                                                            registry):
+        """Out and back is a round trip, which it cannot be if either
+        direction quietly loses ground."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        before = view.mapToScene(self.ANCHOR)
+        where = QPointF(self.ANCHOR)
+        for delta in (-120,) * 8 + (120,) * 8:
+            view.wheelEvent(QWheelEvent(
+                where, view.mapToGlobal(self.ANCHOR), QPoint(0, 0),
+                QPoint(0, delta), Qt.NoButton, Qt.NoModifier,
+                Qt.ScrollUpdate, False))
+            scene.flush_rect_fit()
+        after = view.mapToScene(self.ANCHOR)
+        assert abs(after.x() - before.x()) < 1.0
+        assert abs(after.y() - before.y()) < 1.0
+
+    def test_where_the_view_is_parked_is_still_reachable(self, qtbot,
+                                                         registry):
+        """The union is still doing its job: a view sent far past the flow
+        keeps its place inside the span, so a refit cannot clamp it back."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        view.centerOn(9000, 9000)
+        parked = view.mapToScene(view.viewport().rect().center())
+        scene.flush_rect_fit()
+        assert scene.sceneRect().contains(parked)
+        assert view.mapToScene(view.viewport().rect().center()) == parked

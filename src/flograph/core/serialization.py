@@ -159,7 +159,6 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                                       if f.expanded_size else None),
                     "members": list(f.members),
                     "member_frames": list(f.member_frames),
-                    "nudged": [list(entry) for entry in f.nudged],
                     "source": f.source,
                     "source_fingerprint": f.source_fingerprint,
                 }
@@ -412,7 +411,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
                            if entry.get("expanded_size") else None),
             members=tuple(entry.get("members", ())),
             member_frames=tuple(entry.get("member_frames", ())),
-            nudged=tuple(tuple(n) for n in entry.get("nudged", ())),
+            # a "nudged" key in a file written before 0.1.15 is read past:
+            # it recorded what expanding this frame shoved aside so that
+            # folding could put it back, and nothing is shoved aside now
             source=entry.get("source", ""),
             source_fingerprint=entry.get("source_fingerprint", ""),
             # absent before canvas tabs, and on the model canvas (G12)
