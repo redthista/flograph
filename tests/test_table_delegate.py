@@ -58,6 +58,50 @@ class TestIconPlacement:
         assert 0.4 < _ink_centre(image, cell) < 0.6
 
 
+class TestAnIconFollowsTheColumnsAlign:
+    """Centred is the *default*, not the only answer. An icon standing in
+    for the value is the cell's whole content, so `align` moves it the way
+    it would have moved the value — which the printed table already did
+    (`core/table_html._cell`), leaving the card the odd one out.
+    """
+
+    ICONS = "flag iconmap only sla: breach=✗ red"
+
+    def test_align_right_puts_it_on_the_right(self, qtbot):
+        image, cell = _cell_image(qtbot, f"{self.ICONS}\nflag align right")
+        assert _ink_centre(image, cell) > 0.65
+
+    def test_align_left_puts_it_on_the_left(self, qtbot):
+        image, cell = _cell_image(qtbot, f"{self.ICONS}\nflag align left")
+        assert _ink_centre(image, cell) < 0.35
+
+    def test_align_centre_is_what_it_already_did(self, qtbot):
+        image, cell = _cell_image(qtbot, f"{self.ICONS}\nflag align centre")
+        assert 0.4 < _ink_centre(image, cell) < 0.6
+
+    def test_a_number_column_still_centres_its_icon(self, qtbot):
+        """Numbers align right by their dtype, with nobody asking. That is
+        not an `align` rule and must not move an icon that has been centred
+        since icons existed."""
+        frame = pd.DataFrame({"sla": ["breach"], "flag": [1]})
+        view = DataTableView()
+        view.setModel(PandasModel(
+            frame, rules=parse_rules("flag iconmap only sla: breach=✗ red")))
+        view.setColumnWidth(1, COLUMN_WIDTH)
+        view.resize(340, 90)
+        qtbot.addWidget(view)
+        image = view.viewport().grab().toImage()
+        cell = view.visualRect(view.model().index(0, 1))
+        assert 0.4 < _ink_centre(image, cell) < 0.6
+
+    def test_the_value_beside_an_icon_is_unaffected(self, qtbot):
+        """Without `only` the value is still there and still owns the
+        alignment; the icon keeps its margin."""
+        image, cell = _cell_image(
+            qtbot, "flag iconmap sla: breach=✗ red\nflag align right")
+        assert _ink_centre(image, cell) > 0.4
+
+
 # ------------------------------------------------------------------- T1
 #
 # A cell holds a list of decorations now, each knowing its own place. The

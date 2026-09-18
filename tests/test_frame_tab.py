@@ -426,13 +426,17 @@ class TestAModelCanvasTab:
         bar.moveTab(bar._index_of_page(first), bar._index_of_page("board"))
         assert bar.page_order() == [second, first, "board"]
 
-    def test_the_model_menu_says_nothing_when_it_heads_nothing(self, window):
+    def test_the_model_menu_heading_nothing_offers_only_a_new_page(self, window):
         """With no canvas tabs there is nothing to list and nothing to
-        fold, so the menu is empty — it was offering the fold regardless
-        (Dan)."""
+        fold, so neither is offered — it used to offer the fold regardless
+        (Dan). What is left is New ▸, because the Model tab is the one tab
+        every project has and so the one place a right-click can always be
+        relied on to make a page (0.1.15 #10)."""
         bar = window.page_bar
         assert bar._canvas_tabs() == []
-        assert bar._model_menu().isEmpty()
+        menu = bar._model_menu()
+        assert [a.text() for a in menu.actions() if not a.isSeparator()] \
+            == ["New"]
 
     def test_right_clicking_the_model_tab_lists_its_canvases(self, window):
         """Read what a group holds and go straight to a page, without

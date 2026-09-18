@@ -202,3 +202,44 @@ class TestTheEventItself:
         view = DataTableView()
         event = QHelpEvent(QEvent.ToolTip, QPoint(5, 5), QPoint(5, 5))
         assert view.viewportEvent(event) is True
+
+
+# ------------------------------------------------------------- wrapping
+#
+# A cell can hold a paragraph, and Qt draws a plain-text tooltip as the
+# single line it is — off the side of the screen. It word-wraps only text
+# that *might be rich text*, and a value out of a table must never be
+# handed over as rich text: it is somebody's data, and a `<b>` in a cell
+# is a `<b>` in a cell. So the wrap happens on the way to QToolTip.
+
+class TestWrapping:
+    def test_a_long_line_is_broken_into_readable_ones(self):
+        from flograph.ui.data_table import TOOLTIP_WRAP, wrap_tooltip
+        text = "word " * 80
+        lines = wrap_tooltip(text).split("\n")
+        assert len(lines) > 1
+        assert all(len(line) <= TOOLTIP_WRAP for line in lines)
+
+    def test_a_short_one_is_left_exactly_as_it_was(self):
+        from flograph.ui.data_table import wrap_tooltip
+        assert wrap_tooltip("ok") == "ok"
+
+    def test_the_blank_line_between_a_note_and_a_value_survives(self):
+        from flograph.ui.data_table import wrap_tooltip
+        assert wrap_tooltip("note\n\n“value”") == "note\n\n“value”"
+
+    def test_a_word_wider_than_the_tooltip_is_broken_not_let_run(self):
+        from flograph.ui.data_table import TOOLTIP_WRAP, wrap_tooltip
+        lines = wrap_tooltip("x" * 300).split("\n")
+        assert all(len(line) <= TOOLTIP_WRAP for line in lines)
+        assert "".join(lines) == "x" * 300
+
+    def test_html_in_a_cell_is_not_turned_into_markup(self):
+        from flograph.ui.data_table import wrap_tooltip
+        assert wrap_tooltip("<b>bold</b>") == "<b>bold</b>"
+
+    def test_what_the_cell_says_is_unchanged(self, qapp):
+        """The wrap is on display only — `_tooltip_text` is still the
+        whole value, which is what every other test here asserts on."""
+        view = view_for()
+        assert view._tooltip_text(view.model().index(0, 0)) == LONG

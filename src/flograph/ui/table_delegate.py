@@ -417,8 +417,16 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
                          Qt.AlignVCenter | Qt.AlignHCenter, str(d.text))
         return width
 
-    def _draw_line(self, painter, band, decorations, metrics, pen) -> None:
-        """A whole line of decorations, centred in `band`."""
+    def _draw_line(self, painter, band, decorations, metrics, pen,
+                   align=None) -> None:
+        """A whole line of decorations in `band`.
+
+        Centred unless the column asked for a side. An icon standing in for
+        the value is the cell's whole content, so it follows the column's
+        `align` rule the way the value it replaced would have — which is
+        already what the printed table does (`core/table_html._cell`), and
+        for a while was the one place the two disagreed.
+        """
         if not decorations:
             return
         if (len(decorations) == 1 and _spark(decorations[0]) is not None
@@ -434,7 +442,13 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
                       self._chip_width(metrics, d, band.height()))
                   for d in decorations]
         total = sum(widths) + _ICON_GAP * (len(widths) - 1)
-        x = band.left() + max(0, (band.width() - total) // 2)
+        spare = max(0, band.width() - total)
+        if align is not None and align & int(Qt.AlignLeft):
+            x = band.left()
+        elif align is not None and align & int(Qt.AlignRight):
+            x = band.left() + spare
+        else:
+            x = band.left() + spare // 2
         for d, width in zip(decorations, widths):
             self._draw_chip(painter, x, band, d, metrics, pen, width)
             x += width + _ICON_GAP
@@ -589,12 +603,30 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # one method that owns it
         middle = self._value_band(opt, decorations, metrics, text, pill)
         if inside:
-            self._draw_line(painter, middle, inside, metrics, pen)
+            self._draw_line(painter, middle, inside, metrics, pen,
+                            self._column_align(index))
         else:
             painter.setFont(opt.font)
             self._draw_value(painter, middle, text, opt, text_pen,
                              pill, pill_ink)
         painter.restore()
+
+    @staticmethod
+    def _column_align(index):
+        """What an `align` rule asked of this column, or None.
+
+        Read off the **header**, not the cell: a cell's own alignment role
+        also carries the right-alignment numbers get by their dtype, and an
+        icon in a number column has always been centred. An icon moves
+        because somebody wrote `align`, not because the column holds
+        numbers — which is the same distinction the printed table draws.
+        """
+        model = index.model()
+        if model is None:
+            return None
+        asked = model.headerData(index.column(), Qt.Horizontal,
+                                 Qt.TextAlignmentRole)
+        return None if asked is None else int(asked)
 
     def _draw_value(self, painter, rect, text, opt, pen, pill, ink) -> None:
         if not text:

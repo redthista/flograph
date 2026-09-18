@@ -61,6 +61,15 @@ def _header_group(data) -> Optional[str]:
 _SCROLL_BUTTONS = ("ScrollLeftButton", "ScrollRightButton")
 
 
+#: What "+" and every **New ▸** submenu offer, in the order they offer it.
+#: One list because the two used to be written out separately, and a kind
+#: added to one is a kind missing from the other.
+NEW_PAGE_KINDS = (("Dashboard page", "dashboard"),
+                  ("Report page", "report"),
+                  (None, None),
+                  ("Model canvas", "canvas"))
+
+
 class PageTabBar(QTabBar):
     add_page_requested = Signal(str)   # "dashboard" | "report"
     rename_page_requested = Signal(str, str)   # page_id, new title
@@ -341,13 +350,19 @@ class PageTabBar(QTabBar):
         straight to one — without the canvases having to be on show."""
         menu = QMenu(self)
         canvases = self._canvas_tabs()
-        if not canvases:
-            return menu      # nothing to list, and nothing to fold
-        self._add_page_entries(menu, [self.tabData(i) for i in canvases])
-        menu.addSeparator()
-        fold_action = menu.addAction("Show the canvases" if self._model_folded
-                                     else "Fold the canvases away")
-        fold_action.triggered.connect(self.toggle_model_fold)
+        if canvases:
+            self._add_page_entries(menu, [self.tabData(i) for i in canvases])
+            menu.addSeparator()
+            fold_action = menu.addAction(
+                "Show the canvases" if self._model_folded
+                else "Fold the canvases away")
+            fold_action.triggered.connect(self.toggle_model_fold)
+            menu.addSeparator()
+        # New is here even with no canvas tabs to head, which is why this
+        # no longer returns an empty menu early: the Model tab is the one
+        # tab a project always has, so it is the one place a right-click
+        # can always be relied on to offer a page
+        menu.addMenu(self._new_page_submenu(menu))
         return menu
 
     def toggle_model_fold(self) -> None:
@@ -481,7 +496,13 @@ class PageTabBar(QTabBar):
     def _group_color(self, group: str) -> QColor:
         """The group's own colour; failing that the first coloured page in
         it lends the section its colour; otherwise the accent, so a section
-        reads as one either way."""
+        reads as one either way.
+
+        A section made now settles its Automatic colour when it is made
+        (`MainWindow._set_page_group`), so the middle branch is what a
+        project saved before that still reaches — and only until somebody
+        gives the group a colour of its own.
+        """
         if self._group_colors.get(group):
             return QColor(self._group_colors[group])
         for page_id in self.page_order():
@@ -814,11 +835,17 @@ class PageTabBar(QTabBar):
                 event.accept()
                 return
         # right-click on the Model tab: what it heads, and the fold — the
-        # same answer a group header gives (G12/G13)
-        if (event.button() == Qt.RightButton and index == self._model_index()
-                and self._canvas_tabs()):
+        # same answer a group header gives (G12/G13). Offered whether or
+        # not it heads anything, because its menu now also makes a page.
+        if event.button() == Qt.RightButton and index == self._model_index():
             where = event.globalPosition().toPoint()
             self._menu_with_the_focus(lambda: self._model_menu().exec(where))
+            event.accept()
+            return
+        # right-click on the empty strip past the last tab: there is no tab
+        # to talk about, so the menu is the one thing there is to do here
+        if event.button() == Qt.RightButton and index < 0:
+            self._show_add_menu(event.globalPosition().toPoint())
             event.accept()
             return
         # the Model tab's chevron folds its canvas tabs away (G12/G13); the
@@ -927,11 +954,35 @@ class PageTabBar(QTabBar):
         be asserted without an exec() that would block the suite."""
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
-        choices = {menu.addAction("Dashboard page"): "dashboard",
-                   menu.addAction("Report page"): "report"}
-        menu.addSeparator()
-        choices[menu.addAction("Model canvas")] = "canvas"
+        choices = {}
+        for label, kind in NEW_PAGE_KINDS:
+            if label is None:
+                menu.addSeparator()
+                continue
+            choices[menu.addAction(label)] = kind
         return menu, choices
+
+    def _new_page_submenu(self, parent: QMenu) -> QMenu:
+        """**New ▸** on every menu the bar opens.
+
+        The same three kinds "+" offers, reachable from wherever the
+        pointer already is — "+" lives at one end of a strip that can be
+        scrolled, and the answer to "how do I add a page here" should not
+        be "go and find the button".
+
+        Parented to the menu it is put on: a submenu only Python holds is
+        deleted when this returns, leaving a dead entry behind — the same
+        trap `_group_submenu` names.
+        """
+        sub = QMenu("New", parent)
+        for label, kind in NEW_PAGE_KINDS:
+            if label is None:
+                sub.addSeparator()
+                continue
+            sub.addAction(label).triggered.connect(
+                lambda _checked=False, kind=kind:
+                self.add_page_requested.emit(kind))
+        return sub
 
     def contextMenuEvent(self, event) -> None:
         """Swallow the context-menu event that follows our own right-click.
@@ -963,6 +1014,11 @@ class PageTabBar(QTabBar):
         """
         menu = QMenu(self)
         menu.setToolTipsVisible(True)   # off by default in QMenu
+        # New first, then a line: making a page is what a right-click on a
+        # tab bar is for in every other application, and the entries below
+        # are all about the one tab under the pointer
+        menu.addMenu(self._new_page_submenu(menu))
+        menu.addSeparator()
         # One tick, not a pair of mutually exclusive ones: the page is
         # either locked or it isn't, and a checkbox says that in half
         # the space two radio-ish entries took.
@@ -1143,6 +1199,8 @@ class PageTabBar(QTabBar):
         ungroup_action = menu.addAction("Ungroup")
         ungroup_action.triggered.connect(
             lambda: self.rename_group_requested.emit(group, ""))
+        menu.addSeparator()
+        menu.addMenu(self._new_page_submenu(menu))
         return menu
 
     def _prompt_rename_group(self, group: str) -> None:

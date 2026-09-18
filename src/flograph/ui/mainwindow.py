@@ -2897,6 +2897,26 @@ class MainWindow(QMainWindow):
         from .commands import SetPageGroupColorCommand, SetPageGroupCommand
         page = self.graph.pages.get(page_id)
         group = str(group or "").strip()
+        if (page is not None and group and not color
+                and group not in self._page_groups().values()
+                and not self.graph.page_group_colors.get(group)):
+            # A brand-new section settles its **Automatic** colour here,
+            # once, and keeps it. Left to be worked out from its members
+            # every time the bar was rebuilt, the section re-took the
+            # colour of whichever coloured page came first — so dragging a
+            # blue page into a red group turned the group blue, and a
+            # plain group gained a colour from the first coloured page put
+            # in it. Neither is a thing anybody asked for: Automatic is a
+            # starting point, not a standing rule.
+            #
+            # The accent is pinned outright when there is nothing to take
+            # a colour from, rather than left unset. Unset *is* "borrow
+            # from the members", so leaving it there would keep the second
+            # half of the bug — and the accent is the colour the section
+            # was being drawn in anyway, so nothing looks different for
+            # having said it. **Reset colour** clears it and hands the
+            # section back to its pages, which is what that entry means.
+            color = page.color or theme.SELECTION_OUTLINE.name()
         recolor = bool(group and color
                        and self.graph.page_group_colors.get(group) != color)
         if page is None or (page.group == group and not recolor):

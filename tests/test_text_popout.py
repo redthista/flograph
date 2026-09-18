@@ -427,3 +427,64 @@ class TestTheEditorInside:
         spans = [(r.start, r.length) for r in block.layout().formats()
                  if r.format.foreground().color() == COLUMN.foreground().color()]
         assert (0, len("unit price")) in spans
+
+
+# ------------------------------------------------------ making it bigger
+#
+# "I should be able to full screen the code edit window." A QDialog gets no
+# maximize button from Qt unless it asks for one, so the pop-out could be
+# dragged bigger and never simply filled out — and it opened at the same
+# 820x560 every time however big you had made the last one.
+
+class TestTheWindowItself:
+    def _popout(self, qtbot):
+        from flograph.ui.properties.text_popout import TextPopOut
+        dialog = TextPopOut("Rules", "one\ntwo")
+        qtbot.addWidget(dialog)
+        return dialog
+
+    def test_it_offers_a_maximize_button(self, qtbot):
+        from PySide6.QtCore import Qt
+        assert self._popout(qtbot).windowFlags() & Qt.WindowMaximizeButtonHint
+
+    def test_it_is_still_a_dialog(self, qtbot):
+        """The hint is added to the flags the platform gave it, not put in
+        their place — a bare setWindowFlags loses the dialog's own type."""
+        from PySide6.QtCore import Qt
+        flags = self._popout(qtbot).windowFlags()
+        assert flags & Qt.Dialog
+
+    def test_it_has_a_size_grip(self, qtbot):
+        assert self._popout(qtbot).isSizeGripEnabled()
+
+    def test_f11_maximizes_and_restores(self, qtbot):
+        dialog = self._popout(qtbot)
+        dialog.show()
+        dialog.toggle_maximized()
+        assert dialog.isMaximized()
+        dialog.toggle_maximized()
+        assert not dialog.isMaximized()
+
+    def test_the_size_it_was_left_is_the_size_it_opens(self, qtbot):
+        from PySide6.QtCore import QSettings
+        from flograph.ui.properties.text_popout import GEOMETRY_KEY
+        QSettings("flograph", "flograph").remove(GEOMETRY_KEY)
+        first = self._popout(qtbot)
+        first.resize(640, 480)
+        first.done(0)                       # Cancel still records the size
+        second = self._popout(qtbot)
+        assert second.size().width() == 640
+        assert second.size().height() == 480
+
+    def test_the_code_pop_out_opens_bigger_by_default(self, qtbot):
+        from PySide6.QtCore import QSettings
+        from flograph.ui.editor.code_popout import CodePopOut
+        from flograph.ui.properties.text_popout import (
+            GEOMETRY_KEY, MAXIMIZED_KEY, TextPopOut)
+        settings = QSettings("flograph", "flograph")
+        settings.remove(GEOMETRY_KEY)
+        settings.remove(MAXIMIZED_KEY)
+        code = CodePopOut("Code", "x = 1", type_id="t")
+        qtbot.addWidget(code)
+        assert code.DEFAULT_SIZE.width() > TextPopOut.DEFAULT_SIZE.width()
+        assert code.size().width() == code.DEFAULT_SIZE.width()

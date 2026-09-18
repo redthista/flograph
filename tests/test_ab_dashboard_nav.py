@@ -615,9 +615,12 @@ class TestTabGroups:
         # the group's own pages come first (G13): reading what a section
         # holds — and reaching a page from it without unfolding — is what a
         # header's menu is asked for most
+        # Reset colour is there because a section now settles a colour
+        # when it is made (0.1.15 #9) — resetting hands it back to its
+        # pages, which is the only way back to borrowing one
         assert [a.text() for a in menu.actions() if not a.isSeparator()] == \
             ["A", "B", "Fold away", "Rename group…", "Change colour…",
-             "Ungroup"]
+             "Reset colour", "Ungroup", "New"]
         # a group with a colour of its own can go back to borrowing one
         window._recolor_page_group("Sales", "#123456")
         menu = window.page_bar._group_menu("Sales")
@@ -639,8 +642,9 @@ class TestTabGroups:
         window._set_page_group(ids[0], "Sales")
         bar = window.page_bar
         menu = bar._context_menu(bar._index_of_page(ids[1]), ids[1])
+        # by title: the menu carries a New ▸ submenu as well now (#10)
         group_menu = next(a.menu() for a in menu.actions()
-                          if a.menu() is not None)
+                          if a.menu() is not None and a.menu().title() == "Group")
         assert group_menu.title() == "Group"
         assert [a.text() for a in group_menu.actions()
                 if not a.isSeparator()] == ["No group", "Sales", "New group…"]
@@ -688,6 +692,102 @@ class TestTabGroups:
         assert _shown(window.page_bar) == ["Model", "B", "+"]
 
 
+class TestNewPageFromTheBar:
+    """0.1.15 #10: "right click in the tab menu to add new -> dashboard,
+    report, canvas". "+" already asked the question; it just had to be
+    findable from wherever the pointer was, on a strip that scrolls."""
+
+    LABELS = ["Dashboard page", "Report page", "Model canvas"]
+
+    def _new_menu(self, menu):
+        return next(a.menu() for a in menu.actions()
+                    if a.menu() is not None and a.menu().title() == "New")
+
+    def test_a_page_tabs_menu_offers_it(self, window):
+        ids = _pages(window, "A")
+        bar = window.page_bar
+        sub = self._new_menu(bar._context_menu(bar._index_of_page(ids[0]),
+                                               ids[0]))
+        assert [a.text() for a in sub.actions() if not a.isSeparator()] \
+            == self.LABELS
+
+    def test_a_group_headers_menu_offers_it(self, window):
+        ids = _pages(window, "A")
+        window._set_page_group(ids[0], "Sales")
+        sub = self._new_menu(window.page_bar._group_menu("Sales"))
+        assert [a.text() for a in sub.actions() if not a.isSeparator()] \
+            == self.LABELS
+
+    def test_the_model_tabs_menu_offers_it(self, window):
+        sub = self._new_menu(window.page_bar._model_menu())
+        assert [a.text() for a in sub.actions() if not a.isSeparator()] \
+            == self.LABELS
+
+    def test_picking_one_asks_for_that_kind(self, window):
+        ids = _pages(window, "A")
+        bar = window.page_bar
+        asked = []
+        bar.add_page_requested.connect(asked.append)
+        sub = self._new_menu(bar._context_menu(bar._index_of_page(ids[0]),
+                                               ids[0]))
+        for action in sub.actions():
+            if not action.isSeparator():
+                action.trigger()
+        assert asked == ["dashboard", "report", "canvas"]
+
+    def test_it_really_makes_the_page(self, window):
+        """Through the window, not just the signal — a menu that asks for
+        something nobody acts on is the same as no menu."""
+        before = len(window.graph.pages)
+        sub = self._new_menu(window.page_bar._model_menu())
+        next(a for a in sub.actions() if a.text() == "Report page").trigger()
+        assert len(window.graph.pages) == before + 1
+        assert list(window.graph.pages.values())[-1].kind == "report"
+
+    def test_the_empty_strip_past_the_tabs_opens_it_too(self, window):
+        """A right-click where there is no tab has nothing else it could
+        mean. `_show_add_menu` is the "+" path, guard and all, so this
+        checks the press reaches it rather than re-testing the menu."""
+        from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+        bar = window.page_bar
+        opened = []
+        bar._show_add_menu = lambda where: opened.append(where)
+        far = QPointF(bar.width() + 400, bar.height() / 2)
+        assert bar.tabAt(far.toPoint()) < 0, "meant to be past the last tab"
+        bar.mousePressEvent(QMouseEvent(
+            QEvent.MouseButtonPress, far, bar.mapToGlobal(far.toPoint()),
+            Qt.RightButton, Qt.RightButton, Qt.NoModifier))
+        assert len(opened) == 1
+
+    def test_a_right_click_on_a_tab_still_gets_the_tabs_own_menu(self, window):
+        """The empty-strip branch must not swallow the ordinary case."""
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+        ids = _pages(window, "A")
+        bar = window.page_bar
+        opened = []
+        bar._show_add_menu = lambda where: opened.append(where)
+        shown = []
+        bar._show_context_menu = lambda *a: shown.append(a)
+        centre = QPointF(bar.tabRect(bar._index_of_page(ids[0])).center())
+        bar.mousePressEvent(QMouseEvent(
+            QEvent.MouseButtonPress, centre, bar.mapToGlobal(centre.toPoint()),
+            Qt.RightButton, Qt.RightButton, Qt.NoModifier))
+        assert opened == [] and len(shown) == 1
+
+    def test_the_plus_button_and_the_menus_offer_the_same_kinds(self, window):
+        """One list feeds both (NEW_PAGE_KINDS); this is what says so."""
+        bar = window.page_bar
+        plus, choices = bar._add_menu()
+        sub = self._new_menu(bar._model_menu())
+        assert [a.text() for a in plus.actions() if not a.isSeparator()] == \
+            [a.text() for a in sub.actions() if not a.isSeparator()]
+        from flograph.ui.dashboard.page_bar import NEW_PAGE_KINDS
+        assert sorted(choices.values()) == sorted(
+            k for _label, k in NEW_PAGE_KINDS if k)
+
+
 class TestAGroupsColour:
     """Dan, testing AB4: a colour for a group, chosen when it is made and
     changeable after, that leaves the pages' own colours alone."""
@@ -721,6 +821,67 @@ class TestAGroupsColour:
         assert window.page_bar._group_color("Sales").name() == "#2563eb"
         window._recolor_page_group("Sales", None)   # Reset colour
         assert window.page_bar._group_color("Sales").name() == "#b45309"
+
+    def test_a_page_dragged_in_later_does_not_repaint_the_group(self, window):
+        """Dan, 0.1.15: "dragging pages around shouldn't then change the
+        colour of the group." Automatic settles when the section is made,
+        and what arrives afterwards is a member, not a vote."""
+        ids = _pages(window, "A", "B")
+        window._recolor_page(ids[0], "#b45309")
+        window._set_page_group(ids[0], "Sales")          # Automatic
+        assert window.page_bar._group_color("Sales").name() == "#b45309"
+        window._recolor_page(ids[1], "#2563eb")
+        window._move_page(list(window.graph.pages), ids[1], "Sales")
+        assert window.graph.pages[ids[1]].group == "Sales"
+        assert window.page_bar._group_color("Sales").name() == "#b45309"
+
+    def test_nor_does_recolouring_a_page_already_in_it(self, window):
+        ids = _pages(window, "A")
+        window._recolor_page(ids[0], "#b45309")
+        window._set_page_group(ids[0], "Sales")
+        window._recolor_page(ids[0], "#2563eb")
+        assert window.page_bar._group_color("Sales").name() == "#b45309"
+
+    def test_a_section_made_from_plain_pages_pins_the_accent(self, window):
+        """Nothing to take a colour from, so the colour it was being drawn
+        in is written down — leaving it unset means "borrow from the
+        members", which is the half of the bug that bites a plain group."""
+        from flograph.ui import theme
+        ids = _pages(window, "A")
+        window._set_page_group(ids[0], "Sales")
+        assert window.graph.page_group_colors == {
+            "Sales": theme.SELECTION_OUTLINE.name()}
+        assert window.page_bar._group_color("Sales") == theme.SELECTION_OUTLINE
+
+    def test_and_a_coloured_page_dragged_into_it_leaves_it_alone(self, window):
+        """Dan's report, exactly: a group that was not red, and a red page
+        dragged in."""
+        ids = _pages(window, "A", "B")
+        window._set_page_group(ids[0], "Sales")          # plain pages
+        window._recolor_page(ids[1], "#b45309")
+        window._move_page(list(window.graph.pages), ids[1], "Sales")
+        assert window.graph.pages[ids[1]].group == "Sales"
+        assert window.page_bar._group_color("Sales").name() == "#60a5fa"
+
+    def test_settling_a_colour_is_part_of_the_same_undo_step(self, window):
+        ids = _pages(window, "A")
+        window._recolor_page(ids[0], "#b45309")
+        before = window.undo_stack.count()
+        window._set_page_group(ids[0], "Sales")
+        assert window.undo_stack.count() == before + 1
+        window.undo_stack.undo()
+        assert window.graph.pages[ids[0]].group == ""
+        assert window.graph.page_group_colors == {}
+
+    def test_reset_colour_still_means_automatic(self, window):
+        """Pinning is what Automatic *does*, not a replacement for it —
+        Reset colour hands the section back to its pages."""
+        ids = _pages(window, "A", "B")
+        window._recolor_page(ids[0], "#b45309")
+        window._set_page_group(ids[0], "Sales")
+        window._recolor_page_group("Sales", None)
+        window._recolor_page(ids[0], "#2563eb")
+        assert window.page_bar._group_color("Sales").name() == "#2563eb"
 
     def test_it_is_muted_like_a_tab(self, window, monkeypatch):
         """Dan: a group's colour mutes the way a tab's and a card's do —

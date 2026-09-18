@@ -27,7 +27,8 @@ from flograph.core.table_format import (
     DEFAULT_PALETTE, MAX_PICTURE_SIZE, MAX_ROW_HEIGHT, MAX_RULE_WIDTH,
     MAX_SPARK_WIDTH, MIN_PICTURE_SIZE, MIN_ROW_HEIGHT, MIN_RULE_WIDTH,
     MIN_SPARK_WIDTH, PALETTES, _is_glob, abbreviate_pictures, bar_token,
-    fill_token, parse_rule_lines, quote_column, rule_summary, scale_token,
+    fill_token, glyph_token, parse_rule_lines, quote_column, rule_summary,
+    scale_token,
 )
 from flograph.ui.emoji_font import apply_emoji_font, with_emoji
 
@@ -200,6 +201,18 @@ _PLACES = [("left of the value", ""), ("right of the value", "right"),
 def _place(box) -> str:
     token = box.currentData()
     return f" {token}" if token else ""
+
+
+def _glyph_text(edit) -> str:
+    """What an icon box holds, as a rule writes it.
+
+    A pasted picture goes in as bare base64: a ``data:`` prefix holds a
+    comma and SVG markup holds spaces, and an icon map's pairs are split on
+    both. Anything else is the typed glyph with its spaces taken out.
+    """
+    typed = edit.text()
+    uri = picture_uri(typed)
+    return DATA_PREFIX.sub("", uri) if uri else "".join(typed.split())
 
 
 def _pill(box) -> str:
@@ -874,7 +887,12 @@ class RuleBuilder(QDialog):
         self._and = QLabel("and")
         vl.addWidget(self._and)
         vl.addWidget(self._val2)
-        self._fill = ColorChoice(_FILL_CHOICES)
+        # (none) is offered because a highlight need not paint anything: an
+        # `=> icon ✓ right` rule has no fill at all, and without a way to
+        # say so, opening one to edit it would give it a fill it never had.
+        # A fresh rule still opens on Red — set below, after the widget.
+        self._fill = ColorChoice(_FILL_CHOICES, allow_none=True)
+        self._fill.set_value("red")
         self._fill.changed.connect(self._refresh)
         self._bold = QCheckBox("bold text")
         self._scope = QComboBox()
@@ -896,8 +914,22 @@ class RuleBuilder(QDialog):
             "text in the pill — leave blank to wrap the value")
         self._hl_badge.textChanged.connect(self._refresh)
         self._hl_place = self._place_combo()
+        # One glyph placed by a condition — `= 1 => icon ✓ green`. The
+        # parser has always taken it; without a row here, editing such a
+        # rule in the manager rebuilt it from the widgets and dropped it.
+        self._hl_icon = _PictureEdit()
+        apply_emoji_font(self._hl_icon)
+        self._hl_icon.setPlaceholderText(
+            "a character, an emoji (✓, →, 🙂), or paste / drop a picture")
+        self._hl_icon.textChanged.connect(self._refresh)
+        self._hl_icon.textChanged.connect(
+            lambda _t, e=self._hl_icon: _show_picture(e))
+        self._hl_icon_color = ColorChoice(_GLYPH_CHOICES, allow_none=True)
+        self._hl_icon_color.changed.connect(self._refresh)
         f.addRow("", self._hl_pill)
         f.addRow("Pill text", self._hl_badge)
+        f.addRow("Icon", self._hl_icon)
+        f.addRow("Icon colour", self._hl_icon_color)
         f.addRow("Place", self._hl_place)
         f.addRow("Apply to", self._scope)
         f.addRow("", self._bold)
@@ -1335,19 +1367,34 @@ class RuleBuilder(QDialog):
                 self._val2.setText(str(value[1]))
             elif value is not None:
                 self._val1.setText(str(value))
-            self._fill.set_value(fill_token(rule.bg))
+            self._fill.set_value(fill_token(rule.bg) or "(none)")
             self._bold.setChecked(bool(rule.bold))
             self._hl_height.setValue(rule.row_height or MIN_ROW_HEIGHT - 1)
             self._scope.setCurrentIndex(1 if rule.scope == "row" else 0)
             self._set_other_col(self._hl_test, rule.source)
+            # The mark and where it sits. Left out, these were rebuilt from
+            # whatever the widgets happened to hold, so editing a rule threw
+            # its icon away and put its place back to the left.
+            self._hl_pill.setChecked(bool(rule.as_pill))
+            if rule.as_pill:
+                self._hl_badge.setText(rule.glyph or "")
+            else:
+                self._hl_icon.setText(rule.glyph or "")
+                self._hl_icon_color.set_value(
+                    glyph_token(rule.glyph_color) or "(none)")
+            _pick_data(self._hl_place,
+                       "" if rule.glyph_where in (None, "left")
+                       else rule.glyph_where)
         elif rule.mode == "icons":
             _pick_data(self._icon_style, "set")
             _pick_data(self._iconset, rule.icon_set or "traffic")
             self._icon_reverse.setChecked(bool(rule.reverse))
             self._set_other_col(self._icon_by, rule.source)
+            self._load_icon_place(rule)
             self._sync_icon_style()
         elif rule.mode == "icon_map":
             _pick_data(self._icon_style, "map")
+            self._load_icon_place(rule)
             # `source` is the deciding column; show it as "(this column)"
             # only when it is the single column the icon is drawn in.
             src = rule.source if rule.source not in rule.columns else None
@@ -1356,7 +1403,7 @@ class RuleBuilder(QDialog):
             self._map.setRowCount(0)
             for value, pair in (rule.mapping or {}).items():
                 glyph = pair[0] if pair else ""
-                colour = fill_token(pair[1]) if len(pair) > 1 and pair[1] else ""
+                colour = glyph_token(pair[1]) if len(pair) > 1 and pair[1] else ""
                 self._add_map_row(value, glyph, colour)
             if not self._map.rowCount():
                 self._add_map_row()
@@ -1388,6 +1435,19 @@ class RuleBuilder(QDialog):
             _pick_data(self._layout_prop, "label")
             self._layout_label.setText(rule.label or "")
             self._sync_layout_prop()
+
+    def _load_icon_place(self, rule) -> None:
+        """Where an icon rule's mark sits, and whether it is in a pill.
+
+        Shared by both icon kinds because both write the same two tokens,
+        and neither read them back — an `icons … pill right` came home as
+        a plain set on the left, which is what made editing a rule mean
+        setting it up again.
+        """
+        _pick_data(self._icon_place,
+                   "" if rule.glyph_where in (None, "left")
+                   else rule.glyph_where)
+        self._icon_pill.setChecked(bool(rule.as_pill))
 
     # -------------------------------------------------------- line builder
 
@@ -1450,19 +1510,44 @@ class RuleBuilder(QDialog):
                 if not value:
                     return ""
                 cond = f"{subject} {words[op]} {value}"
-            fill = self._fill.value() or "grey"
-            asked = self._hl_height.value()
-            tall = f", height {asked}" if asked >= MIN_ROW_HEIGHT else ""
-            if self._scope.currentIndex() == 1:
-                return f"{cond} => row {fill}{tall}"
-            if self._hl_pill.isChecked():
+            # One style chunk per thing the rule draws, joined with commas —
+            # the shape `_parse_style_tokens` reads. A list rather than a
+            # built-up string because a highlight can now say several things
+            # at once (a fill, a mark, bold, a height) and every one of them
+            # has to survive being read back in and written out again.
+            fill = self._fill.value()
+            fill = "" if fill == "(none)" else fill
+            row_scope = self._scope.currentIndex() == 1
+            place = self._hl_place.currentData()
+            parts: list = []
+            if row_scope:
+                # a row highlight paints every cell of the row, so the
+                # parser refuses a pill or an icon on it — a fill it must
+                # have, or there is nothing to paint the row with
+                parts.append(f"row {fill or 'grey'}")
+            elif self._hl_pill.isChecked():
                 badge = self._hl_badge.text().strip()
-                label = f' "{badge}"' if badge else ""
-                tail = f"pill {fill}{label}{_place(self._hl_place)}"
-            else:
-                tail = f"bg {fill}"
-            tail += ", bold" if self._bold.isChecked() else ""
-            return f"{cond} => {tail}{tall}"
+                parts.append(" ".join(
+                    ["pill"] + ([fill] if fill else [])
+                    + ([f'"{badge}"'] if badge else [])
+                    + ([place] if place else [])))
+            elif fill:
+                parts.append(f"bg {fill}")
+            glyph = "" if row_scope else _glyph_text(self._hl_icon)
+            if glyph:
+                colour = self._hl_icon_color.value()
+                parts.append(" ".join(
+                    ["icon", glyph]
+                    + ([colour] if colour and colour != "(none)" else [])
+                    # a pill has already spent the place on itself
+                    + ([place] if place and not self._hl_pill.isChecked()
+                       else [])))
+            if self._bold.isChecked():
+                parts.append("bold")
+            asked = self._hl_height.value()
+            if asked >= MIN_ROW_HEIGHT:
+                parts.append(f"height {asked}")
+            return f"{cond} => {', '.join(parts)}" if parts else ""
         if kind == K_ICONS:
             decider = _other_col_value(self._icon_by)
             if self._icon_style.currentData() == "map":
@@ -1477,13 +1562,7 @@ class RuleBuilder(QDialog):
                         # a row mid-insert: its item is set (which says the
                         # cell changed) before its editors exist
                         continue
-                    typed = self._map.cellWidget(r, 1).text()
-                    uri = picture_uri(typed)
-                    # a picture goes in as bare base64: a `data:` prefix
-                    # holds a comma and SVG markup holds spaces, and the
-                    # pairs are split on both. The bytes name the type.
-                    glyph = (DATA_PREFIX.sub("", uri) if uri
-                             else "".join(typed.split()))
+                    glyph = _glyph_text(self._map.cellWidget(r, 1))
                     colour = self._map.cellWidget(r, 2).value()
                     if not value or not glyph:
                         continue

@@ -237,8 +237,37 @@ def tooltip_host(widget, global_pos):
     return views[0].viewport() if views else widget
 
 
+#: How wide a tooltip is allowed to get, in characters. A cell can hold a
+#: paragraph, and a tooltip of one long line is drawn as one long line —
+#: Qt word-wraps a tooltip only when its text might be rich text, and a
+#: value out of a table is not rich text and must not be treated as any
+#: (it is somebody's data, and `<b>` in a cell is a `<b>` in a cell).
+#: So the wrapping is done here, in characters rather than pixels, which
+#: is the unit the text is in and needs no font to measure.
+TOOLTIP_WRAP = 72
+
+
+def wrap_tooltip(text: str, width: int = TOOLTIP_WRAP) -> str:
+    """A tooltip broken into lines no wider than `width`.
+
+    Paragraphs are kept — the cut-short value is offered under the note a
+    rule wrote, with a blank line between them, and that blank line is
+    what says they are two different things. A word longer than the whole
+    width (a URL, an id) is broken rather than allowed to run off the
+    screen, which is the case the wrapping exists for.
+    """
+    import textwrap
+    lines: list = []
+    for paragraph in str(text).split("\n"):
+        lines.extend(textwrap.wrap(paragraph, width,
+                                   break_long_words=True,
+                                   break_on_hyphens=False) or [""])
+    return "\n".join(lines)
+
+
 def show_tooltip(global_pos, text: str, widget) -> None:
-    QToolTip.showText(global_pos, text, tooltip_host(widget, global_pos))
+    QToolTip.showText(global_pos, wrap_tooltip(text),
+                      tooltip_host(widget, global_pos))
 
 
 class TooltipHeader(QHeaderView):

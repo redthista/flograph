@@ -616,3 +616,84 @@ class TestAutoColourPage:
         offered = {b._auto_palette.itemData(i)
                    for i in range(b._auto_palette.count())}
         assert offered == set(PALETTES)
+
+
+# ----------------------------------------------------- editing a rule twice
+#
+# The manager edits a rule by parsing its line, filling the builder from the
+# Rule, and reading the line back out. So anything `_load` does not restore
+# is not "left alone" — it is rebuilt from whatever the widgets happened to
+# hold, and silently written back. That cost a rule its place ("on the
+# right" came home on the left), a highlight its icon, and an icon set its
+# pill, every single edit.
+#
+# One test over a table of lines rather than one per field: the property is
+# that the round trip is the identity, and the next thing somebody adds to
+# the builder is the next thing that will forget to restore itself.
+
+ROUND_TRIPS = [
+    # highlights: a fill, a pill, a pill with text and a place
+    "status = breach => bg red",
+    "status = breach => bg red, bold",
+    'status = breach => pill red "OT" right',
+    "status = breach => pill red",
+    "status = breach => row red",
+    "status = breach => row red, bold",
+    "status = breach => bg red, height 40",
+    # a highlight whose whole style is one glyph — no fill at all
+    "status = breach => icon X",
+    "status = breach => icon X green",
+    "status = breach => icon X green right",
+    "status = breach => icon X above",
+    "status = breach => bg red, icon X green right",
+    # the tests that read another column, and the wordier operators
+    'status = breach if sla => bg red',
+    "revenue between 10 20 => bg amber",
+    "status contains fail => bg red",
+    "status is empty => bg grey",
+    # icon sets and icon maps carry the same two modifiers
+    "revenue icons traffic",
+    "revenue icons traffic reverse",
+    "revenue icons traffic pill above",
+    "revenue icons traffic right by units",
+    "revenue icons traffic pill right by units only",
+    "sla iconmap sla: ok=T green, breach=X red",
+    "sla iconmap right sla: ok=T green",
+    "sla iconmap only pill sla: ok=T green",
+]
+
+
+@pytest.mark.parametrize("line", ROUND_TRIPS)
+def test_editing_a_rule_without_touching_it_changes_nothing(build, line):
+    rule = parse_rules(line)[0]
+    assert build(rule).line() == line
+
+
+@pytest.mark.parametrize("line", ROUND_TRIPS)
+def test_and_it_is_still_the_same_rule_after_two_edits(build, line):
+    """Twice, because a field that comes back wrong on the first pass can
+    still look stable on the second — the drift has already happened."""
+    once = build(parse_rules(line)[0]).line()
+    assert build(parse_rules(once)[0]).line() == line
+
+
+def test_a_highlights_icon_survives_being_edited(build):
+    """The reported symptom, named: 'on the right' had to be set again on
+    every edit."""
+    b = build(parse_rules("status = breach => icon X green right")[0])
+    assert b._hl_icon.text() == "X"
+    assert b._hl_icon_color.value() == "green"
+    assert b._hl_place.currentData() == "right"
+
+
+def test_an_icon_sets_pill_and_place_survive_being_edited(build):
+    b = build(parse_rules("revenue icons traffic pill above")[0])
+    assert b._icon_pill.isChecked() is True
+    assert b._icon_place.currentData() == "above"
+
+
+def test_a_pills_text_and_place_survive_being_edited(build):
+    b = build(parse_rules('status = breach => pill red "OT" right')[0])
+    assert b._hl_pill.isChecked() is True
+    assert b._hl_badge.text() == "OT"
+    assert b._hl_place.currentData() == "right"

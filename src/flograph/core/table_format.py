@@ -319,6 +319,17 @@ def bar_token(colour) -> str:
 
 def fill_token(colour) -> str:
     return preset_name(colour, _FILL_PRESETS)
+
+
+def glyph_token(colour) -> str:
+    """The DSL name for an icon's colour. A glyph is drawn *on* the grid
+    rather than behind the text, so it has its own vivid presets and its
+    own name for them — read back with `fill_token` a green tick comes
+    home as `#5cb85c`, which is the same colour spelled as nobody typed
+    it."""
+    return preset_name(colour, _GLYPH_COLOURS)
+
+
 _OPS = {">", ">=", "<", "<=", "=", "!=", "between",
         "contains", "starts", "ends", "matches", "empty", "notempty"}
 

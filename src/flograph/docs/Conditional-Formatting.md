@@ -76,7 +76,10 @@ column read properly. `width auto` hands the column back to the auto-fit —
 useful for exempting one column from a pattern rule like `FY* width 120`.
 
 `align` beats the column's own habit (numbers right, text left), and the
-header moves with it. `label` changes only what is *printed* on the header:
+header moves with it — as does a mark drawn *in place of* the value, so a
+column of ticks can be lined up with the columns beside it (see
+[[#showing-the-format-instead-of-the-value|showing the format instead of
+the value]]). `label` changes only what is *printed* on the header:
 rules, sorting, Ctrl+C and exports all still use the real column name, and
 resting the cursor on the header shows it.
 
@@ -149,6 +152,18 @@ status  iconmap only sla: breach=🔥, ok=✅   # the icon is the column
 units   bar blue only                       # a bar chart down a column
 score   scale green only                    # a plain heatmap block
 ```
+
+A mark standing in for the value is the cell's whole content, so it sits
+where the column's [[#shaping-the-table|`align`]] rule puts it:
+
+```
+flag    iconmap only sla: breach=✗, ok=✓
+flag    align right                         # the ticks line up on the right
+```
+
+Without an `align` it is centred, which is what it has always been. A
+number column's automatic right-alignment is the dtype's doing rather than
+a rule, and leaves the mark centred.
 
 The value is only hidden, never lost: the column still **sorts** on it,
 **Ctrl+C** still copies it, and an export still writes it. It works at

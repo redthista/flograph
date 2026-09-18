@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from PySide6.QtCore import QSize
+
 from flograph.core import NodeScriptError, parse_spec
 from flograph.core.text_assist import Diagnostic, TextAssist
 
@@ -43,6 +45,7 @@ class CodePopOut(TextPopOut):
     """`editor` holds the copy being edited; read it back after exec()."""
 
     UNCHECKED = ""  # there are no columns to check in a script
+    DEFAULT_SIZE = QSize(960, 700)      # a script wants more room than rules
 
     def __init__(self, title: str, text: str, *, type_id: str,
                  read_only: bool = False, parent=None) -> None:
@@ -52,7 +55,6 @@ class CodePopOut(TextPopOut):
         self._type_id = type_id
         self.setObjectName("code_popout")
         self.editor.setObjectName("code_popout_editor")
-        self.resize(960, 700)
 
     def _assist_editor(self, editor: CodeEditor, columns: list) -> None:
         # CodeEditor comes with the Python highlighter already

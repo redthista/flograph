@@ -17,14 +17,14 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QByteArray, QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QPolygonF, QShortcut,
     QTextCursor,
 )
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QMessageBox, QVBoxLayout,
-    QWidget,
+    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QMessageBox, QSizeGrip,
+    QVBoxLayout, QWidget,
 )
 
 from flograph.core.text_assist import TextAssist
@@ -34,6 +34,13 @@ from ..editor.rules_highlighter import RulesHighlighter
 from ..editor.word_completion import WordCompleter
 
 LINT_DELAY_MS = 300
+_ORG = _APP = "flograph"
+#: Where this window was left, so the next one opens the same size. One
+#: key for every pop-out rather than one each: they are the same window
+#: doing the same job, and somebody who makes it full screen for a script
+#: wants it full screen for a box of rules too.
+GEOMETRY_KEY = "text_popout/geometry"
+MAXIMIZED_KEY = "text_popout/maximized"
 ERROR_INK = "#f87171"
 WARNING_INK = "#fbbf24"
 OK_INK = "#86efac"
@@ -68,8 +75,13 @@ class TextPopOut(QDialog):
     sample: the first rows of the table coming in, for the lint to try the
     text against, or None when nothing upstream has run."""
 
+    #: How big a pop-out opens when nothing has been remembered yet. A
+    #: subclass says its own — a script wants more room than a box of
+    #: rules does — and a geometry saved from either wins over both.
+    DEFAULT_SIZE = QSize(820, 560)
+
     HINT = ("Ctrl+Space completes · Ctrl+F finds · "
-            "Alt+Click adds a caret · Ctrl+Enter applies")
+            "Alt+Click adds a caret · F11 full screen · Ctrl+Enter applies")
     # said after "No problems found" when there is no table to check against
     UNCHECKED = (" — columns not checked until the nodes feeding this one "
                  "have run")
@@ -82,6 +94,15 @@ class TextPopOut(QDialog):
         super().__init__(parent)
         self.setObjectName("text_popout")
         self.setWindowTitle(title)
+        # A QDialog gets no maximize button from Qt, so a window meant to
+        # be "as big as the work needs" could be dragged bigger and never
+        # simply filled out. The hint has to be asked for by name, and it
+        # is added to the flags the platform already gave this dialog
+        # rather than replacing them — a bare setWindowFlags here loses the
+        # dialog's own type and reparents the native window.
+        self.setWindowFlags(self.windowFlags()
+                            | Qt.WindowMaximizeButtonHint)
+        self.setSizeGripEnabled(True)
         self.assist = assist or TextAssist()
         self._sample = sample
         self._original = text
@@ -132,7 +153,8 @@ class TextPopOut(QDialog):
                 ("Ctrl+F", lambda: self.find_bar.open_bar()),
                 ("Ctrl+H", lambda: self.find_bar.open_bar(replace=True)),
                 ("F3", lambda: self._find_again()),
-                ("Shift+F3", lambda: self._find_again(backwards=True))):
+                ("Shift+F3", lambda: self._find_again(backwards=True)),
+                ("F11", lambda: self.toggle_maximized())):
             QShortcut(QKeySequence(keys), self, slot).setContext(
                 Qt.WidgetWithChildrenShortcut)
 
@@ -143,11 +165,42 @@ class TextPopOut(QDialog):
         editor.textChanged.connect(self._lint_timer.start)
         self.run_lint()
 
-        self.resize(820, 560)
+        self.resize(self.DEFAULT_SIZE)
+        self._restore_geometry()
         cursor = editor.textCursor()
         cursor.movePosition(QTextCursor.End)
         editor.setTextCursor(cursor)
         editor.setFocus()
+
+    # ------------------------------------------------------- the window
+
+    def toggle_maximized(self) -> None:
+        """F11, and the title bar's button by another route. Not full
+        screen proper: a maximized window keeps its title bar, and losing
+        that in a modal dialog leaves no obvious way back."""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+    def _restore_geometry(self) -> None:
+        """Open where the last one was left. Size and place, not contents:
+        every pop-out shares the key, because they are one window doing one
+        job (see GEOMETRY_KEY)."""
+        settings = QSettings(_ORG, _APP)
+        stored = settings.value(GEOMETRY_KEY)
+        if isinstance(stored, QByteArray) and not stored.isEmpty():
+            self.restoreGeometry(stored)
+        if settings.value(MAXIMIZED_KEY, False, type=bool):
+            self.showMaximized()
+
+    def done(self, result: int) -> None:
+        settings = QSettings(_ORG, _APP)
+        settings.setValue(MAXIMIZED_KEY, self.isMaximized())
+        # the *normal* geometry, so un-maximizing lands back on a sensible
+        # window rather than on whatever size it was before it was grown
+        settings.setValue(GEOMETRY_KEY, self.saveGeometry())
+        super().done(result)
 
     def _assist_editor(self, editor: CodeEditor, columns: list) -> None:
         """Highlighting and completion for what is being edited: the box's
