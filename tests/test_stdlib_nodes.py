@@ -1,5 +1,6 @@
 """Every shipped node executed headless through the contract, including error
 paths."""
+import json
 import re
 
 import pandas as pd
@@ -2082,3 +2083,164 @@ class TestReadFileNode:
                         "parse_dates": "when", "nrows": 2})
         assert len(out) == 2
         assert pd.api.types.is_datetime64_any_dtype(out["when"])
+
+
+class TestFilterPage:
+    FILTER_PAGE = "flograph.viz.filter_page"
+
+    @pytest.fixture
+    def sales(self):
+        return pd.DataFrame({
+            "region": ["north", "south", "north", "east"],
+            "units": [10, 20, 30, 40],
+            "when": pd.to_datetime(["2024-01-05", "2024-02-10",
+                                    "2024-03-15", "2024-01-20"]),
+            "rep": ["amy", "bob", "amy", "cid"],
+        })
+
+    def test_passthrough_when_blank(self, registry, sales):
+        out = run_node(registry, self.FILTER_PAGE, {}, table=sales)
+        assert list(out["filtered"]["region"]) == list(sales["region"])
+        assert len(out["rejected"]) == 0
+        assert out["filters"] == ""
+        assert 'data-filter-col="region"' in out["view"]
+        assert "flograph.set" in out["view"]
+
+    def test_categorical_multi(self, registry, sales):
+        filters = json.dumps({"region": {"kind": "include",
+                                         "values": ["north", "east"]}})
+        out = run_node(registry, self.FILTER_PAGE, {"filters": filters},
+                       table=sales)
+        assert sorted(out["filtered"]["region"]) == ["east", "north", "north"]
+        assert list(out["rejected"]["region"]) == ["south"]
+        assert (json.loads(out["filters"]) ==
+                {"region": {"kind": "include",
+                            "values": ["north", "east"]}})
+
+    def test_categorical_empty_matches_nothing(self, registry, sales):
+        filters = json.dumps({"region": {"kind": "include", "values": []}})
+        out = run_node(registry, self.FILTER_PAGE, {"filters": filters},
+                       table=sales)
+        assert len(out["filtered"]) == 0
+        assert len(out["rejected"]) == len(sales)
+
+    def test_single_select_keeps_first(self, registry, sales):
+        filters = json.dumps({"region": {"kind": "include",
+                                         "values": ["south", "north"]}})
+        out = run_node(registry, self.FILTER_PAGE,
+                       {"filters": filters, "single": "region"}, table=sales)
+        assert list(out["filtered"]["region"]) == ["south"]
+
+    def test_numeric_range(self, registry, sales):
+        filters = json.dumps({"units": {"kind": "range",
+                                        "min": 15, "max": 35}})
+        out = run_node(registry, self.FILTER_PAGE, {"filters": filters},
+                       table=sales)
+        assert list(out["filtered"]["units"]) == [20, 30]
+        assert list(out["rejected"]["units"]) == [10, 40]
+
+    def test_numeric_reversed_range_is_reordered(self, registry, sales):
+        filters = json.dumps({"units": {"kind": "range",
+                                        "min": 35, "max": 15}})
+        out = run_node(registry, self.FILTER_PAGE, {"filters": filters},
+                       table=sales)
+        assert list(out["filtered"]["units"]) == [20, 30]
+
+    def test_date_range(self, registry, sales):
+        filters = json.dumps({"when": {"kind": "dates",
+                                       "from": "2024-01-01",
+                                       "to": "2024-01-31"}})
+        out = run_node(registry, self.FILTER_PAGE, {"filters": filters},
+                       table=sales)
+        assert list(out["filtered"]["region"]) == ["north", "east"]
+
+    def test_string_dates_are_detected(self, registry):
+        frame = pd.DataFrame({
+            "sdate": ["2024-01-05", "2024-02-10", "2024-01-25",
+                      "2024-03-01", "2024-01-02", "not a date"],
+            "v": [1, 2, 3, 4, 5, 6],
+        })
+        out = run_node(registry, self.FILTER_PAGE, {}, table=frame)
+        assert 'data-filter-col="sdate"' in out["view"]
+        assert out["view"].count('data-kind="date"') == 1
+        filters = json.dumps({"sdate": {"kind": "dates",
+                                        "from": "2024-01-01",
+                                        "to": "2024-01-31"}})
+        out = run_node(registry, self.FILTER_PAGE, {"filters": filters},
+                       table=frame)
+        # the unparseable string is a real value, not a null, so the
+        # January range correctly excludes it
+        assert list(out["filtered"]["v"]) == [1, 3, 5]
+
+    def test_text_contains_case_insensitive(self, registry, sales):
+        filters = json.dumps({"rep": {"kind": "contains", "text": "A"}})
+        out = run_node(registry, self.FILTER_PAGE,
+                       {"filters": filters, "max_values": 2}, table=sales)
+        # max_values=2 pushes 3-valued columns to text search; the rep
+        # filter still matches both Amys regardless of case
+        assert list(out["filtered"]["rep"]) == ["amy", "amy"]
+
+    def test_exclude_hides_section(self, registry, sales):
+        out = run_node(registry, self.FILTER_PAGE, {"exclude": "units"},
+                       table=sales)
+        assert 'data-filter-col="units"' not in out["view"]
+        assert 'data-filter-col="region"' in out["view"]
+        assert len(out["filtered"]) == len(sales)
+
+    def test_exclude_unknown_raises(self, registry, sales):
+        with pytest.raises(ValueError, match="not in the table"):
+            run_node(registry, self.FILTER_PAGE, {"exclude": "nope"},
+                     table=sales)
+
+    def test_broken_filters_json_raises(self, registry, sales):
+        with pytest.raises(ValueError, match="not JSON"):
+            run_node(registry, self.FILTER_PAGE, {"filters": "nope{"},
+                     table=sales)
+
+    def test_stale_column_filter_is_ignored(self, registry, sales):
+        filters = json.dumps({"gone": {"kind": "include",
+                                       "values": ["x"]}})
+        out = run_node(registry, self.FILTER_PAGE, {"filters": filters},
+                       table=sales)
+        assert len(out["filtered"]) == len(sales)
+        assert out["filters"] == ""
+
+    def test_apply_mode_renders_buffered(self, registry, sales):
+        out = run_node(registry, self.FILTER_PAGE, {"update": "apply"},
+                       table=sales)
+        assert 'var MODE = "apply"' in out["view"]
+        assert len(out["filtered"]) == len(sales)
+
+    def test_dual_slider_markup_and_auto_step(self, registry, sales):
+        out = run_node(registry, self.FILTER_PAGE, {}, table=sales)
+        assert 'class="dual"' in out["view"]
+        assert 'class="dfill"' in out["view"]
+        # integer column spanning 30 -> automatic step of 1
+        assert 'data-step="1.0"' in out["view"]
+        # trimmed span label, not float dust
+        assert "10 – 40" in out["view"]
+
+    def test_custom_slider_step_and_accent(self, registry, sales):
+        out = run_node(registry, self.FILTER_PAGE,
+                       {"slider_step": 5, "accent": "#ff0000",
+                        "card_min_width": 300}, table=sales)
+        assert 'data-step="5.0"' in out["view"]
+        assert "--accent:#ff0000" in out["view"]
+        assert "--cardmin:300px" in out["view"]
+
+    def test_display_toggles_hide_chrome(self, registry, sales):
+        out = run_node(registry, self.FILTER_PAGE,
+                       {"show_search": False, "show_all_none": False,
+                        "show_reset": False, "show_numbers": False},
+                       table=sales)
+        assert 'class="search"' not in out["view"]
+        assert 'class="allbtn"' not in out["view"]
+        assert 'class="creset"' not in out["view"]
+        assert 'class="lo"' not in out["view"]
+        # ...but filtering still works without the number boxes
+        filters = json.dumps({"units": {"kind": "range",
+                                        "min": 15, "max": 35}})
+        out = run_node(registry, self.FILTER_PAGE,
+                       {"filters": filters, "show_numbers": False},
+                       table=sales)
+        assert list(out["filtered"]["units"]) == [20, 30]
