@@ -101,10 +101,19 @@ one you are looking at stays on the bar. Canvas tabs stay with the Model
 tab: they are not offered a group of their own, and dragging one reorders
 it among the other canvases rather than moving it out.
 
-**Right-click the Model tab** — or any group's header — to read what it
-holds and go straight to one of them. The list is there whether the
+**Right-click the Model tab** — or any group's header, a page tab, or the
+empty strip past the last tab — to read what it holds, go straight to one
+of them, or add a page with **New ▸**. The list is there whether the
 section is folded or not, so a page you know the name of is one
 right-click away rather than an unfold and a hunt.
+
+**The bar opens the way you left it.** Which sections are folded away,
+whether the Model tab's canvases are, and the zoom and place of every
+canvas tab are all kept in the project, so a flow handed to somebody else
+opens on what you were looking at. They are saved by a **save** — folding
+a section or panning a canvas is not itself a change to the project and
+never marks it as one, so a fold you make and never save is a fold you
+keep for that session only.
 
 ## A frame as a model canvas
 

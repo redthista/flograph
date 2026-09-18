@@ -126,8 +126,8 @@ class ContentFittedSceneRect:
         # minimap click into empty margin, a jump to the far side — none may
         # be clamped back by the refit that follows them.
         #
-        centres = [(view, view.mapToScene(view.viewport().rect().center()))
-                   for view in self.views()]
+        centres = [(view, view.viewport_centre()) for view in self.views()
+                   if hasattr(view, "viewport_centre")]
         for view in self.views():
             visible = view.mapToScene(view.viewport().rect()).boundingRect()
             target = target.united(visible)
@@ -144,7 +144,7 @@ class ContentFittedSceneRect:
             # ordinary case; the span only ever grows here, and it is
             # `ensure_span_covers` that keeps a *zoom* from outrunning it.
             for view, centre in centres:
-                now = view.mapToScene(view.viewport().rect().center())
+                now = view.viewport_centre()
                 if now != centre:
                     view.centerOn(centre)
 

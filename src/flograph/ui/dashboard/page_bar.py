@@ -242,6 +242,32 @@ class PageTabBar(QTabBar):
             self._folded.discard(group)
         self._rebuild_groups()
 
+    def folded_groups(self) -> set:
+        """The sections folded away right now — what the project saves."""
+        return set(self._folded)
+
+    def set_folded_groups(self, groups) -> None:
+        """Fold exactly these sections and unfold the rest — a project
+        being opened. One call rather than a `set_group_folded` each,
+        because each rebuilds the whole bar."""
+        wanted = {str(g) for g in groups if g}
+        if wanted == self._folded:
+            return
+        self._folded = wanted
+        self._rebuild_groups()
+
+    def model_folded(self) -> bool:
+        return self._model_folded
+
+    def set_model_folded(self, folded: bool) -> None:
+        """The Model tab's own fold over its canvas tabs, set outright.
+        `toggle_model_fold` is the gesture; this is the restore."""
+        folded = bool(folded)
+        if folded == self._model_folded:
+            return
+        self._model_folded = folded
+        self._rebuild_groups()
+
     def _drop_headers(self) -> None:
         """Take every header out. The caller holds _syncing."""
         for i in range(self.count() - 1, -1, -1):

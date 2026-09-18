@@ -2781,6 +2781,51 @@ class MainWindow(QMainWindow):
             self.view.scene().clearSelection()
             self.view.frame_content()
 
+    # --------------------------------------- how the bar was left (#3, #4)
+
+    def _capture_view_state(self) -> None:
+        """Copy the tab bar's folds and each canvas tab's place into the
+        graph, so a save carries them.
+
+        Done here rather than as the user folds or pans, and deliberately
+        not through a command: neither is a change to the *project*, and
+        marking it modified because a section was tidied away would ask you
+        to save for having looked at something. The price is that a fold
+        you never save is a fold you keep only for the session, which is
+        the same bargain as any other unsaved change.
+        """
+        if self._on_canvas_tab:
+            # the tab being looked at has not written its place down yet —
+            # that happens on the way out of it
+            self._canvas_view_states[self._current_page_id] = \
+                self.view.view_state()
+        self.graph.folded_page_groups = self.page_bar.folded_groups()
+        self.graph.canvases_folded = self.page_bar.model_folded()
+        self.graph.canvas_views = {
+            page_id or "": (float(zoom), float(centre.x()), float(centre.y()))
+            for page_id, (zoom, centre) in self._canvas_view_states.items()}
+
+    def _restore_view_state(self) -> None:
+        """Put back what `_capture_view_state` wrote, for a project just
+        opened. The folds go on last: `select_page` brings a page out of a
+        folded section to show it, so folding first and selecting after is
+        the order that leaves the bar agreeing with itself."""
+        self._canvas_view_states = {
+            (page_id or None): (zoom, QPointF(x, y))
+            for page_id, (zoom, x, y) in self.graph.canvas_views.items()}
+        # the tab showing now has to be put there by hand: it was selected
+        # before these arrived, so `_show_canvas_tab` had nothing to read
+        if self._on_canvas_tab:
+            state = self._canvas_view_states.get(self._current_page_id)
+            if state is not None:
+                # the span has to cover where we are going before the view
+                # can be sent there — a fitted scene rect clamps a centre
+                # it does not yet reach (see ContentFittedSceneRect)
+                self.scene.flush_rect_fit()
+                self.view.restore_view_state(state)
+        self.page_bar.set_model_folded(self.graph.canvases_folded)
+        self.page_bar.set_folded_groups(self.graph.folded_page_groups)
+
     def _onto_the_canvas(self) -> None:
         """Step aside to the model canvas from a dashboard or report page,
         for something only the canvas can do. A frame's tab already is the
@@ -5619,6 +5664,7 @@ class MainWindow(QMainWindow):
         saved_page = self.settings.value(f"active_page/{path}", "")
         if saved_page and saved_page in self.graph.pages:
             self.page_bar.select_page(saved_page)
+        self._restore_view_state()
         broken = sum(1 for n in loaded.nodes.values() if n.spec.broken)
         dropped = loaded.dropped_connections
         if broken or dropped:
@@ -5927,6 +5973,7 @@ class MainWindow(QMainWindow):
             return False
         if not path.endswith(".flowf"):
             path += ".flowf"
+        self._capture_view_state()
         try:
             serialization.save(self.graph, path)
         except OSError as exc:
@@ -5949,6 +5996,7 @@ class MainWindow(QMainWindow):
         unchanged blobs are copied from — the same path on a plain Save, the
         old path on Save As."""
         path = self._project_path
+        self._capture_view_state()
         plan = cache_persistence.plan_project_save(
             self.graph, self.engine.cache, self.engine.history)
         self._save_clean_index = self.undo_stack.index()

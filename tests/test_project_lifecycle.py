@@ -71,11 +71,15 @@ def build_small_project(win):
 class TestSaveOpen:
     def test_save_and_reopen_reproduces_graph(self, window, tmp_path):
         build_small_project(window)
-        before = graph_to_dict(window.graph)
         path = str(tmp_path / "proj.flograph")
         window._project_path = path
         assert window._save()
         assert window.undo_stack.isClean()
+        # snapshotted after the save, not before it: saving is also when
+        # the window writes down where each canvas tab was looking and
+        # which sections were folded (0.1.15 #3, #4), so the graph a save
+        # produces is the thing a reopen has to reproduce
+        before = graph_to_dict(window.graph)
 
         window._replace_graph(__import__("flograph.core", fromlist=["Graph"]).Graph())
         assert not window.graph.nodes

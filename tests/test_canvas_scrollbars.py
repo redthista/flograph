@@ -227,6 +227,49 @@ class TestTheSpanDoesNotDriftTheView:
         assert abs(after.x() - before.x()) < 1.0
         assert abs(after.y() - before.y()) < 1.0
 
+    def test_the_middle_of_the_viewport_is_the_middle_of_the_viewport(
+            self, qtbot, registry):
+        """`QRect::center()` truncates — the middle of a 900px viewport is
+        449, not 449.5 — so the scene point it maps to was half a pixel up
+        and left of the real centre. Harmless read once; fed back into
+        `centerOn` it lands a whole scroll step away, which is how a
+        restored canvas walked 2.5 units per save/open cycle (0.1.15 #4).
+        """
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        view.set_zoom(0.4)
+        view.centerOn(300.0, 200.0)
+        centre = view.viewport_centre()
+        assert centre.x() == pytest.approx(300.0, abs=0.01)
+        assert centre.y() == pytest.approx(200.0, abs=0.01)
+
+    def test_asking_for_the_centre_it_reports_moves_nothing(self, qtbot,
+                                                             registry):
+        """The property that makes it safe to persist: read it, hand it
+        straight back, and the view has not moved. Ten times over, because
+        the failure was a step at a time."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        view.set_zoom(0.4)
+        view.centerOn(300.0, 200.0)
+        first = view.viewport_centre()
+        for _ in range(10):
+            view.centerOn(view.viewport_centre())
+        assert view.viewport_centre().x() == pytest.approx(first.x(), abs=0.01)
+        assert view.viewport_centre().y() == pytest.approx(first.y(), abs=0.01)
+
+    def test_stepping_the_zoom_does_not_creep_either(self, qtbot, registry):
+        """`set_zoom` (the +/- buttons and the zoom box) reads the centre
+        and hands it back, so it had the same half-pixel loss on every
+        step."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        view.set_zoom(1.0)
+        view.centerOn(300.0, 200.0)
+        before = view.viewport_centre()
+        for zoom in (0.9, 0.8, 0.7, 0.6, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0):
+            view.set_zoom(zoom)
+        after = view.viewport_centre()
+        assert after.x() == pytest.approx(before.x(), abs=1)
+        assert after.y() == pytest.approx(before.y(), abs=1)
+
     def test_where_the_view_is_parked_is_still_reachable(self, qtbot,
                                                          registry):
         """The union is still doing its job: a view sent far past the flow

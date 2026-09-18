@@ -370,8 +370,7 @@ class NodeGraphView(ZoomPanGraphicsView):
     def view_state(self) -> tuple:
         """Where the view stands — zoom and the scene point at its centre —
         so a tab that shares it can put it back (G12)."""
-        return (self.zoom,
-                self.mapToScene(self.viewport().rect().center()))
+        return (self.zoom, self.viewport_centre())
 
     def restore_view_state(self, state: tuple) -> None:
         zoom, center = state

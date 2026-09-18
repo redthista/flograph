@@ -229,8 +229,35 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
             "env_path": graph.env_path,
             # the tab bar's group colours, only when there are any
             **_group_colors_entry(graph),
+            # and how it was left: folded sections, folded canvases, and
+            # where each canvas tab was looking (0.1.15 #3, #4)
+            **_view_state_entry(graph),
         },
     }
+
+
+def _view_state_entry(graph: Graph) -> dict[str, Any]:
+    """How the tab bar was left, for the keys that have anything to say.
+
+    Each is left out when it is the default, so a project nobody has folded
+    or panned is written exactly as it was before this existed. A fold on a
+    group no page is in any more goes the same way its colour does — it
+    would otherwise come back, unasked, on the next group given that name.
+    """
+    out: dict[str, Any] = {}
+    in_use = {page.group for page in graph.pages.values() if page.group}
+    folded = sorted(graph.folded_page_groups & in_use)
+    if folded:
+        out["folded_page_groups"] = folded
+    if graph.canvases_folded:
+        out["canvases_folded"] = True
+    # "" is the model canvas; every other key must still be a page
+    views = {page_id: [round(float(v), 4) for v in state]
+             for page_id, state in graph.canvas_views.items()
+             if page_id == "" or page_id in graph.pages}
+    if views:
+        out["canvas_views"] = views
+    return out
 
 
 def _group_colors_entry(graph: Graph) -> dict[str, Any]:
@@ -278,6 +305,20 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
     if isinstance(raw_colors, dict):
         graph.page_group_colors = {str(g): str(c)
                                    for g, c in raw_colors.items() if g and c}
+    # absent in anything written before 0.1.15, where the defaults are what
+    # the bar did anyway: nothing folded, every canvas tab framing itself
+    raw_folded = payload.get("folded_page_groups") or ()
+    if isinstance(raw_folded, (list, tuple)):
+        graph.folded_page_groups = {str(g) for g in raw_folded if g}
+    graph.canvases_folded = bool(payload.get("canvases_folded", False))
+    raw_views = payload.get("canvas_views") or {}
+    if isinstance(raw_views, dict):
+        for page_id, state in raw_views.items():
+            try:
+                zoom, x, y = (float(v) for v in state)
+            except (TypeError, ValueError):
+                continue        # hand-edited into something unreadable
+            graph.canvas_views[str(page_id)] = (zoom, x, y)
     for entry in node_entries:
         type_id = entry["type"]
         code = entry.get("code")

@@ -279,6 +279,21 @@ class ZoomPanGraphicsView(QGraphicsView):
     def zoom(self) -> float:
         return self.transform().m11()
 
+    def viewport_centre(self) -> QPointF:
+        """The scene point in the middle of the viewport.
+
+        `QRect::center()` on the viewport **truncates** — the middle of a
+        900px-wide widget comes back as 449, not 449.5 — so the point it
+        maps to is half a pixel up and left of the real centre. Read once
+        that is invisible. Fed back in it is not: `centerOn` is asked for a
+        point half a pixel off, lands a whole scroll step away, and doing
+        that on every save/open cycle walked a restored canvas 2.5 scene
+        units to the left each time (0.1.15 #4). A float rect has the
+        centre it actually has.
+        """
+        return self.mapToScene(
+            self.viewport().rect()).boundingRect().center()
+
     def _zoom_updated(self) -> None:
         self._apply_lod()
         self._zoom_settle.start()
@@ -292,8 +307,9 @@ class ZoomPanGraphicsView(QGraphicsView):
         factor = value / self.zoom
         if math.isclose(factor, 1.0):
             return
-        center = self.mapToScene(self.viewport().rect().center())
-        self._make_room_for(value, center, self.viewport().rect().center())
+        center = self.viewport_centre()
+        self._make_room_for(value, center,
+                            QRectF(self.viewport().rect()).center())
         self.scale(factor, factor)
         self.centerOn(center)
         self._zoom_updated()

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QComboBox
 from flograph.core import Frame, Graph, Page
 from flograph.core.page_nav import (CANVAS_KIND, SHOW_EVERY, linked_pages,
                                     reader_pages)
+from flograph.core import serialization
 from flograph.core.serialization import graph_from_dict, graph_to_dict
 from flograph.ui import mainwindow as mw
 from flograph.ui.canvas.view import edge_crossing
@@ -521,3 +522,178 @@ class TestAModelCanvasTab:
         assert window.view.fence_frame is None
         window.page_bar.select_page(fenced)
         assert window.view.fence_frame == "f1"
+
+
+# ------------------------------------------------- 0.1.15 #3 and #4
+#
+# "Can we save open and collapse status of the report/dashboard/model
+# groups?" and "model canvas pages don't seem to save and restore your
+# viewport position on .flograph file reopen?"
+#
+# Both are how the bar and its canvases were *left*, and both were runtime
+# only — the fold said so in its own comment ("Bar state, not saved"), and
+# the viewport was kept in a dict the window cleared on open. They travel
+# in the file now, for the same reason `view_mode` and `fit_to_window` do:
+# a project should open the way it was left, for whoever opens it.
+#
+# Deliberately *not* on the undo stack. Folding a section or panning a
+# canvas is not a change to the project, and marking it modified would ask
+# you to save for having looked at something. So the window writes them as
+# it saves and reads them as it opens, and a fold you never save is one you
+# keep for the session only.
+
+class TestHowTheBarWasLeftIsSaved:
+
+    def _project(self, window, tmp_path):
+        """(path to save to, the frame tab's page id) for a project with a
+        canvas tab and a grouped pair of dashboard pages."""
+        window.undo_stack.push(AddPageCommand(
+            window.graph, Page(id="board", title="Board", group="Sales")))
+        window.undo_stack.push(AddPageCommand(
+            window.graph, Page(id="board2", title="Board 2", group="Sales")))
+        return str(tmp_path / "p.flograph"), _open(window)
+
+    def test_a_folded_section_comes_back_folded(self, window, flow, tmp_path):
+        _path, _tab = self._project(window, tmp_path)
+        window.page_bar.set_group_folded("Sales", True)
+        window._capture_view_state()
+        assert window.graph.folded_page_groups == {"Sales"}
+        reloaded = graph_from_dict(graph_to_dict(window.graph),
+                                   window.registry)
+        assert reloaded.folded_page_groups == {"Sales"}
+
+    def test_an_unfolded_one_says_nothing_at_all(self, window, flow,
+                                                 tmp_path):
+        """A project nobody has folded is written as it always was."""
+        _path, _tab = self._project(window, tmp_path)
+        window._capture_view_state()
+        data = graph_to_dict(window.graph)["graph"]
+        assert "folded_page_groups" not in data
+        assert "canvases_folded" not in data
+
+    def test_the_model_tabs_own_fold_is_saved_too(self, window, flow,
+                                                  tmp_path):
+        _path, _tab = self._project(window, tmp_path)
+        window.page_bar.toggle_model_fold()
+        assert window.page_bar.model_folded() is True
+        window._capture_view_state()
+        reloaded = graph_from_dict(graph_to_dict(window.graph),
+                                   window.registry)
+        assert reloaded.canvases_folded is True
+
+    def test_a_fold_on_a_group_with_no_pages_left_is_dropped(self, window,
+                                                             flow, tmp_path):
+        """The same rule its colour follows — it would otherwise come back,
+        unasked, on the next group given that name."""
+        _path, _tab = self._project(window, tmp_path)
+        window.page_bar.set_group_folded("Sales", True)
+        window._set_page_group("board", "")
+        window._set_page_group("board2", "")
+        window._capture_view_state()
+        data = graph_to_dict(window.graph)["graph"]
+        assert "folded_page_groups" not in data
+
+    def test_where_each_canvas_tab_was_looking_is_saved(self, window, flow,
+                                                       tmp_path):
+        _path, page_id = self._project(window, tmp_path)
+        window.page_bar.select_page(None)
+        window.view.set_zoom(0.5)
+        window.view.centerOn(120.0, -40.0)
+        window._capture_view_state()
+        views = window.graph.canvas_views
+        assert "" in views, "the model canvas has no Page, so it keys on ''"
+        zoom, x, y = views[""]
+        assert zoom == pytest.approx(0.5)
+        assert x == pytest.approx(120.0, abs=2)
+        assert y == pytest.approx(-40.0, abs=2)
+
+    def test_each_tab_keeps_its_own(self, window, flow, tmp_path):
+        _path, page_id = self._project(window, tmp_path)
+        window.page_bar.select_page(None)
+        window.view.set_zoom(0.5)
+        window.page_bar.select_page(page_id)
+        window.view.set_zoom(1.5)
+        window._capture_view_state()
+        assert window.graph.canvas_views[""][0] == pytest.approx(0.5)
+        assert window.graph.canvas_views[page_id][0] == pytest.approx(1.5)
+
+    def test_a_view_for_a_page_that_has_gone_is_not_written(self, window,
+                                                            flow, tmp_path):
+        _path, _tab = self._project(window, tmp_path)
+        window.graph.canvas_views["ghost"] = (1.0, 5.0, 5.0)
+        data = graph_to_dict(window.graph)["graph"]
+        assert "ghost" not in data.get("canvas_views", {})
+
+    def test_reopening_puts_the_view_back(self, window, flow, tmp_path):
+        """End to end, through a real save and a real open."""
+        path, _tab = self._project(window, tmp_path)
+        window.page_bar.select_page(None)
+        window.view.set_zoom(0.4)
+        window.view.centerOn(300.0, 200.0)
+        window.page_bar.set_group_folded("Sales", True)
+        window._capture_view_state()
+        serialization.save(window.graph, path)
+
+        window.open_path(path, confirm=False)
+        assert window.page_bar.folded_groups() == {"Sales"}
+        assert window.view.zoom == pytest.approx(0.4)
+        centre = window.view.view_state()[1]
+        assert centre.x() == pytest.approx(300.0, abs=1)
+        assert centre.y() == pytest.approx(200.0, abs=1)
+
+    def test_saving_and_reopening_over_and_over_does_not_walk(
+            self, window, flow, tmp_path):
+        """It used to lose one scroll step per cycle — 2.5 scene units at
+        this zoom, every time the project was opened. `QRect::center()`
+        truncates, so the centre read back out of the view was half a pixel
+        off the one `centerOn` had been given, and saving that back asked
+        for a point that landed a step further along. See
+        `ZoomPanGraphicsView.viewport_centre`."""
+        path, _tab = self._project(window, tmp_path)
+        window.page_bar.select_page(None)
+        window.view.set_zoom(0.4)
+        window.view.centerOn(300.0, 200.0)
+        first = None
+        for _ in range(5):
+            window._capture_view_state()
+            serialization.save(window.graph, path)
+            window.open_path(path, confirm=False)
+            centre = window.view.view_state()[1]
+            if first is None:
+                first = centre
+            assert centre.x() == pytest.approx(first.x(), abs=1)
+            assert centre.y() == pytest.approx(first.y(), abs=1)
+            assert window.view.zoom == pytest.approx(0.4)
+
+    def test_a_project_saved_before_this_opens_at_the_old_defaults(
+            self, window, flow, tmp_path):
+        path, _tab = self._project(window, tmp_path)
+        serialization.save(window.graph, path)
+        # strip the keys, the way a file written by 0.1.14 has none
+        import json
+        with open(path) as fh:
+            data = json.load(fh)
+        for key in ("folded_page_groups", "canvases_folded", "canvas_views"):
+            data["graph"].pop(key, None)
+        with open(path, "w") as fh:
+            json.dump(data, fh)
+        window.open_path(path, confirm=False)
+        assert window.page_bar.folded_groups() == set()
+        assert window.page_bar.model_folded() is False
+
+    def test_folding_a_section_does_not_mark_the_project_modified(
+            self, window, flow, tmp_path):
+        """The whole reason this is not a command: tidying the bar must not
+        ask you to save."""
+        _path, _tab = self._project(window, tmp_path)
+        clean = window.undo_stack.index()
+        window.page_bar.set_group_folded("Sales", True)
+        window.page_bar.toggle_model_fold()
+        assert window.undo_stack.index() == clean
+
+    def test_nor_does_panning_a_canvas(self, window, flow, tmp_path):
+        _path, _tab = self._project(window, tmp_path)
+        clean = window.undo_stack.index()
+        window.view.set_zoom(0.3)
+        window.view.centerOn(999.0, 999.0)
+        assert window.undo_stack.index() == clean

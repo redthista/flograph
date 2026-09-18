@@ -288,6 +288,30 @@ class Graph:
         # group no page is in any more (an undo can bring the pages back) —
         # only the ones in use are saved.
         self.page_group_colors: dict[str, str] = {}
+        # How the tab bar and the canvas tabs were left: which sections are
+        # folded away, whether the Model tab's canvases are, and where each
+        # canvas tab was looking (0.1.15 #3 and #4).
+        #
+        # In the file, so a project opens the way it was left for whoever
+        # opens it — the same reasoning as `view_mode` and `fit_to_window`,
+        # which are also about how a page presents itself rather than what
+        # it holds. Not on the undo stack and not a `page_changed`: folding
+        # a section or panning a canvas must not mark the project modified,
+        # or tidying the bar would ask you to save. The window writes these
+        # as it saves and reads them as it opens (`_capture_view_state` /
+        # `_restore_view_state`), so they persist with a save you were
+        # making anyway and are simply not kept by one you don't make.
+        #
+        # A fold belongs to the *section*, like its colour does — a flag on
+        # each page could disagree with the others and leave "is this group
+        # folded?" with no answer. May name a group no page is in any more,
+        # for the same reason `page_group_colors` may; only groups in use
+        # are saved.
+        self.folded_page_groups: set[str] = set()
+        self.canvases_folded: bool = False
+        #: page id -> (zoom, centre x, centre y). "" is the model canvas,
+        #: which is a tab without a Page of its own.
+        self.canvas_views: dict[str, tuple[float, float, float]] = {}
         # Where this project's secrets live, for `${env:NAME}`. A *path*,
         # relative to the project file where it can be — never the values,
         # which must not enter a file that gets emailed around. Empty means
