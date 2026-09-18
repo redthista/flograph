@@ -336,6 +336,21 @@ def _table_quote(name: str) -> str:
 
 # ------------------------------------------------------------------ registry
 
+def lint_chart_rules(text: str, sample=None) -> list[Diagnostic]:
+    """Underline a Chart rules line that cannot be read (core.chart_rules).
+
+    Only what the language itself refuses: whether a column exists is
+    known when the chart runs, not while it is being typed, and a rule
+    naming a missing column is skipped there with a line in the log.
+    """
+    from flograph.core import chart_rules
+
+    return [Diagnostic(lineno, message)
+            for lineno, message in chart_rules.lint(text)]
+
+
+from flograph.core.chart_rules import KEYWORDS as _CHART_RULE_KEYWORDS
+
 _ASSISTS = {
     ("flograph.transform.conditional_column", "rules"):
         TextAssist(CONDITIONAL_KEYWORDS, as_typed, lint_conditional_column),
@@ -347,6 +362,12 @@ _ASSISTS = {
         TextAssist((), as_typed, lint_rename),
     ("flograph.transform.replace_values", "pairs"):
         TextAssist((), as_typed, lint_replace_values),
+    ("flograph.viz.show_plotly", "chart_rules"):
+        TextAssist(_CHART_RULE_KEYWORDS, as_typed, lint_chart_rules),
+    ("flograph.viz.chart_per_value_plotly", "chart_rules"):
+        TextAssist(_CHART_RULE_KEYWORDS, as_typed, lint_chart_rules),
+    ("flograph.viz.plotly_style", "chart_rules"):
+        TextAssist(_CHART_RULE_KEYWORDS, as_typed, lint_chart_rules),
 }
 
 

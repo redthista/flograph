@@ -3,7 +3,9 @@
 Every chart Plotly Express draws, on an interactive card — hover, zoom and
 pan in place. Needs the 'plotly' package: install it from Tools > Manage
 Packages if missing. Outputs the plotly Figure for further consumers.
-**Colors you choose** (under More options): **Color from column** takes each
+
+**Colors you choose** (under Colour and grouping, and Palette and theme):
+**Color from column** takes each
 category's color from a column of the table, so a status column holding
 `red`, `amber` and `green` (or `#22c55e`, or any CSS color name) draws in
 those colors. It colors by the Color by column, or by the color column itself
@@ -59,12 +61,14 @@ since a histogram of a column is what "histogram" means. A chart built from
 columns named some other way — a pie's slices, a treemap's hierarchy — says
 which box it needs instead of guessing.
 
-**More options** opens the rest: encodings (size, symbol, dash, pattern,
-text, hover), facets, animation frames, error bars, trendlines, marginal
-plots, bin and normalisation settings, axis ranges and log scales,
-palettes and colour scales, opacity. Everything hidden behind it is still
-hidden per chart kind, so a box plot never offers a bin count. The tick
-itself is cosmetic — opening the drawer doesn't redraw anything.
+The Properties panel is in **sections** that fold. **What to plot**,
+**Colour and grouping**, **Chart shape** and **Titles** start open — what
+nearly every chart is built from. The rest start folded, a heading each:
+Click to filter, Axes and gridlines, Palette and theme, Labels and hover,
+Markers and lines, Trendlines and marginals, Error bars, Animation, then the
+styling. Every section only offers the rows the chart kind has, so a box
+plot never offers a bin count, and the panel's **search** box finds any
+setting by name.
 
 Settings that don't apply to the chart you switched to are kept, not
 dropped: switch back and they are as you left them. The node logs the
@@ -81,19 +85,20 @@ positive and negative away from zero.
 has no way to be told about only one — and on a log axis you still type the
 values you want to see, not their exponents.
 
-**Styling options** is the second drawer, for how the finished chart
+The sections from **Legend** down are for how the finished chart
 *looks* rather than what it shows: the legend (show/hide, one of seven
 positions, a column or a row, fine X/Y placement, what a click does,
 order, marker and text size, background and border), axis titles,
-gridlines, d3 tick formats, tick angle, category sorting, a range slider,
+**hiding** the axis titles, tick labels, a whole axis, the legend title or
+the color bar (on every panel of a faceted chart), gridlines, d3 tick formats, tick angle, category sorting, a range slider,
 a horizontal or vertical **reference line** with a label, a **note** in
 any corner, fonts, text colour, plot and card backgrounds, margins. Every
-one has a **keep**/blank default, so the drawer is inert until used. What
+one has a **keep**/blank default, so those sections are inert until used. What
 plotly express already expresses — theme, palette, axis range, log scale,
 the title — stays with the settings above and isn't repeated in the
-drawer.
+styling sections.
 
-At the foot of the drawer are three escape hatches — **Layout (JSON)**,
+In the **Plotly JSON** section are three escape hatches — **Layout (JSON)**,
 **Traces (JSON)**, **Interactivity (JSON)** — each a JSON object handed
 straight to `update_layout`, `update_traces` and the render config with
 nothing in between. The rows above are shortcuts for the settings people
@@ -135,7 +140,10 @@ NODE = {
     # Lets the chart's own page write this node's "selected" param when a
     # point is clicked — see "On click" below and flograph.core.bridge.
     "interactive": True,
-    "inputs": [("table", "dataframe")],
+    # `compare` is the second table a `series … from compare` rule draws
+    # from — last year's figures beside this year's, on the same X.
+    "inputs": [("table", "dataframe"),
+               ("compare", "dataframe", {"optional": True})],
     "outputs": [("figure", "object"), ("selected", "any"),
                 ("table", "dataframe")],
 }
@@ -478,7 +486,9 @@ def _kinds_taking(*args: str) -> list[str]:
 #              (via _kinds_taking) and how _build() emits it.
 #   "kinds"    an explicit kind list, for the few rows whose visibility
 #              isn't a straight read of one px argument.
-#   "advanced" hide behind the "More options" tick.
+#   "advanced" a deeper setting. No longer read by the panel — sections
+#              are `_SECTION_GROUPS` — but still a note of which rows are
+#              everyday and which aren't.
 #
 # Order is the order of the properties panel: what the chart is made of,
 # then what it is coloured and split by, then the shape of the chart
@@ -486,10 +496,11 @@ def _kinds_taking(*args: str) -> list[str]:
 _ROWS: list[dict[str, Any]] = [
     {"name": "kind", "type": "choice", "label": "Kind",
      "options": list(_KINDS), "default": "line"},
-    # Reveals the two-thirds of the panel that no chart needs every day.
-    # Cosmetic, so opening the drawer doesn't re-run the chart.
+    # Once a tick that revealed the deeper two-thirds of the panel; those
+    # rows sit in folded sections now (`_SECTION_GROUPS`). Kept, hidden, so
+    # a flow saved with it still opens.
     {"name": "more", "type": "bool", "label": "More options",
-     "default": False, "cosmetic": True},
+     "default": False, "cosmetic": True, "hidden": True},
 
     # ------------------------------------------------------ click to filter
     {"name": "on_click", "type": "choice", "label": "On click",
@@ -796,6 +807,10 @@ _ROWS: list[dict[str, Any]] = [
     {"name": "title", "type": "string", "label": "Title", "default": ""},
     {"name": "subtitle", "type": "string", "label": "Subtitle",
      "default": "", "advanced": True},
+    {"name": "chart_rules", "type": "text", "label": "Chart rules",
+     "default": "", "wizard": "chart", "insert_columns": "inline", "placeholder":
+     'series total line thick blue as "Total"  \N{EM DASH}  one rule a line, '
+     "F1 \N{RIGHTWARDS ARROW} Chart Rules for the language"},
 ]
 
 #: Rows that feed a px argument, keyed by param name — used by _build().
@@ -860,8 +875,8 @@ def _params() -> list[dict[str, Any]]:
     """The PARAMS rows for every Plotly Express setting this node offers.
 
     Each row comes back with its `visible_when` filled in — the chart
-    kinds that accept its argument, ANDed with the "More options" tick for
-    an advanced row — and with this module's private keys removed.
+    kinds that accept its argument — and with this module's private keys
+    removed.
     """
     out = []
     for row in _ROWS:
@@ -876,8 +891,6 @@ def _params() -> list[dict[str, Any]]:
             # be a typo in an argument name, and is caught by the test that
             # checks this table against plotly itself.
             when["kind"] = list(kinds)
-        if row.get("advanced"):
-            when["more"] = ["True"]
         if when:
             spec["visible_when"] = when
         out.append(spec)
@@ -1391,132 +1404,122 @@ _NOTE_POS: dict[str, tuple] = {
     "bottom right": (0.99, 0.01, "right", "bottom"),
 }
 
-#: Every styling row hangs off the one "Styling options" tick, the way the
-#: chart rows hang off "More options". Two drawers: what the chart is, and
-#: how it looks.
-_WHEN_STYLING = {"styling": ["True"]}
+#: The styling rows used to hang off one "Styling options" tick. They sit in
+#: folded sections now (see `_SECTIONS`); the tick stays as a hidden param so
+#: a flow saved with it still opens, but it no longer hides anything.
 
 _STYLE_ROWS: list[dict[str, Any]] = [
     {"name": "styling", "type": "bool", "label": "Styling options",
-     "default": False, "cosmetic": True},
+     "default": False, "cosmetic": True, "hidden": True},
 
     {"name": "title_align", "type": "choice", "label": "Title position",
-     "options": [_KEEP, "left", "center", "right"], "default": _KEEP,
-     "visible_when": _WHEN_STYLING},
+     "options": [_KEEP, "left", "center", "right"], "default": _KEEP},
     {"name": "x_title", "type": "string", "label": "X axis title",
-     "default": "", "placeholder": "blank leaves it as plotted",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted"},
     {"name": "y_title", "type": "string", "label": "Y axis title",
-     "default": "", "placeholder": "blank leaves it as plotted",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted"},
+    # Blank above keeps plotly's own axis title (the column name); these
+    # take it away, on every axis a faceted chart has.
+    {"name": "axis_titles", "type": "choice", "label": "Axis titles",
+     "options": [_KEEP, "hide X", "hide Y", "hide both"], "default": _KEEP},
     {"name": "legend_title", "type": "string", "label": "Legend title",
-     "default": "", "placeholder": "blank leaves it as plotted",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted"},
+    {"name": "hide_legend_title", "type": "bool", "label": "Hide legend title",
+     "default": False},
     {"name": "colorbar_title", "type": "string", "label": "Color bar title",
-     "default": "", "placeholder": "blank leaves it as plotted",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "blank leaves it as plotted"},
+    {"name": "hide_colorbar", "type": "bool", "label": "Hide color bar",
+     "default": False},
 
     {"name": "legend", "type": "choice", "label": "Legend",
-     "options": [_KEEP, "show", "hide"], "default": _KEEP,
-     "visible_when": _WHEN_STYLING},
+     "options": [_KEEP, "show", "hide"], "default": _KEEP},
     {"name": "legend_pos", "type": "choice", "label": "Legend position",
      "options": [_KEEP, "right", "top", "bottom", "inside top left",
                  "inside top right", "inside bottom left",
                  "inside bottom right"],
-     "default": _KEEP, "visible_when": _WHEN_STYLING},
+     "default": _KEEP},
     {"name": "legend_orientation", "type": "choice", "label": "Legend layout",
-     "options": [_KEEP, "vertical", "horizontal"], "default": _KEEP,
-     "visible_when": _WHEN_STYLING},
+     "options": [_KEEP, "vertical", "horizontal"], "default": _KEEP},
     {"name": "legend_click", "type": "choice", "label": "Legend clicks",
-     "options": [_KEEP, "toggle one", "isolate one", "off"], "default": _KEEP,
-     "visible_when": _WHEN_STYLING},
+     "options": [_KEEP, "toggle one", "isolate one", "off"], "default": _KEEP},
     {"name": "legend_x", "type": "string", "label": "Legend X", "default": "",
-     "placeholder": "0 left – 1 right (1.02 = just outside)",
-     "visible_when": _WHEN_STYLING},
+     "placeholder": "0 left – 1 right (1.02 = just outside)"},
     {"name": "legend_y", "type": "string", "label": "Legend Y", "default": "",
-     "placeholder": "0 bottom – 1 top", "visible_when": _WHEN_STYLING},
+     "placeholder": "0 bottom – 1 top"},
     {"name": "legend_order", "type": "choice", "label": "Legend order",
      "options": [_KEEP, "normal", "reversed", "grouped", "reversed grouped"],
-     "default": _KEEP, "visible_when": _WHEN_STYLING},
+     "default": _KEEP},
     {"name": "legend_item_size", "type": "choice", "label": "Legend marker size",
-     "options": [_KEEP, "from the trace", "uniform"], "default": _KEEP,
-     "visible_when": _WHEN_STYLING},
+     "options": [_KEEP, "from the trace", "uniform"], "default": _KEEP},
     {"name": "legend_font_size", "type": "int", "label": "Legend text size",
-     "default": 0, "min": 0, "max": 36, "visible_when": _WHEN_STYLING},
+     "default": 0, "min": 0, "max": 36},
     {"name": "legend_bg", "type": "string", "label": "Legend background",
-     "default": "", "placeholder": "e.g. #f5f5f5 or rgba(0,0,0,.05)",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #f5f5f5 or rgba(0,0,0,.05)"},
     {"name": "legend_border", "type": "string", "label": "Legend border",
-     "default": "", "placeholder": "e.g. #ccc", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #ccc"},
     {"name": "legend_border_width", "type": "int", "label": "Legend border width",
-     "default": 0, "min": 0, "max": 10, "visible_when": _WHEN_STYLING},
+     "default": 0, "min": 0, "max": 10},
 
     {"name": "hovermode", "type": "choice", "label": "Hover",
      "options": [_KEEP, "closest", "x", "y", "x unified", "y unified", "off"],
-     "default": _KEEP, "visible_when": _WHEN_STYLING},
+     "default": _KEEP},
 
     {"name": "grid_x", "type": "choice", "label": "X gridlines",
-     "options": [_KEEP, "on", "off"], "default": _KEEP,
-     "visible_when": _WHEN_STYLING},
+     "options": [_KEEP, "on", "off"], "default": _KEEP},
     {"name": "grid_y", "type": "choice", "label": "Y gridlines",
-     "options": [_KEEP, "on", "off"], "default": _KEEP,
-     "visible_when": _WHEN_STYLING},
+     "options": [_KEEP, "on", "off"], "default": _KEEP},
+    {"name": "tick_labels", "type": "choice", "label": "Tick labels",
+     "options": [_KEEP, "hide X", "hide Y", "hide both"], "default": _KEEP},
+    # the line, ticks, labels, title and gridlines all go — for a chart
+    # that is only its shape, like a sparkline
+    {"name": "hide_axis", "type": "choice", "label": "Hide whole axis",
+     "options": [_KEEP, "hide X", "hide Y", "hide both"], "default": _KEEP},
     {"name": "x_format", "type": "string", "label": "X tick format",
-     "default": "", "placeholder": ",.0f  or  %b %Y",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": ",.0f  or  %b %Y"},
     {"name": "y_format", "type": "string", "label": "Y tick format",
-     "default": "", "placeholder": ",.0f  or  .1%",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": ",.0f  or  .1%"},
     {"name": "tick_angle", "type": "string", "label": "X tick angle",
-     "default": "", "placeholder": "degrees, e.g. -45",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "degrees, e.g. -45"},
     {"name": "category_order", "type": "choice", "label": "Sort categories",
      "options": [_KEEP, "as plotted", "category ascending",
                  "category descending", "total ascending",
                  "total descending"],
-     "default": _KEEP, "visible_when": _WHEN_STYLING},
+     "default": _KEEP},
     {"name": "range_slider", "type": "bool", "label": "Range slider",
-     "default": False, "visible_when": _WHEN_STYLING},
+     "default": False},
 
     {"name": "line_at", "type": "string", "label": "Reference line",
-     "default": "", "placeholder": "a value, e.g. 0 or 100",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "a value, e.g. 0 or 100"},
     {"name": "line_axis", "type": "choice", "label": "Reference line on",
-     "options": ["y", "x"], "default": "y", "visible_when": _WHEN_STYLING},
+     "options": ["y", "x"], "default": "y"},
     {"name": "line_label", "type": "string", "label": "Reference label",
-     "default": "", "placeholder": "e.g. Target", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. Target"},
     {"name": "line_color", "type": "string", "label": "Reference color",
-     "default": "", "placeholder": "e.g. crimson or #b00",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. crimson or #b00"},
     # Not "line_dash": that name is already a column-encoding row on these
     # nodes ("Dash by"). Plotly Style, which has no encoding rows, calls the
     # same setting line_dash.
     {"name": "ref_dash", "type": "choice", "label": "Reference style",
-     "options": ["dash", "solid", "dot", "dashdot"], "default": "dash",
-     "visible_when": _WHEN_STYLING},
+     "options": ["dash", "solid", "dot", "dashdot"], "default": "dash"},
 
     {"name": "note", "type": "text", "label": "Note", "default": "",
-     "placeholder": "text to place on the chart", "visible_when": _WHEN_STYLING},
+     "placeholder": "text to place on the chart"},
     {"name": "note_pos", "type": "choice", "label": "Note position",
      "options": ["top left", "top right", "bottom left", "bottom right"],
-     "default": "top left", "visible_when": _WHEN_STYLING},
+     "default": "top left"},
 
     {"name": "font_family", "type": "string", "label": "Font", "default": "",
-     "placeholder": "e.g. Georgia, Inter, sans-serif",
-     "visible_when": _WHEN_STYLING},
+     "placeholder": "e.g. Georgia, Inter, sans-serif"},
     {"name": "font_size", "type": "int", "label": "Font size", "default": 0,
-     "min": 0, "max": 48, "visible_when": _WHEN_STYLING},
+     "min": 0, "max": 48},
     {"name": "font_color", "type": "string", "label": "Text color",
-     "default": "", "placeholder": "e.g. #333 or slategray",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #333 or slategray"},
     {"name": "plot_color", "type": "string", "label": "Plot background",
-     "default": "", "placeholder": "e.g. #fff or rgba(0,0,0,0)",
-     "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #fff or rgba(0,0,0,0)"},
     {"name": "paper_color", "type": "string", "label": "Card background",
-     "default": "", "placeholder": "e.g. #fff", "visible_when": _WHEN_STYLING},
+     "default": "", "placeholder": "e.g. #fff"},
     {"name": "margin", "type": "string", "label": "Margins", "default": "",
-     "placeholder": "left,right,top,bottom in pixels",
-     "visible_when": _WHEN_STYLING},
+     "placeholder": "left,right,top,bottom in pixels"},
 
     # The escape hatch. Everything above is a shortcut for a setting people
     # reach for; these three boxes are the rest of plotly, verbatim. A JSON
@@ -1526,17 +1529,14 @@ _STYLE_ROWS: list[dict[str, Any]] = [
     {"name": "layout_json", "type": "text", "label": "Layout (JSON)",
      "default": "", "placeholder":
      '{"bargap": 0.25, "barmode": "overlay"}  —  plotly.com/python/reference'
-     "/layout",
-     "visible_when": _WHEN_STYLING},
+     "/layout"},
     {"name": "traces_json", "type": "text", "label": "Traces (JSON)",
      "default": "", "placeholder":
      '{"marker_line_width": 1, "textposition": "outside"}  —  applied to '
-     "every trace",
-     "visible_when": _WHEN_STYLING},
+     "every trace"},
     {"name": "config_json", "type": "text", "label": "Interactivity (JSON)",
      "default": "", "placeholder":
-     '{"scrollZoom": true, "displayModeBar": false, "staticPlot": false}',
-     "visible_when": _WHEN_STYLING},
+     '{"scrollZoom": true, "displayModeBar": false, "staticPlot": false}'},
 ]
 
 # Every styling dropdown keeps a "leave it alone" option — that is what
@@ -1572,7 +1572,38 @@ def _apply_styling(fig, params: dict[str, Any]) -> None:
     _style_note(params, fig)
     if params.get("colorbar_title"):
         fig.update_coloraxes(colorbar_title_text=params["colorbar_title"])
+    _hide_parts(params, fig)
     _apply_raw(params, fig)
+
+
+#: A "hide X / hide Y / hide both" choice as the axes it names.
+_HIDDEN_AXES = {"hide X": ("x",), "hide Y": ("y",), "hide both": ("x", "y")}
+
+
+def _hide_parts(params, fig) -> None:
+    """Take titles, tick labels, whole axes and the color bar away.
+
+    Runs after every other axis setting, so hiding wins over a title typed
+    into X axis title. `update_xaxes` walks every x axis the figure has, so
+    each panel of a faceted chart loses it too, and a chart with no
+    cartesian axes (a pie) is left as it is.
+    """
+    updates = {"x": fig.update_xaxes, "y": fig.update_yaxes}
+    for name, settings in (("axis_titles", {"title_text": ""}),
+                           ("tick_labels", {"showticklabels": False}),
+                           ("hide_axis", {"visible": False})):
+        for axis in _HIDDEN_AXES.get(params.get(name, _KEEP), ()):
+            updates[axis](**settings)
+    if params.get("hide_colorbar"):
+        # px puts a continuous colour on a shared coloraxis; a trace drawn
+        # some other way carries its own scale, on itself or its marker
+        fig.update_coloraxes(showscale=False)
+        for trace in fig.data:
+            if "showscale" in trace:
+                trace.showscale = False
+            marker = getattr(trace, "marker", None) if "marker" in trace else None
+            if marker is not None and "showscale" in marker:
+                marker.showscale = False
 
 
 def _apply_raw(params, fig) -> None:
@@ -1624,6 +1655,8 @@ def _style_titles(params, layout) -> None:
         layout["title_xanchor"] = align
     if params.get("legend_title"):
         layout["legend_title_text"] = params["legend_title"]
+    if params.get("hide_legend_title"):
+        layout["legend_title_text"] = ""
 
 
 def _style_legend(params, layout) -> None:
@@ -1759,7 +1792,97 @@ def _style_numbers(text) -> list:
     return [] if None in parsed else parsed
 
 
-PARAMS = [
+#: Properties-panel sections, in the order the panel shows them: (title,
+#: starts folded, the rows in it). The open ones are what nearly every chart
+#: is built from; the folded ones are where the rest waits, a heading each,
+#: until someone opens one — the panel remembers which, per node type. Rows
+#: a chart kind has no use for are still left out per kind, so an open
+#: section on a bar chart is a handful of rows, not every row plotly has.
+#: A row missing from here would sit loose at the top of the panel, which
+#: the tests refuse.
+_SECTION_GROUPS: list[tuple[str, bool, tuple[str, ...]]] = [
+    ("What to plot", False, (
+        "x", "y", "summarise", "z", "x_start", "x_end", "names", "values",
+        "path", "dimensions", "r", "theta", "a", "b", "c")),
+    ("Colour and grouping", False, (
+        "color", "color_map_column", "size", "facet_row", "facet_col",
+        "facet_col_wrap")),
+    ("Chart shape", False, (
+        "orientation", "barmode", "barnorm", "groupnorm", "boxmode",
+        "violinmode", "stripmode", "histfunc", "histnorm", "nbins", "nbinsx",
+        "nbinsy", "cumulative", "points", "notched", "box", "ecdfnorm",
+        "ecdfmode", "lines", "markers", "line_shape", "line_close", "hole",
+        "branchvalues", "maxdepth", "dimensions_max_cardinality", "base",
+        "polar_direction", "start_angle", "render_mode")),
+    ("Charts per value", False, (
+        "shared_scale", "max_charts", "columns", "rows", "direction")),
+    ("Titles", False, (
+        "title", "subtitle", "title_align", "x_title", "y_title",
+        "axis_titles", "labels")),
+    ("Chart rules", False, ("chart_rules",)),
+    ("Click to filter", True, ("on_click", "selected", "view_range")),
+    ("Axes and gridlines", True, (
+        "log_x", "log_y", "log_z", "log_r", "min_x", "max_x", "min_y",
+        "max_y", "min_z", "max_z", "min_r", "max_r", "min_theta",
+        "max_theta", "hide_axis", "tick_labels", "grid_x", "grid_y",
+        "x_format", "y_format",
+        "tick_angle", "category_order", "range_slider")),
+    ("Palette and theme", True, (
+        "template", "color_sequence", "color_map_json", "color_scale",
+        "color_min", "color_max", "color_midpoint", "opacity")),
+    ("Labels and hover", True, (
+        "text", "text_auto", "hover_name", "hover_data", "hovermode")),
+    ("Markers and lines", True, (
+        "symbol", "size_max", "line_dash", "pattern_shape", "line_group")),
+    ("Trendlines and marginals", True, (
+        "trendline", "trendline_scope", "trendline_window", "marginal",
+        "marginal_x", "marginal_y")),
+    ("Error bars", True, (
+        "error_y", "error_y_minus", "error_x", "error_x_minus", "error_z")),
+    ("Animation", True, ("animation_frame", "animation_group")),
+    ("Legend", True, (
+        "legend", "legend_title", "hide_legend_title", "legend_pos",
+        "legend_orientation",
+        "legend_click", "legend_x", "legend_y", "legend_order",
+        "legend_item_size", "legend_font_size", "legend_bg", "legend_border",
+        "legend_border_width", "colorbar_title", "hide_colorbar")),
+    ("Reference line", True, (
+        "line_at", "line_axis", "line_label", "line_color", "ref_dash")),
+    ("Note", True, ("note", "note_pos")),
+    ("Text and background", True, (
+        "font_family", "font_size", "font_color", "plot_color", "paper_color",
+        "margin")),
+    ("Plotly JSON", True, ("layout_json", "traces_json", "config_json")),
+    ("Card", True, ("width", "height", "scale")),
+]
+_SECTION_OF: dict[str, tuple[int, int, str, bool]] = {
+    name: (order, place, title, folded)
+    for order, (title, folded, names) in enumerate(_SECTION_GROUPS)
+    for place, name in enumerate(names)
+}
+
+
+def _sectioned(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows in panel order, each given its section.
+
+    Rows in no section (the chart kind) come first; the rest follow
+    `_SECTION_GROUPS`, section by section and row by row. Copies, so the shared row
+    tables are never written to. Order is only the panel's: params are
+    stored and read by name.
+    """
+    loose, placed = [], []
+    for row in rows:
+        where = _SECTION_OF.get(row["name"])
+        if where is None:
+            loose.append(row)
+            continue
+        order, place, title, folded = where
+        placed.append((order, place,
+                       {**row, "section": title, "folded": folded}))
+    return loose + [row for _, _, row in sorted(placed, key=lambda t: t[:2])]
+
+
+PARAMS = _sectioned([
     *_params(),
     *_STYLE_ROWS,
     {"name": "width", "type": "int", "label": "Width",
@@ -1771,7 +1894,7 @@ PARAMS = [
     # would re-run the plot, and everything downstream, for the same figure.
     {"name": "scale", "type": "int", "label": "Scale %",
      "default": 100, "min": 25, "max": 400, "cosmetic": True},
-]
+])
 
 
 # --------------------------------------------------------- click to filter
@@ -2106,7 +2229,47 @@ def _summarised(ctx, table, kwargs: dict, kind: str):
     return grouped, across
 
 
-def run(ctx, table):
+
+def _chart_rules():
+    """The chart-rules language, or None on a flograph too old to have it.
+
+    Like `_figure_lock` below, this node is meant to drop into an older
+    flograph and still draw — so the box is simply not applied there, with
+    a line in the log saying why, rather than the node failing to load.
+    """
+    try:
+        from flograph.core import chart_rules
+    except ImportError:
+        return None
+    return chart_rules
+
+
+def _apply_chart_rules(ctx, fig, frame, raw, compare, kwargs, kind) -> None:
+    """The Chart rules box: extra series, and styling beyond the rows.
+
+    Runs last, so a rule wins over a setting, and never raises — a line
+    that cannot be read, or names a column that isn't there, is logged and
+    skipped, and the chart still draws.
+    """
+    chart_rules = _chart_rules()
+    if chart_rules is None:
+        if str(ctx.params.get("chart_rules", "")).strip():
+            ctx.log("Chart rules need a newer flograph — the box was skipped")
+        return
+
+    rules, problems = chart_rules.parse(ctx.params.get("chart_rules", ""))
+    if rules:
+        x = kwargs.get("x") if isinstance(kwargs.get("x"), str) else ""
+        problems += chart_rules.apply_rules(
+            fig, rules, frame=frame, raw=raw, compare=compare, x=x,
+            ys=tuple(_column_list(kwargs.get("y"))),
+            aggregate=_SUMMARISE.get(
+                str(ctx.params.get("summarise", "none")), ""))
+    for problem in problems:
+        ctx.log(f"chart rule skipped \N{EM DASH} {problem}")
+
+
+def run(ctx, table, compare=None):
     try:
         import plotly.express as px
     except ImportError:
@@ -2137,6 +2300,7 @@ def run(ctx, table):
     if layout:
         fig.update_layout(**layout)
     _apply_styling(fig, ctx.params)
+    _apply_chart_rules(ctx, fig, drawn, table, compare, kwargs, kind)
 
     ctx.log(f"plotted {len(fig.data)} trace(s) ({kind})")
     if ignored:

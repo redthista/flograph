@@ -105,6 +105,17 @@ class ParamSpec:
     # text only: offer a "build a rule…" button beside the box that opens
     # the conditional-formatting wizard and appends the line it builds.
     rule_wizard: bool = False
+    # text only: which builder the box offers beside it — "table" is the
+    # conditional-formatting rules manager (what rule_wizard says), "chart"
+    # the chart-rules one. Blank is a plain box.
+    wizard: str = ""
+    # Properties-panel grouping: rows sharing a section sit under one
+    # heading that folds. Rows with none stay at the top level, so a node
+    # that declares no sections looks exactly as it always has. `folded`
+    # on any row of a section starts that section folded until someone
+    # opens it (the panel remembers per node type after that).
+    section: str = ""
+    folded: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], where: str = "PARAMS") -> "ParamSpec":
@@ -165,7 +176,11 @@ class ParamSpec:
                 d.get("insert_columns"), name, where),
             cosmetic=cosmetic,
             rule_wizard=bool(d.get("rule_wizard", False)),
+            wizard=str(d.get("wizard") or
+                       ("table" if d.get("rule_wizard") else "")),
             visible_when=visible_when,
+            section=str(d.get("section") or "").strip(),
+            folded=bool(d.get("folded", False)),
         )
 
     def visible_for(self, values: dict[str, Any]) -> bool:

@@ -25,6 +25,7 @@ same page.
 | Delete | **Del** |
 | Rename node | **F2** |
 | Find node | **Ctrl+F** (over the canvas) |
+| Search properties | **Ctrl+F** (in the Properties panel) |
 | Add frame around selection | **Ctrl+G** |
 
 Undo, cut, copy and paste are focus-aware — inside the code editor they act

@@ -92,9 +92,43 @@ NODE = {
 # figure somebody else built without quietly flattening it.
 _KEEP = "keep"
 
-PARAMS = [
+#: Properties-panel sections: the row each starts at -> (title, starts
+#: folded). Theme and titles are what a style is usually for; the rest start
+#: folded, a heading each, until someone opens one.
+_SECTIONS: dict[str, tuple[str, bool]] = {
+    "chart_rules": ("Chart rules", False),
+    "template": ("Theme and colours", False),
+    "title": ("Titles", False),
+    "legend": ("Legend", True),
+    "hovermode": ("Axes, gridlines and hover", True),
+    "line_at": ("Reference line", True),
+    "note": ("Note", True),
+    "font_family": ("Text and background", True),
+    "layout_json": ("Plotly JSON", True),
+    "width": ("Card", True),
+}
+
+def _sectioned(rows: list[dict]) -> list[dict]:
+    """Give each row the properties-panel section it sits in.
+
+    A section runs from the row named in `_SECTIONS` until the next one
+    starts; rows before the first stay at the top of the panel. Copies,
+    so the shared row tables are never written to.
+    """
+    section, folded = "", False
+    out = []
+    for row in rows:
+        if row["name"] in _SECTIONS:
+            section, folded = _SECTIONS[row["name"]]
+        out.append({**row, "section": section, "folded": folded}
+                   if section else row)
+    return out
+
+PARAMS = _sectioned([
+    # Once a tick hiding the deeper rows; they sit in folded sections now.
+    # Kept, hidden, so a flow saved with it still opens.
     {"name": "more", "type": "bool", "label": "More options",
-     "default": False, "cosmetic": True},
+     "default": False, "cosmetic": True, "hidden": True},
 
     {"name": "template", "type": "choice", "label": "Theme",
      "options": [_KEEP, "plotly", "plotly_white", "plotly_dark", "ggplot2",
@@ -111,19 +145,29 @@ PARAMS = [
      "placeholder": "(keep)"},
     {"name": "subtitle", "type": "string", "label": "Subtitle",
      "default": "", "placeholder": "(keep)"},
+    {"name": "chart_rules", "type": "text", "label": "Chart rules",
+     "default": "", "wizard": "chart", "placeholder":
+     'legend bottom horizontal  \N{EM DASH}  one rule a line, F1 '
+     "\N{RIGHTWARDS ARROW} Chart Rules for the language"},
     {"name": "title_align", "type": "choice", "label": "Title position",
-     "options": [_KEEP, "left", "center", "right"], "default": _KEEP,
-     "visible_when": {"more": ["True"]}},
+     "options": [_KEEP, "left", "center", "right"], "default": _KEEP},
 
     {"name": "x_title", "type": "string", "label": "X axis title",
      "default": "", "placeholder": "(keep)"},
     {"name": "y_title", "type": "string", "label": "Y axis title",
      "default": "", "placeholder": "(keep)"},
+    # Blank above keeps plotly's own axis title (the column name); these
+    # take it away, on every axis a faceted chart has.
+    {"name": "axis_titles", "type": "choice", "label": "Axis titles",
+     "options": [_KEEP, "hide X", "hide Y", "hide both"], "default": _KEEP},
     {"name": "legend_title", "type": "string", "label": "Legend title",
      "default": "", "placeholder": "(keep)"},
+    {"name": "hide_legend_title", "type": "bool", "label": "Hide legend title",
+     "default": False},
     {"name": "colorbar_title", "type": "string", "label": "Color bar title",
-     "default": "", "placeholder": "(keep)",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "(keep)"},
+    {"name": "hide_colorbar", "type": "bool", "label": "Hide color bar",
+     "default": False},
 
     {"name": "legend", "type": "choice", "label": "Legend",
      "options": [_KEEP, "show", "hide"], "default": _KEEP},
@@ -138,28 +182,22 @@ PARAMS = [
      "options": [_KEEP, "toggle one", "isolate one", "off"],
      "default": _KEEP},
     {"name": "legend_x", "type": "string", "label": "Legend X", "default": "",
-     "placeholder": "0 left – 1 right (1.02 = just outside)",
-     "visible_when": {"more": ["True"]}},
+     "placeholder": "0 left – 1 right (1.02 = just outside)"},
     {"name": "legend_y", "type": "string", "label": "Legend Y", "default": "",
-     "placeholder": "0 bottom – 1 top",
-     "visible_when": {"more": ["True"]}},
+     "placeholder": "0 bottom – 1 top"},
     {"name": "legend_order", "type": "choice", "label": "Legend order",
      "options": [_KEEP, "normal", "reversed", "grouped", "reversed grouped"],
-     "default": _KEEP, "visible_when": {"more": ["True"]}},
+     "default": _KEEP},
     {"name": "legend_item_size", "type": "choice", "label": "Legend marker size",
-     "options": [_KEEP, "from the trace", "uniform"], "default": _KEEP,
-     "visible_when": {"more": ["True"]}},
+     "options": [_KEEP, "from the trace", "uniform"], "default": _KEEP},
     {"name": "legend_font_size", "type": "int", "label": "Legend text size",
-     "default": 0, "min": 0, "max": 36, "visible_when": {"more": ["True"]}},
+     "default": 0, "min": 0, "max": 36},
     {"name": "legend_bg", "type": "string", "label": "Legend background",
-     "default": "", "placeholder": "(keep)",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "(keep)"},
     {"name": "legend_border", "type": "string", "label": "Legend border",
-     "default": "", "placeholder": "(keep)",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "(keep)"},
     {"name": "legend_border_width", "type": "int",
-     "label": "Legend border width", "default": 0, "min": 0, "max": 10,
-     "visible_when": {"more": ["True"]}},
+     "label": "Legend border width", "default": 0, "min": 0, "max": 10},
 
     {"name": "hovermode", "type": "choice", "label": "Hover",
      "options": [_KEEP, "closest", "x", "y", "x unified", "y unified",
@@ -171,9 +209,9 @@ PARAMS = [
     {"name": "log_y", "type": "choice", "label": "Log Y",
      "options": [_KEEP, "on", "off"], "default": _KEEP},
     {"name": "min_x", "type": "string", "label": "Min X", "default": "",
-     "placeholder": "(keep)", "visible_when": {"more": ["True"]}},
+     "placeholder": "(keep)"},
     {"name": "max_x", "type": "string", "label": "Max X", "default": "",
-     "placeholder": "(keep)", "visible_when": {"more": ["True"]}},
+     "placeholder": "(keep)"},
     {"name": "min_y", "type": "string", "label": "Min Y", "default": "",
      "placeholder": "(keep)"},
     {"name": "max_y", "type": "string", "label": "Max Y", "default": "",
@@ -183,22 +221,25 @@ PARAMS = [
      "options": [_KEEP, "on", "off"], "default": _KEEP},
     {"name": "grid_y", "type": "choice", "label": "Y gridlines",
      "options": [_KEEP, "on", "off"], "default": _KEEP},
+    {"name": "tick_labels", "type": "choice", "label": "Tick labels",
+     "options": [_KEEP, "hide X", "hide Y", "hide both"], "default": _KEEP},
+    # the line, ticks, labels, title and gridlines all go — for a chart
+    # that is only its shape, like a sparkline
+    {"name": "hide_axis", "type": "choice", "label": "Hide whole axis",
+     "options": [_KEEP, "hide X", "hide Y", "hide both"], "default": _KEEP},
     {"name": "x_format", "type": "string", "label": "X tick format",
-     "default": "", "placeholder": ",.0f  or  %b %Y",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": ",.0f  or  %b %Y"},
     {"name": "y_format", "type": "string", "label": "Y tick format",
-     "default": "", "placeholder": ",.0f  or  .1%",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": ",.0f  or  .1%"},
     {"name": "tick_angle", "type": "string", "label": "X tick angle",
-     "default": "", "placeholder": "degrees, e.g. -45",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "degrees, e.g. -45"},
     {"name": "category_order", "type": "choice", "label": "Sort categories",
      "options": [_KEEP, "as plotted", "category ascending",
                  "category descending", "total ascending",
                  "total descending"],
      "default": _KEEP},
     {"name": "range_slider", "type": "bool", "label": "Range slider",
-     "default": False, "visible_when": {"more": ["True"]}},
+     "default": False},
 
     {"name": "line_at", "type": "string", "label": "Reference line",
      "default": "", "placeholder": "a value, e.g. 0 or 100"},
@@ -207,11 +248,9 @@ PARAMS = [
     {"name": "line_label", "type": "string", "label": "Reference label",
      "default": "", "placeholder": "e.g. Target"},
     {"name": "line_color", "type": "string", "label": "Reference color",
-     "default": "", "placeholder": "e.g. crimson or #b00",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "e.g. crimson or #b00"},
     {"name": "line_dash", "type": "choice", "label": "Reference style",
-     "options": ["dash", "solid", "dot", "dashdot"], "default": "dash",
-     "visible_when": {"more": ["True"]}},
+     "options": ["dash", "solid", "dot", "dashdot"], "default": "dash"},
 
     {"name": "note", "type": "text", "label": "Note", "default": "",
      "placeholder": "text to place on the chart"},
@@ -220,22 +259,17 @@ PARAMS = [
      "default": "top left"},
 
     {"name": "font_family", "type": "string", "label": "Font",
-     "default": "", "placeholder": "(keep)",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "(keep)"},
     {"name": "font_size", "type": "int", "label": "Font size", "default": 0,
-     "min": 0, "max": 48, "visible_when": {"more": ["True"]}},
+     "min": 0, "max": 48},
     {"name": "font_color", "type": "string", "label": "Text color",
-     "default": "", "placeholder": "(keep)",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "(keep)"},
     {"name": "plot_color", "type": "string", "label": "Plot background",
-     "default": "", "placeholder": "(keep)",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "(keep)"},
     {"name": "paper_color", "type": "string", "label": "Card background",
-     "default": "", "placeholder": "(keep)",
-     "visible_when": {"more": ["True"]}},
+     "default": "", "placeholder": "(keep)"},
     {"name": "margin", "type": "string", "label": "Margins", "default": "",
-     "placeholder": "left,right,top,bottom in pixels",
-     "visible_when": {"more": ["True"]}},
+     "placeholder": "left,right,top,bottom in pixels"},
 
     # The escape hatch. Everything above is a shortcut for a setting people
     # reach for; these three boxes are the rest of plotly, verbatim — a JSON
@@ -244,15 +278,13 @@ PARAMS = [
     {"name": "layout_json", "type": "text", "label": "Layout (JSON)",
      "default": "", "placeholder":
      '{"bargap": 0.25, "barmode": "overlay"}  —  plotly.com/python/reference'
-     "/layout", "visible_when": {"more": ["True"]}},
+     "/layout"},
     {"name": "traces_json", "type": "text", "label": "Traces (JSON)",
      "default": "", "placeholder":
-     '{"marker_line_width": 1}  —  applied to every trace',
-     "visible_when": {"more": ["True"]}},
+     '{"marker_line_width": 1}  —  applied to every trace'},
     {"name": "config_json", "type": "text", "label": "Interactivity (JSON)",
      "default": "", "placeholder":
-     '{"scrollZoom": true, "displayModeBar": false}',
-     "visible_when": {"more": ["True"]}},
+     '{"scrollZoom": true, "displayModeBar": false}'},
 
     {"name": "width", "type": "int", "label": "Width",
      "default": 460, "min": 260, "max": 4000, "cosmetic": True},
@@ -262,7 +294,7 @@ PARAMS = [
     # figure this node already produced.
     {"name": "scale", "type": "int", "label": "Scale %",
      "default": 100, "min": 25, "max": 400, "cosmetic": True},
-]
+])
 
 # Every dropdown here keeps a "leave it alone" option — that is what makes
 # the node inert until asked — but the bare word reads like a real choice.
@@ -387,16 +419,25 @@ def run(ctx, figure=None, style=None):
         if not figure:
             return {"figure": [], "style": payload}
         styled = []
+        problems: list = []
         for index, one in enumerate(figure):
             ctx.check_cancelled()
             ctx.progress(index / len(figure))
-            styled.append(_style(one, layers))
+            styled.append(_style(one, layers, problems if not index else None))
         ctx.log(f"styled {len(styled)} figures with {_describe(layers)}")
+        _log_problems(ctx, problems)
         return {"figure": styled, "style": payload}
 
-    styled = _style(figure, layers)
+    problems: list = []
+    styled = _style(figure, layers, problems)
     ctx.log(f"styled 1 figure with {_describe(layers)}")
+    _log_problems(ctx, problems)
     return {"figure": styled, "style": payload}
+
+
+def _log_problems(ctx, problems) -> None:
+    for problem in problems:
+        ctx.log(f"chart rule skipped \N{EM DASH} {problem}")
 
 
 def _chain(style) -> list:
@@ -438,8 +479,12 @@ def _describe(layers) -> str:
     return f"{settings} setting(s){chained}"
 
 
-def _style(figure, layers):
-    """One figure, restyled onto a copy of itself."""
+def _style(figure, layers, problems=None):
+    """One figure, restyled onto a copy of itself.
+
+    `problems` collects what a Chart rules line could not do, for the node
+    to log — a bad line never stops the figure coming out.
+    """
     import plotly.graph_objects as go
 
     if not hasattr(figure, "update_layout"):
@@ -454,7 +499,9 @@ def _style(figure, layers):
         # figure in place would restyle somebody else's chart too.
         fig = go.Figure(figure)
         for layer in layers:
-            _apply(fig, layer)
+            trouble = _apply(fig, layer)
+            if problems is not None:
+                problems.extend(trouble)
         return fig
 
 
@@ -481,7 +528,71 @@ def _apply(fig, params) -> None:
     _note(params, fig)
     if params.get("colorbar_title"):
         fig.update_coloraxes(colorbar_title_text=params["colorbar_title"])
+    _hide_parts(params, fig)
     _raw(params, fig)
+    return _chart_rules_box(params, fig)
+
+
+def _chart_rules():
+    """The chart-rules language, or None on a flograph too old to have it.
+
+    Like `_figure_lock` below, this node is meant to drop into an older
+    flograph and still draw — so the box is simply not applied there, with
+    a line in the log saying why, rather than the node failing to load.
+    """
+    try:
+        from flograph.core import chart_rules
+    except ImportError:
+        return None
+    return chart_rules
+
+
+def _chart_rules_box(params, fig) -> list:
+    """The Chart rules box, applied last so a rule wins over a row.
+
+    A style layer has no data, so a `series` rule — which draws from the
+    chart's own rows — can only be written on the chart node itself; it is
+    reported here rather than half-drawn.
+    """
+    chart_rules = _chart_rules()
+    if chart_rules is None:
+        return (["Chart rules need a newer flograph — the box was skipped"]
+                if str(params.get("chart_rules", "")).strip() else [])
+
+    rules, problems = chart_rules.parse(params.get("chart_rules", ""))
+    if rules:
+        problems += chart_rules.apply_rules(fig, rules)
+    return problems
+
+
+#: A "hide X / hide Y / hide both" choice as the axes it names.
+_HIDDEN_AXES = {"hide X": ("x",), "hide Y": ("y",), "hide both": ("x", "y")}
+
+
+def _hide_parts(params, fig) -> None:
+    """Take titles, tick labels, whole axes and the color bar away.
+
+    Runs after every other axis setting, so hiding wins over a title typed
+    into X axis title. `update_xaxes` walks every x axis the figure has, so
+    each panel of a faceted chart loses it too, and a chart with no
+    cartesian axes (a pie) is left as it is.
+    """
+    updates = {"x": fig.update_xaxes, "y": fig.update_yaxes}
+    for name, settings in (("axis_titles", {"title_text": ""}),
+                           ("tick_labels", {"showticklabels": False}),
+                           ("hide_axis", {"visible": False})):
+        for axis in _HIDDEN_AXES.get(params.get(name, _KEEP), ()):
+            updates[axis](**settings)
+    if params.get("hide_colorbar"):
+        # px puts a continuous colour on a shared coloraxis; a trace drawn
+        # some other way carries its own scale, on itself or its marker
+        fig.update_coloraxes(showscale=False)
+        for trace in fig.data:
+            if "showscale" in trace:
+                trace.showscale = False
+            marker = getattr(trace, "marker", None) if "marker" in trace else None
+            if marker is not None and "showscale" in marker:
+                marker.showscale = False
 
 
 def _parsed_json(text, what) -> dict:
@@ -544,6 +655,8 @@ def _titles(params, layout) -> None:
         layout["title_xanchor"] = align
     if params.get("legend_title"):
         layout["legend_title_text"] = params["legend_title"]
+    if params.get("hide_legend_title"):
+        layout["legend_title_text"] = ""
 
 
 #: A legend click toggles the entry by default and isolates it on a

@@ -63,6 +63,18 @@ class TestLeavesThingsAlone:
 
 
 class TestSettings:
+    def test_hide_titles_ticks_axes_and_color_bar(self, registry, figure):
+        out = style(registry, {"axis_titles": "hide X", "tick_labels":
+                               "hide Y", "hide_axis": "hide both",
+                               "hide_legend_title": True,
+                               "hide_colorbar": True}, figure=figure)
+        assert out.layout.xaxis.title.text == ""
+        assert out.layout.yaxis.showticklabels is False
+        assert out.layout.xaxis.visible is False
+        assert out.layout.yaxis.visible is False
+        assert out.layout.legend.title.text == ""
+        assert out.layout.coloraxis.showscale is False
+
     def test_title_and_axis_titles(self, registry, figure):
         out = style(registry, {"title": "Sales", "x_title": "Region",
                                "y_title": "Units"}, figure=figure)

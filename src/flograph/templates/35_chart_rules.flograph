@@ -1,0 +1,294 @@
+{
+  "flograph_version": "0.1.15",
+  "schema": 1,
+  "graph": {
+    "nodes": [
+      {
+        "id": "cr_sales",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          0
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"Month\", \"type\": \"text\"}, {\"name\": \"Region\", \"type\": \"text\"}, {\"name\": \"Units\", \"type\": \"number\"}, {\"name\": \"Margin\", \"type\": \"number\"}], \"rows\": [[\"Jan\", \"North\", 120, 0.31], [\"Jan\", \"South\", 95, 0.31], [\"Feb\", \"North\", 138, 0.29], [\"Feb\", \"South\", 102, 0.29], [\"Mar\", \"North\", 151, 0.33], [\"Mar\", \"South\", 98, 0.33], [\"Apr\", \"North\", 144, 0.3], [\"Apr\", \"South\", 121, 0.3], [\"May\", \"North\", 169, 0.35], [\"May\", \"South\", 130, 0.35], [\"Jun\", \"North\", 182, 0.37], [\"Jun\", \"South\", 141, 0.37]]}",
+          "width": 480,
+          "height": 400
+        },
+        "code": null,
+        "label": "This year"
+      },
+      {
+        "id": "cr_history",
+        "type": "flograph.io.table",
+        "pos": [
+          0,
+          520
+        ],
+        "params": {
+          "data": "{\"version\": 2, \"columns\": [{\"name\": \"Month\", \"type\": \"text\"}, {\"name\": \"Units\", \"type\": \"number\"}], \"rows\": [[\"Jan\", 190], [\"Feb\", 205], [\"Mar\", 233], [\"Apr\", 248], [\"May\", 262], [\"Jun\", 280]]}",
+          "width": 360,
+          "height": 260
+        },
+        "code": null,
+        "label": "Last year"
+      },
+      {
+        "id": "cr_note",
+        "type": "flograph.util.note",
+        "pos": [
+          0,
+          860
+        ],
+        "params": {
+          "text": "## Chart rules\n\nEvery chart here is styled by its **Chart rules** box \u2014 one rule a line, with\na **Chart Rules\u2026** builder beside it. Press **F1 \u25b8 Chart Rules** for the\nlanguage. A line that can't be read is listed in the log and skipped; the\nchart still draws (try typing `wibble` into any of them).\n\n**1 \u00b7 Total and last year** \u2014 `series` draws a line over the bars with its own\nlegend entry. `from compare` reads the second table wired into the node's\n**compare** input, matched on the Month axis.\n\n**2 \u00b7 A second axis** \u2014 `series Margin right` puts margin on its own Y axis;\n`axis y2` names and formats it. Margin was summarised away by *Group and\ntotal*, so the rule reads it from the raw rows.\n\n**3 \u00b7 A house style** \u2014 the rules live on a **Plotly Style** node, so any\nnumber of charts can share them. Chain a second Style node and it appends.\n\n**4 \u00b7 One chart per region** \u2014 the same rules, applied to every panel.",
+          "width": 480,
+          "height": 460
+        },
+        "code": null,
+        "label": null
+      },
+      {
+        "id": "cr_total",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          840,
+          0
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "Month",
+          "y": "Units",
+          "color": "Region",
+          "barmode": "stack",
+          "summarise": "sum",
+          "title": "Units by month",
+          "chart_rules": "series total line thick blue as \"Total\"\nseries total from compare dashed grey as \"Last year\"\nlegend bottom horizontal\naxis y title \"Units\"\nline at 250 dotted red label \"Target\"",
+          "width": 600,
+          "height": 380
+        },
+        "code": null,
+        "label": "1 \u00b7 Total and last year"
+      },
+      {
+        "id": "cr_axis2",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          840,
+          520
+        ],
+        "params": {
+          "kind": "bar",
+          "x": "Month",
+          "y": "Units",
+          "summarise": "sum",
+          "title": "Units and margin",
+          "chart_rules": "series Margin right line thick amber as \"Margin %\"\naxis y2 title \"Margin\" format .0%\naxis y title \"Units\" grid off\naxis x hide title\nlegend bottom horizontal",
+          "width": 600,
+          "height": 380
+        },
+        "code": null,
+        "label": "2 \u00b7 A second axis"
+      },
+      {
+        "id": "cr_plain",
+        "type": "flograph.viz.show_plotly",
+        "pos": [
+          840,
+          1040
+        ],
+        "params": {
+          "kind": "line",
+          "x": "Month",
+          "y": "Units",
+          "color": "Region",
+          "title": "Units by region",
+          "width": 600,
+          "height": 380
+        },
+        "code": null,
+        "label": "3 \u00b7 Plain chart"
+      },
+      {
+        "id": "cr_house",
+        "type": "flograph.viz.plotly_style",
+        "pos": [
+          1700,
+          1040
+        ],
+        "params": {
+          "chart_rules": "font Georgia 13\nbackground plot #ffffff paper #ffffff\naxis y title \"Units\" grid on\naxis x hide title\nlegend top horizontal\nnote \"House style\" bottom right\nlayout {\"bargap\": 0.35}",
+          "width": 600,
+          "height": 380
+        },
+        "code": null,
+        "label": "3 \u00b7 House style"
+      },
+      {
+        "id": "cr_panels",
+        "type": "flograph.viz.chart_per_value_plotly",
+        "pos": [
+          840,
+          1560
+        ],
+        "params": {
+          "split_by": "Region",
+          "kind": "bar",
+          "x": "Month",
+          "y": "Units",
+          "chart_rules": "series total from compare dashed grey as \"Last year\"\nlegend bottom horizontal\naxis y title \"Units\"",
+          "width": 600,
+          "height": 760,
+          "columns": 1
+        },
+        "code": null,
+        "label": "4 \u00b7 One per region"
+      }
+    ],
+    "connections": [
+      {
+        "id": "c1",
+        "src": [
+          "cr_sales",
+          "table"
+        ],
+        "dst": [
+          "cr_total",
+          "table"
+        ]
+      },
+      {
+        "id": "c2",
+        "src": [
+          "cr_sales",
+          "table"
+        ],
+        "dst": [
+          "cr_axis2",
+          "table"
+        ]
+      },
+      {
+        "id": "c3",
+        "src": [
+          "cr_sales",
+          "table"
+        ],
+        "dst": [
+          "cr_plain",
+          "table"
+        ]
+      },
+      {
+        "id": "c4",
+        "src": [
+          "cr_sales",
+          "table"
+        ],
+        "dst": [
+          "cr_panels",
+          "table"
+        ]
+      },
+      {
+        "id": "c5",
+        "src": [
+          "cr_history",
+          "table"
+        ],
+        "dst": [
+          "cr_total",
+          "compare"
+        ]
+      },
+      {
+        "id": "c6",
+        "src": [
+          "cr_history",
+          "table"
+        ],
+        "dst": [
+          "cr_panels",
+          "compare"
+        ]
+      },
+      {
+        "id": "c7",
+        "src": [
+          "cr_plain",
+          "figure"
+        ],
+        "dst": [
+          "cr_house",
+          "figure"
+        ]
+      }
+    ],
+    "frames": [
+      {
+        "id": "cr_frame",
+        "title": "Chart rules \u2014 series, axes, styles",
+        "rect": [
+          -60,
+          -80,
+          2420,
+          2480
+        ],
+        "color": "#26415c"
+      }
+    ],
+    "pages": [
+      {
+        "id": "cr_dash",
+        "title": "Dashboard",
+        "kind": "dashboard",
+        "tiles": [
+          {
+            "id": "crt1",
+            "node": "cr_total",
+            "port": "figure",
+            "rect": [
+              40,
+              40,
+              600,
+              380
+            ]
+          },
+          {
+            "id": "crt2",
+            "node": "cr_axis2",
+            "port": "figure",
+            "rect": [
+              680,
+              40,
+              600,
+              380
+            ]
+          },
+          {
+            "id": "crt3",
+            "node": "cr_house",
+            "port": "figure",
+            "rect": [
+              40,
+              460,
+              600,
+              380
+            ]
+          },
+          {
+            "id": "crt4",
+            "node": "cr_panels",
+            "port": "figures",
+            "rect": [
+              680,
+              460,
+              600,
+              380
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

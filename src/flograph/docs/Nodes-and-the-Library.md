@@ -11,6 +11,27 @@ row) pins it in a **★ Favorites** section at the top and puts it first in the
 Tab popup. The star button beside the search box narrows the tree to
 favorites only. Favorites persist per machine.
 
+## The Properties panel
+
+Select a node and its settings show in **Properties**. One line at the top
+says what the node does; **ⓘ** opens the whole description and the node's
+version.
+
+- **Sections.** Big nodes group their settings under headings: click one to
+  fold it, use the **⇊ / ⇈** buttons beside the search box (or right-click) to expand or collapse them all.
+  Each node type remembers which sections you left open. While you scroll
+  through a long section its heading stays pinned at the top, and clicking
+  it there folds the section.
+- **Search.** Type in **Search properties** (**Ctrl+F** in the panel) to
+  show only the settings that match — by label, by the setting's own name,
+  by its hint, its choices or its section. The search stays as you select
+  other nodes, so one setting can be compared across several.
+- **Changed.** A setting you've changed from its default has a **bold**
+  label, and a section's heading counts them. The **Changed** button shows
+  only those — "what did I set on this chart?"
+- **Reset.** Right-click a setting ▸ **Reset to Default**, or a heading ▸
+  **Reset … to Defaults** for the whole section. Each is one undo step.
+
 ## The standard library
 
 **Input** — Slider, Between Slider, Number, Text, Date, Toggle, Choice. You

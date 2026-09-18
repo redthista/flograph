@@ -12,4 +12,5 @@
 - **Sharing results**
   - [[Dashboards and Reports]]
   - [[Conditional Formatting]]
+  - [[Chart Rules]]
   - [[Running Headless]]

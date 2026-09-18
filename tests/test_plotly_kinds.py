@@ -238,7 +238,7 @@ class TestThePropertiesPanel:
     """The gating has to hold in the panel, not only in the spec: a
     hundred rows is unusable if they all show at once."""
 
-    def _panel(self, qtbot, registry, kind, more=False):
+    def _panel(self, qtbot, registry, kind):
         from PySide6.QtGui import QUndoStack
 
         from flograph.core import Graph
@@ -247,20 +247,23 @@ class TestThePropertiesPanel:
         graph = Graph()
         node = graph.add_node(registry.instantiate(SHOW))
         graph.set_param(node.id, "kind", kind)
-        graph.set_param(node.id, "more", more)
         panel = ParamsPanel(graph, QUndoStack())
         qtbot.addWidget(panel)
         panel.set_node(node.id)
         return panel
 
     def _rows(self, panel):
-        tree = panel.tree
-        return {tree.topLevelItem(i).text(0)
-                for i in range(tree.topLevelItemCount())}
+        """The rows in view as the panel opens: top-level ones, and those
+        in a section that starts open. A folded section is one heading,
+        not the rows inside it."""
+        return {label for label, item in panel.rows().items()
+                if not item.isHidden()
+                and (item.parent() is None or item.parent().isExpanded())}
 
     def test_a_line_chart_shows_a_readable_handful(self, qtbot, registry):
         rows = self._rows(self._panel(qtbot, registry, "line"))
-        assert 10 <= len(rows) <= 20
+        # 21 since the axis and legend titles joined the open Title section
+        assert 10 <= len(rows) <= 24
         assert {"Kind", "X column", "Y columns", "Color by"} <= rows
 
     def test_a_pie_chart_shows_pie_things_not_axis_things(self, qtbot,
@@ -269,18 +272,28 @@ class TestThePropertiesPanel:
         assert {"Labels column", "Values column", "Hole"} <= rows
         assert not rows & {"X column", "Y columns", "Log Y", "Bins"}
 
-    def test_more_options_reveals_the_rest(self, qtbot, registry):
-        few = self._rows(self._panel(qtbot, registry, "scatter"))
-        many = self._rows(self._panel(qtbot, registry, "scatter", more=True))
-        assert few < many
-        assert "Symbol by" in many and "Symbol by" not in few
+    def test_the_deeper_settings_wait_in_folded_sections(self, qtbot,
+                                                         registry):
+        panel = self._panel(qtbot, registry, "scatter")
+        rows = panel.rows()
+        assert "More options" not in rows
+        assert "Symbol by" in rows
+        assert not rows["Symbol by"].parent().isExpanded()
+        assert "Symbol by" not in self._rows(panel)
 
-    def test_no_kind_shows_everything_at_once(self, qtbot, registry):
+    def test_no_kind_opens_on_a_wall_of_rows(self, qtbot, registry):
         for kind in KINDS:
-            rows = self._rows(self._panel(qtbot, registry, kind, more=True))
-            # Out of 100-odd rows. Scatter, which takes the most, is at 51
-            # since Color from column and Color map (JSON).
-            assert len(rows) < 55, kind
+            rows = self._rows(self._panel(qtbot, registry, kind))
+            assert len(rows) < 25, (kind, len(rows))
+
+    def test_every_setting_has_a_section(self, registry):
+        # a row left out of _SECTION_GROUPS would sit loose at the top
+        for type_id, loose in ((SHOW, {"kind"}),
+                               (PER_VALUE, {"kind", "split_by"})):
+            for spec in registry.get(type_id).params:
+                if spec.hidden or spec.name in loose:
+                    continue
+                assert spec.section, (type_id, spec.name)
 
 
 class TestGraphsSavedBeforeThis:

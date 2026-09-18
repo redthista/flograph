@@ -15,12 +15,16 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QTextCursor, QUndoStack
+from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QBrush, QFontMetrics, QKeySequence, QPainter, QPalette, QShortcut,
+    QTextCursor, QUndoStack,
+)
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
-    QSpinBox, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QSpinBox, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from flograph.core import Graph, ParamSpec, varlinks
@@ -50,6 +54,90 @@ class _NodeRefCombo(QComboBox):
     def showPopup(self) -> None:
         self._refresh()
         super().showPopup()
+
+
+_ORG = "flograph"
+_APP = "flograph"
+#: Whether the ⓘ paragraph is open — one choice for every node.
+_SHOW_ABOUT = "properties/show_about"
+#: Per node type and section: "1" open, "0" folded.
+_SECTION_KEY = "properties/sections/{type_id}/{section}"
+
+#: Item data: which param a row edits, or which section a heading heads.
+_PARAM_ROLE = Qt.UserRole
+_SECTION_ROLE = Qt.UserRole + 1
+#: The Name row isn't a param; it answers to this in `_rows`.
+_LABEL_ROW = "__label__"
+
+
+def _setting(key: str, default: bool) -> bool:
+    value = QSettings(_ORG, _APP).value(key, None)
+    if value is None:
+        return default
+    return str(value).lower() in ("1", "true")
+
+
+def _store_setting(key: str, value: bool) -> None:
+    QSettings(_ORG, _APP).setValue(key, "1" if value else "0")
+
+
+def _about(doc: str) -> str:
+    """What a node does, from its docstring: the first paragraph after the
+    title line. A docstring opens with the node's name, which the node's
+    own header already says."""
+    paragraphs = [p.strip() for p in (doc or "").split("\n\n") if p.strip()]
+    if len(paragraphs) > 1 and "\n" not in paragraphs[0] \
+            and not paragraphs[0].endswith("."):
+        paragraphs = paragraphs[1:]
+    return paragraphs[0] if paragraphs else ""
+
+
+class _DimElidedLabel(QLabel):
+    """One dim line that ends in an ellipsis rather than widening the dock;
+    the whole text stays readable in its tooltip."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+    def setText(self, text: str) -> None:       # noqa: N802 — Qt override
+        super().setText(text)
+        self.setToolTip(text)
+
+    def paintEvent(self, event) -> None:        # noqa: N802 — Qt override
+        painter = QPainter(self)
+        painter.setPen(self.palette().color(QPalette.Mid))
+        metrics = QFontMetrics(self.font())
+        painter.drawText(
+            self.rect(), int(Qt.AlignLeft | Qt.AlignVCenter),
+            metrics.elidedText(self.text(), Qt.ElideRight, self.width()))
+        painter.end()
+
+
+class _StickySection(QLabel):
+    """The heading of the section being scrolled through, pinned to the top
+    of the grid once its own row has scrolled away — so the middle of a
+    long section still says which section it is. Clicking it folds the
+    section, the quickest way out of one."""
+
+    clicked = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setAutoFillBackground(True)
+        self.setContentsMargins(6, 0, 6, 0)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Fold this section")
+        font = self.font()
+        font.setBold(True)
+        self.setFont(font)
+
+    def mousePressEvent(self, event) -> None:   # noqa: N802 — Qt override
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 # Marks the actions in a column picker that should leave the menu showing
@@ -163,11 +251,36 @@ class ParamsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
+        # One line about the node, its first sentence elided, and an ⓘ that
+        # opens the whole paragraph and the version beneath it. The
+        # paragraph used to sit above every node's settings in full, pushing
+        # the first of them down the panel on every selection.
+        self._header = QWidget()
+        header_row = QHBoxLayout(self._header)
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(4)
+        self._summary = _DimElidedLabel()
+        header_row.addWidget(self._summary, 1)
+        self._info_button = QToolButton()
+        self._info_button.setText("\N{CIRCLED LATIN SMALL LETTER I}")
+        self._info_button.setCheckable(True)
+        self._info_button.setAutoRaise(True)
+        self._info_button.setToolTip("Show what this node does, and its version")
+        self._info_button.setChecked(_setting(_SHOW_ABOUT, False))
+        self._info_button.toggled.connect(self._on_info_toggled)
+        header_row.addWidget(self._info_button)
+        self._header.hide()
+        layout.addWidget(self._header)
+
+        self._details = QWidget()
+        details = QVBoxLayout(self._details)
+        details.setContentsMargins(0, 0, 0, 2)
+        details.setSpacing(2)
         self._doc_label = QLabel()
         self._doc_label.setWordWrap(True)
         self._doc_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
         self._doc_label.hide()
-        layout.addWidget(self._doc_label)
+        details.addWidget(self._doc_label)
 
         # Which *edition* of the node type this is -- see NodeSpec.version.
         # Dimmer than the doc and below it: you only look for it when you are
@@ -176,7 +289,9 @@ class ParamsPanel(QWidget):
         self._version_label = QLabel()
         self._version_label.setStyleSheet("color: palette(mid); font-size: 8pt;")
         self._version_label.hide()
-        layout.addWidget(self._version_label)
+        details.addWidget(self._version_label)
+        self._details.hide()
+        layout.addWidget(self._details)
 
         self._placeholder = QLabel("No node selected")
         self._placeholder.setStyleSheet("color: palette(mid);")
@@ -189,16 +304,82 @@ class ParamsPanel(QWidget):
         self._locked_label.hide()
         layout.addWidget(self._locked_label)
 
+        # Search and "changed only" narrow the rows; both survive moving to
+        # another node, the way a filter box does in any editor, so comparing
+        # the same setting across six charts is one word typed once.
+        self._filter_bar = QWidget()
+        filter_row = QHBoxLayout(self._filter_bar)
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(4)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search properties")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._apply_filter)
+        filter_row.addWidget(self.search, 1)
+        self.changed_only = QToolButton()
+        self.changed_only.setText("Changed")
+        self.changed_only.setCheckable(True)
+        self.changed_only.setToolTip(
+            "Show only the settings changed from their defaults")
+        self.changed_only.toggled.connect(self._apply_filter)
+        filter_row.addWidget(self.changed_only)
+        # Only for a node with sections; a flat list has nothing to fold.
+        self.expand_all = QToolButton()
+        self.expand_all.setText("\N{DOWNWARDS PAIRED ARROWS}")
+        self.expand_all.setToolTip("Expand all sections")
+        self.expand_all.clicked.connect(
+            lambda: self.set_all_sections_expanded(True))
+        filter_row.addWidget(self.expand_all)
+        self.collapse_all = QToolButton()
+        self.collapse_all.setText("\N{UPWARDS PAIRED ARROWS}")
+        self.collapse_all.setToolTip("Collapse all sections")
+        self.collapse_all.clicked.connect(
+            lambda: self.set_all_sections_expanded(False))
+        filter_row.addWidget(self.collapse_all)
+        self._filter_bar.hide()
+        layout.addWidget(self._filter_bar)
+
+        self._no_match = QLabel()
+        self._no_match.setStyleSheet("color: palette(mid);")
+        self._no_match.setWordWrap(True)
+        self._no_match.hide()
+        layout.addWidget(self._no_match)
+
+        find = QShortcut(QKeySequence.Find, self)
+        find.setContext(Qt.WidgetWithChildrenShortcut)
+        find.activated.connect(self._focus_search)
+
         self.tree = QTreeWidget()
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels(["Property", "Value"])
         self.tree.setRootIsDecorated(False)
+        # Section rows carry their own arrow; indenting their children would
+        # only take width from the value column.
+        self.tree.setIndentation(0)
         self.tree.setAlternatingRowColors(True)
         self.tree.header().setSectionResizeMode(QHeaderView.Interactive)
         self.tree.header().setStretchLastSection(True)
         self.tree.setColumnWidth(0, 140)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_row_menu)
+        self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.itemExpanded.connect(self._on_section_toggled)
+        self.tree.itemCollapsed.connect(self._on_section_toggled)
+        self.tree.verticalScrollBar().valueChanged.connect(self._update_sticky)
         self.tree.hide()
         layout.addWidget(self.tree, 1)
+
+        self._sticky = _StickySection(self.tree.viewport())
+        self._sticky.clicked.connect(self._fold_sticky_section)
+        self._sticky.hide()
+
+        # param name (or _LABEL_ROW) -> its row; section title -> its heading
+        self._rows: dict[str, QTreeWidgetItem] = {}
+        self._sections: dict[str, QTreeWidgetItem] = {}
+        # Set while the panel itself expands or folds a section (restoring
+        # the remembered state, or opening one to show a search match), so
+        # only a person's click is remembered.
+        self._arranging = False
 
         # Typed params land here first and reach the graph once typing
         # pauses — see _commit_typed. One timer for the panel, not one per
@@ -212,6 +393,7 @@ class ParamsPanel(QWidget):
         graph.events.param_changed.connect(self._on_param_changed)
         graph.events.code_changed.connect(self._on_code_changed)
         graph.events.locked_changed.connect(self._on_locked_changed)
+        graph.events.label_changed.connect(self._on_label_changed)
         graph.events.node_removed.connect(self._on_node_removed)
 
     def minimumSizeHint(self) -> QSize:
@@ -244,28 +426,40 @@ class ParamsPanel(QWidget):
         self._locked_label.setVisible(locked)
 
     def _clear(self) -> None:
+        self._sticky.hide()
         self.tree.clear()
         self._setters = {}
+        self._rows = {}
+        self._sections = {}
 
     def _rebuild(self) -> None:
         self._clear()
         if self._node_id is None or self._node_id not in self._graph.nodes:
+            self._header.hide()
+            self._details.hide()
             self._doc_label.hide()
             self._version_label.hide()
             self._locked_label.hide()
+            self._filter_bar.hide()
+            self._no_match.hide()
             self._placeholder.show()
             self.tree.hide()
             return
         node = self._graph.node(self._node_id)
         self._placeholder.hide()
+        self._filter_bar.show()
         self.tree.show()
         self._apply_locked(node.locked)
 
-        if node.spec.doc:
-            self._doc_label.setText(node.spec.doc.split("\n\n")[0])
+        about = _about(node.spec.doc)
+        if about:
+            self._doc_label.setText(about)
             self._doc_label.show()
+            # the first sentence, on one line, as a line to glance at
+            self._summary.setText(" ".join(about.split()))
         else:
             self._doc_label.hide()
+            self._summary.setText(node.spec.label)
 
         if node.spec.version:
             self._version_label.setText(f"version {node.spec.version}")
@@ -276,12 +470,18 @@ class ParamsPanel(QWidget):
             self._version_label.show()
         else:
             self._version_label.hide()
+        self._header.show()
+        self._details.setVisible(self._info_button.isChecked())
 
         label_edit = QLineEdit(node.label_override or "")
         label_edit.setPlaceholderText(node.spec.label)
         label_edit.editingFinished.connect(
             lambda: self._commit_label(label_edit.text()))
-        self._add_row("Name", label_edit)
+        self._label_edit = label_edit
+        item = self._add_row("Name", label_edit)
+        item.setData(0, _PARAM_ROLE, _LABEL_ROW)
+        self._rows[_LABEL_ROW] = item
+        self._mark_changed(item, bool(node.label_override))
 
         if card_kind(node) == "reroute":
             desc_edit = QPlainTextEdit(node.description)
@@ -291,6 +491,8 @@ class ParamsPanel(QWidget):
                 lambda: self._commit_description(desc_edit.toPlainText()))
             self._add_row("Description", desc_edit)
 
+        folded_by_default = {spec.section for spec in node.spec.params
+                             if spec.section and spec.folded}
         for spec in node.spec.params:
             # hidden (edited elsewhere, e.g. the Table node's grid) or not
             # applicable to what the sibling params currently say
@@ -299,14 +501,305 @@ class ParamsPanel(QWidget):
             value = node.params.get(spec.name)
             widget, setter = self._make_widget(spec, value)
             self._setters[spec.name] = setter
-            item = self._add_row(spec.label or spec.name, widget)
+            parent = None
+            if spec.section:
+                parent = self._section_item(
+                    node.type_id, spec.section,
+                    spec.section in folded_by_default)
+            item = self._add_row(spec.label or spec.name, widget, parent)
+            item.setData(0, _PARAM_ROLE, spec.name)
+            self._rows[spec.name] = item
             self._annotate_variables(item, node, spec, value)
+            self._mark_changed(item, self._is_changed(spec, node.params))
             if varlinks.substitutable(node, spec):
                 # Read through a callable, not a snapshot: the panel outlives
                 # edits to the Variables node, and a stale list would offer
                 # names that no longer exist.
                 var_completion.attach(
                     widget, lambda: varlinks.completion_names(self._graph))
+
+        # A heading with every row hidden by `visible_when` never got made,
+        # so every section here has something in it.
+        for header in self._sections.values():
+            self._refresh_section(header)
+        self.expand_all.setVisible(bool(self._sections))
+        self.collapse_all.setVisible(bool(self._sections))
+        self._apply_filter()
+
+    # ------------------------------------------------------------ sections
+
+    def _section_item(self, type_id: str, title: str,
+                      folded: bool) -> QTreeWidgetItem:
+        """The heading for `title`, made on first use.
+
+        A section named again further down the list gathers under its first
+        heading rather than making a second one with the same name.
+        """
+        header = self._sections.get(title)
+        if header is not None:
+            return header
+        header = QTreeWidgetItem([title, ""])
+        header.setData(0, _SECTION_ROLE, title)
+        header.setFlags(Qt.ItemIsEnabled)
+        font = header.font(0)
+        font.setBold(True)
+        header.setFont(0, font)
+        brush = QBrush(self.palette().color(QPalette.Button))
+        header.setBackground(0, brush)
+        header.setBackground(1, brush)
+        header.setSizeHint(0, QSize(0, 24))
+        self.tree.addTopLevelItem(header)
+        header.setFirstColumnSpanned(True)
+        self._sections[title] = header
+        key = _SECTION_KEY.format(type_id=type_id, section=title)
+        self._arranging = True
+        try:
+            header.setExpanded(_setting(key, not folded))
+        finally:
+            self._arranging = False
+        return header
+
+    def _refresh_section(self, header: QTreeWidgetItem) -> None:
+        """Arrow, title, and how many of its settings are changed."""
+        title = header.data(0, _SECTION_ROLE)
+        changed = sum(
+            1 for i in range(header.childCount())
+            if header.child(i).font(0).bold())
+        arrow = ("\N{BLACK DOWN-POINTING SMALL TRIANGLE}" if header.isExpanded()
+                 else "\N{BLACK RIGHT-POINTING SMALL TRIANGLE}")
+        text = f"{arrow}  {title}"
+        if changed:
+            text += f"  \N{MIDDLE DOT} {changed} changed"
+        header.setText(0, text)
+        header.setToolTip(
+            0, f"{title}: click to {'fold' if header.isExpanded() else 'open'}")
+        if self._sticky.isVisible() and self._sticky.property("section") == title:
+            self._sticky.setText(text)
+
+    def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        if item.data(0, _SECTION_ROLE):
+            item.setExpanded(not item.isExpanded())
+
+    def _on_section_toggled(self, item: QTreeWidgetItem) -> None:
+        title = item.data(0, _SECTION_ROLE)
+        if not title:
+            return
+        self._refresh_section(item)
+        if not self._arranging and not self._filtering() and self._node_id:
+            node = self._graph.nodes.get(self._node_id)
+            if node is not None:
+                _store_setting(_SECTION_KEY.format(
+                    type_id=node.type_id, section=title), item.isExpanded())
+        QTimer.singleShot(0, self._update_sticky)
+
+    def set_all_sections_expanded(self, expanded: bool) -> None:
+        """Expand or collapse every section. Remembered like a click on each
+        — except during a search, which puts them back when it ends."""
+        for header in self._sections.values():
+            header.setExpanded(expanded)
+
+    def _update_sticky(self, *_args) -> None:
+        """Pin the heading of the section whose rows are at the top."""
+        top = self.tree.itemAt(QPoint(4, 1))
+        header = top.parent() if top is not None else None
+        if header is None or not header.data(0, _SECTION_ROLE):
+            self._sticky.hide()
+            return
+        self._sticky.setProperty("section", header.data(0, _SECTION_ROLE))
+        self._sticky.setText(header.text(0))
+        palette = self._sticky.palette()
+        palette.setColor(QPalette.Window, self.palette().color(QPalette.Button))
+        self._sticky.setPalette(palette)
+        height = max(24, self.tree.visualItemRect(header).height())
+        self._sticky.setGeometry(0, 0, self.tree.viewport().width(), height)
+        self._sticky.show()
+        self._sticky.raise_()
+
+    def _fold_sticky_section(self) -> None:
+        header = self._sections.get(self._sticky.property("section"))
+        if header is None:
+            return
+        header.setExpanded(False)
+        self.tree.scrollToItem(header, QAbstractItemView.PositionAtTop)
+
+    def resizeEvent(self, event) -> None:       # noqa: N802 — Qt override
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._update_sticky)
+
+    def changeEvent(self, event) -> None:       # noqa: N802 — Qt override
+        super().changeEvent(event)
+        # section headings are painted in the palette's colours as they were
+        # when the grid was built; a theme switch rebuilds them
+        if event.type() == QEvent.PaletteChange and self._sections:
+            QTimer.singleShot(0, self._rebuild_if_live)
+
+    # -------------------------------------------------- changed and filter
+
+    @staticmethod
+    def _is_changed(spec: ParamSpec, params: dict[str, Any]) -> bool:
+        return params.get(spec.name, spec.default) != spec.default
+
+    @staticmethod
+    def _mark_changed(item: QTreeWidgetItem, changed: bool) -> None:
+        font = item.font(0)
+        if font.bold() != changed:
+            font.setBold(changed)
+            item.setFont(0, font)
+
+    def rows(self) -> dict[str, QTreeWidgetItem]:
+        """Every setting's row by its label, sections included — what a
+        test or a caller means by "the rows", headings left out."""
+        out: dict[str, QTreeWidgetItem] = {}
+
+        def walk(item: QTreeWidgetItem) -> None:
+            if item.data(0, _SECTION_ROLE):
+                for i in range(item.childCount()):
+                    walk(item.child(i))
+            else:
+                out.setdefault(item.text(0), item)
+
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+        return out
+
+    def _filtering(self) -> bool:
+        return bool(self.search.text().strip()) or self.changed_only.isChecked()
+
+    def _focus_search(self) -> None:
+        if self._filter_bar.isVisible():
+            self.search.setFocus(Qt.ShortcutFocusReason)
+            self.search.selectAll()
+
+    def _row_matches(self, item: QTreeWidgetItem, words: list[str],
+                     specs: dict[str, ParamSpec]) -> bool:
+        if self.changed_only.isChecked() and not item.font(0).bold():
+            return False
+        if not words:
+            return True
+        spec = specs.get(item.data(0, _PARAM_ROLE))
+        parent = item.parent()
+        haystack = [item.text(0)]
+        if parent is not None:
+            haystack.append(parent.data(0, _SECTION_ROLE) or "")
+        if spec is not None:
+            haystack += [spec.name, spec.placeholder, *map(str, spec.options)]
+        text = " ".join(haystack).casefold()
+        return all(word in text for word in words)
+
+    def _apply_filter(self, *_args) -> None:
+        """Hide the rows the search box and the Changed button rule out.
+
+        Every word has to match somewhere in a row's label, its param name,
+        its placeholder, its choices or its section's title — so "legend"
+        finds the whole Legend section and `color_discrete` finds the map
+        by the name plotly gives it. A match inside a folded section opens
+        it for as long as the search lasts; clearing the search puts every
+        section back the way it was left.
+        """
+        if self._node_id is None or self._node_id not in self._graph.nodes:
+            return
+        node = self._graph.node(self._node_id)
+        specs = {spec.name: spec for spec in node.spec.params}
+        words = self.search.text().casefold().split()
+        filtering = self._filtering()
+        shown = 0
+        self._arranging = True
+        try:
+            for i in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(i)
+                title = item.data(0, _SECTION_ROLE)
+                if not title:
+                    hit = not filtering or self._row_matches(item, words, specs)
+                    item.setHidden(not hit)
+                    shown += hit
+                    continue
+                visible = 0
+                for j in range(item.childCount()):
+                    child = item.child(j)
+                    hit = not filtering or self._row_matches(child, words, specs)
+                    child.setHidden(not hit)
+                    visible += hit
+                item.setHidden(visible == 0)
+                shown += visible
+                if filtering:
+                    item.setExpanded(True)
+                else:
+                    item.setExpanded(_setting(_SECTION_KEY.format(
+                        type_id=node.type_id, section=title),
+                        not any(s.folded for s in node.spec.params
+                                if s.section == title)))
+        finally:
+            self._arranging = False
+        if filtering and not shown:
+            self._no_match.setText(
+                "No changed settings match." if self.changed_only.isChecked()
+                else "No settings match.")
+            self._no_match.show()
+        else:
+            self._no_match.hide()
+        QTimer.singleShot(0, self._update_sticky)
+
+    # ---------------------------------------------------------- row menu
+
+    def _show_row_menu(self, pos) -> None:
+        from .. import menu_guard
+        if menu_guard.settling() or self._node_id is None:
+            return
+        item = self.tree.itemAt(pos)
+        node = self._graph.node(self._node_id)
+        menu = QMenu(self)
+        if item is not None and item.data(0, _SECTION_ROLE):
+            title = item.data(0, _SECTION_ROLE)
+            names = [item.child(i).data(0, _PARAM_ROLE)
+                     for i in range(item.childCount())
+                     if item.child(i).font(0).bold()]
+            action = menu.addAction(f"Reset {title} to Defaults")
+            action.setEnabled(bool(names) and not node.locked)
+            action.triggered.connect(
+                lambda: self.reset_to_defaults(names, f"Reset {title}"))
+        elif item is not None and item.data(0, _PARAM_ROLE):
+            name = item.data(0, _PARAM_ROLE)
+            action = menu.addAction("Reset to Default")
+            action.setEnabled(item.font(0).bold() and not node.locked)
+            action.triggered.connect(lambda: self.reset_to_defaults([name]))
+        if self._sections:
+            if not menu.isEmpty():
+                menu.addSeparator()
+            menu.addAction("Expand All").triggered.connect(
+                lambda: self.set_all_sections_expanded(True))
+            menu.addAction("Collapse All").triggered.connect(
+                lambda: self.set_all_sections_expanded(False))
+        if menu.isEmpty():
+            return
+        try:
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+        finally:
+            menu_guard.menu_closed()
+
+    def reset_to_defaults(self, names: list[str],
+                          text: str = "Reset to Default") -> None:
+        """Put these settings back to their defaults, as one undo step."""
+        if self._node_id is None or not names:
+            return
+        self.flush_pending()
+        node = self._graph.node(self._node_id)
+        if node.locked:
+            return
+        specs = {spec.name: spec for spec in node.spec.params}
+        self._undo_stack.beginMacro(text)
+        try:
+            for name in names:
+                if name == _LABEL_ROW:
+                    self._commit_label("")
+                elif name in specs:
+                    self._commit(name, specs[name].default, merge=False)
+        finally:
+            self._undo_stack.endMacro()
+
+    def _on_info_toggled(self, checked: bool) -> None:
+        _store_setting(_SHOW_ABOUT, checked)
+        if self._node_id is not None:
+            self._details.setVisible(checked)
 
     def _annotate_variables(self, item: QTreeWidgetItem, node,
                             spec: ParamSpec, value: Any) -> None:
@@ -331,10 +824,14 @@ class ParamsPanel(QWidget):
         if widget is not None:
             widget.setToolTip(tip)
 
-    def _add_row(self, label: str, widget: QWidget) -> QTreeWidgetItem:
+    def _add_row(self, label: str, widget: QWidget,
+                 parent: Optional[QTreeWidgetItem] = None) -> QTreeWidgetItem:
         item = QTreeWidgetItem([label, ""])
         item.setToolTip(0, label)
-        self.tree.addTopLevelItem(item)
+        if parent is None:
+            self.tree.addTopLevelItem(item)
+        else:
+            parent.addChild(item)
         self.tree.setItemWidget(item, 1, widget)
         # rows default to a single text line's height -- taller widgets
         # (the multiline "text" editor) would get clipped without this, but
@@ -408,7 +905,9 @@ class ParamsPanel(QWidget):
                 # would reset the cursor to the start — only sync real changes
                 if text.toPlainText() != str(v or ""):
                     self._silently(text.setPlainText, str(v or ""))
-            if spec.rule_wizard:
+            if spec.wizard == "chart":
+                widget = self._with_rule_wizard(spec, text, "chart")
+            elif spec.rule_wizard:
                 widget = self._with_rule_wizard(spec, text)
             elif spec.insert_columns:
                 widget = self._with_column_inserter(spec, text)
@@ -517,8 +1016,8 @@ class ParamsPanel(QWidget):
         edit.editingFinished.connect(self.flush_pending)
         return edit, self._line_setter(edit)
 
-    def _with_rule_wizard(self, spec: ParamSpec,
-                          text: QPlainTextEdit) -> QWidget:
+    def _with_rule_wizard(self, spec: ParamSpec, text: QPlainTextEdit,
+                          which: str = "table") -> QWidget:
         """A multiline rules box with a 'Rules…' button under it that opens
         the rule manager — a list of the applied rules with add / edit /
         remove — and writes the box back."""
@@ -532,9 +1031,10 @@ class ParamsPanel(QWidget):
         # cannot draw would leave the line looking like it lost a character
         apply_emoji_font(text)
         col.addWidget(text)
-        button = QPushButton("Rules…")
+        button = QPushButton("Chart Rules…" if which == "chart" else "Rules…")
         button.setObjectName(f"param_{spec.name}_wizard")
-        button.clicked.connect(lambda: self._open_rule_wizard(spec, text))
+        button.clicked.connect(
+            lambda: self._open_rule_wizard(spec, text, which))
         col.addWidget(button, 0, Qt.AlignLeft)
         return host
 
@@ -556,12 +1056,16 @@ class ParamsPanel(QWidget):
                     return columns
         return []
 
-    def _open_rule_wizard(self, spec: ParamSpec, text: QPlainTextEdit) -> None:
+    def _open_rule_wizard(self, spec: ParamSpec, text: QPlainTextEdit,
+                          which: str = "table") -> None:
         from PySide6.QtWidgets import QDialog
 
-        from .table_rule_wizard import RuleManager
+        if which == "chart":
+            from .chart_rule_wizard import ChartRuleManager as Manager
+        else:
+            from .table_rule_wizard import RuleManager as Manager
 
-        dlg = RuleManager(text.toPlainText(), self._wizard_columns(), self)
+        dlg = Manager(text.toPlainText(), self._wizard_columns(), self)
         if dlg.exec() == QDialog.Accepted:
             new_text = dlg.result_text()
             if new_text != text.toPlainText():
@@ -1305,6 +1809,12 @@ class ParamsPanel(QWidget):
         if name in self._setters:
             self._setters[name](value)
         node = self._graph.node(node_id)
+        item = self._rows.get(name)
+        spec = node.spec.param(name) if item is not None else None
+        if spec is not None:
+            self._mark_changed(item, self._is_changed(spec, node.params))
+            if item.parent() is not None:
+                self._refresh_section(item.parent())
         if name in controllers(node.spec.params):
             # This one decides which other rows exist, so the grid has to be
             # rebuilt — but never from inside the signal of the widget that
@@ -1312,6 +1822,15 @@ class ParamsPanel(QWidget):
             # combo it destroyed mid-emit. Next event loop turn is soon
             # enough and the widget has finished by then.
             QTimer.singleShot(0, self._rebuild_if_live)
+
+    def _on_label_changed(self, node_id: str) -> None:
+        item = self._rows.get(_LABEL_ROW)
+        if node_id != self._node_id or item is None:
+            return
+        label = self._graph.node(node_id).label_override
+        if self._label_edit.text() != (label or ""):
+            self._silently(self._label_edit.setText, label or "")
+        self._mark_changed(item, bool(label))
 
     def _rebuild_if_live(self) -> None:
         """Deferred rebuild — the node may have been deselected or deleted

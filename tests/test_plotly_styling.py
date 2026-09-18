@@ -10,6 +10,7 @@ which does the same job on a figure these nodes did not draw.
 """
 import pandas as pd
 import pytest
+from PySide6.QtCore import Qt
 
 from flograph.core import NodeRegistry, compile_run
 from tests.conftest import FakeContext
@@ -130,6 +131,54 @@ class TestTheStylingPass:
         assert figure.layout.xaxis.tickangle == -45
 
     @both
+    def test_hide_axis_titles_even_a_typed_one(self, registry, type_id,
+                                              table):
+        figure = _fig(registry, type_id,
+                      {"x_title": "Region", "axis_titles": "hide both"}, table)
+        assert figure.layout.xaxis.title.text == ""
+        assert figure.layout.yaxis.title.text == ""
+        figure = _fig(registry, type_id, {"axis_titles": "hide Y"}, table)
+        assert figure.layout.yaxis.title.text == ""
+        assert figure.layout.xaxis.title.text != ""
+
+    @both
+    def test_hide_tick_labels_and_whole_axes(self, registry, type_id, table):
+        figure = _fig(registry, type_id,
+                      {"tick_labels": "hide X", "hide_axis": "hide Y"}, table)
+        assert figure.layout.xaxis.showticklabels is False
+        assert figure.layout.yaxis.visible is False
+        assert figure.layout.xaxis.visible is None
+
+    @both
+    def test_hidden_on_every_facet_panel(self, registry, type_id, table):
+        figure = _fig(registry, type_id,
+                      {"facet_col": "city", "hide_axis": "hide both"}, table)
+        axes = [name for name in figure.layout if name.startswith(("xaxis",
+                                                                  "yaxis"))]
+        assert len(axes) > 2
+        assert all(figure.layout[name].visible is False for name in axes)
+
+    @both
+    def test_hide_legend_title(self, registry, type_id, table):
+        figure = _fig(registry, type_id,
+                      {"color": "city", "hide_legend_title": True}, table)
+        assert figure.layout.legend.title.text == ""
+
+    @both
+    def test_hide_color_bar(self, registry, type_id, table):
+        figure = _fig(registry, type_id,
+                      {"color": "units", "hide_colorbar": True}, table)
+        assert figure.layout.coloraxis.showscale is False
+
+    def test_hiding_on_a_pie_is_a_no_op_not_a_crash(self, registry, table):
+        figure = _fig(registry, SHOW,
+                      {"kind": "pie", "names": "region", "values": "units",
+                       "hide_axis": "hide both", "axis_titles": "hide both",
+                       "tick_labels": "hide both", "hide_colorbar": True},
+                      table)
+        assert figure.data
+
+    @both
     def test_reference_line_and_note(self, registry, type_id, table):
         figure = _fig(registry, type_id,
                       {"line_at": "25", "line_label": "Target",
@@ -244,7 +293,7 @@ class TestTheEscapeHatch:
 
 
 class TestThePanelStillGates:
-    def _rows(self, qtbot, registry, more, styling):
+    def _panel(self, qtbot, registry):
         from PySide6.QtGui import QUndoStack
 
         from flograph.core import Graph
@@ -253,45 +302,39 @@ class TestThePanelStillGates:
         graph = Graph()
         node = graph.add_node(registry.instantiate(SHOW))
         graph.set_param(node.id, "kind", "bar")
-        graph.set_param(node.id, "more", more)
-        graph.set_param(node.id, "styling", styling)
         panel = ParamsPanel(graph, QUndoStack())
         qtbot.addWidget(panel)
         panel.set_node(node.id)
-        tree = panel.tree
-        return {tree.topLevelItem(i).text(0)
-                for i in range(tree.topLevelItemCount())}
+        return graph, node, panel
 
-    def test_styling_rows_are_hidden_until_the_tick(self, qtbot, registry):
-        shut = self._rows(qtbot, registry, more=False, styling=False)
-        open_ = self._rows(qtbot, registry, more=False, styling=True)
-        assert "Legend position" not in shut
-        assert "Legend position" in open_
-        assert "Reference line" in open_
+    def test_styling_rows_sit_in_folded_sections(self, qtbot, registry):
+        # The "Styling options" tick is gone from the panel: its rows are
+        # there, a section each, folded until someone opens one.
+        _, _, panel = self._panel(qtbot, registry)
+        rows = panel.rows()
+        assert "Styling options" not in rows
+        legend = rows["Legend position"].parent()
+        assert legend.data(0, Qt.UserRole + 1) == "Legend"
+        assert not legend.isExpanded()
+        assert not rows["Reference line"].parent().isExpanded()
+        # the chart's own sections start open
+        assert rows["X column"].parent().isExpanded()
+        assert "More options" not in rows
 
-    def test_both_drawers_open_is_still_under_a_hundred_rows(self, qtbot,
-                                                            registry):
-        rows = self._rows(qtbot, registry, more=True, styling=True)
-        assert len(rows) < 100
+    def test_a_flow_saved_with_the_ticks_still_opens(self, registry):
+        assert registry.get(SHOW).param("styling").hidden
+        assert registry.get(SHOW).param("more").hidden
+
+    def test_every_row_is_still_under_a_hundred(self, qtbot, registry):
+        _, _, panel = self._panel(qtbot, registry)
+        assert len(panel.rows()) < 100
 
     def _combo(self, qtbot, registry, label):
-        from PySide6.QtGui import QUndoStack
-
-        from flograph.core import Graph
-        from flograph.ui.properties.params_panel import ParamsPanel
-
-        graph = Graph()
-        node = graph.add_node(registry.instantiate(SHOW))
-        graph.set_param(node.id, "kind", "bar")
-        graph.set_param(node.id, "styling", True)
-        panel = ParamsPanel(graph, QUndoStack())
-        qtbot.addWidget(panel)
-        panel.set_node(node.id)
-        tree = panel.tree
-        for i in range(tree.topLevelItemCount()):
-            if tree.topLevelItem(i).text(0) == label:
-                return graph, node, tree.itemWidget(tree.topLevelItem(i), 1)
-        raise AssertionError(f"no {label!r} row")
+        graph, node, panel = self._panel(qtbot, registry)
+        item = panel.rows().get(label)
+        if item is None:
+            raise AssertionError(f"no {label!r} row")
+        return graph, node, panel.tree.itemWidget(item, 1)
 
     def test_a_keep_dropdown_reads_as_default_not_keep(self, qtbot, registry):
         _, _, combo = self._combo(qtbot, registry, "Legend position")

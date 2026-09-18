@@ -154,10 +154,10 @@ class TestParams:
         for name in ("kind", "title", "template", "labels"):
             assert "kind" not in rows[name].get("visible_when", {})
 
-    def test_advanced_rows_hide_behind_more_options(self, ps):
-        rows = {row["name"]: row for row in ps.params()}
-        assert rows["symbol"]["visible_when"]["more"] == ["True"]
-        assert "more" not in rows["color"].get("visible_when", {})
+    def test_no_row_waits_on_the_old_more_options_tick(self, ps):
+        # the deeper rows sit in folded sections instead (_SECTION_GROUPS)
+        for row in ps.params():
+            assert "more" not in row.get("visible_when", {}), row["name"]
 
     def test_more_is_cosmetic_so_opening_it_never_re_runs(self, ps):
         rows = {row["name"]: row for row in ps.params()}

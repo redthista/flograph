@@ -107,6 +107,8 @@ Extra keys, all optional:
 | `insert_columns` | `text` | Offer a column-name picker for a box that is *about* columns but isn't a plain list — `"inline"` inserts at the cursor, `"mapping"` treats the box as `column = value` lines. |
 | `hidden` | any | Not shown in the panel (edited elsewhere). |
 | `cosmetic` | any | Changing it does **not** mark the node dirty — its cached output survives. For things that only affect arrangement, like how a list of charts is laid out. |
+| `section` | any | `"Legend"` — put the row under a heading of that name in the Properties panel, which folds. Rows sharing a section gather under its first heading; rows with none stay at the top. A node that declares no sections shows a plain list. |
+| `folded` | any | `True` on any row of a section starts that section folded, until someone opens it (the panel remembers each section's fold per node type). |
 
 Flow variables work in any text param: write `${data_dir}` and it resolves
 from a `[[Flow Variables|Variables]]` node.
