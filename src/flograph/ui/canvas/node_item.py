@@ -28,6 +28,7 @@ from ..slicer_list import SlicerPanel
 from ..web_links import WEB_LINK_SCHEMES, open_web_link
 from . import marks
 from .grid import EDGE_MARGIN, grid_step, snap, snap_point, snapping_active
+from .popup_lift import stacked_z
 from .stacking import NODE_Z, z_for
 
 NODE_WIDTH = 170.0
@@ -1131,8 +1132,12 @@ class NodeItem(QGraphicsObject):
 
     def apply_stacking(self) -> None:
         """Take the node's place in the stacking order — its band sits above
-        the wires, so a card always covers the wires that reach it."""
-        self.setZValue(z_for(NODE_Z, self.node.z))
+        the wires, so a card always covers the wires that reach it.
+
+        Through `stacked_z`, so a card holding an open dropdown keeps its
+        lift: a restack used to overwrite it and leave the list buried
+        under the card in front (see canvas.popup_lift)."""
+        self.setZValue(stacked_z(self, z_for(NODE_Z, self.node.z)))
 
     def on_params_changed(self, name: Optional[str] = None) -> None:
         """Params drive geometry for notes (text/width) and tables
@@ -1333,7 +1338,7 @@ class NodeItem(QGraphicsObject):
         card is lifted while the list is open, as a slicer's dropdown is.
         """
         from ..report.completion import ReportCompleter, card_vocabulary
-        from .stacking import POPUP_HOST_Z
+        from . import popup_lift
 
         def vocabulary():
             scene = self.scene()
@@ -1341,14 +1346,16 @@ class NodeItem(QGraphicsObject):
                                    getattr(scene, "output_cache", None),
                                    self.node)
 
-        resting = {}
+        held = {"up": False}
 
         def on_popup(shown: bool) -> None:
-            if shown:
-                resting.setdefault("z", self.zValue())
-                self.setZValue(max(self.zValue(), POPUP_HOST_Z))
-            elif "z" in resting:
-                self.setZValue(resting.pop("z"))
+            # counted by popup_lift, so this only has to avoid asking twice
+            if shown and not held["up"]:
+                held["up"] = True
+                popup_lift.lift(self)
+            elif not shown and held["up"]:
+                held["up"] = False
+                popup_lift.drop(self)
 
         editor.completer = ReportCompleter(editor, vocabulary, on_popup)
 

@@ -29,6 +29,7 @@ from ..canvas.grid import (
 from ..canvas.node_item import (
     BUTTON_H, BUTTON_W, card_kind, kpi_caption, kpi_text,
 )
+from ..canvas.popup_lift import stacked_z
 from ..canvas.stacking import FULLSCREEN_TILE_Z, z_for
 from ..slicer_list import SlicerPanel
 
@@ -332,9 +333,12 @@ class TileItem(QGraphicsObject):
     def apply_stacking(self) -> None:
         """Take the tile's place in the page's stacking order — except while
         maximized, when it owns the page and has to sit over tiles that are
-        merely stacked above it."""
-        self.setZValue(FULLSCREEN_TILE_Z if self._fullscreen
-                       else z_for(0.0, self.tile.z))
+        merely stacked above it.
+
+        Through `stacked_z`, so a tile holding an open dropdown keeps its
+        lift across a restack (see canvas.popup_lift)."""
+        self.setZValue(stacked_z(self, FULLSCREEN_TILE_Z if self._fullscreen
+                                 else z_for(0.0, self.tile.z)))
 
     def set_fullscreen_rect(self, rect: QRectF) -> None:
         """Pin the tile to an exact scene rect — the view calls this on the

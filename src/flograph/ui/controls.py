@@ -888,7 +888,11 @@ class ChoiceControl(ControlWidget):
     dashboard's author typed, or the live values of a column."""
 
     def _build(self) -> None:
-        self._combo = QComboBox()
+        # a card-aware combo: a control sits on a canvas card or a dashboard
+        # tile, where a plain one's list is drawn under the card in front of
+        # it and placed by coordinates that mean nothing (canvas.popup_lift)
+        from .canvas.popup_lift import CardComboBox
+        self._combo = CardComboBox()
         self._combo.setObjectName("control_choice")
         self._combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._combo.activated.connect(self._commit)  # user choice only

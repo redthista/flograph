@@ -27,12 +27,12 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
-    QApplication, QGridLayout, QLabel, QLineEdit, QMenu, QScrollArea,
+    QApplication, QGridLayout, QLabel, QLineEdit, QScrollArea,
     QSizePolicy, QStyle, QStyleOptionButton, QStyleOptionViewItem,
     QStyledItemDelegate, QToolButton, QTreeWidget, QTreeWidgetItem,
-    QTreeWidgetItemIterator, QVBoxLayout, QWidget, QWidgetAction,
+    QTreeWidgetItemIterator, QVBoxLayout, QWidget,
 )
 
 from flograph.core.slicer import (SlicerOptions, TreeNode, dump_paths,
@@ -40,7 +40,7 @@ from flograph.core.slicer import (SlicerOptions, TreeNode, dump_paths,
                                   selected_paths)
 
 from . import theme
-from .canvas.stacking import POPUP_HOST_Z
+from .canvas import popup_lift
 from .flow_layout import FlowLayout
 
 # How many rows to *build at once*. Not a cap on the slicer: the full value
@@ -878,6 +878,34 @@ QToolButton[slicerBranch="true"] {{ font-weight: 600; }}
 """
 
 
+class _ChevronButton(QToolButton):
+    """The dropdown slicer's button, with the chevron drawn on.
+
+    It used to be Qt's own menu indicator, which needs the button to *have*
+    a menu — and the menu is what could not be used here (see
+    `_DropdownView`). The mark is the same size and in the same place, so
+    the button looks as it did.
+    """
+
+    MARK = 14       # the room kept clear for it on the right
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        box = self.rect().adjusted(0, 0, -6, 0)
+        middle = box.center()
+        pen = QPen(self.palette().color(QPalette.ButtonText), 1.4)
+        pen.setCapStyle(Qt.RoundCap)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(pen)
+        right, half = box.right(), 3
+        painter.drawLine(right - 2 * half, middle.y() - half + 1,
+                         right - half, middle.y() + half - 1)
+        painter.drawLine(right - half, middle.y() + half - 1,
+                         right, middle.y() - half + 1)
+        painter.end()
+
+
 class _DropdownView(QWidget):
     """The compact layout: one button saying what is picked, with the whole
     tree — search, All / None and all — inside its popup. For a dashboard
@@ -892,20 +920,24 @@ class _DropdownView(QWidget):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
 
-        self._button = QToolButton()
-        self._button.setPopupMode(QToolButton.InstantPopup)
+        self._button = _ChevronButton()
         self._button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._styled_for: Optional[str] = None
         self._apply_style()
+        self._button.clicked.connect(self.open_popup)
         column.addWidget(self._button)
         column.addStretch(1)
 
-        # the popup is built once and reused: rebuilding a QMenu on every
-        # open would drop the search text the moment a tick reopened it
-        self._popup = QMenu(self._button)
-        holder = QWidget()
-        inner = QVBoxLayout(holder)
+        # A window of its own, not a menu hung off the button: a slicer is
+        # drawn on a card, and Qt puts a popup belonging to a widget on a
+        # card back *into* the canvas as part of that card — where it is
+        # clipped by the card's own frame, and where a click anywhere else
+        # never reaches it, so the only way out is picking something. See
+        # canvas.popup_lift. Built once and reused, because rebuilding it
+        # per open would drop the search text the moment a tick reopened it.
+        self._popup = popup_lift.CardPopup()
+        inner = QVBoxLayout(self._popup)
         inner.setContentsMargins(4, 4, 4, 4)
         inner.setSpacing(3)
         self.tree = SlicerTreeWidget(model)
@@ -917,43 +949,14 @@ class _DropdownView(QWidget):
             else self.tree.collapseAll())
         inner.addWidget(self.toolbar)
         inner.addWidget(self.tree, 1)
-        holder.setMinimumSize(QSize(240, 260))
-        action = QWidgetAction(self._popup)
-        action.setDefaultWidget(holder)
-        self._popup.addAction(action)
-        self._button.setMenu(self._popup)
+        self._popup.setMinimumSize(QSize(240, 260))
         self.tree.selection_changed.connect(self._on_changed)
-        # Qt embeds a proxied widget's popup into the scene as a child of
-        # the card's proxy, so the popup stacks with its card and a card
-        # placed in front of it covers it (AA7). The card is lifted to the
-        # top while the popup is open and put back after — the item's own
-        # z, never the layer saved on the node, which itemChange leaves be.
-        self._lifted: Optional[tuple] = None
-        self._popup.aboutToShow.connect(self._lift_host)
-        self._popup.aboutToHide.connect(self._drop_host)
 
-    def _host_item(self):
-        """The canvas card or dashboard tile this slicer is drawn in — or
-        None when it is not in a scene at all."""
-        proxy = self.window().graphicsProxyWidget()
-        return proxy.topLevelItem() if proxy is not None else None
-
-    def _lift_host(self) -> None:
-        item = self._host_item()
-        if item is None or self._lifted is not None:
-            return
-        self._lifted = (item, item.zValue())
-        # max: a maximized tile already sits higher than this
-        item.setZValue(max(item.zValue(), POPUP_HOST_Z))
-
-    def _drop_host(self) -> None:
-        if self._lifted is None:
-            return
-        item, z = self._lifted
-        self._lifted = None
-        import shiboken6
-        if shiboken6.isValid(item):
-            item.setZValue(z)
+    def open_popup(self) -> None:
+        """Show the values, under the button, wherever it looks like it
+        is — a proxied widget's own coordinates are an offscreen
+        container's and say nothing about the screen."""
+        self._popup.open_against(self._button)
 
     def _apply_style(self) -> None:
         """The button borrows the accent for its border and its open-state
@@ -969,11 +972,10 @@ class _DropdownView(QWidget):
             f"QToolButton {{ background: {theme.NODE_HEADER.name()};"
             f" color: {theme.NODE_TEXT.name()};"
             f" border: 1px solid {border};"
-            f" border-radius: 3px; padding: 3px 6px; font-size: 9pt;"
-            f" text-align: left; }}"
-            f"QToolButton:hover {{ border-color: {colour.name()}; }}"
-            f"QToolButton::menu-indicator {{ subcontrol-position: right"
-            f" center; }}")
+            f" border-radius: 3px; font-size: 9pt; text-align: left;"
+            # room on the right for the chevron _ChevronButton draws
+            f" padding: 3px {_ChevronButton.MARK}px 3px 6px; }}"
+            f"QToolButton:hover {{ border-color: {colour.name()}; }}")
 
     def _refresh_after_toolbar(self) -> None:
         self.tree.rebuild()

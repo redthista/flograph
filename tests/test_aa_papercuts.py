@@ -493,32 +493,50 @@ def _dropdown_in_a_card(z=3.0):
 
 
 class TestTheSlicerDropdown:
-    def test_its_card_is_lifted_while_it_is_open(self, qtbot):
-        from flograph.ui.canvas.stacking import POPUP_HOST_Z
+    """AA7 was answered by lifting the card the dropdown sits on, which
+    settled it against *other* cards and left it embedded in the canvas —
+    so the card's own frame still cut its lower rows in half, and a click
+    anywhere else never reached it, leaving no way out but picking
+    something. It is a window of its own now (0.1.15 #1/#2), which is all
+    three at once and needs no lift.
+    """
+
+    def test_its_list_is_not_embedded_in_the_canvas(self, qtbot):
         scene, card, dropdown = _dropdown_in_a_card()
-        dropdown._popup.popup(QPoint(0, 0))
+        view = QGraphicsView(scene)
+        qtbot.addWidget(view)
+        view.resize(600, 400)
+        view.show()
+        assert dropdown.open_popup() is not False
         assert dropdown._popup.isVisible()
-        assert card.zValue() == POPUP_HOST_Z
+        assert dropdown._popup.graphicsProxyWidget() is None
+        assert dropdown._popup.isWindow(), "still part of the card"
+        dropdown._popup.close()
+
+    def test_the_card_does_not_have_to_move_for_it(self, qtbot):
+        scene, card, dropdown = _dropdown_in_a_card()
+        view = QGraphicsView(scene)
+        qtbot.addWidget(view)
+        view.resize(600, 400)
+        view.show()
+        dropdown.open_popup()
+        assert card.zValue() == 3.0
         dropdown._popup.close()
         assert card.zValue() == 3.0
 
-    def test_a_maximized_tile_is_not_lowered(self, qtbot):
-        from flograph.ui.canvas.stacking import FULLSCREEN_TILE_Z
-        scene, card, dropdown = _dropdown_in_a_card(FULLSCREEN_TILE_Z)
-        dropdown._popup.popup(QPoint(0, 0))
-        assert card.zValue() == FULLSCREEN_TILE_Z
-        dropdown._popup.close()
-        assert card.zValue() == FULLSCREEN_TILE_Z
-
     def test_outside_a_scene_it_simply_opens(self, qtbot):
+        """A slicer in a dock or a harness has a window already, and the
+        button's own coordinates are the right ones — same path, different
+        answer from `anchor_for`."""
         from flograph.core.slicer import SlicerOptions
         from flograph.ui.slicer_list import SlicerPanel
         panel = SlicerPanel()
         qtbot.addWidget(panel)
+        panel.show()
         panel.set_options(SlicerOptions(["region"], [("north",)]),
                           {"selected": "", "mode": "multi",
                            "layout": "dropdown", "show_counts": False})
-        panel.view._popup.popup(QPoint(0, 0))
+        panel.view.open_popup()
         assert panel.view._popup.isVisible()
         panel.view._popup.close()
 
