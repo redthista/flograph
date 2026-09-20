@@ -1888,7 +1888,8 @@ class NodeItem(QGraphicsObject):
         body = str(self.node.params.get("text", "") or "")
         from ..report.render import render_card
         rendered = render_card(body, scene.graph, cache, self.node.id,
-                               width=int(self.width) - 44) \
+                               width=int(self.width) - 44,
+                               header_fill=theme.NODE_HEADER.name()) \
             if scene is not None else None
         # before the old document goes: a QMovie still writing frames into a
         # deleted document is a crash, not a stale picture
@@ -1896,8 +1897,11 @@ class NodeItem(QGraphicsObject):
         if rendered is None:
             self._report_view.setMarkdown(body)
             return
-        # colours come from the card, not the document: a report card is
-        # part of the canvas and has to read against the dark body
+        # Colours come from the card, not the document: a report card is
+        # part of the canvas and has to read against the dark body. That
+        # goes for a table's header row too, which is why the render was
+        # asked for the card's own header tone rather than paper's light
+        # grey — the text on it is this light ink either way.
         document = rendered.document
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()

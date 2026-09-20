@@ -824,3 +824,71 @@ class TestCardEditorCompletion:
         assert item.zValue() >= POPUP_HOST_Z
         QApplication.sendEvent(popup, QEvent(QEvent.Hide))
         assert item.zValue() == resting
+
+
+class TestATableHeaderReadsOnTheCard:
+    """A report table's header row is filled light grey, which is right on
+    paper and wrong on a card: the card is part of a dark canvas and its
+    text is light, so the header came out light-on-light and could not be
+    read. The card asks for its own tone instead; paper is untouched.
+    """
+
+    def _flow(self, registry):
+        graph = Graph()
+        source = graph.add_node(registry.instantiate("flograph.io.table"))
+        shown = graph.add_node(registry.instantiate("flograph.viz.show_table"))
+        graph.set_label(shown.id, "Sales")
+        card = graph.add_node(registry.instantiate("flograph.viz.report_card"))
+        graph.connect(shown.id, "table", card.id, "a")
+        graph.set_param(card.id, "text", "![[Sales]]")
+        cache = OutputCache()
+        cache.set(shown.id, {"table": pd.DataFrame({"region": ["N", "S"],
+                                                    "units": [1, 2]})}, 0.0)
+        return graph, cache, card, source
+
+    def _fills(self, document):
+        import re
+
+        return set(re.findall(r'bgcolor="([^"]+)"', document.toHtml()))
+
+    def test_paper_keeps_its_light_grey(self, registry):
+        from flograph.ui.report.render import PAPER_HEADER, render_card
+
+        graph, cache, card, _source = self._flow(registry)
+        rendered = render_card("![[Sales]]", graph, cache, card.id)
+        assert PAPER_HEADER in self._fills(rendered.document)
+
+    def test_a_card_asks_for_a_tone_of_its_own(self, registry):
+        from flograph.ui.report.render import PAPER_HEADER, render_card
+
+        graph, cache, card, _source = self._flow(registry)
+        rendered = render_card("![[Sales]]", graph, cache, card.id,
+                               header_fill="#363943")
+        fills = self._fills(rendered.document)
+        assert "#363943" in fills and PAPER_HEADER not in fills
+
+    def test_the_canvas_card_uses_the_cards_own_header_colour(self, qtbot,
+                                                              registry):
+        """The colour a node's header band is painted in, so the table's
+        header reads as part of the same card."""
+        from PySide6.QtGui import QUndoStack
+
+        from flograph.ui import theme
+
+        graph, cache, card, _source = self._flow(registry)
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        scene.output_cache = cache
+        item = scene.node_items[card.id]
+        item.refresh_report()
+        assert theme.NODE_HEADER.name() in self._fills(
+            item._report_view.document())
+
+    def test_the_cards_own_pdf_is_still_paper(self, registry):
+        """Export PDF off a card *is* on paper, so it keeps paper's tone —
+        the exception that says the rest is about the screen."""
+        from flograph.ui.report.render import PAPER_HEADER, render_card
+
+        graph, cache, card, _source = self._flow(registry)
+        rendered = render_card("![[Sales]]", graph, cache, card.id,
+                               image_scale=2.0)
+        assert PAPER_HEADER in self._fills(rendered.document)

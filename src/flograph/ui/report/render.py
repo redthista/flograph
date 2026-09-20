@@ -63,14 +63,25 @@ FIGURE_WIDTH = 510
 # Deliberately only this rule, not the whole sheet: staging with
 # `body { font-family: … }` in force would bake that family into every span
 # and outrank the emoji-capable default font `_document()` exists to set.
-STAGED_CSS = """
-    th { background-color: #eeeeee; }
-"""
+#: What a table's header row is filled with on paper — and in the preview
+#: and the exported HTML, which are the same document on the same white
+#: page. A **report card** is not on paper: it is part of a dark canvas or
+#: a dashboard tile, and a light grey band there is a stripe of daylight
+#: with the card's own light text on it, which is what "the headers are
+#: not readable" was. Those two callers pass their own tone instead.
+PAPER_HEADER = "#eeeeee"
+
+
+def staged_css(header_fill: str = PAPER_HEADER) -> str:
+    return f"\n    th {{ background-color: {header_fill}; }}\n"
+
+
+STAGED_CSS = staged_css()
 
 # Enough of a stylesheet to make a printed report look like a document
 # rather than a text dump. Qt's rich text engine supports a small CSS
 # subset — everything here is inside it.
-REPORT_CSS = """
+_BASE_CSS = """
     body { font-family: sans-serif; font-size: 11pt; }
     h1 { font-size: 20pt; }
     h2 { font-size: 15pt; }
@@ -78,7 +89,17 @@ REPORT_CSS = """
     table { border-collapse: collapse; }
     td, th { border: 1px solid #999; padding: 3px 7px; }
     blockquote { color: #b45309; }
-""" + STAGED_CSS
+"""
+
+
+def report_css(header_fill: str = PAPER_HEADER) -> str:
+    """The stylesheet, with whatever tone the header row wants. `th` is in
+    both sheets for the reason STAGED_CSS gives: a table `fit_tables` has
+    rebuilt has real `<th>` again, in the final document."""
+    return _BASE_CSS + staged_css(header_fill)
+
+
+REPORT_CSS = report_css()
 
 
 def _document() -> QTextDocument:
@@ -1415,7 +1436,8 @@ def render_report(body: str, graph, cache, image_scale: float = 1.0,
 def render_card(body: str, graph, cache, node_id: str,
                 width: "int | None" = None,
                 image_scale: float = 1.0,
-                page_break_rule: bool = False) -> RenderedReport:
+                page_break_rule: bool = False,
+                header_fill: str = PAPER_HEADER) -> RenderedReport:
     """A report *card*: embeds name the node's own wired inputs.
 
     `width` is the card's usable width — charts are raster by the time they
@@ -1425,20 +1447,25 @@ def render_card(body: str, graph, cache, node_id: str,
     `image_scale` is for the card's own Export PDF: on the canvas a card is
     drawn at screen resolution, and printing that would put a visibly soft
     chart on paper.
+
+    `header_fill` is how a card says it is not on paper — see PAPER_HEADER.
+    Its own Export PDF leaves it alone, because that one is.
     """
     return render_body(body, by_wired_input(graph, cache, node_id),
                        image_width=width or FIGURE_WIDTH,
                        image_scale=image_scale,
                        source=source_by_wired_input(graph, node_id),
                        nested=nested_by_wired_input(graph, cache, node_id),
-                       page_break_rule=page_break_rule, cache=cache)
+                       page_break_rule=page_break_rule, cache=cache,
+                       header_fill=header_fill)
 
 
 def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 image_scale: float = 1.0, source=None,
                 nested=None, page_break_rule: bool = False,
                 page_height: "float | None" = None,
-                cache=None, page_links: bool = False) -> RenderedReport:
+                cache=None, page_links: bool = False,
+                header_fill: str = PAPER_HEADER) -> RenderedReport:
     """Lay a report body out as a document ready to show or print.
 
     `page_links` keeps a `[Costs](page:Costs)` link a link, and only the
@@ -1469,7 +1496,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     staged = _document()
     # see STAGED_CSS — the header tone has to be resolved here, because the
     # `<th>` it selects does not survive staged.toHtml()
-    staged.setDefaultStyleSheet(STAGED_CSS)
+    staged.setDefaultStyleSheet(staged_css(header_fill))
     staged.setMarkdown(resolved)
     html = staged.toHtml()
     for index, width in enumerate(resolver.widths):
@@ -1485,7 +1512,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     # every embedded chart would hang off the edge; the inset belongs to the
     # widget's padding (and the PDF's margins) instead.
     document.setDocumentMargin(0)
-    document.setDefaultStyleSheet(REPORT_CSS)
+    document.setDefaultStyleSheet(report_css(header_fill))
     for index, image in enumerate(resolver.images):
         document.addResource(QTextDocument.ImageResource,
                              QUrl(IMAGE_TOKEN_URL.format(index)), image)

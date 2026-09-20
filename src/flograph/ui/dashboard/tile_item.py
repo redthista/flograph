@@ -809,9 +809,12 @@ class TileItem(QGraphicsObject):
         if self._report_view is None or node is None:
             return
         from ..report.render import render_card
+        # the tile is dark like the card, header row included — see
+        # render.PAPER_HEADER
         rendered = render_card(str(node.params.get("text", "") or ""),
                                self._graph, self._engine.cache, node.id,
-                               width=int(self._size[0]) - 48)
+                               width=int(self._size[0]) - 48,
+                               header_fill=theme.NODE_HEADER.name())
         document = rendered.document
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()
