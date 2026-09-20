@@ -282,6 +282,39 @@ embedding its own wired inputs. It edits in place on the canvas, has a
 right-click Insert menu listing everything embeddable, and tiles onto a
 dashboard — rich prose on a dashboard, which a chart tile cannot do.
 
+## Spell check
+
+A report page's source, a Report card and a **Note** underline words that
+are not words while you write them, with corrections on a right-click.
+There is nothing to install and nothing to download: flograph carries its
+own dictionary, so it works on a machine that allows neither.
+
+**Only while you are writing.** The marks live on the editor and nowhere
+else — a locked page, the preview beside it, the printed PDF, the exported
+HTML and a Note nobody is editing are never marked up. Nothing a reader
+sees carries a squiggle.
+
+**British by default.** Settings ▸ General ▸ Writing switches the
+dictionary between **British (UK)** — which marks *color* and *organize* —
+and **American (US)**, which marks *colour* and *organise*. Everything the
+two share is the same list either way. The same page turns the check off.
+
+**What it does not check.** An `![[embed]]`, a `[[wiki link]]`, a
+`${variable}`, `inline code`, a fenced code block, a URL, an email
+address, a file path and an HTML tag are all machinery rather than prose,
+and are left alone — as is any word with a digit in it, so `col_2` and
+`q1sales` are not typos. The CSS box on a report page is not prose either.
+
+**Your own words.** Right-click an underlined word ▸ **Add “…” to my
+dictionary** and it stops being marked, everywhere, at once. Those words
+are **yours, not the project's** — the same column names, product names
+and surnames follow you from one flow to the next, and a `.flograph` you
+send somebody does not teach their spell check anything. They live in a
+plain `dictionary.txt` beside the rest of your flograph settings, one
+word per line. Settings ▸ General ▸ Writing ▸ **My dictionary ▸ Edit
+words…** shows the list, says where the file is, and takes a pasted batch
+of column names in one go.
+
 ## Where is this used?
 
 A page names the node it shows, but nothing on the node says which pages

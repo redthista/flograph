@@ -156,6 +156,13 @@ class SettingsGrid(QTreeWidget):
         return list(self._group_order)
 
 
+def _edit_my_dictionary(parent) -> None:
+    """Open the list of words the spell check has been taught."""
+    from .editor.spell_check import MyDictionaryDialog
+
+    MyDictionaryDialog(parent).exec()
+
+
 class SettingsDialog(QDialog):
     def __init__(self, window, parent=None) -> None:
         super().__init__(parent)
@@ -219,9 +226,13 @@ class SettingsDialog(QDialog):
         turning knobs — but a reset changes the values underneath an already
         open dialog, so it has to be pulled back into sync afterwards."""
         from .data_table import table_text_size
+        from .editor.spell_check import spell_check_enabled, spell_language
         from .spreadsheet import autosize_default_enabled, date_formats_setting
+        from flograph.core.spelling import LANGUAGES
 
         combo_values = {
+            "spell_language_combo": (list(LANGUAGES).index(spell_language())
+                                     if spell_language() in LANGUAGES else 0),
             "theme_pref_combo": ["system", "light", "dark"].index(
                 window.theme_pref if window.theme_pref
                 in ("system", "light", "dark") else "dark"),
@@ -251,6 +262,7 @@ class SettingsDialog(QDialog):
             "stats_sampling_checkbox": window.stats_sampling_enabled,
             "requirements_notice_checkbox": window.settings.value(
                 "packages/notify_missing", True, type=bool),
+            "spell_check_checkbox": spell_check_enabled(),
         }
         spins = {
             "table_text_size_spinbox": table_text_size(),
@@ -547,6 +559,53 @@ class SettingsDialog(QDialog):
                  "flograph's title bar, keeping the icons — their tooltips "
                  "still say what they do. The workflow name stays. Only "
                  "applies with the custom window frame.")
+
+        rows.add_group("Writing")
+
+        from .editor.spell_check import (set_spell_check_enabled,
+                                         set_spell_language,
+                                         spell_check_enabled, spell_language)
+        from flograph.core.spelling import LANGUAGES
+
+        spell_check = QCheckBox("Check spelling while writing")
+        spell_check.setObjectName("spell_check_checkbox")
+        spell_check.setChecked(spell_check_enabled())
+        spell_check.toggled.connect(set_spell_check_enabled)
+        rows.add("Spell check", spell_check,
+                 "Underline words that are not words while you write a "
+                 "report page, a Report card or a Note, with corrections on "
+                 "a right-click. It appears only in the editor — never on a "
+                 "locked page, a preview, a printed PDF or exported HTML — "
+                 "so nothing a reader sees is ever marked up. The dictionary "
+                 "is built in: nothing to install and nothing to download.")
+
+        spell_lang = QComboBox()
+        spell_lang.setObjectName("spell_language_combo")
+        languages = list(LANGUAGES)
+        spell_lang.addItems([LANGUAGES[code] for code in languages])
+        spell_lang.setCurrentIndex(languages.index(spell_language())
+                                   if spell_language() in languages else 0)
+        spell_lang.currentIndexChanged.connect(
+            lambda index: set_spell_language(languages[index]))
+        words_button = QPushButton("Edit words…")
+        words_button.setObjectName("my_dictionary_button")
+        words_button.clicked.connect(
+            lambda: _edit_my_dictionary(words_button))
+        rows.add("My dictionary", words_button,
+                 "The words you have taught it — column names, product "
+                 "names, a client's surname. Right-clicking an underlined "
+                 "word adds one; this is where to see the list, paste a "
+                 "batch in or take one out. They are yours rather than the "
+                 "project's, so the same jargon follows you from one flow "
+                 "to the next, and they are kept in a plain text file "
+                 "beside your other flograph settings.")
+
+        rows.add("Dictionary", spell_lang,
+                 "Which English to check against. British is the default, "
+                 "and marks \"color\" and \"organize\"; American marks "
+                 "\"colour\" and \"organise\". The words the two share are "
+                 "the same list either way. Takes effect straight away, in "
+                 "every editor already open.")
 
         rows.add_group("Execution")
 

@@ -559,18 +559,37 @@ class CardTextEditor(QPlainTextEdit):
     right-clicking where you are typing is where you look for it — the
     equivalent menu on a report *page* is a toolbar button, which a card has
     no room for.
+
+    It also spell-checks what is typed, which is why the editor exists at
+    all rather than the card's painted text — a squiggle belongs on an
+    editor, so a Note that nobody is editing, its printed page and its
+    exported HTML never see one.
     """
 
     def __init__(self, text: str, item: "NodeItem") -> None:
         super().__init__(text)
         self._item = item
+        from ..editor.spell_check import SpellHighlighter
+        self._speller = SpellHighlighter(self.document())
+        # the text went in through the constructor above, before there was
+        # anything to check it — Qt would catch up on the next turn of the
+        # event loop, which is one frame of a card opening unmarked
+        self._speller.rehighlight()
+
+    def _learn(self, word: str) -> None:
+        from ..editor.spell_check import learn_word
+
+        learn_word(word)
 
     def contextMenuEvent(self, event) -> None:
         # the standard menu's actions are already wired to this editor's
         # own slots, so exec() runs whichever the user picks; only the
         # inserts need handling here
+        from ..editor.spell_check import add_spelling_actions
         menu = self.createStandardContextMenu()
         inserts = self._item.add_insert_menu(menu)
+        add_spelling_actions(menu, self, self._speller.checker,
+                             self._learn, event.pos())
         chosen = menu.exec(event.globalPos())
         if chosen in inserts:
             self.insert_embed(inserts[chosen])

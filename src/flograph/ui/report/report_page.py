@@ -81,6 +81,13 @@ class ReportPage(QWidget):
         self.editor.setTabChangesFocus(True)
         self.editor.setPlaceholderText(
             "Write the report in markdown, and ![[embed]] what the flow made…")
+        # Spell check, on the source box only. The preview, the PDF and the
+        # exported HTML are built from the text, never from this widget, so
+        # "never on the final output" needs no rule of its own — and in
+        # view mode the box is hidden, which is the other half of the ask.
+        from ..editor.spell_check import SpellHighlighter, SpellingMenu
+        self._speller = SpellHighlighter(self.editor.document())
+        SpellingMenu(self.editor, self._speller, self._learn_word)
         self.css_editor = QPlainTextEdit()
         self.css_editor.setObjectName("report_css_source")
         self.css_editor.setFont(font)
@@ -323,6 +330,14 @@ class ReportPage(QWidget):
         self._undo_stack.push(
             SetPageCustomCssCommand(self._graph, self.page_id, text))
         self._timer.start()
+
+    def _learn_word(self, word: str) -> None:
+        """Remember a word — a column name, a product, a surname. It goes
+        in *your* dictionary beside your settings, not in the project: the
+        same jargon follows you from one flow to the next."""
+        from ..editor.spell_check import learn_word
+
+        learn_word(word)
 
     def _insert_css_template(self) -> None:
         name = self._css_template.currentText()
