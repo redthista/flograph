@@ -63,8 +63,11 @@ Colours are a preset name (`green`, `red`, `amber`, `blue`, `grey`) or a
 `#hex`. Scales: `green`, `blue`, `red`, `red-green`, `red-yellow-green`,
 `diverging`. A column name with a space just works; `"quote it"` if it has
 a comma or reads like a keyword. A name with a `*` / `?` is a **pattern**
-that selects every matching column (`20* scale green`). Several rules can
-target one column (a data bar *and* an icon).
+that selects every matching column (`20* scale green`), and so is a value
+on the `=` / `!=` side of a test or on the left of a map entry
+(`status = late* => bg red`, `status colormap: late*=red`) — `"quote"` a
+value that really contains one. Several rules can target one column (a
+data bar *and* an icon).
 
 Anything wrong with a rule — a typo, a column the table doesn't have — is
 reported on the **Show Table** that applies it, where the data is.

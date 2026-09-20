@@ -660,6 +660,11 @@ ROUND_TRIPS = [
     "sla iconmap sla: ok=T green, breach=X red",
     "sla iconmap right sla: ok=T green",
     "sla iconmap only pill sla: ok=T green",
+    # value patterns, and the quoting that turns one back into text
+    "status = late* => bg red",
+    "status != late* => bg red",
+    'status = "10*" => bg red',
+    "sla iconmap sla: A*=T green, B?=X red",
 ]
 
 

@@ -965,6 +965,50 @@ def column_matches(patterns, name) -> bool:
     return False
 
 
+def _is_quoted(text: Any) -> bool:
+    text = str(text).strip()
+    return len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'"
+
+
+def value_matches(pattern: Any, value: Any) -> bool:
+    """Does a cell's `value` satisfy a rule's written `pattern`?
+
+    A pattern holding ``*``, ``?`` or ``[`` is a case-sensitive glob — the
+    same spelling a column list already uses, so the rules have one
+    wildcard story rather than two. `"In quotes"` is that text exactly,
+    which is how a value that genuinely contains a ``*`` is written.
+    Anything else matches exactly, as it always did.
+    """
+    text = str(value)
+    written = str(pattern).strip()
+    if _is_quoted(written):
+        return text == _unquote(written)
+    return text == written or (_is_glob(written)
+                               and fnmatch.fnmatchcase(text, written))
+
+
+def is_pattern(written: Any) -> bool:
+    """Would `value_matches` read this as a glob rather than as text? The
+    wizard asks, so it can say so beside the box."""
+    written = str(written).strip()
+    return not _is_quoted(written) and _is_glob(written)
+
+
+def map_pair(mapping: dict, value: Any):
+    """The entry a cell's value takes out of an `iconmap` / `colormap`: its
+    own key if the map names it, else the first pattern key that catches
+    it. Exact before glob, so one spelled-out exception still beats the
+    ``*`` line written above it."""
+    text = str(value).strip()
+    pair = mapping.get(text)
+    if pair is not None:
+        return pair
+    for key, candidate in (mapping or {}).items():
+        if (_is_quoted(key) or _is_glob(key)) and value_matches(key, text):
+            return candidate
+    return None
+
+
 def expand_columns(patterns, columns) -> list[str]:
     """The concrete column names `patterns` selects, de-duplicated.
 
@@ -2427,11 +2471,25 @@ def _condition_mask(series, op: str, value: Any):
     else:
         s = series.astype("string")
         target = str(value)
+        if op in ("=", "!=") and (_is_quoted(target) or _is_glob(target)):
+            # `status = late*` is a pattern, `status = "10*"` is the text —
+            # the rest of the ops are left alone, because `contains` and
+            # `matches` are their own kinds of partial match already
+            hit = _pattern_mask(s, target)
+            return hit if op == "=" else ~hit
     return {
         "=": s == target, "!=": s != target,
         "<": s < target, "<=": s <= target,
         ">": s > target, ">=": s >= target,
     }.get(op, pd.Series(False, index=series.index))
+
+
+def _pattern_mask(text, written: str):
+    """`value_matches` over a whole column of text at once. A cell with
+    nothing in it matches nothing, which is what `empty` is for."""
+    if _is_quoted(written):
+        return (text == _unquote(written)).fillna(False).astype(bool)
+    return text.str.match(fnmatch.translate(written), na=False)
 
 
 def _format_value(value: Any, spec: str) -> Optional[str]:
@@ -2655,7 +2713,7 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                 for i, v in enumerate(src):
                     if _is_missing(v):
                         continue
-                    pair = mapping.get(str(v).strip())
+                    pair = map_pair(mapping, v)
                     if not pair or not pair[0]:
                         continue
                     first = pair[0]

@@ -136,6 +136,13 @@ class TestSeveralRowsInOneCell:
         ok_first = self.build("value iconmap status: ok=✓ green, breach=✗ red")
         assert icons(styled(ok_first, "Q1")) == ["✓"]
 
+    def test_a_pattern_key_picks_the_row_that_matches_it(self):
+        """The map's keys may be patterns, so "listed first" has to mean
+        the first key that *matches* one of the cell's rows rather than
+        the first spelled exactly like one."""
+        built = self.build("value iconmap status: b*=✗ red, o*=✓ green")
+        assert icons(styled(built, "Q1")) == ["✗"]
+
     def test_a_highlight_fires_if_any_row_passes(self):
         built = self.build("value if status = breach => bg red")
         assert styled(built, "Q1")[0].bg

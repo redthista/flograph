@@ -21,7 +21,7 @@ A rule is `columns  verb  argument`:
 | `scale` | `revenue scale green` | 2- or 3-colour heatmap across the column's range |
 | `bar` | `units bar blue` | in-cell data bar; a column with negatives splits from the centre |
 | `icons` | `score icons traffic` | a 3-tier icon set (`traffic`, `arrows`, `check`), split at the column's thirds — add `reverse` to flip it |
-| `iconmap` | `sla iconmap sla: ok=✓ green, breach=✗ red` | an icon per exact value; the glyph is any character or emoji |
+| `iconmap` | `sla iconmap sla: ok=✓ green, breach=✗ red` | an icon per value; the glyph is any character or emoji, and a value may be a [[#value-patterns|pattern]] |
 | `… => bg / fg / bold` | `score >= 90 => bg green, bold` | highlight the cell when the test passes |
 | `… => row <colour>` | `status = fail => row red` | highlight the whole row |
 | `icon` (in a `=>`) | `20* = 1 => icon ✓ green` | place one icon where the test passes |
@@ -41,6 +41,7 @@ A rule is `columns  verb  argument`:
 
 Tests for a highlight: `> < >= <= = !=`, `between 10 20`, `contains`,
 `starts with`, `ends with`, `matches` (regex), `is empty`, `is not empty`.
+`=` and `!=` take a [[#value-patterns|pattern]] — `status = late* => bg red`.
 
 Colours are a preset — `green` `red` `amber` `blue` `grey` `purple` — or a
 `#hex`. Scale presets: `green` `blue` `red` `red-green` `red-yellow-green`
@@ -347,7 +348,9 @@ sla       iconmap: 1=✓ green, 0=✗ red
 `colormap` fills the cell and picks readable ink for it; give a second
 colour (`ok=green white`) to choose the ink yourself. `iconmap` places a
 glyph. Both take `only` to draw the format *instead of* the value —
-`status colormap only: fail=red` is a status block with no word in it.
+`status colormap only: fail=red` is a status block with no word in it. A
+value on the left of an `=` may be a [[#value-patterns|pattern]]
+(`late*=red`), so one line can stand for a family of values.
 
 **Leave the source column out** — nothing before the colon — and each
 column the rule draws in reads *its own* value. That is the only spelling
@@ -466,6 +469,41 @@ hide _tmp_*                   # every scratch column
 ```
 
 A pattern that matches nothing is reported on the Show Table, next to the data.
+
+## Value patterns
+
+The same wildcards work on the **value** side, wherever a rule compares what
+is written with what is in the cell — the `=` and `!=` tests, and the keys of
+an `iconmap` or `colormap`:
+
+```
+status  = late*        => bg red      # late-1, late-2, late whatever
+code    != A?          => fg grey     # anything but A1, A2, AB …
+ref     = [0-9]*       => bold        # starting with a digit
+
+status  colormap: late*=red, on hold=amber, ok=green
+code    iconmap: A*=▲ red, B*=■ amber, "10*"=★ green
+```
+
+`*` is any run of characters, `?` is any one, `[abc]` is one of a set.
+Matching is **case-sensitive**, the same as a column pattern — `late*` does
+not catch `LATE`.
+
+Only `=` and `!=` read a pattern. `contains`, `starts with` and `ends with`
+are already partial matches and take the text as typed, and `matches` is a
+full regular expression, which is where to go for anything a glob cannot say.
+
+A value that genuinely contains a `*`, `?` or `[` goes in `"quotes"`, which
+means those characters and nothing else. That is the same quoting a column
+name uses when it contains a comma or reads like a keyword.
+
+In a map, a value named outright beats a pattern, and among patterns the
+first line that matches wins — so an exception can be written above or below
+the `*` rule that would otherwise catch it:
+
+```
+severity  colormap: critical=#7f1d1d, c*=red, w*=amber
+```
 
 ## A note that explains a cell
 

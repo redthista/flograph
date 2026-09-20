@@ -113,6 +113,14 @@ a `*` / `?` is a **pattern** — `20* scale green` heatmaps every year
 column, `*_qty bar blue` every quantity column, `hide _tmp_*` every scratch
 column.
 
+The same wildcards work on the **value** side: the `=` and `!=` tests
+(`status = late* => bg red`) and the keys of a map (`status colormap:
+late*=red, ok=green`). `*` is any run of characters, `?` any one, `[abc]`
+one of a set, and matching is case-sensitive, as it is for a column. A
+value that really contains a `*` goes in `"quotes"`. `contains`, `starts
+with` and `ends with` are partial matches already and take the text as
+typed; `matches` is a full regular expression.
+
 **Matrix.** Set **Show as** to *matrix* and the card pivots the table
 itself — **Rows** down the side, **Columns** across the top, **Values** in
 the cells, combined by **Aggregation** — the way a spreadsheet's pivot table

@@ -7,9 +7,9 @@ import pytest
 from flograph.core.table_format import (
     CellStyle, ColumnLayout, Rule, _column_list, column_layout, column_matches,
     column_stats, evaluate_column, evaluate_rows, expand_columns, merge_styles,
-    parse_op_value, parse_rules, parse_rules_lenient, quote_column, readable_fg,
-    rule_summary, rules_from_style, style_payload, style_report, split_rules,
-    wraps_text,
+    is_pattern, map_pair, parse_op_value, parse_rules, parse_rules_lenient,
+    quote_column, readable_fg, rule_summary, rules_from_style, style_payload,
+    style_report, split_rules, value_matches, wraps_text,
 )
 
 
@@ -322,6 +322,122 @@ class TestWildcardColumns:
     def test_style_report_is_clean_when_the_glob_matches(self):
         payload = style_payload({"format_rules": "20* bar blue"})
         assert style_report(payload, pd.DataFrame({"2021": [1]})) == []
+
+
+class TestWildcardValues:
+    """0.1.15 #7: the same wildcards column names take, on the value side —
+    the `=` / `!=` tests and the keys of an icon or colour map."""
+
+    def _hit(self, line, frame, column="code"):
+        (rule,) = parse_rules(line)
+        styles = evaluate_column(frame[column], [rule],
+                                 column_stats(frame[column]), frame=frame)
+        return [bool(st and (st.bg or st.fg or st.icon)) for st in styles]
+
+    FRAME = pd.DataFrame({"code": ["A10", "A11", "B20", "10*", "a10"]})
+
+    def test_a_glob_value_matches_a_family(self):
+        assert self._hit("code = A1* => bg red", self.FRAME) \
+            == [True, True, False, False, False]
+
+    def test_one_character_at_a_time(self):
+        assert self._hit("code = A1? => bg red", self.FRAME) \
+            == [True, True, False, False, False]
+        assert self._hit("code = A1 => bg red", self.FRAME) \
+            == [False] * 5
+
+    def test_a_set_of_characters(self):
+        assert self._hit("code = [AB]1* => bg red", self.FRAME) \
+            == [True, True, False, False, False]
+
+    def test_not_equal_is_the_other_side_of_the_same_test(self):
+        assert self._hit("code != A1* => bg red", self.FRAME) \
+            == [False, False, True, True, True]
+
+    def test_quoting_means_the_characters_themselves(self):
+        """The escape hatch, and the reason it is quotes: a column name
+        already uses them for a name that reads like a keyword."""
+        assert self._hit('code = "10*" => bg red', self.FRAME) \
+            == [False, False, False, True, False]
+
+    def test_a_plain_value_is_still_exact(self):
+        assert self._hit("code = A10 => bg red", self.FRAME) \
+            == [True, False, False, False, False]
+
+    def test_matching_is_case_sensitive(self):
+        """The same as a column pattern — one wildcard story, not two."""
+        assert self._hit("code = a1* => bg red", self.FRAME) \
+            == [False, False, False, False, True]
+
+    def test_an_empty_cell_matches_nothing(self):
+        frame = pd.DataFrame({"code": ["A1", None, ""]})
+        assert self._hit("code = A* => bg red", frame) \
+            == [True, False, False]
+
+    def test_the_partial_match_ops_are_left_alone(self):
+        """`contains` and friends are already partial, and `matches` is a
+        full regex — a glob there would be a third thing to learn."""
+        frame = pd.DataFrame({"code": ["A1*B", "A1XB"]})
+        assert self._hit("code contains 1* => bg red", frame) \
+            == [True, False]
+        assert self._hit("code starts with A1* => bg red", frame) \
+            == [True, False]
+
+    def test_a_map_key_may_be_a_pattern(self):
+        hits = self._hit("code iconmap: A*=✓ green, B*=✗ red", self.FRAME)
+        assert hits == [True, True, True, False, False]
+
+    def test_a_named_value_beats_a_pattern(self):
+        (rule,) = parse_rules("code iconmap: A1*=✓ green, A10=★ red")
+        assert map_pair(rule.mapping, "A10")[0] == "★"
+        assert map_pair(rule.mapping, "A11")[0] == "✓"
+
+    def test_among_patterns_the_first_written_wins(self):
+        (rule,) = parse_rules("code iconmap: A*=✓ green, A1*=★ red")
+        assert map_pair(rule.mapping, "A10")[0] == "✓"
+
+    def test_a_quoted_map_key_is_text(self):
+        (rule,) = parse_rules('code iconmap: "10*"=★ green, *=✓ red')
+        assert map_pair(rule.mapping, "10*")[0] == "★"
+        assert map_pair(rule.mapping, "A10")[0] == "✓"
+
+    def test_an_unmapped_value_still_gets_nothing(self):
+        (rule,) = parse_rules("code iconmap: A*=✓ green")
+        assert map_pair(rule.mapping, "B20") is None
+
+    def test_a_colormap_key_is_a_pattern_too(self):
+        frame = pd.DataFrame({"status": ["late-1", "late-2", "ok"]})
+        (rule,) = parse_rules("status colormap: late*=red, ok=green")
+        styles = evaluate_column(frame["status"], [rule],
+                                 column_stats(frame["status"]), frame=frame)
+        assert styles[0].bg == styles[1].bg != styles[2].bg
+
+
+class TestValueMatches:
+    """The one answer the condition test and the map lookup both read."""
+
+    @pytest.mark.parametrize("pattern,value,hit", [
+        ("late", "late", True),
+        ("late", "later", False),
+        ("late*", "later", True),
+        ("late*", "late", True),
+        ("A?", "A1", True),
+        ("A?", "A12", False),
+        ("[ab]1", "b1", True),
+        ('"10*"', "10*", True),
+        ('"10*"', "100", False),
+        ("*", "anything", True),
+        ("late*", "LATER", False),
+    ])
+    def test_it(self, pattern, value, hit):
+        assert value_matches(pattern, value) is hit
+
+    def test_a_number_matches_as_its_text(self):
+        assert value_matches("1*", 12) is True
+
+    def test_is_pattern_says_which_are_globs(self):
+        assert is_pattern("late*") and is_pattern("A?")
+        assert not is_pattern("late") and not is_pattern('"10*"')
 
 
 class TestHide:

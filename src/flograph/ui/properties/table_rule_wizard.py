@@ -60,6 +60,15 @@ _OPS = [("is greater than", ">"), ("is ≥", ">="), ("is less than", "<"),
         ("ends with", "ends"), ("matches (regex)", "matches"),
         ("is between", "between"), ("is empty", "empty"),
         ("is not empty", "notempty")]
+#: What a pattern may say, wherever a rule compares a written value with
+#: a cell's. Kept in one place because the condition box and the value→icon
+#: map both say it, and they must not say it differently.
+_WILDCARD_HELP = (
+    "A value may be a pattern: * for any run of characters, ? for any one, "
+    "[abc] for one of a set. \"In quotes\" means the characters themselves, "
+    "which is how a value that really contains a * is written. Matching is "
+    "case-sensitive, the same as a column pattern.")
+
 _ICON_SETS = [("Traffic lights  ● ● ●", "traffic"),
               ("Arrows  ▼ ▬ ▲", "arrows"),
               ("Tick / dash / cross  ✓ – ✗", "check")]
@@ -990,6 +999,9 @@ class RuleBuilder(QDialog):
                             "or paste a picture as base64):"))
         self._map = QTableWidget(0, 3)
         self._map.setHorizontalHeaderLabels(["value", "icon", "colour"])
+        self._map.horizontalHeaderItem(0).setToolTip(
+            _WILDCARD_HELP + " A value the map names outright wins over a "
+            "pattern, and among patterns the first row that matches wins.")
         self._map.setMaximumHeight(150)
         self._map.horizontalHeader().setStretchLastSection(True)
         self._map.cellChanged.connect(self._refresh)
@@ -1310,6 +1322,12 @@ class RuleBuilder(QDialog):
         two = op == "between"
         self._val2.setVisible(two)
         self._and.setVisible(two)
+        # only the two that compare a whole value take a pattern; contains
+        # and matches are their own kinds of partial match already
+        wild = op in ("=", "!=")
+        self._val1.setPlaceholderText("late  ·  late*  ·  A?  ·  \"10*\""
+                                      if wild else "")
+        self._val1.setToolTip(_WILDCARD_HELP if wild else "")
         self._refresh()
 
     def _refresh(self) -> None:

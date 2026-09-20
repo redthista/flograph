@@ -39,7 +39,7 @@ from typing import Any
 from .table_format import (
     Rule, _column_list, _condition_mask, _is_glob, _is_missing,
     column_matches, hidden_columns, index_shown, rule_summary,
-    rules_from_style, shown_columns)
+    rules_from_style, shown_columns, value_matches)
 
 AGGREGATIONS = ("sum", "mean", "median", "min", "max", "count",
                 "distinct count", "std", "first")
@@ -251,8 +251,11 @@ def _first_listed(mapping: dict):
     def combine(series):
         present = [str(v).strip() for v in series if not _is_missing(v)]
         for key in order:
-            if key in present:
-                return key
+            # a key may be a pattern, so the first *matching* row wins the
+            # cell rather than the first identically-spelled one
+            hit = next((v for v in present if value_matches(key, v)), None)
+            if hit is not None:
+                return hit
         return present[0] if present else None
     return combine
 
