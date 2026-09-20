@@ -174,11 +174,48 @@ class TestTheSpanDoesNotDriftTheView:
 
     def test_what_is_under_the_cursor_stays_under_the_cursor(self, qtbot,
                                                              registry):
+        """While the flow is bigger than the window — the whole of ordinary
+        use — a zoom holds its anchor exactly."""
         _graph, scene, view = self._view_on_a_flow(qtbot, registry)
         before = view.mapToScene(self.ANCHOR)
-        after = self._wheel_out(view, scene)
+        after = self._wheel_out(view, scene, ticks=7)
         assert abs(after.x() - before.x()) < 1.0
         assert abs(after.y() - before.y()) < 1.0
+
+    def test_once_the_whole_flow_fits_it_settles_instead_of_creeping(
+            self, qtbot, registry):
+        """Zoom out far enough and the span — the flow plus a margin, and
+        deliberately *not* the viewport — is smaller than the window, so Qt
+        centres it and the anchor gives way.
+
+        That is the trade, and the alternative is what it replaced: a span
+        that followed the viewport had no scroll range left at that zoom,
+        so Qt re-centred it a few pixels over on every refit, for ever.
+        What matters is that it *settles* — it stops, and stays stopped.
+        """
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        self._wheel_out(view, scene, ticks=16)
+        settled = view.viewport_centre()
+        for _ in range(20):
+            scene.flush_rect_fit()
+        assert view.viewport_centre() == settled
+
+    def test_it_does_not_creep_at_any_zoom(self, qtbot, registry):
+        """Dan, testing 0.1.15: "the canvases were all slowly moving on
+        their own". Forty idle refits is about ten seconds of the debounce
+        with nobody touching anything; at zoom 0.13 this walked 930 scene
+        units, and 1246 before 0.1.15 went near it."""
+        _graph, scene, view = self._view_on_a_flow(qtbot, registry)
+        for zoom in (1.0, 0.77, 0.5, 0.29, 0.13):
+            view.set_zoom(zoom)
+            view.centerOn(613.0, 447.0)     # awkward numbers on purpose
+            scene.flush_rect_fit()
+            start = view.viewport_centre()
+            for _ in range(40):
+                scene.flush_rect_fit()
+            moved = view.viewport_centre()
+            assert abs(moved.x() - start.x()) < 0.01, f"crept at zoom {zoom}"
+            assert abs(moved.y() - start.y()) < 0.01, f"crept at zoom {zoom}"
 
     def test_it_holds_with_the_bars_off_too(self, qtbot, registry):
         """The span is world-sized then, so there was never anything to
@@ -189,14 +226,16 @@ class TestTheSpanDoesNotDriftTheView:
         after = self._wheel_out(view, scene)
         assert abs(after.x() - before.x()) < 1.0
 
-    def test_the_span_keeps_up_with_the_zoom_rather_than_lagging(
-            self, qtbot, registry):
-        """The cause, named: the span has to cover what the view shows at
-        the moment the transform changes, not a beat later."""
+    def test_the_span_is_the_flow_not_the_window(self, qtbot, registry):
+        """The property the whole thing turns on, stated on its own: a span
+        worked out from what a view can *see* feeds back into itself; one
+        worked out from the flow and from where the views are parked cannot.
+        """
         _graph, scene, view = self._view_on_a_flow(qtbot, registry)
-        self._wheel_out(view, scene, ticks=12)
-        visible = view.mapToScene(view.viewport().rect()).boundingRect()
-        assert scene.sceneRect().contains(visible)
+        before = scene.sceneRect()
+        self._wheel_out(view, scene, ticks=10)
+        assert scene.sceneRect() == before, \
+            "zooming changed the span, so the span is following the window"
 
     def test_sitting_still_and_refitting_moves_nothing(self, qtbot,
                                                         registry):

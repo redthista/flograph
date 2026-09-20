@@ -308,35 +308,9 @@ class ZoomPanGraphicsView(QGraphicsView):
         if math.isclose(factor, 1.0):
             return
         center = self.viewport_centre()
-        self._make_room_for(value, center,
-                            QRectF(self.viewport().rect()).center())
         self.scale(factor, factor)
         self.centerOn(center)
         self._zoom_updated()
-
-    def _make_room_for(self, zoom: float, anchor: QPointF, at) -> None:
-        """Widen the scrollable span to hold what this zoom is about to
-        show, before the transform changes.
-
-        A view cannot scroll outside the scene rect, and Qt enforces that
-        inside `scale()` — so a zoom that ends up showing more than the
-        span held was clamped on the spot, and the canvas slid sideways as
-        the span caught up a beat later. Worked out from the zoom rather
-        than measured after it, because after it is too late.
-
-        `anchor` is the scene point staying put and `at` where it sits in
-        the viewport. The scene's own fitting decides whether any of this
-        applies — with the scroll bars off the span is world-sized and
-        this costs one `contains` check.
-        """
-        scene = self.scene()
-        if scene is None or not hasattr(scene, "ensure_span_covers"):
-            return
-        rect = self.viewport().rect()
-        top_left = QPointF(anchor.x() - at.x() / zoom,
-                           anchor.y() - at.y() / zoom)
-        scene.ensure_span_covers(QRectF(
-            top_left, QSizeF(rect.width() / zoom, rect.height() / zoom)))
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._scrollable_widget_at(event.position().toPoint()) is not None:
@@ -372,7 +346,6 @@ class ZoomPanGraphicsView(QGraphicsView):
             return
         pos = event.position().toPoint()
         before = self.mapToScene(pos)
-        self._make_room_for(new_zoom, before, pos)
         self.scale(factor, factor)
         after = self.mapToScene(pos)
         delta = after - before

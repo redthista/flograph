@@ -121,55 +121,47 @@ class ContentFittedSceneRect:
         return bounds
 
     def _fit_scene_rect(self) -> None:
+        """Fit the span to the flow, and to wherever the views are parked.
+
+        **Never to what a view can see.** That is the trap, and it is an
+        old one: unioning the visible rect made the span follow the
+        viewport, so at a zoom where the flow is smaller than the window
+        the span came out as the visible rect exactly. The scroll range
+        then goes to zero, Qt centres the scene in the viewport a few
+        pixels over, the next refit measures *that* and matches it, and the
+        canvas slides off on its own with nobody touching it. Measured at
+        zoom 0.13: 930 scene units over forty idle refits, and 1246 before
+        0.1.15 went near any of this, so it is not a new fault. Padding the
+        span does not save it either — with the range at zero there is
+        nowhere to put the view back to.
+
+        So the span is worked out from the **flow** and from each view's
+        *centre* — a point, which a zoom does not change. Ask twice and the
+        answer is the same, which is the only property that matters here.
+
+        The cost, and it is a real one: zoom out far enough that the whole
+        flow plus its margin fits inside the window, and the span is
+        smaller than the viewport, so Qt centres it and the canvas settles
+        there instead of following the cursor. It settles *once* and stays
+        put, rather than creeping, and at that zoom the whole flow is on
+        screen and there is nothing to pan to.
+        """
         target = self._shown_bounds().adjusted(
             -SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN)
-        # Wherever the views are right now stays reachable: Esc-restore, a
-        # minimap click into empty margin, a jump to the far side — none may
-        # be clamped back by the refit that follows them.
-        #
-        centres = [(view, view.viewport_centre()) for view in self.views()
-                   if hasattr(view, "viewport_centre")]
+        # wherever a view is parked stays reachable: Esc-restore, a minimap
+        # click into empty margin, a jump to the far side — none may be
+        # clamped back by the refit that follows them
         for view in self.views():
-            visible = view.mapToScene(view.viewport().rect()).boundingRect()
-            target = target.united(visible)
+            if not hasattr(view, "viewport_centre"):
+                continue
+            centre = view.viewport_centre()
+            target = target.united(QRectF(centre, centre))
         if target != self.sceneRect():
             # setSceneRect itself emits changed for the redrawn regions;
             # the equality check above is what stops that re-queueing us
             # forever, so nothing here may be blocked — the views still
             # need sceneRectChanged to retune their scroll ranges
             self.setSceneRect(target)
-            # Changing the span reworks every scroll bar's range, and a
-            # value that no longer fits is clamped into the new one — which
-            # moves the view under the user. Put each view back on what it
-            # was looking at. A no-op when nothing was clamped, which is the
-            # ordinary case; the span only ever grows here, and it is
-            # `ensure_span_covers` that keeps a *zoom* from outrunning it.
-            for view, centre in centres:
-                now = view.viewport_centre()
-                if now != centre:
-                    view.centerOn(centre)
-
-    def ensure_span_covers(self, rect: QRectF) -> None:
-        """Make room in the span for a view that is about to show `rect`.
-
-        A view cannot scroll outside `sceneRect`, and Qt applies that the
-        moment the transform changes — inside `scale()`, before any refit
-        of ours can run. So zooming out far enough that the viewport no
-        longer fits in the span left the zoom half-applied: Qt pulled the
-        view back inside, the refit 250 ms later grew the span to match,
-        and the next tick did it again. What that looks like is the page
-        sliding about while you zoom, with nobody asking it to (0.1.15).
-
-        Called *before* the transform changes, with the rect the zoom
-        intends to show, so there is nothing to clamp. A no-op while the
-        span is world-sized, which is every canvas with the scroll bars
-        turned off.
-        """
-        if not self._rect_fitted:
-            return
-        current = self.sceneRect()
-        if not current.contains(rect):
-            self.setSceneRect(current.united(rect))
 
 
 class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
