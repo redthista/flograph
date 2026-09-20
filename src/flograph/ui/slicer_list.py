@@ -158,12 +158,18 @@ class _Selection:
         Computed, never stored: a parent whose children are all ticked reads
         as ticked whether or not the parent itself is in the selection, so
         the two ways of arriving at "all of north" look identical.
+
+        Ragged data is the exception. When the parent is a row of its own as
+        well as a branch — a store that has its own rows *and* aisles under
+        it — ticking every aisle is not ticking the store, because the
+        store's own rows are still out. That reads part-filled until the
+        store itself is ticked.
         """
         if self.covered(node.path):
             return Qt.Checked
         if node.children:
             states = [self.state(child) for child in node.children]
-            if all(s == Qt.Checked for s in states):
+            if all(s == Qt.Checked for s in states) and not node.row:
                 return Qt.Checked
             if any(s != Qt.Unchecked for s in states):
                 return Qt.PartiallyChecked
@@ -228,11 +234,15 @@ class _Selection:
         describing "everything". Purely a tidying step: `state()` already
         draws both forms the same and `matches()` already filters them the
         same.
+
+        Not so for a branch that is a row of its own (ragged data): rolling
+        its children up into it would quietly add its own rows to the
+        filter, so that one stays spelled out.
         """
         chosen = {tuple(p) for p in paths}
         # deepest first, so a rolled-up level is available to the one above
         for node in sorted((n for root in self._roots for n in root.walk()
-                            if n.children),
+                            if n.children and not n.row),
                            key=lambda n: -n.depth):
             if node.path in chosen:
                 continue
@@ -277,10 +287,12 @@ class _Selection:
 
         def visit(visible):
             for node, children in visible:
-                if children:
-                    visit(children)
-                else:
+                # a branch that is also a row of its own counts as both:
+                # without its own entry, Select All would tick every aisle
+                # and still leave the store's own rows filtered out
+                if node.row or not children:
                     out.append(node.path)
+                visit(children)
         visit(self.visible())
         return out
 

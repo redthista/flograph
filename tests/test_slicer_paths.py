@@ -7,10 +7,11 @@ writes back is a file-format promise.
 """
 import pytest
 
-from flograph.core.slicer import (SlicerOptions, build_tree, dump_paths,
+from flograph.core.slicer import (BLANK, SlicerOptions, as_leaves,
+                                  build_tree, dump_paths, is_blank,
                                   is_descendant, leaf_values, matches,
                                   normalise, parse_path, path_label,
-                                  selected_paths, slicer_columns)
+                                  selected_paths, slicer_columns, trim_path)
 
 
 class TestColumns:
@@ -159,3 +160,94 @@ class TestOptions:
 
     def test_len_is_the_number_of_paths(self):
         assert len(SlicerOptions(["a"], [("x",), ("y",)])) == 2
+
+
+class TestRaggedPaths:
+    """0.1.15: four columns do not mean four levels on every row. Trimming
+    is what lets a two-deep row sit beside a four-deep one instead of
+    trailing the literal value "nan" behind it."""
+
+    @pytest.mark.parametrize("value", [None, float("nan"), "", "   ", BLANK])
+    def test_what_counts_as_an_empty_level(self, value):
+        assert is_blank(value)
+
+    @pytest.mark.parametrize("value", ["nan", "0", 0, False, "None "])
+    def test_what_does_not(self, value):
+        """A column that has been stringified already carries "nan" as
+        ordinary text, and a level reading 0 or False is a value."""
+        assert not is_blank(value)
+
+    def test_a_path_ends_where_its_data_does(self):
+        assert trim_path(["north", "store A", None, None]) \
+            == ("north", "store A")
+
+    def test_an_empty_level_with_data_under_it_is_kept(self):
+        """Dropping it would merge two rows that differ — `north > ? > x`
+        and `north > y > x` are not the same row."""
+        assert trim_path(["north", "", "aisle 1"]) \
+            == ("north", BLANK, "aisle 1")
+
+    def test_every_level_empty_is_no_path(self):
+        assert trim_path([None, "", None]) == ()
+
+    def test_trimming_is_idempotent(self):
+        """Introspection marks blanks up before it trims, so trimming what
+        has already been marked up has to give the same answer."""
+        once = trim_path(["north", "", "aisle 1", ""])
+        assert trim_path(once) == once
+
+    def test_as_leaves_leaves_an_ordinary_ragged_path_short(self):
+        """Nothing runs deeper through "store A", so it stays two levels —
+        which is the whole point of trimming."""
+        assert as_leaves([("north", "store A"), ("south", "b", "c")], 3) \
+            == [("north", "store A"), ("south", "b", "c")]
+
+    def test_as_leaves_gives_a_shadowed_path_its_blank_back(self):
+        """Rows with no store trim to plain "south", which is the *parent*
+        of every southern store — ticking it would mean the whole region.
+        Handed its empty level back it is a sibling, and pickable alone."""
+        assert as_leaves([("south",), ("south", "store B")], 2) \
+            == [("south", BLANK), ("south", "store B")]
+
+    def test_as_leaves_keeps_going_until_the_path_is_a_leaf(self):
+        assert as_leaves([("a",), ("a", BLANK, "c")], 3) \
+            == [("a", BLANK, BLANK), ("a", BLANK, "c")]
+
+    def test_as_leaves_never_grows_past_the_columns(self):
+        assert as_leaves([("a",), ("a", "b")], 1) == [("a",), ("a", "b")]
+
+    def test_a_tree_marks_which_levels_are_rows(self):
+        """On a tree of one depth this is just "has no children"; ragged
+        data splits the two, and a level that is both has to say so."""
+        roots = build_tree([("a",), ("a", "b")])
+        assert roots[0].row and roots[0].children[0].row
+
+    def test_a_level_only_passed_through_is_not_a_row(self):
+        roots = build_tree([("a", "b")])
+        assert not roots[0].row
+        assert roots[0].children[0].row
+
+
+class TestBlankLevels:
+    """`level_mask` is the one place a path's level becomes a filter, so
+    the node's run() cannot disagree with what the card drew."""
+
+    def test_a_blank_level_matches_empty_cells(self):
+        pd = pytest.importorskip("pandas")
+        from flograph.core.slicer import level_mask
+        column = pd.Series(["north", None, "", "   ", "south"])
+        assert list(level_mask(column, BLANK)) \
+            == [False, True, True, True, False]
+
+    def test_an_ordinary_level_matches_its_value(self):
+        pd = pytest.importorskip("pandas")
+        from flograph.core.slicer import level_mask
+        column = pd.Series(["north", None, "south"])
+        assert list(level_mask(column, "north")) == [True, False, False]
+
+    def test_a_numeric_level_matches_as_text(self):
+        """Paths are strings all the way through, which is how a slicer has
+        always compared."""
+        pd = pytest.importorskip("pandas")
+        from flograph.core.slicer import level_mask
+        assert list(level_mask(pd.Series([1, 2]), "2")) == [False, True]

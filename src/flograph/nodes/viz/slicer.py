@@ -42,6 +42,14 @@ ticked (its columns named after "Column(s)", or "value"), so it can still
 feed a Join, or the "options" input of a Choice node, or another Slicer.
 With several columns, write a line as "north > store A".
 
+**Trees of different lengths.** A path ends where its data does. Over four
+columns, a row that only fills two is a two-level path — `north > store A`
+sits beside `south > store B > aisle 1 > shelf 3`, and ticking it keeps
+every row under it. An empty level with data still *below* it is a level
+all the same, drawn as "(blank)", because two rows that differ there are
+two rows. Earlier builds turned an empty cell into the literal value "nan"
+and drew it as one more thing to tick.
+
 **Chaining.** The "selected" output carries the ticked values as a list
 whatever the mode and however deep the tree — the deepest value of each
 selection — so one picker can drive the options of the next: region picks a
@@ -55,7 +63,7 @@ works when editing by hand).
 NODE = {
     "label": "Slicer",
     "category": "Viz",
-    "version": "1.2",
+    "version": "1.3",
     "card": "slicer",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe"), ("selected", "any")],
@@ -109,8 +117,8 @@ def run(ctx, table=None):
     import pandas as pd
 
     from flograph.core.controls import lines_to_values
-    from flograph.core.slicer import (leaf_values, matches, normalise,
-                                      parse_path, selected_paths,
+    from flograph.core.slicer import (leaf_values, level_mask, matches,
+                                      normalise, parse_path, selected_paths,
                                       slicer_columns)
 
     columns = slicer_columns(ctx.params.get("column", ""))
@@ -154,8 +162,11 @@ def run(ctx, table=None):
     keep = pd.Series(False, index=table.index)
     for path in picked:
         mask = pd.Series(True, index=table.index)
+        # zip stops at the shorter, so a ragged path tests only the levels
+        # it has — and level_mask is what knows a "(blank)" level means an
+        # empty cell rather than a column whose text reads "(blank)"
         for column, value in zip(columns, path):
-            mask &= table[column].astype(str) == value
+            mask &= level_mask(table[column], value)
         keep |= mask
     filtered = table[keep]
     where = ", ".join(repr(c) for c in columns)

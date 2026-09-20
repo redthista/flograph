@@ -44,8 +44,9 @@ def slicer_options(graph: Graph, cache: OutputCache,
 
     None means "nothing usable yet", so hosts can show a run-me placeholder.
     """
-    from flograph.core.slicer import (SlicerOptions, parse_path,
-                                      slicer_columns)
+    from flograph.core.slicer import (BLANK, SlicerOptions, as_leaves,
+                                      blank_mask, parse_path, slicer_columns,
+                                      trim_path)
 
     node = graph.nodes.get(node_id)
     if node is None:
@@ -74,17 +75,31 @@ def slicer_options(graph: Graph, cache: OutputCache,
     usable = [c for c in columns if c in source.columns]
     if not usable:
         return None
+    # blankness is decided on the real column and only then stringified:
+    # astype(str) turns NaN into the *text* "nan", which used to group and
+    # draw as a value, so a two-level row under a four-column slicer read
+    # `north > store A > nan > nan`
     frame = source[usable].astype(str)
+    for column in usable:
+        frame.loc[blank_mask(source[column]), column] = BLANK
     sizes = frame.groupby(usable, sort=True, observed=True).size()
-    paths, counts = [], {}
+    # a path ends where its data does, so trailing blanks come off — which
+    # can land two groups on the same path, and they are one row of the tree
+    totals: dict = {}
     for key, size in sizes.items():
-        path = tuple(key) if isinstance(key, tuple) else (str(key),)
-        paths.append(path)
+        raw = tuple(key) if isinstance(key, tuple) else (str(key),)
+        # blank all the way down still has rows behind it, and on a
+        # one-column slicer "no region" is a perfectly good thing to pick,
+        # so the top level is kept even when there is nothing in it
+        path = trim_path(raw) or (BLANK,)
+        totals[path] = totals.get(path, 0) + int(size)
+    paths, counts = as_leaves(totals, len(usable)), {}
+    for path, size in zip(paths, totals.values()):
         # every ancestor of a leaf gets that leaf's rows, so a collapsed
         # parent still reports what picking it would keep
         for depth in range(1, len(path) + 1):
             prefix = path[:depth]
-            counts[prefix] = counts.get(prefix, 0) + int(size)
+            counts[prefix] = counts.get(prefix, 0) + size
     return SlicerOptions(usable, paths, counts)
 
 

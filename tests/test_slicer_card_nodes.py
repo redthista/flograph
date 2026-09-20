@@ -18,6 +18,16 @@ REGIONS = {"columns": ["region", "units"],
 STORES = {"columns": ["region", "store", "units"],
           "rows": [["north", "alpha", "10"], ["north", "beta", "20"],
                    ["north", "beta", "5"], ["south", "gamma", "30"]]}
+#: three levels, and not every row fills all three — north's store has no
+#: aisles, south has rows with no store at all, and east stops at the region
+RAGGED = {"columns": ["region", "store", "aisle", "tag"],
+          "rows": [["north", "store A", "", "a"],
+                   ["north", "store A", "", "b"],
+                   ["north", "store Z", "", "g"],
+                   ["south", "store B", "aisle 1", "c"],
+                   ["south", "store B", "aisle 2", "d"],
+                   ["south", "", "", "e"],
+                   ["east", "", "", "f"]]}
 
 
 def _resize_event(w: int, h: int) -> QResizeEvent:
@@ -77,6 +87,20 @@ def _add_nested_flow(win, column="region, store"):
     for node in (source, slicer, shown):
         win.graph.add_node(node)
     win.graph.set_param(source.id, "data", json.dumps(STORES))
+    win.graph.set_param(slicer.id, "column", column)
+    win.graph.connect(source.id, "table", slicer.id, "table")
+    win.graph.connect(slicer.id, "table", shown.id, "table")
+    return source, slicer, shown
+
+
+def _add_ragged_flow(win, column="region, store, aisle"):
+    """The same flow over a table whose rows run to different depths."""
+    source = win.registry.instantiate("flograph.io.table", pos=(0, 0))
+    slicer = win.registry.instantiate("flograph.viz.slicer", pos=(400, 0))
+    shown = win.registry.instantiate("flograph.viz.show_table", pos=(800, 0))
+    for node in (source, slicer, shown):
+        win.graph.add_node(node)
+    win.graph.set_param(source.id, "data", json.dumps(RAGGED))
     win.graph.set_param(slicer.id, "column", column)
     win.graph.connect(source.id, "table", slicer.id, "table")
     win.graph.connect(slicer.id, "table", shown.id, "table")
@@ -689,6 +713,106 @@ class TestSlicerHierarchy:
         panel.toolbar._search.setText("gamma")
         # the branch is kept so the match can be reached, but north is gone
         assert _texts(panel.view) == ["south", "gamma"]
+
+
+class TestRaggedTrees:
+    """0.1.15: four columns do not mean every path is four long. A row whose
+    deeper levels are empty ends where its data does, and an empty level
+    with data still under it is a level of its own called "(blank)" —
+    neither is the literal value "nan" every one of them used to draw as."""
+
+    def _panel_of(self, win, slicer):
+        return win.scene.node_items[slicer.id]._slicer_panel
+
+    def test_a_path_ends_where_its_data_does(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_ragged_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        view = self._panel_of(win, slicer).view
+        assert _texts(view) == ["east", "north", "store A", "store Z",
+                                "south", "(blank)", "store B",
+                                "aisle 1", "aisle 2"]
+        # the bug this fixes: an empty cell arriving as a value to tick
+        assert "nan" not in _texts(view)
+        # east stops at the region, so it has nothing to open
+        assert _row(view, "east").childCount() == 0
+        assert _row(view, "store A").childCount() == 0
+
+    def test_ticking_a_short_path_filters_on_the_levels_it_has(
+            self, qtbot, window):
+        win = window
+        _source, slicer, shown = _add_ragged_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        panel = self._panel_of(win, slicer)
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            _row(panel.view, "store A").setCheckState(0, Qt.Checked)
+
+        assert json.loads(win.graph.nodes[slicer.id].params["selected"]) \
+            == [["north", "store A"]]
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert sorted(filtered["tag"]) == ["a", "b"]
+
+    def test_an_empty_level_beside_a_filled_one_can_be_picked(
+            self, qtbot, window):
+        """South has rows with a store and rows without. The storeless ones
+        are their own branch, so they can be kept on their own — trimming
+        them to plain "south" would have made them mean the whole region."""
+        win = window
+        _source, slicer, shown = _add_ragged_flow(win)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        panel = self._panel_of(win, slicer)
+        blank = _row(panel.view, "(blank)")
+        assert blank.parent().text(0) == "south"
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            blank.setCheckState(0, Qt.Checked)
+
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert list(filtered["tag"]) == ["e"]
+
+    def test_row_counts_follow_the_trimmed_paths(self, qtbot, window):
+        win = window
+        _source, slicer, _shown = _add_ragged_flow(win)
+        win.graph.set_param(slicer.id, "show_counts", True)
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        view = self._panel_of(win, slicer).view
+        assert _row(view, "store A  (2)") is not None
+        assert _row(view, "south  (3)") is not None
+
+    def test_a_one_column_slicer_can_still_pick_the_empty_rows(
+            self, qtbot, window):
+        """Nothing ragged about one level — but an empty cell is a real
+        group of rows, and "(blank)" is what it is called instead of the
+        "nan" astype(str) used to leave behind."""
+        win = window
+        _source, slicer, shown = _add_ragged_flow(win, column="store")
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            win.engine.run_all()
+        panel = self._panel_of(win, slicer)
+        assert _texts(panel.view) == ["(blank)", "store A", "store B",
+                                      "store Z"]
+
+        with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
+            _row(panel.view, "(blank)").setCheckState(0, Qt.Checked)
+
+        filtered = win.engine.cache.get(shown.id).outputs["table"]
+        assert sorted(filtered["tag"]) == ["e", "f"]
+
+    def test_a_branch_that_is_also_a_row_needs_its_own_tick(self, qtbot):
+        """A standalone slicer can be typed that way — "north" on one line
+        and "north > store A" on the next. Ticking every child is then not
+        the same as ticking the parent, because the parent's own rows are
+        still out, so it draws part-filled rather than full."""
+        panel = _panel(qtbot, [("north",), ("north", "store A")],
+                       columns=("region", "store"))
+        panel.model.toggle(("north", "store A"))
+        assert panel.model.committed_value() == '[["north", "store A"]]'
+        assert not panel.model.is_checked(("north",))
 
 
 class TestSlicerLayouts:

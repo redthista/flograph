@@ -147,6 +147,13 @@ Its **Layout** setting draws the same selection three ways — a checkbox
 behind one button saying what is picked — and **Show row counts** puts the
 number of rows behind each value beside it.
 
+Branches need not all be the same length. A row that fills two of the four
+columns is a two-level path, ending where its data does: `north > store A`
+sits beside `south > store B > aisle 1 > shelf 3`, and ticking it keeps
+everything under it. Where some rows have a value at a level and others do
+not, the empty ones become their own **(blank)** branch you can tick on its
+own, rather than disappearing into their parent.
+
 A slicer on a page can also drop what it does not need: **Show search box**
 and **Show All / None** take either row away, and turning off both leaves
 just the values. **Accent colour** gives one slicer its own colour for
