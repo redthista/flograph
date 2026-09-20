@@ -12,7 +12,8 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
-Q, R, T, V, X, Y, Z, AA, AB and AC) are where shipped work used to be. Old numbers are kept
+Q, R, T, V, X, Y, Z, AA, AB and AC) are where shipped work used to be; AD
+is the newest chunk, not a gap. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -65,6 +66,18 @@ Gantt Chart filter when clicked, like every other visual that can. N5 shipped
 opened as far as its node says. U2 shipped the same day and
 chunk U retires with it: on paper, every data bar in a column starts at
 the same place.
+
+Dan's 0.1.15 list was worked through on 2026-09-18 to 2026-09-20. Ten of
+its eighteen bullets shipped — the conditional-formatting rule round trip,
+tooltip wrapping, icon alignment, a full-screen pop-out editor, a group
+colour that stops drifting, **New ▸** on the tab bar, the frame nudge
+taken out, the zoom-out drift, the bar's folds and each canvas tab's place
+saved with the project, the drag that unfolded the canvases, and dropdowns
+on cards opening in front and in the right place. What is *not* built from
+that list is carried here: **AD** is its second row of tabs, and the rest
+of it — wildcards in value rules, ragged slicer trees, a spell checker, and
+two apps sharing one Plotly — is still on `0.1.15_issues.md` waiting its
+turn rather than being restated here twice.
 
 ---
 
@@ -249,6 +262,48 @@ guide that ships on the dashboard. What is missing:
   one-file temp dir) or otherwise not writable: hide the toggle and say why.
   All of it lives in `ui/wiki/` and `core/docpages.py`; the card and tile
   wiring is done.
+
+---
+
+## AD. A second row of tabs
+
+**AD1. A header row and a contents row** (Dan, 0.1.15). Today the tab bar
+is one strip: a group's header sits *in line* with its pages, and the
+**Model** tab sits in line with the canvas tabs it heads. Dan's sketch puts
+the headers on the first row and whatever the chosen one holds on a second
+— click **Model** and its canvases appear below; click a group and its
+pages do; groups and loose pages share the top row.
+
+  It reads as "add a row", and it is not. **It replaces four things that
+  already ship**, which is why it is its own chunk rather than an entry in
+  N:
+
+  - the **fold** (AB4, and its saved state from 0.1.15 #3) — a second row
+    *is* the fold, so `_folded` / `canvases_folded` and the chevrons either
+    become the row's selection or go;
+  - the **header tabs** `_rebuild_groups` inserts, and `_group_color`
+    behind them, which exist to make one strip read as sections;
+  - the **drag rules** — `_landing_group`, `_group_drop`, `_blocks` and
+    `_enforce_canvas_run` all answer "which run of tabs is this in", a
+    question a second row answers by which row you dropped on;
+  - where **New ▸** belongs (0.1.15 #10), which is per-row.
+
+  So the cost is not the row, it is deciding what survives it. Worth
+  answering first: does a page still belong to exactly one group (today it
+  does, `Page.group` is one name), or does the top row become a *filter*
+  where a page can appear under more than one? The first is a layout
+  change; the second is a model change and much larger.
+
+  Also open: what the second row shows when nothing is chosen, whether the
+  rows can be collapsed to one, and whether a canvas tab keeps being the
+  Model tab's alone (G12/G13 decided it is, for reasons that a second row
+  may or may not preserve).
+
+  What helps: the ordering maths is already Qt-free and separate
+  (`core/page_nav.py` — `gather_groups`, `order_after_regroup`), so the
+  model side of "which pages are in which group, in what order" is reusable
+  whatever the bar looks like. `Page.group`, `page_group_colors` and the
+  0.1.15 saved fold state are all already in the file format.
 
 ---
 
