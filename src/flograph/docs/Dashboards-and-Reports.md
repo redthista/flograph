@@ -152,6 +152,81 @@ The tab list (right-click the tab bar's `<` `>` arrows) shows each group
 under its own heading. The groups travel with the project; which are folded
 is up to whoever is looking.
 
+### A row of their own
+
+On a project that has outgrown one strip, **Settings ▸ General ▸ Grouped
+pages ▸ Put a group's pages on a second row** splits the bar in two. The
+group headers keep the top row to themselves, alongside the pages in no
+group, and the pages of whichever group you click appear on a row beneath
+it. The top row then stays the same handful of names however many pages the
+project grows.
+
+**Every header is filled with its own colour** — a tone of it while the
+group is closed, solid while it is open, sized snugly round its name like
+any other tab. The chevrons are gone with them: there is nothing to fold
+here, and which group you are in is something to see at a glance rather
+than read off a small arrow.
+
+The **Model** tab is a header like any other — it has headed the canvas
+tabs since they arrived — so clicking it puts them on that row and fills in
+the same way, and *only* that: the model canvas itself is the first entry
+on the row, so you reach it by clicking it there, exactly as you reach any
+other page. It reads **Models**, counting the model canvas among what it
+heads.
+
+**Drag a page along the row** to reorder it inside its group; the rest of
+the bar stays where it is. The model canvas keeps the front of its row —
+the other canvas tabs are views of it.
+
+**Drag a page between the rows to change the group it is in.** The two rows
+are what a page's group *is* in this mode — the top row is the pages in no
+group, the row below is one group's — so dragging a tab from one to the
+other is the plainest way to say where it belongs. Pull a loose page down
+onto the row and it joins the group showing there, at the gap you drop it
+in; drag one from the row up onto the bar and it leaves its group and takes
+the place you put it, between two headers or after the last of them. The
+target row marks the gap as you go, and the tab you are holding travels
+with the pointer.
+
+A page on the row **right-clicks to its own menu**, the same one its tab
+has always had, and right-clicking moves nobody: the menu is about that
+page, not a way of going to it. A group's header right-clicks to rename,
+recolour or ungroup — with no fold, and no list of the pages the row is
+already showing. And the switch itself is on those menus and on the empty
+strip past the last tab, as **Pages on a second row**, so the bar can be
+put back to one row from the bar rather than from Settings.
+
+**One group is open at a time.** Opening another closes the first, because
+two would only be a long strip again, and clicking the open one does
+nothing — a header is a switch, and one of them is on.
+
+**Go to a page in no group and the row goes away.** The top row is where
+those pages live, so standing on one means there is no group being looked
+at, and a row of some other group's pages would only be in the way. Click
+any header to bring it back. A project with no groups at all never has a
+second row, which is a different thing again: nothing to show rather than
+something put away.
+
+Everything else is where it was. A page on the second row right-clicks to
+the same menu as its own tab, the header still drags to move the whole
+group — sliding under the pointer as a tab does, over the groups it passes —
+and right-clicks to rename, recolour or ungroup, and the page you are
+on stays the page you are on when a group closes. Switching the setting off
+puts every page back on the one strip, behind a header that folds.
+
+### A model canvas in a group
+
+A canvas tab can go in a group like any other page — **Group ▸** on its
+right-click menu, or a drag onto a group's header on the one-row bar. File
+the model that feeds the Sales pages under **Sales**, and it sits in that
+section, folds away with it and rides its row.
+
+The **Model** tab heads the canvas tabs no group has taken, and only those:
+put your last one in a group and Model goes back to being a plain tab with
+no chevron, no count and no row of its own. That is the rule throughout —
+one header per tab. Take the canvas back out of the group and the Model tab
+has it again, back in its run right behind the tab.
+
 ## Input controls
 
 The other half of a dashboard: a node category you *set* rather than compute.

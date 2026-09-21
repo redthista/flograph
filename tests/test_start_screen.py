@@ -271,10 +271,12 @@ class TestTheChrome:
     has none on show."""
 
     def test_the_page_tabs_step_aside(self, window):
+        """The host, so a second row of group pages goes with the bar it
+        belongs to rather than being left behind on the start screen."""
         _screen(window)
-        assert window.page_bar.isHidden()
+        assert window.page_bar_host.isHidden()
         window.leave_start_screen()
-        assert not window.page_bar.isHidden()
+        assert not window.page_bar_host.isHidden()
 
     def test_the_run_buttons_step_aside(self, window):
         bar = window._title_bar

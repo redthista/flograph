@@ -463,21 +463,30 @@ class TestAModelCanvasTab:
         assert bar.isTabVisible(bar._index_of_page("pp0"))     # the current
         assert not bar.isTabVisible(bar._index_of_page("pp1"))
 
-    def test_a_canvas_tab_is_the_model_tab_s_and_nothing_else_s(self, window):
-        """One header per tab (Dan): a canvas tab is never offered a group
-        of its own, and folding the Model tab is what puts it away."""
+    def test_a_canvas_tab_has_one_header_at_a_time(self, window):
+        """One header per tab (Dan) — which is not the same as the Model
+        tab always being it. A canvas tab can be put in a group, and then
+        that group has it outright: the Model tab stops counting it and
+        stops folding it away (0.1.15 #12)."""
         bar = window.page_bar
         window._add_page(CANVAS_KIND)
         page_id = bar.current_page_id()
         index = bar._index_of_page(page_id)
         texts = [a.text() for a in bar._context_menu(index, page_id).actions()]
-        assert "Group" not in texts
+        assert "Group" in texts
         bar.select_page(None)
         assert bar._canvas_tabs() == [index]
         bar.toggle_model_fold()
         assert not bar.isTabVisible(bar._index_of_page(page_id))
         bar.toggle_model_fold()
         assert bar.isTabVisible(bar._index_of_page(page_id))
+
+        window._set_page_group(page_id, "Sales")
+        assert bar._canvas_tabs() == []          # Sales has it now
+        bar.toggle_model_fold()
+        assert bar.isTabVisible(bar._index_of_page(page_id))
+        bar.set_group_folded("Sales", True)      # and Sales folds it away
+        assert not bar.isTabVisible(bar._index_of_page(page_id))
 
     def test_canvas_tabs_reorder_only_among_themselves(self, window):
         """They sit next to the Model tab that heads them: a drag moves one
@@ -500,12 +509,13 @@ class TestAModelCanvasTab:
         fold, so neither is offered — it used to offer the fold regardless
         (Dan). What is left is New ▸, because the Model tab is the one tab
         every project has and so the one place a right-click can always be
-        relied on to make a page (0.1.15 #10)."""
+        relied on to make a page (0.1.15 #10) — and, since 0.1.15 #12, the
+        bar's own one-row-or-two switch."""
         bar = window.page_bar
         assert bar._canvas_tabs() == []
         menu = bar._model_menu()
         assert [a.text() for a in menu.actions() if not a.isSeparator()] \
-            == ["New"]
+            == ["New", "Pages on a second row"]
 
     def test_right_clicking_the_model_tab_lists_its_canvases(self, window):
         """Read what a group holds and go straight to a page, without

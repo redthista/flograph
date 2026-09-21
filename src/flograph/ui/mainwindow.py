@@ -54,7 +54,8 @@ from .canvas.node_item import DEFAULT_LOD_THRESHOLD, IMAGE_TYPE, card_kind
 from .canvas.palette import LibraryPanel, NodePalettePopup
 from .favorites import Favorites
 from .dashboard import (
-    DashboardPage, PageTabBar, default_tile_port, default_tile_size,
+    DashboardPage, PageBarHost, PageTabBar, default_tile_port,
+    default_tile_size,
     is_tile_able,
 )
 from . import dock_edges
@@ -114,6 +115,10 @@ class MainWindow(QMainWindow):
         # built the first time it is asked for — see show_start_screen
         self._start_screen = None
         self.page_bar = PageTabBar()
+        # the bar, and under it the second row when Settings asks for one
+        # (#12). The window goes on talking to page_bar throughout; only
+        # the widget that goes in the layout is the host.
+        self.page_bar_host = PageBarHost(self.page_bar)
         # docks/toolbars need a real QMainWindow, but the page bar has to
         # live outside that dock system entirely (see _apply_page_bar_position)
         # -- so the docks+canvas live in this nested QMainWindow, and it plus
@@ -244,6 +249,12 @@ class MainWindow(QMainWindow):
             "canvas/page_bar_position", "top", type=str)
         if self.page_bar_position not in ("top", "bottom"):
             self.page_bar_position = "top"
+        # #12: a group's pages on a row of their own, headers keeping the
+        # top one. Off by default — a bar of two small groups reads better
+        # on one row, and this is for the project that outgrew that.
+        self.page_tabs_second_row = self.settings.value(
+            "canvas/page_bar_second_row", False, type=bool)
+        self.page_bar.set_second_row(self.page_tabs_second_row)
         self.snap_enabled = self.settings.value("snap/enabled", True, type=bool)
         self.grid_step = float(
             self.settings.value("snap/step", grid.DEFAULT_STEP))
@@ -628,6 +639,15 @@ class MainWindow(QMainWindow):
 
         self._apply_page_bar_position(self.page_bar_position)
 
+    def set_page_tabs_second_row(self, on: bool) -> None:
+        """Put a group's pages on a second row, or take the row away."""
+        on = bool(on)
+        if on == self.page_tabs_second_row:
+            return
+        self.page_tabs_second_row = on
+        self.settings.setValue("canvas/page_bar_second_row", on)
+        self.page_bar.set_second_row(on)
+
     def set_page_bar_position(self, position: str) -> None:
         if position not in ("top", "bottom"):
             return
@@ -663,8 +683,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        ordered = ([self.page_bar, self._dock_host] if position == "top"
-                  else [self._dock_host, self.page_bar])
+        ordered = ([self.page_bar_host, self._dock_host] if position == "top"
+                  else [self._dock_host, self.page_bar_host])
         for widget in ordered:
             layout.addWidget(widget, 1 if widget is self._dock_host else 0)
         self.setCentralWidget(container)
@@ -1994,6 +2014,8 @@ class MainWindow(QMainWindow):
                        events.frame_changed):
             signal.connect(lambda *_: self.view.refresh_fence())
         self.page_bar.add_page_requested.connect(self._add_page)
+        self.page_bar.second_row_requested.connect(
+            self.set_page_tabs_second_row)
         self.page_bar.rename_page_requested.connect(self._rename_page)
         self.page_bar.delete_page_requested.connect(self._delete_page)
         self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
@@ -2544,11 +2566,17 @@ class MainWindow(QMainWindow):
         """Page order with the canvas tabs at the front, in the order they
         are already in. They sit under the Model tab that heads them
         (G12/G13), so they belong next to it on the bar — the same
-        contiguity a group's pages keep (see core.page_nav)."""
+        contiguity a group's pages keep (see core.page_nav).
+
+        A canvas tab that has been put in a group is not one of them: that
+        group is its header now, and its section is where it belongs. Two
+        headers claiming one tab is what kept pulling it back out.
+        """
         from flograph.core.page_nav import CANVAS_KIND
         ids = list(self.graph.pages)
         canvases = [page_id for page_id in ids
-                    if self.graph.pages[page_id].kind == CANVAS_KIND]
+                    if self.graph.pages[page_id].kind == CANVAS_KIND
+                    and not self.graph.pages[page_id].group]
         held = set(canvases)
         return canvases + [page_id for page_id in ids if page_id not in held]
 
@@ -2908,12 +2936,20 @@ class MainWindow(QMainWindow):
     def _move_page(self, order: list[str], page_id: str, group: str) -> None:
         """A page tab dropped where it lands in another group, or out of its
         own: the group and the place in one undo step. The order is still
-        gathered, so the group it left stays one section."""
-        from flograph.core.page_nav import CANVAS_KIND, gather_groups
+        gathered, so the group it left stays one section.
+
+        A canvas tab moves like any other page. It used to be refused: the
+        Model tab headed every canvas tab, so a group taking one left two
+        headers arguing over it. Now the group has it outright and the
+        Model tab heads only what no group has taken (`_canvas_tabs`), so
+        a model built for one part of a project can be filed with the
+        pages for that part.
+        """
+        from flograph.core.page_nav import gather_groups
         from .commands import SetPageGroupCommand
         page = self.graph.pages.get(page_id)
         group = str(group or "").strip()
-        if page is None or page.kind == CANVAS_KIND or page.group == group:
+        if page is None or page.group == group:
             self._reorder_pages(order)
             return
         current = list(self.graph.pages)
@@ -5614,7 +5650,8 @@ class MainWindow(QMainWindow):
         run keys go with the buttons, so F5 can't run a project that sits
         hidden behind the screen."""
         showing = self.start_screen_visible
-        self.page_bar.setVisible(not showing)
+        # the host, so a second row goes with the bar it belongs to
+        self.page_bar_host.setVisible(not showing)
         title_bar = getattr(self, "_title_bar", None)
         if title_bar is not None:
             title_bar.set_run_buttons_shown(not showing)

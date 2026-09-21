@@ -146,7 +146,7 @@ class TestPageTabs:
     def test_page_bar_position_default_is_top(self, window):
         layout = window.centralWidget().layout()
         assert isinstance(layout, QVBoxLayout)
-        assert layout.itemAt(0).widget() is window.page_bar
+        assert layout.itemAt(0).widget() is window.page_bar_host
         assert layout.itemAt(1).widget() is window._dock_host
         assert window.log_dock in window._dock_host.tabifiedDockWidgets(
             window.properties_dock)
@@ -156,19 +156,19 @@ class TestPageTabs:
         layout = window.centralWidget().layout()
         assert isinstance(layout, QVBoxLayout)
         assert layout.itemAt(0).widget() is window._dock_host
-        assert layout.itemAt(1).widget() is window.page_bar
+        assert layout.itemAt(1).widget() is window.page_bar_host
 
         window.set_page_bar_position("top")
         layout = window.centralWidget().layout()
         assert isinstance(layout, QVBoxLayout)
-        assert layout.itemAt(0).widget() is window.page_bar
+        assert layout.itemAt(0).widget() is window.page_bar_host
         assert layout.itemAt(1).widget() is window._dock_host
 
         window.set_page_bar_position("bottom")
         layout = window.centralWidget().layout()
         assert isinstance(layout, QVBoxLayout)
         assert layout.itemAt(0).widget() is window._dock_host
-        assert layout.itemAt(1).widget() is window.page_bar
+        assert layout.itemAt(1).widget() is window.page_bar_host
 
         # switching around never disturbed the pre-existing tab group
         group = window._dock_host.tabifiedDockWidgets(window.properties_dock)

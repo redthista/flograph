@@ -267,43 +267,32 @@ guide that ships on the dashboard. What is missing:
 
 ## AD. A second row of tabs
 
-**AD1. A header row and a contents row** (Dan, 0.1.15). Today the tab bar
-is one strip: a group's header sits *in line* with its pages, and the
-**Model** tab sits in line with the canvas tabs it heads. Dan's sketch puts
-the headers on the first row and whatever the chosen one holds on a second
-— click **Model** and its canvases appear below; click a group and its
-pages do; groups and loose pages share the top row.
+**AD1. What a second row could still replace** (Dan, 0.1.15). The row
+itself shipped in 0.1.15 as a setting: headers and loose pages on the top
+row, the open group's pages beneath, the Model tab heading its canvases the
+same way. That was deliberately the *layout* answer — it changed where a
+tab is drawn and nothing else. What it did not settle:
 
-  It reads as "add a row", and it is not. **It replaces four things that
-  already ship**, which is why it is its own chunk rather than an entry in
-  N:
+  - **Whether the fold survives it.** With the row on, a group's pages are
+    never on the top strip, so `_folded` is only what the one-row mode
+    uses. Two ways of tidying the same bar, and a project saves the fold.
+  - **Whether a page can be under more than one header.** Today
+    `Page.group` is one name, so the top row is an index, not a filter.
+    A filter is a model change and much larger.
+  - **Per-row New ▸.** The `+` deliberately stayed on the top row: it
+    means *add a page*, and which row it lands on is the group's business.
+    Whether a row wants its own is open.
 
-  - the **fold** (AB4, and its saved state from 0.1.15 #3) — a second row
-    *is* the fold, so `_folded` / `canvases_folded` and the chevrons either
-    become the row's selection or go;
-  - the **header tabs** `_rebuild_groups` inserts, and `_group_color`
-    behind them, which exist to make one strip read as sections;
-  - the **drag rules** — `_landing_group`, `_group_drop`, `_blocks` and
-    `_enforce_canvas_run` all answer "which run of tabs is this in", a
-    question a second row answers by which row you dropped on;
-  - where **New ▸** belongs (0.1.15 #10), which is per-row.
+  Settled since: a page moves between the rows by being dragged between
+  them (the rows are what a group *is* in this mode), a canvas tab can be
+  put in a group like any other page — the Model tab heads only the ones
+  no group has taken — and **Pages on a second row** is on the bar's own
+  menus, so the two rows collapse to one without going through Settings.
 
-  So the cost is not the row, it is deciding what survives it. Worth
-  answering first: does a page still belong to exactly one group (today it
-  does, `Page.group` is one name), or does the top row become a *filter*
-  where a page can appear under more than one? The first is a layout
-  change; the second is a model change and much larger.
-
-  Also open: what the second row shows when nothing is chosen, whether the
-  rows can be collapsed to one, and whether a canvas tab keeps being the
-  Model tab's alone (G12/G13 decided it is, for reasons that a second row
-  may or may not preserve).
-
-  What helps: the ordering maths is already Qt-free and separate
-  (`core/page_nav.py` — `gather_groups`, `order_after_regroup`), so the
-  model side of "which pages are in which group, in what order" is reusable
-  whatever the bar looks like. `Page.group`, `page_group_colors` and the
-  0.1.15 saved fold state are all already in the file format.
+  What helps, unchanged: the ordering maths is Qt-free and separate
+  (`core/page_nav.py` — `gather_groups`, `order_after_regroup`), and
+  `Page.group`, `page_group_colors` and the saved fold state are all
+  already in the file format.
 
 ---
 

@@ -92,6 +92,27 @@ def tint(base: QColor, color, alpha: float) -> QColor:
         round(over.blue() * alpha + base.blue() * (1 - alpha)),
     )
 
+def page_tint(color, alpha: float = None) -> QColor:
+    """A page's own colour as it is laid **over** its tab, or None when
+    the page has no colour.
+
+    Translucent, unlike `tint` above: the themed tab shows through, so
+    whatever the colour picker returned comes out muted rather than
+    garish. Read at paint time, so Settings ▸ Canvas reaches it without a
+    restart — hence the default resolved here rather than in a signature
+    that is bound at import.
+
+    One definition because three places have to agree on it: the tab bar,
+    the second row of pages, and the pixmap Qt makes of a tab being
+    dragged (`dashboard.page_bar.DraggedTabStyle`).
+    """
+    if not color:
+        return None
+    over = QColor(color)
+    over.setAlphaF(TINT_STRONG if alpha is None else alpha)
+    return over
+
+
 STATUS_COLORS: dict[NodeStatus, QColor] = {
     NodeStatus.IDLE: QColor("#6b7280"),
     NodeStatus.QUEUED: QColor("#eab308"),

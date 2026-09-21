@@ -5,8 +5,9 @@ _apply_page_bar_position docstring: the rotated label couldn't be made to
 render reliably centered on real screens.)
 
 MainWindow.set_page_bar_position() rearranges the outer window's central
-layout (page_bar plus the dock host, which holds the canvas and every other
-dock) rather than moving a QDockWidget -- see _apply_page_bar_position's
+layout (page_bar_host -- the bar and, when Settings asks for one, the second
+row of group pages -- plus the dock host, which holds the canvas and every
+other dock) rather than moving a QDockWidget -- see _apply_page_bar_position's
 docstring in mainwindow.py for why: splitDockWidget() against an anchor with
 an existing tab group (Inspector+Log, Properties+Code) reliably corrupts
 that group the first time it's called more than once against the same
@@ -52,7 +53,7 @@ class TestPageBarPositionOnMainWindow:
         assert window.page_bar_position == "top"
         layout = window.centralWidget().layout()
         assert isinstance(layout, QVBoxLayout)
-        assert layout.itemAt(0).widget() is window.page_bar
+        assert layout.itemAt(0).widget() is window.page_bar_host
         assert layout.itemAt(1).widget() is window._dock_host
 
     @pytest.mark.parametrize("position, layout_cls, order", [
@@ -66,9 +67,9 @@ class TestPageBarPositionOnMainWindow:
         assert isinstance(layout, layout_cls)
         first, second = layout.itemAt(0).widget(), layout.itemAt(1).widget()
         if order == "page_bar_first":
-            assert (first, second) == (window.page_bar, window._dock_host)
+            assert (first, second) == (window.page_bar_host, window._dock_host)
         else:
-            assert (first, second) == (window._dock_host, window.page_bar)
+            assert (first, second) == (window._dock_host, window.page_bar_host)
 
     def test_invalid_or_unchanged_position_is_a_no_op(self, window):
         layout_before = window.centralWidget().layout()
@@ -107,7 +108,7 @@ class TestPageBarPositionOnMainWindow:
         layout = second.centralWidget().layout()
         assert isinstance(layout, QVBoxLayout)
         assert layout.itemAt(0).widget() is second._dock_host
-        assert layout.itemAt(1).widget() is second.page_bar
+        assert layout.itemAt(1).widget() is second.page_bar_host
 
 
 class TestPageBarPositionSettingsDialog:
@@ -125,4 +126,4 @@ class TestPageBarPositionSettingsDialog:
         assert window.page_bar_position == "bottom"
         layout = window.centralWidget().layout()
         assert isinstance(layout, QVBoxLayout)
-        assert layout.itemAt(1).widget() is window.page_bar
+        assert layout.itemAt(1).widget() is window.page_bar_host

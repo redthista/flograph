@@ -618,9 +618,11 @@ class TestTabGroups:
         # Reset colour is there because a section now settles a colour
         # when it is made (0.1.15 #9) — resetting hands it back to its
         # pages, which is the only way back to borrowing one
+        # "Pages on a second row" is last: the bar's own layout, offered
+        # where you are when you want it (0.1.15 #12)
         assert [a.text() for a in menu.actions() if not a.isSeparator()] == \
             ["A", "B", "Fold away", "Rename group…", "Change colour…",
-             "Reset colour", "Ungroup", "New"]
+             "Reset colour", "Ungroup", "New", "Pages on a second row"]
         # a group with a colour of its own can go back to borrowing one
         window._recolor_page_group("Sales", "#123456")
         menu = window.page_bar._group_menu("Sales")
@@ -752,7 +754,8 @@ class TestNewPageFromTheBar:
         from PySide6.QtGui import QMouseEvent
         bar = window.page_bar
         opened = []
-        bar._show_add_menu = lambda where: opened.append(where)
+        bar._show_add_menu = (lambda where, view_options=False:
+                              opened.append(where))
         far = QPointF(bar.width() + 400, bar.height() / 2)
         assert bar.tabAt(far.toPoint()) < 0, "meant to be past the last tab"
         bar.mousePressEvent(QMouseEvent(
@@ -767,7 +770,8 @@ class TestNewPageFromTheBar:
         ids = _pages(window, "A")
         bar = window.page_bar
         opened = []
-        bar._show_add_menu = lambda where: opened.append(where)
+        bar._show_add_menu = (lambda where, view_options=False:
+                              opened.append(where))
         shown = []
         bar._show_context_menu = lambda *a: shown.append(a)
         centre = QPointF(bar.tabRect(bar._index_of_page(ids[0])).center())
@@ -1287,13 +1291,42 @@ class TestDropAPageIntoAGroup:
             QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier,
                                QPoint(x, start.y()))
 
+    def _drag_onto_header(self, bar, page_id, release=True):
+        """Drag a tab onto the group header, **following it as it moves**.
+
+        Qt slides the dragged tab to the header's near side, which shifts
+        the header itself — so a point worked out before the drag started
+        is aimed at where the header used to be. It only ever worked
+        because the header was padded out with 12px of white space; that
+        went when the headers were sized round their names, and this is
+        what a person does anyway, which is aim at the header they can
+        see.
+        """
+        from PySide6.QtCore import QPoint
+        y = bar.tabRect(_header(bar)).center().y()
+        start = bar.tabRect(bar._index_of_page(page_id)).center()
+        QTest.mousePress(bar, Qt.LeftButton, Qt.NoModifier, start)
+        at = start.x()
+        for _ in range(200):
+            target = bar.tabRect(_header(bar)).center().x()
+            if abs(target - at) <= 4:
+                at = target
+                break
+            at += 4 if target > at else -4
+            QTest.mouseMove(bar, QPoint(at, y))
+        QTest.mouseMove(bar, QPoint(at, y))
+        if release:
+            QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier,
+                               QPoint(at, y))
+        return at, y
+
     def _run(self, window, group="Sales"):
         return [p for p, page in window.graph.pages.items()
                 if page.group == group]
 
     def test_onto_the_header_joins_it(self, window, qtbot):
         ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
-        self._drag_to(bar, ids[3], bar.tabRect(_header(bar)).center().x())
+        self._drag_onto_header(bar, ids[3])
         assert window.graph.pages[ids[3]].group == "Sales"
         assert set(self._run(window)) == {ids[1], ids[2], ids[3]}
         assert bar.page_group(ids[3]) == "Sales"
@@ -1349,12 +1382,10 @@ class TestDropAPageIntoAGroup:
 
     def test_the_header_lights_while_a_tab_is_over_it(self, window, qtbot):
         ids, bar = self._bar(window, qtbot, "A", "B", "C", "D")
-        header_x = bar.tabRect(_header(bar)).center().x()
-        self._drag_to(bar, ids[3], header_x, release=False)
+        at, y = self._drag_onto_header(bar, ids[3], release=False)
         assert bar._drop_hint == "Sales"
         from PySide6.QtCore import QPoint
-        QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier,
-                           QPoint(header_x, bar.tabRect(0).center().y()))
+        QTest.mouseRelease(bar, Qt.LeftButton, Qt.NoModifier, QPoint(at, y))
         assert bar._drop_hint is None
 
     def test_a_reorder_that_moves_no_group_still_gathers(self, window):

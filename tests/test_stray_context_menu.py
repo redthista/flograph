@@ -175,7 +175,8 @@ class TestThePageBarRecordsIt:
             def exec(self, _where):
                 return None
 
-        monkeypatch.setattr(bar, "_add_menu", lambda: (FakeMenu(), {}))
+        monkeypatch.setattr(bar, "_add_menu",
+                            lambda view_options=False: (FakeMenu(), {}))
         bar._show_add_menu(QPoint(0, 0))
         assert menu_guard.settling()
 
@@ -191,8 +192,9 @@ class TestThePageBarRecordsIt:
                 return self._action
 
         action = object()
-        monkeypatch.setattr(bar, "_add_menu",
-                            lambda: (FakeMenu(action), {action: "canvas"}))
+        monkeypatch.setattr(
+            bar, "_add_menu",
+            lambda view_options=False: (FakeMenu(action), {action: "canvas"}))
         bar.add_page_requested.connect(asked.append)
         bar._show_add_menu(QPoint(0, 0))
         assert asked == ["canvas"]

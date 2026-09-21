@@ -243,6 +243,7 @@ class SettingsDialog(QDialog):
                 window.double_click_action),
         }
         checks = {
+            "page_bar_second_row_checkbox": window.page_tabs_second_row,
             "titlebar_compact_checkbox": window.settings.value(
                 "window/titlebar_compact", False, type=bool),
             "update_notify_checkbox": window.settings.value(
@@ -524,6 +525,19 @@ class SettingsDialog(QDialog):
             lambda index: window.set_page_bar_position(positions[index]))
         rows.add("Page bar position", page_bar_combo,
                  "Which edge of the window the Model/page tabs live on.")
+
+        second_row_check = QCheckBox("Put a group's pages on a second row")
+        second_row_check.setObjectName("page_bar_second_row_checkbox")
+        second_row_check.setChecked(window.page_tabs_second_row)
+        second_row_check.toggled.connect(window.set_page_tabs_second_row)
+        rows.add("Grouped pages", second_row_check,
+                 "The group headers keep the top row to themselves, and the "
+                 "pages of whichever group you click appear on a row beneath "
+                 "it — so the top row stays the same handful of names however "
+                 "many pages a project grows. The Model tab is a header like "
+                 "any other, so clicking its chevron puts the canvas tabs on "
+                 "that row. One group is open at a time. Off leaves every "
+                 "page on the one strip, behind a header that folds.")
 
         start_check = QCheckBox("Show the start screen when flograph opens")
         start_check.setObjectName("start_screen_checkbox")
