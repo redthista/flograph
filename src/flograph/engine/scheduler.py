@@ -101,6 +101,11 @@ class _InFlight:
     # (see _input_token) tells it from a node that wrote into that input.
     handed_in: dict[int, tuple[str, str, object]] = field(default_factory=dict)
     run: Optional[NodeRun] = None
+    # The params this node was dispatched with. Compared against the node's
+    # own when it finishes: a slicer ticked or a slider dragged *while it
+    # was running* means the result coming back answers a question nobody
+    # is asking any more. See _on_node_finished.
+    params: dict = field(default_factory=dict)
 
 
 # Values a node cannot change in place at all, so there is nothing to guard.
@@ -520,6 +525,10 @@ class ExecutionEngine(QObject):
         self._remaining_preds: dict[str, int] = {}
         # node_id -> _InFlight, for every node currently running.
         self._running: dict[str, _InFlight] = {}
+        # Nodes that finished this run holding an answer to a question
+        # that has since changed — see _answered_the_question. Lives
+        # for the run only; cleared in _finish.
+        self._stale: set[str] = set()
         # An exclusive node has the process to itself, so nothing new starts
         # while one is running.
         self._exclusive_running = False
@@ -1144,7 +1153,7 @@ class ExecutionEngine(QObject):
             params, variables = varsubst.resolve(self.graph, node_id, self.cache)
         except VariableError as exc:
             return f"not configured: {exc}"
-        inflight = _InFlight(node_id=node_id)
+        inflight = _InFlight(node_id=node_id, params=dict(node.params))
         inputs = {}
         for port in node.spec.inputs:
             conn = self.graph.input_connection(node_id, port.name)
@@ -1263,7 +1272,10 @@ class ExecutionEngine(QObject):
                 inflight.handed_in if inflight is not None else {})
             self.cache.set(node_id, outputs, wall_time,
                            alias_of=alias_of, alias_port=alias_port)
-            self.graph.mark_clean(node_id)
+            if self._answered_the_question(node_id, inflight):
+                self.graph.mark_clean(node_id)
+            else:
+                self._stale.add(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.node_succeeded.emit(node_id)
         self._close_node_run(inflight, "ok", wall_time)
@@ -1283,6 +1295,37 @@ class ExecutionEngine(QObject):
             self.node_failed.emit(node_id, error)
         self._dispatch()
 
+    def _answered_the_question(self, node_id: str,
+                               inflight: "Optional[_InFlight]") -> bool:
+        """Whether the result just handed back still answers what the node
+        is being asked, so the node can be marked clean.
+
+        **Marking clean is a claim**: "this cached value is what these
+        params and these inputs produce". A node dispatched with the filter
+        on *April* and finishing after the slicer moved to *May* has not
+        earned that claim — and making it anyway is how a quick change
+        during a run went missing. The re-run the change asked for is
+        deferred until the run in flight ends (`request_run`), and by then
+        `build_plan` skips the node for being clean. The chart keeps
+        April's numbers, nothing is dirty, and nothing ever says so.
+
+        Two ways to fail it. The node's own params changed under it, which
+        is the slicer, the slider, the typed cell. Or something it read is
+        itself stale, which walks the staleness down the branch as each
+        node completes — they finish in topological order, so a direct look
+        at the predecessors is enough to carry it the whole way.
+
+        A stale node's outputs are still cached: the nodes below it in this
+        run have to read *something*, and the honest something is the value
+        its inputs actually produced. It stays **dirty**, so the deferred
+        re-run picks it up along with everything under it.
+        """
+        if inflight is not None and inflight.params != self.graph.nodes[
+                node_id].params:
+            return False
+        return not any(src in self._stale
+                       for src in self.graph.predecessors(node_id))
+
     def _retire(self, node_id: str) -> "Optional[_InFlight]":
         """Take a node off the floor, whatever it finished as."""
         inflight = self._running.pop(node_id, None)
@@ -1301,6 +1344,7 @@ class ExecutionEngine(QObject):
         # no-op for the *next* run, which would then never start.
         self._warm_remaining.clear()
         self._warm_signals.clear()
+        self._stale.clear()
         self._pressure_timer.stop()
         self._close_record()
         self.run_finished.emit(not self._had_failure)
