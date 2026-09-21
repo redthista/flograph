@@ -709,10 +709,20 @@ class TestLockedPageCursor:
 class TestReportViewMode:
     def test_locking_hides_the_editor_and_the_whole_toolbar(self, window):
         """Every control on that strip is for writing the report, so the
-        strip goes rather than being emptied."""
+        strip goes rather than being emptied.
+
+        `isVisibleTo(page)`, not `isHidden()`: the editor gained a parent
+        when the CSS tab arrived beside it, and locking hides *that* — so
+        the editor stopped being hidden in its own right while being every
+        bit as gone. `isHidden()` only answers for the widget itself, and
+        `isVisible()` cannot be asked here at all, since these tests never
+        put the window on screen. `isVisibleTo` is the one that means
+        "would this show if the page did", which is the question.
+        """
         page = add_page(window, "r1", kind="report")
         page.set_view_mode(True)
-        assert page.editor.isHidden()
+        assert not page.editor.isVisibleTo(page)
+        assert page._editor_tabs.isHidden()   # what locking actually hides
         assert page._toolbar.isHidden()
 
     def test_the_preview_stays(self, window):
@@ -724,7 +734,8 @@ class TestReportViewMode:
         page = add_page(window, "r1", kind="report")
         page.set_view_mode(True)
         page.set_view_mode(False)
-        assert not page.editor.isHidden()
+        assert page.editor.isVisibleTo(page)
+        assert not page._editor_tabs.isHidden()
         assert not page._toolbar.isHidden()
 
     def test_the_report_toolbar_carries_no_lock(self, window):

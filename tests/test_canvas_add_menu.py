@@ -81,6 +81,29 @@ class TestThePopupItself:
         popup._search.setText("fra")
         assert popup._list.currentItem().data(EXTRA_ROLE) == "frame"
 
+    def test_even_while_a_node_still_fuzzily_matches(self, window):
+        """The node search scores a **subsequence**, so "fra" goes on
+        finding "Filter Page" (F-ilte-R P-A-ge) until you have typed
+        "frame". The selection used to step over the extras on the
+        assumption that a query narrow enough to match one had left no
+        nodes to step onto — so Frame sat at the top of the list with
+        Filter Page highlighted under it, and Enter added a Filter Page.
+        """
+        popup = self._popup(window)
+        popup._search.setText("fra")
+        assert any("Filter Page" in text for text in labels(popup))
+        assert popup._list.currentRow() == 0
+        assert popup._list.currentItem().data(EXTRA_ROLE) == "frame"
+
+    def test_an_extra_that_does_not_match_is_not_selected(self, window):
+        """Only *listed* extras win the top row, and one is only listed
+        when the query is inside its label — which is a stricter match
+        than the fuzzy one the nodes are found by."""
+        popup = self._popup(window)
+        popup._search.setText("filter")
+        assert all(item.data(EXTRA_ROLE) is None for item in rows(popup))
+        assert popup._list.currentItem().data(TYPE_ID_ROLE)
+
     def test_choosing_an_extra_says_so_on_its_own_signal(self, window,
                                                           qtbot):
         popup = self._popup(window)

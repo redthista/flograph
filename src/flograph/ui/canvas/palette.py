@@ -136,11 +136,32 @@ class NodePalettePopup(QFrame):
             item.setData(Qt.UserRole, spec.type_id)
             self._list.addItem(item)
         if self._list.count():
-            # Start on the first *node*, not on an extra: the popup is here
-            # to add a node, and Enter on an empty search should say so. Type
-            # "fra" and the nodes drop away, leaving the extra selected.
-            self._list.setCurrentRow(
-                first_node if first_node < self._list.count() else 0)
+            self._list.setCurrentRow(self._starting_row(query, first_node))
+
+    def _starting_row(self, query: str, first_node: int) -> int:
+        """Which row is selected once the list has been rebuilt.
+
+        The top of it — except on an empty search, where the extras are
+        stepped over: the popup is here to add a node, and Enter on an
+        empty search should mean that rather than whatever extra the
+        caller happened to pass in.
+
+        It used to step over the extras *always*, on the assumption that
+        typing enough to match one would leave no nodes to step onto. That
+        is not how the node search works. It scores a **subsequence**, so
+        "fra" still finds "Filter Page" (**F**ilte**R** P**A**ge) and the
+        node list does not empty until "frame". So typing "fra" put Frame
+        at the top of the list, highlighted Filter Page underneath it, and
+        added a Filter Page on Enter.
+
+        An extra is only listed when the query is *inside* its label, so
+        whenever one is showing it has matched more strictly than anything
+        the fuzzy node search turned up — which is exactly when the top of
+        the list is the right answer.
+        """
+        if query:
+            return 0
+        return first_node if first_node < self._list.count() else 0
 
     def _accept_current(self) -> None:
         self._accept(self._list.currentItem())
