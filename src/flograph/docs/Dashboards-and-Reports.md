@@ -11,6 +11,29 @@ the node *is* the chart, not a preview elsewhere. Card kinds shipped today:
 `figure`, `webview`, `table_viewer`, `kpi`, `grid`, `slicer`, `button`,
 `note`, `control`, `report`, `pagelinks`.
 
+### When a web card comes up blank
+
+A `webview` card — a Plotly chart, a Sankey, a Wiki, an HTML template — is
+drawn by Qt WebEngine, which is Chromium. Chromium fails quietly: a page
+that will not load and a page whose renderer has been killed both leave a
+blank rectangle that looks exactly like a node which produced nothing. The
+card now says which happened instead, and a renderer that died is reloaded
+once by itself, since one lost to a momentary squeeze comes back.
+
+If a card stays blank and the message does not explain it, start flograph
+with **`FLOGRAPH_WEB_LOG=1`** set and reproduce it:
+
+```
+Windows:    set FLOGRAPH_WEB_LOG=1 && flograph
+Linux/Mac:  FLOGRAPH_WEB_LOG=1 flograph
+```
+
+Everything the engine says is written to **`web.log`**, beside the rest of
+your flograph settings (Settings ▸ General says where that folder is). It
+is off unless you ask for it, it records the engine and nothing about your
+data, and each run notes its own process id — which matters when the thing
+you are looking into is two copies of flograph open at once.
+
 ## Dashboard pages
 
 Click **+** on the page bar to add a dashboard page. Drag nodes onto it and

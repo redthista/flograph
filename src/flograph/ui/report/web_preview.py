@@ -31,8 +31,8 @@ class WebPreview(QWidget):
         if self.browser is not None:
             return True
         try:
-            from PySide6.QtWebEngineWidgets import QWebEngineView
-            self.browser = QWebEngineView(self)
+            from ..webprofile import new_view
+            self.browser = new_view(self)
         except Exception:
             self._message.setText(
                 "Web preview needs the PySide6 WebEngine component.\n"

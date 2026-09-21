@@ -136,9 +136,9 @@ class _Snapshotter:
             from PySide6.QtWidgets import QApplication
             if QApplication.instance() is None:
                 return None      # no app yet; try again later, not broken
-            from PySide6.QtWebEngineWidgets import QWebEngineView
+            from ..webprofile import new_view
 
-            view = QWebEngineView()
+            view = new_view()
             # A viewport big enough to lay out in; toImage takes its own
             # size, so this is not what decides the picture's dimensions.
             view.resize(1200, 800)

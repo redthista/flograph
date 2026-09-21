@@ -107,9 +107,10 @@ class _Snapshotter:
             if QApplication.instance() is None:
                 return None      # no app yet; try again later, not broken
             from PySide6.QtWebEngineCore import QWebEngineSettings
-            from PySide6.QtWebEngineWidgets import QWebEngineView
 
-            view = QWebEngineView()
+            from ..webprofile import new_view
+
+            view = new_view()
             # The same two settings the card's view is given (see
             # inspector/plotly_view.py): the page is loaded from a local
             # file, and without this a Leaflet map or any library pulling a

@@ -6,7 +6,13 @@ node can be built from *any* Python library. The webview is created lazily on
 first content — Chromium is heavy and the import can be missing on trimmed
 PySide6 installs — and the page loads from a temp file, not setHtml: a
 self-contained Plotly page embeds all of plotly.js (~3 MB) and setHtml caps
-content at 2 MB."""
+content at 2 MB.
+
+When Chromium fails, it fails *silently*: a page that will not load, and a
+page whose renderer process is killed, both leave a blank white rectangle
+that is indistinguishable from a node returning an empty chart. So the view
+watches for both and says which happened — and a dead renderer is reloaded
+once first, because one lost to a momentary squeeze comes back."""
 from __future__ import annotations
 
 import uuid
@@ -20,6 +26,35 @@ from flograph.core.chart_grid import DEFAULT_DIRECTION
 RUN_PROMPT = "Run the graph to see the view here."
 NO_WEBENGINE = ("Qt WebEngine is not available — install the full PySide6 "
                 "package (Tools > Manage Packages) to display web views.")
+LOAD_FAILED = ("This view's page did not load. The HTML is written to a temp "
+               "file and handed to Qt WebEngine, so a failure here is "
+               "Chromium's rather than the node's — re-run the node to try "
+               "again.")
+RENDERER_GONE = ("Qt WebEngine gave up on this view: {why}. It was reloaded "
+                 "once and went again. A very large chart or a machine short "
+                 "of memory are the usual causes.")
+
+#: Chromium's word for why a page's process went away, keyed by
+#: QWebEnginePage.RenderProcessTerminationStatus. Plain ints, so the message
+#: can be built and tested without importing WebEngine.
+TERMINATION = {
+    0: "the renderer exited normally",
+    1: "the renderer exited abnormally",
+    2: "the renderer crashed",
+    3: "the renderer was killed",
+}
+
+
+def termination_reason(status, code) -> str:
+    """Why a page's renderer stopped, in words, for the card to show.
+
+    A webview whose renderer dies goes *blank* and says nothing — the widget
+    is still there, the page behind it is not. That is indistinguishable
+    from "the node produced an empty chart" unless the view says so, which
+    is the whole reason this text exists.
+    """
+    return (f"{TERMINATION.get(int(status), 'the renderer stopped')} "
+            f"(exit code {int(code)})")
 
 _plotly_tmp = None  # TemporaryDirectory for the HTML, cleaned at exit
 
@@ -60,6 +95,10 @@ class PlotlyView(QWidget):
         # the same node must not race on one HTML file
         self._token = uuid.uuid4().hex
         self.view = None  # the QWebEngineView, once built
+        # the file currently in front of the view, so a page whose renderer
+        # died can be reloaded without waiting for the next run
+        self._path = None
+        self._retried = False
         # (columns, rows, direction) for a stacked list — see
         # core.chart_grid. The host sets it from the node's own params.
         self._grid = (0, 0, DEFAULT_DIRECTION)
@@ -81,11 +120,12 @@ class PlotlyView(QWidget):
         if self.view is not None:
             return self.view
         try:
-            from PySide6.QtWebEngineWidgets import QWebEngineView
             from PySide6.QtWebEngineCore import QWebEngineSettings
+
+            from ..webprofile import new_view
+            view = new_view()
         except ImportError:
             return None
-        view = QWebEngineView()
         # content is loaded from a local temp file (see set_content), and Qt
         # WebEngine's default local-content sandbox blocks that file from
         # fetching remote subresources — so a folium/Leaflet map or any
@@ -95,6 +135,11 @@ class PlotlyView(QWidget):
             QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
             True)
         view.hide()
+        # A page that fails to load, or whose renderer Chromium kills, leaves
+        # a blank white rectangle and no clue whose fault it was. Both are
+        # said out loud instead.
+        view.loadFinished.connect(self._on_load_finished)
+        view.page().renderProcessTerminated.connect(self._on_renderer_gone)
         self._layout.addWidget(view, 1)
         self.view = view
         if self._interactive:
@@ -151,11 +196,8 @@ class PlotlyView(QWidget):
                 # only way to give back the memory a big chart took is to
                 # destroy the view; _ensure_view rebuilds it lazily when the
                 # next content arrives.
-                view = self.view
-                self._layout.removeWidget(view)
-                view.hide()
-                view.deleteLater()
-                self.view = None
+                self._drop_view()
+            self._path = None
             self.placeholder.setText(RUN_PROMPT)
             self.placeholder.show()
             return
@@ -166,9 +208,65 @@ class PlotlyView(QWidget):
             return
         path = _plotly_html_path(self._token)
         path.write_text(html, encoding="utf-8")
+        self._path = path
+        # new content gets its own retry: one bad chart having killed the
+        # renderer must not spend the next one's second chance
+        self._retried = False
         view.load(QUrl.fromLocalFile(str(path)))
         self.placeholder.hide()
         view.show()
+
+    def _drop_view(self) -> None:
+        """Take the webview out and let it go."""
+        view = self.view
+        self.view = None
+        if view is None:
+            return
+        self._layout.removeWidget(view)
+        view.hide()
+        view.deleteLater()
+
+    def _fail(self, message: str) -> None:
+        """Put a reason where the page should have been."""
+        if self.view is not None:
+            self.view.hide()
+        self.placeholder.setText(message)
+        self.placeholder.show()
+
+    def _on_load_finished(self, ok: bool) -> None:
+        if not ok:
+            self._fail(LOAD_FAILED)
+            return
+        self.placeholder.hide()
+        if self.view is not None:
+            self.view.show()
+
+    def _reload(self) -> None:
+        """Build a fresh view and put the same file back in front of it."""
+        self._drop_view()
+        view = self._ensure_view()
+        if view is None:
+            return
+        view.load(QUrl.fromLocalFile(str(self._path)))
+        self.placeholder.hide()
+        view.show()
+
+    def _on_renderer_gone(self, status, code) -> None:
+        """Chromium killed the page's process.
+
+        The widget survives it; the page does not, so what is left is a
+        blank rectangle that will never paint again. Rebuild it and reload
+        the same file **once** — a renderer lost to a momentary squeeze
+        comes back, and that is the common case. A second death on the same
+        content is reported rather than retried, or a page that kills the
+        renderer every time would loop forever.
+        """
+        why = termination_reason(status, code)
+        if self._retried or self._path is None:
+            self._fail(RENDERER_GONE.format(why=why))
+            return
+        self._retried = True
+        self._reload()
 
     # historical name — callers still push output via set_figure()
     set_figure = set_content

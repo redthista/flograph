@@ -46,6 +46,14 @@ def main(argv: list[str] | None = None) -> int:
     # must be set before the QApplication exists: the Show Plotly card embeds
     # Qt WebEngine, which needs shared GL contexts to composite
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    # also before it, and for the same reason — the engine reads its flags
+    # once. Two copies of flograph open at once must not be two Chromiums
+    # working in one directory; see ui/webprofile.
+    from flograph.ui.webprofile import (
+        claim_chromium_dirs, claim_engine_logging,
+    )
+    claim_chromium_dirs()
+    claim_engine_logging()
     app = QApplication.instance() or QApplication(sys.argv if argv is None else argv)
     app.setApplicationName("flograph")
     app.setOrganizationName("flograph")
