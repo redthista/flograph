@@ -24,9 +24,23 @@ _ID_PAGE_CSS = 1006
 # The mark is live-applied from the Appearance dialog as the user tries
 # things, so merging keeps clicking through sixteen swatches to find the
 # right one a single undo step rather than sixteen.
-_ID_MARK = 1006
+#
+# 1009, not 1006: it shared that number with _ID_PAGE_CSS. Harmless as it
+# stood, because Qt only merges when the command on top *accepts* the new
+# one and both of these check the type first — but these numbers exist to
+# say "these two are the same kind of edit", and two unrelated commands
+# answering to one is a silent corruption waiting for the first mergeWith
+# written without that check.
+_ID_MARK = 1009
 _ID_PAGE_LOOK = 1007
 _ID_TILE_STYLE = 1008
+# A report's zoom arrives a wheel-notch at a time — see
+# SetPagePreviewViewCommand.
+_ID_PAGE_ZOOM = 1010
+
+#: "leave this one alone", for the setters where None is itself a value
+#: worth setting — a report's zoom, where None means "fit to the pane".
+_KEEP = object()
 
 
 class AddNodeCommand(QUndoCommand):
@@ -1162,6 +1176,62 @@ class SetPagePreviewModeCommand(QUndoCommand):
         self._graph.set_page_preview_mode(self._page_id, self._old)
 
 
+class SetPagePreviewViewCommand(QUndoCommand):
+    """How a report's paper is being looked at: the zoom, and whether the
+    sheets lie side by side. Saved with the page, like its preview mode.
+
+    A zoom arrives **a wheel notch at a time**, so consecutive zooms of the
+    same page merge: spinning the wheel until the text is the size you want
+    is one thing a person did, and it should undo in one step rather than
+    eighteen. Toggling side-by-side is a single click, so it does not merge
+    — which also stops it swallowing the zoom that came before it, the way
+    it would if the whole command class merged on one id.
+
+    Both halves are always written, and `redo`/`undo` restore the pair, so
+    a zoom made after a flow toggle cannot undo into a state neither of
+    them was ever in.
+    """
+
+    def __init__(self, graph: Graph, page_id: str, *,
+                 zoom: Any = _KEEP, flow: Any = _KEEP,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        page = graph.page(page_id)
+        if flow is _KEEP:
+            label = "zoom"
+        else:
+            label = ("pages side by side" if flow
+                     else "pages in one column")
+        super().__init__(label, parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = (page.preview_zoom, page.preview_flow)
+        self._new = (page.preview_zoom if zoom is _KEEP else zoom,
+                     page.preview_flow if flow is _KEEP else flow)
+        self._merges = flow is _KEEP
+
+    def id(self) -> int:
+        return _ID_PAGE_ZOOM if self._merges else -1   # -1: Qt never merges
+
+    def redo(self) -> None:
+        self._apply(self._new)
+
+    def undo(self) -> None:
+        self._apply(self._old)
+
+    def _apply(self, state) -> None:
+        zoom, flow = state
+        if self._page_id in self._graph.pages:
+            self._graph.set_page_preview_view(self._page_id, zoom=zoom,
+                                              flow=flow)
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (not isinstance(other, SetPagePreviewViewCommand)
+                or other._page_id != self._page_id):
+            return False
+        self._new = other._new
+        return True
+
+
 class ReorderPagesCommand(QUndoCommand):
     def __init__(self, graph: Graph, order: list[str],
                  parent: Optional[QUndoCommand] = None) -> None:
@@ -1223,6 +1293,9 @@ class DuplicatePageCommand(QUndoCommand):
             # would mean editing either one changed both
             setup=src.setup.copy(),
             preview_mode=src.preview_mode,
+            # the copy opens the way the original was being read
+            preview_zoom=src.preview_zoom,
+            preview_flow=src.preview_flow,
             background=src.background,
             tile_style=src.tile_style.copy(),
         )

@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
 from flograph.core import Graph
 
 from ..commands import (SetPageBodyCommand, SetPageCustomCssCommand,
-                        SetPagePreviewModeCommand)
+                        SetPagePreviewModeCommand,
+                        SetPagePreviewViewCommand)
 from .preview import PagedPreview
 from .render import render_report
 from .web_preview import WebPreview
@@ -172,7 +173,7 @@ class ReportPage(QWidget):
         self._flow_btn.setToolTip(
             "Lay the pages out left-to-right instead of in one column — "
             "the contact sheet, for seeing where everything falls at once")
-        self._flow_btn.toggled.connect(self.preview.set_flow)
+        self._flow_btn.toggled.connect(self._flow_toggled)
 
         self._help_btn = QToolButton()
         self._help_btn.setText("?")
@@ -253,10 +254,13 @@ class ReportPage(QWidget):
         engine.node_succeeded.connect(self._on_node_ran)
         engine.node_failed.connect(self._on_node_ran)
 
+        self.preview.zoom_changed.connect(self._zoom_changed)
+
         self._load_from_model()
         page = self._page()
         self.set_view_mode(page.view_mode if page is not None else False)
         self._set_preview_mode(page.preview_mode if page is not None else "pages")
+        self._apply_preview_view(page)
         if page is not None and page.preview_mode == "web":
             self.refresh_preview()
 
@@ -474,6 +478,39 @@ class ReportPage(QWidget):
         self._editor_tabs.tabBar().setTabVisible(1, mode == "web")
         if mode == "pages" and self._editor_tabs.currentIndex() == 1:
             self._editor_tabs.setCurrentIndex(0)
+
+    def _apply_preview_view(self, page) -> None:
+        """Show the paper the way this page was last set up to be read.
+
+        Nothing is saved back for it. Both handlers below only push a
+        command when the value they are given *differs* from the page's,
+        and here it is the page's — which is a better guard than muting
+        the signals would be, because it holds for every route to them and
+        not just this one. Applying a saved value has to be silent: a
+        command pushed here would be an undo step for something nobody
+        did, writing the page's own setting back over itself.
+        """
+        if page is None:
+            return
+        self._flow_btn.setChecked(page.preview_flow)
+        self.preview.set_flow(page.preview_flow)
+        self.preview.set_zoom(page.preview_zoom)
+
+    def _flow_toggled(self, flow: bool) -> None:
+        self.preview.set_flow(flow)
+        page = self._page()
+        if page is not None and page.preview_flow != bool(flow):
+            self._undo_stack.push(SetPagePreviewViewCommand(
+                self._graph, self.page_id, flow=bool(flow)))
+
+    def _zoom_changed(self) -> None:
+        """The reader zoomed with Ctrl+wheel. Saved with the page, and
+        merged with the notches either side of it — see the command."""
+        page = self._page()
+        zoom = self.preview.user_zoom()
+        if page is not None and page.preview_zoom != zoom:
+            self._undo_stack.push(SetPagePreviewViewCommand(
+                self._graph, self.page_id, zoom=zoom))
 
     def _preview_mode_changed(self, _index: int) -> None:
         page = self._page()

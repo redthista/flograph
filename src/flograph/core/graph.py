@@ -253,6 +253,18 @@ class Page:
     # Report pages: the preview target. Pages is the PDF-faithful view;
     # web is the continuously scrolling browser view.
     preview_mode: str = "pages"
+    # Report pages: how the paper is being looked at — an explicit zoom
+    # (None fits a sheet to the pane) and whether the sheets lie left to
+    # right and wrap rather than stacking in one column.
+    #
+    # Saved with the page for the reason fit_to_window is saved: how a
+    # finished report is meant to be *read* is a property of the report,
+    # not of the machine opening it. It matters more here than there,
+    # because locking a report takes its whole toolbar away — so a page
+    # that did not remember this could never be set up to open two-up at
+    # all, only left that way until it was next closed.
+    preview_zoom: Optional[float] = None
+    preview_flow: bool = False
     # Dashboard pages: the colour behind the tiles ("#rrggbb"), None for the
     # theme's canvas, and the look every tile on the page takes unless it
     # says otherwise. A report ignores both.
@@ -1249,6 +1261,24 @@ class Graph:
         """Set a report's preview target, with a safe file-format default."""
         page = self.page(page_id)
         page.preview_mode = "web" if mode == "web" else "pages"
+        self.events.page_changed.emit(page)
+        return page
+
+    def set_page_preview_view(self, page_id: str, *, zoom: Any = _KEEP,
+                              flow: Any = _KEEP) -> Page:
+        """How a report's paper is being looked at: the zoom, and whether
+        the sheets lie side by side.
+
+        One setter for both, and `_KEEP` rather than None for "leave it
+        alone", because None is itself a zoom — it is what "fit a sheet to
+        the pane" is stored as, so it cannot double as the do-nothing
+        value (the same reason set_page_look and set_page_color take it).
+        """
+        page = self.page(page_id)
+        if zoom is not _KEEP:
+            page.preview_zoom = None if zoom is None else float(zoom)
+        if flow is not _KEEP:
+            page.preview_flow = bool(flow)
         self.events.page_changed.emit(page)
         return page
 

@@ -373,6 +373,15 @@ opens the full embed-syntax reference.
 the browser, and `[the costs](page:Costs)` goes to that page (see *Getting
 around a dashboard*). Rest on one to see where it goes.
 
+**A report remembers how you were reading it.** Ctrl+wheel zooms the paper,
+and the **▦** button lays the sheets left to right so several sit side by
+side instead of stacking in one column — and both are saved with the page,
+so it opens that way next time and for whoever you hand the file to. That
+matters most on a **locked** page: locking takes the whole toolbar away, so
+a report that did not remember this could never be *set up* to open two-up,
+only left that way until it was closed. Spin the wheel as much as you like
+— the whole spin undoes in one step.
+
 ## Report card
 
 **Viz ▸ Report** is the same Markdown but as a node *inside* the flow,

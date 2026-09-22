@@ -436,6 +436,47 @@ class TestThePageModel:
         page = graph_from_dict(data, registry).pages["p1"]
         assert page.preview_mode == "pages"
 
+    def test_how_the_paper_is_being_read_round_trips(self, registry):
+        """Dan: a locked report should open the way it was set up to be
+        read — two pages side by side, at the zoom it was left at."""
+        graph = Graph()
+        graph.add_page(Page(id="p1", kind="report"))
+        graph.set_page_preview_view("p1", zoom=1.75, flow=True)
+        data = json.loads(json.dumps(graph_to_dict(graph)))
+        page = graph_from_dict(data, registry).pages["p1"]
+        assert page.preview_zoom == 1.75
+        assert page.preview_flow is True
+
+    def test_a_page_nobody_has_set_up_writes_nothing(self, registry):
+        """Fit-to-pane in one column is the default, so it costs no lines
+        in the file — and a project saved by this build still opens in an
+        older one."""
+        graph = Graph()
+        graph.add_page(Page(id="p1", kind="report"))
+        entry = graph_to_dict(graph)["graph"]["pages"][0]
+        assert "preview_zoom" not in entry
+        assert "preview_flow" not in entry
+
+    def test_a_file_written_before_this_fits_the_pane(self, registry):
+        graph = Graph()
+        graph.add_page(Page(id="p1", kind="report"))
+        data = json.loads(json.dumps(graph_to_dict(graph)))
+        page = graph_from_dict(data, registry).pages["p1"]
+        assert page.preview_zoom is None
+        assert page.preview_flow is False
+
+    @pytest.mark.parametrize("bad", ["nonsense", -3, 0, None, [1]])
+    def test_a_zoom_that_is_not_one_reads_as_fit_to_the_pane(self, registry,
+                                                             bad):
+        """A truncated or hand-edited file opens at the default rather
+        than refusing to open, like every other page setting here."""
+        graph = Graph()
+        graph.add_page(Page(id="p1", kind="report"))
+        graph.set_page_preview_view("p1", zoom=1.5)
+        data = json.loads(json.dumps(graph_to_dict(graph)))
+        data["graph"]["pages"][0]["preview_zoom"] = bad
+        assert graph_from_dict(data, registry).pages["p1"].preview_zoom is None
+
     def test_custom_css_round_trips(self, registry):
         graph = Graph()
         graph.add_page(Page(id="p1", kind="report", custom_css="body { color: red; }"))

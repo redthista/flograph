@@ -74,6 +74,9 @@ class PagedPreview(QAbstractScrollArea):
 
     #: a link on the paper was clicked: its href, as the report wrote it
     link_activated = Signal(str)
+    #: the reader zoomed with Ctrl+wheel — as opposed to the page applying
+    #: a saved zoom, which goes through set_zoom without announcing itself
+    zoom_changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -148,6 +151,17 @@ class PagedPreview(QAbstractScrollArea):
 
     def zoom(self) -> float:
         return self._scale
+
+    def user_zoom(self) -> Optional[float]:
+        """The zoom the reader set for themselves, or None while the paper
+        is being fitted to the pane.
+
+        `zoom()` answers the *effective* scale, which cannot tell a
+        deliberate 100% from a pane that happens to be one page wide — and
+        saving that would pin a page to whatever width the window had the
+        day it was written.
+        """
+        return self._user_scale
 
     def set_zoom(self, scale: Optional[float]) -> None:
         """Set an explicit zoom, or None to go back to fitting the width."""
@@ -360,6 +374,11 @@ class PagedPreview(QAbstractScrollArea):
             self.set_zoom(self._scale * (ZOOM_STEP if delta > 0
                                          else 1 / ZOOM_STEP))
             bar.setValue(int(before * self._scale - anchor))
+            # Only a zoom the reader made themselves is worth saving, so it
+            # is announced from the gesture rather than from set_zoom —
+            # which the page also calls to *apply* a saved one, and would
+            # otherwise save right back over what it had just loaded.
+            self.zoom_changed.emit()
             event.accept()
             return
         if delta:

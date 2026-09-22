@@ -818,3 +818,87 @@ class TestPageTabMenu:
         window.page_bar.remove_page_tab("r1")
         assert "r1" not in window.page_bar._kinds
         assert "r1" not in window.page_bar._view_modes
+
+
+class TestHowTheReportIsBeingRead:
+    """Dan: "save settings like zoom level in the report page, and when
+    locked I want it to remember how I have it shown, 2 pages side by
+    side."
+
+    It matters more on a locked page than anywhere else: locking takes the
+    whole toolbar away, so a page that did not remember this could never
+    be *set up* to open two-up — only left that way until it was closed.
+    """
+
+    def _report(self, window, **view):
+        window.undo_stack.push(AddPageCommand(
+            window.graph, Page(id="r1", title="R", kind="report", **view)))
+        return window._dashboard_pages["r1"]
+
+    def test_a_page_opens_the_way_it_was_left(self, window):
+        page = self._report(window, preview_flow=True, preview_zoom=1.5)
+        assert page.preview.flow() is True
+        assert page.preview.user_zoom() == 1.5
+        assert page._flow_btn.isChecked() is True
+
+    def test_and_opening_it_saves_nothing_back(self, window):
+        """Applying a saved value must not announce itself as a change —
+        it would push a command for something nobody did, and write the
+        page's own setting back over itself."""
+        before = window.undo_stack.count()
+        self._report(window, preview_flow=True, preview_zoom=1.5)
+        assert window.undo_stack.count() == before + 1   # the page itself
+
+    def test_side_by_side_is_saved_on_the_page(self, window):
+        page = self._report(window)
+        page._flow_btn.setChecked(True)
+        assert window.graph.page("r1").preview_flow is True
+        assert page.preview.flow() is True
+        window.undo_stack.undo()
+        assert window.graph.page("r1").preview_flow is False
+
+    def test_a_zoom_is_saved_on_the_page(self, window):
+        page = self._report(window)
+        send_wheel(page.preview, dy=120, modifiers=Qt.ControlModifier)
+        assert window.graph.page("r1").preview_zoom == page.preview.user_zoom()
+        assert window.graph.page("r1").preview_zoom is not None
+
+    def test_a_spin_of_the_wheel_is_one_undo_step(self, window):
+        """A zoom arrives a notch at a time. Getting the size right is one
+        thing a person did, not eighteen."""
+        page = self._report(window)
+        before = window.undo_stack.count()
+        for _ in range(6):
+            send_wheel(page.preview, dy=120, modifiers=Qt.ControlModifier)
+        assert window.undo_stack.count() == before + 1
+        zoomed = window.graph.page("r1").preview_zoom
+        assert zoomed is not None
+        window.undo_stack.undo()
+        assert window.graph.page("r1").preview_zoom is None
+
+    def test_the_side_by_side_toggle_does_not_swallow_the_zoom(self, window):
+        """It is one click, so it starts its own step — otherwise it would
+        merge with the zoom before it and the two would undo together."""
+        page = self._report(window)
+        send_wheel(page.preview, dy=120, modifiers=Qt.ControlModifier)
+        steps = window.undo_stack.count()
+        page._flow_btn.setChecked(True)
+        assert window.undo_stack.count() == steps + 1
+
+    def test_a_locked_page_still_shows_it(self, window):
+        """The toolbar is gone, so this is the only way it can be so."""
+        page = self._report(window, preview_flow=True, preview_zoom=1.25)
+        page.set_view_mode(True)
+        assert page._toolbar.isHidden()
+        assert page.preview.flow() is True
+        assert page.preview.user_zoom() == 1.25
+
+    def test_a_duplicate_opens_the_way_the_original_was_read(self, window):
+        from flograph.ui.commands import DuplicatePageCommand
+
+        self._report(window, preview_flow=True, preview_zoom=1.5)
+        window.undo_stack.push(DuplicatePageCommand(window.graph, "r1"))
+        copy = [p for p in window.graph.pages.values() if p.id != "r1"][-1]
+        assert copy.preview_flow is True
+        assert copy.preview_zoom == 1.5
+

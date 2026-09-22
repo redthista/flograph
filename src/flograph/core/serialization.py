@@ -55,6 +55,24 @@ FLOGRAPH_VERSION = _running_version("0.0.0+unknown")
 
 SCHEMA_VERSION = 1
 
+
+def _preview_zoom(value) -> "Optional[float]":
+    """A report page's saved zoom, or None for "fit a sheet to the pane".
+
+    Anything that is not a positive, finite number reads as None rather
+    than raising: a truncated or hand-edited file should open at the
+    default, the way every other page setting here does. How far a zoom is
+    allowed to go is the preview's business, not this file's — it clamps
+    whatever it is handed to its own limits.
+    """
+    import math
+
+    try:
+        zoom = float(value)
+    except (TypeError, ValueError):
+        return None
+    return zoom if math.isfinite(zoom) and zoom > 0 else None
+
 MIGRATIONS: dict[int, Callable[[dict], dict]] = {
     # e.g. 1: _migrate_1_to_2
 }
@@ -201,6 +219,13 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     # only what the user changed — see PageSetup.to_dict
                     "setup": p.setup.to_dict(),
                     "preview_mode": p.preview_mode,
+                    # only a page somebody has set up to be read a
+                    # particular way says so, like a tile's aspect: a
+                    # zoom of None is "fit to the pane", which is the
+                    # default and needs no line in the file
+                    **({"preview_zoom": p.preview_zoom}
+                       if p.preview_zoom is not None else {}),
+                    **({"preview_flow": True} if p.preview_flow else {}),
                     # a dashboard's look, only once someone has set one
                     **({"background": p.background} if p.background else {}),
                     **({"tile_style": p.tile_style.to_dict()}
@@ -516,6 +541,11 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             setup=PageSetup.from_dict(entry.get("setup")),
             preview_mode=("web" if entry.get("preview_mode") == "web"
                           else "pages"),
+            # absent before a report remembered how it was being read, and
+            # absent on any page nobody has set up — both mean "fit a
+            # sheet to the pane, one under the next"
+            preview_zoom=_preview_zoom(entry.get("preview_zoom")),
+            preview_flow=bool(entry.get("preview_flow", False)),
             # absent before dashboards could be formatted, and on any page
             # nobody has — both mean the theme's look
             background=clean_background(entry.get("background")),
