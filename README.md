@@ -388,7 +388,9 @@ so a task that slips pushes everything after it, with phases, progress,
 milestones, dependency arrows and a baseline to measure the slip
 against, and a third output that hands you the whole chart as a
 standalone HTML page), 
-Slicer, Image (any picture on the canvas, animated GIFs included, from a
+Slicer, Filter Page (a filter for every column of a table on one page —
+checklists, range sliders, date pickers and contains boxes — with the rows
+that match them all flowing on), Image (any picture on the canvas, animated GIFs included, from a
 file or a base64 string), PDF Viewer (a page of a document on the canvas or a
 dashboard — rendered at the size it is drawn at, so a 400-page report costs
 one page of pixels, with chevrons under the page number to turn it: paging

@@ -259,6 +259,17 @@ ticks, chosen tiles and the dropdown button, so a filter panel of three
 reads at a glance; leave it on **Theme** to follow the app. None of these
 re-runs the flow — they change the picture, not the filter.
 
+When a table wants filtering on everything at once, a **Filter Page** saves
+building a slicer per column. Wire the table in and every column arrives with
+a control of its own: a searchable checklist for categories, a two-handled
+slider for numbers, a from/to picker for dates, a *contains* box for anything
+too varied to list. Its **filtered** output is the rows that match them all.
+Leave columns out with **Exclude columns**, make a checklist pick one value
+with **Single-select columns**, and set **Update mode** to *apply* if you
+would rather make several changes and then press **Apply** than re-run on
+each. What the page has picked shows in its **Filters** box, and clearing
+that box clears every filter.
+
 A visual can be the filter too. Set a **Show Plotly** or a **Show Table** to
 **On click ▸ select one** (or *select many*) and clicking it filters what it
 feeds. On a chart you click a bar or drag a box. On a table you click a
