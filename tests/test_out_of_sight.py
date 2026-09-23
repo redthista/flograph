@@ -154,6 +154,122 @@ class TestCanvasCards:
         assert item._table_viewer_view.model().rowCount() == 3
 
 
+# ------------------------------------------------------ catching up
+
+class TestCatchingUp:
+    """Put off is not skipped: once nobody is moving, the waiting cards are
+    rebuilt a card at a time, nearest first, so a later pan finds them
+    ready instead of rebuilding them under the pointer (ui.catch_up)."""
+
+    def _shown(self, win, qtbot):
+        win.resize(1200, 800)
+        win.show()
+        qtbot.waitExposed(win)
+        win.view.center_on_scene(QPointF(0, 0))
+
+    def test_a_far_card_fills_while_nobody_moves(self, window, qtbot):
+        win = window
+        source = _table(win)
+        far = _show_table(win, source, pos=(40000, 40000))
+        self._shown(win, qtbot)
+        item = win.scene.node_items[far.id]
+
+        _run(win, qtbot)
+        assert "output" in item.deferred_refreshes
+        qtbot.waitUntil(lambda: not item.deferred_refreshes, timeout=5000)
+        assert item._table_viewer_view.model().rowCount() == 3
+
+    def test_the_nearest_goes_first(self, window, qtbot, monkeypatch):
+        win = window
+        source = _table(win)
+        self._shown(win, qtbot)
+        area = win.view.mapToScene(win.view.viewport().rect()).boundingRect()
+        far = _show_table(win, source, pos=(area.right() + 40000, 0))
+        near = _show_table(win, source, pos=(area.right() + 200, 0))
+        order = []
+        for node in (far, near):
+            item = win.scene.node_items[node.id]
+            original = item.flush_deferred
+            monkeypatch.setattr(
+                item, "flush_deferred",
+                lambda n=node, f=original: (order.append(n.id), f()))
+
+        _run(win, qtbot)
+        qtbot.waitUntil(lambda: len(order) == 2, timeout=5000)
+        assert order == [near.id, far.id]
+
+    def test_nothing_is_rebuilt_while_a_button_is_held(
+            self, window, qtbot, monkeypatch):
+        from PySide6.QtCore import Qt
+
+        from flograph.ui import catch_up
+
+        win = window
+        source = _table(win)
+        far = _show_table(win, source, pos=(40000, 40000))
+        self._shown(win, qtbot)
+        item = win.scene.node_items[far.id]
+        held = [True]
+        monkeypatch.setattr(
+            catch_up.QApplication, "mouseButtons",
+            lambda: Qt.LeftButton if held[0] else Qt.NoButton)
+
+        _run(win, qtbot)
+        qtbot.wait(catch_up.IDLE_S * 1000 + 400)
+        assert "output" in item.deferred_refreshes
+
+        held[0] = False
+        qtbot.waitUntil(lambda: not item.deferred_refreshes, timeout=5000)
+
+    def test_a_far_web_card_waits_for_a_pan_to_come_near(
+            self, window, qtbot):
+        """Each web card wakes a Chromium renderer and holds its memory,
+        so one far away is not loaded just in case."""
+        from flograph.ui import catch_up
+
+        win = window
+        source = _table(win)
+        chart = win.registry.instantiate("flograph.viz.show_plotly",
+                                         pos=(40000, 40000))
+        win.graph.add_node(chart)
+        win.graph.connect(source.id, "table", chart.id, "table")
+        self._shown(win, qtbot)
+        item = win.scene.node_items[chart.id]
+
+        _run(win, qtbot)
+        qtbot.wait(catch_up.IDLE_S * 1000 + 400)
+        assert "output" in item.deferred_refreshes
+
+        area = win.view.mapToScene(win.view.viewport().rect()).boundingRect()
+        rect = item.sceneBoundingRect()
+        # half a screen short of it: near, not yet in sight
+        win.view.center_on_scene(QPointF(
+            rect.left() - area.width(), rect.center().y()))
+        assert not win.scene.can_see(item)
+        qtbot.waitUntil(lambda: not item.deferred_refreshes, timeout=5000)
+
+    def test_a_hidden_page_fills_while_nobody_moves(self, window, qtbot):
+        win = window
+        source = _table(win)
+        show = _show_table(win, source, pos=(300, 0))
+        win.undo_stack.push(AddPageCommand(win.graph, Page(id="p1",
+                                                           title="Board")))
+        win.undo_stack.push(AddTileCommand(win.graph, "p1", Tile(
+            id="t1", node_id=show.id, port="table")))
+        page = win._dashboard_pages["p1"]
+        tile = page.scene.tile_items["t1"]
+        win.show()
+        qtbot.waitExposed(win)
+        win.page_bar.select_page(None)
+        qtbot.waitUntil(lambda: not page.isVisible(), timeout=2000)
+
+        _run(win, qtbot)
+        assert "t1" in page.scene._stale_tiles
+        qtbot.waitUntil(lambda: not page.scene._stale_tiles, timeout=5000)
+        assert not page.isVisible()
+        assert tile._table_view.model().rowCount() == 3
+
+
 # ------------------------------------------------------ dashboard pages
 
 class TestHiddenPages:

@@ -4066,6 +4066,12 @@ class NodeItem(QGraphicsObject):
             # re-derives every "is anyone looking at this" answer, which is
             # where the QMovie playback decisions live
             self._apply_proxy_visibility()
+            # shown again (a frame expanded): anything put off while it was
+            # hidden can be caught up now
+            scene = self.scene()
+            if value and self.deferred_refreshes and scene is not None \
+                    and hasattr(scene, "resume_deferred"):
+                scene.resume_deferred()
         if change == QGraphicsItem.ItemSelectedHasChanged \
                 and self._button_edit and not value:
             # Clicking the canvas or another node drops the selection, which

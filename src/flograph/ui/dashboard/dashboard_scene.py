@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QGraphicsScene
 
 from flograph.core import Graph, Tile
 
+from .. import catch_up
 from ..commands import (
     MoveResizeTileCommand, RemoveTileCommand, SetPageMaximizedTileCommand,
 )
@@ -44,8 +45,11 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         self.undo_stack = undo_stack
         self.page_id = page_id
         self.tile_items: dict[str, TileItem] = {}
-        # tiles whose refresh was put off while this page was out of sight
+        # tiles whose refresh was put off while this page was out of sight;
+        # ui.catch_up fills them, and while it does defer_tile lets it through
         self._stale_tiles: set[str] = set()
+        self._catching_up = False
+        catch_up.register(self)
 
         # Snap-to-grid view preference; the main window is the sole writer.
         from ..canvas.grid import DEFAULT_STEP
@@ -181,20 +185,66 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         """Put off refilling a tile on a page nobody is looking at. Every
         dashboard page is built up front and hears every run, so without
         this a hidden page re-rendered its charts and re-read its tables
-        from the cache — from disk, on an open — for nobody. True means
-        postponed until `flush_stale`."""
-        if not self.page_hidden():
+        from the cache — from disk, on an open — for nobody, in the middle
+        of the run. True means postponed: `ui.catch_up` fills it once
+        things are quiet, or as soon as the page is shown."""
+        if self._catching_up or not self.page_hidden():
             return False
         self._stale_tiles.add(item.tile.id)
+        catch_up.stirred()
+        catch_up.poke()
         return True
 
     def flush_stale(self) -> None:
-        """The page came into sight: refill what was put off."""
-        stale, self._stale_tiles = self._stale_tiles, set()
-        for tile_id in stale:
-            item = self.tile_items.get(tile_id)
-            if item is not None:
-                item.refresh_content()
+        """The page came into sight: fill what was put off, a tile per turn
+        of the event loop so the page itself appears at once."""
+        self.resume_deferred()
+
+    def resume_deferred(self) -> None:
+        catch_up.poke()
+
+    def catch_up_candidate(self):
+        """The put-off tile most worth filling next (see ui.catch_up): on a
+        page being looked at, nearest the view first; on a hidden page,
+        only once everything is quiet, and a web, report or slow one not
+        at all."""
+        self._stale_tiles &= self.tile_items.keys()
+        if not self._stale_tiles:
+            return None
+        areas = [v.mapToScene(v.viewport().rect()).boundingRect()
+                 for v in self.views()
+                 if v.window().isVisible() and v.isVisible()]
+        best = None
+        for tile_id in self._stale_tiles:
+            item = self.tile_items[tile_id]
+            if areas:
+                rect = item.sceneBoundingRect()
+                away = min(catch_up.screens_away(rect, a) for a in areas)
+                rank = (0 if away <= catch_up.PREFETCH else 1, away)
+            elif item._kind() in ("plotly", "report") or catch_up.slow(item):
+                # a Chromium renderer each, or seconds of layout: these
+                # wait for the page to be shown, as they always did
+                continue
+            else:
+                rank = (1, float("inf"))
+            if best is None or rank < best[0]:
+                best = (rank, tile_id)
+        if best is None:
+            return None
+        (tier, away), tile_id = best
+        item = self.tile_items[tile_id]
+        return tier, away, lambda: self._catch_up(tile_id), item
+
+    def _catch_up(self, tile_id: str) -> None:
+        self._stale_tiles.discard(tile_id)
+        item = self.tile_items.get(tile_id)
+        if item is None:
+            return
+        self._catching_up = True
+        try:
+            item.refresh_content()
+        finally:
+            self._catching_up = False
 
     def _tiles_for(self, node_id: str) -> list[TileItem]:
         return [item for item in self.tile_items.values()

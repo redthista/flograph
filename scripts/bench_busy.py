@@ -10,8 +10,9 @@ table. It prints:
 - the longest single freeze of the GUI thread in that time, and how many
   freezes passed the "you notice it" line (`ui.perf.NOTICE_S`);
 - where the GUI thread's time went, by `core.perf.timed` label;
-- the bill for what was put off while out of sight: showing a dashboard
-  page, and scrolling the report card into view;
+- the bill for what was put off while out of sight: panning the length
+  of the flow straight after a run and again after a pause, showing a
+  dashboard page, and scrolling the report card into view;
 - one sort of a formatted 50k-row table;
 - save + reopen of the project (the open half is the freezing half);
 - Stop on a node that ignores cancellation: how long until the run ends.
@@ -191,6 +192,36 @@ def build(win, rows):
     return gen, tables
 
 
+def pan_across(app, view, scene_items, pause):
+    """Pan the view along the row of cards the way a hand does after a
+    run: half a screen over ~10 frames, a glance (~120 ms), on again.
+    `pause` seconds pass between the run ending and the pan starting.
+    Returns every frame's GUI time, pauses included — a pause that
+    stutters is felt too."""
+    from PySide6.QtCore import QPointF
+    pump(app, pause)
+    rects = [i.sceneBoundingRect() for i in scene_items]
+    x, x1 = min(r.left() for r in rects), max(r.right() for r in rects)
+    y = rects[0].center().y()
+    hop = view.mapToScene(view.viewport().rect()).boundingRect().width() / 2
+    frames = []
+
+    def frame():
+        started = time.perf_counter()
+        app.processEvents()
+        frames.append(time.perf_counter() - started)
+        time.sleep(0.016)
+
+    while x <= x1:
+        for _ in range(10):
+            x += hop / 10
+            view.center_on_scene(QPointF(x, y))
+            frame()
+        for _ in range(8):
+            frame()
+    return frames
+
+
 def perf_table(title):
     from flograph.core import perf
     rows = sorted(perf.tallies().items(), key=lambda kv: -kv[1].total)
@@ -267,6 +298,28 @@ def main(argv):
     print("\n== Re-run after an upstream change")
     freezes(start)
     perf_table("GUI-thread time by label")
+
+    # -- panning round after a run -------------------------------------
+    # Out-of-sight cards wait (AE1); this is what a user feels moving
+    # round afterwards, straight away and after a moment's pause.
+    row = [win.scene.node_items[n.id] for n in win.graph.nodes.values()
+           if n.id in win.scene.node_items
+           and win.scene.node_items[n.id].sceneBoundingRect().top() < 300]
+    for seed, pause, title in ((2, 0.05, "straight after a run"),
+                               (3, 2.0, "2 s after a run")):
+        win.view.center_on_scene(row[0].sceneBoundingRect().center())
+        win.graph.set_param(gen.id, "seed", seed)
+        win.engine.run_all()
+        wait_for(app, win.engine.run_finished, 300)
+        start = section("pan")
+        frames = pan_across(app, win.view, row, pause)
+        print(f"\n== Pan the length of the flow, {title}")
+        print(f"  frames {len(frames)} | worst {max(frames) * 1000:.0f}ms"
+              f" | over 50ms: {sum(f > 0.05 for f in frames)}"
+              f" | GUI work {sum(frames) * 1000:.0f}ms")
+        freezes(start)
+        perf_table("GUI-thread time by label")
+    pump(app, 1.5)
 
     # -- what out-of-sight work costs when it comes into sight -----------
     # AE2 put these off until they are looked at; this is the bill when

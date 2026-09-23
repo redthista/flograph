@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Performance | **Moving round a busy flow is smooth again** | 0.1.16 stopped rebuilding cards nobody could see after a run, but left the work for the moment they came into view — so panning round afterwards rebuilt every chart and table as it scrolled in, a stutter at each pause. The work now happens while you are not moving: cards within a screen of the view are made ready once the view has been still for a moment, so a pan meets them finished, and the rest of the canvas (and the tables on dashboard pages you are not looking at) catch up a card at a time once everything has been quiet for about half a second. Nothing is rebuilt while a mouse button is held, and a card that comes into view mid-pan waits for the pan to stop. Plotly and other web cards are only made ready when a pan could reach them, never just in case, since each holds a browser renderer's memory; report cards, and anything else whose refresh takes longer than 0.3 s, still wait until they are on screen. On `scripts/bench_busy.py`, panning the length of the flow straight after a run: worst frame 360 ms → 18 ms, frames over 50 ms 2 → 0; showing a hidden dashboard page no longer freezes (211 ms → none). |
 
 ## 0.1.16
 

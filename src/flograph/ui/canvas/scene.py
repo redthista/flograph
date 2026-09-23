@@ -31,10 +31,10 @@ from .connection_item import ConnectionItem, PendingConnectionItem
 from .frame_item import FrameItem
 from .shape_item import ShapeItem
 from .node_item import (
-    DEFAULT_LOD_THRESHOLD, NodeItem, PortItem, compact_on,
+    DEFAULT_LOD_THRESHOLD, NodeItem, PortItem, card_kind, compact_on,
 )
 from .stacking import LAYER_LABELS
-from .. import theme
+from .. import catch_up, theme
 
 #: The half-extent of the world-sized span used whenever the scroll bars are
 #: hidden. Large enough that a drag pan never reaches an edge, so the canvas
@@ -217,6 +217,10 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         # never fades anything.
         self.requested_nodes: frozenset = frozenset()
         self.node_items: dict[str, NodeItem] = {}
+        # put-off card refreshes are caught up by ui.catch_up; while it runs
+        # one here, defer_refresh lets it through
+        self._catching_up = False
+        catch_up.register(self)
         self.connection_items: dict[str, ConnectionItem] = {}
         # Goto/From links that have asked to be drawn, keyed by link id. Not
         # a wire and not in graph.connections — see canvas.link_line.
@@ -383,7 +387,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self.refresh_frame_holds()
         self._queue_rect_fit()
         # cards on the canvas now shown may have been skipped while hidden
-        QTimer.singleShot(0, self.flush_deferred)
+        self.resume_deferred()
 
     def place_here(self, *objects):
         """Stamp new nodes, frames or shapes onto the canvas being shown, so
@@ -1307,9 +1311,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         """Put off a card's refresh while nobody can see the card.
 
         True means postponed: `refresh` is kept on the item under `key` (a
-        later one for the same key replaces it) and runs the next time the
-        card comes into sight — a pan, a zoom back into detail, the canvas
-        page shown again (`flush_deferred`). False means go ahead now.
+        later one for the same key replaces it) and `ui.catch_up` runs it
+        later — soon after the card comes into or near view, or once
+        everything has been quiet for a moment. False means go ahead now.
 
         Rebuilding a card nobody is looking at is where a busy flow's
         freezes came from: a report card below the fold re-rendered its
@@ -1317,10 +1321,13 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         page re-evaluated every rule. The value is in the cache either way,
         so the card loses nothing by reading it later.
         """
-        if self.can_see(item):
+        if self._catching_up or self.can_see(item):
             item.deferred_refreshes.pop(key, None)
             return False
         item.deferred_refreshes[key] = refresh
+        # a run still finishing nodes is not a quiet moment
+        catch_up.stirred()
+        catch_up.poke()
         return True
 
     def can_see(self, item) -> bool:
@@ -1336,19 +1343,61 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         if not views:
             return True
         rect = item.sceneBoundingRect()
-        for view in views:
-            if not view.isVisible():
-                continue
-            area = view.mapToScene(view.viewport().rect()).boundingRect()
-            if area.intersects(rect):
-                return True
-        return False
+        return any(area.intersects(rect) for area in self._areas_in_sight())
 
-    def flush_deferred(self) -> None:
-        """Run the postponed refreshes of every card now in sight."""
-        for item in list(self.node_items.values()):
-            if item.deferred_refreshes and self.can_see(item):
-                item.flush_deferred()
+    def _areas_in_sight(self) -> list:
+        return [v.mapToScene(v.viewport().rect()).boundingRect()
+                for v in self.views()
+                if v.window().isVisible() and v.isVisible()]
+
+    def resume_deferred(self) -> None:
+        """What is on screen changed: put-off refreshes may be due."""
+        catch_up.poke()
+
+    def catch_up_candidate(self):
+        """The put-off card most worth rebuilding next (see ui.catch_up):
+        in or near view before far away, detail before flattened, nearest
+        first; a web card only once it is near, and a slow one only once
+        it is on screen. A card hidden in a collapsed frame or on another canvas tab
+        waits until it is shown; a canvas nobody is looking at waits too."""
+        pending = [item for item in self.node_items.values()
+                   if item.deferred_refreshes and item.isVisible()]
+        if not pending:
+            return None
+        areas = self._areas_in_sight()
+        if not areas:
+            return None
+        best = None
+        for item in pending:
+            rect = item.sceneBoundingRect()
+            away = min(catch_up.screens_away(rect, area) for area in areas)
+            near = away <= catch_up.PREFETCH and not item._flat
+            # a report card lays its tables out for seconds: done ahead of
+            # time it is a freeze waiting for the user's next move, so it
+            # and anything else that proved slow wait until they are seen
+            if (item.report_card or catch_up.slow(item)) \
+                    and (away > 0 or item._flat):
+                continue
+            # a web card wakes a Chromium renderer and holds its memory:
+            # made ready when a pan could reach it, never just in case
+            if not near and card_kind(item.node) == "webview":
+                continue
+            rank = (0 if near else 1, away)
+            if best is None or rank < best[0]:
+                best = (rank, item)
+        if best is None:
+            return None
+        (tier, away), item = best
+        return tier, away, lambda: self._catch_up(item), item
+
+    def _catch_up(self, item) -> None:
+        if item.scene() is not self:
+            return
+        self._catching_up = True
+        try:
+            item.flush_deferred()
+        finally:
+            self._catching_up = False
 
     def set_requested_nodes(self, node_ids) -> None:
         """Which nodes have a re-run queued. Only the cards whose answer
@@ -1688,7 +1737,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self._apply_lod()
         # a settings change moves no view, so nothing else would notice
         # that the cards are drawn in detail again
-        QTimer.singleShot(0, self.flush_deferred)
+        self.resume_deferred()
 
     def refresh_render_ratios(self) -> None:
         """Re-target figure cards' render resolution — called by the view

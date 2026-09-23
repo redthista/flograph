@@ -19,7 +19,7 @@ try:
 except ImportError:  # trimmed PySide6 installs ship without QtWebEngine
     QWebEngineView = None
 
-from .. import theme
+from .. import catch_up, theme
 
 
 # How many recent frames the paint timer averages over. A couple of seconds
@@ -214,9 +214,11 @@ class ZoomPanGraphicsView(QGraphicsView):
         super().__init__(scene, parent)
 
         # The part of the scene on screen changed: a card that was skipped
-        # while out of sight (scene.defer_refresh) may be in sight now.
-        # First, because centerOn and resizes below already scroll.
-        # Coalesced, so a pan is one pass when it stops, not one per pixel.
+        # while out of sight (scene.defer_refresh) may be in or near sight
+        # now. First, because centerOn and resizes below already scroll.
+        # Coalesced, so a pan asks once when it stops, not once per pixel;
+        # ui.catch_up then waits for the view to stay still before it
+        # rebuilds anything.
         self._area_settle = QTimer(self)
         self._area_settle.setSingleShot(True)
         self._area_settle.setInterval(60)
@@ -270,11 +272,12 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def _on_area_settled(self) -> None:
         scene = self.scene()
-        if scene is not None and hasattr(scene, "flush_deferred"):
-            scene.flush_deferred()
+        if scene is not None and hasattr(scene, "resume_deferred"):
+            scene.resume_deferred()
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         super().scrollContentsBy(dx, dy)
+        catch_up.stirred()
         self._area_settle.start()
 
     def showEvent(self, event) -> None:
@@ -865,6 +868,7 @@ class ZoomPanGraphicsView(QGraphicsView):
         shown = (self.viewportTransform(), self.viewport().size())
         if shown != self._last_shown:
             self._last_shown = shown
+            catch_up.stirred()
             self._area_settle.start()
 
     # ------------------------------------------------------------------ bg
