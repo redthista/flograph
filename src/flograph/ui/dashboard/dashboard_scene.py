@@ -205,9 +205,9 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
 
     def catch_up_candidate(self):
         """The put-off tile most worth filling next (see ui.catch_up): on a
-        page being looked at, nearest the view first; on a hidden page,
-        only once everything is quiet, and a web, report or slow one not
-        at all."""
+        page being looked at, at once and nearest the view first; on a
+        hidden page, only once everything is quiet, and a web, report or
+        slow one not at all."""
         self._stale_tiles &= self.tile_items.keys()
         if not self._stale_tiles:
             return None
@@ -218,9 +218,11 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         for tile_id in self._stale_tiles:
             item = self.tile_items[tile_id]
             if areas:
+                # the page is being looked at: this is the refill its
+                # showing asked for, so it waits for nothing
                 rect = item.sceneBoundingRect()
                 away = min(catch_up.screens_away(rect, a) for a in areas)
-                rank = (0 if away <= catch_up.PREFETCH else 1, away)
+                rank = (catch_up.NOW, away)
             elif item._kind() in ("plotly", "report") or catch_up.slow(item):
                 # a Chromium renderer each, or seconds of layout: these
                 # wait for the page to be shown, as they always did

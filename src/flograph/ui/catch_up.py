@@ -15,7 +15,12 @@ So the put-off work is done here instead, while nobody is doing anything:
   view has been still for `SETTLE_S`, so they are ready before a pan
   reaches them; everything else once the view and the run have both been
   quiet for `IDLE_S`, so a few seconds after a run nothing is left waiting;
-- nothing at all while a mouse button is held — a pan, a drag, a band;
+- nothing while a mouse button is held *and the view is moving* — a pan.
+  A held button alone is not trusted: Wayland loses a release now and
+  then (a click that switches page, a menu), and a button Qt believes is
+  still down would otherwise hold everything back for good;
+- a page just switched to is filled at once, a tile per turn, with no
+  quiet to wait for (tier `NOW`) — looking at it is the whole reason;
 - nothing slow ahead of time: a refresh that took longer than `SLOW_S`
   (a report card laying out a long table takes seconds) is a freeze the
   user walks into if they touch anything meanwhile, so it keeps waiting
@@ -26,8 +31,8 @@ once would put two rebuilds in one turn again.
 
 A scene takes part by `register()`ing itself and answering
 ``catch_up_candidate()`` with its most deserving put-off refresh, as
-``(tier, distance, run, key)`` — tier 0 for "in or near view", 1 for the
-rest, distance in screens, `key` the card or tile, which is what its time
+``(tier, distance, run, key)`` — tier `NOW` for "on a page just shown",
+0 for "in or near view", 1 for the rest, distance in screens, `key` the card or tile, which is what its time
 is remembered against — or None when it has nothing it can do yet. `run`
 must take the refresh off the scene's books before doing it, so one that
 raises is not picked again forever.
@@ -52,6 +57,10 @@ PREFETCH = 1.0
 SLOW_S = 0.3
 # re-check this often while a button is held
 _HANDS_ON_MS = 100
+# a held button counts only if the view moved this recently
+_HANDS_ON_MOVING_S = 1.0
+# the tier that waits for nothing
+NOW = -1
 
 _sources: "weakref.WeakSet" = weakref.WeakSet()
 _last_stir = 0.0
@@ -124,14 +133,16 @@ def _tick() -> None:
     best = _best()
     if best is None:
         return
-    if QApplication.mouseButtons() != Qt.NoButton:
-        _timer.start(_HANDS_ON_MS)
-        return
-    wait = SETTLE_S if best[0] == 0 else IDLE_S
-    left = wait - (time.monotonic() - _last_stir)
-    if left > 0:
-        _timer.start(int(left * 1000) + 1)
-        return
+    if best[0] != NOW:
+        quiet = time.monotonic() - _last_stir
+        if quiet < _HANDS_ON_MOVING_S \
+                and QApplication.mouseButtons() != Qt.NoButton:
+            _timer.start(_HANDS_ON_MS)
+            return
+        left = (SETTLE_S if best[0] == 0 else IDLE_S) - quiet
+        if left > 0:
+            _timer.start(int(left * 1000) + 1)
+            return
     started = time.monotonic()
     try:
         best[2]()

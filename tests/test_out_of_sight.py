@@ -198,8 +198,7 @@ class TestCatchingUp:
         qtbot.waitUntil(lambda: len(order) == 2, timeout=5000)
         assert order == [near.id, far.id]
 
-    def test_nothing_is_rebuilt_while_a_button_is_held(
-            self, window, qtbot, monkeypatch):
+    def test_nothing_is_rebuilt_mid_pan(self, window, qtbot, monkeypatch):
         from PySide6.QtCore import Qt
 
         from flograph.ui import catch_up
@@ -213,11 +212,16 @@ class TestCatchingUp:
         monkeypatch.setattr(
             catch_up.QApplication, "mouseButtons",
             lambda: Qt.LeftButton if held[0] else Qt.NoButton)
+        # a hand dragging the canvas: button down, view moving
+        panning = QTimer()
+        panning.timeout.connect(catch_up.stirred)
+        panning.start(50)
 
         _run(win, qtbot)
         qtbot.wait(catch_up.IDLE_S * 1000 + 400)
         assert "output" in item.deferred_refreshes
 
+        panning.stop()
         held[0] = False
         qtbot.waitUntil(lambda: not item.deferred_refreshes, timeout=5000)
 
@@ -294,6 +298,63 @@ class TestHiddenPages:
         win.page_bar.select_page("p1")
         qtbot.waitUntil(lambda: not page.scene._stale_tiles, timeout=3000)
         assert tile._table_view.model().rowCount() == 3
+
+
+    def _web_tile_page(self, win, qtbot):
+        source = _table(win)
+        chart = win.registry.instantiate("flograph.viz.show_plotly",
+                                         pos=(300, 0))
+        win.graph.add_node(chart)
+        win.graph.connect(source.id, "table", chart.id, "table")
+        win.undo_stack.push(AddPageCommand(win.graph, Page(id="p1",
+                                                           title="Board")))
+        win.undo_stack.push(AddTileCommand(win.graph, "p1", Tile(
+            id="t1", node_id=chart.id, port="figure")))
+        page = win._dashboard_pages["p1"]
+        win.show()
+        qtbot.waitExposed(win)
+        win.page_bar.select_page(None)
+        qtbot.waitUntil(lambda: not page.isVisible(), timeout=2000)
+        return page
+
+    def test_a_web_tile_waits_for_its_page_then_fills(self, window, qtbot):
+        """A chart tile holds a Chromium renderer, so a hidden page keeps
+        it put off through the quiet — and fills it the moment it is
+        shown."""
+        from flograph.ui import catch_up
+
+        win = window
+        page = self._web_tile_page(win, qtbot)
+        _run(win, qtbot)
+        qtbot.wait(catch_up.IDLE_S * 1000 + 400)
+        assert "t1" in page.scene._stale_tiles
+
+        win.page_bar.select_page("p1")
+        qtbot.waitUntil(lambda: not page.scene._stale_tiles, timeout=5000)
+        assert page.scene.tile_items["t1"]._plotly_widget._path is not None
+
+    def test_a_button_qt_thinks_is_down_holds_nothing_back(
+            self, window, qtbot, monkeypatch):
+        """Wayland loses a release now and then — the click on a page's
+        tab is one. A page just shown fills regardless, and a held button
+        with the view still counts for nothing."""
+        from PySide6.QtCore import Qt
+
+        from flograph.ui import catch_up
+
+        win = window
+        page = self._web_tile_page(win, qtbot)
+        _run(win, qtbot)
+        monkeypatch.setattr(catch_up.QApplication, "mouseButtons",
+                            lambda: Qt.LeftButton)
+        win.page_bar.select_page("p1")
+        qtbot.waitUntil(lambda: not page.scene._stale_tiles, timeout=5000)
+
+        win.page_bar.select_page(None)
+        far = _show_table(win, _table(win), pos=(40000, 40000))
+        item = win.scene.node_items[far.id]
+        _run(win, qtbot)
+        qtbot.waitUntil(lambda: not item.deferred_refreshes, timeout=5000)
 
 
 # ------------------------------------------------------ report cards
