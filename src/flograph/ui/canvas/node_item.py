@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
+from flograph.core import perf
 from flograph.core import NodeInstance, PortSpec, PortType
 from flograph.core.links import link_label, source_id
 from flograph.core.node import NodeStatus
@@ -918,6 +919,9 @@ class NodeItem(QGraphicsObject):
         self._move_suppressed = False  # body press cleared ItemIsMovable
         self._button_edit = False  # button in edit mode (right-click to enter)
         self._flat = False  # painting as a flat rect with ports/widgets hidden (see set_lod)
+        # refreshes put off while the card was out of sight, by kind
+        # (scene.defer_refresh); run when it comes back into view
+        self.deferred_refreshes: dict = {}
         self._note_editor: QGraphicsProxyWidget | None = None
         self._note_editor_widget: QPlainTextEdit | None = None
         self._closing_note_edit = False
@@ -1839,6 +1843,7 @@ class NodeItem(QGraphicsObject):
         if view is not None and hasattr(view, "set_grid"):
             view.set_grid(*grid_settings(self.node.params))
 
+    @perf.timed('plotly: set figure')
     def set_plotly_figure(self, figure) -> None:
         """Render a freshly computed plotly figure (or None) into the
         embedded webview — called from the GUI thread once the engine
@@ -1894,6 +1899,7 @@ class NodeItem(QGraphicsObject):
         self._layout_report_proxy()
         self.refresh_report()
 
+    @perf.timed('report card render')
     def refresh_report(self) -> None:
         """Re-render the card's markdown against whatever is wired in.
 
@@ -2070,6 +2076,7 @@ class NodeItem(QGraphicsObject):
         proxy.setOpacity(0.45 if self._updating else 1.0)
         self._layout_table_viewer_proxy()
 
+    @perf.timed('table: set data')
     def set_table_data(self, table, style=None) -> None:
         """Push a freshly computed DataFrame (or None) onto the embedded
         table view — called from the GUI thread once the engine reports this
@@ -3159,6 +3166,12 @@ class NodeItem(QGraphicsObject):
         self._apply_port_visibility()
         self._apply_proxy_visibility()
         self.update()
+
+    def flush_deferred(self) -> None:
+        pending = list(self.deferred_refreshes.values())
+        self.deferred_refreshes.clear()
+        for refresh in pending:
+            refresh()
 
     def set_active(self, active: bool) -> None:
         """Fade a deactivated node back instead of repainting it.

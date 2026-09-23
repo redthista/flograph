@@ -23,6 +23,7 @@ from typing import Iterable, Optional
 
 from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 
+from flograph.core import perf
 from flograph.core.graph import Graph
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
@@ -1265,22 +1266,26 @@ class ExecutionEngine(QObject):
         return None, None
 
     def _on_node_finished(self, node_id: str, outputs: dict, wall_time: float) -> None:
-        inflight = self._retire(node_id)
-        if node_id in self.graph.nodes:
-            alias_of, alias_port = self._alias_source(
-                node_id, outputs,
-                inflight.handed_in if inflight is not None else {})
-            self.cache.set(node_id, outputs, wall_time,
-                           alias_of=alias_of, alias_port=alias_port)
-            if self._answered_the_question(node_id, inflight):
-                self.graph.mark_clean(node_id)
-            else:
-                self._stale.add(node_id)
-            self.graph.set_status(node_id, NodeStatus.DONE)
-            self.node_succeeded.emit(node_id)
-        self._close_node_run(inflight, "ok", wall_time)
-        self._release_successors(node_id)
-        self._dispatch()
+        # timed in the body, not by decorator: this is a slot on a worker
+        # signal, and the engine's connections stay plain bound methods
+        with perf.timed("engine: node finished"):
+            inflight = self._retire(node_id)
+            if node_id in self.graph.nodes:
+                alias_of, alias_port = self._alias_source(
+                    node_id, outputs,
+                    inflight.handed_in if inflight is not None else {})
+                with perf.timed("engine: cache set"):
+                    self.cache.set(node_id, outputs, wall_time,
+                                   alias_of=alias_of, alias_port=alias_port)
+                if self._answered_the_question(node_id, inflight):
+                    self.graph.mark_clean(node_id)
+                else:
+                    self._stale.add(node_id)
+                self.graph.set_status(node_id, NodeStatus.DONE)
+                self.node_succeeded.emit(node_id)
+            self._close_node_run(inflight, "ok", wall_time)
+            self._release_successors(node_id)
+            self._dispatch()
 
     def _on_node_failed(self, node_id: str, error: NodeError) -> None:
         inflight = self._retire(node_id)

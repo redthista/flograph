@@ -32,6 +32,7 @@ from PySide6.QtGui import (QImage, QImageReader, QPainter, QPainterPath,
 # parse_aspect lives in core: a dashboard tile's shape is stated in the same
 # words as a `ratio=` here, and two readers of "16:9" would drift. Imported
 # by name so the renderer, and the tests that reach it through here, keep it.
+from flograph.core import perf
 from flograph.core.aspect import parse_aspect
 from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
                                   PAGEBREAK_TOKEN, format_scalar,
@@ -436,6 +437,7 @@ def plotly_geometry(value, image_width: int, for_print: bool,
     return width, height, round(scale, 3)
 
 
+@perf.timed('report: plotly picture')
 def plotly_image(value, image_width: int, for_print: bool,
                  aspect: "float | None" = None, scale_mult: float = 1.0):
     """A Plotly figure as PNG bytes, or a warning block if it cannot be.
@@ -515,6 +517,7 @@ def _card_dimension(value, fallback: int) -> int:
     return number if number > 0 else fallback
 
 
+@perf.timed('report: web picture')
 def html_image(value, params, image_width: int, for_print: bool,
                aspect: "float | None" = None, scale_mult: float = 1.0,
                grid: tuple = ()):
@@ -1156,6 +1159,7 @@ class _Resolver:
             return markdown
         return body[body.find(">", start) + 1:end]
 
+    @perf.timed('report: matplotlib picture')
     def _matplotlib_image(self, value):
         """A matplotlib Figure as a QImage with this embed's shape and
         density applied, or None for anything that isn't a Figure.
@@ -1286,6 +1290,7 @@ class _Resolver:
 
         return format_scalar(value)
 
+    @perf.timed('report: table embed')
     def _table(self, value, ref: str) -> str:
         """A frame as a table, carrying whatever formatting its card shows.
 
@@ -1460,6 +1465,7 @@ def render_card(body: str, graph, cache, node_id: str,
                        header_fill=header_fill)
 
 
+@perf.timed('report: render body')
 def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 image_scale: float = 1.0, source=None,
                 nested=None, page_break_rule: bool = False,
@@ -1705,6 +1711,7 @@ def _measure(document, placement: "_TablePlacement") -> "tuple | None":
     return rect.top(), rect.height(), table.rows() - 1      # minus the header
 
 
+@perf.timed('report: fit tables')
 def fit_tables(document, html: str, resolver, page_height: "float | None",
                page_width: int) -> str:
     """Give each measured table the size it asked for, now that there is a

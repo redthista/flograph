@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
+from flograph.core import perf
 from flograph.core import (
     Graph, GraphError, NodeInstance, NodeRegistry, NodeStatus, Page, Tile,
     parse_spec,
@@ -357,7 +358,14 @@ class MainWindow(QMainWindow):
         self._report_refresh = QTimer(self)
         self._report_refresh.setSingleShot(True)
         self._report_refresh.setInterval(120)
-        self._report_refresh.timeout.connect(self._refresh_report_cards)
+        self._report_refresh.timeout.connect(
+            lambda: self._refresh_report_cards(self._take_report_changes()))
+        # Nodes whose output or params changed since report cards last
+        # looked — a card re-renders only when something it shows is in
+        # here (see _report_card_affected). None means "assume everything".
+        self._report_changes: "Optional[set]" = set()
+        # nodes that finished during the current run
+        self._ran_this_run: set = set()
 
         self._build_docks()
         self._build_actions()
@@ -1616,11 +1624,13 @@ class MainWindow(QMainWindow):
             lambda: self.scene.set_requested_nodes(engine.requested_nodes))
         # every run: a report card's content lives upstream of it, so the
         # cards that changed are not the ones that ran
-        engine.run_finished.connect(lambda *_: self._refresh_report_cards())
+        engine.run_started.connect(self._ran_this_run.clear)
+        engine.node_succeeded.connect(self._ran_this_run.add)
+        engine.run_finished.connect(self._on_run_finished_reports)
         # ...and on a param change, because a *cosmetic* one (chart layout)
         # deliberately never runs anything
         self.graph.events.param_changed.connect(
-            lambda *_: self._report_refresh.start())
+            lambda node_id, *_: self._note_report_change(node_id))
         self.graph.events.preview_enabled_changed.connect(
             self._on_preview_enabled_changed)
 
@@ -1666,6 +1676,7 @@ class MainWindow(QMainWindow):
             self.show_status(
                 f"{labels}: kept the linked contents in the table", 5000)
 
+    @perf.timed('card: figure')
     def _on_figure_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "figure":
@@ -1675,6 +1686,11 @@ class MainWindow(QMainWindow):
         item = self.scene.node_items.get(node_id)
         if item is None:
             return
+        # Out of sight, the card waits — it reads the cache when it is
+        # scrolled to, so skipping it now loses nothing (AE2).
+        if self.scene.defer_refresh(
+                item, "output", lambda: self._on_figure_node_succeeded(node_id)):
+            return
         entry = self.engine.cache.get(node_id)
         # the node's own first output, not a hardcoded "figure": a figure
         # card is free to name its port anything (Chart per Value emits
@@ -1682,6 +1698,7 @@ class MainWindow(QMainWindow):
         port = node.spec.outputs[0].name if node.spec.outputs else "figure"
         item.set_figure(entry.outputs.get(port) if entry else None)
 
+    @perf.timed('card: plotly')
     def _on_plotly_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "webview":
@@ -1690,6 +1707,9 @@ class MainWindow(QMainWindow):
             return
         item = self.scene.node_items.get(node_id)
         if item is None:
+            return
+        if self.scene.defer_refresh(
+                item, "output", lambda: self._on_plotly_node_succeeded(node_id)):
             return
         entry = self.engine.cache.get(node_id)
         # a webview node's rendered output is its first declared output port
@@ -1710,6 +1730,7 @@ class MainWindow(QMainWindow):
         from .browser import can_open
         return can_open(node, self.engine.cache.get(node_id))
 
+    @perf.timed('browser page')
     def _on_browser_node_succeeded(self, node_id: str) -> None:
         """Keep an open browser tab level with the canvas.
 
@@ -1735,7 +1756,50 @@ class MainWindow(QMainWindow):
         self.engine.cache.outputs_for(node_id)
         return open_node_from(self, node, self.engine.cache.get(node_id))
 
-    def _refresh_report_cards(self) -> None:
+    def _note_report_change(self, node_id: "Optional[str]") -> None:
+        """Something a report card might show changed; look soon."""
+        if self._report_changes is not None:
+            if node_id is None:
+                self._report_changes = None
+            else:
+                self._report_changes.add(node_id)
+        self._report_refresh.start()
+
+    def _take_report_changes(self) -> "Optional[set]":
+        changed, self._report_changes = self._report_changes, set()
+        return changed
+
+    def _on_run_finished_reports(self, *_) -> None:
+        changed = self._take_report_changes()
+        if changed is not None:
+            changed |= self._ran_this_run
+        self._ran_this_run.clear()
+        self._refresh_report_cards(changed)
+
+    def _report_card_affected(self, node, changed: set) -> bool:
+        """Could anything this card shows be among `changed`?
+
+        Its own node (the text, or it re-ran because a wire into it did),
+        anything upstream of it (a cosmetic chart param changes the picture
+        without running anything), or a node it names by label. The label
+        test is a substring search for `[[Label` rather than a parse: a
+        false yes costs one render, the price every card used to pay on
+        every run."""
+        if node.id in changed:
+            return True
+        if changed & self.graph.upstream(node.id):
+            return True
+        body = str(node.params.get("text", "") or "")
+        if "[[" not in body:
+            return False
+        for node_id in changed:
+            other = self.graph.nodes.get(node_id)
+            if other is not None and f"[[{other.label}" in body:
+                return True
+        return False
+
+    @perf.timed('report cards')
+    def _refresh_report_cards(self, changed: "Optional[set]" = None) -> None:
         """Re-render every report card on the canvas. Blunt on purpose:
         working out which cards embed which upstream node would duplicate
         the embed parser for no gain.
@@ -1746,13 +1810,23 @@ class MainWindow(QMainWindow):
         pass. A finished run calls this directly; there is only one of those.
         """
         self._report_refresh.stop()
+        refreshed = set()
         for item in self.scene.node_items.values():
-            if getattr(item, "report_card", False):
+            if not getattr(item, "report_card", False):
+                continue
+            if changed is not None and not self._report_card_affected(
+                    item.node, changed):
+                continue
+            refreshed.add(item.node.id)
+            # out of sight, it renders when it is scrolled to (AE2)
+            if not self.scene.defer_refresh(item, "report",
+                                            item.refresh_report):
                 item.refresh_report()
         # Same trigger, same coalescing: a card whose page is open in a
         # browser has that page rewritten here too.
-        self._refresh_open_report_cards()
+        self._refresh_open_report_cards(refreshed)
 
+    @perf.timed('card: table')
     def _on_table_viewer_node_succeeded(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
         if node is None or card_kind(node) != "table_viewer":
@@ -1762,6 +1836,9 @@ class MainWindow(QMainWindow):
         item = self.scene.node_items.get(node_id)
         if item is None:
             return
+        if self.scene.defer_refresh(
+                item, "output", lambda: self._on_table_viewer_node_succeeded(node_id)):
+            return
         entry = self.engine.cache.get(node_id)
         # first output holds the displayed frame: "table" for Show Table,
         # "spec" for Table Spec
@@ -1769,6 +1846,7 @@ class MainWindow(QMainWindow):
         style = entry.outputs.get("style") if entry else None
         item.set_table_data(entry.outputs.get(port) if entry else None, style)
 
+    @perf.timed('card: grid')
     def _on_grid_node_succeeded(self, node_id: str) -> None:
         """After a linked Table run, show the merged sheet on the card:
         input-owned columns refreshed, the user's own columns (formula
@@ -1884,6 +1962,7 @@ class MainWindow(QMainWindow):
         else:
             item.set_card_value(entry.outputs.get("value"))
 
+    @perf.timed('card: slicer')
     def _on_slicer_node_succeeded(self, node_id: str) -> None:
         """Populate the slicer's checkbox list with the column's unique
         values, read from the *upstream* cache — the slicer's own output is
@@ -1952,7 +2031,7 @@ class MainWindow(QMainWindow):
         elif kind == "report":
             # Coalesced: a report re-reads every embed it names, and an open
             # lands a batch of them at once (see _refresh_report_cards).
-            self._report_refresh.start()
+            self._note_report_change(node_id)
 
     # ------------------------------------------- cache data arriving late
 
@@ -2142,6 +2221,7 @@ class MainWindow(QMainWindow):
                            width=PageSetup().body_width_points(),
                            image_scale=2.0 if for_print else 1.0)
 
+    @perf.timed('export: report card pdf')
     def _export_report_card_pdf(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
         rendered = self._render_report_card(node_id, for_print=True)
@@ -2165,6 +2245,7 @@ class MainWindow(QMainWindow):
         else:
             self.show_status(f"Exported {path}", 6000)
 
+    @perf.timed('export: report card html')
     def _export_report_card_html(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
         rendered = self._render_report_card(node_id, for_print=True)
@@ -2198,7 +2279,8 @@ class MainWindow(QMainWindow):
         remember(node_id, path)
         self.show_status(status_message(node, path), 8000)
 
-    def _refresh_open_report_cards(self) -> None:
+    @perf.timed('report browser pages')
+    def _refresh_open_report_cards(self, only: "Optional[set]" = None) -> None:
         """Keep an open browser tab level with the report cards on canvas.
 
         A report card is not like a webview node: it re-renders when its
@@ -2210,6 +2292,8 @@ class MainWindow(QMainWindow):
         from .browser import is_open, rewrite
         for node_id, node in self.graph.nodes.items():
             if not is_open(node_id) or card_kind(node) != "report":
+                continue
+            if only is not None and node_id not in only:
                 continue
             rendered = self._render_report_card(node_id, for_print=False)
             if rendered is not None:
@@ -2297,6 +2381,7 @@ class MainWindow(QMainWindow):
         else:
             self.show_status(f"Saved {path}", 6000)
 
+    @perf.timed('export: report html')
     def _export_report_html(self, page_id: str) -> None:
         """The report as one self-contained HTML file.
 
@@ -2315,6 +2400,7 @@ class MainWindow(QMainWindow):
         self._write_html(widget.rendered(for_print=True), path, page.title,
                          setup=page.setup, custom_css=page.custom_css)
 
+    @perf.timed('export: report pdf')
     def _export_report_pdf(self, page_id: str) -> None:
         page = self.graph.pages.get(page_id)
         widget = self._dashboard_pages.get(page_id)
@@ -5683,6 +5769,7 @@ class MainWindow(QMainWindow):
         self.show_status(
             f"Loaded example '{path.stem}' — use Save As to keep it", 4000)
 
+    @perf.timed('open project')
     def open_path(self, path: str, confirm: bool = True) -> bool:
         if self._cache_still_loading():
             return False
@@ -5730,6 +5817,7 @@ class MainWindow(QMainWindow):
         self._offer_requirements()
         return True
 
+    @perf.timed('open: restore cache')
     def _restore_cache(self, path: str, quiet: bool = False) -> None:
         """Register the just-opened project's cached results without reading
         any of them.
@@ -5917,6 +6005,7 @@ class MainWindow(QMainWindow):
                 sources.update(self.graph.var_sources(node_id))
         return ids + sorted(sources.difference(ids))
 
+    @perf.timed('open: build canvas and pages')
     def _replace_graph(self, loaded: Graph) -> None:
         # A wire/node/frame drag or a middle-drag pan in progress when Open
         # fires never gets its mouse release — the items go away underneath

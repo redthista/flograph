@@ -212,6 +212,16 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def __init__(self, scene, parent=None) -> None:
         super().__init__(scene, parent)
+
+        # The part of the scene on screen changed: a card that was skipped
+        # while out of sight (scene.defer_refresh) may be in sight now.
+        # First, because centerOn and resizes below already scroll.
+        # Coalesced, so a pan is one pass when it stops, not one per pixel.
+        self._area_settle = QTimer(self)
+        self._area_settle.setSingleShot(True)
+        self._area_settle.setInterval(60)
+        self._area_settle.timeout.connect(self._on_area_settled)
+        self._last_shown = None
         # SmoothPixmapTransform matters for the embedded figure/webview
         # cards: without it any zoomed raster is scaled nearest-neighbor
         # and reads as pixelated instead of merely soft
@@ -258,7 +268,25 @@ class ZoomPanGraphicsView(QGraphicsView):
         self._zoom_settle.setInterval(150)
         self._zoom_settle.timeout.connect(self._on_zoom_settled)
 
+    def _on_area_settled(self) -> None:
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "flush_deferred"):
+            scene.flush_deferred()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        self._area_settle.start()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._area_settle.start()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._area_settle.start()
+
     def _on_zoom_settled(self) -> None:
+        self._area_settle.start()
         scene = self.scene()
         if scene is not None and hasattr(scene, "refresh_render_ratios"):
             scene.refresh_render_ratios()
@@ -830,6 +858,14 @@ class ZoomPanGraphicsView(QGraphicsView):
         started = time.perf_counter()
         super().paintEvent(event)
         self.paint_stats.record(time.perf_counter() - started)
+        # Panning here is translate(), which no virtual reports, so the paint
+        # is where a moved or zoomed view is noticed: a different transform
+        # or viewport size than last time means a different part of the
+        # scene is on screen (see _area_settle).
+        shown = (self.viewportTransform(), self.viewport().size())
+        if shown != self._last_shown:
+            self._last_shown = shown
+            self._area_settle.start()
 
     # ------------------------------------------------------------------ bg
 

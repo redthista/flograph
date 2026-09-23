@@ -382,6 +382,8 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         self._refresh_collapsed_frames()
         self.refresh_frame_holds()
         self._queue_rect_fit()
+        # cards on the canvas now shown may have been skipped while hidden
+        QTimer.singleShot(0, self.flush_deferred)
 
     def place_here(self, *objects):
         """Stamp new nodes, frames or shapes onto the canvas being shown, so
@@ -1299,6 +1301,55 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         if item is not None:
             item.refresh_status()
 
+    # ---------------------------------------------- refreshes out of sight
+
+    def defer_refresh(self, item, key: str, refresh) -> bool:
+        """Put off a card's refresh while nobody can see the card.
+
+        True means postponed: `refresh` is kept on the item under `key` (a
+        later one for the same key replaces it) and runs the next time the
+        card comes into sight — a pan, a zoom back into detail, the canvas
+        page shown again (`flush_deferred`). False means go ahead now.
+
+        Rebuilding a card nobody is looking at is where a busy flow's
+        freezes came from: a report card below the fold re-rendered its
+        charts after every run, and a table on a canvas behind a dashboard
+        page re-evaluated every rule. The value is in the cache either way,
+        so the card loses nothing by reading it later.
+        """
+        if self.can_see(item):
+            item.deferred_refreshes.pop(key, None)
+            return False
+        item.deferred_refreshes[key] = refresh
+        return True
+
+    def can_see(self, item) -> bool:
+        """Is any of this card on a screen right now?
+
+        A window that isn't showing at all (tests, a window being built)
+        counts as seeing everything, which keeps every refresh as eager as
+        it always was there. Inside a showing window, the card must be on a
+        visible view, inside its viewport, and drawn in detail."""
+        if getattr(item, "_flat", False) or not item.isVisible():
+            return False
+        views = [v for v in self.views() if v.window().isVisible()]
+        if not views:
+            return True
+        rect = item.sceneBoundingRect()
+        for view in views:
+            if not view.isVisible():
+                continue
+            area = view.mapToScene(view.viewport().rect()).boundingRect()
+            if area.intersects(rect):
+                return True
+        return False
+
+    def flush_deferred(self) -> None:
+        """Run the postponed refreshes of every card now in sight."""
+        for item in list(self.node_items.values()):
+            if item.deferred_refreshes and self.can_see(item):
+                item.flush_deferred()
+
     def set_requested_nodes(self, node_ids) -> None:
         """Which nodes have a re-run queued. Only the cards whose answer
         changes are touched — on a large flow a queued run covers most of
@@ -1635,6 +1686,9 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         Settings dialog) so the effect is immediate rather than waiting for
         the next zoom change."""
         self._apply_lod()
+        # a settings change moves no view, so nothing else would notice
+        # that the cards are drawn in detail again
+        QTimer.singleShot(0, self.flush_deferred)
 
     def refresh_render_ratios(self) -> None:
         """Re-target figure cards' render resolution — called by the view

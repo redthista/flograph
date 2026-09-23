@@ -44,6 +44,8 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         self.undo_stack = undo_stack
         self.page_id = page_id
         self.tile_items: dict[str, TileItem] = {}
+        # tiles whose refresh was put off while this page was out of sight
+        self._stale_tiles: set[str] = set()
 
         # Snap-to-grid view preference; the main window is the sole writer.
         from ..canvas.grid import DEFAULT_STEP
@@ -100,9 +102,10 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
     def _on_tile_added(self, page_id: str, tile: Tile) -> None:
         if page_id != self.page_id:
             return
-        item = TileItem(tile, self.graph, self.engine)
+        item = TileItem(tile, self.graph, self.engine, fill=False)
         self.addItem(item)
         self.tile_items[tile.id] = item
+        item.refresh_content()
         if self.view_mode:
             # undoing a delete on a view-mode page must bring the tile back
             # locked, not as the one movable thing on a locked page
@@ -164,6 +167,34 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
             item.sync_from_model()
             # a tile moved or resized changes what "the whole page" is
             self.queue_view_fit()
+
+    def page_hidden(self) -> bool:
+        """Is this page behind another one in a window that is showing?
+
+        A window that isn't showing (tests, a window still being built)
+        counts as looking at every page, which keeps those as eager as
+        they always were."""
+        views = [v for v in self.views() if v.window().isVisible()]
+        return bool(views) and not any(v.isVisible() for v in views)
+
+    def defer_tile(self, item) -> bool:
+        """Put off refilling a tile on a page nobody is looking at. Every
+        dashboard page is built up front and hears every run, so without
+        this a hidden page re-rendered its charts and re-read its tables
+        from the cache — from disk, on an open — for nobody. True means
+        postponed until `flush_stale`."""
+        if not self.page_hidden():
+            return False
+        self._stale_tiles.add(item.tile.id)
+        return True
+
+    def flush_stale(self) -> None:
+        """The page came into sight: refill what was put off."""
+        stale, self._stale_tiles = self._stale_tiles, set()
+        for tile_id in stale:
+            item = self.tile_items.get(tile_id)
+            if item is not None:
+                item.refresh_content()
 
     def _tiles_for(self, node_id: str) -> list[TileItem]:
         return [item for item in self.tile_items.values()

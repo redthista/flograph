@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QTableView, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
+from flograph.core import perf
 from flograph.core import NodeStatus, Tile
 from flograph.core.tile_style import (CARD_LOOK, NOTE_LOOK, TRANSPARENT,
                                       resolve)
@@ -171,7 +172,7 @@ def default_tile_size(node) -> tuple[float, float]:
 
 
 class TileItem(QGraphicsObject):
-    def __init__(self, tile: Tile, graph, engine) -> None:
+    def __init__(self, tile: Tile, graph, engine, fill: bool = True) -> None:
         super().__init__()
         self.tile = tile
         self._graph = graph
@@ -256,7 +257,10 @@ class TileItem(QGraphicsObject):
         self._build_host()
         self._built = True
         self.apply_stacking()
-        self.refresh_content()
+        # A dashboard scene fills its tiles itself once they are added, so a
+        # page nobody is looking at can put it off (DashboardScene.defer_tile)
+        if fill:
+            self.refresh_content()
 
     # ------------------------------------------------------------- geometry
 
@@ -961,9 +965,14 @@ class TileItem(QGraphicsObject):
                 self._graph, node.id, "selected", new_value))
         scene.slicer_changed.emit(node.id)
 
+    @perf.timed('tile')
     def refresh_content(self) -> None:
         """Pull the node's cached output into the content widget — called on
         build, on node success/failure, and when the node is (un)deleted."""
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "defer_tile") \
+                and scene.defer_tile(self):
+            return
         # a node deleted or restored changes kind, and a kind is what says
         # whether the tile has a title bar, and takes a format, at all
         self._look_cache = None

@@ -4,7 +4,7 @@ pair; dispose() must be called when the page is removed (core events hold
 strong refs to the scene, the list and the pane)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QMenu, QSplitter,
@@ -337,6 +337,10 @@ class DashboardPage(QWidget):
         same bargain the report preview makes."""
         super().showEvent(event)
         self.scene.set_animations_playing(True)
+        # tiles skipped while the page was hidden; after this paint, so the
+        # page appears at once and its tiles catch up
+        # (the page is the timer's context: disposed first, it never fires)
+        QTimer.singleShot(0, self, lambda: self.scene.flush_stale())
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)

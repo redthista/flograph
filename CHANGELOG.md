@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Performance | **What nobody can see costs nothing** — busy flows stop freezing after a run | A flow with many long formatted tables, charts and a report card froze the window for seconds after every run, and almost none of that work was for anything on screen: every card re-rendered after every run, including the ones scrolled out of view, zoomed out to flat boxes, or on a dashboard page behind the one you were looking at. Out of sight, a card now waits and refreshes when it comes into view (a pan, a zoom back into detail, its page shown); a hidden dashboard page fills its tiles when you switch to it. **Report cards** re-render only when something they show changed — their own text, anything wired into them, anything upstream of that, or a node they name by label — instead of after every run of anything, which is also why **Stop** could take many seconds longer than the node it was waiting on. Measured on `scripts/bench_busy.py` (13 formatted 50,000-row tables, 8 charts, 2 dashboard pages, a report card and a report page): a run went from 26.7 s to 2.6 s with the longest freeze from 13.4 s to 0.47 s, and opening the saved project from 5.6 s to 0.16 s. Set `FLOGRAPH_PERF=1` to have anything slow on the GUI thread named in the terminal as it happens. |
 
 ## 0.1.15
 

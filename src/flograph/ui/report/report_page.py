@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QSplitter, QStackedWidget, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
+from flograph.core import perf
 from flograph.core import Graph
 
 from ..commands import (SetPageBodyCommand, SetPageCustomCssCommand,
@@ -422,6 +423,7 @@ class ReportPage(QWidget):
 
     # ---------------------------------------------------------- the preview
 
+    @perf.timed('report page')
     def refresh_preview(self) -> None:
         import shiboken6
 

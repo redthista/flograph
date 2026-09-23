@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QToolTip,
 )
 
+from flograph.core import perf
 from flograph.core.table_picks import Picks, parse_picks
 
 from .spreadsheet.clipboard import block_to_html, block_to_tsv
@@ -458,6 +459,7 @@ class DataTableView(QTableView):
             else QHeaderView.Interactive)      # Qt's own default otherwise
         self._apply_text_size(refit=False)   # row height for this font
 
+    @perf.timed('table: fit columns')
     def fit_columns_to_data(self) -> None:
         """Size each column to the wider of its header and its sampled
         content, clamped to [MIN_COL_WIDTH, MAX_COL_WIDTH] — unless a
