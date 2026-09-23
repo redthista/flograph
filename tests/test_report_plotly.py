@@ -192,3 +192,65 @@ class TestInAReport:
 
     def test_a_non_plotly_value_is_not_claimed(self):
         assert plotly_image("just a string", 510, False) is None
+
+
+class TestInTheBackground:
+    """AE4: on screen, a chart not drawn yet is a placeholder and is drawn
+    without the window waiting on Chromium with its input shut off."""
+
+    def test_a_new_picture_is_pending_then_cached(self, qtbot, figure):
+        plotly_snapshot.clear_cache()
+        ready = []
+        with plotly_snapshot.deferred(lambda: ready.append(True)):
+            first = plotly_snapshot.snapshot(figure, 500, 300)
+        assert first is plotly_snapshot.PENDING
+        qtbot.waitUntil(lambda: bool(ready), timeout=45000)
+        again = plotly_snapshot.snapshot(figure, 500, 300)
+        if again is None:
+            pytest.skip("Qt WebEngine could not render here")
+        assert again[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_a_cached_picture_needs_no_second_pass(self, qtbot, figure):
+        plotly_snapshot.clear_cache()
+        if plotly_snapshot.snapshot(figure, 420, 280) is None:
+            pytest.skip("Qt WebEngine could not render here")
+        ready = []
+        with plotly_snapshot.deferred(lambda: ready.append(True)):
+            got = plotly_snapshot.snapshot(figure, 420, 280)
+        assert isinstance(got, bytes)
+        qtbot.wait(50)
+        assert ready == []
+
+    def test_a_pending_chart_is_a_placeholder_the_right_size(self, qtbot,
+                                                           figure):
+        from PySide6.QtGui import QImage
+
+        plotly_snapshot.clear_cache()
+        ready = []
+        with plotly_snapshot.deferred(lambda: ready.append(True)):
+            data = plotly_image(figure, 510, for_print=False)
+        # not left drawing into the next test
+        qtbot.waitUntil(lambda: bool(ready), timeout=45000)
+        image = QImage()
+        assert image.loadFromData(data, "PNG")
+        width, height, scale = plotly_geometry(figure, 510, for_print=False)
+        assert (image.width(), image.height()) == (round(width * scale),
+                                                   round(height * scale))
+
+    def test_a_failed_draw_is_not_queued_forever(self, qtbot, figure,
+                                                 monkeypatch):
+        """A figure the page cannot draw must fall back like before, not
+        bounce between a placeholder and another attempt."""
+        plotly_snapshot.clear_cache()
+        snap = plotly_snapshot._SNAPSHOTTER
+        monkeypatch.setattr(snap, "_broken", True)
+        monkeypatch.setattr(snap, "_view", None)
+        ready = []
+        with plotly_snapshot.deferred(lambda: ready.append(True)):
+            assert plotly_snapshot.snapshot(figure, 300, 200) \
+                is plotly_snapshot.PENDING
+        qtbot.waitUntil(lambda: bool(ready), timeout=2000)
+        with plotly_snapshot.deferred(lambda: ready.append("again")):
+            assert plotly_snapshot.snapshot(figure, 300, 200) is None
+        qtbot.wait(50)
+        assert ready == [True]

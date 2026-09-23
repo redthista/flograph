@@ -454,10 +454,16 @@ def plotly_image(value, image_width: int, for_print: bool,
     width, height, scale = plotly_geometry(value, image_width, for_print,
                                            aspect, scale_mult)
     try:
-        from .plotly_snapshot import snapshot
+        from .plotly_snapshot import PENDING, snapshot
         image = snapshot(value, width, height, scale)
     except Exception:
         image = None
+    else:
+        if image is PENDING:
+            # being drawn in the background (plotly_snapshot.deferred); the
+            # render is redone when it is in
+            return placeholder_png(round(width * scale),
+                                   round(height * scale))
     if image:
         return image
     try:
@@ -468,6 +474,38 @@ def plotly_image(value, image_width: int, for_print: bool,
                 "WebEngine is not available to take a picture of it. Install "
                 "the full PySide6 package from Manage Packages…, then run "
                 "again.")
+
+
+_PLACEHOLDERS: dict = {}
+
+
+def placeholder_png(width: int, height: int) -> bytes:
+    """A quiet box the size of a picture still being drawn, so the text
+    around it is laid out where it will stay when the picture arrives."""
+    key = (width, height)
+    found = _PLACEHOLDERS.get(key)
+    if found is not None:
+        return found
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QColor, QFont
+
+    image = QImage(max(width, 1), max(height, 1), QImage.Format_ARGB32)
+    image.fill(QColor("#eceef2"))
+    painter = QPainter(image)
+    painter.setPen(QColor("#8a8f99"))
+    font = QFont()
+    font.setPixelSize(max(12, min(28, height // 14)))
+    painter.setFont(font)
+    painter.drawText(image.rect(), Qt.AlignCenter, "Drawing chart…")
+    painter.end()
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.WriteOnly)
+    image.save(buffer, "PNG")
+    found = _PLACEHOLDERS[key] = bytes(data)
+    if len(_PLACEHOLDERS) > 16:
+        del _PLACEHOLDERS[next(iter(_PLACEHOLDERS))]
+    return found
 
 
 # The size a webview card is when nothing says otherwise — the default
@@ -799,6 +837,9 @@ class _Resolver:
         # drops it, `data:` address, width and all), so it is set aside as
         # a token of plain text and put back into the HTML afterwards.
         self.inline: list[str] = []
+        # each table embed's HTML, put into the document after the markdown
+        # has been read (see TABLE_TOKEN)
+        self.table_html: list[str] = []
         # the width each image should be drawn at — per image, because a
         # multi-column grid renders its cells narrower than the page
         self.widths: list[int] = []
@@ -1340,7 +1381,11 @@ class _Resolver:
                 ref=ref, marker=marker, build=build,
                 rows=self._max_rows, font_pt=font_pt,
                 height=self._table_height, fit=self._table_fit))
-        return html
+        # The table goes in after the markdown is read, not through it: Qt's
+        # markdown reader took 1.6 s over a 500-row table that setHtml reads
+        # in 0.05 s (AE4). What stands in the markdown is a token.
+        self.table_html.append(html)
+        return TABLE_TOKEN.format(len(self.table_html) - 1)
 
     def _set_aside_pictures(self, html: str) -> str:
         """Every sparkline `<img>` in a table swapped for a text token.
@@ -1505,6 +1550,10 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     staged.setDefaultStyleSheet(staged_css(header_fill))
     staged.setMarkdown(resolved)
     html = staged.toHtml()
+    # tables first: their cells carry picture and spark tokens of their own
+    for index, table in enumerate(resolver.table_html):
+        html = _put_table_back(html, index,
+                               _staged_table(table, header_fill))
     for index, width in enumerate(resolver.widths):
         html = html.replace(IMAGE_TOKEN.format(index), _img_tag(index, width))
     for index, tag in enumerate(resolver.inline):
@@ -1539,6 +1588,24 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
         animations=resolver.animations,
         image_widths={i: w for i, w in enumerate(resolver.widths)},
         images=list(resolver.images))
+
+
+def show_in(view, document) -> None:
+    """Hand a rendered document to a text view, laid out once.
+
+    A view lays a new document out at its full width, and if that turns out
+    taller than the view the scroll bar appears, the width shrinks, and the
+    whole document is laid out again — a second pass that cost a second on
+    a card holding a 500-row table (AE4). A document plainly taller than
+    the view is going to get the bar anyway, so it is given it up front.
+    Counted in text blocks (every table cell is one): cheap, and only has
+    to be right about documents far past the fold."""
+    from PySide6.QtCore import Qt
+    lines = document.blockCount() * view.fontMetrics().lineSpacing()
+    tall = lines > 3 * max(view.viewport().height(), 1)
+    view.setVerticalScrollBarPolicy(
+        Qt.ScrollBarAlwaysOn if tall else Qt.ScrollBarAsNeeded)
+    view.setDocument(document)
 
 
 def unlink_page_links(document) -> int:
@@ -1586,6 +1653,42 @@ _FIT_FLOOR = 0.45
 #: markdown. Every `data:` picture a table carries, whatever its type: the
 #: markdown pass drops an `<img>` in a table cell however it got there.
 SPARK_TOKEN = "@@flograph-spark-{}@@"
+#: Where a table embed goes, while the markdown around it is read.
+TABLE_TOKEN = "@@flograph-table-{}@@"
+
+
+_BODY_RE = re.compile(r"<body\b[^>]*>(.*)</body>", re.S)
+
+
+def _staged_table(table: str, header_fill: str) -> str:
+    """A table's HTML as the staged document writes it back out — the same
+    pass the markdown reader used to put it through, minus the markdown.
+
+    That pass is not a formality: Qt does not hand a table's `font-size`
+    (an embed's `scale=`) down to its cells, and writing the table back out
+    is what spells the size onto every cell. Read by setHtml it costs a
+    twentieth of what the markdown reader charged for the same table."""
+    staged = _document()
+    staged.setDefaultStyleSheet(staged_css(header_fill))
+    staged.setHtml(table)
+    found = _BODY_RE.search(staged.toHtml())
+    return found.group(1) if found else table
+
+
+def _put_table_back(html: str, index: int, table: str) -> str:
+    """Swap a table's token for the table. The markdown reader wrapped a
+    token standing alone in a paragraph of its own (and maybe a span), and
+    a table inside a `<p>` is not something to hand Qt, so the wrapper goes
+    with it; a token that shares its paragraph with words is swapped in
+    place, as the table always was when it went through the reader."""
+    token = re.escape(TABLE_TOKEN.format(index))
+    alone = re.compile(
+        r"<p\b[^>]*>\s*(?:<span\b[^>]*>)?\s*" + token
+        + r"\s*(?:</span>)?\s*</p>")
+    found, count = alone.subn(lambda _m: table, html, count=1)
+    if count:
+        return found
+    return html.replace(TABLE_TOKEN.format(index), table, 1)
 _SPARK_IMG_RE = re.compile(
     r'<img src="data:image/[\w.+-]+;base64,[^"]*"[^>]*>')
 

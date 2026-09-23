@@ -133,6 +133,16 @@ from a `[[Flow Variables|Variables]]` node.
 node that wrote it and lands in the Log dock, with a traceback mapped to the
 line in *your* script.
 
+**What Stop does to your node.** Stop ends the run at once — it does not
+wait for your `run()` to return. A node that calls `ctx.check_cancelled()`
+stops at its next call. One that doesn't (a single long database read, one
+big pandas call) cannot be interrupted, so it is left to finish on its own
+thread: its light keeps running, the status bar names it, and whatever it
+returns is thrown away. The node stays dirty and runs properly next time,
+and it is not started again until that old call has returned — so calling
+`check_cancelled()` in a long loop is still what makes Stop *stop* the work
+rather than just stop waiting for it.
+
 ## The rules that matter
 
 **Treat inputs as read-only.** Outputs are cached and shared by reference, so

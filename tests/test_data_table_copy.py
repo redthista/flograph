@@ -366,8 +366,6 @@ class TestColumnFit:
         assert table.columnWidth(1) > 100
 
     def test_wrap_lets_the_rows_grow(self, qtbot):
-        from PySide6.QtWidgets import QHeaderView
-
         from flograph.core.table_format import parse_rules
 
         table = DataTableView()
@@ -376,17 +374,15 @@ class TestColumnFit:
                                     "inside a narrow column"]})
         table.setModel(PandasModel(df, parent=table,
                                    rules=parse_rules("note width 120\nwrap")))
-        assert (table.verticalHeader().sectionResizeMode(0)
-                == QHeaderView.ResizeToContents)
+        assert table.rows_size_to_content()
+        assert (table.rowHeight(0)
+                > table.verticalHeader().defaultSectionSize())
 
     def test_without_a_wrap_rule_the_rows_are_left_alone(self, qtbot):
-        from PySide6.QtWidgets import QHeaderView
-
         table = DataTableView()
         qtbot.addWidget(table)
         table.setModel(PandasModel(pd.DataFrame({"a": [1]}), parent=table))
-        assert (table.verticalHeader().sectionResizeMode(0)
-                != QHeaderView.ResizeToContents)
+        assert not table.rows_size_to_content()
 
     def test_a_bar_only_column_is_wide_enough_to_read_the_bar(self, qtbot):
         """`units bar blue only` leaves no text to fit to, and a column

@@ -2590,35 +2590,65 @@ def _pooled_stats(rule, frame) -> Optional[ColumnStats]:
 
 
 def evaluate_column(series, rules, stats: ColumnStats, frame=None,
-                    pool_frame=None) -> list:
+                    pool_frame=None, memo: "dict | None" = None) -> list:
     """One ``CellStyle | None`` per row of `series`, in its current order.
 
-    `frame` is the whole (current-order) DataFrame — needed only by a rule
-    that reads a *different* column than the one it draws in: ``iconmap``,
-    and any ``scale`` / ``bar`` / ``icons`` / ``highlight`` rule carrying a
-    ``by`` / ``if`` clause (its deciding column is ``rule.source``).
+    `frame` is the DataFrame `series` is a column of, row for row — needed
+    only by a rule that reads a *different* column than the one it draws
+    in: ``iconmap``, and any ``scale`` / ``bar`` / ``icons`` /
+    ``highlight`` rule carrying a ``by`` / ``if`` clause (its deciding
+    column is ``rule.source``).
 
-    `pool_frame` is where a pooled rule (``Rule.pool``) is measured, when
-    that is more than `frame` holds — a printed table cut to its first rows
-    is still shaded against the whole matrix, as `stats` is.
+    `pool_frame` is the whole table, when `series` and `frame` are only
+    some of its rows: a printed table cut to its first rows, or the block
+    of rows a card is painting. Everything measured across a column is
+    measured there — a pooled rule's range (``Rule.pool``), a ``by``
+    column's range, the colours ``autocolour`` hands out, a ``shared``
+    spark's scale — so a slice is coloured exactly as the whole would be,
+    as `stats` already is.
+
+    `memo` keeps those measurements between calls. They depend on the
+    table and the rule, never on which rows are asked for, so a caller
+    evaluating a table a block at a time passes the same dict each time
+    and pays for each measurement once.
     """
     import pandas as pd
 
     n = len(series)
     acc: list = [None] * n
     values = list(series)
+    whole = pool_frame if pool_frame is not None else frame
+    memo = {} if memo is None else memo
+
+    def _measured(rule, what: str, compute):
+        key = (id(rule), what)
+        if key not in memo:
+            memo[key] = compute()
+        return memo[key]
 
     def _decide(rule) -> tuple:
         """The series whose values drive `rule`, and stats for it — the
         drawn column, unless a ``by`` / ``if`` clause named another one;
         measured over `rule.pool` together when it names columns."""
-        pooled = _pooled_stats(
-            rule, pool_frame if pool_frame is not None else frame)
+        pooled = _measured(rule, "pool", lambda: _pooled_stats(rule, whole))
         if (rule.source and frame is not None
                 and rule.source in getattr(frame, "columns", [])):
             other = frame[rule.source]
-            return other, pooled or column_stats(other)
+            if pooled is not None:
+                return other, pooled
+            return other, _measured(rule, "by", lambda: column_stats(
+                whole[rule.source]
+                if rule.source in getattr(whole, "columns", []) else other))
         return series, pooled or stats
+
+    def _whole_column(source):
+        """The whole of the column `values` / `frame[source]` come from."""
+        name = source or getattr(series, "name", None)
+        if name is not None and name in getattr(whole, "columns", []):
+            column = whole[name]
+            if getattr(column, "ndim", 1) == 1:
+                return list(column)
+        return None
 
     for rule in rules:
         contrib: list = [None] * n
@@ -2797,11 +2827,11 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
             if block is not None:
                 low = high = None
                 if rule.shared:
-                    whole = _numeric_block(
-                        pool_frame if pool_frame is not None else frame,
-                        cols)
-                    low, high = _extent(whole if whole is not None
-                                        else block)
+                    def _shared_extent():
+                        everything = _numeric_block(whole, cols)
+                        return _extent(everything if everything is not None
+                                       else block)
+                    low, high = _measured(rule, "shared", _shared_extent)
                 alone = rule.hide_value or _place(rule) == "in"
                 for i, row in enumerate(block.itertuples(index=False,
                                                          name=None)):
@@ -2839,7 +2869,10 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
             else:
                 src = None
             if src is not None:
-                wheel = auto_colors(src, rule.palette)
+                # handed out over the whole column: the wheel is sorted by
+                # value, so a slice would hand the same value another colour
+                wheel = _measured(rule, "wheel", lambda: auto_colors(
+                    _whole_column(rule.source) or src, rule.palette))
                 for i, v in enumerate(src):
                     color = wheel.get(str(v).strip()) if not _is_missing(v) else None
                     if not color:

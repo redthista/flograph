@@ -150,6 +150,8 @@ def run(ctx):
     QTimer.singleShot(100, engine.cancel)
     with qtbot.waitSignal(engine.run_finished, timeout=5000):
         engine.run_all()
+    # the run ends at Stop (AE5); the node stops at its next check
+    qtbot.waitUntil(lambda: not engine.abandoned_nodes, timeout=5000)
     assert node.status == NodeStatus.ERROR
     assert node.progress == 0.0
 

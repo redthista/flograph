@@ -82,6 +82,7 @@ RUN_TICK_MS = 500
 QUIET_NODE_AFTER_S = 10.0
 
 from .stats_window import StatsWindow
+from .busy import busy
 from .settings_dialog import SettingsDialog
 from .docs import DocsWindow
 from . import theme
@@ -447,6 +448,45 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.resource_monitor)
         self._apply_stats_settings()
         self.show_status("Ready")
+
+    def watch_for_stalls(self) -> None:
+        """Notice when the window stops answering and, once it answers
+        again, say for how long and what it was doing (ui/perf.py). Only
+        the real app turns this on — a test window has no one to tell."""
+        from .perf import StallWatchdog
+        self.stall_watchdog = StallWatchdog(self)
+        self.stall_watchdog.stalled.connect(self._on_stall)
+        self.stall_watchdog.start()
+
+    def _on_stall(self, seconds: float, label: str) -> None:
+        # a second is where a pause stops reading as a hitch and starts
+        # reading as "has it crashed?"; a run's own line is left alone
+        if seconds < 1.0 or self.engine.active:
+            return
+        what = f" ({label})" if label else ""
+        self.show_status(f"The window was busy for {seconds:.1f} s{what}",
+                         6000)
+
+    def _say_what_stop_left(self) -> None:
+        """The status line while nodes Stop walked away from are still
+        running, and a word when the last of them has gone."""
+        left = self.engine.abandoned_nodes
+        if left:
+            names = sorted(self.graph.nodes[n].label for n in left
+                           if n in self.graph.nodes)
+            shown = ", ".join(names[:3]) + (
+                f" (+{len(names) - 3})" if len(names) > 3 else "")
+            self.show_status(
+                f"Stopped — {shown} {'is' if len(names) == 1 else 'are'} "
+                f"still finishing in the background; what "
+                f"{'it returns' if len(names) == 1 else 'they return'} "
+                f"will be thrown away")
+            self._stop_left_something = True
+        elif getattr(self, "_stop_left_something", False):
+            self._stop_left_something = False
+            if not self.engine.active:
+                self.show_status("Stopped — the background work has "
+                                 "finished; nothing from it was kept", 5000)
 
     def show_status(self, message: str, timeout: int = 0) -> None:
         """Say something on the status line, optionally for `timeout` ms.
@@ -1586,6 +1626,9 @@ class MainWindow(QMainWindow):
                             f"refresh and no longer match their inputs: "
                             f"{names}{more}")
             self.show_status(message, 5000 if not stale else 15000)
+            # Stop ended the run without waiting for what was still running
+            # (AE5); say so rather than leave a busy light unexplained.
+            self._say_what_stop_left()
 
         def on_joined(additions: list) -> None:
             if not additions:
@@ -1597,6 +1640,7 @@ class MainWindow(QMainWindow):
 
         engine.run_started.connect(on_started)
         engine.run_joined.connect(on_joined)
+        engine.abandoned_changed.connect(self._say_what_stop_left)
         engine.node_started.connect(on_node_started)
         # Both outcomes take the node off the floor, so the line can go back
         # to naming whoever is left.
@@ -2224,18 +2268,26 @@ class MainWindow(QMainWindow):
     @perf.timed('export: report card pdf')
     def _export_report_card_pdf(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        rendered = self._render_report_card(node_id, for_print=True)
-        if node is None or rendered is None:
+        if node is None:
             return
+        # asked first, rendered after: the render is the slow part, and a
+        # save dialog should not wait behind it
         path = self._save_path_for(node.label, ".pdf", "Export report as PDF",
                                    "PDF documents (*.pdf)")
         if path is None:
             return
         from .report import export_pdf
-        try:
-            export_pdf(rendered.document, path, title=node.label)
-        except OSError as exc:
-            QMessageBox.warning(self, "Export failed", str(exc))
+        failure = None
+        with busy(self, f"Exporting {Path(path).name}…"):
+            rendered = self._render_report_card(node_id, for_print=True)
+            if rendered is None:
+                return
+            try:
+                export_pdf(rendered.document, path, title=node.label)
+            except OSError as exc:
+                failure = exc
+        if failure is not None:
+            QMessageBox.warning(self, "Export failed", str(failure))
             return
         if rendered.problems:
             QMessageBox.warning(
@@ -2248,13 +2300,16 @@ class MainWindow(QMainWindow):
     @perf.timed('export: report card html')
     def _export_report_card_html(self, node_id: str) -> None:
         node = self.graph.nodes.get(node_id)
-        rendered = self._render_report_card(node_id, for_print=True)
-        if node is None or rendered is None:
+        if node is None:
             return
         path = self._save_path_for(node.label, ".html",
                                    "Save report as HTML",
                                    "HTML documents (*.html)")
         if path is None:
+            return
+        with busy(self, f"Exporting {Path(path).name}…"):
+            rendered = self._render_report_card(node_id, for_print=True)
+        if rendered is None:
             return
         from flograph.core.page_setup import PageSetup
         self._write_html(rendered, path, node.label, setup=PageSetup())
@@ -2397,7 +2452,9 @@ class MainWindow(QMainWindow):
                                    "HTML documents (*.html)")
         if path is None:
             return
-        self._write_html(widget.rendered(for_print=True), path, page.title,
+        with busy(self, f"Exporting {Path(path).name}…"):
+            rendered = widget.rendered(for_print=True)
+        self._write_html(rendered, path, page.title,
                          setup=page.setup, custom_css=page.custom_css)
 
     @perf.timed('export: report pdf')
@@ -2411,12 +2468,16 @@ class MainWindow(QMainWindow):
         if path is None:
             return
         from .report import export_pdf
-        rendered = widget.rendered(for_print=True)
-        try:
-            export_pdf(rendered.document, path, title=page.title,
-                       setup=page.setup)
-        except OSError as exc:
-            QMessageBox.warning(self, "Export failed", str(exc))
+        failure = None
+        with busy(self, f"Exporting {Path(path).name}…"):
+            rendered = widget.rendered(for_print=True)
+            try:
+                export_pdf(rendered.document, path, title=page.title,
+                           setup=page.setup)
+            except OSError as exc:
+                failure = exc
+        if failure is not None:
+            QMessageBox.warning(self, "Export failed", str(failure))
             return
         # exported anyway — a report with a hole in it is still worth
         # having, but nobody should find out about the hole from the PDF
@@ -5757,11 +5818,13 @@ class MainWindow(QMainWindow):
         if not self._confirm_discard():
             return
         try:
-            loaded = serialization.load(path, self.registry)
+            with busy(self, f"Opening example '{path.stem}'…"):
+                loaded = serialization.load(path, self.registry)
         except (GraphError, OSError, KeyError) as exc:
             QMessageBox.critical(self, "Open failed", str(exc))
             return
-        self._replace_graph(loaded)
+        with busy(self):
+            self._replace_graph(loaded)
         self._project_path = None
         self.engine.history.clear()      # examples open unmeasured
         self.resource_monitor.set_disk_watch_path(None)
@@ -5776,11 +5839,13 @@ class MainWindow(QMainWindow):
         if confirm and not self._confirm_discard():
             return False
         try:
-            loaded = serialization.load(path, self.registry)
+            with busy(self, f"Opening {Path(path).name}…"):
+                loaded = serialization.load(path, self.registry)
         except (GraphError, OSError, KeyError) as exc:
             QMessageBox.critical(self, "Open failed", str(exc))
             return False
-        self._replace_graph(loaded)
+        with busy(self):
+            self._replace_graph(loaded)
         self._project_path = path
         self.resource_monitor.set_disk_watch_path(path)
         self._push_recent(path)

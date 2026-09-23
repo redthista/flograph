@@ -309,6 +309,9 @@ class TestFailureAndCancellation:
         wait_run(qtbot, engine, trigger)
         assert not engine.running_nodes
         assert not engine.active
+        # Stop walks away rather than waiting (AE5); each node still stops
+        # at its next check_cancelled, a few milliseconds later
+        qtbot.waitUntil(lambda: not engine.abandoned_nodes, timeout=5000)
         assert not any(n.status is NodeStatus.RUNNING
                        for n in graph.nodes.values())
 

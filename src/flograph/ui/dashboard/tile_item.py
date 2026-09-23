@@ -812,13 +812,16 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if self._report_view is None or node is None:
             return
+        from ..report.plotly_snapshot import deferred
         from ..report.render import render_card
         # the tile is dark like the card, header row included — see
-        # render.PAPER_HEADER
-        rendered = render_card(str(node.params.get("text", "") or ""),
-                               self._graph, self._engine.cache, node.id,
-                               width=int(self._size[0]) - 48,
-                               header_fill=theme.NODE_HEADER.name())
+        # render.PAPER_HEADER. A chart not drawn yet is a placeholder until
+        # it is, and then the tile renders again (AE4).
+        with deferred(self._report_pictures_ready):
+            rendered = render_card(str(node.params.get("text", "") or ""),
+                                   self._graph, self._engine.cache, node.id,
+                                   width=int(self._size[0]) - 48,
+                                   header_fill=theme.NODE_HEADER.name())
         document = rendered.document
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()
@@ -826,9 +829,15 @@ class TileItem(QGraphicsObject):
         # before the old document goes: a QMovie still writing frames into a
         # deleted document is a crash, not a stale picture
         self._stop_report_animations()
-        self._report_view.setDocument(document)
+        from ..report.render import show_in
+        show_in(self._report_view, document)
         self._report_rendered = rendered
         self._start_report_animations(rendered, self._report_view)
+
+    def _report_pictures_ready(self) -> None:
+        import shiboken6
+        if shiboken6.isValid(self) and self._report_view is not None:
+            self._render_report()
 
     def _render_wiki(self, name: str | None = None) -> None:
         """Re-point a Markdown Wiki tile at its folder / page — cheap: it

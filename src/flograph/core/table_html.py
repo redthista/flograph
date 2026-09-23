@@ -164,6 +164,10 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         out.append(f"<th{align}{fixed}>{head}</th>")
     out.append("</tr></thead><tbody>")
     table_height = row_height_of(rules)
+    # each column read once: `shown[column].iloc[row]` per cell was 10,000
+    # frame lookups for a 500-row table. `.array[row]` boxes a value
+    # exactly as `iloc` does (a Timestamp stays a Timestamp).
+    arrays = {column: shown[column].array for column in columns}
     for row in range(len(shown)):
         # Qt's rich text has no row height to set — `height` on a row or a
         # cell, as an attribute or as CSS, is ignored — but it honours a
@@ -174,7 +178,7 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         out.append("<tr>")
         for column in columns:
             entry = layout.get(str(column))
-            out.append(_cell(shown[column].iloc[row],
+            out.append(_cell(arrays[column][row],
                              styles.get((row, column)),
                              numeric[column], track, stacked,
                              align=entry.align if entry else None,

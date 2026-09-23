@@ -68,8 +68,6 @@ class TestTextSize:
     def test_a_wrapping_table_keeps_its_content_sized_rows(self, qtbot):
         """A `wrap` rule means each row is as tall as its own text; the
         text size must not put a fixed height back."""
-        from PySide6.QtWidgets import QHeaderView
-
         class Wrapping(PandasModel):
             def wraps_text(self):
                 return True
@@ -77,9 +75,13 @@ class TestTextSize:
         view = DataTableView()
         qtbot.addWidget(view)
         view.setModel(Wrapping(pd.DataFrame({"a": ["x" * 80]}), parent=view))
+        view.setColumnWidth(0, 120)
         set_table_text_size(7.0)
-        assert view.verticalHeader().sectionResizeMode(0) == \
-            QHeaderView.ResizeToContents
+        # still sized to its text, not put back to one fixed line
+        assert view.rows_size_to_content()
+        header = view.verticalHeader()
+        assert view.rowHeight(0) == max(view.sizeHintForRow(0),
+                                        header.minimumSectionSize())
 
 
 class TestTableMenu:

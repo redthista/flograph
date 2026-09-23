@@ -227,3 +227,29 @@ class TestReportCards:
         with qtbot.waitSignal(win.engine.run_finished, timeout=20000):
             win.engine.run_targets([named.id])
         assert calls
+
+
+# ------------------------------------------------------ saying it is busy
+
+class TestSayingItIsBusy:
+    def test_busy_puts_the_cursor_back_even_on_an_error(self, window):
+        from PySide6.QtGui import QGuiApplication
+
+        from flograph.ui.busy import busy
+
+        with pytest.raises(ValueError):
+            with busy(window, "Opening a.flograph…"):
+                assert QGuiApplication.overrideCursor() is not None
+                assert window._status_label.text() == "Opening a.flograph…"
+                raise ValueError("boom")
+        assert QGuiApplication.overrideCursor() is None
+
+    def test_a_long_freeze_is_named_afterwards(self, window):
+        window._on_stall(1.8, "report card render")
+        assert window._status_label.text() == (
+            "The window was busy for 1.8 s (report card render)")
+
+    def test_a_short_hitch_is_not_worth_a_word(self, window):
+        window.show_status("")
+        window._on_stall(0.4, "tile")
+        assert window._status_label.text() == ""

@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     window = MainWindow(registry)
     window.resize(1400, 900)
     window.show()
+    window.watch_for_stalls()
 
     args = app.arguments()[1:]
     project = next((a for a in args if a.endswith(".flograph")), None)

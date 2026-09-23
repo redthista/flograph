@@ -107,6 +107,9 @@ class _InFlight:
     # was running* means the result coming back answers a question nobody
     # is asking any more. See _on_node_finished.
     params: dict = field(default_factory=dict)
+    # The worker's signals, kept so Stop can cut an abandoned node loose:
+    # its result goes nowhere rather than into the cache (see cancel).
+    signals: object = None
 
 
 # Values a node cannot change in place at all, so there is nothing to guard.
@@ -485,6 +488,9 @@ class ExecutionEngine(QObject):
     # its nodes join the plan and run alongside, sharing the pool. Carries
     # the node ids that joined, for a status line worth reading.
     run_joined = Signal(list)
+    # Nodes Stop walked away from are still running on their thread; this
+    # fires when that set grows or shrinks (see `abandoned_nodes`).
+    abandoned_changed = Signal()
 
     def __init__(self, graph: Graph, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -533,6 +539,11 @@ class ExecutionEngine(QObject):
         # An exclusive node has the process to itself, so nothing new starts
         # while one is running.
         self._exclusive_running = False
+        # Nodes Stop walked away from: still running on a pool thread, no
+        # longer part of any run. A node here is not started again until
+        # its old thread returns, and each one counts against the worker
+        # limit, because it is still using a worker. See cancel().
+        self._abandoned: set[str] = set()
         # Size of the plan as built and how many nodes have been started from
         # it, for "node 3 of 12".
         self._plan_total = 0
@@ -976,11 +987,15 @@ class ExecutionEngine(QObject):
         self.request_changed.emit()
 
     def cancel(self) -> None:
-        """Cooperative cancel: unstarted nodes leave the plan immediately;
-        every running node stops at its next ctx.check_cancelled().
+        """Stop now: the run ends here, whatever is still running.
 
-        One token covers the whole run, so nodes in flight are all told at
-        once rather than in turn.
+        Unstarted nodes leave the plan. Running ones are told through the
+        token — a node that calls ctx.check_cancelled() stops at its next
+        call — and then *walked away from*, rather than waited for: a thread
+        cannot be killed, and one stuck in a database read or a single long
+        pandas call used to hold the whole run open, Stop button and all,
+        for as long as it took (AE5). Its result, when it comes, is thrown
+        away; the node stays dirty, so the next run computes it properly.
         """
         if not self._active or self._token is None:
             return
@@ -993,8 +1008,75 @@ class ExecutionEngine(QObject):
         for node_id in self._pending:
             self.graph.set_status(node_id, NodeStatus.IDLE)
         self._clear_pending()
-        if not self._running:
-            self._finish()
+        for node_id, inflight in list(self._running.items()):
+            self._abandon(node_id, inflight)
+        self._running.clear()
+        self._exclusive_running = False
+        self._finish()
+
+    @property
+    def abandoned_nodes(self) -> frozenset:
+        """Nodes Stop walked away from that are still running."""
+        return frozenset(self._abandoned)
+
+    def _abandon(self, node_id: str, inflight: "_InFlight") -> None:
+        signals = inflight.signals
+        if signals is not None:
+            # Its outcome no longer goes to the run: not into the cache, not
+            # onto the cards. Its log lines still arrive — what a stuck node
+            # prints on its way out is worth seeing.
+            for signal, slot in ((signals.finished, self._on_node_finished),
+                                 (signals.failed, self._on_node_failed),
+                                 (signals.progressed, self._on_node_progress)):
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+            # Bound methods, never lambdas: a lambda has no receiver, so
+            # PySide would run it on the worker thread that emitted — and
+            # from there touch the graph. A method of this QObject is
+            # queued onto the GUI thread like every other result.
+            signals.finished.connect(self._on_abandoned_finished)
+            signals.failed.connect(self._on_abandoned_failed)
+        self._close_node_run(inflight, "cancelled", None)
+        self._abandoned.add(node_id)
+        if node_id in self.graph.nodes:
+            # Still running is the truth, so the light keeps saying so; the
+            # message says whose run it no longer is.
+            self.graph.set_status(
+                node_id, NodeStatus.RUNNING,
+                "stopping — still finishing in the background; its result "
+                "will be thrown away")
+        self.abandoned_changed.emit()
+
+    def _on_abandoned_finished(self, node_id: str, _outputs: dict,
+                               _wall_time: float) -> None:
+        self._on_abandoned_done(node_id)
+
+    def _on_abandoned_failed(self, node_id: str, error) -> None:
+        # One that stopped at its check_cancelled() says so, as a stopped
+        # node always has; one that failed on its way out is not news.
+        self._on_abandoned_done(
+            node_id, "cancelled" if getattr(error, "cancelled", False)
+            else None)
+
+    def _on_abandoned_done(self, node_id: str,
+                           message: "Optional[str]" = None) -> None:
+        """An abandoned node's thread has returned, with nothing kept."""
+        if node_id not in self._abandoned:
+            return
+        self._abandoned.discard(node_id)
+        # unless a newer run has already queued it again
+        if (node_id in self.graph.nodes and node_id not in self._running
+                and node_id not in self._pending):
+            if message:
+                self.graph.set_status(node_id, NodeStatus.ERROR, message)
+            else:
+                self.graph.set_status(node_id, NodeStatus.IDLE)
+        self.abandoned_changed.emit()
+        # its worker slot is free, and a run may have been waiting for this
+        # very node to be startable again
+        self._dispatch()
 
     def _clear_pending(self) -> None:
         self._pending.clear()
@@ -1017,15 +1099,30 @@ class ExecutionEngine(QObject):
             return
         limit = self.worker_limit()
         while self._ready and not self._exclusive_running:
-            if len(self._running) >= limit:
+            if len(self._running) + len(self._abandoned) >= limit:
                 break
+            if any(is_exclusive(self.graph.nodes[n]) for n in self._abandoned
+                   if n in self.graph.nodes):
+                # an exclusive node still has the process, run or no run
+                break
+            # A node whose last run Stop walked away from waits for that
+            # thread: two copies of one node's body at once would race on
+            # everything it touches. The others need not wait for it.
+            startable = next((i for i, n in enumerate(self._ready)
+                              if n not in self._abandoned), None)
+            if startable is None:
+                break
+            if startable:
+                ahead = self._ready[startable]
+                del self._ready[startable]
+                self._ready.appendleft(ahead)
             node_id = self._ready[0]
             node = self.graph.nodes.get(node_id)
             if node is None:
                 self._ready.popleft()
                 self._pending.discard(node_id)
                 continue
-            if is_exclusive(node) and self._running:
+            if is_exclusive(node) and (self._running or self._abandoned):
                 # It gets the process to itself, so it waits for the floor to
                 # clear. Left at the head of the queue: the completion that
                 # empties _running dispatches again and finds it here.
@@ -1048,6 +1145,10 @@ class ExecutionEngine(QObject):
                 break
 
         if self._running:
+            return
+        if self._ready and self._abandoned:
+            # Held back by threads Stop left behind, not finished:
+            # _on_abandoned_done dispatches again when one returns.
             return
         # Nothing in flight means nothing was holding the loop back — every
         # reason it breaks early needs a node already running — so _ready is
@@ -1175,6 +1276,7 @@ class ExecutionEngine(QObject):
         signals.logged.connect(self.node_log)
         signals.progressed.connect(self._on_node_progress)
 
+        inflight.signals = signals
         self._running[node_id] = inflight
         if is_exclusive(node):
             self._exclusive_running = True

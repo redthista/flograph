@@ -411,6 +411,11 @@ class ReportPage(QWidget):
             self._set_preview_mode(page.preview_mode)
             self._schedule_preview()
 
+    def _pictures_ready(self) -> None:
+        import shiboken6
+        if shiboken6.isValid(self):
+            self._schedule_preview()
+
     def _schedule_preview(self) -> None:
         """Re-render soon — or, on a page nobody is looking at, once it is
         looked at. Every param typed into Properties lands here, for every
@@ -437,8 +442,14 @@ class ReportPage(QWidget):
         # than a rule standing in for one, and it is what will print.
         # page_links: this is the one render a click can follow a `page:`
         # link from; paper and HTML get the plain words
-        rendered = render_report(page.body, self._graph, self._engine.cache,
-                                 setup=setup, page_links=True)
+        # Charts not drawn yet come back as placeholders and are drawn in the
+        # background; the preview renders again when they are in, rather
+        # than the window waiting on Chromium with its input shut off (AE4).
+        from .plotly_snapshot import deferred
+        with deferred(self._pictures_ready):
+            rendered = render_report(page.body, self._graph,
+                                     self._engine.cache,
+                                     setup=setup, page_links=True)
         # `render_report` **re-enters the event loop** — a web-view embed is
         # printed to PDF, and that waits. So the window can close while this
         # method is part-way through, and the preview we checked above can be

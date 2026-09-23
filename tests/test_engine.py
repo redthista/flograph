@@ -208,6 +208,8 @@ def run(ctx):
     engine, ran = make_engine(graph)
     QTimer.singleShot(100, engine.cancel)
     ok = wait_run(qtbot, engine, engine.run_all)
+    # the run ends at Stop (AE5); the node stops at its next check
+    qtbot.waitUntil(lambda: not engine.abandoned_nodes, timeout=5000)
     assert slow.status == NodeStatus.ERROR
     assert slow.status_message == "cancelled"
     assert slow.dirty

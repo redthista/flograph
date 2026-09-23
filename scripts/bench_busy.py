@@ -10,6 +10,8 @@ table. It prints:
 - the longest single freeze of the GUI thread in that time, and how many
   freezes passed the "you notice it" line (`ui.perf.NOTICE_S`);
 - where the GUI thread's time went, by `core.perf.timed` label;
+- the bill for what was put off while out of sight: showing a dashboard
+  page, and scrolling the report card into view;
 - one sort of a formatted 50k-row table;
 - save + reopen of the project (the open half is the freezing half);
 - Stop on a node that ignores cancellation: how long until the run ends.
@@ -239,6 +241,9 @@ def main(argv):
         return time.perf_counter()
 
     def freezes(start):
+        # the watchdog hears about a freeze on its first tick after it; a
+        # freeze that ended inside the last pump has not been ticked yet
+        pump(app, 0.3)
         print(f"  wall {time.perf_counter() - start:6.2f}s | longest freeze "
               f"{dog.longest * 1000:6.0f}ms ({dog.longest_label or '?'}) | "
               f"freezes >{int(1000 * 0.2)}ms: {dog.count}")
@@ -262,6 +267,30 @@ def main(argv):
     print("\n== Re-run after an upstream change")
     freezes(start)
     perf_table("GUI-thread time by label")
+
+    # -- what out-of-sight work costs when it comes into sight -----------
+    # AE2 put these off until they are looked at; this is the bill when
+    # they are.
+    start = section("show page")
+    win.page_bar.select_page("dash0")
+    pump(app, 1.5)
+    print("\n== Show a dashboard page (4 charts, 4 formatted tables)")
+    freezes(start)
+    perf_table("GUI-thread time by label")
+    win.page_bar.select_page(None)
+    pump(app, 0.5)
+
+    report_item = next(i for i in win.scene.node_items.values()
+                       if getattr(i, "report_card", False))
+    start = section("report")
+    win.view.center_on_scene(report_item.sceneBoundingRect().center())
+    pump(app, 1.5)
+    print("\n== Scroll the report card into view")
+    freezes(start)
+    perf_table("GUI-thread time by label")
+    win.view.center_on_scene(win.scene.node_items[tables[0].id]
+                             .sceneBoundingRect().center())
+    pump(app, 0.5)
 
     # -- sort a formatted card ------------------------------------------
     item = win.scene.node_items[tables[0].id]

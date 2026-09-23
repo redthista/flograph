@@ -12,8 +12,8 @@ holds what is *not* built.
 Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
-Q, R, T, V, X, Y, Z, AA, AB and AC) are where shipped work used to be; AD
-and AE are the newest chunks, not gaps. Old numbers are kept
+Q, R, T, V, X, Y, Z, AA, AB, AC and AE) are where shipped work used to be;
+AD is the newest chunk, not a gap. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -293,34 +293,6 @@ tab is drawn and nothing else. What it did not settle:
   (`core/page_nav.py` — `gather_groups`, `order_after_regroup`), and
   `Page.group`, `page_group_colors` and the saved fold state are all
   already in the file format.
-
----
-
-## AE. Busy flows feel fast
-
-A flow with many long formatted tables, many Plotly charts and reports of
-hundred-row tables makes the app hang, and Stop is slow. Almost all of it
-is work on the GUI thread that nobody has asked for yet, not slow nodes.
-Plan (2026-09-23): measure first, then remove the biggest costs, one piece
-shipped at a time. `scripts/bench_busy.py` (AE1) and out-of-sight cards
-(AE2) shipped the same day; every piece below reports before/after against
-the bench. Measured and dropped from AE2: embedding plotly.js in each card
-page (~50 ms a card) and `estimate_size` on the GUI thread (~40 ms a run)
-— neither is where the freezes were.
-
-- **AE3. Tables pay for the rows on screen.** Rules evaluated in blocks,
-  not whole columns (`pandas_model._col_styles`); pooled stats memoised;
-  sort keeps stats; the model survives an unchanged re-run; no vertical
-  `ResizeToContents`.
-- **AE4. A report that does render is quick.** Which cards render, and
-  when, shipped with AE2; what is left is the render itself — a 50k-point
-  chart snapshot took 5–23 s inside an input-blocking loop and a 500-row
-  table ~3 s of layout. Cache each embed's picture/HTML per value; memoise
-  font metrics (`render._table_text_width`).
-- **AE5. Stop is instant.** Abandon in-flight nodes, finish the run at
-  once, drop their late results; never run one node twice at once.
-- **AE6. The app says what it is doing.** Busy cursor + status for open,
-  export and slow renders; a stall watchdog that names what is stalling.
 
 ---
 

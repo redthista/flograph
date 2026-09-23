@@ -1911,11 +1911,14 @@ class NodeItem(QGraphicsObject):
         scene = self.scene()
         cache = getattr(scene, "output_cache", None) if scene else None
         body = str(self.node.params.get("text", "") or "")
+        from ..report.plotly_snapshot import deferred
         from ..report.render import render_card
-        rendered = render_card(body, scene.graph, cache, self.node.id,
-                               width=int(self.width) - 44,
-                               header_fill=theme.NODE_HEADER.name()) \
-            if scene is not None else None
+        # a chart not drawn yet is a placeholder until it is (AE4)
+        with deferred(self._report_pictures_ready):
+            rendered = render_card(body, scene.graph, cache, self.node.id,
+                                   width=int(self.width) - 44,
+                                   header_fill=theme.NODE_HEADER.name()) \
+                if scene is not None else None
         # before the old document goes: a QMovie still writing frames into a
         # deleted document is a crash, not a stale picture
         self._stop_report_animations()
@@ -1931,13 +1934,26 @@ class NodeItem(QGraphicsObject):
         document.setDefaultStyleSheet(
             document.defaultStyleSheet()
             + f"\nbody {{ color: {theme.NODE_TEXT.name()}; }}")
-        self._report_view.setDocument(document)
+        from ..report.render import show_in
+        show_in(self._report_view, document)
         if rendered.animations:
             from ..report.animate import ReportAnimator
             self._report_animator = ReportAnimator(
                 document, rendered.animations, rendered.image_widths,
                 on_frame=self._report_view.viewport().update)
             self._report_animator.set_playing(self._report_should_animate())
+
+    def _report_pictures_ready(self) -> None:
+        """The charts the last render had to leave as placeholders are
+        drawn: render again, and find them cached."""
+        import shiboken6
+        if not shiboken6.isValid(self):
+            return
+        scene = self.scene()
+        if scene is None:
+            return
+        if not scene.defer_refresh(self, "report", self.refresh_report):
+            self.refresh_report()
 
     def _stop_report_animations(self) -> None:
         if self._report_animator is not None:

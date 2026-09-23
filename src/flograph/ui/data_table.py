@@ -348,6 +348,21 @@ class DataTableView(QTableView):
         # "Default" in Settings restores it rather than a guess at it.
         self._theme_font = QFont(self.font())
         self._wraps = False                # set from the model in setModel
+        # Rows sized to what is in them (a `wrap`, a mark on a line of its
+        # own, a tall spark) — and which of them have been measured. Only
+        # the rows in view are, as they come into view (_size_rows_in_view).
+        self._sizes_rows = False
+        self._sized_rows: set = set()
+        self._sizing = False
+        # a column drag resizes many times; re-measure once it pauses
+        self._resize_rows_later = QTimer(self)
+        self._resize_rows_later.setSingleShot(True)
+        self._resize_rows_later.setInterval(0)
+        self._resize_rows_later.timeout.connect(self._remeasure_rows)
+        self.verticalScrollBar().valueChanged.connect(
+            lambda _v: self._size_rows_in_view())
+        header.sectionResized.connect(
+            lambda *_: self._sizes_rows and self._resize_rows_later.start())
         self._points_in_force = float(self._theme_font.pointSizeF())
         self._apply_text_size()
         _text_size_notifier.changed.connect(self._apply_text_size)
@@ -401,6 +416,9 @@ class DataTableView(QTableView):
         if refit and self.model() is not None \
                 and self.model().columnCount() > 0:
             self.fit_columns_to_data()
+        # a new font is a new height for every row measured so far
+        if getattr(self, "_sizes_rows", False):
+            self._remeasure_rows()
 
     def _sort_requested(self, column: int, mode: str) -> None:
         model = self.model()
@@ -435,15 +453,21 @@ class DataTableView(QTableView):
                 self._selection_changed)
             model.modelReset.connect(self._show_picks)
             model.rowsInserted.connect(self._show_picks)
+            model.modelReset.connect(self._remeasure_rows)
+            model.layoutChanged.connect(self._remeasure_rows)
+            model.rowsInserted.connect(
+                lambda *_: self._size_rows_in_view())
             self._show_picks()
 
     def _apply_wrapping(self, model) -> None:
         """A `wrap` rule lets a row grow to fit its text.
 
-        Left to Qt rather than measured here: `ResizeToContents` on the
-        vertical header sizes each row as it is needed, so the rows a
-        paged model fetches later come out right too, without this view
-        tracking insertions. It costs nothing until a rule asks for it.
+        Measured here, a screenful at a time (`_size_rows_in_view`), not
+        left to Qt's `ResizeToContents`: that re-measures *every* loaded row
+        through the delegate on every layout — each page fetched, each sort,
+        each scroll — which on a long wrapped table was seconds a time
+        (AE3). A row out of view keeps the default height until it is
+        scrolled to. It costs nothing until a rule asks for it.
         """
         wraps = bool(model is not None
                      and getattr(model, "wraps_text", lambda: False)())
@@ -454,10 +478,54 @@ class DataTableView(QTableView):
         # tooltip, and a taller row says nothing about that.
         grows = bool(model is not None
                      and getattr(model, "grows_rows", lambda: False)())
-        self.verticalHeader().setSectionResizeMode(
-            QHeaderView.ResizeToContents if wraps or grows
-            else QHeaderView.Interactive)      # Qt's own default otherwise
+        self._sizes_rows = wraps or grows
+        self._sized_rows = set()
+        self.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self._apply_text_size(refit=False)   # row height for this font
+
+    def rows_size_to_content(self) -> bool:
+        """Do this table's rows grow to what is in them?"""
+        return self._sizes_rows
+
+    def _remeasure_rows(self) -> None:
+        """Forget every measured row — the order, the widths or the font
+        changed — and measure the ones in view again."""
+        if not self._sizes_rows:
+            return
+        self._sized_rows = set()
+        self._size_rows_in_view()
+
+    def _size_rows_in_view(self) -> None:
+        """Size the rows a screen shows, from the top one in view down,
+        each once until something makes it stale."""
+        model = self.model()
+        if not self._sizes_rows or model is None or self._sizing:
+            return
+        count = model.rowCount()
+        if not count:
+            return
+        self._sizing = True
+        try:
+            row = max(self.rowAt(0), 0)
+            room = max(self.viewport().height(), 1)
+            filled = 0
+            # bounded: a screen is rarely a hundred rows, and a view with
+            # no geometry yet must not measure the whole table either
+            for row in range(row, min(count, row + 200)):
+                if row not in self._sized_rows:
+                    self._sized_rows.add(row)
+                    self.resizeRowToContents(row)
+                filled += self.rowHeight(row)
+                if filled > room:
+                    break
+        finally:
+            self._sizing = False
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # a wider view is wider columns only if they stretch; either way a
+        # taller one shows rows nobody measured yet
+        self._size_rows_in_view()
 
     @perf.timed('table: fit columns')
     def fit_columns_to_data(self) -> None:

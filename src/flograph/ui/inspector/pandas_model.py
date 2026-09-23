@@ -225,9 +225,18 @@ class PandasModel(QAbstractTableModel):
         self._cf_active = bool(self._rules) and len(self._df) <= CF_MAX_ROWS
         self._value_roles = _VALUE_ROLES_FMT if self._cf_active else _VALUE_ROLES
         self._col_stats: dict = {}          # col index -> ColumnStats
-        # col index -> [(rule index, [CellStyle | None] down the rows)]
+        # What a rule measures across the whole table (a `by` column's
+        # range, a pool, autocolour's wheel) — see evaluate_column's `memo`.
+        # Row order does not change any of it, so a sort keeps it too.
+        self._measured: dict = {}
+        # Rules are evaluated a block of rows at a time, when a row in the
+        # block is first drawn — never down the whole column: a 50,000-row
+        # table showing forty rows used to style all 50,000 for every rule
+        # the moment it arrived (AE3).
+        # (col index, block) -> [(rule index, [CellStyle | None] per row)]
         self._col_cache: dict = {}
-        self._row_cache = None              # {rule index: [CellStyle | None]}
+        # block -> {rule index: [CellStyle | None] per row}
+        self._row_cache: dict = {}
         #: (row, col) -> the combined CellStyle (or None) — see _cell_style
         self._styles_at: dict = {}
 
@@ -262,27 +271,33 @@ class PandasModel(QAbstractTableModel):
         self._df = ordered
         self._loaded = min(PAGE_SIZE, len(self._df))
         self._col_cache.clear()
-        self._row_cache = None
+        self._row_cache.clear()
         self._values.clear()
         self._styles_at.clear()
 
     def _is_row_rule(self, rule) -> bool:
         return rule.mode == "highlight" and rule.scope == "row"
 
-    def _row_styles(self) -> dict:
-        if self._row_cache is None:
+    def _row_styles(self, block: int) -> dict:
+        found = self._row_cache.get(block)
+        if found is None:
             from flograph.core.table_format import evaluate_rows
-            self._row_cache = {
-                i: evaluate_rows(self._df, [rule])
+            start = block * _BLOCK
+            rows = self._df.iloc[start:start + _BLOCK]
+            found = self._row_cache[block] = {
+                i: evaluate_rows(rows, [rule])
                 for i, rule in enumerate(self._rules) if self._is_row_rule(rule)}
-        return self._row_cache
+        return found
 
-    def _col_styles(self, col: int) -> list:
-        entry = self._col_cache.get(col)
+    def _col_styles(self, col: int, block: int) -> list:
+        key = (col, block)
+        entry = self._col_cache.get(key)
         if entry is None:
             from flograph.core.table_format import (
                 column_matches, column_stats, evaluate_column)
             name = str(self._df.columns[col])
+            start = block * _BLOCK
+            rows = None
             stats = None
             entry = []
             for i, rule in enumerate(self._rules):
@@ -291,12 +306,16 @@ class PandasModel(QAbstractTableModel):
                 if rule.columns and not column_matches(rule.columns, name):
                     continue
                 if stats is None:
+                    # over the whole column, so a block is shaded against
+                    # the table's range rather than its own
                     stats = self._col_stats.get(col) or column_stats(
                         self._source.iloc[:, col])
                     self._col_stats[col] = stats
+                    rows = self._df.iloc[start:start + _BLOCK]
                 try:
-                    styles = evaluate_column(self._df.iloc[:, col], [rule],
-                                             stats, frame=self._df)
+                    styles = evaluate_column(
+                        rows.iloc[:, col], [rule], stats, frame=rows,
+                        pool_frame=self._df, memo=self._measured)
                 except Exception:
                     # This runs inside data(), which Qt calls from the middle
                     # of painting and measuring. An exception escaping there
@@ -305,7 +324,7 @@ class PandasModel(QAbstractTableModel):
                     # and the rest of the table still is.
                     continue
                 entry.append((i, styles))
-            self._col_cache[col] = entry
+            self._col_cache[key] = entry
         return entry
 
     def _cell_style(self, row: int, col: int):
@@ -327,12 +346,13 @@ class PandasModel(QAbstractTableModel):
 
     def _combined_style(self, row: int, col: int):
         parts = []                         # (rule index, CellStyle)
-        for i, styles in self._col_styles(col):
-            if row < len(styles) and styles[row] is not None:
-                parts.append((i, styles[row]))
-        for i, styles in self._row_styles().items():
-            if row < len(styles) and styles[row] is not None:
-                parts.append((i, styles[row]))
+        block, at = divmod(row, _BLOCK)
+        for i, styles in self._col_styles(col, block):
+            if at < len(styles) and styles[at] is not None:
+                parts.append((i, styles[at]))
+        for i, styles in self._row_styles(block).items():
+            if at < len(styles) and styles[at] is not None:
+                parts.append((i, styles[at]))
         if not parts:
             return None
         parts.sort(key=lambda t: t[0])
@@ -392,7 +412,7 @@ class PandasModel(QAbstractTableModel):
         # colours follow values: the per-cell styles were built against the
         # old order, the column stats (whole-column min/max/…) still hold
         self._col_cache.clear()
-        self._row_cache = None
+        self._row_cache.clear()
         self._values.clear()
         self._styles_at.clear()
         self.endResetModel()
