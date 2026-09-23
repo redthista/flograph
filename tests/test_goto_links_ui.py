@@ -236,6 +236,68 @@ class TestGoToConnectedNodeMenu:
         assert not any(text.startswith("Go to") for text in seen)
 
 
+    # --- the far end on another canvas (G12/G13): the jump changes tab
+
+    def _canvas_tab(self, window, title="Other"):
+        from flograph.core import Page
+        from flograph.core.page_nav import CANVAS_KIND
+        page = Page(id="c2", title=title, kind=CANVAS_KIND)
+        window.graph.add_page(page)
+        return page.id
+
+    def test_go_to_a_goto_on_another_canvas_tab(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+
+        goto, node = add_pair(window.graph, window.registry, name="Sales")
+        window.graph.nodes[goto.id].canvas = self._canvas_tab(window)
+        window.scene.set_canvas("c2")
+        window.scene.set_canvas("")
+        assert not window.scene.node_items[goto.id].isVisible()
+        _pick_menu_action(monkeypatch, "Go to Sales")
+
+        window._show_node_menu(node.id, QPoint(0, 0))
+
+        assert window._current_page_id == "c2"
+        assert window.scene.canvas_id == "c2"
+        item = window.scene.node_items[goto.id]
+        assert item.isVisible() and item.isSelected()
+
+    def test_go_back_to_a_from_on_the_model_canvas(self, window, monkeypatch):
+        from PySide6.QtCore import QPoint
+
+        goto, node = add_pair(window.graph, window.registry, name="Sales")
+        window.graph.set_label(node.id, "Reader")
+        window.graph.nodes[goto.id].canvas = self._canvas_tab(window)
+        window.page_bar.select_page("c2")
+        assert window.scene.canvas_id == "c2"
+        _pick_menu_action(monkeypatch, "Go to Reader")
+
+        window._show_node_menu(goto.id, QPoint(0, 0))
+
+        assert window._current_page_id is None
+        assert window.scene.canvas_id == ""
+        assert window.scene.node_items[node.id].isSelected()
+
+    def test_go_into_a_box_whose_tab_was_closed(self, window, monkeypatch):
+        """A box (G13) keeps its canvas when its tab is closed; the jump puts
+        the tab back rather than landing nowhere."""
+        from PySide6.QtCore import QPoint
+        from flograph.core import Frame
+
+        goto, node = add_pair(window.graph, window.registry, name="Sales")
+        window.graph.add_frame(Frame(id="box", title="Box",
+                                     rect=(0, 0, 300, 200), own_canvas="c9"))
+        window.graph.nodes[goto.id].canvas = "c9"
+        assert "c9" not in window.graph.pages
+        _pick_menu_action(monkeypatch, "Go to Sales")
+
+        window._show_node_menu(node.id, QPoint(0, 0))
+
+        assert "c9" in window.graph.pages
+        assert window.scene.canvas_id == "c9"
+        assert window.scene.node_items[goto.id].isSelected()
+
+
 class TestLinkLines:
     """Drawing a named link after all: off by default (the wire it saves is
     the point of the node), on for one pair when following that pair is

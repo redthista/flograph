@@ -1689,7 +1689,7 @@ class MainWindow(QMainWindow):
         # a frame's tab (G12): a jump past the frame goes back to the whole
         # canvas first, and a wire's label at the edge goes to its far end
         self.view.fence_escape_requested.connect(
-            lambda: self.page_bar.select_page(None))
+            lambda: self._select_canvas(self.scene.canvas_id))
         self.view.fence_node_requested.connect(self._go_to_node)
         self.view.shape_context_requested.connect(self._show_shape_menu)
         self.view.shape_draw_requested.connect(self._push_new_shape)
@@ -3008,6 +3008,34 @@ class MainWindow(QMainWindow):
         itself out (NodeGraphView._escape_fence_for)."""
         if not self._on_canvas_tab:
             self.page_bar.select_page(None)
+
+    def _onto_canvas_of(self, obj) -> None:
+        """Step onto the canvas `obj` (a node, frame or shape) is drawn on.
+
+        With more than one canvas, a jump to something on another one would
+        otherwise centre on a place this canvas has nothing at — the view
+        moves and nothing is there. Already on its canvas, a frame's tab
+        stays put, as _onto_the_canvas leaves it."""
+        canvas_id = getattr(obj, "canvas", "") or ""
+        if self._on_canvas_tab and self.scene.canvas_id == canvas_id:
+            return
+        self._select_canvas(canvas_id)
+
+    def _select_canvas(self, canvas_id: str) -> None:
+        """Select the whole-canvas tab for `canvas_id`: the Model tab for "",
+        else the canvas tab of that id — put back first if it was a box's
+        (G13) whose tab has been closed, since the box still holds it."""
+        if not canvas_id:
+            self.page_bar.select_page(None)
+            return
+        if self._canvas_page(canvas_id) is None:
+            box = next((f for f in self.graph.frames.values()
+                        if f.own_canvas == canvas_id), None)
+            if box is None:
+                return
+            self._open_frame_canvas(box.id)
+            return
+        self.page_bar.select_page(canvas_id)
 
     def _place_model_docks(self, was_away: bool) -> None:
         """Hide the model docks, or bring them back, to match what is showing
@@ -4898,8 +4926,13 @@ class MainWindow(QMainWindow):
 
         Jumping is a model-canvas act, so a dashboard or report page steps
         aside for it, on the same reasoning as _find_node: the menu item
-        would otherwise appear to do nothing over a hidden canvas."""
-        self._onto_the_canvas()
+        would otherwise appear to do nothing over a hidden canvas. The node
+        may be on another canvas tab — a From reads a Goto wherever it is —
+        so the jump goes to that tab first."""
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            return
+        self._onto_canvas_of(node)
         self.view.go_to_node(node_id)
 
     def _go_to_use(self, use) -> None:
@@ -4954,7 +4987,12 @@ class MainWindow(QMainWindow):
         """A row clicked in the Navigator: bring the model canvas to it. A node
         folded inside a collapsed frame lands on the frame — go_to_node sorts
         that out — and a frame row lands on the frame."""
-        self._onto_the_canvas()
+        store = {"frame": self.graph.frames,
+                 "shape": self.graph.shapes}.get(kind, self.graph.nodes)
+        target = store.get(ident)
+        if target is None:
+            return
+        self._onto_canvas_of(target)
         if kind == "frame":
             self.view.go_to_frame(ident)
         elif kind == "shape":

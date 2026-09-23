@@ -374,8 +374,10 @@ class TestAModelCanvasTab:
         assert view.zoom == pytest.approx(0.5)
         window.page_bar.select_page(page_id)
         assert view.zoom == pytest.approx(1.3)
-        window._go_to_node(source.id)              # nothing to escape from
-        assert window.page_bar.current_page_id() == page_id
+        # the node is on the model canvas, not this one: the jump goes there
+        window._go_to_node(source.id)
+        assert window.page_bar.current_page_id() is None
+        assert window.scene.node_items[source.id].isSelected()
 
     def test_the_model_tab_is_their_header(self, window, flow):
         """Canvas tabs fold away under the **Model** tab itself, rather than

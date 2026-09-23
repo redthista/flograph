@@ -86,7 +86,9 @@ One flow either way. A wire is only ever drawn between two nodes on the
 same canvas, but nothing else stops at the edge: **Goto / From** picks a
 value up on any canvas, `${variables}` reach everywhere, a report page
 embeds `![[Any Node]]` wherever it lives, and **Run All** runs the lot.
-Copy and paste moves work from one canvas to another.
+Copy and paste moves work from one canvas to another. A Goto or From's
+right-click **Go to…** takes you to the other end on whichever tab it is
+on — opening a box's tab again if you had closed it.
 
 Every canvas tab keeps its own zoom and place and is saved with the
 project. Right-click one for **Rename**, a colour, a group, **Duplicate**
