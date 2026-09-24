@@ -350,7 +350,10 @@ The report toolbar's **Preview** selector has two targets:
   running headers or footers.
 * **Web** shows the report as a continuously scrolling browser document. It
   uses the same HTML path as the saved HTML file, so browser CSS is applied
-  as it will be outside flograph.
+  as it will be outside flograph. It fills the width of the window, as the
+  saved HTML does in a browser; printed from a browser, it goes back onto
+  the page's paper and margins. For a narrower reading column, add
+  `body { max-width: 50em; margin: 0 auto; }` in the CSS tab.
 
 When **Web** is selected, a **CSS** tab appears beside the Markdown editor.
 CSS is saved with the report page and applies to Web preview and saved HTML;

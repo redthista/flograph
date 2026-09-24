@@ -120,10 +120,14 @@ class TestItLooksLikeTheReport:
         assert "@page" in html
         assert "size: 210mm 297mm;" in html
 
-    def test_the_body_measures_the_text_column(self):
+    def test_on_screen_the_body_fills_the_window(self):
+        """Held to the paper's text column it sat as a strip in the middle
+        of a wide Web preview. Printed, @page's margins size it instead."""
         setup = PageSetup(margin_left=40.0, margin_right=40.0)
         html = report_html(self.plain(), "R", setup=setup)
-        assert f"max-width: {setup.body_mm()[0]:g}mm" in html
+        assert "max-width" not in html.split("img {")[0].split("body {")[-1]
+        assert "margin: 0 auto" not in html
+        assert "40mm" in html                # @page keeps the margins
 
     def test_printing_from_the_browser_keeps_a_chart_whole(self):
         """The one thing this export can do that Qt cannot — the other half

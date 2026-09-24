@@ -4,6 +4,8 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Large tables show in a report's Web preview** | A report page's **Web** preview went blank, or stopped updating and kept showing an older copy, once the page reached about 2 MB of HTML. A few hundred formatted table rows is enough, because every cell carries its own styling. The preview handed the page to Chromium in a way capped at 2 MB, and a page over the cap was silently refused. It now loads from a file, which has no limit (a 2,000-row table, 9 MB, shows in full), and it keeps where you had scrolled to as it re-renders while you type. |
+| UI | **A report's Web preview uses the whole width** | The Web preview, and a saved HTML report opened in a browser, held the text to the width of the paper's text column, so on a wide window everything sat in a narrow strip in the middle. It now fills the window, and wide tables get the room. Printing from the browser still puts it on the page's paper and margins, and the **Pages** preview and PDF are unchanged. For a reading column, add `body { max-width: 50em; margin: 0 auto; }` in the CSS tab. |
 
 ## 0.1.17
 

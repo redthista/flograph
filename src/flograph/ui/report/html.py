@@ -186,32 +186,34 @@ def page_style(setup) -> str:
     Not the Jinja/CSS export shelved as ideas_archived.md item 8 — that
     one owns the layout and can do running headers, counters and
     interactive Plotly.
-    This is the cheap half: the same page size and margins, and a body
-    that measures the same as the PDF's text column, so a chart sized for
-    the page is the same fraction of the width in both. Without it the
-    HTML was a browser-default wall of text at whatever width the window
-    happened to be, which is why it read as a different document.
+    This is the cheap half: the same page size and margins, so what the
+    browser prints lands on the paper the PDF does, with a chart sized for
+    the page the same fraction of the width in both.
 
     `@page` also makes the browser's own Print produce the right paper,
     which is the one thing this export can offer that the PDF cannot: a
     page break that avoids splitting a chart (`break-inside: avoid`), the
     half of A3 Qt has no answer for.
+
+    On screen the body fills the window. Held to the paper's text column it
+    sat as a narrow strip in the middle of a wide preview, and the Web
+    preview exists to be the other target — the Pages preview is the one
+    that looks like paper. Printed, it is the paper's width again: `@page`
+    sets the margins and the body takes what is between them.
     """
     from flograph.core.page_setup import page_css
-    width, _height = setup.body_mm()
     return f"""
 {page_css(setup)}
 body {{
-  margin: 0 auto;
-  padding: 24px 16px;
-  max-width: {width:g}mm;
+  margin: 0;
+  padding: 24px 32px;
   background: #ffffff;
   color: #111111;
 }}
 img {{ max-width: 100%; height: auto; }}
 table {{ border-collapse: collapse; }}
 @media print {{
-  body {{ padding: 0; max-width: none; }}
+  body {{ padding: 0; }}
   /* What the Qt export cannot express: keep a chart whole. */
   img, table, pre, blockquote {{ break-inside: avoid; page-break-inside: avoid; }}
   h1, h2, h3 {{ break-after: avoid; page-break-after: avoid; }}

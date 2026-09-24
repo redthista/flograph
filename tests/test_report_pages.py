@@ -910,3 +910,55 @@ class TestPrintResolution:
         preview, printed = width_of(1.0), width_of(2.0)
         assert preview == 700                      # the figure's own pixels
         assert abs(printed / 510 * 72 - PRINT_DPI) < 2
+
+
+class TestTheWebPreview:
+    """The Web preview shows the exported HTML in Chromium. It was handed
+    over with setHtml, a data: URL Chromium refuses past 2 MB — a few
+    hundred formatted table rows — and a refused page left the preview
+    blank or showing the last one that fitted."""
+
+    def _text(self, preview, qtbot):
+        got = []
+        preview.browser.page().toPlainText(got.append)
+        qtbot.waitUntil(lambda: bool(got), timeout=5000)
+        return got[0]
+
+    def _big(self, marker):
+        # a table the way Qt writes one: a long style on every cell
+        cell = ('<td style=" padding-left:7; padding-right:7; '
+                'border-top:1px; border-top-color:#999999; '
+                'border-top-style:solid;">{}</td>')
+        rows = "".join("<tr>" + cell.format(i) * 8 + "</tr>"
+                       for i in range(3000))
+        return (f"<html><body><h1>{marker}</h1><table>{rows}</table>"
+                f"<p>end of {marker}</p></body></html>")
+
+    def test_a_report_past_two_megabytes_shows(self, qtbot):
+        from flograph.ui.report.web_preview import WebPreview
+
+        preview = WebPreview()
+        qtbot.addWidget(preview)
+        preview.show()
+        assert preview._ensure_browser()
+        html = self._big("first")
+        assert len(html.encode()) > 2_500_000
+        with qtbot.waitSignal(preview.browser.loadFinished,
+                              timeout=20000) as blocker:
+            preview.set_html(html)
+        assert blocker.args == [True]
+        assert "end of first" in self._text(preview, qtbot)
+
+    def test_a_new_copy_replaces_the_last(self, qtbot):
+        from flograph.ui.report.web_preview import WebPreview
+
+        preview = WebPreview()
+        qtbot.addWidget(preview)
+        preview.show()
+        assert preview._ensure_browser()
+        for marker in ("first", "second"):
+            with qtbot.waitSignal(preview.browser.loadFinished,
+                                  timeout=20000):
+                preview.set_html(self._big(marker))
+        text = self._text(preview, qtbot)
+        assert "end of second" in text and "first" not in text
