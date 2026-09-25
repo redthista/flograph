@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
 
 from flograph.core import perf
 from flograph.core import (
-    Graph, GraphError, NodeInstance, NodeRegistry, NodeStatus, Page, Tile,
-    parse_spec,
+    Graph, GraphError, NodeInstance, NodeRegistry, NodeStatus, Page,
+    PortDirection, PortSpec, PortType, Tile, can_connect, parse_spec,
 )
 from flograph.core import dotenv
 from flograph.core import serialization
@@ -2683,12 +2683,7 @@ class MainWindow(QMainWindow):
         frame_ids = {f.id for f in frames}
         return {
             _CLIPBOARD_KEY: 1,
-            "nodes": [{
-                "id": n.id, "type": n.type_id, "pos": list(n.pos),
-                "params": dict(n.params), "code": n.code_override,
-                "label": n.label_override, "color": n.color,
-                "description": n.description,
-            } for n in nodes],
+            "nodes": [self._node_clip_entry(n) for n in nodes],
             "connections": [{
                 "src": [c.src_node, c.src_port],
                 "dst": [c.dst_node, c.dst_port],
@@ -5382,6 +5377,29 @@ class MainWindow(QMainWindow):
 
     # ----------------------------------------------------------- copy/paste
 
+    @staticmethod
+    def _node_clip_entry(n: NodeInstance) -> dict:
+        """One node as the clipboard carries it — enough for the copy to be
+        the same node, not just the same script."""
+        return {
+            "id": n.id, "type": n.type_id, "pos": list(n.pos),
+            "params": dict(n.params), "code": n.code_override,
+            "label": n.label_override, "color": n.color,
+            "description": n.description,
+            # ports grown past the script (a wire dropped on a spare). Left
+            # out, the copy had only the script's own ports, and the wire to
+            # `in3` named a port that wasn't there
+            "extra_inputs": [{"name": p.name, "type": p.type.value}
+                             for p in n.extra_inputs],
+            "exclusive": n.exclusive_override,
+            "preview": n.canvas_preview_enabled,
+            "port_labels": n.port_labels, "flow_pins": n.flow_pins,
+            "ports_collapsed": n.ports_collapsed,
+            "compact_view": n.compact_view,
+            "mark": n.mark, "mark_text": n.mark_text,
+            "mark_image": n.mark_image,
+        }
+
     def _selection_payload(self) -> Optional[dict]:
         node_ids = {item.node.id for item in self.scene.selected_node_items()}
         # dicts as ordered sets: the frames come out in a stable order, and a
@@ -5410,12 +5428,7 @@ class MainWindow(QMainWindow):
         ids = {n.id for n in nodes}
         return {
             _CLIPBOARD_KEY: 1,
-            "nodes": [{
-                "id": n.id, "type": n.type_id, "pos": list(n.pos),
-                "params": dict(n.params), "code": n.code_override,
-                "label": n.label_override, "color": n.color,
-                "description": n.description,
-            } for n in nodes],
+            "nodes": [self._node_clip_entry(n) for n in nodes],
             "connections": [{
                 "src": [c.src_node, c.src_port], "dst": [c.dst_node, c.dst_port],
             } for c in self.graph.connections.values()
@@ -5547,6 +5560,26 @@ class MainWindow(QMainWindow):
                 params[param.name] = id_map[target]
         return params
 
+    def _wire_fits(self, src_node: str, src_port: str,
+                   dst_node: str, dst_port: str) -> bool:
+        """Would Graph.connect accept this wire, without raising?"""
+        from flograph.core.ports import is_flow
+        src = self.graph.nodes.get(src_node)
+        dst = self.graph.nodes.get(dst_node)
+        if src is None or dst is None:
+            return False
+        out_spec = src.spec.output(src_port)
+        in_spec = dst.spec.input(dst_port)
+        if out_spec is None or in_spec is None:
+            return False
+        if not can_connect(out_spec.type, in_spec.type):
+            return False
+        if self.graph.would_cycle(src_node, dst_node):
+            return False
+        return not (is_flow(dst_port) and any(
+            c.src_node == src_node and c.dst_node == dst_node
+            and is_flow(c.dst_port) for c in self.graph.connections.values()))
+
     def _insert_payload(self, payload: dict,
                         offset: Optional[tuple] = None,
                         label: str = "paste",
@@ -5590,7 +5623,26 @@ class MainWindow(QMainWindow):
                 label_override=entry.get("label"),
                 color=entry.get("color"),
                 description=entry.get("description", ""),
+                exclusive_override=entry.get("exclusive"),
+                canvas_preview_enabled=entry.get("preview", True),
+                port_labels=entry.get("port_labels"),
+                flow_pins=entry.get("flow_pins"),
+                ports_collapsed=entry.get("ports_collapsed", False),
+                compact_view=entry.get("compact_view"),
+                mark=entry.get("mark", "") or "",
+                mark_text=entry.get("mark_text", "") or "",
+                mark_image=entry.get("mark_image", "") or "",
             ))
+            extras = []
+            for port in entry.get("extra_inputs") or []:
+                try:
+                    extras.append(PortSpec(
+                        port["name"], PortType(port["type"]),
+                        PortDirection.INPUT, optional=True))
+                except (KeyError, ValueError, TypeError):
+                    continue
+            if extras:
+                new_nodes[-1].adopt_extra_inputs(extras)
         # frames get an id map of their own, for the same reason the nodes do:
         # a folded frame names the nodes and frames it stands in for, and
         # those names have to be re-pointed at the copies. Assigned up front
@@ -5656,7 +5708,12 @@ class MainWindow(QMainWindow):
         for conn in payload.get("connections", []):
             src_node, src_port = conn["src"]
             dst_node, dst_port = conn["dst"]
-            if src_node in id_map and dst_node in id_map:
+            # checked first rather than caught: a ConnectCommand that raises
+            # escapes the paste halfway, taking every later wire and the
+            # reselect below with it, and leaves the macro open
+            if (src_node in id_map and dst_node in id_map
+                    and self._wire_fits(id_map[src_node], src_port,
+                                        id_map[dst_node], dst_port)):
                 self.undo_stack.push(ConnectCommand(
                     self.graph, id_map[src_node], src_port,
                     id_map[dst_node], dst_port))
