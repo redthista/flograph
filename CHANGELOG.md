@@ -5,6 +5,7 @@
 | Category | Change | Details |
 | --- | --- | --- |
 | Fix | **Closing the code pop-out doesn't freeze the app** | Closing the pop-out code editor could hang the window for seconds, sometimes much longer, while a Python completion lookup still running behind it finished. It now closes at once; the lookup finishes in the background. |
+| UI | **A canvas tab that holds its own nodes says Delete** | Right-clicking a canvas made with **+ ▸ Model canvas** offered **Close Tab**, but removing it deletes every node on it (after asking). It now says **Delete**, and so does the question. A tab that only shows a frame or a box still says **Close Tab**, because closing it changes nothing on the canvas. One **Ctrl+Z** still brings a deleted canvas back with everything on it. |
 
 ## 0.1.18
 
