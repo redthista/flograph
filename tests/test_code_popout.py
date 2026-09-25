@@ -147,3 +147,72 @@ class TestCodePopOut:
 
         dialog = _real_dialog(qtbot, VALID)
         assert isinstance(dialog.completer, CompletionController)
+
+
+class TestClosingDoesNotWaitForJedi:
+    """Closing the pop-out used to wait, on the GUI thread, for whatever jedi
+    call was in flight — the app froze until it returned."""
+
+    @pytest.fixture
+    def stuck_jedi(self, monkeypatch):
+        """jedi that blocks until released, and records what it was asked."""
+        import threading
+
+        import jedi
+
+        gate, started, asked = threading.Event(), threading.Event(), []
+
+        class Stuck:
+            def __init__(self, source):
+                asked.append(source)
+                started.set()
+                gate.wait(10)
+
+            def complete(self, *args):
+                return []
+
+            def get_signatures(self, *args):
+                return []
+
+        monkeypatch.setattr(jedi, "Script", Stuck)
+        yield gate, started, asked
+        gate.set()
+        from flograph.ui.editor import completion
+        for thread, _worker in completion._retiring:
+            assert thread.wait(5000)
+        completion._prune_retiring()
+
+    def test_closing_mid_call_returns_at_once(self, qtbot, stuck_jedi):
+        import time
+
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        from flograph.ui.editor import completion
+
+        gate, started, _asked = stuck_jedi
+        dialog = CodePopOut("t", VALID, type_id="x")
+        controller = dialog.completer
+        controller._request_completions.emit(0, "x", 1, 1)
+        assert started.wait(5)
+        began = time.perf_counter()
+        dialog.done(QDialog.Rejected)
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        assert time.perf_counter() - began < 1.0
+        # still finishing its call, somewhere a teardown can't destroy it
+        assert len(completion._retiring) == 1
+        gate.set()
+
+    def test_overtaken_requests_are_skipped(self, qtbot, stuck_jedi):
+        gate, started, asked = stuck_jedi
+        dialog = _real_dialog(qtbot, VALID)
+        controller = dialog.completer
+        controller._fire_request()
+        assert started.wait(5)          # jedi is busy with the first...
+        for _ in range(3):              # ...while three more queue up
+            controller._fire_request()
+        gate.set()
+        qtbot.waitUntil(lambda: len(asked) >= 2, timeout=5000)
+        qtbot.wait(100)
+        # the three queued behind the first: only the newest reaches jedi
+        assert len(asked) == 2

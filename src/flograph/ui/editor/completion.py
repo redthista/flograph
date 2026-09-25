@@ -3,13 +3,22 @@
 jedi's first call can take a second — everything runs on a dedicated worker
 thread, requests are debounced and tagged with ids so stale replies are
 dropped, and the worker is warmed with a dummy request at startup.
+
+A jedi call can't be interrupted, so nothing on the GUI thread may wait for
+one. The worker skips a request that a newer one has overtaken before it
+starts, so a burst of typing costs one call rather than a queue of them; and
+an editor that goes away mid-call (the code pop-out closing) hands its thread
+to `_retiring` to finish in its own time instead of blocking the window on
+it — closing the pop-out used to freeze the app for as long as jedi took.
 """
 from __future__ import annotations
 
-from typing import Optional
+import atexit
+import sys
 
 from PySide6.QtCore import (
-    QEvent, QObject, QStringListModel, Qt, QThread, QTimer, Signal, Slot,
+    QCoreApplication, QEvent, QObject, QStringListModel, Qt, QThread, QTimer,
+    Signal, Slot,
 )
 from PySide6.QtWidgets import QCompleter, QToolTip
 
@@ -17,14 +26,42 @@ from .code_editor import CodeEditor
 
 DEBOUNCE_MS = 200
 MAX_COMPLETIONS = 50
+#: how long a closing editor gives its worker to stop before leaving it to
+#: finish alone: long enough for an idle thread, short enough not to show
+RETIRE_WAIT_MS = 50
+
+#: (thread, worker) pairs still finishing a jedi call for an editor that has
+#: gone. Held here because a QThread destroyed while running aborts the
+#: process; pruned whenever another one retires, and waited for at exit.
+_retiring: list = []
+
+
+def _prune_retiring() -> None:
+    _retiring[:] = [pair for pair in _retiring if not pair[0].isFinished()]
+
+
+@atexit.register
+def _wait_for_retiring() -> None:
+    for thread, _worker in _retiring:
+        thread.wait()
+    _retiring.clear()
 
 
 class JediWorker(QObject):
     completions_ready = Signal(int, object)  # request_id, [(name, suffix)]
     signatures_ready = Signal(int, str)      # request_id, text
 
+    def __init__(self) -> None:
+        super().__init__()
+        #: the newest request id the editor has sent, written from the GUI
+        #: thread: a queued request below it has been overtaken, and is
+        #: skipped rather than run for a reply nobody will read
+        self.latest = -1
+
     @Slot(int, str, int, int)
     def complete(self, request_id: int, source: str, line: int, col: int) -> None:
+        if request_id < self.latest:
+            return
         payload: list[tuple[str, str]] = []
         try:
             import jedi
@@ -40,6 +77,8 @@ class JediWorker(QObject):
 
     @Slot(int, str, int, int)
     def signatures(self, request_id: int, source: str, line: int, col: int) -> None:
+        if request_id < self.latest:
+            return
         text = ""
         try:
             import jedi
@@ -130,11 +169,32 @@ class CompletionController(QObject):
         return super().eventFilter(obj, event)
 
     def shutdown(self) -> None:
-        if self._thread.isRunning():
-            self._thread.quit()
-            # no timeout: quit() is queued behind any in-flight jedi call,
-            # and abandoning a running QThread aborts the process
-            self._thread.wait()
+        """Stop the worker without waiting on jedi. quit() only lands once
+        an in-flight call returns, which can be seconds; the thread is then
+        left in `_retiring` to finish rather than waited for here. At exit
+        there is no later, so it is waited for as before."""
+        thread = self._thread
+        if not thread.isRunning():
+            return
+        self._worker.latest = sys.maxsize  # anything still queued is skipped
+        thread.quit()
+        if (sys.is_finalizing() or QCoreApplication.instance() is None
+                or QCoreApplication.closingDown()):
+            # past atexit, nothing would wait for a retired thread
+            thread.wait()
+            return
+        if thread.wait(RETIRE_WAIT_MS):
+            return
+        try:
+            self._worker.completions_ready.disconnect(self._on_completions)
+            self._worker.signatures_ready.disconnect(self._on_signatures)
+        except (RuntimeError, TypeError):
+            pass
+        # out of this controller's tree, which is being torn down: Qt would
+        # destroy the running thread with it, and that aborts the process
+        thread.setParent(None)
+        _prune_retiring()
+        _retiring.append((thread, self._worker))
 
     # ------------------------------------------------------------- requests
 
@@ -157,6 +217,7 @@ class CompletionController(QObject):
             )[:self._editor.textCursor().positionInBlock()]
         if before.endswith("("):
             self._request_id += 1
+            self._worker.latest = self._request_id
             self._request_signatures.emit(self._request_id, source, line, col)
             self._completer.popup().hide()
             return
@@ -168,6 +229,7 @@ class CompletionController(QObject):
 
     def _fire_request(self) -> None:
         self._request_id += 1
+        self._worker.latest = self._request_id
         source, line, col = self._cursor_location()
         self._request_completions.emit(self._request_id, source, line, col)
 
