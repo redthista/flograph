@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Closing the code pop-out doesn't freeze the app** | Closing the pop-out code editor could hang the window for seconds, sometimes much longer, while a Python completion lookup still running behind it finished. It now closes at once; the lookup finishes in the background. |
 
 ## 0.1.18
 
