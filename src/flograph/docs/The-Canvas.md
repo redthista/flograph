@@ -92,9 +92,10 @@ on — opening a box's tab again if you had closed it.
 
 Every canvas tab keeps its own zoom and place and is saved with the
 project. Right-click one for **Rename**, a colour, a group, **Duplicate**
-(a canvas of its own is copied with everything on it) and **Close Tab** —
-which, for a canvas of its own, takes its nodes with it after asking.
-One **Ctrl+Z** brings the whole canvas back.
+(a canvas of its own is copied with everything on it) and **Delete**,
+which takes the canvas's nodes with it after asking. One **Ctrl+Z** brings
+the whole canvas back. A tab that only looks at a frame or a box says
+**Close Tab** instead: closing it changes nothing on the canvas.
 
 Canvas tabs belong to the **Model** tab, which is their header: click the
 chevron on it to fold them away when the bar gets busy, and again to bring

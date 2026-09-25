@@ -191,6 +191,13 @@ class PageTabBar(QTabBar):
         # Export PDF on a locked report
         self._kinds: dict[str, str] = {}
         self._fenced: dict[str, bool] = {}   # canvas tabs: a view of a frame
+        # Whether a canvas tab only *looks at* a canvas something else owns
+        # (a frame's fenced view, or a box's canvas, G13) — so closing it
+        # loses nothing — or is the canvas, so removing it deletes what is on
+        # it. Box ownership lives on the frame, which the bar never sees, so
+        # the window answers; the default knows only about fenced tabs.
+        self.canvas_tab_is_view = lambda page_id: self._fenced.get(
+            page_id, False)
         # Canvas tabs (G12/G13) are the Model tab's own group: it is the
         # header, so they fold away under it rather than under a header tab
         # repeating a name the bar already carries. Bar state, not saved —
@@ -1869,11 +1876,18 @@ class PageTabBar(QTabBar):
         color_action = QAction("Change colour…", self)
         reset_color_action = (QAction("Reset colour", self)
                               if page_id in self._colors else None)
-        del_action = QAction("Close Tab" if canvas_tab else "Delete", self)
-        if canvas_tab:
+        # "Close Tab" only where closing is all it does. A canvas of its own
+        # takes its nodes with it, which is a delete and says so.
+        view_tab = canvas_tab and self.canvas_tab_is_view(page_id)
+        del_action = QAction("Close Tab" if view_tab else "Delete", self)
+        if view_tab:
             del_action.setToolTip(
                 "Close this tab. The frame and everything in it stay on "
                 "the canvas.")
+        elif canvas_tab:
+            del_action.setToolTip(
+                "Delete this canvas and the nodes on it. Undo brings them "
+                "back.")
         rename_action.triggered.connect(
             lambda: self._prompt_rename(index, page_id))
         dup_action.triggered.connect(lambda: self.duplicate_page_requested.emit(page_id))

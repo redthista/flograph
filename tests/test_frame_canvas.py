@@ -143,6 +143,10 @@ class TestTurningAFrameIntoACanvas:
         _source, inside_a, _inside_b, _after = flow
         window._frame_to_canvas("f1")
         canvas_id = _canvas_of(window)
+        bar = window.page_bar
+        texts = [a.text() for a in bar._context_menu(
+            bar._index_of_page(canvas_id), canvas_id).actions()]
+        assert "Close Tab" in texts and "Delete" not in texts
         window._delete_page(canvas_id)
         assert canvas_id not in window.graph.pages
         assert window.graph.frames["f1"].own_canvas == canvas_id

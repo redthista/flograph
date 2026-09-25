@@ -556,7 +556,8 @@ class TestAModelCanvasTab:
         index = window.page_bar._index_of_page(page_id)
         texts = [a.text() for a in
                  window.page_bar._context_menu(index, page_id).actions()]
-        assert "Close Tab" in texts and "Duplicate" in texts
+        assert "Delete" in texts and "Duplicate" in texts
+        assert "Close Tab" not in texts       # it takes its nodes with it
         assert "Locked" not in texts
         assert "Scale to fit the window" not in texts
 

@@ -2141,6 +2141,7 @@ class MainWindow(QMainWindow):
             self.set_page_tabs_second_row)
         self.page_bar.rename_page_requested.connect(self._rename_page)
         self.page_bar.delete_page_requested.connect(self._delete_page)
+        self.page_bar.canvas_tab_is_view = self._canvas_tab_is_view
         self.page_bar.duplicate_page_requested.connect(self._duplicate_page)
         self.page_bar.reorder_pages_requested.connect(self._reorder_pages)
         self.page_bar.move_page_requested.connect(self._move_page)
@@ -2616,6 +2617,16 @@ class MainWindow(QMainWindow):
             page_id = page.id
         self.page_bar.select_page(page_id)
 
+    def _canvas_tab_is_view(self, page_id: str) -> bool:
+        """True for a canvas tab that only looks at something else's canvas
+        — a frame's fenced view, or a box's (G13) — so closing it loses
+        nothing. False for a canvas of its own, whose removal is a delete."""
+        page = self.graph.pages.get(page_id)
+        if page is None:
+            return False
+        return bool(page.frame) or any(
+            f.own_canvas == page_id for f in self.graph.frames.values())
+
     def _close_canvas_tab(self, page) -> None:
         """Close a canvas tab. One that only *looks at* a frame closes and
         leaves the canvas alone. A canvas of its own takes what is on it —
@@ -2644,13 +2655,13 @@ class MainWindow(QMainWindow):
                      if s.canvas == page.id]
         if node_ids or frame_ids or shape_ids:
             answer = QMessageBox.question(
-                self, "Close canvas",
-                f"Close “{page.title}” and delete the {len(node_ids)} node(s) "
-                f"on it?\n\nNothing else can reach them once the tab has "
-                f"gone. Undo brings the canvas and everything on it back.")
+                self, "Delete canvas",
+                f"Delete “{page.title}” and the {len(node_ids)} node(s) "
+                f"on it?\n\nUndo brings the canvas and everything on it "
+                f"back.")
             if answer != QMessageBox.Yes:
                 return
-        self.undo_stack.beginMacro("close canvas")
+        self.undo_stack.beginMacro("delete canvas")
         if node_ids or frame_ids or shape_ids:
             self.scene.delete_items(node_ids, [], frame_ids, shape_ids,
                                     confirm=False)
