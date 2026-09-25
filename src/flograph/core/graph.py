@@ -384,7 +384,9 @@ class Graph:
             if node_id in (c.src_node, c.dst_node)
         ]
         for conn in removed:
-            self.disconnect(conn.id)
+            # the node going away keeps its grown ports: undo puts it back
+            # with its wires, and they must find the ports they left
+            self.disconnect(conn.id, shrink=conn.dst_node != node_id)
         del self.nodes[node_id]
         self.events.node_removed.emit(node_id)
         self._refresh_links()
@@ -728,6 +730,8 @@ class Graph:
         dst = self.node(dst_node)
         out_spec = src.spec.output(src_port)
         in_spec = dst.spec.input(dst_port)
+        if in_spec is None and self._regrow_input(dst, dst_port):
+            in_spec = dst.spec.input(dst_port)
         # A wire landing on the trailing spare grows the node first, so the
         # rest of this method validates against the port that will really
         # carry it. Only when the wire is otherwise acceptable — the source
@@ -763,7 +767,8 @@ class Graph:
             displaced = self.input_connection(dst_node, dst_port,
                                               include_links=False)
             if displaced is not None:
-                self.disconnect(displaced.id)
+                # the new wire takes this very port: don't shrink it away
+                self.disconnect(displaced.id, shrink=False)
 
         conn = Connection(
             id=conn_id or uuid.uuid4().hex,
@@ -784,7 +789,10 @@ class Graph:
         self._refresh_links()
         return conn, displaced
 
-    def disconnect(self, conn_id: str) -> Connection:
+    def disconnect(self, conn_id: str, shrink: bool = True) -> Connection:
+        """Remove a wire. A grown port it leaves empty goes with it
+        (`shrink`), so a node takes back the slots it no longer needs and
+        only the trailing spare stays open."""
         conn = self.connections.pop(conn_id, None)
         if conn is None:
             raise GraphError(f"no connection with id {conn_id!r}")
@@ -793,6 +801,8 @@ class Graph:
         if conn.dst_node in self.nodes:
             self.mark_dirty(conn.dst_node)
         self._refresh_links()  # removing a wire can unblock a refused link
+        if shrink:
+            self._shrink_inputs(conn.dst_node)
         return conn
 
     def _iter_edges(self) -> Iterable[Connection]:
@@ -879,6 +889,46 @@ class Graph:
         self.events.code_changed.emit(node.id)
         self.mark_dirty(node.id)
         return name
+
+    def _shrink_inputs(self, node_id: str) -> None:
+        """Drop the grown ports nothing is wired into any more.
+
+        The survivors keep their names — renumbering would rename the ports
+        under their wires — so a node can read in2, in4, more; the next
+        growth continues past the highest. Announced as code_changed, like
+        growing, so the canvas rebuilds the pins the same way.
+        """
+        node = self.nodes.get(node_id)
+        if node is None or not node.extra_inputs:
+            return
+        by_input = self._edges().by_input
+        keep = [p for p in node.extra_inputs
+                if (node_id, p.name) in by_input]
+        if len(keep) == len(node.extra_inputs):
+            return
+        node.adopt_extra_inputs(keep)
+        self.events.code_changed.emit(node_id)
+
+    def _regrow_input(self, node: NodeInstance, name: str) -> bool:
+        """Put back a grown port a disconnect took away, in its old place.
+
+        Undo and redo reconnect by port name, and since disconnecting now
+        shrinks the node, that name may be gone. Only `in<N>` on a node
+        with a spare can come back; grown names only ever increase, so
+        sorting by number restores the original order — which is the
+        order Concatenate stacks its tables in.
+        """
+        m = re.fullmatch(r"in(\d+)", name)
+        spare = next((p for p in node.spec.inputs if p.spare), None)
+        if m is None or spare is None:
+            return False
+        extras = sorted(
+            [*node.extra_inputs,
+             PortSpec(name, spare.type, PortDirection.INPUT, optional=True)],
+            key=lambda p: int(p.name[2:]) if p.name[2:].isdigit() else 0)
+        node.adopt_extra_inputs(extras)
+        self.events.code_changed.emit(node.id)
+        return True
 
     def _still_valid(self, conn: Connection) -> bool:
         src = self.nodes.get(conn.src_node)

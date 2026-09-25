@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | Fix | **Closing the code pop-out doesn't freeze the app** | Closing the pop-out code editor could hang the window for seconds, sometimes much longer, while a Python completion lookup still running behind it finished. It now closes at once; the lookup finishes in the background. |
 | UI | **A canvas tab that holds its own nodes says Delete** | Right-clicking a canvas made with **+ ▸ Model canvas** offered **Close Tab**, but removing it deletes every node on it (after asking). It now says **Delete**, and so does the question. A tab that only shows a frame or a box still says **Close Tab**, because closing it changes nothing on the canvas. One **Ctrl+Z** still brings a deleted canvas back with everything on it. |
+| Fix | **Concatenate gives back the ports it no longer needs** | Wiring Concatenate's empty bottom port adds another one, but unwiring never took any away, so after a few rewires the node carried a column of empty ports. Now a port that loses its wire goes with it (drag the wire off, delete it, or delete the node that fed it), and only the one empty slot at the bottom stays. The ports that are left keep their names, so their wires and their stacking order don't change. Undo puts a removed port back where it was. |
 
 ## 0.1.18
 

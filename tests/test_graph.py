@@ -248,14 +248,66 @@ def test_refused_wire_does_not_grow_the_node():
     assert [p.name for p in dst.spec.inputs] == ["top", "more"]
 
 
-def test_disconnect_leaves_the_grown_port_in_place():
-    """Undo of a connect does not shrink the node back — a leftover empty
-    slot costs nothing and shrinking under the user's cursor would."""
+def test_disconnect_takes_the_emptied_grown_port_away():
+    """A node scales back down: the port a wire grew goes when the wire
+    does, leaving only the spare as the one empty slot."""
     graph = Graph()
     src, dst = _spare_pair(graph)
     conn, _ = graph.connect(src.id, "value", dst.id, "more")
     graph.disconnect(conn.id)
-    assert dst.spec.input("in2") is not None
+    assert [p.name for p in dst.spec.inputs] == ["top", "more"]
+    assert dst.extra_inputs == []
+
+
+def test_shrinking_the_middle_keeps_the_other_names_and_wires():
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    conns = [graph.connect(graph.add_node(make_node()).id, "value",
+                           dst.id, "more")[0] for _ in range(3)]
+    graph.disconnect(conns[1].id)  # in3
+    assert [p.name for p in dst.spec.inputs] == ["top", "in2", "in4", "more"]
+    assert graph.input_connection(dst.id, "in4") is not None
+    # the next growth continues past the highest, never reusing a live name
+    conn, _ = graph.connect(src.id, "value", dst.id, "more")
+    assert conn.dst_port == "in5"
+
+
+def test_reconnecting_a_shrunk_port_by_name_puts_it_back_in_place():
+    """Undo reconnects by the name the wire had; the port comes back where
+    it was, since Concatenate stacks in port order."""
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    conns = [graph.connect(graph.add_node(make_node()).id, "value",
+                           dst.id, "more")[0] for _ in range(3)]
+    gone = graph.disconnect(conns[1].id)
+    graph.connect(gone.src_node, gone.src_port, gone.dst_node, gone.dst_port,
+                  conn_id=gone.id)
+    assert [p.name for p in dst.spec.inputs] == [
+        "top", "in2", "in3", "in4", "more"]
+
+
+def test_displacing_a_wire_does_not_shrink_its_port():
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    graph.connect(src.id, "value", dst.id, "more")
+    other = graph.add_node(make_node())
+    conn, displaced = graph.connect(other.id, "value", dst.id, "in2")
+    assert displaced is not None and conn.dst_port == "in2"
+    assert [p.name for p in dst.spec.inputs] == ["top", "in2", "more"]
+
+
+def test_deleting_an_upstream_node_shrinks_but_the_node_itself_keeps_ports():
+    graph = Graph()
+    src, dst = _spare_pair(graph)
+    graph.connect(src.id, "value", dst.id, "more")
+    graph.remove_node(src.id)
+    assert [p.name for p in dst.spec.inputs] == ["top", "more"]
+
+    graph2 = Graph()
+    src2, dst2 = _spare_pair(graph2)
+    graph2.connect(src2.id, "value", dst2.id, "more")
+    node, removed = graph2.remove_node(dst2.id)
+    assert node.spec.input("in2") is not None  # ready for undo to re-add
 
 
 def test_fork_keeps_grown_ports_and_their_wires():
