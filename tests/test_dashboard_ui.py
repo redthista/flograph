@@ -864,6 +864,10 @@ class TestEditableTableTile:
         page = window._dashboard_pages["p1"]
         item.setSelected(True)
         page.scene.setFocusItem(item._proxy)
+        # a cell is focused, not merely the proxy: an empty proxy (a card
+        # that hasn't run) must let Delete through to the tile
+        from PySide6.QtWidgets import QAbstractItemView
+        item._proxy.widget().findChild(QAbstractItemView).setFocus()
 
         QTest.keyClick(page.view, Qt.Key_Delete)
         assert "t1" in page.scene.tile_items

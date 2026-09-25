@@ -970,3 +970,34 @@ class TestSelectAll:
         window.action_select_all.trigger()
 
         assert window.page_bar.current_page_id() is None
+
+
+class TestDeleteAfterClickingACardBody:
+    """A click on a card's body makes its proxy the scene's focus item even
+    when nothing inside can take focus — a slicer or table that hasn't run
+    shows only a placeholder label — and the canvas then handed Delete to
+    that empty proxy instead of deleting the selected node."""
+
+    @pytest.mark.parametrize("type_id", ["flograph.viz.slicer",
+                                         "flograph.viz.show_table"])
+    def test_delete_removes_a_card_that_has_not_run(
+            self, window, registry, qtbot, type_id):
+        from PySide6.QtTest import QTest
+        window.resize(1400, 900)
+        window.show()
+        qtbot.waitExposed(window)
+        node = registry.instantiate(type_id, pos=(0.0, 0.0))
+        window.graph.add_node(node)
+        view = window.view
+        item = window.scene.node_items[node.id]
+        view.centerOn(item)
+        rect = item.sceneBoundingRect()
+        body = view.mapFromScene(rect.center().x(),
+                                 rect.top() + rect.height() * 0.6)
+        QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, body)
+        assert item.isSelected()
+        assert isinstance(window.scene.focusItem(), QGraphicsProxyWidget)
+
+        QTest.keyClick(view, Qt.Key_Delete)
+
+        assert node.id not in window.graph.nodes

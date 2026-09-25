@@ -808,8 +808,17 @@ class ZoomPanGraphicsView(QGraphicsView):
 
     def _proxy_widget_has_focus(self) -> bool:
         """True when an embedded widget (note editor, table cell) is focused
-        and should receive keys instead of the canvas shortcuts."""
-        return isinstance(self.scene().focusItem(), QGraphicsProxyWidget)
+        and should receive keys instead of the canvas shortcuts.
+
+        A click on a card's body makes its proxy the focus item even when
+        nothing inside can take focus — a slicer or table that hasn't run
+        shows only a placeholder label — and Delete then went to a widget
+        that wasn't there. So a widget inside must actually hold focus."""
+        item = self.scene().focusItem()
+        if not isinstance(item, QGraphicsProxyWidget):
+            return False
+        widget = item.widget()
+        return widget is not None and widget.focusWidget() is not None
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if (not self._proxy_widget_has_focus()
