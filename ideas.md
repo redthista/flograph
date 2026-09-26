@@ -13,7 +13,7 @@ Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
 Q, R, T, V, X, Y, Z, AA, AB, AC and AE) are where shipped work used to be;
-AD is the newest chunk, not a gap. Old numbers are kept
+AF is the newest chunk, not a gap. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -293,6 +293,25 @@ tab is drawn and nothing else. What it did not settle:
   (`core/page_nav.py` — `gather_groups`, `order_after_regroup`), and
   `Page.group`, `page_group_colors` and the saved fold state are all
   already in the file format.
+
+---
+
+## AF. Web view cards
+
+Two notes of Dan's from 0.1.17, both about living with a `webview` card.
+Captured 2026-09-26 and not investigated yet, so neither has a cost.
+
+**AF1. A Plotly chart fills the web view's width** (Dan). Today a chart
+has to be given `width = 300%` just to span a small page, and more for a
+full one. The ask: `width = 100` means 100% of the viewport. First find out
+where the width is lost: in the page's own CSS, in Plotly's `autosize`, or
+in the card's viewport. A page that sizes itself by `100vh` behaves
+differently in a card, a tile and a report, so check all three.
+
+**AF2. The status bar's zoom works on a web page** (Dan). With a web view
+focused, the zoom % at the bottom of the window would show and set that
+page's zoom: Ctrl+wheel zooms it, and clicking the % puts it back to 100.
+Open: whether the zoom is per card, per page or saved with the project.
 
 ---
 
