@@ -95,6 +95,21 @@ def test_a_wire_that_cannot_be_made_is_skipped_not_fatal(window, registry):
     assert set(window.graph.nodes) == before
 
 
+def test_undo_works_after_the_paste(window, registry):
+    """The other half of the original report: after the failed paste Undo
+    was greyed out, because the paste's macro was never closed."""
+    _three_into_concat(window, registry)
+    before = set(window.graph.nodes)
+    wires_before = set(window.graph.connections)
+    _paste(window)
+    assert window.undo_stack.canUndo()
+    window.undo_stack.undo()
+    assert set(window.graph.nodes) == before
+    assert set(window.graph.connections) == wires_before
+    window.undo_stack.redo()
+    assert len(window.graph.nodes) == 2 * len(before)
+
+
 def test_look_settings_travel_with_the_copy(window, registry):
     node = _add(window, registry, SCRIPT, "a", (0.0, 0.0))
     node.canvas_preview_enabled = False
