@@ -14,7 +14,11 @@ reads neither, is handed what pip would have used, so a machine set up for
 a private mirror installs from it whichever installer runs.
 
 An index that wants a user name and password (JFrog, Artifactory) gets them
-through `IndexLogin`, put into the index URL for one run. Neither installer
+through `IndexLogin`, put into the index URL for one run — and that URL
+goes to the installer in its environment (`login_environment`), never on
+its command line, which other programs and security logging can read. It
+is only ever needed for a private index; plain PyPI use never sees any of
+this. Neither installer
 can be asked over a pipe the way a console asks: `uv pip` never prompts, and
 pip's password prompt reads the Windows console itself, not stdin. So the
 dialog watches for the index turning an install away (`asks_for_login`,
@@ -247,6 +251,23 @@ def login_refused(output: str) -> bool:
     return bool(_REFUSED.search(_ANSI.sub("", output)))
 
 
+def login_risk(index: PackageIndex) -> str:
+    """Why a password sent to `index` could be read on its way there, or
+    "". Plain http is not encrypted at all; a trusted host is encrypted
+    but its certificate is not checked, so anything posing as it gets the
+    password."""
+    host = index_host(index.url).rpartition(":")[0] or index_host(index.url)
+    if index.url.strip().lower().startswith("http://"):
+        return ("This index uses http://, which is not encrypted: the "
+                "password can be read by anyone on the network between you "
+                "and it. Ask for its https:// address.")
+    if host and (host in index.hosts() or index_host(index.url) in index.hosts()):
+        return (f"{host} is a trusted host, so its certificate is not "
+                f"checked: a server pretending to be it would be sent the "
+                f"password. Only sign in on a network you trust.")
+    return ""
+
+
 def login_index(configured: "PackageIndex | None" = None,
                 environ=None, files=None) -> PackageIndex:
     """The index a login is for: the one an install would use — including,
@@ -380,6 +401,37 @@ def uv_has_own_index(environ=None) -> bool:
     return any(environ.get(name, "").strip() for name in UV_INDEX_ENV)
 
 
+def _login_target(action, index, login, environ, files) -> "PackageIndex | None":
+    """The index `login` signs in to for this action, or None when there
+    is no login to send (none given, an uninstall, nothing but PyPI)."""
+    if not login or action == "uninstall":
+        return None
+    target = login_index(index, environ, files)
+    return target if target.url.strip() else None
+
+
+def login_environment(action: str, index: "PackageIndex | None" = None,
+                      login: "IndexLogin | None" = None,
+                      environ=None, files=None) -> dict[str, str]:
+    """The environment variables that carry `login` to the installer —
+    the index URL with the login in it, under the name the installer
+    reads it by. {} when there is no login to send. Goes with
+    `build_command` given the same arguments, which then leaves the URL
+    off the command line."""
+    environ = os.environ if environ is None else environ
+    target = _login_target(action, index, login, environ, files)
+    if target is None:
+        return {}
+    url = url_with_login(target.url, login)
+    if installer_kind() == "uv":
+        # UV_DEFAULT_INDEX, when set, wins over UV_INDEX_URL, so the login
+        # goes into the one uv reads; an old uv knows only UV_INDEX_URL
+        name = ("UV_DEFAULT_INDEX" if environ.get("UV_DEFAULT_INDEX", "").strip()
+                else "UV_INDEX_URL")
+        return {name: url}
+    return {"PIP_INDEX_URL": url}
+
+
 def build_command(action: str, packages: list[str],
                   index: "PackageIndex | None" = None,
                   environ=None, files=None,
@@ -393,19 +445,19 @@ def build_command(action: str, packages: list[str],
     used — unless uv has been told an index of its own. Uninstalling needs
     no index, and pip refuses the options there.
 
-    `login` signs in to that index: its URL goes on the command line with
-    the login in it, whichever installer runs and wherever the URL came
-    from. Show the result through `redact`.
+    `login` signs in to that index. The command then names no index URL
+    at all: the URL, login and all, travels in the environment from
+    `login_environment`, because a command line is anybody's to read — the
+    process list, /proc, and the security software that logs every command
+    a company PC runs. Only its trusted hosts stay on the command line.
     """
     if action not in ("install", "upgrade", "uninstall"):
         raise ValueError(f"unknown action {action!r}")
     packages = validate_requirements(packages)
     environ = os.environ if environ is None else environ
-    if login and action != "uninstall":
-        target = login_index(index, environ, files)
-        if target.url.strip():
-            index = PackageIndex(url_with_login(target.url, login),
-                                 target.trusted_host, source=target.source)
+    signed_in = _login_target(action, index, login, environ, files)
+    if signed_in is not None:
+        index = PackageIndex(trusted_host=signed_in.trusted_host)
     kind = installer_kind()
     if kind == "pip":
         base = [sys.executable, "-m", "pip"]
@@ -418,8 +470,8 @@ def build_command(action: str, packages: list[str],
     if kind == "uv":
         base = [shutil.which("uv"), "pip"]
         target = ["--python", sys.executable]
-        if index:
-            where = index.uv_args()
+        if index or signed_in is not None:
+            where = index.uv_args() if index else []
         elif uv_has_own_index(environ):
             where = []
         else:

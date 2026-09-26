@@ -18,14 +18,16 @@ window, not from a box under the log. A console can answer pip's prompt;
 a pipe can't, because on Windows pip reads the password from the console
 itself, and `uv pip` never asks at all. So when the index turns an install
 away, the dialog stops the installer, asks, and runs the install again
-with the login in the index URL. The login lasts until flograph closes,
-one per index host, and is never saved.
+with the login in the index URL — handed over in the installer's
+environment, never its command line. The login lasts until flograph
+closes, one per index host, and is never saved. None of it shows until a
+private index is set: plain PyPI is the normal case.
 """
 from __future__ import annotations
 
 import importlib
 
-from PySide6.QtCore import QProcess, Qt, QTimer
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer
 from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
@@ -74,9 +76,16 @@ class SignInDialog(QDialog):
     """User name and password for one index host."""
 
     def __init__(self, host: str, username: str = "", refused: bool = False,
-                 parent=None) -> None:
+                 parent=None, risk: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle("Sign In to Package Index")
+        #: said before a password is typed, not after it has gone
+        self.risk_label = QLabel("⚠ " + risk if risk else "")
+        self.risk_label.setObjectName("sign_in_risk")
+        self.risk_label.setTextFormat(Qt.PlainText)
+        self.risk_label.setWordWrap(True)
+        self.risk_label.setVisible(bool(risk))
+        self.risk_label.setStyleSheet("color: #e0a030;")
         intro = QLabel(
             (f"{host} didn't accept that user name and password. Try again."
              if refused else
@@ -102,6 +111,7 @@ class SignInDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addWidget(intro)
+        layout.addWidget(self.risk_label)
         layout.addLayout(form)
         layout.addWidget(hint)
         layout.addWidget(buttons)
@@ -224,7 +234,9 @@ class PackagesDialog(QDialog):
             text += f" — signed in as {login.username}"
         self._index_label.setText(text)
         self._sign_in_btn.setText("Sign Out" if login else "Sign In…")
-        self._sign_in_btn.setEnabled(bool(self._index_host()))
+        # a private index is the exception, not the rule: with plain PyPI
+        # there is nothing to sign in to, and no button to wonder about
+        self._sign_in_btn.setVisible(bool(self._index_host()))
 
     # -------------------------------------------------------------- sign-in
 
@@ -235,6 +247,12 @@ class PackagesDialog(QDialog):
         if index.url.strip().split(":", 1)[0].lower() not in ("http", "https"):
             return ""
         return packages.index_host(index.url)
+
+    def _login_risk(self) -> str:
+        """Why a password sent to this index could be read on the way,
+        or "" — shown in the Sign In window before one is typed."""
+        return packages.login_risk(
+            packages.login_index(configured_index(self._settings)))
 
     def _login(self) -> packages.IndexLogin | None:
         return _LOGINS.get(self._index_host())
@@ -262,7 +280,8 @@ class PackagesDialog(QDialog):
     def _ask_login(self, host: str, username: str,
                    refused: bool) -> packages.IndexLogin | None:
         """The Sign In window; a separate method so tests can answer it."""
-        dialog = SignInDialog(host, username, refused, self)
+        dialog = SignInDialog(host, username, refused, self,
+                              risk=self._login_risk())
         if dialog.exec() != QDialog.Accepted:
             return None
         return dialog.login() or None
@@ -342,18 +361,30 @@ class PackagesDialog(QDialog):
         if self.busy:
             return
         login = self._login()
+        index = configured_index(self._settings)
         try:
-            argv = packages.build_command(
-                action, specs, index=configured_index(self._settings),
-                login=login)
+            argv = packages.build_command(action, specs, index=index,
+                                          login=login)
+            secret_env = packages.login_environment(action, index, login)
         except (ValueError, RuntimeError) as exc:
             self._append_log(f"error: {exc}")
             return
         self._run, self._run_output = (action, list(specs)), ""
         self._run_login, self._stopped_for_login = login, False
         self._append_log("$ " + packages.redact(" ".join(argv), login))
+        if secret_env:
+            self._append_log(f"  (signed in as {login.username}; the login "
+                             f"goes to the installer privately, not on its "
+                             f"command line)")
         self._set_busy(True)
         process = QProcess(self)
+        if secret_env:
+            # the login rides in the installer's environment, which only
+            # this user can read — never in argv, which anyone can
+            env = QProcessEnvironment.systemEnvironment()
+            for name, value in secret_env.items():
+                env.insert(name, value)
+            process.setProcessEnvironment(env)
         process.readyReadStandardOutput.connect(
             lambda: self._on_output(process.readAllStandardOutput()))
         process.readyReadStandardError.connect(
@@ -378,7 +409,7 @@ class PackagesDialog(QDialog):
             self._process.kill()
 
     def _on_finished(self, action: str, code: int) -> None:
-        if action != "uninstall" and (
+        if action != "uninstall" and self._index_host() and (
                 self._stopped_for_login
                 or (code != 0 and packages.login_refused(self._run_output))):
             self._append_log("")

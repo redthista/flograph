@@ -64,33 +64,79 @@ class TestTheLoginInTheUrl:
 
 class TestBuildingTheCommand:
 
-    def test_uv_gets_the_setting_with_the_login(self, uv):
-        argv = packages.build_command(
-            "install", ["requests"], index=PackageIndex(MIRROR),
-            environ={}, files=[], login=IndexLogin("bob", "pw"))
-        assert argv[argv.index("--index-url") + 1] == \
-            packages.url_with_login(MIRROR, IndexLogin("bob", "pw"))
+    """The login travels in the environment, never on the command line —
+    which the process list, /proc and a company's security logging all
+    show to others."""
 
-    def test_pip_is_told_its_own_index_to_carry_the_login(self, pip):
-        """With no flograph setting pip reads pip.conf — but the login can
-        only travel in a URL, so that URL goes on the command line."""
-        argv = packages.build_command(
-            "upgrade", ["requests"], environ={"PIP_INDEX_URL": MIRROR},
-            files=[], login=IndexLogin("bob", "pw"))
-        assert "https://bob:pw@mirror.example.com" in \
-            argv[argv.index("--index-url") + 1]
+    LOGIN = IndexLogin("bob", "hunter22")
 
-    def test_uvs_own_index_gets_the_login(self, uv):
-        argv = packages.build_command(
-            "install", ["requests"], environ={"UV_INDEX_URL": MIRROR},
-            files=[], login=IndexLogin("bob", "pw"))
-        assert "https://bob:pw@" in argv[argv.index("--index-url") + 1]
+    def _both(self, action="install", index=None, environ=None):
+        environ = {} if environ is None else environ
+        argv = packages.build_command(action, ["requests"], index=index,
+                                      environ=environ, files=[],
+                                      login=self.LOGIN)
+        env = packages.login_environment(action, index, self.LOGIN,
+                                         environ=environ, files=[])
+        assert not any("hunter22" in a for a in argv), argv
+        return argv, env
+
+    def test_uv_gets_the_setting_in_its_environment(self, uv):
+        argv, env = self._both(
+            index=PackageIndex(MIRROR, "mirror.example.com"))
+        assert "--index-url" not in argv
+        # the trusted host is no secret, and stays where it was
+        assert argv[argv.index("--allow-insecure-host") + 1] == \
+            "mirror.example.com"
+        assert env == {"UV_INDEX_URL":
+                       packages.url_with_login(MIRROR, self.LOGIN)}
+
+    def test_pip_gets_its_own_index_in_its_environment(self, pip):
+        """With no flograph setting pip reads pip.conf — the login can
+        only travel in a URL, so the URL is handed over with it."""
+        argv, env = self._both(action="upgrade",
+                               environ={"PIP_INDEX_URL": MIRROR})
+        assert argv[3:] == ["install", "--upgrade", "requests"]
+        assert env == {"PIP_INDEX_URL":
+                       packages.url_with_login(MIRROR, self.LOGIN)}
+
+    def test_uv_told_an_index_of_its_own_keeps_its_name(self, uv):
+        _argv, env = self._both(environ={"UV_DEFAULT_INDEX": MIRROR})
+        assert list(env) == ["UV_DEFAULT_INDEX"]
+        assert "bob:hunter22@" in env["UV_DEFAULT_INDEX"]
+
+    def test_uv_with_a_login_is_not_handed_pips_index_on_the_side(self, uv):
+        argv, env = self._both(index=PackageIndex(MIRROR),
+                               environ={"PIP_INDEX_URL": "https://other/s"})
+        assert "https://other/s" not in argv
+        assert MIRROR.split("//")[1] in env["UV_INDEX_URL"]
 
     def test_uninstalling_sends_no_login(self, pip):
-        argv = packages.build_command(
-            "uninstall", ["requests"], index=PackageIndex(MIRROR),
-            environ={}, files=[], login=IndexLogin("bob", "pw"))
-        assert not any("pw" in a for a in argv[3:])
+        argv, env = self._both(action="uninstall",
+                               index=PackageIndex(MIRROR))
+        assert env == {}
+
+    def test_no_login_changes_nothing(self, pip):
+        """Plain pip use is untouched: no login, no environment."""
+        assert packages.login_environment(
+            "install", PackageIndex(MIRROR), None, environ={}) == {}
+        assert packages.build_command(
+            "install", ["requests"], environ={}, files=[]) == \
+            [sys.executable, "-m", "pip", "install", "requests"]
+
+
+class TestWarningBeforeSigningIn:
+
+    def test_plain_http(self):
+        assert "not encrypted" in packages.login_risk(
+            PackageIndex("http://mirror.example.com/simple"))
+
+    def test_a_trusted_host(self):
+        assert "certificate is not checked" in packages.login_risk(
+            PackageIndex("https://mirror.example.com:8443/simple",
+                         "mirror.example.com"))
+
+    def test_https_checked_is_fine(self):
+        assert packages.login_risk(PackageIndex(MIRROR)) == ""
 
 
 class TestReadingTheInstaller:
@@ -125,12 +171,13 @@ class _Window(QWidget):
 
 
 #: a fake installer: without a login it does what pip does (prompt, then
-#: wait on stdin) or what uv does (say 401, fail); with one it succeeds
+#: wait on stdin) or what uv does (say 401, fail); with one — read, as uv
+#: reads it, from the environment — it succeeds
 FAKE = r'''
-import sys
-kind, url = sys.argv[1], sys.argv[2]
+import os, sys
+kind, url = sys.argv[1], os.environ.get("UV_INDEX_URL", sys.argv[2])
 if "@" in url:
-    print("Successfully installed requests-2.0 with", url)
+    print("Successfully installed requests-2.0 from", url)
     sys.exit(0)
 if kind == "pip":
     print("Looking in indexes:", url)
@@ -154,16 +201,23 @@ def dialog(qtbot, tmp_path, monkeypatch):
     qtbot.addWidget(window)
     monkeypatch.setattr(packages, "installer_kind", lambda: "uv")
     monkeypatch.setattr(packages, "list_installed", lambda: [])
+    for name in ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX"):
+        monkeypatch.delenv(name, raising=False)
     dlg = PackagesDialog(window)
     qtbot.addWidget(dlg)
     dlg.runs = []
     dlg.asked = []
+    dlg.argvs = []
+    real_build = packages.build_command
 
     def fake(kind):
-        def build(action, specs, index=None, login=None, **_):
+        def build(action, specs, index=None, login=None, **kw):
             dlg.runs.append(login)
-            url = packages.url_with_login(index.url, login)
-            return [sys.executable, "-c", FAKE, kind, url]
+            # the real command, for what it would have shown the world...
+            dlg.argvs.append(real_build(action, specs, index=index,
+                                        login=login, **kw))
+            # ...and a stand-in to run; the environment is the real one
+            return [sys.executable, "-c", FAKE, kind, index.url]
         monkeypatch.setattr(packages, "build_command", build)
 
     def answer(*logins):
@@ -199,8 +253,15 @@ class TestSigningInWhenAsked:
         log = _log(dialog)
         assert "the index asks for a user name and password" in log
         assert "— install finished —" in log
+        # the installer got the login (it said where from, and it's
+        # starred in the log), but nothing anyone else can see carries it
+        assert "from https://bob:****@" in log
         assert "hunter22" not in log
-        assert "https://bob:****@" in log
+        assert not any("hunter22" in a for argv in dialog.argvs
+                       for a in argv)
+        assert not any("hunter22" in a for a in dialog._process.arguments())
+        assert "hunter22" in dialog._process.processEnvironment().value(
+            "UV_INDEX_URL")
         assert "signed in as bob" in dialog._index_label.text()
 
     def test_uvs_401_is_asked_for(self, dialog, qtbot):
@@ -218,7 +279,8 @@ class TestSigningInWhenAsked:
 
         def build(action, specs, index=None, login=None, **_):
             dialog.runs.append(login)      # always refused
-            return [sys.executable, "-c", FAKE, "uv", index.url]
+            return [sys.executable, "-c",
+                    "import sys; print('401 Unauthorized'); sys.exit(1)"]
         monkeypatch.setattr(packages, "build_command", build)
         dialog.answer()                    # then the user cancels
         dialog._install_edit.setText("requests")
@@ -258,7 +320,31 @@ class TestTheButton:
         monkeypatch.setattr(packages, "pip_config_index",
                             lambda *a, **k: PackageIndex())
         dialog._show_index()
-        assert not dialog._sign_in_btn.isEnabled()
+        # plain PyPI is the normal case: no sign-in anywhere in sight
+        assert dialog._sign_in_btn.isHidden()
+
+    def test_plain_pypi_failing_is_just_a_failure(self, dialog, qtbot,
+                                                   monkeypatch):
+        """No private index, no sign-in: a failed install says failed."""
+        dialog._settings.setValue("packages/index_url", "")
+        monkeypatch.setattr(packages, "pip_config_index",
+                            lambda *a, **k: PackageIndex())
+        dialog.fake("uv")
+        dialog.answer(IndexLogin("bob", "pw"))
+        dialog._install_edit.setText("requests")
+        dialog._install()
+        qtbot.waitUntil(lambda: "— install failed" in _log(dialog),
+                        timeout=10000)
+        assert dialog.asked == []
+
+    def test_the_window_warns_before_the_password_is_typed(self, dialog,
+                                                            qtbot):
+        dialog._settings.setValue("packages/index_url",
+                                  "http://mirror.example.com/simple")
+        assert "not encrypted" in dialog._login_risk()
+        win = SignInDialog(HOST, risk=dialog._login_risk())
+        qtbot.addWidget(win)
+        assert not win.risk_label.isHidden()
 
     def test_the_window_hides_the_password(self, qtbot):
         win = SignInDialog(HOST, "bob", refused=True)

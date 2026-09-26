@@ -104,16 +104,33 @@ index to `uv` when uv is the installer, because uv doesn't read pip's
 settings. Manage Packages says which index an install will use and where
 that came from, and the update check asks the same one.
 
-**An index that needs a login.** When the index asks for a user name and
-password, as JFrog and Artifactory usually do, Manage Packages stops the
-install and opens a **Sign In** window. Sign in and the install runs again.
-You can also sign in ahead of time with **Sign In…** beside the index line.
-An API key or identity token works as the password. The login is kept only
-until flograph closes, one per index, and is never saved. The log shows the
-password as `****`. A sign-in the index refuses asks again; **Sign Out**
-forgets it. (A command window lets you type the login when pip asks for
-it. Here that can't work: on Windows pip reads the password from the
-console, not from flograph, and `uv` never asks.)
+**An index that needs a login.** Only with a private index set does any
+of this appear; installing from PyPI never asks for anything. When the
+index asks for a user name and password, as JFrog and Artifactory usually
+do, Manage Packages stops the install and opens a **Sign In** window. Sign
+in and the install runs again. You can also sign in ahead of time with
+**Sign In…** beside the index line. An API key or identity token works as
+the password, and is the better choice where your index offers one: it can
+be revoked without changing your password.
+
+How the password is kept safe:
+
+- It is kept in memory until flograph closes, one per index, and never
+  written to settings or to disk. **Sign Out** forgets it.
+- It goes to pip or uv in their environment, which only your own account
+  can read. It is never put on their command line, which other programs,
+  and the security software many companies run, can see and record.
+- The log shows it as `****`.
+- The Sign In window warns before you type, if the index is `http://` (not
+  encrypted) or a trusted host (its certificate isn't checked).
+
+One exception is pip's own doing: when pip has to build a package from
+source rather than download a ready-made wheel, it starts a second pip
+with the index address, login included, on that pip's command line, for
+as long as the build takes. uv doesn't do this. (A command window lets you
+type the login when pip asks for it; that can't work here, because on
+Windows pip reads the password from the console, not from flograph, and
+uv never asks.)
 
 **What a flow needs.** **Tools ▸ What This Flow Needs** lists the Python
 packages a flow's nodes import and the web libraries its visuals load, read
