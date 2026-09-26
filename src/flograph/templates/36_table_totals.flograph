@@ -1,0 +1,409 @@
+{
+ "flograph_version": "0.1.19",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "tt_data",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     0
+    ],
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"Region\", \"type\": \"text\"}, {\"name\": \"Product\", \"type\": \"text\"}, {\"name\": \"Quarter\", \"type\": \"text\"}, {\"name\": \"Units\", \"type\": \"integer\"}, {\"name\": \"Revenue\", \"type\": \"number\"}, {\"name\": \"Profit\", \"type\": \"number\"}], \"rows\": [[\"North\", \"Widget\", \"Q1\", 50, 2100.0, 672.0], [\"North\", \"Gadget\", \"Q1\", 10, 650.0, 136.5], [\"North\", \"Gizmo\", \"Q1\", 44, 1232.0, 394.24], [\"South\", \"Widget\", \"Q1\", 8, 336.0, -20.16], [\"South\", \"Gadget\", \"Q1\", 88, 5720.0, -1716.0], [\"South\", \"Gizmo\", \"Q1\", 39, 1092.0, 196.56], [\"East\", \"Widget\", \"Q1\", 63, 2646.0, 476.28], [\"East\", \"Gadget\", \"Q1\", 79, 5135.0, 924.3], [\"East\", \"Gizmo\", \"Q1\", 77, 2156.0, 689.92], [\"West\", \"Widget\", \"Q1\", 81, 3402.0, 272.16], [\"West\", \"Gadget\", \"Q1\", 70, 4550.0, 364.0], [\"West\", \"Gizmo\", \"Q1\", 52, 1456.0, -378.56], [\"North\", \"Widget\", \"Q2\", 58, 2436.0, 609.0], [\"North\", \"Gadget\", \"Q2\", 58, 3770.0, 942.5], [\"North\", \"Gizmo\", \"Q2\", 23, 644.0, -38.64], [\"South\", \"Widget\", \"Q2\", 71, 2982.0, -357.84], [\"South\", \"Gadget\", \"Q2\", 34, 2210.0, -243.1], [\"South\", \"Gizmo\", \"Q2\", 45, 1260.0, 315.0], [\"East\", \"Widget\", \"Q2\", 70, 2940.0, -352.8], [\"East\", \"Gadget\", \"Q2\", 83, 5395.0, 971.1], [\"East\", \"Gizmo\", \"Q2\", 78, 2184.0, 546.0], [\"West\", \"Widget\", \"Q2\", 8, 336.0, -20.16], [\"West\", \"Gadget\", \"Q2\", 57, 3705.0, 296.4], [\"West\", \"Gizmo\", \"Q2\", 25, 700.0, -182.0]]}",
+     "width": 460,
+     "height": 520
+    },
+    "code": null,
+    "label": "Sales"
+   },
+   {
+    "id": "tt_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     680
+    ],
+    "params": {
+     "text": "## Totals and groups\n\nEvery table on the right is a **Show Table** fed from **Sales**. Click one and look at its Properties: **Total row**, **Total row at**, **Show as ▸ grouped**, **Group by**, **Subtotals** and **Totals in output**, plus the rules in **Conditional formatting**.\n\nPress **Rules…** to see the same lines in the builder — the **Totals & groups** page, and **Text colour** / **Draw on** on the Highlight page.\n\nOpen the **Dashboard** and **Report** tabs to see the same tables on a page and on paper.",
+     "width": 460,
+     "height": 360
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_total",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     0
+    ],
+    "params": {
+     "totals": "sum",
+     "format_rules": "Revenue  format $,.0f\nProfit   format $,.0f\nRevenue  bar blue\nUnits    total average\nProduct  total distinct\nRegion   total \"All regions\"\nProfit < 0 => fg red\nProfit < 0 => fg red, icon ▼ red right, on total\nProfit > 0 => fg green, on total",
+     "width": 680,
+     "height": 420
+    },
+    "code": null,
+    "label": "1 · A total row"
+   },
+   {
+    "id": "tt_total_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     0
+    ],
+    "params": {
+     "text": "**1 · A total row.** *Total row ▸ sum* totals every number column. The rules box refines it a column at a time:\n\n- `Units total average` — one column averaged instead\n- `Product total distinct` — how many different products\n- `Region total \"All regions\"` — words instead of a number\n\nClick a header: the rows sort, the total stays at the bottom. The data bar ignores the total (it would always be the longest), and `on total` gives the total its own colour and ▼.",
+     "width": 520,
+     "height": 260
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_both",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     580
+    ],
+    "params": {
+     "totals": "average",
+     "totals_at": "both",
+     "total_label": "Average",
+     "format_rules": "Revenue  format $,.0f\nProfit   format $,.2f\nUnits    total max\ntotal => bg #2a3550, bold",
+     "width": 680,
+     "height": 420
+    },
+    "code": null,
+    "label": "2 · Top and bottom, styled"
+   },
+   {
+    "id": "tt_both_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     580
+    ],
+    "params": {
+     "text": "**2 · Top and bottom.** *Total row at ▸ both*, *Total label ▸ Average*, and `Units total max` for the one column where the biggest order is the interesting number.\n\n`total => bg #2a3550, bold` restyles the total rows. `subtotal => …` and `group => …` do the same for a grouped table.",
+     "width": 520,
+     "height": 180
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_grouped",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     1160
+    ],
+    "params": {
+     "mode": "grouped",
+     "group_by": "Region",
+     "totals": "sum",
+     "subtotals": "on the group row",
+     "format_rules": "Revenue  format $,.0f\nProfit   format $,.0f\nRevenue  bar blue\nProfit < 0 => fg red, icon ▼ red right, on all\nProfit > 0 => fg green, on totals",
+     "width": 680,
+     "height": 520
+    },
+    "code": null,
+    "label": "3 · Grouped by region"
+   },
+   {
+    "id": "tt_grouped_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     1160
+    ],
+    "params": {
+     "text": "**3 · Grouped.** *Show as ▸ grouped*, *Group by ▸ Region*: each region gets a header row with its row count and subtotals. **Click a region to fold it**; right-click for Expand / Collapse All Groups.\n\n`on all` puts the red ▼ on negative data rows *and* totals; `on totals` greens the positive subtotals and the grand total without touching the rows.",
+     "width": 520,
+     "height": 220
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_nested",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     1840
+    ],
+    "params": {
+     "mode": "grouped",
+     "group_by": "Region, Product",
+     "groups_start": "outer level open",
+     "subtotals": "both",
+     "totals": "sum",
+     "totals_at": "top",
+     "total_label": "All sales",
+     "format_rules": "Revenue  format $,.0f\nProfit   format $,.0f\nsubtotal both \"subtotal\"\ngroup => bg #26343f\nProfit < 0 => fg red, on subtotals",
+     "width": 680,
+     "height": 460
+    },
+    "code": null,
+    "label": "4 · Nested, starts folded"
+   },
+   {
+    "id": "tt_nested_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     1840
+    ],
+    "params": {
+     "text": "**4 · Nested.** *Group by ▸ Region, Product* nests, outermost first. *Groups start ▸ outer level open* shows each region's products folded — click one to see its rows.\n\n*Subtotals ▸ both* writes them on the group row and under the group; `subtotal both \"subtotal\"` changes what follows the name. The grand total is at the top, called *All sales*.",
+     "width": 520,
+     "height": 200
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_out",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     2460
+    ],
+    "params": {
+     "mode": "grouped",
+     "group_by": "Quarter",
+     "totals": "sum",
+     "subtotals": "under the group",
+     "totals_out": true,
+     "format_rules": "Revenue  format $,.0f\nProfit   format $,.0f",
+     "width": 680,
+     "height": 420
+    },
+    "code": null,
+    "label": "5 · Totals in output"
+   },
+   {
+    "id": "tt_matrix",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     3040
+    ],
+    "params": {
+     "mode": "matrix",
+     "matrix_rows": "Region",
+     "matrix_columns": "Product",
+     "matrix_values": "Revenue",
+     "matrix_agg": "mean",
+     "totals": "average",
+     "format_rules": "* scale green\n* format $,.0f",
+     "width": 680,
+     "height": 300
+    },
+    "code": null,
+    "label": "6 · Matrix with a true total"
+   },
+   {
+    "id": "tt_matrix_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     3040
+    ],
+    "params": {
+     "text": "**6 · A matrix total.** Average revenue by region × product, with *Total row ▸ average*. The total is the average of the **rows** behind each column, not of the four cells above it — a cell built from many sales counts for more than one built from few. The heatmap leaves the total row out.",
+     "width": 520,
+     "height": 160
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_down",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1620,
+     2460
+    ],
+    "params": {
+     "width": 520,
+     "height": 420
+    },
+    "code": null,
+    "label": "What went downstream"
+   },
+   {
+    "id": "tt_out_note",
+    "type": "flograph.util.note",
+    "pos": [
+     2380,
+     2460
+    ],
+    "params": {
+     "text": "**5 · Totals in output.** Grouped by quarter with a subtotal under each, and *Totals in output* ticked — so the table that leaves it carries a *Q1 Total*, *Q2 Total* and *Total* row, the way a spreadsheet's Subtotal command writes them.\n\n**What went downstream** has no rules of its own: it shows those rows as plain data. Untick *Totals in output* and they vanish from it, while the card on the left looks exactly the same.",
+     "width": 460,
+     "height": 240
+    },
+    "code": null,
+    "label": null
+   }
+  ],
+  "connections": [
+   {
+    "id": "c01",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_total",
+     "table"
+    ]
+   },
+   {
+    "id": "c02",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_both",
+     "table"
+    ]
+   },
+   {
+    "id": "c03",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_grouped",
+     "table"
+    ]
+   },
+   {
+    "id": "c04",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_nested",
+     "table"
+    ]
+   },
+   {
+    "id": "c05",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_out",
+     "table"
+    ]
+   },
+   {
+    "id": "c06",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_matrix",
+     "table"
+    ]
+   },
+   {
+    "id": "c07",
+    "src": [
+     "tt_out",
+     "table"
+    ],
+    "dst": [
+     "tt_down",
+     "table"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "tt_frame",
+    "title": "Totals and groups",
+    "rect": [
+     -60,
+     -80,
+     2960,
+     3480
+    ],
+    "color": "#26415c"
+   }
+  ],
+  "pages": [
+   {
+    "id": "tt_dash",
+    "title": "Dashboard",
+    "kind": "dashboard",
+    "tiles": [
+     {
+      "id": "t1",
+      "node": "tt_grouped",
+      "port": "table",
+      "rect": [
+       40,
+       40,
+       680,
+       520
+      ]
+     },
+     {
+      "id": "t2",
+      "node": "tt_nested",
+      "port": "table",
+      "rect": [
+       760,
+       40,
+       680,
+       520
+      ]
+     },
+     {
+      "id": "t3",
+      "node": "tt_total",
+      "port": "table",
+      "rect": [
+       40,
+       600,
+       680,
+       420
+      ]
+     },
+     {
+      "id": "t4",
+      "node": "tt_matrix",
+      "port": "table",
+      "rect": [
+       760,
+       600,
+       680,
+       300
+      ]
+     }
+    ]
+   },
+   {
+    "id": "tt_report",
+    "title": "Report",
+    "kind": "report",
+    "body": "# Sales by region\n\nThe same tables, printed. Group rows, subtotals and the grand total come out as they are on the card, colours included.\n\n## By region\n\n![[3 · Grouped by region]]\n\n## Region × product, averaged\n\n![[6 · Matrix with a true total]]\n"
+   }
+  ]
+ }
+}
