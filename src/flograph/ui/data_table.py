@@ -853,8 +853,12 @@ class DataTableView(QTableView):
         rows, cols = model.rowCount(), model.columnCount()
         if selection_model is None or not rows or not cols:
             return Picks()
+        # a total or group row is not a row of the table, so it is never
+        # part of a pick — only the rows it stands for could be
+        data_row = getattr(model, "is_data_row", lambda _r: True)
         if self._pick_by == "row":
-            picked = sorted({i.row() for i in selection_model.selectedIndexes()})
+            picked = sorted({i.row() for i in selection_model.selectedIndexes()
+                             if data_row(i.row())})
             if len(picked) == rows:
                 return Picks()             # every row: Select All
             return Picks(rows=[model.row_label(r) for r in picked])
@@ -868,7 +872,7 @@ class DataTableView(QTableView):
         free = cols - len(picked_cols)
         by_row: dict[int, set] = {}
         for index in selection_model.selectedIndexes():
-            if index.column() not in picked_cols:
+            if index.column() not in picked_cols and data_row(index.row()):
                 by_row.setdefault(index.row(), set()).add(index.column())
         columns = [names[c] for c in sorted(picked_cols)]
         full = sorted(r for r, cs in by_row.items()
@@ -908,7 +912,9 @@ class DataTableView(QTableView):
         model = self.model()
         current = self.currentIndex()
         if (not picks or not current.isValid()
-                or not self.selectionModel().isSelected(current)):
+                or not self.selectionModel().isSelected(current)
+                or not getattr(model, "is_data_row",
+                               lambda _r: True)(current.row())):
             return Picks()
         if self._last_gesture == "row" or self._pick_by == "row":
             return Picks(rows=[model.row_label(current.row())])
@@ -975,7 +981,24 @@ class DataTableView(QTableView):
         self._put_picks(picks)
         return True
 
+    def _fold_at(self, row: int) -> bool:
+        """A click on a group's row folds or unfolds it. The whole row
+        answers rather than just its arrow: a header row carries subtotals,
+        not values anyone picks, and a target the width of the table is one
+        a dashboard reader cannot miss."""
+        model = self.model()
+        special = getattr(model, "special_at", lambda _r: None)(row)
+        if special is None or special.kind != "group":
+            return False
+        model.toggle_group(row)
+        return True
+
     def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self.model() is not None:
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid() and self._fold_at(index.row()):
+                event.accept()
+                return
         if (self._pick_mode != "nothing" and self.model() is not None
                 and event.button() == Qt.LeftButton):
             self._settle_pending()
@@ -997,6 +1020,14 @@ class DataTableView(QTableView):
         header needs nothing special: Qt selects the row, and the selection
         becomes the pick as any other does.
         """
+        if (watched is self.verticalHeader().viewport()
+                and event.type() == QEvent.MouseButtonPress
+                and event.button() == Qt.LeftButton
+                and self.model() is not None):
+            row = self.verticalHeader().logicalIndexAt(
+                event.position().toPoint())
+            if row >= 0 and self._fold_at(row):
+                return True
         if self._pick_mode != "nothing" and self.model() is not None:
             kind = event.type()
             columns = self.horizontalHeader()
@@ -1087,6 +1118,14 @@ class DataTableView(QTableView):
         select_all.setShortcut(QKeySequence.SelectAll)
         select_all.setEnabled(everything.isEnabled())
         select_all.triggered.connect(self.selectAll)
+
+        model = self.model()
+        if getattr(model, "is_grouped", lambda: False)():
+            menu.addSeparator()
+            unfold = menu.addAction("Expand All Groups")
+            unfold.triggered.connect(lambda: model.set_all_groups(False))
+            fold = menu.addAction("Collapse All Groups")
+            fold.triggered.connect(lambda: model.set_all_groups(True))
 
         if self._pick_mode != "nothing":
             # the way out of a filter that is keeping nothing you want

@@ -38,13 +38,18 @@ A rule is `columns  verb  argument`:
 | `label` | `revenue label "Revenue (£)"` | the header text to show; the real column name is what every rule, sort and export still uses |
 | `wrap` | `wrap` | let long text run onto more lines, growing the rows — the one rule that takes no columns |
 | `sort` | `revenue sort desc` | the order the table *opens* in — on the card, in a tile and on paper |
+| `total` | `total sum` · `price total average` | a total row — see [[#totals-and-groups|Totals and groups]] |
+| `group` | `group region, product` | rows gathered under a header you can fold — see [[#totals-and-groups|Totals and groups]] |
+| `on` (in a `=>`) | `profit < 0 => fg red, on totals` | draw on the total rows instead of (or as well as) the data rows |
 
 Tests for a highlight: `> < >= <= = !=`, `between 10 20`, `contains`,
 `starts with`, `ends with`, `matches` (regex), `is empty`, `is not empty`.
 `=` and `!=` take a [[#value-patterns|pattern]] — `status = late* => bg red`.
 
 Colours are a preset — `green` `red` `amber` `blue` `grey` `purple` — or a
-`#hex`. Scale presets: `green` `blue` `red` `red-green` `red-yellow-green`
+`#hex`. `bg` takes the preset as a dark fill that text reads on; `fg` (the
+text colour) and an icon take it as a bright ink, so `profit < 0 => fg red`
+is red text you can read on the dark grid. Scale presets: `green` `blue` `red` `red-green` `red-yellow-green`
 `green-yellow-red` `diverging`. In the **Rules…** builder every colour box is
 a swatch menu with a **Custom…** entry that opens the system colour picker.
 
@@ -327,6 +332,89 @@ included — and appear in **Open in Browser** and exported HTML.
 **Open Example ▸ Table Pictures** is a worked flow: logos beside names,
 owner photos cut to circles, SVG badges, pasted icons in an icon map and
 pictures on tiles — on the canvas, a dashboard page and a report page.
+
+## Totals and groups
+
+A total row is a row the table does not have, laid out among the rows it
+does. The quick way is Show Table's **Total row** dropdown — `sum`,
+`average`, `median`, `min`, `max`, `range`, `count` (cells with a value),
+`rows` (blanks included), `distinct`, `std`, `variance`, `first`, `last` or
+`mode` — which totals every number column, with **Total row at** (bottom,
+top or both) and **Total label** beside it. The rules box says the same
+thing, and says more:
+
+```
+total sum                     # every number column, summed
+total sum top "Grand total"   # …at the top, and called that
+total average both            # top and bottom
+price     total average       # one column totalled differently
+region    total "All regions" # a column that says something instead
+id        total none          # and one left blank
+```
+
+The dropdown comes first and the box refines it, a later line winning for
+the columns it names — so "sum" in the dropdown and `price total average`
+in the box sums everything but price. A total in the column's own units (a
+sum, an average, a min) takes the column's `format`; a count does not, so
+a money column's count never prints as `$12`.
+
+**A total is left alone by the other rules.** It is always the biggest
+number, so a heatmap it joined would go flat and `revenue > 1000 => bg red`
+would always light it. It is not sorted either: clicking a header moves the
+data rows and the totals stay where they are. To colour or mark a total by
+its own value, aim a highlight at it with `on`:
+
+```
+profit < 0 => fg red, icon ▼ red, on totals    # every total row
+profit > 0 => fg green, on total               # the grand total only
+margin < 0.1 => bg amber, on subtotals         # the groups' subtotals
+status = late => bg red, on all                # data rows and totals
+total => bg #2a3550, bold                      # a whole kind of row
+subtotal => fg #9aa0a6
+```
+
+`on` takes `totals` (every total row), `total` (the grand total), `subtotals`
+(a group's row and the row under it), `groups` (group rows only), `data`
+and `all`. In **Rules…** it is **Draw on**, on the Highlight page, beside
+**Text colour**.
+
+### Grouped rows
+
+Set **Show as** to *grouped* and pick **Group by**: rows that share a value
+gather under a header row showing the value and how many rows it holds.
+Click a group's row, or its row number, to fold it; right-click the table
+for **Expand All Groups** / **Collapse All Groups**. Several columns nest,
+outermost first, and the grouping columns move into a group column of their
+own at the front.
+
+```
+group region, product          # the rules-box spelling
+group region closed            # start folded: open / closed / first
+subtotal below                 # above (on the group's row) / below / both / none
+subtotal both "Subtotal"       # …and what follows a group's name
+```
+
+Groups come in the order their first row appears, so sorting by a number
+puts the group holding the biggest row first, and the rows within each
+group are sorted too. Folding is a way of looking: a re-run keeps what you
+folded, the table port carries every row, and **Groups start** says how a
+freshly-opened table looks. A matrix is already grouped, so *grouped* and
+*matrix* are two different **Show as** choices; a matrix still takes a
+**Total row**, and its total is worked out from the rows behind each column,
+not from the cells — the average of a mean matrix is the mean of its rows.
+
+### Totals in the output
+
+The totals are a way of *looking* at the table, so the table port carries
+the rows that arrived. Tick **Totals in output** to write them in: a total
+row indexed by its label, and — grouped — the groups in order with a
+"North Total" row under each (a spreadsheet's Subtotal command writes the
+same). A Show Table fed that table still totals it correctly: the style it
+receives says which rows were written in, and they are taken back out before
+the card lays out its own.
+
+The totals print on a report page and in a dashboard tile exactly as on the
+card, folded groups included.
 
 ## Order of application
 

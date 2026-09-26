@@ -1367,10 +1367,13 @@ class _Resolver:
         font_pt = (REPORT_FONT_PT * self._table_scale
                    if self._table_scale != 1.0 else None)
 
+        grand, baked = self._table_totals(ref)
+
         def build(rows: int, size: "float | None") -> str:
             return frame_to_html(value, rules, hidden, shown, max_rows=rows,
                                  width=self._image_width, font_pt=size,
-                                 marker=marker, text_width=_table_text_width)
+                                 marker=marker, text_width=_table_text_width,
+                                 grand=grand, baked=baked)
 
         try:
             html = self._set_aside_pictures(build(self._max_rows, font_pt))
@@ -1427,6 +1430,22 @@ class _Resolver:
                     shown_columns(style))
         except Exception:
             return (), (), ()
+
+    def _table_totals(self, ref: str) -> tuple:
+        """(a matrix's true grand totals, the total rows Totals in output
+        wrote into the table) off the same style port — see table_totals."""
+        node = self._node_for(ref)
+        if node is None or self._cache is None:
+            return None, None
+        try:
+            style = self._cache.outputs_for(node.id).get("style")
+        except Exception:
+            return None, None
+        if not isinstance(style, dict):
+            return None, None
+        grand = style.get("grand")
+        return (grand if isinstance(grand, dict) else None,
+                style.get("baked") or None)
 
 
 def source_by_label(graph):

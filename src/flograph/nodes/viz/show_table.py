@@ -170,6 +170,32 @@ thing clicked. A pick shows every cell it matched, survives a re-run and a
 sort, and works the same on a dashboard tile. In matrix mode it filters the
 matrix you see.
 
+**Totals.** **Total row** totals every number column — sum, average,
+median, min, max, range, count, rows, distinct, std, variance, first, last
+or mode — at the bottom, top or both, under **Total label**. The rules box
+refines it a column at a time:
+
+```
+total sum top "Grand total"     # the dropdown, typed
+price     total average         # one column differently
+region    total "All regions"   # words instead of a number
+profit < 0 => fg red, icon ▼ red, on totals   # rules reach totals via `on`
+total => bg #2a3550, bold       # how total rows look
+```
+
+A total is never sorted with the rows and never joins a heatmap, bar or
+highlight — unless a rule asks with `on totals`. It takes its column's
+`format` unless it is a count.
+
+**Grouped.** Set **Show as** to *grouped* and pick **Group by**: rows with
+the same value gather under a header row you click to fold, with subtotals
+on it, under it, or both (**Subtotals**). Right-click for Expand / Collapse
+All Groups. Several columns nest, outermost first.
+
+**Totals in output** writes the totals into the `table` and `filtered`
+outputs; off, they are only drawn. See **Totals and groups** in the
+Conditional Formatting handbook page.
+
 **The row index.** Untick **Show row index** to lose the numbers down the
 left edge — a generated 0, 1, 2… says nothing on a dashboard. Like the
 column lists it is a view: the table leaving the `table` port keeps its
@@ -178,7 +204,7 @@ index.
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.7",
+    "version": "1.8",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object", {"optional": True})],
@@ -188,9 +214,23 @@ NODE = {
                 ("filtered", "dataframe")],
 }
 _MATRIX = {"mode": ["matrix"]}
+_GROUPED = {"mode": ["grouped"]}
+# core/table_totals.AGGREGATIONS, written out so the script stands alone
+# (a test keeps the two the same)
+_TOTALS = ["sum", "average", "median", "min", "max", "range", "count",
+           "rows", "distinct", "std", "variance", "first", "last", "mode"]
+_TOTALLED = {"totals": _TOTALS}
 PARAMS = [
     {"name": "mode", "type": "choice", "label": "Show as",
-     "options": ["table", "matrix"], "default": "table"},
+     "options": ["table", "grouped", "matrix"], "default": "table"},
+    {"name": "group_by", "type": "columns", "label": "Group by",
+     "default": "", "placeholder": "outermost first", "visible_when": _GROUPED},
+    {"name": "groups_start", "type": "choice", "label": "Groups start",
+     "options": ["open", "folded", "outer level open"], "default": "open",
+     "visible_when": _GROUPED},
+    {"name": "subtotals", "type": "choice", "label": "Subtotals",
+     "options": ["on the group row", "under the group", "both", "none"],
+     "default": "on the group row", "visible_when": _GROUPED},
     {"name": "matrix_rows", "type": "columns", "label": "Rows", "default": "",
      "placeholder": "what runs down the side", "visible_when": _MATRIX},
     {"name": "matrix_columns", "type": "columns", "label": "Columns",
@@ -205,6 +245,18 @@ PARAMS = [
     {"name": "matrix_order", "type": "choice", "label": "Order",
      "options": ["as they appear", "sorted"], "default": "as they appear",
      "visible_when": _MATRIX},
+    {"name": "totals", "type": "choice", "label": "Total row",
+     "options": ["off"] + _TOTALS, "default": "off"},
+    {"name": "totals_at", "type": "choice", "label": "Total row at",
+     "options": ["bottom", "top", "both"], "default": "bottom",
+     "visible_when": _TOTALLED},
+    {"name": "total_label", "type": "string", "label": "Total label",
+     "default": "Total", "visible_when": _TOTALLED},
+    # Off by default: the totals are a way of looking at the table, and a
+    # node downstream summing a column that already holds its own total
+    # would count everything twice.
+    {"name": "totals_out", "type": "bool", "label": "Totals in output",
+     "default": False},
     {"name": "on_click", "type": "choice", "label": "On click",
      "options": ["nothing", "select one", "select many"],
      "default": "nothing"},
@@ -256,7 +308,14 @@ def run(ctx, table, style=None):
                          "hide": ctx.params.get("hide", ""),
                          "sort": ctx.params.get("sort", ""),
                          "sort_dir": ctx.params.get("sort_dir", ""),
-                         "row_index": ctx.params.get("row_index", True)})
+                         "row_index": ctx.params.get("row_index", True),
+                         "mode": ctx.params.get("mode", "table"),
+                         "group_by": ctx.params.get("group_by", ""),
+                         "groups_start": ctx.params.get("groups_start", ""),
+                         "subtotals": ctx.params.get("subtotals", ""),
+                         "totals": ctx.params.get("totals", "off"),
+                         "totals_at": ctx.params.get("totals_at", ""),
+                         "total_label": ctx.params.get("total_label", "")})
     merged = merge_styles(style, own)
     if ctx.params.get("mode") == "matrix":
         from flograph.core.matrix import build_matrix, column_list
@@ -270,7 +329,7 @@ def run(ctx, table, style=None):
             values=column_list(ctx.params.get("matrix_values")),
             agg=ctx.params.get("matrix_agg") or "sum",
             order=ctx.params.get("matrix_order") or "as they appear",
-            style=merged)
+            style=merged, totals=True)
         for note in built.notes:
             ctx.log(f"matrix — {note}")
         ctx.log(f"matrix: {len(table)} rows -> {len(built.frame)} rows")
@@ -290,4 +349,23 @@ def run(ctx, table, style=None):
             ctx.log(f"selection — {note}")
         ctx.log(f"selection ({describe(picks)}): kept {len(filtered):,} "
                 f"of {len(table):,} rows")
+    # Total rows and groups (core/table_totals.py). The card lays them out
+    # itself; they reach the table port only when Totals in output says so,
+    # and then the style says which rows they are, so a card fed this table
+    # does not total its own totals.
+    from flograph.core.table_format import rules_from_style
+    from flograph.core.table_totals import plan_from_rules, with_totals
+
+    plan = plan_from_rules(rules_from_style(merged), table)
+    for note in plan.notes:
+        ctx.log(f"totals — {note}")
+    if ctx.params.get("totals_out") and plan.active:
+        grand = merged.get("grand") if isinstance(merged, dict) else None
+        table, baked = with_totals(table, plan, grand=grand)
+        merged = {**merged, "baked": baked}
+        if picks:
+            filtered, _ = with_totals(filtered, plan)
+        else:
+            filtered = table
+        ctx.log(f"totals: {len(baked)} total row(s) written into the output")
     return {"table": table, "style": merged, "filtered": filtered}

@@ -2119,7 +2119,10 @@ class NodeItem(QGraphicsObject):
                 # keeps its scroll position, its sort and its paged-in rows
                 view.show()
                 return
-            view.setModel(styled_model(table, style, parent=view))
+            model = styled_model(table, style, parent=view)
+            # a re-run keeps the groups the reader had folded
+            model.carry_folds(previous)
+            view.setModel(model)
             view.verticalHeader().setVisible(index_shown(style))
             view.show()
         if previous is not None:

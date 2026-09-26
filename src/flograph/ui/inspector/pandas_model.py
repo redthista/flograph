@@ -95,7 +95,7 @@ def _is_missing(value: Any) -> bool:
 
 class PandasModel(QAbstractTableModel):
     def __init__(self, df: pd.DataFrame, parent=None, rules=None,
-                 hidden=None, shown=None) -> None:
+                 hidden=None, shown=None, grand=None) -> None:
         super().__init__(parent)
         # A spark can add a column (drawn in one the table lacks) and put
         # the columns it reads out of view. Worked out before anything else
@@ -109,6 +109,27 @@ class PandasModel(QAbstractTableModel):
         df, rules, spark_hidden = spark_projection(df, rules)
         if spark_hidden:
             hidden = list(hidden or []) + spark_hidden
+        # Total rows and groups (core/table_totals.py). Worked out from the
+        # rules before anything is projected: a grouped table writes its
+        # groups in a column of its own, so the grouping columns leave the
+        # view — they would say the same thing on every row of a group.
+        from flograph.core.table_totals import plan_from_rules
+        self._all_rules = list(rules or [])
+        self._plan = plan_from_rules(self._all_rules, df)
+        if self._plan.grouped:
+            hidden = list(hidden or []) + [
+                c for c in self._plan.group_by if c not in (shown or [])]
+        #: the reader's folds: group paths flipped from how groups start
+        self._toggled: set = set()
+        #: `Layout` when there are total rows or groups, else None — and
+        #: then every row is a data row and nothing below is any different
+        self._layout = None
+        #: 1 when a grouped table has its group column in front, else 0
+        self._lead = 1 if self._plan.grouped else 0
+        #: {id(Special): {column: CellStyle}}, built a kind at a time
+        self._special_styles: dict = {}
+        #: the precomputed grand total a matrix carries (see styled_model)
+        self._grand = grand or None
         self._df = df
         #: (column, block) -> that block's values, as `iat` would box them
         self._values: dict = {}
@@ -150,10 +171,258 @@ class PandasModel(QAbstractTableModel):
             self._visible = visible
         self._set_rules(rules)
         self._apply_default_sort()
+        self._relayout()
 
     def _src(self, col: int) -> int:
-        """A visible column index -> its position in the underlying frame."""
+        """A visible column index -> its position in the underlying frame;
+        -1 for a grouped table's group column, which the frame lacks."""
+        col -= self._lead
+        if col < 0:
+            return -1
         return col if self._visible is None else self._visible[col]
+
+    # ------------------------------------------------ totals and groups
+
+    def _relayout(self) -> None:
+        """Lay the (sorted) frame out with its total rows and groups. Called
+        whenever the row order or a fold changes; cheap next to a sort."""
+        self._special_styles = {}
+        if not self._plan.active:
+            self._layout = None
+            return
+        from flograph.core.table_totals import build_layout
+        try:
+            self._layout = build_layout(self._df, self._plan, self._toggled,
+                                        grand=self._grand)
+        except Exception:
+            # the render path: a table with no totals beats a blank card
+            self._layout = None
+            self._lead = 0
+        self._loaded = min(max(PAGE_SIZE, self._loaded), self._row_total())
+
+    def _row_total(self) -> int:
+        return len(self._df) if self._layout is None else len(self._layout)
+
+    def _at(self, row: int):
+        """(frame position, None) for a data row, (None, Special) for a
+        total or group row."""
+        if self._layout is None:
+            return row, None
+        return self._layout.at(row)
+
+    def special_at(self, row: int):
+        """The Special at a display row, or None for a data row."""
+        if self._layout is None or not 0 <= row < len(self._layout):
+            return None
+        return self._layout.at(row)[1]
+
+    def is_data_row(self, row: int) -> bool:
+        return self.special_at(row) is None
+
+    def is_grouped(self) -> bool:
+        return self._layout is not None and self._plan.grouped
+
+    def plan(self):
+        return self._plan
+
+    def toggle_group(self, row: int) -> bool:
+        """Fold or unfold the group whose header is at `row`. The rows come
+        and go as an insert or a removal, not a reset, so the scroll
+        position and the rest of the table stay where they were."""
+        special = self.special_at(row)
+        if special is None or special.kind != "group":
+            return False
+        from flograph.core.table_totals import build_layout
+        key = tuple(special.key)
+        toggled = set(self._toggled)
+        toggled ^= {key}
+        try:
+            layout = build_layout(self._df, self._plan, toggled,
+                                  grand=self._grand)
+        except Exception:
+            return False
+        old, new = len(self._layout), len(layout)
+        delta = new - old
+        loaded = self._loaded
+        if delta < 0:
+            last = min(row - delta, loaded - 1)
+            if last > row:
+                self.beginRemoveRows(QModelIndex(), row + 1, last)
+            self._commit_layout(layout, toggled,
+                                max(row + 1, loaded + delta))
+            if last > row:
+                self.endRemoveRows()
+        elif delta > 0:
+            self.beginInsertRows(QModelIndex(), row + 1, row + delta)
+            self._commit_layout(layout, toggled, loaded + delta)
+            self.endInsertRows()
+        else:
+            self._commit_layout(layout, toggled, loaded)
+        # the arrow on the header row, and every total row's styles
+        self.dataChanged.emit(self.index(0, 0),
+                              self.index(max(0, self._loaded - 1),
+                                         max(0, self.columnCount() - 1)))
+        return True
+
+    def _commit_layout(self, layout, toggled, loaded) -> None:
+        self._layout = layout
+        self._toggled = toggled
+        self._special_styles = {}
+        self._loaded = max(0, min(loaded, len(layout)))
+
+    def set_all_groups(self, folded: bool) -> None:
+        """Expand All / Collapse All: every group to one state."""
+        if not self.is_grouped():
+            return
+        from flograph.core.table_totals import build_layout, is_collapsed
+        # every group key there is, whatever is folded now
+        whole = build_layout(self._df, self._plan, grand=self._grand,
+                             expand_all=True)
+        toggled = {s.key for s in whole.specials
+                   if s.kind == "group"
+                   and is_collapsed(self._plan, s.level, s.key, ()) != folded}
+        self.beginResetModel()
+        self._toggled = toggled
+        self._relayout()
+        self.endResetModel()
+
+    def carry_folds(self, other) -> None:
+        """Take `other`'s folds — a re-run's new model keeping the groups
+        the reader had folded, where it groups the same way."""
+        try:
+            if (other is not None and self.is_grouped()
+                    and other.plan().group_by == self._plan.group_by
+                    and other._toggled):
+                self.beginResetModel()
+                self._toggled = set(other._toggled)
+                self._relayout()
+                self.endResetModel()
+        except Exception:
+            pass
+
+    def _visible_names(self) -> list:
+        names = [str(c) for c in self._df.columns]
+        if self._visible is None:
+            return names
+        return [names[i] for i in self._visible]
+
+    def _style_of_special(self, special, name: str):
+        """The CellStyle a total or group row's cell is drawn with."""
+        found = self._special_styles.get(id(special))
+        if found is None:
+            from flograph.core.table_totals import label_column, special_styles
+            kind = special.kind
+            of_kind = [s for s in self._layout.specials if s.kind == kind]
+            names = self._visible_names()
+            where = (None if self._plan.grouped
+                     else label_column(self._plan, names))
+
+            def values_of(s):
+                row = dict(s.values)
+                if where is not None and where not in row:
+                    row[where] = s.label
+                return row
+            try:
+                styles = special_styles(of_kind, kind, self._all_rules,
+                                        names, values_of)
+            except Exception:
+                styles = [{} for _ in of_kind]
+            for s, style in zip(of_kind, styles):
+                self._special_styles[id(s)] = style
+            found = self._special_styles.get(id(special), {})
+        return found.get(name)
+
+    def _special_text(self, special, col: int) -> str:
+        """What a total or group row says in a (visible) column."""
+        if col == 0 and self._lead:
+            indent = "    " * max(0, special.level)
+            if special.kind == "group":
+                arrow = "▸" if special.collapsed else "▾"
+                return f"{indent}{arrow} {special.label}  ({special.count:,})"
+            if special.kind == "subtotal":
+                return f"{indent}   {special.label}"
+            return special.label
+        name = self._visible_names()[col - self._lead]
+        how = self._plan.how(name)
+        if name in special.values:
+            from flograph.core.table_totals import cell_text
+            return cell_text(special.values[name], how, self._all_rules, name)
+        if special.kind == "total" and not self._lead:
+            from flograph.core.table_totals import label_column
+            if name == label_column(self._plan, self._visible_names()):
+                return special.label
+        return ""
+
+    def _special_data(self, special, index, role: int):
+        col = index.column()
+        if role == _DISPLAY:
+            if col >= self._lead:
+                style = self._style_of_special(
+                    special, self._visible_names()[col - self._lead])
+                if style is not None and style.hide_value:
+                    return ""
+            return self._special_text(special, col)
+        if role == _EDIT:
+            if col >= self._lead:
+                name = self._visible_names()[col - self._lead]
+                if name in special.values:
+                    value = special.values[name]
+                    return "" if value is None else str(value)
+            return self._special_text(special, col).strip()
+        if role == _TOOLTIP:
+            if special.kind == "group":
+                verb = "unfold" if special.collapsed else "fold"
+                return (f"{special.label}: {special.count:,} rows — click "
+                        f"the arrow to {verb}")
+            if col >= self._lead:
+                name = self._visible_names()[col - self._lead]
+                how = self._plan.how(name)
+                if how and how[0] == "agg" and name in special.values:
+                    from flograph.core.table_totals import AGGREGATION_HELP
+                    return (f"{special.label} — {name}: "
+                            f"{how[1]} ({AGGREGATION_HELP.get(how[1], '')})")
+            return None
+        if role == _HEIGHT:
+            return self._row_height
+        name = (self._visible_names()[col - self._lead]
+                if col >= self._lead else None)
+        style = self._style_of_special(
+            special, name if name is not None
+            else self._visible_names()[0] if self._visible_names() else "")
+        if role == _ALIGNMENT:
+            if col < self._lead:
+                return None
+            forced = self._align.get(self._src(col))
+            if forced is not None:
+                return forced
+            value = special.values.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return _ALIGN_NUMBER
+            return None
+        if style is None:
+            return None
+        if role == _FONT:
+            return _BOLD_FONT if style.bold else None
+        if role == _FOREGROUND:
+            return QColor(style.fg) if style.fg else None
+        if role == _BACKGROUND:
+            return QColor(style.bg) if style.bg else None
+        if col < self._lead:
+            return None
+        if role == BAR_ROLE:
+            if style.bar is not None:
+                return (style.bar, style.bar_color, style.bar_mode)
+            return None
+        if role == ICON_ROLE:
+            if style.decorations:
+                first = style.decorations[0]
+                return (first.text, first.color)
+            return None
+        if role == DECOR_ROLE:
+            if style.decorations or style.pill:
+                return (style.decorations, style.pill, style.pill_fg)
+            return None
+        return None
 
     def _value(self, row: int, col: int):
         """`self._df.iat[row, col]`, from a block of the column read once.
@@ -191,22 +460,27 @@ class PandasModel(QAbstractTableModel):
         # here keeps them out of the per-cell path entirely — and out of
         # `_cf_active`, so a table whose only rule is `width 120` pays
         # nothing per row.
-        self._layout = column_layout(rules, self._df.columns)
+        self._layout_rules = column_layout(rules, self._df.columns)
         self._wraps = wraps_text(rules)
         # by column index, so the hot paths (data / headerData) are a dict
         # lookup on a number rather than a string built per call
         self._align: dict = {}
         self._labels: dict = {}
         for i, name in enumerate(self._df.columns):
-            entry = self._layout.get(str(name))
+            entry = self._layout_rules.get(str(name))
             if entry is None:
                 continue
             if entry.align in _ALIGN_RULE:
                 self._align[i] = _ALIGN_RULE[entry.align]
             if entry.label:
                 self._labels[i] = entry.label
+        from flograph.core.table_format import TOTAL_MODES, on_data
+        # total and group lines lay rows out rather than paint them, and a
+        # rule aimed `on totals` only is drawn by _special_data — neither is
+        # evaluated down a column of data
         self._rules = [r for r in (rules or [])
-                       if r.mode != "hide" and r.mode not in LAYOUT_MODES]
+                       if r.mode != "hide" and r.mode not in LAYOUT_MODES
+                       and r.mode not in TOTAL_MODES and on_data(r)]
         # A mark on a line of its own, or a tall spark, asks the delegate
         # for a taller cell — and Qt only asks the delegate how tall a row
         # is when the view sizes rows to their contents. Read off the rules
@@ -250,8 +524,16 @@ class PandasModel(QAbstractTableModel):
         It takes effect the next time the table is built — a re-run, or
         reopening the project.
         """
+        from flograph.core.table_totals import plan_from_rules
         self.beginResetModel()
+        self._all_rules = list(rules or [])
+        plan = plan_from_rules(self._all_rules, self._df)
+        if plan.group_by == self._plan.group_by:
+            # a grouping that changed would need the columns re-projected,
+            # which is a new model's job; the totals can change in place
+            self._plan = plan
         self._set_rules(rules)
+        self._relayout()
         self.endResetModel()
 
     def _apply_default_sort(self) -> None:
@@ -391,7 +673,7 @@ class PandasModel(QAbstractTableModel):
         """
         column = self._src(column) if 0 <= column < self.columnCount() else column
         if not 0 <= column < len(self._source.columns):
-            return
+            return                   # the group column sorts nothing
         from ..table_sort import pandas_sort_key
 
         self.beginResetModel()
@@ -409,6 +691,9 @@ class PandasModel(QAbstractTableModel):
         except Exception:
             self._df = self._source
         self._loaded = min(PAGE_SIZE, len(self._df))
+        # the data rows moved; the totals stay where they are, and groups
+        # keep their rows together — in the order their first row now comes
+        self._relayout()
         # colours follow values: the per-cell styles were built against the
         # old order, the column stats (whole-column min/max/…) still hold
         self._col_cache.clear()
@@ -425,14 +710,14 @@ class PandasModel(QAbstractTableModel):
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
-        return (len(self._df.columns) if self._visible is None
-                else len(self._visible))
+        return self._lead + (len(self._df.columns) if self._visible is None
+                             else len(self._visible))
 
     def canFetchMore(self, parent: QModelIndex = QModelIndex()) -> bool:
-        return not parent.isValid() and self._loaded < len(self._df)
+        return not parent.isValid() and self._loaded < self._row_total()
 
     def fetchMore(self, parent: QModelIndex = QModelIndex()) -> None:
-        remaining = len(self._df) - self._loaded
+        remaining = self._row_total() - self._loaded
         count = min(PAGE_SIZE, remaining)
         if count <= 0:
             return
@@ -445,8 +730,16 @@ class PandasModel(QAbstractTableModel):
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
         role = int(role)
+        if self._layout is not None and index.isValid():
+            row, special = self._layout.at(index.row())
+            if special is not None:
+                return self._special_data(special, index, role)
+            if index.column() < self._lead:
+                return None              # a data row's group cell is empty
+        else:
+            row = index.row()
         if role == _HEIGHT:
-            return self._height_at(index)
+            return self._height_at(index, row)
         # Bail before touching the frame: Qt asks for roles this model has
         # no opinion on, and `iat` is a real pandas lookup, not a free one.
         # `_value_roles` widens to include the format roles only when a
@@ -454,8 +747,8 @@ class PandasModel(QAbstractTableModel):
         if role not in self._value_roles or not index.isValid():
             return None
         col = self._src(index.column())
-        value = self._value(index.row(), col)
-        style = self._cell_style(index.row(), col) if self._cf_active else None
+        value = self._value(row, col)
+        style = self._cell_style(row, col) if self._cf_active else None
         if role == _DISPLAY:
             if style is not None and style.hide_value:
                 # an `only` rule draws its format instead of the value. The
@@ -535,16 +828,25 @@ class PandasModel(QAbstractTableModel):
         if role == _DISPLAY:
             if orientation == _HORIZONTAL:
                 col = self._src(section)
+                if col < 0:
+                    return " › ".join(self._plan.group_by)
                 # a `label` rule renames the header on screen only; every
                 # rule, sort and export still goes by the real column name
                 return self._labels.get(col, str(self._df.columns[col]))
-            return str(self._df.index[section])
+            pos, special = self._at(section)
+            if special is not None:
+                return special.label if special.kind == "total" else ""
+            return str(self._df.index[pos])
         if role == _ALIGNMENT and orientation == _HORIZONTAL:
             # the header follows its column, or a right-aligned money
             # column would sit under a centred title
             return self._align.get(self._src(section))
         if role == _TOOLTIP and orientation == _HORIZONTAL:
             col = self._src(section)
+            if col < 0:
+                return ("Grouped by " + ", ".join(self._plan.group_by)
+                        + " — click a group's arrow to fold it; right-click "
+                          "to fold or unfold them all")
             name = str(self._df.columns[col])
             # The name in full, always: a header cut short by a `width` rule
             # or a dragged edge has nowhere else to be read (AA3). A `label`
@@ -560,7 +862,10 @@ class PandasModel(QAbstractTableModel):
         renamed it to on screen. What a copy puts on the clipboard: the
         values go out raw (EditRole), and a header that did not match them
         would be worse than useless in the spreadsheet they land in."""
-        return str(self._df.columns[self._src(section)])
+        col = self._src(section)
+        if col < 0:
+            return " › ".join(self._plan.group_by)
+        return str(self._df.columns[col])
 
     def wraps_text(self) -> bool:
         """Did a rule ask for wrapped text? The view acts on it — row
@@ -577,13 +882,14 @@ class PandasModel(QAbstractTableModel):
         """How tall a `height` line asks every row to be, or None."""
         return self._row_height
 
-    def _height_at(self, index) -> "int | None":
+    def _height_at(self, index, row=None) -> "int | None":
         """How tall this cell's row should be: a highlight's `height` where
         one matched, else the table's `height` line, else None."""
         if not index.isValid():
             return None
-        if self._cf_active:
-            style = self._cell_style(index.row(), self._src(index.column()))
+        row = index.row() if row is None else row
+        if self._cf_active and self._src(index.column()) >= 0:
+            style = self._cell_style(row, self._src(index.column()))
             if style is not None and style.row_height:
                 return style.row_height
         return self._row_height
@@ -591,13 +897,19 @@ class PandasModel(QAbstractTableModel):
     def column_layout(self, section: int):
         """The `ColumnLayout` for a *visible* column, or None. Read by the
         view, which owns column widths — the model has no say in geometry."""
-        return self._layout.get(str(self._df.columns[self._src(section)]))
+        col = self._src(section)
+        if col < 0:
+            return None
+        return self._layout_rules.get(str(self._df.columns[col]))
 
     # ----------------------------------------------------- click to filter
 
     def row_label(self, row: int) -> str:
         """A row's index label as text — what a row pick keeps it by."""
-        return str(self._df.index[row])
+        pos, special = self._at(row)
+        if special is not None:
+            return ""
+        return str(self._df.index[pos])
 
     def _column_texts(self, section: int):
         """A visible column as text, converted whole and kept.
@@ -622,21 +934,39 @@ class PandasModel(QAbstractTableModel):
     def pick_texts(self, section: int, rows) -> list[str]:
         """The values at `rows` of a visible column, as a pick records them
         — the way core.table_picks reads the node's table."""
+        if self._src(section) < 0:
+            return ["" for _ in rows]
         texts = self._column_texts(section)
-        return [str(texts[r]) for r in rows]
+        out = []
+        for r in rows:
+            pos, special = self._at(r)
+            out.append("" if special is not None else str(texts[pos]))
+        return out
 
     def rows_matching(self, section: int, values) -> list[int]:
         """The paged-in rows whose value in a visible column is one of
         `values` (as text)."""
         wanted = set(values)
-        texts = self._column_texts(section)[:self._loaded]
-        return [r for r, text in enumerate(texts) if text in wanted]
+        if self._layout is None:
+            texts = self._column_texts(section)[:self._loaded]
+            return [r for r, text in enumerate(texts) if text in wanted]
+        if self._src(section) < 0:
+            return []
+        texts = self._column_texts(section)
+        return [r for r in range(self._loaded)
+                if (e := int(self._layout.entries[r])) >= 0
+                and texts[e] in wanted]
 
     def rows_labelled(self, labels) -> list[int]:
         """The paged-in rows whose index label is one of `labels`."""
         wanted = set(labels)
-        index = self._df.index[:self._loaded].astype(str)
-        return [r for r, label in enumerate(index) if label in wanted]
+        if self._layout is None:
+            index = self._df.index[:self._loaded].astype(str)
+            return [r for r, label in enumerate(index) if label in wanted]
+        index = self._df.index.astype(str)
+        return [r for r in range(self._loaded)
+                if (e := int(self._layout.entries[r])) >= 0
+                and index[e] in wanted]
 
 
 def keeps_table(model, table, style) -> bool:
@@ -650,6 +980,7 @@ def keeps_table(model, table, style) -> bool:
     try:
         if getattr(model, "style_payload", None) != style:
             return False
+        table = _unbaked(table, style)
         old = getattr(model, "_input", None)
         if old is None:
             return False
@@ -661,6 +992,18 @@ def keeps_table(model, table, style) -> bool:
                 and old.equals(table))
     except Exception:
         return False
+
+
+def _unbaked(df, style):
+    """`df` without the total rows Totals in output wrote into it."""
+    baked = style.get("baked") if isinstance(style, dict) else None
+    if not baked:
+        return df
+    try:
+        from flograph.core.table_totals import strip_baked
+        return strip_baked(df, baked)
+    except Exception:
+        return df
 
 
 def styled_model(df: pd.DataFrame, style: Any, parent=None) -> PandasModel:
@@ -677,7 +1020,13 @@ def styled_model(df: pd.DataFrame, style: Any, parent=None) -> PandasModel:
         shown = shown_columns(style)
     except Exception:
         rules, hidden, shown = [], [], []
+    # Totals in output wrote the total rows into the table; the card lays
+    # them out itself — pinned, styled, and out of every sort and scale —
+    # so it takes back the rows they were written into.
+    df = _unbaked(df, style)
+    grand = style.get("grand") if isinstance(style, dict) else None
     model = PandasModel(df, parent=parent, rules=rules, hidden=hidden,
-                        shown=shown)
+                        shown=shown,
+                        grand=grand if isinstance(grand, dict) else None)
     model.style_payload = style        # for keeps_table
     return model

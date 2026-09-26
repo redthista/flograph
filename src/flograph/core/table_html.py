@@ -82,7 +82,7 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                   max_rows: int = MAX_ROWS,
                   width: "int | None" = None, paper: bool = True,
                   font_pt: "float | None" = None, marker: str = "",
-                  text_width=None) -> str:
+                  text_width=None, grand=None, baked=None) -> str:
     """`frame` as an HTML table carrying `rules` as cell styling.
 
     `hidden` and `shown` are the card's column projection — what to drop
@@ -105,10 +105,23 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     it returns None, each value cell is sized by its own text as it always
     was: a guessed width has nothing to catch a short guess, and the markup
     that does catch one crashed Qt in a process with no GUI application.
+
+    Total rows and groups (core/table_totals.py) are laid out the way the
+    card lays them out, from the same functions: `grand` is a matrix's true
+    totals and `baked` the rows Totals in output wrote into the table,
+    which come out again before the rows are laid out.
     """
     frame = _as_frame(frame)
     if frame is None:
         return "> *(not a table)*"
+    from flograph.core import table_totals as tt
+    if baked:
+        frame = tt.strip_baked(frame, baked)
+    plan = tt.plan_from_rules(rules, frame)
+    if plan.grouped:
+        # the card's projection: a group's value is written in its header
+        hidden = list(hidden) + [c for c in plan.group_by
+                                 if c not in (shown or ())]
     # a spark may add a column and put away the ones it reads — the same
     # function the card calls, before the projection that has to see both
     frame, rules, spark_hidden = spark_projection(frame, rules)
@@ -129,8 +142,19 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         from flograph.core.table_sort import sorted_frame
         frame = sorted_frame(frame, order[0], order[1])
 
-    total = len(frame)
-    shown = frame.head(max_rows) if total > max_rows else frame
+    arranged = None
+    if plan.active:
+        try:
+            arranged = tt.build_layout(frame, plan, grand=grand)
+        except Exception:
+            arranged = None
+    if arranged is not None:
+        total = len(arranged)
+        entries = arranged.entries[:max_rows]
+        shown = frame.take(entries[entries >= 0])
+    else:
+        total = len(frame)
+        shown = frame.head(max_rows) if total > max_rows else frame
     styles = _cell_styles(frame, shown, columns, rules, paper)
     numeric = {c: _is_numeric(frame[c]) for c in columns}
     track = _track_width(width)
@@ -151,6 +175,12 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     size = f' width="{int(width)}"' if width else ""
     text_size = f' style="font-size:{font_pt:g}pt"' if font_pt else ""
     out = [f'<table{size}{text_size} class="flograph-table"><thead><tr>']
+    lead = bool(arranged is not None and plan.grouped)
+    if lead:
+        out.append(f"<th>{marker}{_escape(' › '.join(plan.group_by))}</th>")
+        marker_used = True
+    else:
+        marker_used = False
     for index, column in enumerate(columns):
         entry = layout.get(str(column))
         align = _align_attr(entry, numeric[column])
@@ -160,7 +190,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         label = entry.label if entry and entry.label else str(column)
         # the marker rides in the first header cell rather than in a
         # paragraph of its own, which would print as a blank line
-        head = (marker if index == 0 else "") + _escape(label)
+        head = (marker if index == 0 and not marker_used else ""
+                ) + _escape(label)
         out.append(f"<th{align}{fixed}>{head}</th>")
     out.append("</tr></thead><tbody>")
     table_height = row_height_of(rules)
@@ -168,7 +199,31 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     # frame lookups for a 500-row table. `.array[row]` boxes a value
     # exactly as `iloc` does (a Timestamp stays a Timestamp).
     arrays = {column: shown[column].array for column in columns}
-    for row in range(len(shown)):
+    specials = (_special_rows(arranged, plan, columns, rules, paper)
+                if arranged is not None else {})
+    if arranged is not None:
+        sequence = [(int(e), None) if e >= 0
+                    else (None, arranged.specials[-e - 1])
+                    for e in entries.tolist()]
+    else:
+        sequence = [(r, None) for r in range(len(shown))]
+    data_row = -1
+    for _pos, special in sequence:
+        if special is not None:
+            out.append(_special_tr(special, plan, columns, specials, numeric,
+                                   layout_rules=layout_rules_of(rules,
+                                                                columns),
+                                   lead=lead, rules=rules))
+            continue
+        data_row += 1
+        row = data_row
+        if lead:
+            out.append("<tr><td></td>")
+            out.extend(_data_cells(row, columns, arrays, styles, numeric,
+                                   track, stacked, layout, value_widths,
+                                   rooms, table_height, font_pt))
+            out.append("</tr>")
+            continue
         # Qt's rich text has no row height to set — `height` on a row or a
         # cell, as an attribute or as CSS, is ignored — but it honours a
         # cell's top and bottom padding. So a tall row is made of padding.
@@ -194,6 +249,96 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         out.append(f"<p><i>{marker}Showing {max_rows:,} of "
                    f"{total:,} rows.</i></p>")
     return "".join(out)
+
+
+def _data_cells(row, columns, arrays, styles, numeric, track, stacked,
+                layout, value_widths, rooms, table_height, font_pt) -> list:
+    """A data row's `<td>`s — the loop body of frame_to_html, for a grouped
+    table whose rows start with an empty group cell."""
+    asked = _asked_height(row, columns, styles, table_height)
+    pad = (_row_padding(asked, row, columns, styles, font_pt)
+           if asked else None)
+    cells = []
+    for column in columns:
+        entry = layout.get(str(column))
+        cells.append(_cell(arrays[column][row], styles.get((row, column)),
+                           numeric[column], track, stacked,
+                           align=entry.align if entry else None,
+                           value_width=value_widths.get(column),
+                           spark_room=rooms.get(column),
+                           pad=pad, row_height=asked))
+    return cells
+
+
+def layout_rules_of(rules, columns) -> dict:
+    return column_layout(rules, columns)
+
+
+def _special_rows(layout, plan, columns, rules, paper) -> dict:
+    """{id(special): {column: CellStyle}} for every total and group row,
+    evaluated a kind at a time as the card does."""
+    from flograph.core import table_totals as tt
+    names = [str(c) for c in columns]
+    where = None if plan.grouped else tt.label_column(plan, names)
+
+    def values_of(s):
+        row = dict(s.values)
+        if where is not None and where not in row:
+            row[where] = s.label
+        return row
+    out: dict = {}
+    for kind in ("total", "group", "subtotal"):
+        of_kind = [s for s in layout.specials if s.kind == kind]
+        if not of_kind:
+            continue
+        try:
+            styles = tt.special_styles(of_kind, kind, rules, names, values_of)
+        except Exception:
+            styles = [{} for _ in of_kind]
+        for s, found in zip(of_kind, styles):
+            out[id(s)] = {name: (for_paper(style) if paper else style)
+                          for name, style in found.items()}
+    return out
+
+
+def _special_tr(special, plan, columns, specials, numeric, layout_rules,
+                lead: bool, rules) -> str:
+    """A total or group row as a `<tr>`."""
+    import dataclasses
+
+    from flograph.core import table_totals as tt
+    names = [str(c) for c in columns]
+    found = specials.get(id(special), {})
+    first = found.get(names[0]) if names else None
+    cells = ["<tr>"]
+    if lead:
+        indent = "\u00a0" * 4 * max(0, special.level)
+        if special.kind == "group":
+            text = f"{indent}{special.label} ({special.count:,})"
+        elif special.kind == "subtotal":
+            text = f"{indent}{special.label}"
+        else:
+            text = special.label
+        style = first
+        cells.append(_cell(None, dataclasses.replace(style, text=text)
+                           if style is not None else None, False))
+    where = None if plan.grouped else tt.label_column(plan, names)
+    for column, name in zip(columns, names):
+        style = found.get(name)
+        if name in special.values:
+            text = tt.cell_text(special.values[name], plan.how(name), rules,
+                                name)
+        elif special.kind == "total" and name == where:
+            text = special.label
+        else:
+            text = ""
+        entry = layout_rules.get(name)
+        cells.append(_cell(None, dataclasses.replace(style, text=text or " ")
+                           if style is not None else None,
+                           numeric[column] and name in special.values,
+                           align=entry.align if entry else None))
+    cells.append("</tr>")
+    return "".join(cells)
 
 
 def _align_attr(entry, numeric: bool) -> str:

@@ -1151,8 +1151,10 @@ class TileItem(QGraphicsObject):
                     widget.show()
                     self.update()          # the stale look comes off
                     return
-                self._table_view.setModel(
-                    styled_model(value, style, parent=self._table_view))
+                model = styled_model(value, style, parent=self._table_view)
+                # a re-run keeps the groups the reader had folded
+                model.carry_folds(previous)
+                self._table_view.setModel(model)
                 self._table_view.verticalHeader().setVisible(
                     index_shown(style))
                 self._placeholder.hide()

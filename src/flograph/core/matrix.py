@@ -306,8 +306,14 @@ def _matching(patterns, names) -> list[str]:
 
 
 def build_matrix(table, rows, columns, values=(), agg="sum",
-                 order="as they appear", style=None) -> Matrix:
+                 order="as they appear", style=None,
+                 totals: bool = False) -> Matrix:
     """`table` as a matrix, with `style`'s rules carried onto its cells.
+
+    `totals` carries each cell column's true grand total on the style
+    (``"grand"``): the matrix's own aggregation over the *rows* behind the
+    column, which is what a total row of a mean matrix has to be — the mean
+    of the cells would weight a cell of one row like a cell of a thousand.
 
     Raises ValueError, naming the setting to fix, when the rows or columns
     are missing — the card shows it the way any node shows a failure.
@@ -537,4 +543,31 @@ def build_matrix(table, rows, columns, values=(), agg="sum",
     }
     if not index_shown(style):
         payload["index"] = False
+    if totals:
+        grand = _grand_totals(table, columns, values, agg, value_keys,
+                              name_of)
+        if grand:
+            from .table_totals import canonical_agg
+            payload["grand"] = {"agg": canonical_agg(
+                "distinct" if agg == "distinct count" else agg),
+                "values": grand}
     return Matrix(frame=frame, style=payload, notes=notes)
+
+
+def _grand_totals(table, columns, values, agg, value_keys, name_of) -> dict:
+    """{cell column: `agg` of the rows that built that column}."""
+    from .table_totals import _scalar
+    try:
+        per = table.groupby(columns, sort=False, dropna=False)[values].agg(
+            _AGG_FUNCS.get(agg, agg))
+    except Exception:
+        return {}
+    out: dict = {}
+    for vk in value_keys:
+        key = vk[1:]
+        k = key[0] if len(columns) == 1 else tuple(key)
+        try:
+            out[name_of[vk]] = _scalar(per.loc[k, vk[0]])
+        except Exception:
+            continue
+    return out

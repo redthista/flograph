@@ -268,7 +268,12 @@ _ICON_LABELS = {
 _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
           "sort", "color_map", "auto_color", "tooltip", "sparkline",
-          "row_height", "image"}
+          "row_height", "image", "total", "subtotal", "group",
+          "total_style"}
+
+#: The rules that lay out total rows and groups (core/table_totals.py).
+#: Like the layout modes they are read once, never evaluated per cell.
+TOTAL_MODES = frozenset({"total", "subtotal", "group", "total_style"})
 
 #: The rules that shape the *table* rather than paint a cell. They are read
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
@@ -438,6 +443,18 @@ class Rule:
     #: as an icon on a tile; a photo cut to a circle, as an avatar.
     picture_shape: Optional[str] = None
     picture_tile: Optional[str] = None
+    #: total: how the column is totalled — one of table_totals.AGGREGATIONS,
+    #: or "none" to leave it blank. total_text: words written there instead.
+    total_agg: Optional[str] = None
+    total_text: Optional[str] = None
+    #: total: where the grand total goes (top / bottom / both / none);
+    #: subtotal: above / below / both / none; group: how groups start
+    #: (open / closed / first). One field, because each mode has one place.
+    total_place: Optional[str] = None
+    #: The kinds of row a rule draws on — table_totals.ROW_KINDS. Empty
+    #: means the data rows, which is all a rule could draw on before there
+    #: were total rows; `=> fg red, on totals` aims it at the totals instead.
+    rows_on: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         out = {}
@@ -1860,11 +1877,34 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
         elif head == "bg" and rest:
             out["bg"] = _resolve_color(rest)
         elif head == "fg" and rest:
-            out["fg"] = _resolve_color(rest)
+            # Text is ink, like a glyph — so a named colour is the vivid
+            # one, not the dark fill `bg red` means. `fg red` used to be the
+            # fill (#5c2b2b), which on the dark grid could barely be read.
+            out["fg"] = _resolve_glyph_color(rest)
         elif head == "row":
             out["scope"] = "row"
             if rest:
                 out["bg"] = _resolve_color(rest)
+        elif head == "on":
+            # which rows the rule draws on: `on totals`, `on subtotal`,
+            # `on all`. Without it a rule draws on the data rows only, as
+            # it always did — a total is never caught by accident.
+            from .table_totals import ON_WORDS
+            kinds: list = list(out.get("rows_on") or [])
+            for word in rest.replace("&", " ").replace("+", " ").split():
+                if word.lower() in ("and", "the"):
+                    continue
+                found = ON_WORDS.get(word.lower())
+                if found is None:
+                    raise ValueError(
+                        f"line {lineno}: 'on' takes the rows to draw on — "
+                        f"totals, total, subtotals, groups, data or all — "
+                        f"got {word!r}")
+                kinds.extend(k for k in found if k not in kinds)
+            if not kinds:
+                raise ValueError(f"line {lineno}: 'on' needs the rows to "
+                                 f"draw on, e.g. 'on totals'")
+            out["rows_on"] = kinds
         elif head == "only":
             # the same modifier the format keywords take: show the styling,
             # not the value. On its own it blanks the cell where the test
@@ -1914,7 +1954,8 @@ def _parse_style_tokens(lineno: int, rhs: str) -> dict:
                 f"line {lineno}: don't understand style {chunk!r} "
                 f"(use 'bg <colour>', 'fg <colour>', 'bold', 'row <colour>', "
                 f"'icon <glyph> [colour] [left|right|above|below|in]', "
-                f"'pill <colour> [\"text\"]', 'only', 'height <pixels>')")
+                f"'pill <colour> [\"text\"]', 'only', 'height <pixels>', "
+                f"'on totals')")
     if ("bg" not in out and "fg" not in out and "glyph" not in out
             and not out.get("bold") and not out.get("hide_value")
             and not out.get("as_pill") and not out.get("row_height")):
@@ -1956,7 +1997,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                         hide_value=bool(style.get("hide_value")),
                         row_height=style.get("row_height"),
                 picture_size=style.get("picture_size"),
-                picture_shape=style.get("picture_shape"))
+                picture_shape=style.get("picture_shape"),
+                rows_on=list(style.get("rows_on") or []))
     # split "column op value": the column is everything up to the operator
     op, value, column = _split_condition(cond)
     if not column:
@@ -1970,7 +2012,8 @@ def _parse_condition_line(lineno: int, line: str) -> Rule:
                 hide_value=bool(style.get("hide_value")),
                 row_height=style.get("row_height"),
                 picture_size=style.get("picture_size"),
-                picture_shape=style.get("picture_shape"))
+                picture_shape=style.get("picture_shape"),
+                rows_on=list(style.get("rows_on") or []))
 
 
 def _split_condition(cond: str) -> tuple:
@@ -2030,8 +2073,110 @@ def _parse_one_line(lineno: int, line: str) -> Rule:
     line = _strip_inline_comment(line)
     if not line:
         raise ValueError(f"line {lineno}: nothing but a comment")
-    return (_parse_condition_line(lineno, line) if "=>" in line
-            else _parse_token_line(lineno, line))
+    try:
+        return (_parse_condition_line(lineno, line) if "=>" in line
+                else _parse_token_line(lineno, line))
+    except ValueError as exc:
+        # Total and group lines are only ever tried on a line the rules
+        # above turned down, so no line that meant something before can
+        # come to mean something else — `total scale green` is still a
+        # heatmap of a column called "total".
+        rule = _parse_totals_line(lineno, line)
+        if rule is None:
+            raise exc
+        return rule
+
+
+def _parse_totals_line(lineno: int, line: str) -> "Rule | None":
+    """A total, subtotal, group or `total =>` line as a Rule; None when the
+    line is not one (and the original error stands). Raises when it plainly
+    is one, but is wrong, so the message is about what was meant."""
+    from . import table_totals as tt
+
+    if "=>" in line:
+        lhs, _, rhs = line.partition("=>")
+        kinds = tt.STYLE_WORDS.get(lhs.strip().lower())
+        if kinds is None:
+            return None
+        style = _parse_style_tokens(lineno, rhs.strip())
+        if style.get("glyph") or style.get("as_pill"):
+            raise ValueError(
+                f"line {lineno}: '{lhs.strip()} =>' paints the whole row, so "
+                f"an icon or a pill has no one cell to go in — name the "
+                f"column: 'profit < 0 => icon ▼ red, on totals'")
+        return Rule("total_style", rows_on=list(kinds), bg=style.get("bg"),
+                    fg=style.get("fg"), bold=bool(style.get("bold")),
+                    hide_value=bool(style.get("hide_value")),
+                    row_height=style.get("row_height"))
+
+    tokens = _quoted_tokens(line)
+    if not tokens:
+        return None
+    head = tokens[0].lower()
+    rest = tokens[1:]
+
+    if head in ("total", "totals") and rest:
+        agg = place = label = None
+        for token in rest:
+            if _is_quoted(token):
+                label = _unquote(token)
+            elif tt.canonical_agg(token):
+                agg = tt.canonical_agg(token)
+            elif tt.place_word(token):
+                place = tt.place_word(token)
+            else:
+                raise ValueError(
+                    f"line {lineno}: don't understand {token!r} in a total "
+                    f"line — give how to total ({', '.join(tt.AGGREGATIONS)}),"
+                    f" where (top, bottom, both, none) and/or \"a label\"")
+        return Rule("total", total_agg=agg, total_place=place, label=label)
+
+    if head in ("subtotal", "subtotals") and rest:
+        place = label = None
+        for token in rest:
+            if _is_quoted(token):
+                label = _unquote(token)
+            elif tt.subtotal_word(token):
+                place = tt.subtotal_word(token)
+            else:
+                raise ValueError(
+                    f"line {lineno}: subtotals go above (on the group's "
+                    f"row), below, both or none, and may take a \"label\" — "
+                    f"got {token!r}")
+        return Rule("subtotal", total_place=place, label=label)
+
+    if head in ("group", "groups", "group-by", "groupby") and rest:
+        state = tt.open_word(rest[-1]) if not _is_quoted(rest[-1]) else None
+        names = rest[:-1] if state else rest
+        columns = _column_list(" ".join(names)) if names else []
+        if names and not columns:
+            return None
+        return Rule("group", columns, total_place=state)
+
+    # `revenue total sum` / `region total "All regions"` / `id total none`
+    at = next((i for i in range(len(tokens) - 1, 0, -1)
+               if tokens[i].lower() in ("total", "totals")), None)
+    if at is None:
+        return None
+    columns = _column_list(" ".join(tokens[:at]))
+    arg = tokens[at + 1:]
+    if not columns:
+        return None
+    if len(arg) != 1:
+        raise ValueError(
+            f"line {lineno}: a column's total is one word — how to total it "
+            f"({', '.join(tt.AGGREGATIONS)}), 'none', or \"text\" to write")
+    word = arg[0]
+    if _is_quoted(word):
+        return Rule("total", columns, total_text=_unquote(word))
+    if word.lower() in ("none", "off", "blank"):
+        return Rule("total", columns, total_agg="none")
+    agg = tt.canonical_agg(word)
+    if agg is None:
+        raise ValueError(
+            f"line {lineno}: can't total by {word!r} — use one of "
+            f"{', '.join(tt.AGGREGATIONS)}, 'none', or \"text\"")
+    return Rule("total", columns, total_agg=agg)
 
 
 def parse_rules(text: str) -> list[Rule]:
@@ -2103,6 +2248,16 @@ def abbreviate_pictures(text: Any) -> str:
 
 
 def rule_summary(rule: Rule) -> str:
+    """A one-line human description of a rule, for the manager's list."""
+    text = _summary(rule)
+    on = list(getattr(rule, "rows_on", None) or [])
+    if on and rule.mode != "total_style":
+        text += "  ·  on " + ("every row" if len(on) == 4
+                              else " and ".join(on) + " rows")
+    return text
+
+
+def _summary(rule: Rule) -> str:
     """A one-line human description of a rule, for the manager's list."""
     cols = ", ".join(rule.columns) or "every column"
     by = f" (by {rule.source})" if rule.source else ""
@@ -2184,6 +2339,37 @@ def rule_summary(rule: Rule) -> str:
     if rule.mode == "sort":
         way = "Z–A" if rule.direction == "desc" else "A–Z"
         return f"{cols}  ·  sorted {way} to start with"
+    if rule.mode == "total":
+        parts = []
+        if rule.total_text is not None:
+            parts.append(f"total reads “{rule.total_text}”")
+        elif rule.total_agg == "none":
+            parts.append("no total")
+        elif rule.total_agg:
+            parts.append(f"total: {rule.total_agg}")
+        if rule.total_place:
+            parts.append("no total row" if rule.total_place == "none"
+                         else f"total row at the {rule.total_place}"
+                         if rule.total_place != "both"
+                         else "total row top and bottom")
+        if rule.label:
+            parts.append(f"labelled “{rule.label}”")
+        who = cols if rule.columns else "every number column"
+        return f"{who}  ·  {', '.join(parts) or 'total'}"
+    if rule.mode == "subtotal":
+        where = {"above": "on each group's row", "below": "under each group",
+                 "both": "on each group's row and under it",
+                 "none": "not shown"}.get(rule.total_place or "", "")
+        label = f", labelled “{rule.label}”" if rule.label else ""
+        return f"subtotals  ·  {where}{label}".rstrip(" ·")
+    if rule.mode == "group":
+        start = {"open": "open", "closed": "folded",
+                 "first": "outer level open"}.get(rule.total_place or "")
+        what = f"grouped by {cols}" if rule.columns else "groups"
+        return f"{what}" + (f"  ·  start {start}" if start else "")
+    if rule.mode == "total_style":
+        kinds = " and ".join(rule.rows_on) or "total"
+        return f"{kinds} rows  ·  styled"
     return rule.mode
 
 
@@ -2229,6 +2415,11 @@ def style_payload(params: dict) -> dict:
     show = [c for r in rules if r.mode == "show" for c in r.columns]
     show += _column_list(params.get("show"))
     keep = [r for r in rules if r.mode not in _LEADING_KEYWORDS]
+    # The Total row / Group by controls are the same rules spelled as
+    # dropdowns — put *first*, unlike Sort By below, because these are a
+    # blanket the box refines: "sum every number column" from the dropdown,
+    # then `price total average` in the box for the one column that isn't.
+    keep = _totals_from_params(params) + keep
     # The Sort By / direction pair is the same rule spelled as a control.
     # Appended, so it wins over a `sort` line in the box the way a later
     # line wins over an earlier one — the box is the advanced way in, the
@@ -2246,6 +2437,42 @@ def style_payload(params: dict) -> dict:
     if not params.get("row_index", True):
         payload["index"] = False
     return payload
+
+
+#: Show Table's dropdown wording -> the rule words. The dropdowns speak
+#: plainly; the rules are terse because they are typed.
+SUBTOTAL_CHOICES = {"on the group row": "above", "under the group": "below",
+                    "both": "both", "none": "none"}
+GROUP_START_CHOICES = {"open": "open", "folded": "closed",
+                       "outer level open": "first"}
+
+
+def _totals_from_params(params: dict) -> list:
+    """The rules Show Table's Total row / Group by controls stand for. Only
+    what a control actually says: a Table Style has none of these keys and
+    gets nothing."""
+    from . import table_totals as tt
+
+    out: list = []
+    agg = tt.canonical_agg(params.get("totals"))
+    place = tt.place_word(params.get("totals_at"))
+    label = str(params.get("total_label") or "").strip() or None
+    if label == "Total":
+        label = None            # the default: a style that says nothing
+    if place == "bottom":
+        place = None            # …stays the payload it always was
+    if agg or place or label:
+        out.append(Rule("total", total_agg=agg, total_place=place,
+                        label=label))
+    if params.get("mode") == "grouped":
+        by = _column_list(params.get("group_by"))
+        if by:
+            out.append(Rule("group", by, total_place=GROUP_START_CHOICES.get(
+                str(params.get("groups_start") or ""), None)))
+        sub = SUBTOTAL_CHOICES.get(str(params.get("subtotals") or ""))
+        if sub:
+            out.append(Rule("subtotal", total_place=sub))
+    return out
 
 
 def _style_parts(style_obj: Any) -> tuple:
@@ -3123,10 +3350,18 @@ def split_rules(rules) -> tuple:
     rules are neither: they shape the table rather than paint a cell."""
     row, col = [], []
     for r in rules:
-        if r.mode in _LEADING_KEYWORDS or r.mode in LAYOUT_MODES:
+        if (r.mode in _LEADING_KEYWORDS or r.mode in LAYOUT_MODES
+                or r.mode in TOTAL_MODES or not on_data(r)):
             continue
         (row if r.mode == "highlight" and r.scope == "row" else col).append(r)
     return col, row
+
+
+def on_data(rule) -> bool:
+    """Does `rule` draw on the data rows? Every rule does, unless an `on …`
+    aims it at total rows only."""
+    on = getattr(rule, "rows_on", None)
+    return not on or "data" in on
 
 
 def wraps_text(rules) -> bool:

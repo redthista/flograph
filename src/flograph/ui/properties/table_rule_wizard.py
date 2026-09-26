@@ -80,14 +80,47 @@ _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
           "Sparkline", "Highlight cells / rows", "Icons", "Pictures",
           "Number format", "Tooltip from another column", "Hide columns",
           "Show only these columns", "Column layout", "Wrap text",
-          "Row height"]
+          "Row height", "Totals & groups"]
 
 #: The kind combo's index, by name. The stack's pages are added in this
 #: order and `_line` dispatches on it, so the number appears in three
 #: places at once — which is exactly the sort of thing that survives one
 #: insertion and quietly breaks on the next.
 (K_SCALE, K_AUTO, K_BAR, K_SPARK, K_HIGHLIGHT, K_ICONS, K_PICTURE, K_NUMBER,
- K_TIP, K_HIDE, K_SHOW, K_LAYOUT, K_WRAP, K_HEIGHT) = range(len(_KINDS))
+ K_TIP, K_HIDE, K_SHOW, K_LAYOUT, K_WRAP, K_HEIGHT,
+ K_TOTALS) = range(len(_KINDS))
+
+#: Which rows a highlight draws on — the `on …` style word. Empty is the
+#: data rows, which is all a rule could draw on before total rows.
+_ON_CHOICES = [("the data rows", ""),
+               ("every total row (grand, group, subtotal)", "totals"),
+               ("the grand total", "total"),
+               ("the subtotals (group rows and the rows under them)",
+                "subtotals"),
+               ("the data rows and every total row", "all")]
+#: …and the kinds each one stands for, to read a rule back in.
+_ON_KINDS = {"": (), "totals": ("total", "group", "subtotal"),
+             "total": ("total",), "subtotals": ("group", "subtotal"),
+             "all": ("data", "total", "group", "subtotal")}
+
+#: The Totals & groups page's "What" choices, one per line it writes.
+_TOTAL_WHAT = [("Total row — every number column", "blanket"),
+               ("How these columns are totalled", "column"),
+               ("Group rows by these columns", "group"),
+               ("Where subtotals go", "subtotal"),
+               ("How total rows look", "style")]
+_TOTAL_PLACES = [("at the bottom", "bottom"), ("at the top", "top"),
+                 ("top and bottom", "both"), ("no total row", "none")]
+_SUB_PLACES = [("on the group's row", "above"),
+               ("on a row under the group", "below"),
+               ("both", "both"), ("none", "none")]
+_GROUP_STARTS = [("open", "open"), ("folded", "closed"),
+                 ("outer level open", "first")]
+_STYLE_ROWS = [("the grand total", "total"),
+               ("subtotal rows (group rows and the rows under them)",
+                "subtotal"),
+               ("group header rows", "group"),
+               ("every total row", "totals")]
 
 #: Where an `image` rule's pictures go. The empty token is "where they
 #: belong": in place of the value when the pictures *are* the column's
@@ -134,7 +167,9 @@ _MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
               "tooltip": K_TIP, "hide": K_HIDE, "show": K_SHOW,
               "column_width": K_LAYOUT, "align": K_LAYOUT,
               "header_label": K_LAYOUT, "wrap": K_WRAP,
-              "row_height": K_HEIGHT, "image": K_PICTURE}
+              "row_height": K_HEIGHT, "image": K_PICTURE,
+              "total": K_TOTALS, "subtotal": K_TOTALS, "group": K_TOTALS,
+              "total_style": K_TOTALS}
 
 #: The palettes an auto colour can spend, newest-friendly names first.
 #: Taken from `PALETTES` rather than listed here, so a palette added to
@@ -453,6 +488,7 @@ class RuleBuilder(QDialog):
         self._build_layout_page()
         self._build_wrap_page()
         self._build_height_page()
+        self._build_totals_page()
         outer.addWidget(self._stack)
 
         outer.addWidget(QLabel("Rule text:"))
@@ -940,7 +976,20 @@ class RuleBuilder(QDialog):
         f.addRow("Icon", self._hl_icon)
         f.addRow("Icon colour", self._hl_icon_color)
         f.addRow("Place", self._hl_place)
+        # Text colour: the one thing a highlight could always do (`fg`) and
+        # the dialog had no control for.
+        self._hl_fg = ColorChoice(_GLYPH_CHOICES, allow_none=True)
+        self._hl_fg.set_value("(none)")
+        self._hl_fg.changed.connect(self._refresh)
+        f.addRow("Text colour", self._hl_fg)
         f.addRow("Apply to", self._scope)
+        self._hl_on = _combo(_ON_CHOICES)
+        self._hl_on.setToolTip(
+            "Total rows are left alone by a rule unless it says otherwise — "
+            "a total is always the biggest number, and would light up every "
+            "test. Choose them here to colour or mark a total by its value.")
+        self._hl_on.currentIndexChanged.connect(self._refresh)
+        f.addRow("Draw on", self._hl_on)
         f.addRow("", self._bold)
         self._hl_height = self._height_spin("unchanged")
         self._hl_height.setToolTip(
@@ -1221,6 +1270,177 @@ class RuleBuilder(QDialog):
         f.addRow("", hint)
         self._stack.addWidget(page)
 
+    def _build_totals_page(self) -> None:
+        """Total rows and grouped rows — core/table_totals.py. One page with
+        a What switch, because each line is small and they are read
+        together: a total, how a column is totalled, the grouping, where
+        its subtotals go, and how any of those rows look."""
+        from flograph.core.table_totals import AGGREGATIONS, AGGREGATION_HELP
+        page = QWidget()
+        f = QFormLayout(page)
+        self._total_what = _combo(_TOTAL_WHAT)
+        f.addRow("What", self._total_what)
+        self._total_how = QComboBox()
+        for name in AGGREGATIONS:
+            self._total_how.addItem(f"{name} — {AGGREGATION_HELP[name]}",
+                                    name)
+        self._total_how.addItem("none — leave it blank", "none")
+        self._total_how.addItem("write some text instead", "text")
+        self._total_text = QLineEdit()
+        self._total_place = _combo(_TOTAL_PLACES)
+        self._sub_place = _combo(_SUB_PLACES)
+        self._group_start = _combo(_GROUP_STARTS)
+        self._style_rows = _combo(_STYLE_ROWS)
+        self._total_fill = ColorChoice(_FILL_CHOICES, allow_none=True)
+        self._total_fill.set_value("blue")
+        self._total_ink = ColorChoice(_GLYPH_CHOICES, allow_none=True)
+        self._total_ink.set_value("(none)")
+        self._total_bold = QCheckBox("bold text")
+        self._total_bold.setChecked(True)
+        self._total_hint = QLabel()
+        self._total_hint.setWordWrap(True)
+        self._total_rows = {}
+        for label, widget in (("Total by", self._total_how),
+                              ("Text", self._total_text),
+                              ("Placed", self._total_place),
+                              ("Subtotals go", self._sub_place),
+                              ("Groups start", self._group_start),
+                              ("Rows", self._style_rows),
+                              ("Fill", self._total_fill),
+                              ("Text colour", self._total_ink),
+                              ("", self._total_bold)):
+            f.addRow(label, widget)
+            self._total_rows[widget] = f.labelForField(widget)
+        f.addRow("", self._total_hint)
+        for box in (self._total_what, self._total_how, self._total_place,
+                    self._sub_place, self._group_start, self._style_rows):
+            box.currentIndexChanged.connect(self._sync_totals)
+        self._total_text.textChanged.connect(self._refresh)
+        self._total_fill.changed.connect(self._refresh)
+        self._total_ink.changed.connect(self._refresh)
+        self._total_bold.toggled.connect(self._refresh)
+        self._stack.addWidget(page)
+        self._sync_totals()
+
+    def _sync_totals(self) -> None:
+        what = self._total_what.currentData()
+        how = self._total_how.currentData()
+        shown = {
+            "blanket": (self._total_how, self._total_text, self._total_place),
+            "column": (self._total_how, self._total_text),
+            "group": (self._group_start,),
+            "subtotal": (self._sub_place, self._total_text),
+            "style": (self._style_rows, self._total_fill, self._total_ink,
+                      self._total_bold),
+        }[what]
+        for widget, label in self._total_rows.items():
+            visible = widget in shown
+            if widget is self._total_text and what == "column":
+                visible = how == "text"
+            widget.setVisible(visible)
+            if label is not None:
+                label.setVisible(visible)
+        self._total_text.setPlaceholderText(
+            {"blanket": "the label — Total, Grand total…",
+             "column": "what the total row says here — All regions…",
+             "subtotal": "what follows a group's name — Total, Subtotal…"
+             }.get(what, ""))
+        self._total_hint.setText({
+            "blanket": "A row totalling every number column. Pick columns "
+                       "under 'How these columns are totalled' to total one "
+                       "differently — a later line wins for its columns.",
+            "column": "How the chosen columns are totalled, on the total row "
+                      "and on every subtotal. A total in the column's own "
+                      "units (a sum, an average) takes its number format.",
+            "group": "Rows sharing a value gather under a header row you "
+                     "can click to fold. Several columns nest, outermost "
+                     "first. The grouping columns move into the group "
+                     "column.",
+            "subtotal": "Where each group's subtotals are written. Groups "
+                        "only have subtotals for columns that are totalled.",
+            "style": "Colours every cell of those rows. To colour a total "
+                     "by its value, use Highlight cells / rows and set Draw "
+                     "on.",
+        }[what])
+        if self._kind.currentIndex() == K_TOTALS:
+            self._on_kind()
+        self._refresh()
+
+    def _totals_line(self, cols: str) -> str:
+        what = self._total_what.currentData()
+        how = self._total_how.currentData()
+        text = self._total_text.text().strip().replace('"', "")
+        if what == "blanket":
+            parts = ["total"]
+            if how not in ("none", "text"):
+                parts.append(how)
+            place = self._total_place.currentData()
+            if place != "bottom" or len(parts) == 1:
+                parts.append(place)
+            if text:
+                parts.append(f'"{text}"')
+            return " ".join(parts)
+        if what == "column":
+            if not cols:
+                return ""
+            if how == "text":
+                return f'{cols} total "{text}"' if text else ""
+            return f"{cols} total {how}"
+        if what == "group":
+            if not cols:
+                return ""
+            start = self._group_start.currentData()
+            return f"group {cols}" + (f" {start}" if start != "open" else "")
+        if what == "subtotal":
+            line = f"subtotal {self._sub_place.currentData()}"
+            return line + (f' "{text}"' if text else "")
+        parts = []
+        fill = self._total_fill.value()
+        if fill and fill != "(none)":
+            parts.append(f"bg {fill}")
+        ink = self._total_ink.value()
+        if ink and ink != "(none)":
+            parts.append(f"fg {ink}")
+        if self._total_bold.isChecked():
+            parts.append("bold")
+        if not parts:
+            return ""
+        return f"{self._style_rows.currentData()} => {', '.join(parts)}"
+
+    def _load_totals(self, rule) -> None:
+        if rule.mode == "group":
+            _pick_data(self._total_what, "group")
+            _pick_data(self._group_start, rule.total_place or "open")
+        elif rule.mode == "subtotal":
+            _pick_data(self._total_what, "subtotal")
+            _pick_data(self._sub_place, rule.total_place or "above")
+            self._total_text.setText(rule.label or "")
+        elif rule.mode == "total_style":
+            _pick_data(self._total_what, "style")
+            kinds = set(rule.rows_on or ())
+            _pick_data(self._style_rows,
+                       "totals" if len(kinds) == 3 else
+                       "subtotal" if kinds == {"group", "subtotal"} else
+                       next(iter(kinds), "total"))
+            self._total_fill.set_value(fill_token(rule.bg) if rule.bg
+                                       else "(none)")
+            self._total_ink.set_value(glyph_token(rule.fg) if rule.fg
+                                      else "(none)")
+            self._total_bold.setChecked(bool(rule.bold))
+        elif rule.columns:
+            _pick_data(self._total_what, "column")
+            if rule.total_text is not None:
+                _pick_data(self._total_how, "text")
+                self._total_text.setText(rule.total_text)
+            else:
+                _pick_data(self._total_how, rule.total_agg or "sum")
+        else:
+            _pick_data(self._total_what, "blanket")
+            _pick_data(self._total_how, rule.total_agg or "none")
+            _pick_data(self._total_place, rule.total_place or "bottom")
+            self._total_text.setText(rule.label or "")
+        self._sync_totals()
+
     def _build_layout_page(self) -> None:
         """Width, alignment and header label.
 
@@ -1291,7 +1511,9 @@ class RuleBuilder(QDialog):
         self._stack.setCurrentIndex(idx)
         # `wrap` is the one rule that takes no columns — offering the picker
         # anyway would promise something the rule cannot keep
-        table_wide = idx in (K_WRAP, K_HEIGHT)
+        table_wide = idx in (K_WRAP, K_HEIGHT) or (
+            idx == K_TOTALS and self._total_what.currentData()
+            in ("blanket", "subtotal", "style"))
         self._col_list.setEnabled(not table_wide)
         self._col_edit.setEnabled(not table_wide)
         if idx == K_ICONS:
@@ -1373,6 +1595,9 @@ class RuleBuilder(QDialog):
             self._set_other_col(self._tip_by, rule.source)
         elif rule.mode == "sparkline":
             self._load_spark(rule)
+        elif rule.mode in ("total", "subtotal", "group", "total_style"):
+            self._load_totals(rule)
+            self._select_columns(rule.columns)
         elif rule.mode == "data_bar":
             self._bar.set_value(bar_token(rule.color))
             self._set_other_col(self._bar_by, rule.source)
@@ -1386,6 +1611,12 @@ class RuleBuilder(QDialog):
             elif value is not None:
                 self._val1.setText(str(value))
             self._fill.set_value(fill_token(rule.bg) or "(none)")
+            self._hl_fg.set_value(glyph_token(rule.fg) if rule.fg
+                                  else "(none)")
+            kinds = tuple(rule.rows_on or ())
+            _pick_data(self._hl_on, next(
+                (w for w, k in _ON_KINDS.items()
+                 if set(k) == set(kinds)), ""))
             self._bold.setChecked(bool(rule.bold))
             self._hl_height.setValue(rule.row_height or MIN_ROW_HEIGHT - 1)
             self._scope.setCurrentIndex(1 if rule.scope == "row" else 0)
@@ -1491,6 +1722,8 @@ class RuleBuilder(QDialog):
             return "wrap"          # table-wide: it names no columns
         if kind == K_HEIGHT:
             return f"height {self._height.value()}"   # table-wide too
+        if kind == K_TOTALS:
+            return self._totals_line(cols)
         if not cols:
             return ""
         if kind == K_SCALE:
@@ -1560,11 +1793,17 @@ class RuleBuilder(QDialog):
                     # a pill has already spent the place on itself
                     + ([place] if place and not self._hl_pill.isChecked()
                        else [])))
+            ink = self._hl_fg.value()
+            if ink and ink != "(none)":
+                parts.append(f"fg {ink}")
             if self._bold.isChecked():
                 parts.append("bold")
             asked = self._hl_height.value()
             if asked >= MIN_ROW_HEIGHT:
                 parts.append(f"height {asked}")
+            on = self._hl_on.currentData()
+            if parts and on:
+                parts.append(f"on {on}")
             return f"{cond} => {', '.join(parts)}" if parts else ""
         if kind == K_ICONS:
             decider = _other_col_value(self._icon_by)
