@@ -261,6 +261,11 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
             "NODE['interactive'] only applies when NODE['card'] is 'webview' "
             "— it is the web view's page that writes back")
 
+    reads_report = node_decl.get("reads_report", "") or ""
+    if not isinstance(reads_report, str):
+        raise NodeScriptError(
+            "NODE['reads_report'] must name the node's page_ref param")
+
     # Optional, and a number is accepted as well as a string because "2.0" is
     # the obvious thing to type and 2.0 is the obvious thing to mistype.
     version = node_decl.get("version") or ""
@@ -291,6 +296,12 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         seen_params.add(spec.name)
         params.append(spec)
 
+    if reads_report and not any(p.name == reads_report and p.type == "page_ref"
+                                for p in params):
+        raise NodeScriptError(
+            f"NODE['reads_report'] names {reads_report!r}, which is not one "
+            f"of this node's page_ref params")
+
     run = namespace.get("run")
     if not callable(run):
         raise NodeScriptError("node script must define a run(ctx, ...) function")
@@ -309,6 +320,7 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         control=control,
         exclusive=exclusive,
         interactive=interactive,
+        reads_report=reads_report,
         version=version,
     )
 

@@ -343,7 +343,8 @@ the extension decide) and the **Engine** — *polars* parses in Rust and
 releases the GIL, so several readers genuinely run at once. The single-format
 Read nodes are all still there, as are Write CSV/Excel/Parquet/JSON/SQLite
 and **Write Text**, which puts a string on disk — an exported chart, a
-report, anything a script built;
+report, anything a script built. **Save Report** writes a report page to
+HTML or PDF each time the flow runs, after everything the page shows;
 drag a file onto the canvas to get the right reader already configured. **Read
 CSV/Excel/Parquet (Folder)** reads a whole directory as one stacked table, and
 **Read CSV (Folder → Dict)** hands back one table per file. **Read PDF** and

@@ -379,8 +379,24 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
         "source": node.source,
         "params": node.params,
         "upstream": sorted(memo[p] for p in parents),
+        **_report_content(graph, node),
     }, sort_keys=True, default=str)
     memo[node_id] = hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _report_content(graph: Graph, node) -> dict:
+    """For a node that renders a report page, the page itself — its text
+    is as much an input as its embeds are, and lives on neither the node's
+    params nor any upstream node. Empty for every other node, so their
+    hashes are exactly what they were."""
+    from flograph.core.reportlinks import is_reader, page_of
+    if not is_reader(node):
+        return {}
+    page = page_of(graph, node)
+    if page is None:
+        return {"report": None}
+    return {"report": [page.title, page.body, page.custom_css,
+                       page.setup.to_dict() if page.setup else None]}
 
 
 def _dependencies(graph: Graph, node_id: str) -> list[str]:
@@ -409,6 +425,8 @@ def _dependencies(graph: Graph, node_id: str) -> list[str]:
     # step changes, even though nothing was handed to it directly — that is
     # the reason to have drawn the edge at all.
     parents.extend(graph.order_sources(node_id))
+    # ...and so is every node the report a Save Report renders embeds.
+    parents.extend(graph.report_sources(node_id))
     return parents
 
 
@@ -428,7 +446,8 @@ def freeze_fingerprint(graph: Graph, node_id: str) -> str:
         if conn is not None:
             upstream_fps.append(node_fingerprint(graph, conn.src_node, memo))
     for src in (*graph.var_sources(node_id),   # portless — see _fingerprint_one
-                *graph.order_sources(node_id)):
+                *graph.order_sources(node_id),
+                *graph.report_sources(node_id)):
         upstream_fps.append(node_fingerprint(graph, src, memo))
     payload = json.dumps({
         "type_id": node.type_id,

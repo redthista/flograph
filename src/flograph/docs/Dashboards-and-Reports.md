@@ -396,6 +396,26 @@ a report that did not remember this could never be *set up* to open two-up,
 only left that way until it was closed. Spin the wheel as much as you like
 — the whole spin undoes in one step.
 
+### Saving a report from the flow
+
+**Save HTML…** and **Export PDF…** save a report when you click them. To save
+one every time the flow runs, add a **Save Report** node (IO) and choose the
+page in its **Report** setting. It runs after every node the page embeds, so
+the charts in the file are the ones this run drew. It runs again whenever one
+of them changes, or the page's text does. If one of them failed, the node
+does not save the file, because the report would have a gap in it.
+
+**Save to** can hold `{page}`, `{date}`, `{time}` and `{datetime}`, as well
+as `${name}` flow variables. For example, `reports/{page} {date}.pdf` keeps
+one file a day. **If the file exists** can be set to Overwrite, Add a number
+or Fail. The node's `path` output is the file it wrote, so you can wire it to
+a node that sends or uploads the file. Tick **Output the HTML** and the `html`
+output carries the web version as well, for either format. With that ticked,
+**Save to** can be left empty and nothing is written to disk.
+
+Reports are drawn by the window, so a headless run cannot save one. The node
+fails there and says why.
+
 ## Report card
 
 **Viz ▸ Report** is the same Markdown but as a node *inside* the flow,

@@ -53,6 +53,11 @@ class NodeSpec:
     # reaching a resource that tolerates one user at a time. Like `card`, it
     # lives in `source`, so forking or saving the node keeps it.
     exclusive: bool = False
+    # declared by NODE["reads_report"]: the name of this node's `page_ref`
+    # param, whose report page the node renders. Every node that page embeds
+    # becomes a derived dependency of this one (see core.reportlinks), so it
+    # runs after them and again when they change. "" for every other node.
+    reads_report: str = ""
     # placeholder standing in for a type_id serialization couldn't resolve
     broken: bool = False
     # library sub-section for user-saved nodes; None/"" = ungrouped, top-level

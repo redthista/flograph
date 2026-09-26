@@ -45,6 +45,7 @@ and `PARAMS` — so it should only declare. Everything else goes inside `run`.
 | `card` | no | Makes the node a live card — see Cards. |
 | `control` | no | With `"card": "control"`, the widget shape — see Cards. |
 | `interactive` | no | With `"card": "webview"`, lets the page write this node's params from JavaScript — see Interactive views. |
+| `reads_report` | no | Names one of the node's `page_ref` params. The node then runs after every node that report page embeds, and again when one of them or the page changes, as Save Report does. |
 
 Unknown keys are ignored, so a newer node file still loads on an older
 flograph.
@@ -104,7 +105,7 @@ Extra keys, all optional:
 | `unset_label` | `choice` | A friendlier label for the option that means "leave this alone" — so a sentinel like `keep` doesn't read as a real choice. The stored value is unchanged. |
 | `min` / `max` | `int`, `float` | Spin-box bounds. |
 | `multi` | `columns`, `page_ref` | `False` = pick one column instead of a list. A `page_ref` is one page unless it says `True`, when it becomes ticks over the pages, stored as a comma list of ids — nothing ticked means every page. |
-| `ref_kind` | `node_ref` | Restrict the dropdown to nodes with this card kind. |
+| `ref_kind` | `node_ref`, `page_ref` | Restrict the dropdown: to nodes with this card kind, or to pages of this kind (`"report"`, `"dashboard"`). |
 | `visible_when` | any | `{"format": ["csv", "auto"]}` — show this row only while another param holds one of those values. Presentational only: `run` still gets every param. |
 | `insert_columns` | `text` | Offer a column-name picker for a box that is *about* columns but isn't a plain list — `"inline"` inserts at the cursor, `"mapping"` treats the box as `column = value` lines. |
 | `wizard` | `text` | Which builder sits beside the box: `"table"` for the conditional-formatting rules manager (`[[Conditional Formatting]]`), `"chart"` for the chart-rules one (`[[Chart Rules]]`). `rule_wizard: True` is the older spelling of `"table"`. |

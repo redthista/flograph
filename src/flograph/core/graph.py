@@ -11,7 +11,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
-from . import links, varlinks
+from . import links, reportlinks, varlinks
 from .datatypes import PortType, can_connect
 from .events import GraphEvents
 from .layers import next_z, order_of
@@ -291,6 +291,10 @@ class Graph:
         # `dst_port` is empty and `_edges` keeps it out of the by-input
         # index. It exists only to say "this node depends on that one".
         self.var_links: dict[str, Connection] = {}
+        # Derived report edges: every node a report page embeds, into each
+        # node that renders that page (Save Report). Portless like
+        # `var_links`; see core.reportlinks.
+        self.report_links: dict[str, Connection] = {}
         self.frames: dict[str, Frame] = {}
         self.shapes: dict[str, Shape] = {}
         self.pages: dict[str, Page] = {}
@@ -418,6 +422,9 @@ class Graph:
         node = self.node(node_id)
         node.label_override = label or None
         self.events.label_changed.emit(node_id)
+        if reportlinks.readers(self):
+            # a report embeds by label, so a rename can move its edges
+            self._refresh_links()
 
     def set_description(self, node_id: str, description: str) -> None:
         node = self.node(node_id)
@@ -541,7 +548,9 @@ class Graph:
         self.events.param_changed.emit(node_id, name, value)
         if name == links.SOURCE_PARAM and links.is_from(node):
             self._refresh_links()   # marks the Froms it moved dirty itself
-        elif self._may_change_var_links(node, spec, previous, value):
+        elif (self._may_change_var_links(node, spec, previous, value)
+              or (reportlinks.is_reader(node)
+                  and name == node.spec.reads_report)):
             # An edit that adds or removes a `${name}` changes the derived
             # edge set, so it has to be re-derived — but only then. The
             # guard keeps every ordinary param edit off the scan, which is
@@ -625,6 +634,8 @@ class Graph:
         """
         self._adopt_edges("links", links.resolve_links(self))
         self._adopt_edges("var_links", varlinks.resolve_var_links(self))
+        self._adopt_edges("report_links",
+                          reportlinks.resolve_report_links(self))
 
     def _adopt_edges(self, attr: str, resolved: dict[str, Connection]) -> None:
         """Swap in a freshly derived edge set, dirtying whoever it moved
@@ -698,6 +709,12 @@ class Graph:
         dependency set — the cache fingerprint above all — has to ask here.
         """
         return sorted({conn.src_node for conn in self.var_links.values()
+                       if conn.dst_node == node_id})
+
+    def report_sources(self, node_id: str) -> list[str]:
+        """The nodes whose output the report this node renders shows. Its
+        own accessor for the same reason `var_sources` is: portless."""
+        return sorted({conn.src_node for conn in self.report_links.values()
                        if conn.dst_node == node_id})
 
     def order_sources(self, node_id: str) -> list[str]:
@@ -811,7 +828,7 @@ class Graph:
         link-awareness lives — everything below inherits it. Persistence and
         wire-drawing read `self.connections` instead."""
         return (*self.connections.values(), *self.links.values(),
-                *self.var_links.values())
+                *self.var_links.values(), *self.report_links.values())
 
     def _invalidate_edges(self) -> None:
         """Call after any change to `connections` or `links`. Cheap enough to
@@ -1209,6 +1226,7 @@ class Graph:
             raise GraphError(f"page id {page.id!r} already in graph")
         self.pages[page.id] = page
         self.events.page_added.emit(page)
+        self._report_changed(page.id)   # an undo can bring a saved page back
         return page
 
     def remove_page(self, page_id: str) -> Page:
@@ -1216,6 +1234,7 @@ class Graph:
         if page is None:
             raise GraphError(f"no page with id {page_id!r}")
         self.events.page_removed.emit(page_id)
+        self._report_changed(page_id)
         return page
 
     def update_page(self, page_id: str, *, title: Optional[str] = None) -> Page:
@@ -1223,6 +1242,8 @@ class Graph:
         if title is not None:
             page.title = title
         self.events.page_changed.emit(page)
+        if title is not None:
+            self._report_changed(page_id)   # it heads the saved file
         return page
 
     def set_page_color(self, page_id: str, color: Optional[str]) -> Page:
@@ -1267,13 +1288,27 @@ class Graph:
         page = self.page(page_id)
         page.body = body or ""
         self.events.page_body_changed.emit(page)
+        self._report_changed(page_id)
         return page
+
+    def _report_changed(self, page_id: str) -> None:
+        """A report page's content moved: whatever renders it is stale, and
+        its embeds may have moved its edges. Nothing to do — and nothing
+        scanned beyond the node list — when no node renders a report."""
+        readers = reportlinks.readers_of(self, page_id)
+        if not readers:
+            return
+        self._refresh_links()
+        for node_id in readers:
+            if node_id in self.nodes:
+                self.mark_dirty(node_id)
 
     def set_page_custom_css(self, page_id: str, css: str) -> Page:
         """Replace a report page's browser stylesheet."""
         page = self.page(page_id)
         page.custom_css = css or ""
         self.events.page_changed.emit(page)
+        self._report_changed(page_id)
         return page
 
     def set_page_view_mode(self, page_id: str, view_mode: bool) -> Page:
@@ -1305,6 +1340,7 @@ class Graph:
         page = self.page(page_id)
         page.setup = setup.copy() if setup is not None else PageSetup()
         self.events.page_changed.emit(page)
+        self._report_changed(page_id)
         return page
 
     def set_page_preview_mode(self, page_id: str, mode: str) -> Page:

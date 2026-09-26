@@ -41,7 +41,8 @@ version.
 through one node: pick the **Format** (or leave it *auto*) and the **Engine**
 (*polars* parses in Rust and releases the GIL, so several readers genuinely
 run at once). The single-format Read nodes are still there, as are Write
-CSV/Excel/Parquet/JSON/SQLite and **Write Text**. **Read … (Folder)** reads a
+CSV/Excel/Parquet/JSON/SQLite and **Write Text**, and **Save Report** writes
+a report page to HTML or PDF whenever the flow runs. **Read … (Folder)** reads a
 directory as one stacked table; **Read PDF** turns documents into a table,
 one row per page. **Table** is a real spreadsheet you edit on the canvas,
 with formulas.

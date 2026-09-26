@@ -73,7 +73,9 @@ class ParamSpec:
     # (True) or one page — which is its default, see from_dict.
     multi: bool = True
     hidden: bool = False  # not shown in the properties panel (edited elsewhere)
-    ref_kind: str = ""  # node_ref only: card kind the referenced node must have
+    # node_ref: card kind the referenced node must have. page_ref: the page
+    # kind ("report", "dashboard") the picker offers; "" offers every page.
+    ref_kind: str = ""
     # text only: offer a picker that inserts an upstream column name. For
     # boxes whose content is *about* columns but isn't a list of them -- a
     # rename mapping, an expression -- where a 'columns' param can't express

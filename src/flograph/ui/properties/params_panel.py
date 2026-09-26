@@ -1553,17 +1553,18 @@ class ParamsPanel(QWidget):
         while showing its title — the Action Button's Go to page (AB2). The
         node_ref combo's rules: refilled every time it drops down, and a
         page that has since been deleted stays visible as missing."""
-        combo = _NodeRefCombo(lambda: self._fill_page_refs(combo))
-        self._fill_page_refs(combo, str(value or ""))
+        kind = spec.ref_kind   # "report" for Save Report; "" is any page
+        combo = _NodeRefCombo(lambda: self._fill_page_refs(combo, kind=kind))
+        self._fill_page_refs(combo, str(value or ""), kind=kind)
         combo.activated.connect(
             lambda _i: self._commit(spec.name, combo.currentData() or ""))
 
         def set_ref(v, combo=combo):
-            self._fill_page_refs(combo, str(v or ""))
+            self._fill_page_refs(combo, str(v or ""), kind=kind)
         return combo, set_ref
 
     def _fill_page_refs(self, combo: QComboBox,
-                        value: Optional[str] = None) -> None:
+                        value: Optional[str] = None, kind: str = "") -> None:
         if value is None:
             value = combo.currentData() or ""
         self._updating = True
@@ -1573,7 +1574,8 @@ class ParamsPanel(QWidget):
             # tab order, the order anyone reading the dashboard knows them by
             from flograph.core.page_nav import reader_pages
             for page in reader_pages(self._graph.pages):
-                combo.addItem(page.title, page.id)
+                if not kind or page.kind == kind:
+                    combo.addItem(page.title, page.id)
             index = combo.findData(value)
             if index < 0 and value:
                 combo.addItem("⚠ missing", value)

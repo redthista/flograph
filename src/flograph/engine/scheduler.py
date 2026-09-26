@@ -27,6 +27,7 @@ from flograph.core import perf
 from flograph.core.graph import Graph
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
+from flograph.core.reportlinks import report_problem
 from flograph.core.varlinks import VariableError, var_problem
 
 from . import pressure, varsubst
@@ -1217,6 +1218,16 @@ class ExecutionEngine(QObject):
         for src in self.graph.var_sources(node_id):
             if not self.cache.has(src):
                 return f"upstream node did not produce output"
+        # A report's embeds are the same kind of portless dependency: saving
+        # a report with a hole where a failed chart should be is worse than
+        # not saving it, since nothing in the file would say why.
+        problem = report_problem(self.graph, node_id)
+        if problem is not None:
+            return problem
+        for src in self.graph.report_sources(node_id):
+            if not self.cache.has(src):
+                label = self.graph.nodes[src].label
+                return f"the report embeds {label!r}, which did not produce output"
         return None
 
     def _prune_downstream(self, node_id: str) -> None:

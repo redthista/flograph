@@ -149,6 +149,10 @@ class MainWindow(QMainWindow):
         # the canvas tab whose zoom and place the view holds right now
         self._view_shows_tab = None
         self.engine = ExecutionEngine(self.graph, parent=self)
+        # Save Report nodes render their page through the window: they ask
+        # from a worker and this answers on the GUI thread.
+        from .report.node_export import ReportNodeExporter
+        self._report_exporter = ReportNodeExporter(self.engine, self)
         # A frame's run flags apply to whatever it holds *now*, and only the
         # canvas can answer that — so the engine asks, once per run, rather
         # than being told whenever something is dragged. Through a lambda
@@ -5773,6 +5777,7 @@ class MainWindow(QMainWindow):
             # write; see it out or the side-car it was writing is lost.
             self._wait_for_cache_save()
             self._save_window_state()
+            self._report_exporter.close()
             event.accept()
         else:
             event.ignore()

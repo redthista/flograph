@@ -36,6 +36,8 @@ the handbook page "Writing a Node" (F1) is the same ground in prose.
 #                params from JavaScript, which dirties it and re-runs what
 #                follows — a click inside a chart doing what a Slicer tick
 #                does
+#   reads_report the name of a page_ref param: the node runs after every
+#                node that report page embeds (Save Report uses it)
 #
 # Ports are (name, type) tuples, or (name, type, opts) where opts may carry
 #   {"optional": True}  the node runs with this input unconnected (it
@@ -90,8 +92,8 @@ NODE = {
 #   multi          columns: a comma list (the default) or a single column.
 #                  page_ref: one page (the default) or ticks over the pages,
 #                  stored as a comma list — none ticked meaning every page.
-#   ref_kind       node_ref only: restrict the dropdown to nodes carrying
-#                  that card kind
+#   ref_kind       node_ref: restrict the dropdown to nodes carrying that
+#                  card kind; page_ref: to pages of that kind ("report")
 #   visible_when   {"format": ["csv", "auto"]} — show this row only while
 #                  another param holds one of those values; several keys are
 #                  ANDed. Presentational only: run() still receives every
