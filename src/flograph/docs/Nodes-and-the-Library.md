@@ -109,9 +109,18 @@ of this appear; installing from PyPI never asks for anything. When the
 index asks for a user name and password, as JFrog and Artifactory usually
 do, Manage Packages stops the install and opens a **Sign In** window. Sign
 in and the install runs again. You can also sign in ahead of time with
-**Sign In…** beside the index line. An API key or identity token works as
-the password, and is the better choice where your index offers one: it can
-be revoked without changing your password.
+**Sign In…** beside the index line.
+
+**Use a token rather than your password.** The **Password or token** box
+takes either, but a token is the better choice. It opens only JFrog, not
+everything your password does. It can be revoked without changing your
+password. And a wrong one can't lock your Windows account the way repeated
+wrong passwords can, when JFrog signs in through the company directory.
+In JFrog, open **Edit Profile** and choose **Generate an Identity Token**
+(or use a reference token your administrator gives you). Put your JFrog
+user name in **User name** and paste the token below it. JFrog's older
+**API keys** work the same way, where your JFrog still has them, but JFrog
+has retired them and newer versions can't create them.
 
 How the password is kept safe:
 

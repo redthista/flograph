@@ -7,7 +7,7 @@ import sys
 
 import pytest
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QLineEdit, QWidget
+from PySide6.QtWidgets import QLabel, QLineEdit, QWidget
 
 from flograph import packages
 from flograph.packages import IndexLogin, PackageIndex
@@ -251,7 +251,7 @@ class TestSigningInWhenAsked:
         assert dialog.asked == [(HOST, "", False)]
         assert dialog.runs == [None, IndexLogin("bob", "hunter22")]
         log = _log(dialog)
-        assert "the index asks for a user name and password" in log
+        assert "the index asks you to sign in" in log
         assert "— install finished —" in log
         # the installer got the login (it said where from, and it's
         # starred in the log), but nothing anyone else can see carries it
@@ -352,3 +352,16 @@ class TestTheButton:
         win.password_edit.setText("pw")
         assert win.password_edit.echoMode() == QLineEdit.Password
         assert win.login() == IndexLogin("bob", "pw")
+
+    def test_the_window_asks_for_a_token_first(self, qtbot):
+        """A token is the safer answer, so the window leads with it — but
+        a password goes in the same box and is sent the same way."""
+        win = SignInDialog(HOST)
+        qtbot.addWidget(win)
+        labels = " ".join(w.text() for w in win.findChildren(QLabel))
+        assert "Password or token:" in labels
+        assert "Identity Token" in labels
+        assert "token" in win.password_edit.placeholderText()
+        win.user_edit.setText("bob")
+        win.password_edit.setText("cmVmdGtuOjAxOjE3")   # a token's shape
+        assert win.login() == IndexLogin("bob", "cmVmdGtuOjAxOjE3")

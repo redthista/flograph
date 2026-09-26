@@ -87,23 +87,29 @@ class SignInDialog(QDialog):
         self.risk_label.setVisible(bool(risk))
         self.risk_label.setStyleSheet("color: #e0a030;")
         intro = QLabel(
-            (f"{host} didn't accept that user name and password. Try again."
+            (f"{host} didn't accept that user name and token or password. "
+             f"Try again — a token may have expired or been revoked."
              if refused else
-             f"{host} asks for a user name and password."))
+             f"{host} asks you to sign in."))
         intro.setTextFormat(Qt.PlainText)
         intro.setWordWrap(True)
         self.user_edit = QLineEdit(username)
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
+        self.password_edit.setPlaceholderText("token (recommended) or password")
+        # a token rather than the password: it opens only the index, is
+        # revoked on its own, and a wrong one can't lock the Windows account
         hint = QLabel(
-            "JFrog and Artifactory also take an API key or identity token "
-            "as the password. Kept until flograph closes; never saved.")
+            "JFrog: paste an identity or reference token from your JFrog "
+            "profile (Edit Profile ▸ Generate an Identity Token). Safer than "
+            "your password: it only opens JFrog, and it can be revoked on "
+            "its own. Your password works too.\n"
+            "Kept until flograph closes; never saved.")
         hint.setTextFormat(Qt.PlainText)
         hint.setWordWrap(True)
-        hint.setEnabled(False)
         form = QFormLayout()
         form.addRow("User name:", self.user_edit)
-        form.addRow("Password:", self.password_edit)
+        form.addRow("Password or token:", self.password_edit)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok
                                    | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Sign In")
@@ -116,7 +122,9 @@ class SignInDialog(QDialog):
         layout.addWidget(hint)
         layout.addWidget(buttons)
         (self.password_edit if username else self.user_edit).setFocus()
-        self.resize(380, self.sizeHint().height())
+        # width only: the height follows the wrapped hint, which a height
+        # taken from sizeHint() now — before wrapping — would cut short
+        self.setMinimumWidth(400)
 
     def login(self) -> packages.IndexLogin:
         return packages.IndexLogin(self.user_edit.text().strip(),
@@ -197,8 +205,9 @@ class PackagesDialog(QDialog):
             "on to uv, which does not read them itself.")
         self._sign_in_btn = QPushButton("Sign In…")
         self._sign_in_btn.setToolTip(
-            "Give a user name and password for the index — for a JFrog or "
-            "Artifactory that asks for one. Kept until flograph closes.")
+            "Give a user name and a token (or password) for the index — for "
+            "a JFrog or Artifactory that asks for one. Kept until flograph "
+            "closes.")
         self._sign_in_btn.clicked.connect(self._toggle_sign_in)
         index_row = QHBoxLayout()
         index_row.addWidget(self._index_label, 1)
@@ -413,8 +422,8 @@ class PackagesDialog(QDialog):
                 self._stopped_for_login
                 or (code != 0 and packages.login_refused(self._run_output))):
             self._append_log("")
-            self._append_log(f"— {action} stopped: the index asks for a "
-                             f"user name and password —")
+            self._append_log(f"— {action} stopped: the index asks you to "
+                             f"sign in —")
             self._set_busy(False)
             # after this slot returns: a modal window opened from inside
             # QProcess.finished would run with the process still tearing down
