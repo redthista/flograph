@@ -27,7 +27,7 @@ from flograph.core import perf
 from flograph.core.graph import Graph
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
-from flograph.core.reportlinks import report_problem
+from flograph.core.reportlinks import report_problem, saves_anyway
 from flograph.core.varlinks import VariableError, var_problem
 
 from . import pressure, varsubst
@@ -1221,13 +1221,21 @@ class ExecutionEngine(QObject):
         # A report's embeds are the same kind of portless dependency: saving
         # a report with a hole where a failed chart should be is worse than
         # not saving it, since nothing in the file would say why.
+        # A node that failed can still hold the output of its last good
+        # run, so "has output" alone would save a report showing a chart
+        # the flow could no longer draw. Unless the reader says to save
+        # anyway, and the render marks each gap.
         problem = report_problem(self.graph, node_id)
         if problem is not None:
             return problem
-        for src in self.graph.report_sources(node_id):
-            if not self.cache.has(src):
+        if not saves_anyway(node):
+            for src in self.graph.report_sources(node_id):
                 label = self.graph.nodes[src].label
-                return f"the report embeds {label!r}, which did not produce output"
+                if self.graph.nodes[src].status == NodeStatus.ERROR:
+                    return f"the report embeds {label!r}, which failed"
+                if not self.cache.has(src):
+                    return (f"the report embeds {label!r}, which did not "
+                            f"produce output")
         return None
 
     def _prune_downstream(self, node_id: str) -> None:
@@ -1237,20 +1245,55 @@ class ExecutionEngine(QObject):
         every predecessor in the plan has finished, so a node that is running
         has no unfinished ancestor to be pruned by.
         """
-        downstream = self.graph.downstream(node_id)
+        downstream = self._failure_reaches(node_id)
         dropped = [nid for nid in self._pending if nid in downstream]
-        if not dropped:
-            return
         self._pending.difference_update(dropped)
         for nid in dropped:
             self._remaining_preds.pop(nid, None)
             self.graph.set_status(nid, NodeStatus.IDLE)
+        # A reader set to save anyway was spared, but it may have been
+        # waiting on what just went: what it waits for now is only what is
+        # still to finish.
+        unfinished = self._pending | set(self._running)
+        for nid in list(self._pending):
+            if not saves_anyway(self.graph.nodes[nid]):
+                continue
+            remaining = sum(1 for p in self.graph.predecessors(nid)
+                            if p in unfinished)
+            if remaining == 0 and self._remaining_preds.get(nid, 0) > 0:
+                self._ready.append(nid)
+            self._remaining_preds[nid] = remaining
+        if not dropped:
+            return
         # _ready is a deque and the dropped nodes may be anywhere in it, so it
         # is rebuilt rather than picked at; it holds only what can start now,
         # which is short.
         if any(nid in self._ready for nid in dropped):
             self._ready = deque(nid for nid in self._ready
                                 if nid in self._pending)
+
+    def _failure_reaches(self, node_id: str) -> set[str]:
+        """What a failure at `node_id` takes down with it: everything
+        downstream, except across a report edge into a reader set to save
+        anyway — that one runs, and its report marks what is missing."""
+        report_only = {(c.src_node, c.dst_node)
+                       for c in self.graph.report_links.values()}
+        other = {(c.src_node, c.dst_node) for c in (
+            *self.graph.connections.values(), *self.graph.links.values(),
+            *self.graph.var_links.values())}
+        seen: set[str] = set()
+        stack = [node_id]
+        while stack:
+            src = stack.pop()
+            for nxt in self.graph.successors(src):
+                if nxt in seen:
+                    continue
+                if ((src, nxt) in report_only and (src, nxt) not in other
+                        and saves_anyway(self.graph.nodes[nxt])):
+                    continue
+                seen.add(nxt)
+                stack.append(nxt)
+        return seen
 
     def _start_node(self, node_id: str) -> Optional[str]:
         """Dispatch a node, or return why it could not be dispatched.

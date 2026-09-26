@@ -20,6 +20,24 @@ from flograph.engine import report_export
 from flograph.engine.report_export import ExportRequest, ReportExportError
 
 
+def stale_embeds(graph, body: str) -> list[str]:
+    """Embeds whose cached output is not what the flow makes now — a node
+    that failed keeps its last good result, and one that was skipped
+    because something above it failed keeps an older one. The render draws
+    either without complaint, so they are named here."""
+    from flograph.core.node import NodeStatus
+    from flograph.core.reportlinks import embedded_nodes
+
+    problems = []
+    for node_id in embedded_nodes(graph, body):
+        node = graph.nodes[node_id]
+        if node.status == NodeStatus.ERROR:
+            problems.append(f"“{node.label}” failed")
+        elif node.dirty:
+            problems.append(f"“{node.label}” is out of date")
+    return problems
+
+
 class ReportNodeExporter(QObject):
     # Emitted on the worker thread; this object lives on the GUI thread, so
     # the connection to a bound method below is queued onto it.
@@ -93,9 +111,12 @@ class ReportNodeExporter(QObject):
         rendered = render_report(page.body, graph, self._engine.cache,
                                  image_scale=2.0, setup=page.setup,
                                  page_break_rule=False)
-        request.problems = list(rendered.problems)
+        request.problems = [*stale_embeds(graph, page.body),
+                            *rendered.problems]
         if request.abandoned:
             return
+        if request.problems and not request.save_anyway:
+            raise ReportExportError(report_export.refusal(request.problems))
         html = ""
         if request.fmt == "HTML" or request.want_html:
             html = report_html(rendered, page.title, setup=page.setup,

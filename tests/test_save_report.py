@@ -11,6 +11,7 @@ import pytest
 
 from flograph.core import Graph, NodeInstance, parse_spec
 from flograph.core.graph import Page
+from flograph.core.node import NodeStatus
 from flograph.core.reportlinks import link_id, report_problem
 from flograph.engine import ExecutionEngine
 from flograph.engine.cache_persistence import node_fingerprint
@@ -213,3 +214,74 @@ def test_headless_says_why(qtbot, flow, tmp_path):
     engine = ExecutionEngine(graph)
     assert not wait_run(qtbot, engine, engine.run_all)
     assert "needs the flograph window" in saver.status_message
+
+
+# ---------------------------------------------------- a report with errors
+
+BOOM = """
+NODE = {"label": "Boom", "category": "Test", "inputs": [],
+        "outputs": [("value", "any")]}
+PARAMS = [{"name": "fail", "type": "bool", "default": True}]
+def run(ctx):
+    if ctx.params["fail"]:
+        raise RuntimeError("no data today")
+    return {"value": "the chart"}
+"""
+
+
+def boom(label):
+    node = NodeInstance.create(parse_spec(BOOM, "test.boom"))
+    node.label_override = label
+    return node
+
+
+class TestErrors:
+
+    def test_a_failed_embed_is_not_saved(self, qtbot, exporting, tmp_path):
+        graph, engine, _headline, saver = exporting
+        graph.add_node(boom("Chart"))
+        graph.set_page_body("r1", "![[Headline]]\n\n![[Chart]]")
+        graph.set_param(saver.id, "path", str(tmp_path / "r.html"))
+        assert not wait_run(qtbot, engine, engine.run_all)
+        assert not (tmp_path / "r.html").exists()
+        # taken down quietly with it, like anything below a failure
+        assert saver.status == NodeStatus.IDLE and saver.dirty
+
+    def test_an_embed_of_nothing_is_not_saved(self, qtbot, exporting,
+                                              tmp_path):
+        graph, engine, _headline, saver = exporting
+        graph.set_page_body("r1", "![[Headline]]\n\n![[Typo]]")
+        graph.set_param(saver.id, "path", str(tmp_path / "r.html"))
+        assert not wait_run(qtbot, engine, engine.run_all)
+        assert not (tmp_path / "r.html").exists()
+        assert "Typo" in saver.status_message
+        assert "Save anyway" in saver.status_message
+
+    def test_save_anyway_saves_round_a_failure(self, qtbot, exporting,
+                                               tmp_path):
+        """The chart fails in the same run: the saver is not taken down
+        with it, and the file has everything else in it."""
+        graph, engine, _headline, saver = exporting
+        graph.add_node(boom("Chart"))
+        graph.set_page_body("r1", "![[Headline]]\n\n![[Chart]]")
+        graph.set_param(saver.id, "path", str(tmp_path / "r.html"))
+        graph.set_param(saver.id, "if_errors", "Save anyway")
+        wait_run(qtbot, engine, engine.run_all)
+        assert "Sales are" in (tmp_path / "r.html").read_text(encoding="utf-8")
+        assert engine.cache.outputs_for(saver.id)["path"]
+
+    def test_a_failure_with_an_old_output_is_not_saved(self, qtbot,
+                                                        exporting, tmp_path):
+        """It ran once, then failed: its old chart is still cached, which
+        must not pass for this run's."""
+        graph, engine, _headline, saver = exporting
+        chart = graph.add_node(boom("Chart"))
+        graph.set_param(chart.id, "fail", False)
+        graph.set_page_body("r1", "![[Chart]]")
+        target = tmp_path / "r.html"
+        graph.set_param(saver.id, "path", str(target))
+        assert wait_run(qtbot, engine, engine.run_all)
+        target.unlink()
+        graph.set_param(chart.id, "fail", True)
+        assert not wait_run(qtbot, engine, engine.run_all)
+        assert not target.exists()

@@ -29,6 +29,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 REPORT_KIND = "report"
 
+#: A reader whose `if_errors` param says this saves a report even when
+#: something it embeds failed or could not be found — the gaps are marked in
+#: the file instead. Every other value, and a reader without the param,
+#: refuses: a report with a silent hole in it is worse than no report.
+ERRORS_PARAM = "if_errors"
+SAVE_ANYWAY = "Save anyway"
+REFUSE = "Don't save"
+
 
 def link_id(reader_id: str, source_id: str) -> str:
     return f"report:{reader_id}:{source_id}"
@@ -36,6 +44,11 @@ def link_id(reader_id: str, source_id: str) -> str:
 
 def is_reader(node) -> bool:
     return bool(getattr(node.spec, "reads_report", ""))
+
+
+def saves_anyway(node) -> bool:
+    """Whether this reader is set to save a report that has errors in it."""
+    return is_reader(node) and node.params.get(ERRORS_PARAM) == SAVE_ANYWAY
 
 
 def readers(graph: "Graph") -> list:

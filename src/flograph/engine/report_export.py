@@ -50,6 +50,15 @@ class ReportExportError(Exception):
     """The report could not be saved. The message is for the user."""
 
 
+def refusal(problems: list) -> str:
+    """Why a report with problems in it was not saved, for the node."""
+    unique = list(dict.fromkeys(problems))
+    more = f" (+{len(unique) - 1} more)" if len(unique) > 1 else ""
+    return (f"not saved — the report has errors: {unique[0]}{more}. Set "
+            f"'If the report has errors' to Save anyway to save it with "
+            f"the gaps marked")
+
+
 # ------------------------------------------------------------- file names
 
 def safe_name(text: str) -> str:
@@ -121,6 +130,7 @@ class ExportRequest:
     if_exists: str
     create_dirs: bool
     want_html: bool
+    save_anyway: bool = False  # write it even with problems in it
     now: datetime = field(default_factory=datetime.now)
     path: str = ""            # set by prepare_path; "" = write nothing
     html: str = ""
@@ -185,13 +195,14 @@ def unregister(exporter: Callable[[ExportRequest], bool]) -> None:
 
 
 def export(ctx, page_id: str, fmt: str, template: str, if_exists: str,
-           create_dirs: bool, want_html: bool) -> ExportRequest:
+           create_dirs: bool, want_html: bool,
+           save_anyway: bool = False) -> ExportRequest:
     """Ask a window to render and save, and wait for it. Called on the
     node's worker thread; Stop still works while it waits."""
     request = ExportRequest(node_id=ctx.node_id, page_id=page_id, fmt=fmt,
                             template=str(template or ""),
                             if_exists=if_exists, create_dirs=create_dirs,
-                            want_html=want_html)
+                            want_html=want_html, save_anyway=save_anyway)
     if not any(exporter(request) for exporter in _live()):
         raise ReportExportError(
             "saving a report needs the flograph window — reports are drawn "

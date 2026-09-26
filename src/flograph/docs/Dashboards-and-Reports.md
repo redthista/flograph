@@ -402,8 +402,14 @@ only left that way until it was closed. Spin the wheel as much as you like
 one every time the flow runs, add a **Save Report** node (IO) and choose the
 page in its **Report** setting. It runs after every node the page embeds, so
 the charts in the file are the ones this run drew. It runs again whenever one
-of them changes, or the page's text does. If one of them failed, the node
-does not save the file, because the report would have a gap in it.
+of them changes, or the page's text does.
+
+**If the report has errors** decides what happens when something on the
+page is wrong: a chart that failed, one left over from an earlier run, or an
+embed that names no node. **Don't save** (the default) fails the node and
+says what was wrong, because the report would have a gap in it. **Save
+anyway** writes the file with the gaps marked, and lists each one in the
+node's log. It still saves when a chart fails in the same run.
 
 **Save to** can hold `{page}`, `{date}`, `{time}` and `{datetime}`, as well
 as `${name}` flow variables. For example, `reports/{page} {date}.pdf` keeps

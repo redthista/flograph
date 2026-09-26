@@ -9,7 +9,8 @@ anyone clicking.
 **Report** picks the page. Every chart, table or number the page embeds
 becomes something this node waits for: it runs after them, and again
 whenever one of them — or the page's text — changes. If one of them fails,
-the report is not saved, rather than being saved with a hole in it.
+the report is not saved, rather than being saved with a hole in it —
+unless **If the report has errors** says to save anyway.
 
 **Save to** may hold these, filled in when the node runs:
 
@@ -23,6 +24,11 @@ variables work here too. Leave off the extension and the format's is added.
 
 **If the file exists**: Overwrite it, Add a number (`report (2).html`), or
 Fail — which stops before anything is drawn.
+
+**If the report has errors**: Don't save (the default) fails the node
+when anything the page embeds failed, is out of date, or cannot be found or
+drawn — the same problems the report page shows. Save anyway writes the
+file with the gaps marked, and lists each one in the node's log.
 
 **Outputs.** `path` is the file written, for a node that mails or uploads it.
 `html` is the report as one HTML page when **Output the HTML** is ticked —
@@ -53,6 +59,8 @@ PARAMS = [
      "default": "Overwrite"},
     {"name": "create_dirs", "type": "bool", "label": "Create folders",
      "default": True},
+    {"name": "if_errors", "type": "choice", "label": "If the report has errors",
+     "options": ["Don't save", "Save anyway"], "default": "Don't save"},
     {"name": "output_html", "type": "bool", "label": "Output the HTML",
      "default": False},
 ]
@@ -65,7 +73,8 @@ def run(ctx):
     want_html = bool(p.get("output_html"))
     result = export(ctx, p.get("page") or "", p.get("format") or "HTML",
                     p.get("path") or "", p.get("if_exists") or "Overwrite",
-                    bool(p.get("create_dirs")), want_html)
+                    bool(p.get("create_dirs")), want_html,
+                    p.get("if_errors") == "Save anyway")
     for problem in dict.fromkeys(result.problems):
         ctx.log(f"warning: {problem}")
     if result.path:
