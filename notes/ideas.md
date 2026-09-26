@@ -76,8 +76,8 @@ saved with the project, the drag that unfolded the canvases, and dropdowns
 on cards opening in front and in the right place. What is *not* built from
 that list is carried here: **AD** is its second row of tabs, and the rest
 of it — wildcards in value rules, ragged slicer trees, a spell checker, and
-two apps sharing one Plotly — is still on `0.1.15_issues.md` waiting its
-turn rather than being restated here twice.
+two apps sharing one Plotly — was carried on `0.1.15_issues.md`; the
+one still-open item there, two apps sharing one Plotly, is now `issues.md` #12.
 
 ---
 

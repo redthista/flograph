@@ -42,7 +42,7 @@ flograph
 - `conftest.py` has an **autouse fixture** that force-collects Qt deferred deletions after every test. Without it, dangling timers from previous tests segfault later tests. This is not a bad test — it's the fixture doing its job.
 - `test_no_qt_in_core.py` is a **poison test**: it runs `import flograph.core` in a subprocess and asserts PySide6 and pandas are NOT pulled in. If you add a top-level import to `core/`, this test breaks.
 - `test_registry.py` parses every built-in node script. If a new node has a malformed `NODE` dict or `run()` signature, this test catches it.
-- **Known flaky crash** (~25%, teardown-only): jedi completion threads from the editor dock survive into GC and cause `double free or corruption` / `QBasicTimer::stop` abort. Tests themselves pass. See `issues.md` for details.
+- **Formerly flaky teardown crash** (`double free or corruption` / `QBasicTimer::stop` abort from jedi completion threads during GC): no longer reproduces since 2026-09-12. If it returns, see `notes/issues.md` #1 for the repro and how to capture a core dump.
 
 ## Architecture invariants
 
@@ -174,6 +174,11 @@ src/flograph/
 ├── packages.py # Runtime pip/uv package management dialog
 └── paths.py    # Path resolution
 tests/         # pytest + pytest-qt (no display needed)
+scripts/       # benchmarks, build helpers, test runner
+docs/          # long-form guides (Node_Creation_Guide.md, roadmap)
+notes/         # planning: ideas, issues, testing to-do, node wishlist
+├── ideas/     # long-form write-ups referenced from ideas.md
+└── flows/     # dev/demo .flograph files (not shipped templates)
 ```
 
 ## Key documentation files
@@ -181,7 +186,11 @@ tests/         # pytest + pytest-qt (no display needed)
 - `README.md` — full project docs, canvas bindings, node library catalog
 - `src/flograph/docs/*.md` — the in-app handbook (Help ▸ Documentation / F1);
   GitHub-wiki-compatible Markdown, edited in the same commit as the feature
-- `issues.md` — tracked bugs
-- `ideas.md` — feature ideas
+- `notes/issues.md` — tracked bugs
+- `notes/ideas.md` — the In-Tray (see `.claude/skills/in-tray`); its
+  neighbours `ideas_archived.md`, `future_ideas.md`, `node_ideas.md`,
+  `new_ideas.md` (raw inbox) and `ideas/` live beside it in `notes/`
+- `notes/testing-todo.md` — manual test passes waiting to be run
+- `docs/Node_Creation_Guide.md` — node-writing rules, aimed at an LLM
 - `.opencode/skills/flograph/SKILL.md` — comprehensive workspace reference
 - `.opencode/skills/new-node/SKILL.md` — node scaffolding guide

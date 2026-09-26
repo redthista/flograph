@@ -20,8 +20,8 @@ folder is named `flopy` (legacy) but the package is `flograph`.
 |------|---------|
 | `main.py` | Thin CLI launcher |
 | `pyproject.toml` | Package metadata, deps, scripts, build config (hatchling) |
-| `issues.md` | Tracked bugs/tasks |
-| `ideas.md` | Feature ideas and brainstorming |
+| `notes/issues.md` | Tracked bugs/tasks |
+| `notes/ideas.md` | Feature ideas (the In-Tray) |
 | `README.md` | Full project documentation |
 | `uv.lock` | Lockfile |
 
@@ -174,5 +174,5 @@ stale pre-rename code — when working on this project, use `src/flograph/`.
 
 ## Issues & ideas
 
-- `issues.md` — tracked bugs and known problems
-- `ideas.md` — feature ideas and brainstorming
+- `notes/issues.md` — tracked bugs and known problems
+- `notes/ideas.md` — feature ideas (the In-Tray); the rest of `notes/` holds its neighbours
