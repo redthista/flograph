@@ -196,8 +196,9 @@ All Groups. Several columns nest, outermost first.
 outputs; off, they are only drawn. See **Totals and groups** in the
 Conditional Formatting handbook page.
 
-**The row index.** Untick **Show row index** to lose the numbers down the
-left edge — a generated 0, 1, 2… says nothing on a dashboard. Like the
+**The row index.** Off by default — a generated 0, 1, 2… says nothing
+on a dashboard. Tick **Show row index** for a table whose index means
+something (dates, names), or to click a row's number to pick it. Like the
 column lists it is a view: the table leaving the `table` port keeps its
 index.
 """
@@ -283,8 +284,11 @@ PARAMS = [
      "multi": False, "placeholder": "the order the table opens in"},
     {"name": "sort_dir", "type": "choice", "label": "Direction",
      "options": ["ascending", "descending"], "default": "ascending"},
+    # Off by default: a generated 0, 1, 2… says nothing to the person
+    # reading a table, least of all on a dashboard. A table whose index
+    # means something (dates, names) ticks it.
     {"name": "row_index", "type": "bool", "label": "Show row index",
-     "default": True},
+     "default": False},
     {"name": "width", "type": "int", "label": "Width",
      "default": 420, "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",

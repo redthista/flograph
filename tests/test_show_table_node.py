@@ -46,8 +46,9 @@ def test_show_table_passes_the_table_through_untouched(registry):
     sentinel = object()
     out = run(FakeContext(params=spec.default_params()), table=sentinel)
     assert out["table"] is sentinel
+    # the row index is off by default, and the style says so
     assert out["style"] == {"rules": [], "show": [], "hide": [],
-                            "errors": []}
+                            "errors": [], "index": False}
 
 
 def test_show_table_merges_incoming_style_with_its_own_box(registry):

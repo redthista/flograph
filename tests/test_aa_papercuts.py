@@ -433,9 +433,9 @@ class TestTheRowIndex:
         assert index_shown(merge_styles(on, on))
         assert index_shown(merge_styles(None, None))
 
-    def test_the_node_ticks_it_by_default(self, registry):
+    def test_the_node_leaves_it_off_by_default(self, registry):
         node = registry.instantiate(SHOW_TABLE)
-        assert node.params["row_index"] is True
+        assert node.params["row_index"] is False
 
     def test_the_node_carries_it_on_its_style_and_keeps_the_table(self):
         show_table = importlib.import_module("flograph.nodes.viz.show_table")
