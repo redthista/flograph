@@ -110,6 +110,23 @@ def test_undo_works_after_the_paste(window, registry):
     assert len(window.graph.nodes) == 2 * len(before)
 
 
+def test_an_older_clipboard_without_grown_ports_still_wires_up(window,
+                                                               registry):
+    """Copied by a version that didn't carry extra_inputs: the wire to
+    `in3` is regrown by connect() rather than dropped by the paste."""
+    _three_into_concat(window, registry)
+    payload = window._selection_payload()
+    for entry in payload["nodes"]:
+        entry.pop("extra_inputs", None)
+    before = set(window.graph.nodes)
+    window._insert_payload(payload)
+    new = set(window.graph.nodes) - before
+    wired = {c.dst_port for c in window.graph.connections.values()
+             if c.dst_node in new}
+    assert wired == {"top", "bottom", "in3"}
+    assert window.undo_stack.canUndo()
+
+
 def test_look_settings_travel_with_the_copy(window, registry):
     node = _add(window, registry, SCRIPT, "a", (0.0, 0.0))
     node.canvas_preview_enabled = False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -5570,6 +5571,11 @@ class MainWindow(QMainWindow):
             return False
         out_spec = src.spec.output(src_port)
         in_spec = dst.spec.input(dst_port)
+        if in_spec is None and re.fullmatch(r"in\d+", dst_port):
+            # connect() regrows a missing in<N> on a node with a spare, as
+            # the spare's type — a clipboard written before grown ports were
+            # carried still names them
+            in_spec = next((p for p in dst.spec.inputs if p.spare), None)
         if out_spec is None or in_spec is None:
             return False
         if not can_connect(out_spec.type, in_spec.type):
