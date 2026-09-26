@@ -13,6 +13,14 @@ settings (pip.conf, `PIP_INDEX_URL`) as it always did — and `uv pip`, which
 reads neither, is handed what pip would have used, so a machine set up for
 a private mirror installs from it whichever installer runs.
 
+An index that wants a user name and password (JFrog, Artifactory) gets them
+through `IndexLogin`, put into the index URL for one run. Neither installer
+can be asked over a pipe the way a console asks: `uv pip` never prompts, and
+pip's password prompt reads the Windows console itself, not stdin. So the
+dialog watches for the index turning an install away (`asks_for_login`,
+`login_refused`), asks for the login in a window of its own, and runs the
+install again with it.
+
 The update-check helpers at the bottom (`update_status`, `upgrade_hint`) are
 strictly read-only: they ask an index what versions exist and compare, never
 installing or writing anything. They have to work — or fail quietly — in a
@@ -29,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from dataclasses import dataclass, field
 
 # Uninstalling these would break the running app; the dialog refuses.
@@ -167,6 +176,89 @@ class PackageIndex:
         return args
 
 
+@dataclass(frozen=True)
+class IndexLogin:
+    """A user name and password for a private index. Held in memory for
+    the session only — never written to settings or to disk."""
+    username: str
+    password: str = field(default="", repr=False)
+
+    def __bool__(self) -> bool:
+        return bool(self.username)
+
+
+def index_host(url: str) -> str:
+    """host[:port] of an index URL, without any login in it — "" for none."""
+    parts = urllib.parse.urlsplit((url or "").strip())
+    return parts.netloc.rpartition("@")[2]
+
+
+def url_with_login(url: str, login: "IndexLogin | None") -> str:
+    """`url` with `login` as its user info, replacing any already there.
+    Both are percent-encoded, so an @ or : in a password, or an e-mail
+    address as the user name, survive; pip and uv both decode them."""
+    url = (url or "").strip()
+    if not url or not login:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return url
+    user = urllib.parse.quote(login.username, safe="")
+    secret = urllib.parse.quote(login.password, safe="")
+    who = f"{user}:{secret}" if login.password else user
+    return urllib.parse.urlunsplit(
+        parts._replace(netloc=f"{who}@{index_host(url)}"))
+
+
+_URL_PASSWORD = re.compile(r"(://[^/\s:@]+:)[^/\s@]+@")
+
+
+def redact(text: str, login: "IndexLogin | None" = None) -> str:
+    """`text` with the password in any URL — and `login`'s, wherever it
+    turns up — replaced by ****, for the log."""
+    text = _URL_PASSWORD.sub(r"\1****@", text)
+    if login and len(login.password) >= 4:
+        for form in {login.password,
+                     urllib.parse.quote(login.password, safe="")}:
+            text = text.replace(form, "****")
+    return text
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+#: pip, asked for a login it doesn't have: it prints this and waits on
+#: input that no window can answer
+_PIP_PROMPT = re.compile(r"(?:^|\n)User for (\S+?):\s*$")
+#: pip, a login refused; uv, any 401 (it never prompts)
+_REFUSED = re.compile(
+    r"401 Error, Credentials not correct|401 Unauthorized"
+    r"|lack of valid authentication credentials", re.IGNORECASE)
+
+
+def asks_for_login(output: str) -> str:
+    """The host pip is waiting on a user name for, when `output` ends in
+    its prompt, else "". The install can only be stopped and run again."""
+    match = _PIP_PROMPT.search(_ANSI.sub("", output))
+    return match.group(1) if match else ""
+
+
+def login_refused(output: str) -> bool:
+    """Did the index turn the installer away for want of a login, or for
+    a wrong one?"""
+    return bool(_REFUSED.search(_ANSI.sub("", output)))
+
+
+def login_index(configured: "PackageIndex | None" = None,
+                environ=None, files=None) -> PackageIndex:
+    """The index a login is for: the one an install would use — including,
+    for uv, an index it was told in its own environment variables."""
+    environ = os.environ if environ is None else environ
+    if not configured and installer_kind() == "uv":
+        for name in ("UV_DEFAULT_INDEX", "UV_INDEX_URL"):
+            if environ.get(name, "").strip():
+                return PackageIndex(environ[name].strip(), source=name)
+    return effective_index(configured, environ, files)
+
+
 def index_problem(url: str, trusted_host: str = "") -> str:
     """What is wrong with an index typed into Settings, or ""."""
     url = (url or "").strip()
@@ -290,7 +382,8 @@ def uv_has_own_index(environ=None) -> bool:
 
 def build_command(action: str, packages: list[str],
                   index: "PackageIndex | None" = None,
-                  environ=None, files=None) -> list[str]:
+                  environ=None, files=None,
+                  login: "IndexLogin | None" = None) -> list[str]:
     """Full argv for install/upgrade/uninstall into this interpreter's
     environment. Raises if no installer is available.
 
@@ -299,11 +392,20 @@ def build_command(action: str, packages: list[str],
     settings not at all, so without one it is given what pip would have
     used — unless uv has been told an index of its own. Uninstalling needs
     no index, and pip refuses the options there.
+
+    `login` signs in to that index: its URL goes on the command line with
+    the login in it, whichever installer runs and wherever the URL came
+    from. Show the result through `redact`.
     """
     if action not in ("install", "upgrade", "uninstall"):
         raise ValueError(f"unknown action {action!r}")
     packages = validate_requirements(packages)
     environ = os.environ if environ is None else environ
+    if login and action != "uninstall":
+        target = login_index(index, environ, files)
+        if target.url.strip():
+            index = PackageIndex(url_with_login(target.url, login),
+                                 target.trusted_host, source=target.source)
     kind = installer_kind()
     if kind == "pip":
         base = [sys.executable, "-m", "pip"]

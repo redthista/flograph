@@ -12,16 +12,25 @@ that with pyarrow. Both cases are reported in the log.
 Where installs come from is Settings ▸ Packages (AC1): an index URL and
 hosts to trust, over pip's own settings. The dialog says which index is in
 force, and where that came from, above the log.
+
+An index that wants a user name and password gets them from a Sign In
+window, not from a box under the log. A console can answer pip's prompt;
+a pipe can't, because on Windows pip reads the password from the console
+itself, and `uv pip` never asks at all. So when the index turns an install
+away, the dialog stops the installer, asks, and runs the install again
+with the login in the index URL. The login lasts until flograph closes,
+one per index host, and is never saved.
 """
 from __future__ import annotations
 
 import importlib
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, Qt, QTimer
 from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget,
+    QTableWidgetItem, QVBoxLayout,
 )
 
 from flograph import packages
@@ -56,6 +65,54 @@ def index_in_force(settings) -> str:
     return packages.describe_index(packages.effective_index(configured))
 
 
+#: index host -> the login signed in with this session. In memory only:
+#: a password never reaches QSettings or the disk.
+_LOGINS: dict[str, packages.IndexLogin] = {}
+
+
+class SignInDialog(QDialog):
+    """User name and password for one index host."""
+
+    def __init__(self, host: str, username: str = "", refused: bool = False,
+                 parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Sign In to Package Index")
+        intro = QLabel(
+            (f"{host} didn't accept that user name and password. Try again."
+             if refused else
+             f"{host} asks for a user name and password."))
+        intro.setTextFormat(Qt.PlainText)
+        intro.setWordWrap(True)
+        self.user_edit = QLineEdit(username)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.Password)
+        hint = QLabel(
+            "JFrog and Artifactory also take an API key or identity token "
+            "as the password. Kept until flograph closes; never saved.")
+        hint.setTextFormat(Qt.PlainText)
+        hint.setWordWrap(True)
+        hint.setEnabled(False)
+        form = QFormLayout()
+        form.addRow("User name:", self.user_edit)
+        form.addRow("Password:", self.password_edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok
+                                   | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Sign In")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(intro)
+        layout.addLayout(form)
+        layout.addWidget(hint)
+        layout.addWidget(buttons)
+        (self.password_edit if username else self.user_edit).setFocus()
+        self.resize(380, self.sizeHint().height())
+
+    def login(self) -> packages.IndexLogin:
+        return packages.IndexLogin(self.user_edit.text().strip(),
+                                   self.password_edit.text())
+
+
 class PackagesDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -64,6 +121,12 @@ class PackagesDialog(QDialog):
         self._process: QProcess | None = None
         #: the window's QSettings, where Settings ▸ Packages keeps the index
         self._settings = getattr(parent, "settings", None)
+        #: the running install: its action and specs (to run again after a
+        #: sign-in), everything it has printed, and the login it was sent
+        self._run: tuple[str, list[str]] | None = None
+        self._run_output = ""
+        self._run_login: packages.IndexLogin | None = None
+        self._stopped_for_login = False
 
         self._filter = QLineEdit()
         self._filter.setPlaceholderText("Filter installed packages…")
@@ -122,6 +185,14 @@ class PackagesDialog(QDialog):
             "Set a private index in Settings ▸ Packages. Left blank, pip's "
             "own settings are used — pip.conf, PIP_INDEX_URL — and handed "
             "on to uv, which does not read them itself.")
+        self._sign_in_btn = QPushButton("Sign In…")
+        self._sign_in_btn.setToolTip(
+            "Give a user name and password for the index — for a JFrog or "
+            "Artifactory that asks for one. Kept until flograph closes.")
+        self._sign_in_btn.clicked.connect(self._toggle_sign_in)
+        index_row = QHBoxLayout()
+        index_row.addWidget(self._index_label, 1)
+        index_row.addWidget(self._sign_in_btn)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._filter)
@@ -129,7 +200,7 @@ class PackagesDialog(QDialog):
         layout.addLayout(install_row)
         layout.addLayout(buttons)
         layout.addWidget(self._log, 2)
-        layout.addWidget(self._index_label)
+        layout.addLayout(index_row)
         layout.addWidget(self._status)
 
         kind = packages.installer_kind()
@@ -147,8 +218,54 @@ class PackagesDialog(QDialog):
         self.refresh()
 
     def _show_index(self) -> None:
-        self._index_label.setText(
-            "Installs from: " + index_in_force(self._settings))
+        text = "Installs from: " + index_in_force(self._settings)
+        login = self._login()
+        if login:
+            text += f" — signed in as {login.username}"
+        self._index_label.setText(text)
+        self._sign_in_btn.setText("Sign Out" if login else "Sign In…")
+        self._sign_in_btn.setEnabled(bool(self._index_host()))
+
+    # -------------------------------------------------------------- sign-in
+
+    def _index_host(self) -> str:
+        """The host a login would go to — "" when installs come from
+        nowhere a login can be put (PyPI, a file:// index)."""
+        index = packages.login_index(configured_index(self._settings))
+        if index.url.strip().split(":", 1)[0].lower() not in ("http", "https"):
+            return ""
+        return packages.index_host(index.url)
+
+    def _login(self) -> packages.IndexLogin | None:
+        return _LOGINS.get(self._index_host())
+
+    def _toggle_sign_in(self) -> None:
+        host = self._index_host()
+        if host in _LOGINS:
+            del _LOGINS[host]
+            self._append_log(f"— signed out of {host} —")
+        else:
+            self._sign_in(host)
+        self._show_index()
+
+    def _sign_in(self, host: str, refused: bool = False) -> bool:
+        """Ask for a login to `host` and keep it; False if none was given."""
+        previous = _LOGINS.get(host)
+        login = self._ask_login(
+            host, previous.username if previous else "", refused)
+        if not login:
+            return False
+        _LOGINS[host] = login
+        self._append_log(f"— signed in to {host} as {login.username} —")
+        return True
+
+    def _ask_login(self, host: str, username: str,
+                   refused: bool) -> packages.IndexLogin | None:
+        """The Sign In window; a separate method so tests can answer it."""
+        dialog = SignInDialog(host, username, refused, self)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.login() or None
 
     def showEvent(self, event) -> None:
         # the dialog is kept and reshown, and Settings may have changed
@@ -224,23 +341,23 @@ class PackagesDialog(QDialog):
     def _run_installer(self, action: str, specs: list[str]) -> None:
         if self.busy:
             return
+        login = self._login()
         try:
             argv = packages.build_command(
-                action, specs, index=configured_index(self._settings))
+                action, specs, index=configured_index(self._settings),
+                login=login)
         except (ValueError, RuntimeError) as exc:
             self._append_log(f"error: {exc}")
             return
-        self._append_log("$ " + " ".join(argv))
+        self._run, self._run_output = (action, list(specs)), ""
+        self._run_login, self._stopped_for_login = login, False
+        self._append_log("$ " + packages.redact(" ".join(argv), login))
         self._set_busy(True)
         process = QProcess(self)
         process.readyReadStandardOutput.connect(
-            lambda: self._append_log(bytes(
-                process.readAllStandardOutput()).decode(errors="replace"),
-                newline=False))
+            lambda: self._on_output(process.readAllStandardOutput()))
         process.readyReadStandardError.connect(
-            lambda: self._append_log(bytes(
-                process.readAllStandardError()).decode(errors="replace"),
-                newline=False))
+            lambda: self._on_output(process.readAllStandardError()))
         process.finished.connect(
             lambda code, _status: self._on_finished(action, code))
         process.errorOccurred.connect(
@@ -248,7 +365,31 @@ class PackagesDialog(QDialog):
         self._process = process
         process.start(argv[0], argv[1:])
 
+    def _on_output(self, data) -> None:
+        text = bytes(data).decode(errors="replace")
+        self._run_output += text
+        self._append_log(packages.redact(text, self._run_login),
+                         newline=False)
+        # pip, wanting a login, prints its prompt and waits on input this
+        # window can't give it: stop it, and ask for the login instead
+        if (not self._stopped_for_login and self.busy
+                and packages.asks_for_login(self._run_output[-500:])):
+            self._stopped_for_login = True
+            self._process.kill()
+
     def _on_finished(self, action: str, code: int) -> None:
+        if action != "uninstall" and (
+                self._stopped_for_login
+                or (code != 0 and packages.login_refused(self._run_output))):
+            self._append_log("")
+            self._append_log(f"— {action} stopped: the index asks for a "
+                             f"user name and password —")
+            self._set_busy(False)
+            # after this slot returns: a modal window opened from inside
+            # QProcess.finished would run with the process still tearing down
+            QTimer.singleShot(0, lambda: self._retry_after_sign_in(
+                bool(self._run_login)))
+            return
         self._append_log(f"— {action} "
                          f"{'finished' if code == 0 else f'failed ({code})'} —")
         if code == 0 and action == "install":
@@ -267,6 +408,18 @@ class PackagesDialog(QDialog):
                 "their old version until flograph is restarted")
         self._set_busy(False)
         self.refresh()
+
+    def _retry_after_sign_in(self, refused: bool) -> None:
+        """Ask for a login and, given one, run the stopped install again."""
+        host = self._index_host()
+        if not host or self._run is None:
+            return
+        signed_in = self._sign_in(host, refused=refused)
+        self._show_index()
+        if signed_in:
+            self._run_installer(*self._run)
+        else:
+            self._append_log("— not signed in; nothing installed —")
 
     def _cancel_process(self) -> None:
         if self.busy:

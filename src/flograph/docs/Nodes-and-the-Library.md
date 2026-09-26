@@ -104,6 +104,17 @@ index to `uv` when uv is the installer, because uv doesn't read pip's
 settings. Manage Packages says which index an install will use and where
 that came from, and the update check asks the same one.
 
+**An index that needs a login.** When the index asks for a user name and
+password, as JFrog and Artifactory usually do, Manage Packages stops the
+install and opens a **Sign In** window. Sign in and the install runs again.
+You can also sign in ahead of time with **Sign In…** beside the index line.
+An API key or identity token works as the password. The login is kept only
+until flograph closes, one per index, and is never saved. The log shows the
+password as `****`. A sign-in the index refuses asks again; **Sign Out**
+forgets it. (A command window lets you type the login when pip asks for
+it. Here that can't work: on Windows pip reads the password from the
+console, not from flograph, and `uv` never asks.)
+
 **What a flow needs.** **Tools ▸ What This Flow Needs** lists the Python
 packages a flow's nodes import and the web libraries its visuals load, read
 from each node's own code, with anything this machine is missing marked and
