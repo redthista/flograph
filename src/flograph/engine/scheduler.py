@@ -1426,35 +1426,55 @@ class ExecutionEngine(QObject):
         # signal, and the engine's connections stay plain bound methods
         with perf.timed("engine: node finished"):
             inflight = self._retire(node_id)
-            if node_id in self.graph.nodes:
-                alias_of, alias_port = self._alias_source(
-                    node_id, outputs,
-                    inflight.handed_in if inflight is not None else {})
-                with perf.timed("engine: cache set"):
-                    self.cache.set(node_id, outputs, wall_time,
-                                   alias_of=alias_of, alias_port=alias_port)
-                if self._answered_the_question(node_id, inflight):
-                    self.graph.mark_clean(node_id)
-                else:
-                    self._stale.add(node_id)
-                self.graph.set_status(node_id, NodeStatus.DONE)
-                self.node_succeeded.emit(node_id)
-            self._close_node_run(inflight, "ok", wall_time)
-            self._release_successors(node_id)
-            self._dispatch()
+            try:
+                if node_id in self.graph.nodes:
+                    alias_of, alias_port = self._alias_source(
+                        node_id, outputs,
+                        inflight.handed_in if inflight is not None else {})
+                    with perf.timed("engine: cache set"):
+                        self.cache.set(node_id, outputs, wall_time,
+                                       alias_of=alias_of, alias_port=alias_port)
+                    if self._answered_the_question(node_id, inflight):
+                        self.graph.mark_clean(node_id)
+                    else:
+                        self._stale.add(node_id)
+                    self.graph.set_status(node_id, NodeStatus.DONE)
+                    self.node_succeeded.emit(node_id)
+                self._close_node_run(inflight, "ok", wall_time)
+            except Exception as exc:
+                # The body ran; keeping what it returned is what failed. Its
+                # light would otherwise stay blue with nothing to say why.
+                self._had_failure = True
+                node = self.graph.nodes.get(node_id)
+                if node is not None and node.status is NodeStatus.RUNNING:
+                    self.graph.set_status(
+                        node_id, NodeStatus.ERROR,
+                        f"finished, but its result could not be kept: {exc}")
+                raise
+            finally:
+                # Whatever went wrong above, the run moves on. This is a
+                # queued slot, so an exception out of it is printed and
+                # dropped: skipping these two left the node after this one
+                # QUEUED for good and the run with no way to end but Stop.
+                # A successor whose input never made it into the cache is
+                # refused by _blocking_problem, with a reason.
+                self._release_successors(node_id)
+                self._dispatch()
 
     def _on_node_failed(self, node_id: str, error: NodeError) -> None:
         inflight = self._retire(node_id)
         self._had_failure = self._had_failure or not error.cancelled
-        self._close_node_run(
-            inflight, "cancelled" if error.cancelled else "failed", None)
-        if node_id in self.graph.nodes:
-            self.graph.set_status(node_id, NodeStatus.ERROR, error.message)
-            # Everything below it leaves the plan, so there is nothing left
-            # for _release_successors to release.
-            self._prune_downstream(node_id)
-            self.node_failed.emit(node_id, error)
-        self._dispatch()
+        try:
+            self._close_node_run(
+                inflight, "cancelled" if error.cancelled else "failed", None)
+            if node_id in self.graph.nodes:
+                self.graph.set_status(node_id, NodeStatus.ERROR, error.message)
+                # Everything below it leaves the plan, so there is nothing
+                # left for _release_successors to release.
+                self._prune_downstream(node_id)
+                self.node_failed.emit(node_id, error)
+        finally:
+            self._dispatch()        # as in _on_node_finished
 
     def _answered_the_question(self, node_id: str,
                                inflight: "Optional[_InFlight]") -> bool:

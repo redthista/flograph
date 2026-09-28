@@ -7,6 +7,7 @@ Event per kind of graph mutation.
 from __future__ import annotations
 
 import contextlib
+import sys
 from typing import Any, Callable
 
 
@@ -25,8 +26,24 @@ class Event:
             self._subscribers.remove(callback)
 
     def emit(self, *args: Any, **kwargs: Any) -> None:
+        """Tell every subscriber, whatever any one of them does about it.
+
+        A subscriber is a view of the change, not part of it, so one that
+        raises is reported and the rest are still told — the rule Qt's own
+        signals keep. Letting it propagate instead unwound whoever made the
+        change, half-way through: a card that fell over as a node went DONE
+        took the scheduler's next step with it, leaving the node green, the
+        one after it orange forever and the run never ending.
+
+        Reported through sys.excepthook rather than swallowed, so the
+        traceback still reaches the console — and pytest-qt, which hooks it,
+        still fails the test.
+        """
         for callback in list(self._subscribers):
-            callback(*args, **kwargs)
+            try:
+                callback(*args, **kwargs)
+            except Exception:
+                sys.excepthook(*sys.exc_info())
 
 
 class GraphEvents:
