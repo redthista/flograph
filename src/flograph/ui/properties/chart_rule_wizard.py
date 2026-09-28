@@ -301,9 +301,14 @@ class _RuleForm(QDialog):
             what = get("what")
             if not what:
                 return ""
-            words.append(what)
+            # an aggregate is the word itself; anything else is a column,
+            # quoted when a space or a keyword would misread it
+            words.append(what if what.lower() in chart_rules.AGGREGATES
+                         else chart_rules.column_name(what))
             if get("of"):
-                words.append("of " + get("of"))
+                words.append("of " + ", ".join(
+                    chart_rules.column_name(c) for c in get("of").split(",")
+                    if c.strip()))
             for name, prefix in (("source", "from "), ("style", ""),
                                  ("axis", ""), ("thick", ""), ("colour", "")):
                 # the chart's own axis is where a series goes unless it is

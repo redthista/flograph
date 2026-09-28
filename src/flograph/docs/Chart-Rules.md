@@ -49,7 +49,7 @@ series total from compare dashed grey as "Last year"
 
 | part | what it does |
 | --- | --- |
-| what to plot | a **column** of the table, or `total`, `average`, `min`, `max`, `count`, `median` worked out across the columns the chart plots. `total of units, returns` totals the columns you name. |
+| what to plot | a **column** of the table, or `total`, `average`, `min`, `max`, `count`, `median` worked out across the columns the chart plots. `total of units, returns` totals the columns you name. A column with a space in its name goes in quotes — `series "Last Year" from compare`, `total of "Net sales", returns` — and the **Chart Rules…** builder, the column picker and autocomplete all write it that way. |
 | `from compare` | read the node's **compare** input — a second table — instead of the chart's own. It is matched on the chart's X column, so a category missing there leaves a gap rather than a zero. |
 | how to draw it | `line` (the default), `dashed`, `dotted`, `step`, `area`, `bars`, `markers`, `points`, `both`. `thick`, or `width 4`. |
 | where | `right` puts it on a second Y axis (`axis y2 …` labels that axis); the same axis otherwise. |

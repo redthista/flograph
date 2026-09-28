@@ -475,3 +475,90 @@ class TestMissingIsAGap:
         got = traces(figure)
         assert self.missing(got["LY"].y) == [False, False, True]
         assert self.missing(got["F"].y) == [True, False, False]
+
+
+class TestColumnsWithSpaces:
+    """A column whose name has a space in it. The builder wrote it bare,
+    and the line it wrote read back as a column `Last` and a stray word."""
+
+    @pytest.fixture
+    def spaced(self):
+        return pd.DataFrame({"month": ["Jan", "Feb"], "units": [1, 2]})
+
+    @pytest.fixture
+    def compare(self):
+        return pd.DataFrame({"month": ["Jan", "Feb"],
+                             "Last Year": [3, 4], "Net sales": [5, 6]})
+
+    def _form(self, qtbot):
+        from flograph.ui.properties.chart_rule_wizard import _RuleForm
+        form = _RuleForm("", ["month", "Last Year", "Net sales"])
+        qtbot.addWidget(form)
+        form._verb.setCurrentIndex(form._verb.findData("series"))
+        return form
+
+    def test_the_builder_quotes_a_spaced_column(self, qtbot):
+        form = self._form(qtbot)
+        form._set("what", "Last Year")
+        form._set("source", "compare")
+        assert form.line() == 'series "Last Year" from compare'
+        assert one(form.line()).opts["column"] == "Last Year"
+
+    def test_the_builder_quotes_each_spaced_column_to_total(self, qtbot):
+        form = self._form(qtbot)
+        form._set("what", "total")
+        form._set("of", "Last Year, Net sales, units")
+        assert form.line() == \
+            'series total of "Last Year", "Net sales", units'
+        assert one(form.line()).opts["columns"] == \
+            ["Last Year", "Net sales", "units"]
+
+    def test_quotes_typed_by_hand_are_not_doubled(self, qtbot):
+        form = self._form(qtbot)
+        form._set("what", '"Last Year"')
+        assert form.line() == 'series "Last Year"'
+
+    def test_a_plain_name_stays_bare_and_an_aggregate_stays_a_word(
+            self, qtbot):
+        form = self._form(qtbot)
+        form._set("what", "units")
+        assert form.line() == "series units"
+        form._set("what", "average")
+        assert one(form.line()).opts["aggregate"] == "average"
+
+    def test_a_quoted_word_is_a_column_not_the_word(self):
+        assert chart_rules.column_name("total") == '"total"'
+        assert one('series "total"').opts == {
+            "style": "line", "axis": "left", "column": "total"}
+
+    def test_the_line_draws_from_the_compare_table(self, registry, spaced,
+                                                   compare):
+        figure, ctx = chart(registry, {"chart_rules":
+                                       'series "Last Year" from compare '
+                                       'as "LY"\n'
+                                       'series total of "Last Year", '
+                                       '"Net sales" from compare as "Both"'},
+                            spaced, compare=compare)
+        got = traces(figure)
+        assert list(got["LY"].y) == [3, 4]
+        assert list(got["Both"].y) == [8, 10]
+        assert not [line for line in ctx.logs if "skipped" in line.lower()]
+
+    def test_editing_the_line_again_round_trips(self, qtbot):
+        from flograph.ui.properties.chart_rule_wizard import _RuleForm
+        line = 'series "Last Year" from compare dashed'
+        form = _RuleForm(line, ["month", "Last Year"])
+        qtbot.addWidget(form)
+        assert form._value("what") == "Last Year"
+        assert form.line() == line
+
+    def test_a_picked_or_completed_column_is_quoted_for_chart_rules(self):
+        """The column picker and the completer type a name the way the box
+        reads it: double quotes here, where an expression takes it bare."""
+        from flograph.core.text_assist import assist_for
+        for type_id in (SHOW, PER_VALUE, "flograph.viz.plotly_style"):
+            quote = assist_for(type_id, "chart_rules").quote
+            assert quote("Last Year") == '"Last Year"'
+            assert quote("units") == "units"
+        expression = assist_for("flograph.transform.expression", "expressions")
+        assert expression.quote("Last Year") == "Last Year"

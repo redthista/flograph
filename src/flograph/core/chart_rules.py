@@ -176,6 +176,22 @@ def tokens(line: str) -> list[tuple[str, bool]]:
     return out
 
 
+def column_name(name: str) -> str:
+    """`name` as a rule writes it: bare when it reads back as that one
+    column, else in quotes — a space would split it into two words, and a
+    word the language uses (`total`, `from`, `right`) would be taken as
+    that word instead."""
+    name = str(name).strip()
+    if len(name) > 1 and name[0] == name[-1] and name[0] in "\"'":
+        name = name[1:-1]            # quoted already, by whoever typed it
+    reserved = (set(AGGREGATES) | set(SERIES_STYLES)
+                | {"of", "from", "as", "right", "left", "thick", "width"})
+    if (name and not re.search(r"[\s,\"'#]", name)
+            and name.lower() not in reserved):
+        return name
+    return '"{}"'.format(name.replace('"', "'"))
+
+
 def strip_comment(line: str) -> str:
     """Drop a trailing `# comment`, leaving a # colour alone."""
     out = []
@@ -264,8 +280,9 @@ def _parse_series(parsed, lineno) -> Rule:
             f'series total line blue as "Total"')
     opts: dict[str, Any] = {"style": "line", "axis": "left"}
     index = 0
-    first = parsed[0][0]
-    if first.lower() in AGGREGATES:
+    first, quoted = parsed[0]
+    # quoted is always a column — how a column called "total" is plotted
+    if not quoted and first.lower() in AGGREGATES:
         opts["aggregate"] = first.lower()
         index = 1
         if index < len(parsed) and parsed[index][0].lower() == "of":
@@ -309,19 +326,28 @@ def _parse_series(parsed, lineno) -> Rule:
 
 
 def _column_list(parsed, index) -> tuple[list[str], int]:
-    """Comma-separated column names from `index` on, stopping at a keyword."""
+    """Comma-separated column names from `index` on, stopping at a keyword.
+
+    A quoted name is one column whatever it holds — spaces, commas, a word
+    the language uses — and the comma after it arrives as a token of its
+    own (`"Net sales", units` is `Net sales` then `,` then `units`), so a
+    list carries on past either kind of comma."""
     columns: list[str] = []
     stop = {"from", "as", "right", "left", "thick", "width"} | set(
         SERIES_STYLES)
     while index < len(parsed):
         text, quoted = parsed[index]
-        if not quoted and text.lower().rstrip(",") in stop:
+        if not quoted and text.lower().strip(",") in stop:
             break
-        for part in text.split(","):
+        for part in [text] if quoted else text.split(","):
             if part.strip():
                 columns.append(part.strip())
         index += 1
-        if not text.endswith(","):
+        more = not quoted and text.endswith(",")
+        if (index < len(parsed) and not parsed[index][1]
+                and parsed[index][0].startswith(",")):
+            more = True
+        if not more:
             break
     return columns, index
 

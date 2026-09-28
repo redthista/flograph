@@ -349,7 +349,11 @@ def lint_chart_rules(text: str, sample=None) -> list[Diagnostic]:
             for lineno, message in chart_rules.lint(text)]
 
 
+# Chart rules quote a spaced name in "double quotes" — not the backticks
+# a pandas expression reads — or `series Last Year` is a column `Last`
+# and a stray word.
 from flograph.core.chart_rules import KEYWORDS as _CHART_RULE_KEYWORDS
+from flograph.core.chart_rules import column_name as _chart_rule_column
 
 _ASSISTS = {
     ("flograph.transform.conditional_column", "rules"):
@@ -363,11 +367,11 @@ _ASSISTS = {
     ("flograph.transform.replace_values", "pairs"):
         TextAssist((), as_typed, lint_replace_values),
     ("flograph.viz.show_plotly", "chart_rules"):
-        TextAssist(_CHART_RULE_KEYWORDS, as_typed, lint_chart_rules),
+        TextAssist(_CHART_RULE_KEYWORDS, _chart_rule_column, lint_chart_rules),
     ("flograph.viz.chart_per_value_plotly", "chart_rules"):
-        TextAssist(_CHART_RULE_KEYWORDS, as_typed, lint_chart_rules),
+        TextAssist(_CHART_RULE_KEYWORDS, _chart_rule_column, lint_chart_rules),
     ("flograph.viz.plotly_style", "chart_rules"):
-        TextAssist(_CHART_RULE_KEYWORDS, as_typed, lint_chart_rules),
+        TextAssist(_CHART_RULE_KEYWORDS, _chart_rule_column, lint_chart_rules),
 }
 
 

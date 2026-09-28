@@ -1149,7 +1149,7 @@ class ParamsPanel(QWidget):
             else:
                 action.triggered.connect(
                     lambda _checked=False, c=column:
-                    self._insert_column(text, c))
+                    self._insert_column(text, c, quote=self._quote_for(spec)))
 
     def _toggle_mapping(self, text: QPlainTextEdit, spec: ParamSpec,
                         column: str) -> None:
@@ -1415,14 +1415,28 @@ class ParamsPanel(QWidget):
             menu.addAction("run upstream nodes to list columns").setEnabled(False)
             return
         mapping = spec.insert_columns == "mapping"
+        quote = self._quote_for(spec)
         for column in columns:
             menu.addAction(column).triggered.connect(
                 lambda _checked=False, c=column: self._insert_column(
-                    editor, f"{c} = " if mapping else c, raw=mapping))
+                    editor, f"{c} = " if mapping else c, raw=mapping,
+                    quote=quote))
+
+    def _quote_for(self, spec: Optional[ParamSpec]):
+        """How this box spells a column it is handed — the quoting its
+        TextAssist gives its completer, so a picked name and a completed one
+        come out the same: `"Last Year"` in chart rules, bare in an
+        expression. None leaves _insert_column to its default."""
+        from flograph.core.text_assist import assist_for
+        node_id = self._node_id
+        if spec is None or node_id is None or node_id not in self._graph.nodes:
+            return None
+        return assist_for(self._graph.node(node_id).type_id, spec.name,
+                          spec.rule_wizard).quote
 
     @staticmethod
     def _insert_column(text: QPlainTextEdit, column: str,
-                       raw: bool = False) -> None:
+                       raw: bool = False, quote=None) -> None:
         cursor = text.textCursor()
         if not getattr(text, "caret_placed", False):
             # nobody has put the caret anywhere, so its position 0 is where
@@ -1433,11 +1447,12 @@ class ParamsPanel(QWidget):
             cursor.movePosition(QTextCursor.End)
             if cursor.block().text().strip():
                 cursor.insertText("\n")
-        # bare, the way the name is spelled — an expression puts in the
+        # the box's own spelling (`quote`, from its TextAssist); without
+        # one, bare the way the name is spelled — an expression puts in the
         # backticks a name with spaces needs — except one like `price($)`,
         # which it can only read in backticks
         from flograph.core.column_refs import as_typed
-        cursor.insertText(column if raw else as_typed(column))
+        cursor.insertText(column if raw else (quote or as_typed)(column))
         text.setTextCursor(cursor)
         # carry on typing where the name landed rather than back in the menu
         text.setFocus()
