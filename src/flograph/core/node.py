@@ -71,6 +71,10 @@ class NodeSpec:
     # existed. Lives in `source`, so a node copied into a user-nodes folder
     # carries its version with it -- the case a package version cannot cover.
     version: str = ""
+    # declared by NODE["bypass"]: None lets core.bypass match outputs to
+    # inputs by name and then by type; a dict names the input each output is
+    # fed from while the node is bypassed; False says it cannot be bypassed.
+    bypass: Any = None
 
     def input(self, name: str) -> Optional[PortSpec]:
         if is_flow(name):
@@ -132,6 +136,11 @@ class NodeInstance:
     # branch below skipped too — there is no input for it to run on, and
     # skipping it says so more clearly than letting each node fail.
     manual: bool = False
+    # Skipped by every run, but not taken out of it: each output is handed
+    # one of the node's inputs (see core.bypass), so everything below runs as
+    # if this node were not there. One of the four run states with active,
+    # frozen and manual — the commands that set any of them clear the others.
+    bypassed: bool = False
     # What this node's params and inputs hashed to at the moment it was
     # frozen. Compared after a run to tell a pin that still reflects the
     # graph from one that has been quietly overtaken by an edit upstream;

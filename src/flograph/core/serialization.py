@@ -126,6 +126,8 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     "locked": n.locked,
                     "frozen": n.frozen,
                     "manual": n.manual,
+                    # only a bypassed node says so, as `canvas` does
+                    **({"bypassed": True} if n.bypassed else {}),
                     "frozen_fingerprint": n.frozen_fingerprint,
                     "exclusive": n.exclusive_override,
                     "preview": n.canvas_preview_enabled,
@@ -394,6 +396,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             locked=entry.get("locked", False),
             frozen=entry.get("frozen", False),
             manual=entry.get("manual", False),
+            bypassed=entry.get("bypassed", False),
             frozen_fingerprint=entry.get("frozen_fingerprint"),
             # absent = follow the script's NODE['exclusive'], which is what
             # every node written before concurrent execution existed wants

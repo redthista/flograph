@@ -27,6 +27,7 @@ from flograph.core import (
     Graph, GraphError, NodeInstance, NodeRegistry, NodeStatus, Page,
     PortDirection, PortSpec, PortType, Tile, can_connect, parse_spec,
 )
+from flograph.core.bypass import can_bypass
 from flograph.core import dotenv
 from flograph.core import serialization
 from flograph.core import user_nodes
@@ -43,7 +44,7 @@ from .commands import (
     ReorderPagesCommand, SetPageColorCommand,
     SetActiveCommand, SetExclusiveCommand, SetFrameCanvasCommand,
     SetFrameFlagCommand, SetFrameSourceCommand, SetItemCanvasCommand,
-    SetManualCommand,
+    SetBypassCommand, SetManualCommand,
     SetFrozenCommand, SetLabelCommand, SetLockedCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
@@ -800,6 +801,12 @@ class MainWindow(QMainWindow):
         self.action_duplicate = act("Duplicate", QKeySequence("Ctrl+D"),
                                     self._duplicate)
         self.action_rename = act("Rename Node", Qt.Key_F2, self._rename_selected)
+        self.action_bypass = act("Bypass Node", QKeySequence("Ctrl+B"),
+                                 self._toggle_bypass_selected)
+        # canvas only, like Select All: Ctrl+B belongs to whatever text box
+        # has the focus everywhere else
+        self.action_bypass.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+        self.view.addAction(self.action_bypass)
         self.action_select_all = act(
             "Select All", QKeySequence.SelectAll, self._select_all_nodes)
         # scoped to the canvas so Ctrl+A keeps selecting text in the code
@@ -881,7 +888,7 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         for action in (self.action_cut, self.action_copy, self.action_paste,
                        self.action_duplicate, self.action_rename,
-                       self.action_select_all):
+                       self.action_bypass, self.action_select_all):
             edit_menu.addAction(action)
         edit_menu.addSeparator()
         edit_menu.addAction(self.action_find_node)
@@ -3446,6 +3453,23 @@ class MainWindow(QMainWindow):
         if len(items) == 1:
             self._rename_node(items[0].node.id)
 
+    def _toggle_bypass_selected(self) -> None:
+        """Ctrl+B: bypass the selection, or put it back if all of it already
+        is. Nodes that cannot be bypassed are left alone rather than
+        refusing the lot."""
+        ids = [i.node.id for i in self.scene.selected_node_items()
+               if can_bypass(i.node.spec)]
+        if not ids:
+            return
+        wanted = not all(self.graph.nodes[i].bypassed for i in ids)
+        self._set_bypass_on(ids, wanted)
+
+    def _set_bypass_on(self, ids: list, wanted: bool) -> None:
+        ids = [i for i in ids if can_bypass(self.graph.nodes[i].spec)]
+        self._set_flag_on(ids, "bypassed", wanted, SetBypassCommand,
+                          "bypass nodes" if wanted
+                          else "stop bypassing nodes")
+
     def _run_all(self) -> None:
         if self._cache_still_writing():
             return
@@ -4642,6 +4666,17 @@ class MainWindow(QMainWindow):
         active_action = menu.addAction(
             "Deactivate" if node.active else "Activate")
         freeze_action = menu.addAction("Unfreeze" if node.frozen else "Freeze")
+        bypass_action = menu.addAction("Bypass")
+        bypass_action.setCheckable(True)
+        bypass_action.setChecked(node.bypassed)
+        bypass_action.setShortcut(self.action_bypass.shortcut())
+        bypass_action.setEnabled(
+            any(can_bypass(self.graph.nodes[i].spec) for i in ids))
+        bypass_action.setToolTip(
+            "Skip this node but keep its wires: each output is handed the "
+            "input it matches, by name and then by type, so everything below "
+            "runs as if the node were not there. An output no input matches "
+            "comes out empty, and a node that needs it will fail.")
         manual_action = menu.addAction("Run only when asked")
         manual_action.setCheckable(True)
         manual_action.setChecked(node.manual)
@@ -4823,6 +4858,8 @@ class MainWindow(QMainWindow):
             self._set_flag_on(
                 ids, "frozen", not node.frozen, SetFrozenCommand,
                 "unfreeze nodes" if node.frozen else "freeze nodes")
+        elif chosen is bypass_action:
+            self._set_bypass_on(ids, not node.bypassed)
         elif chosen is manual_action:
             self._set_flag_on(
                 ids, "manual", not node.manual, SetManualCommand,

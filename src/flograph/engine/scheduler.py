@@ -24,6 +24,7 @@ from typing import Iterable, Optional
 from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 
 from flograph.core import perf
+from flograph.core.bypass import bypass_outputs, passthrough
 from flograph.core.graph import Graph
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
@@ -83,6 +84,8 @@ def is_exclusive(node: NodeInstance) -> bool:
     global state. The node's script declares it with NODE["exclusive"], and
     an instance may override that either way for code the user has forked.
     """
+    if node.bypassed:
+        return False    # nothing of its own runs, so there is nothing to guard
     if node.exclusive_override is not None:
         return node.exclusive_override
     return node.spec.exclusive
@@ -389,6 +392,11 @@ def build_plan(graph: Graph, targets: Iterable[str],
     for node_id, node in graph.nodes.items():
         if not flags.active(node_id):
             wanted -= {node_id} | graph.downstream(node_id)
+        elif node.bypassed:
+            # Stays in the plan like any other node: passing its inputs on is
+            # its run, and it is cheap. Neither a pin nor a hold applies to a
+            # node whose script is not being run in the first place.
+            pass
         elif flags.manual(node_id) and node_id not in aimed:
             # Nobody asked for this one, so it does not fire. What happens
             # below it depends on whether it has anything to give: with a
@@ -439,6 +447,8 @@ def skipped_summary(graph: Graph, targets: Iterable[str],
     for node_id, node in graph.nodes.items():
         if not flags.active(node_id):
             blocked |= {node_id} | graph.downstream(node_id)
+        elif graph.nodes[node_id].bypassed:
+            pass        # see build_plan: a bypassed node is never held
         elif flags.manual(node_id) and node_id not in aimed:
             # The same split build_plan makes: a manual node with nothing to
             # serve takes its branch with it, and those descendants were
@@ -1136,6 +1146,12 @@ class ExecutionEngine(QObject):
             # is found there, where the values are — so both answers go
             # through the same refusal path.
             problem = self._blocking_problem(node_id)
+            if problem is None and node.bypassed:
+                # Done on the spot, never in the pool: there is no body to
+                # run, and a slot spent on handing a reference along would
+                # hold back a node that has real work to do.
+                self._pass_through(node_id)
+                continue
             if problem is None:
                 problem = self._start_node(node_id)
             if problem is not None:
@@ -1209,6 +1225,10 @@ class ExecutionEngine(QObject):
                 continue
             if not self.cache.has(conn.src_node):
                 return f"upstream node did not produce output"
+        if node.bypassed:
+            # its params, variables and report go unread, so what they lack
+            # is not a reason to hold up the nodes waiting on its inputs
+            return None
         # A ${name} is a dependency with no port, so the loop above cannot
         # see it: an unresolvable reference, and a Variables node that
         # produced nothing, both have to be asked about separately.
@@ -1294,6 +1314,41 @@ class ExecutionEngine(QObject):
                 seen.add(nxt)
                 stack.append(nxt)
         return seen
+
+    def _pass_through(self, node_id: str) -> None:
+        """Run a bypassed node: each output gets the input core.bypass maps
+        it to, as the very object upstream cached — no read-only copy, since
+        no code of this node's ever touches it.
+
+        With one output fed straight from upstream the entry is an alias of
+        that upstream value, so the bypass costs no memory and nothing in the
+        saved cache. An output nothing feeds is None, and a node below that
+        needs it fails on it: loud on purpose (see core.bypass).
+        """
+        node = self.graph.nodes[node_id]
+        values: dict = {}
+        sources: dict = {}
+        for port in node.spec.inputs:
+            conn = self.graph.input_connection(node_id, port.name)
+            if conn is None:
+                continue
+            values[port.name] = self.cache.outputs_for(
+                conn.src_node).get(conn.src_port)
+            sources[port.name] = (conn.src_node, conn.src_port)
+        outputs = bypass_outputs(node, values)
+        alias_of = alias_port = None
+        if len(outputs) == 1:
+            (src,) = passthrough(node.spec).values()
+            if src in sources:
+                alias_of, alias_port = sources[src]
+        self._plan_done += 1
+        self.node_started.emit(node_id, self._plan_done, self._plan_total)
+        self.cache.set(node_id, outputs, 0.0,
+                       alias_of=alias_of, alias_port=alias_port)
+        self.graph.mark_clean(node_id)
+        self.graph.set_status(node_id, NodeStatus.DONE, "bypassed")
+        self.node_succeeded.emit(node_id)
+        self._release_successors(node_id)
 
     def _start_node(self, node_id: str) -> Optional[str]:
         """Dispatch a node, or return why it could not be dispatched.

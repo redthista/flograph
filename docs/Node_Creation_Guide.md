@@ -144,6 +144,7 @@ NODE = {
 | `inputs` | list of tuples | no (default `[]`) | see §4 |
 | `outputs` | list of tuples | no (default `[]`) | see §4 |
 | `exclusive` | `bool` | no (default `False`) | see §6 |
+| `bypass` | `False` or `dict` | no | what the node passes on while bypassed — `{"output": "input" or None}`; unnamed outputs match an input by name, then by type. `False` = cannot be bypassed |
 | `card` | `str` from `CARD_KINDS` | no | see §8 |
 | `control` | `str` from `CONTROL_KINDS` | no | **required** iff `card == "control"` |
 

@@ -386,12 +386,16 @@ class SetActiveCommand(QUndoCommand):
         self._node_id = node_id
         self._old = graph.node(node_id).active
         self._new = active
+        if not active:
+            self._first = _leave_bypass(graph, node_id)
 
     def redo(self) -> None:
+        _redo_all(self)
         self._graph.set_active(self._node_id, self._new)
 
     def undo(self) -> None:
         self._graph.set_active(self._node_id, self._old)
+        _undo_all(self)
 
 
 class SetManualCommand(QUndoCommand):
@@ -409,12 +413,16 @@ class SetManualCommand(QUndoCommand):
         self._node_id = node_id
         self._old = graph.node(node_id).manual
         self._new = manual
+        if manual:
+            self._first = _leave_bypass(graph, node_id)
 
     def redo(self) -> None:
+        _redo_all(self)
         self._graph.set_manual(self._node_id, self._new)
 
     def undo(self) -> None:
         self._graph.set_manual(self._node_id, self._old)
+        _undo_all(self)
 
 
 class SetFrameFlagCommand(QUndoCommand):
@@ -480,12 +488,79 @@ class SetFrozenCommand(QUndoCommand):
                 self._new_fp = freeze_fingerprint(graph, node_id)
             except Exception:
                 self._new_fp = None     # unhashable params: pin without one
+            # Off first, and that order matters: leaving bypass dirties the
+            # node, which evicts the pass-through value, so the freeze finds
+            # nothing cached and runs the node once for a real value to pin
+            # rather than pinning its input.
+            self._first = _leave_bypass(graph, node_id)
 
     def redo(self) -> None:
+        _redo_all(self)
         self._graph.set_frozen(self._node_id, self._new, self._new_fp)
 
     def undo(self) -> None:
         self._graph.set_frozen(self._node_id, self._old, self._old_fp)
+        _undo_all(self)
+
+
+def _leave_bypass(graph: Graph, node_id: str) -> list:
+    """The step that takes a node off bypass, if it is on it.
+
+    Bypass, Deactivate, Freeze and Run-only-when-asked are one choice, not
+    four flags that stack: a bypassed node's script is not being run, so a
+    pin or a hold on it would be a statement about nothing. Each command that
+    puts a node into one of them takes it out of the others first, inside
+    the same undo step.
+    """
+    if graph.node(node_id).bypassed:
+        return [SetBypassCommand(graph, node_id, False)]
+    return []
+
+
+# Sub-steps are composed in Python rather than as Qt child commands: a
+# QUndoCommand child is owned by C++ *and* by its Python wrapper, and the two
+# free it twice when the stack goes. `_first` runs before the command's own
+# change and is undone after it.
+def _redo_all(command: QUndoCommand) -> None:
+    for step in getattr(command, "_first", ()):
+        step.redo()
+
+
+def _undo_all(command: QUndoCommand) -> None:
+    for step in reversed(getattr(command, "_first", ())):
+        step.undo()
+
+
+class SetBypassCommand(QUndoCommand):
+    """Skip a node and hand its inputs straight on (see core.bypass), or
+    put it back. Turning it on also clears Deactivate, Freeze and
+    Run-only-when-asked, in the same step, so undo restores them too."""
+
+    def __init__(self, graph: Graph, node_id: str, bypassed: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("bypass node" if bypassed else "stop bypassing node",
+                         parent)
+        self._graph = graph
+        self._node_id = node_id
+        node = graph.node(node_id)
+        self._old = node.bypassed
+        self._new = bypassed
+        self._first = []
+        if bypassed:
+            if not node.active:
+                self._first.append(SetActiveCommand(graph, node_id, True))
+            if node.frozen:
+                self._first.append(SetFrozenCommand(graph, node_id, False))
+            if node.manual:
+                self._first.append(SetManualCommand(graph, node_id, False))
+
+    def redo(self) -> None:
+        _redo_all(self)
+        self._graph.set_bypassed(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_bypassed(self._node_id, self._old)
+        _undo_all(self)
 
 
 class SetLockedCommand(QUndoCommand):

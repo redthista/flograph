@@ -79,6 +79,8 @@ _HANDLED_ITEM_CHANGES = frozenset({
 # A deactivated node is faded rather than hidden: it is still part of the
 # graph, still wired, and still the thing you click to switch back on.
 DEACTIVATED_OPACITY = 0.35
+# Lighter than deactivated: the branch below a bypassed node still runs.
+BYPASSED_OPACITY = 0.6
 LABEL_LOD = 0.5  # hide port names below this zoom
 # Below this zoom, nodes paint as a flat rect (no path/text/LED) and hide
 # their ports and embedded widgets — the per-item cost that makes a large
@@ -405,6 +407,76 @@ class FreezeBadge(NodeBadge):
         for x in (0.0, bar + 3.0):
             painter.drawRoundedRect(QRectF(x, 0.5, bar, self.H - 1.0),
                                     1.0, 1.0)
+
+class BypassBadge(NodeBadge):
+    """An arrow hopping a bar: the node is skipped and its inputs go on."""
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(self.colour, 1.6)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        mid = self.W / 2
+        painter.drawLine(QPointF(mid, self.H - 3.0), QPointF(mid, self.H))
+        hop = QPainterPath(QPointF(0.5, self.H - 2.0))
+        hop.cubicTo(QPointF(0.5, 1.0), QPointF(self.W - 0.5, 1.0),
+                    QPointF(self.W - 0.5, self.H - 5.0))
+        painter.drawPath(hop)
+        painter.drawLine(QPointF(self.W - 0.5, self.H - 5.0),
+                         QPointF(self.W - 3.0, self.H - 7.0))
+
+
+class BypassOverlay(QGraphicsItem):
+    """The line through a bypassed node, from each input to the output it
+    feeds — the whole of what the node does while bypassed, drawn on it.
+
+    A child item, above everything the card draws including its embedded
+    widgets, and exempt from the node's own fade: the node dims so it reads
+    as out of the way, and the line is the one part that stays at full
+    strength because it is the part still carrying data.
+    """
+
+    def __init__(self, parent: "NodeItem") -> None:
+        super().__init__(parent)
+        self.setFlag(QGraphicsItem.ItemIgnoresParentOpacity, True)
+        self.setAcceptedMouseButtons(Qt.NoButton)
+        self.setZValue(1000.0)
+        self.setVisible(False)
+
+    def boundingRect(self) -> QRectF:
+        # the body plus the pins' overhang, from the node's own geometry:
+        # the node's boundingRect unions its children's, this one included,
+        # so asking it would recurse
+        node_item = self.parentItem()
+        pad = PortItem.RADIUS + 16.0
+        return QRectF(-pad, -pad, node_item.width + 2 * pad,
+                      node_item.body_height + 2 * pad)
+
+    def refresh(self) -> None:
+        self.prepareGeometryChange()
+        self.update()
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        from flograph.core.bypass import passthrough
+        node_item = self.parentItem()
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(theme.BYPASS, 2.2)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for out, src in passthrough(node_item.node.spec).items():
+            start = node_item.input_ports.get(src) if src else None
+            end = node_item.output_ports.get(out)
+            if start is None or end is None:
+                continue
+            a, b = start.pos(), end.pos()
+            bend = max(20.0, (b.x() - a.x()) * 0.45)
+            path = QPainterPath(a)
+            path.cubicTo(QPointF(a.x() + bend, a.y()),
+                         QPointF(b.x() - bend, b.y()), b)
+            painter.drawPath(path)
+
 
 CARD_SCALE_MIN, CARD_SCALE_MAX = 25.0, 400.0  # "scale" param, in percent
 
@@ -980,6 +1052,9 @@ class NodeItem(QGraphicsObject):
         # painter cannot reach.
         self._lock_badge = LockBadge(self)
         self._freeze_badge = FreezeBadge(self)
+        self._bypass_badge = BypassBadge(self)
+        self._bypass_badge.colour = theme.BYPASS
+        self._bypass_overlay = BypassOverlay(self)
         self._manual_badge = ManualBadge(self)
         self._heavy_badge = HeavyBadge(self)
         # The node's own two run flags, and the same two as the frames
@@ -1032,6 +1107,7 @@ class NodeItem(QGraphicsObject):
         self.set_active(node.active)
         self.set_frozen(node.frozen)
         self.set_manual(node.manual)
+        self.set_bypassed(node.bypassed)
         self.set_locked(node.locked)
 
     # ------------------------------------------------------------- geometry
@@ -2877,6 +2953,9 @@ class NodeItem(QGraphicsObject):
         # pins moving change childrenBoundingRect, which boundingRect now
         # unions — the old extent must be registered before they move
         self.prepareGeometryChange()
+        overlay = getattr(self, "_bypass_overlay", None)
+        if overlay is not None:     # not yet, while __init__ builds the card
+            overlay.refresh()
         self._layout_flow_ports()
         left, right = self._port_x()
         if self.compact or self.link_card:
@@ -3234,11 +3313,23 @@ class NodeItem(QGraphicsObject):
         """Draw the node as the next run will treat it: its own two flags,
         and whatever the frames around it add on top."""
         self._manual_badge.setVisible(self._own_manual or self._frame_manual)
-        self.setOpacity(1.0 if self._own_active and not self._frame_inactive
-                        else DEACTIVATED_OPACITY)
+        if not self._own_active or self._frame_inactive:
+            self.setOpacity(DEACTIVATED_OPACITY)
+        elif self.node.bypassed:
+            self.setOpacity(BYPASSED_OPACITY)
+        else:
+            self.setOpacity(1.0)
         self._layout_badges()
         self._refresh_tooltip()
         self.update()
+
+    def set_bypassed(self, bypassed: bool) -> None:
+        """Fade the node, less than a deactivated one since its branch still
+        runs, and draw the line its data takes through it."""
+        self._bypass_badge.setVisible(bool(bypassed))
+        self._bypass_overlay.setVisible(bool(bypassed))
+        self._bypass_overlay.refresh()
+        self._apply_run_flags()
 
     def set_locked(self, locked: bool) -> None:
         """Show the padlock. Refusing the move itself is itemChange's job —
@@ -3330,14 +3421,16 @@ class NodeItem(QGraphicsObject):
             y = status.center().y() - NodeBadge.H / 2
             x = self.width / 2 - LED_RADIUS - 6.0 - NodeBadge.W
             for badge in (self._heavy_badge, self._freeze_badge,
-                          self._manual_badge, self._lock_badge):
+                          self._bypass_badge, self._manual_badge,
+                          self._lock_badge):
                 if badge.isVisible():
                     badge.setPos(x, y)
                     x -= NodeBadge.W + 3.0
             return
         x = 1.0
         for badge in (self._heavy_badge, self._freeze_badge,
-                      self._manual_badge, self._lock_badge):
+                      self._bypass_badge, self._manual_badge,
+                      self._lock_badge):
             if badge.isVisible():
                 badge.setPos(x, -(NodeBadge.H + 3.0))
                 x += NodeBadge.W + 4.0
@@ -4372,6 +4465,11 @@ class NodeItem(QGraphicsObject):
             # to say what that means and how to undo it.
             self.setToolTip("Locked — params, code and position are "
                             "read-only. Right-click > Unlock to edit.")
+        elif self.node.bypassed:
+            self.setToolTip("Bypassed — skipped, with each input handed "
+                            "straight on to the output it matches. "
+                            "Right-click > Bypass (or Ctrl+B) to run it "
+                            "again.")
         elif self.node.frozen:
             self.setToolTip("Frozen — serving its last output and skipped by "
                             "every run. Right-click > Unfreeze to run it "

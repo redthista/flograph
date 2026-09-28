@@ -380,6 +380,10 @@ def _fingerprint_one(graph: Graph, node_id: str, resolved: bool,
         "params": node.params,
         "upstream": sorted(memo[p] for p in parents),
         **_report_content(graph, node),
+        # only when set, so no existing hash moves: a bypassed node's cached
+        # value is its input, not its result, and must never be served for
+        # the real thing (or the other way round) across a reopen
+        **({"bypassed": True} if node.bypassed else {}),
     }, sort_keys=True, default=str)
     memo[node_id] = hashlib.sha256(payload.encode()).hexdigest()
 

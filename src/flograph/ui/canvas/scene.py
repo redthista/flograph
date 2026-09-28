@@ -322,6 +322,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         events.locked_changed.connect(self._on_locked_changed)
         events.frozen_changed.connect(self._on_frozen_changed)
         events.manual_changed.connect(self._on_manual_changed)
+        events.bypassed_changed.connect(self._on_bypassed_changed)
         events.preview_enabled_changed.connect(self._on_preview_enabled_changed)
         events.port_labels_changed.connect(self._on_port_labels_changed)
         events.flow_pins_changed.connect(self._on_flow_pins_changed)
@@ -1457,6 +1458,11 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
         item = self.node_items.get(node_id)
         if item is not None:
             item.set_manual(manual)
+
+    def _on_bypassed_changed(self, node_id: str, bypassed: bool) -> None:
+        item = self.node_items.get(node_id)
+        if item is not None:
+            item.set_bypassed(bypassed)
 
     def refresh_stale_pins(self, stale: set) -> None:
         """Amber the frozen nodes in `stale`, plain-grey the rest. Called

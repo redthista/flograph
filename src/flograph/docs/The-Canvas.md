@@ -54,8 +54,27 @@ data ([[Dashboards and Reports|cards]]) keep their own size.
   a drawn mark, a few characters of text, or a picture carried inside the
   project file).
 - Select several nodes and right-click one: the menu acts on the whole
-  **selection** — run, freeze, lock, deactivate, *Run only when asked*,
-  appearance, add to a page — one undo step each.
+  **selection** — run, freeze, bypass, lock, deactivate, *Run only when
+  asked*, appearance, add to a page — one undo step each.
+
+### Skipping a node for a while
+
+Four right-click switches take a node out of the normal run. A node is in
+one of them at a time: picking one clears the other three.
+
+| Switch | The node | The nodes below it |
+| --- | --- | --- |
+| **Deactivate** | doesn't run | don't run either |
+| **Freeze** | doesn't run again | run on its last result |
+| **Run only when asked** | runs only when you run it | run on its last result |
+| **Bypass** (**Ctrl+B**) | doesn't run | run on its *inputs*, as if it weren't there |
+
+**Bypass** keeps the node's wires and settings and hands each input straight
+on to an output: the one with the same name, or else the first of the same
+type. A pink line through the faded node shows which goes where. An output
+no input matches comes out empty, and a node below that needs it **fails**,
+so a bypass never quietly takes part of the flow with it. A node with no
+inputs, or none that match an output, can't be bypassed.
 
 ## Frames
 

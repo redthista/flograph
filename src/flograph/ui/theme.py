@@ -38,6 +38,10 @@ PIN_STALE = QColor("#eab308")
 # done, red error, blue running, amber queued — because in the minimap this
 # has to be told apart from all four at four pixels across.
 PIN_HELD = QColor("#22d3ee")
+# A bypassed node, and the line drawn through it from the input it hands on
+# to the output it feeds. Fuchsia because it has to sit apart from the four
+# status colours and from both pin colours, on the card and in the minimap.
+BYPASS = QColor("#e879f9")
 
 # Status-bar memory bar, brightest first: the project's own cached outputs,
 # the rest of the flograph process, everything else the machine is using.

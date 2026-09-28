@@ -472,6 +472,20 @@ class Graph:
             # again and dirtiness stops mattering.
             self.mark_dirty(node_id)
 
+    def set_bypassed(self, node_id: str, bypassed: bool) -> None:
+        """Skip this node and hand its inputs straight on, or put it back.
+
+        Dirties the node and everything below it both ways: what those nodes
+        last ran on is exactly what a bypass changes, and a switch that left
+        them clean would have the next run do nothing at all.
+        """
+        node = self.node(node_id)
+        if node.bypassed == bypassed:
+            return
+        node.bypassed = bypassed
+        self.events.bypassed_changed.emit(node_id, bypassed)
+        self.mark_dirty(node_id)
+
     def set_locked(self, node_id: str, locked: bool) -> None:
         """Freeze this node's params, code and position against editing."""
         node = self.node(node_id)

@@ -42,6 +42,7 @@ and `PARAMS` — so it should only declare. Everything else goes inside `run`.
 | `outputs` | yes | List of `(name, type)` tuples. |
 | `version` | no | The node *type's* version, e.g. `"2.0"`. Bump it when params or behaviour change so a copy of the file elsewhere can be told apart from the current one. Shows in the properties panel and the library tooltip. |
 | `exclusive` | no | `True` = this node runs with nothing else in flight. See Concurrency. |
+| `bypass` | no | What the node passes on when a user bypasses it: `{"output": "input"}` for the outputs the automatic match (same name, then same type) gets wrong, `None` for an output that should come out empty, or `False` if bypassing the node makes no sense. |
 | `card` | no | Makes the node a live card — see Cards. |
 | `control` | no | With `"card": "control"`, the widget shape — see Cards. |
 | `interactive` | no | With `"card": "webview"`, lets the page write this node's params from JavaScript — see Interactive views. |

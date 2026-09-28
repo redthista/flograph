@@ -32,6 +32,9 @@ def _state_color(item) -> QColor:
         return theme.status_color(node.status)
     if node.frozen:
         return theme.PIN_STALE if item.pin_stale else theme.PIN_HELD
+    if node.bypassed:
+        # like a pin, its "done" says nothing about the node's own work
+        return theme.BYPASS
     if node.status != NodeStatus.IDLE:
         return theme.status_color(node.status)
     if node.color:

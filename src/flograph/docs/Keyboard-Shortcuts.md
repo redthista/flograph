@@ -24,6 +24,7 @@ same page.
 | Select all | **Ctrl+A** (over the canvas — every node and frame) |
 | Delete | **Del** |
 | Rename node | **F2** |
+| Bypass selected nodes (or put them back) | **Ctrl+B** (over the canvas) |
 | Find node | **Ctrl+F** (over the canvas) |
 | Search properties | **Ctrl+F** (in the Properties panel) |
 | Add frame around selection | **Ctrl+G** |

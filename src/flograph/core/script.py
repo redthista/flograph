@@ -281,6 +281,25 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
     # zero ports is legal: display-only nodes (e.g. markdown notes) take no
     # part in dataflow
 
+    bypass = node_decl.get("bypass")
+    if bypass is not None and bypass is not False:
+        if not isinstance(bypass, dict):
+            raise NodeScriptError(
+                "NODE['bypass'] must be False or a dict of "
+                "{output: input} — which input each output passes on")
+        in_names = {p.name for p in inputs}
+        out_names = {p.name for p in outputs}
+        for out, src in bypass.items():
+            if out not in out_names:
+                raise NodeScriptError(
+                    f"NODE['bypass'] names output {out!r}, which the node "
+                    f"does not have")
+            if src is not None and src not in in_names:
+                raise NodeScriptError(
+                    f"NODE['bypass'] feeds {out!r} from {src!r}, which is "
+                    f"not one of the node's inputs")
+        bypass = dict(bypass)
+
     params_decl = namespace.get("PARAMS", [])
     if not isinstance(params_decl, (list, tuple)):
         raise NodeScriptError("PARAMS must be a list of dicts")
@@ -322,6 +341,7 @@ def parse_spec(source: str, type_id: str, builtin: bool = False) -> NodeSpec:
         interactive=interactive,
         reads_report=reads_report,
         version=version,
+        bypass=bypass,
     )
 
 
