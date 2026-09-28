@@ -58,6 +58,48 @@ SHADOW = QColor(0, 0, 0, 60)
 PAPER = QColor("#ffffff")
 
 
+def paginate(document: QTextDocument, setup: PageSetup) -> int:
+    """Lay `document` out onto `setup`'s body and say how many pages it
+    takes. Safe on any thread that owns the document."""
+    body = body_rect(printable_points(setup), setup)
+    document.setPageSize(QSizeF(body.width(), body.height()))
+    return max(1, document.pageCount())
+
+
+def paginate_in_background(document: QTextDocument,
+                           setup: PageSetup) -> int:
+    """`paginate`, for a thread that is not the UI thread — the same pages,
+    reached by a road that lets the UI thread run meanwhile.
+
+    PySide holds Python's lock (the GIL) through nearly every Qt call, and
+    laying a document out is one long call: half a second for a 2,000-row
+    table, during which the UI thread cannot run a line of Python — which
+    is every key typed into the editor. Moving the layout to another
+    thread moved the freeze, nothing more. `print_` is the exception, let
+    go of the lock on purpose because printing is slow; and printing a
+    paginated document lays it out in place, at the size it was given, to
+    count its pages. So the document is printed — one page of it, into a
+    buffer nobody reads — and then counted, which by then is free.
+    """
+    from PySide6.QtCore import QBuffer, QIODevice, QMarginsF
+    from PySide6.QtGui import QPageRanges, QPageSize, QPdfWriter
+
+    body = body_rect(printable_points(setup), setup)
+    size = QSizeF(body.width(), body.height())
+    document.setPageSize(size)
+    sink = QBuffer()
+    sink.open(QIODevice.WriteOnly)
+    writer = QPdfWriter(sink)
+    writer.setResolution(72)
+    writer.setPageSize(QPageSize(size, QPageSize.Point))
+    writer.setPageMargins(QMarginsF(0, 0, 0, 0))
+    first = QPageRanges()
+    first.addPage(1)
+    writer.setPageRanges(first)
+    document.print_(writer)
+    return max(1, document.pageCount())
+
+
 def link_tooltip(href: str) -> str:
     """What resting on a link says: the page a `page:` link goes to, or the
     address anything else opens."""
@@ -106,21 +148,22 @@ class PagedPreview(QAbstractScrollArea):
     # ------------------------------------------------------------- contents
 
     def set_report(self, document: QTextDocument, setup: PageSetup,
-                   title: str = "") -> None:
+                   title: str = "", pages: Optional[int] = None) -> None:
         """Show `document` laid out onto `setup`'s paper.
 
         The document is paginated by giving it the body size — a
         QTextDocument has no page count until it has been told how tall a
-        page is.
+        page is. `pages` says that has been done already (see
+        paginate): laying a long document out is the expensive part, and
+        the report page does it in the background.
         """
         self._document = document
         self._setup = setup or PageSetup()
         self._title = title
         self._date = today()
         if document is not None:
-            body = body_rect(printable_points(self._setup), self._setup)
-            document.setPageSize(QSizeF(body.width(), body.height()))
-            self._pages = max(1, document.pageCount())
+            self._pages = (pages if pages is not None
+                           else paginate(document, self._setup))
         else:
             self._pages = 1
         self._relayout()

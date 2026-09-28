@@ -9,6 +9,7 @@ page is removed — core events hold strong references to the callbacks.
 """
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -25,13 +26,16 @@ from ..commands import (SetPageBodyCommand, SetPageCustomCssCommand,
                         SetPagePreviewModeCommand,
                         SetPagePreviewViewCommand)
 from .preview import PagedPreview
-from .render import render_report
+from .render import finish_body, render_report, stage_report
 from .web_preview import WebPreview
 
 # How long typing has to pause before the preview re-renders. Re-rendering
 # is cheap for text but redraws every embedded chart, so it is not something
 # to do on each keystroke.
 PREVIEW_DELAY_MS = 350
+#: The longest the pause is stretched to. A page whose embeds take a while
+#: to resolve waits for a longer pause — see _note_stage_cost.
+MAX_PREVIEW_DELAY_MS = 1500
 
 STARTER_BODY = """# New report
 
@@ -45,6 +49,10 @@ can be built by a Python Script node rather than typed here.
 
 Use **Export PDF…** when it reads the way you want.
 """
+
+
+#: What ReportPage._layout_job holds while the embeds are being resolved.
+_STAGING = object()
 
 
 class ReportPage(QWidget):
@@ -73,6 +81,8 @@ class ReportPage(QWidget):
         #: a PageSetup the Page Setup dialog is trying out, or None for the
         #: page's own — see preview_setup
         self._setup_override = None
+        #: dispose() has run — it may be asked twice
+        self._disposed = False
 
         self.editor = QPlainTextEdit()
         self.editor.setObjectName("report_source")
@@ -145,6 +155,16 @@ class ReportPage(QWidget):
         self._preview_stack = QStackedWidget()
         self._preview_stack.addWidget(self.preview)
         self._preview_stack.addWidget(self.web_preview)
+        preview_pane = QWidget()
+        preview_layout = QVBoxLayout(preview_pane)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(0)
+        preview_layout.addWidget(self._preview_stack, 1)
+        # "The preview is catching up": on from the first key after a render
+        # to the moment the new one is on screen. It floats over the
+        # preview, so turning it on and off moves nothing (see busy.py).
+        from .busy import BusyOverlay
+        self._busy_bar = BusyOverlay(preview_pane)
         self._preview_mode = QComboBox()
         self._preview_mode.addItem("Pages", "pages")
         self._preview_mode.addItem("Web", "web")
@@ -210,7 +230,7 @@ class ReportPage(QWidget):
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._editor_tabs)
-        splitter.addWidget(self._preview_stack)
+        splitter.addWidget(preview_pane)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([520, 620])
@@ -224,9 +244,15 @@ class ReportPage(QWidget):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(PREVIEW_DELAY_MS)
-        self._timer.timeout.connect(self.refresh_preview)
+        self._timer.timeout.connect(self.request_preview)
         #: something changed while the page was hidden — see _schedule_preview
         self._preview_stale = False
+        #: preview generations: the newest asked for, and the one on screen.
+        #: A layout finishing for anything older than _wanted is dropped.
+        self._wanted = 0
+        self._shown = 0
+        #: the background layout in flight, if any — see request_preview
+        self._layout_job = None
 
         # Locking lives on the page tab's right-click menu and nowhere else.
         # There used to be a 🔒 here as well, which put the control that
@@ -290,12 +316,17 @@ class ReportPage(QWidget):
     def dispose(self) -> None:
         """Mandatory on page removal: core events hold strong refs and would
         keep calling into this widget after its Qt side is deleted."""
+        if self._disposed:
+            return
+        self._disposed = True
         for event, callback in self._event_subs:
             event.disconnect(callback)
         self._event_subs = []
         self._engine.node_succeeded.disconnect(self._on_node_ran)
         self._engine.node_failed.disconnect(self._on_node_ran)
         self._timer.stop()
+        # a layout still running finds the page gone and drops its result
+        self._layout_job = None
         self._stop_animations()
 
     # ------------------------------------------------------------- the body
@@ -323,6 +354,7 @@ class ReportPage(QWidget):
         # merged, so a burst of typing is one undo step
         self._undo_stack.push(
             SetPageBodyCommand(self._graph, self.page_id, text))
+        self._busy_bar.show()
         self._timer.start()
 
     def _on_css_changed(self) -> None:
@@ -422,6 +454,7 @@ class ReportPage(QWidget):
         report page in the project, and rendering one that is out of sight
         was all cost and nothing to see."""
         if self.isVisible():
+            self._busy_bar.show()
             self._timer.start()
         else:
             self._preview_stale = True
@@ -430,13 +463,51 @@ class ReportPage(QWidget):
 
     @perf.timed('report page')
     def refresh_preview(self) -> None:
+        """Render the preview now, on this thread, and show it before
+        returning — for the callers that need it there at once: Page
+        Setup's live paper, switching the preview mode, tests. Whatever a
+        background layout was doing is overtaken by it (see
+        request_preview)."""
         import shiboken6
 
         page = self._page()
         if page is None or not shiboken6.isValid(self.preview):
             return
-        position = self.preview.verticalScrollBar().value()
+        self._wanted += 1
+        generation = self._wanted
+        staged = self._stage(page)
+        if staged is None:
+            return
+        setup, mode, staged = staged
+        rendered = finish_body(staged)
+        self._show(generation, page, setup, mode, rendered)
+
+    def request_preview(self) -> None:
+        """Render the preview in the background and show it when it is
+        done. What typing, a run finishing and a param changing all come
+        to: the editor stays live while a page with a big table is laid
+        out, and the thin bar over the preview says it is catching up.
+
+        One layout at a time. Asking again while one runs just marks the
+        preview wanted again; when the running one lands it is dropped as
+        out of date and the newest text is laid out instead."""
+        self._wanted += 1
+        self._busy_bar.show()
+        if self._layout_job is None:
+            self._start_layout()
+
+    def preview_busy(self) -> bool:
+        """Whether the preview is behind the page: a render waiting on a
+        pause in typing, or one under way."""
+        return self._timer.isActive() or self._shown < self._wanted
+
+    def _stage(self, page):
+        """Resolve the embeds — the part of a render that stays on this
+        thread. None when the page went away while it ran."""
+        import shiboken6
+
         setup = self._setup_override or page.setup
+        mode = self.preview_mode()
         # No page_break_rule any more: the preview is paginated, so a forced
         # break shows as the page actually ending — which is better feedback
         # than a rule standing in for one, and it is what will print.
@@ -446,29 +517,116 @@ class ReportPage(QWidget):
         # background; the preview renders again when they are in, rather
         # than the window waiting on Chromium with its input shut off (AE4).
         from .plotly_snapshot import deferred
+        started = time.perf_counter()
         with deferred(self._pictures_ready):
-            rendered = render_report(page.body, self._graph,
-                                     self._engine.cache,
-                                     setup=setup, page_links=True)
-        # `render_report` **re-enters the event loop** — a web-view embed is
+            staged = stage_report(page.body, self._graph, self._engine.cache,
+                                  setup=setup, page_links=True)
+        # `stage_report` **re-enters the event loop** — a web-view embed is
         # printed to PDF, and that waits. So the window can close while this
         # method is part-way through, and the preview we checked above can be
         # gone by now. Check it again rather than painting into a dead widget.
-        if not shiboken6.isValid(self.preview):
+        if not shiboken6.isValid(self) or not shiboken6.isValid(self.preview):
+            return None
+        self._note_stage_cost(time.perf_counter() - started)
+        return setup, mode, staged
+
+    def _note_stage_cost(self, seconds: float) -> None:
+        """Wait for a longer pause in typing on a page whose embeds are slow
+        to resolve. That part cannot leave this thread, so on a heavy page
+        each render is a moment the editor does not answer; three times its
+        cost keeps one from landing between two words."""
+        delay = max(PREVIEW_DELAY_MS, int(seconds * 3000))
+        self._timer.setInterval(min(delay, MAX_PREVIEW_DELAY_MS))
+
+    def _start_layout(self) -> None:
+        from .layout_job import LayoutJob
+
+        page = self._page()
+        if page is None:
+            self._layout_job = None
+            self._busy_bar.hide()
             return
+        generation = self._wanted
+        # Held while staging, which can re-enter the event loop: a request
+        # arriving meanwhile must mark the preview wanted, not start a
+        # second layout inside this one.
+        self._layout_job = _STAGING
+        staged = self._stage(page)
+        if staged is None:
+            return
+        self._layout_job = None
+        setup, mode, staged = staged
+        if not staged.finishes_anywhere:
+            self._show(generation, page, setup, mode, finish_body(staged))
+            if self.preview_busy():
+                self._timer.start()
+            return
+        title, css = page.title, page.custom_css
+
+        def work(staged):
+            return _lay_out(staged, setup, mode, title, css)
+
+        self._layout_job = LayoutJob(generation, staged, work,
+                                     self._layout_done)
+        self._layout_job.start()
+
+    def _layout_done(self, job) -> None:
+        import shiboken6
+
+        # Taken out of the job, so the job does not keep the document
+        # alive; and the job's thread told to last as long as the document
+        # does, shown or dropped (see layout_job).
+        result, job.result = job.result, None
+        if result is None:
+            job.release()
+        else:
+            job.keep_for(result[0].document)
+        if not shiboken6.isValid(self) or job is not self._layout_job:
+            return
+        self._layout_job = None
+        if job.error is not None:
+            # The background half failed; do it again here, where the error
+            # reaches the console the way a render's always has.
+            self.refresh_preview()
+            return
+        page = self._page()
+        if page is None:
+            self._busy_bar.hide()
+        elif job.generation == self._wanted:
+            rendered, pages, html = result
+            setup, mode = self._setup_override or page.setup, self.preview_mode()
+            self._show(job.generation, page, setup, mode, rendered,
+                       pages=pages, html=html)
+        elif self.preview_busy():
+            # typed on while it ran: lay out what is there now
+            self._start_layout()
+
+    def _show(self, generation: int, page, setup, mode: str, rendered,
+              pages=None, html=None) -> None:
+        """Put a finished render on screen, unless something newer already
+        is."""
+        if generation < self._shown:
+            return
+        self._shown = generation
+        if not self.preview_busy():
+            self._busy_bar.hide()
         self.problems = rendered.problems
-        if self.preview_mode() == "web":
+        if mode == "web":
             from .html import report_html
             self._stop_animations()
-            self.web_preview.set_html(
-                report_html(rendered, page.title, setup=setup,
-                            custom_css=page.custom_css))
+            if html is None:
+                html = report_html(rendered, page.title, setup=setup,
+                                   custom_css=page.custom_css)
+            self.web_preview.set_html(html)
             self._status.setText(self._problem_text())
             return
+        # the reader may have scrolled while the layout ran — keep that
+        position = self.preview.verticalScrollBar().value()
         # Before the old document goes: a running QMovie writing frames into
         # a deleted document is a crash, not a stale picture.
         self._stop_animations()
-        self.preview.set_report(rendered.document, setup, page.title)
+        self.preview.set_report(rendered.document, setup, page.title,
+                                pages=pages)
         self._start_animations(rendered)
         # a re-render on every keystroke that jumped to the top would make
         # the preview useless while writing past the first screenful
@@ -580,6 +738,7 @@ class ReportPage(QWidget):
         super().showEvent(event)
         if self._preview_stale:
             self._preview_stale = False
+            self._busy_bar.show()
             self._timer.start()
         if self._animator is not None:
             self._animator.set_playing(True)
@@ -673,3 +832,24 @@ class ReportPage(QWidget):
         page = self._page()
         from flograph.core.page_setup import PageSetup
         return page.setup if page is not None else PageSetup()
+
+
+def _lay_out(staged, setup, mode: str, title: str, css: str):
+    """The background half of a preview render: finish the document, then
+    paginate it for the paper or write it out for the browser. Runs on the
+    layout pool's thread (see layout_job), and hands the document back to
+    the UI thread before it returns."""
+    from .layout_job import adopt
+    from .preview import paginate_in_background
+
+    rendered = finish_body(staged)
+    pages = html = None
+    try:
+        if mode == "web":
+            from .html import report_html
+            html = report_html(rendered, title, setup=setup, custom_css=css)
+        else:
+            pages = paginate_in_background(rendered.document, setup)
+    finally:
+        adopt(rendered.document)
+    return rendered, pages, html

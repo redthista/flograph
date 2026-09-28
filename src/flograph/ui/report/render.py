@@ -1488,18 +1488,27 @@ def render_report(body: str, graph, cache, image_scale: float = 1.0,
     body height, so an `![[chart|fit]]` can be shrunk to the room left on
     its page. None keeps the A4 default.
     """
+    return finish_body(stage_report(body, graph, cache, image_scale, setup,
+                                    page_break_rule, page_links))
+
+
+def stage_report(body: str, graph, cache, image_scale: float = 1.0,
+                 setup=None, page_break_rule: bool = False,
+                 page_links: bool = False) -> "StagedReport":
+    """The half of render_report that has to happen on the UI thread — see
+    StagedReport. `finish_body` does the rest, on any thread."""
     width = setup.body_width_points() if setup is not None else FIGURE_WIDTH
     page_height = None
     if setup is not None:
         from .export import body_rect, printable_points
         page_height = body_rect(printable_points(setup), setup).height()
-    return render_body(body, by_label(graph, cache), image_width=width,
-                       image_scale=image_scale,
-                       source=source_by_label(graph),
-                       nested=nested_by_label(graph, cache),
-                       page_break_rule=page_break_rule,
-                       page_height=page_height, cache=cache,
-                       page_links=page_links)
+    return stage_body(body, by_label(graph, cache), image_width=width,
+                      image_scale=image_scale,
+                      source=source_by_label(graph),
+                      nested=nested_by_label(graph, cache),
+                      page_break_rule=page_break_rule,
+                      page_height=page_height, cache=cache,
+                      page_links=page_links)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -1538,6 +1547,9 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 header_fill: str = PAPER_HEADER) -> RenderedReport:
     """Lay a report body out as a document ready to show or print.
 
+    Two halves, stage_body and finish_body, run back to back — see
+    StagedReport for why a report page's preview runs them apart.
+
     `page_links` keeps a `[Costs](page:Costs)` link a link, and only the
     on-screen preview of a report page asks for it: that is the one place a
     click can take it to the page. Everywhere else — the PDF, the HTML, a
@@ -1553,6 +1565,56 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     report *page* has one. It is what an `![[chart|fit]]` is measured
     against; without it `fit` is a no-op that says so.
     """
+    return finish_body(stage_body(
+        body, lookup, image_width=image_width, image_scale=image_scale,
+        source=source, nested=nested, page_break_rule=page_break_rule,
+        page_height=page_height, cache=cache, page_links=page_links,
+        header_fill=header_fill))
+
+
+@dataclass
+class StagedReport:
+    """A report with every embed resolved and nothing laid out yet.
+
+    Rendering is two jobs of very different kinds. Resolving the embeds
+    reads the flow's outputs and draws what they need — a chart waits on
+    Chromium, a web-view card is printed, which re-enters the event loop —
+    so it belongs to the UI thread. Everything after it is Qt's rich text:
+    reading the markdown, setting the HTML, and laying out and paginating
+    the result, which for a page holding a big table is nearly all of the
+    time. QTextDocument works on any thread, so a report page's preview
+    does that half in the background and the editor keeps up with typing
+    (see ReportPage.request_preview).
+
+    Nothing here may be shared with the UI thread while `finish_body` runs:
+    the resolver's tables are rebuilt by `fit_tables`, and its images and
+    widths are read. Staged once, finished once.
+    """
+    resolver: "_Resolver"
+    resolved: str
+    image_width: int
+    page_break_rule: bool
+    page_height: "float | None"
+    page_links: bool
+    header_fill: str
+
+    @property
+    def finishes_anywhere(self) -> bool:
+        """Whether `finish_body` may run off the UI thread. Not when a
+        table asked for `height=` or `fit`: measuring it can rebuild it,
+        and a rebuilt table's tiled pictures are painted through the
+        table card's pixmap cache — pixmaps being the UI thread's alone."""
+        return not self.resolver.tables
+
+
+@perf.timed('report: stage body')
+def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
+               image_scale: float = 1.0, source=None,
+               nested=None, page_break_rule: bool = False,
+               page_height: "float | None" = None,
+               cache=None, page_links: bool = False,
+               header_fill: str = PAPER_HEADER) -> StagedReport:
+    """Resolve every embed in `body` — the UI-thread half of render_body."""
     resolver = _Resolver(lookup, image_scale, image_width, source, nested,
                          page_height, cache)
     # Columns first, and they resolve their own embeds as they go: an embed
@@ -1562,6 +1624,26 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     # force a break of its own, which is how a per-region section built in
     # a Python Script node gets to start each region on a fresh page.
     resolved = mark_page_breaks(replace_embeds(staged_body, resolver.render))
+    # The emoji fallback is looked up once and remembered; look it up here,
+    # on the UI thread, so a finish on another thread only ever reads it.
+    _document()
+    return StagedReport(resolver, resolved, image_width, page_break_rule,
+                        page_height, page_links, header_fill)
+
+
+@perf.timed('report: finish body')
+def finish_body(staged_report: StagedReport) -> RenderedReport:
+    """Lay a staged report out as a document — the half of render_body that
+    may run on any thread. The document comes back owned by the thread
+    that called this; hand it over with moveToThread before another uses
+    it."""
+    resolver = staged_report.resolver
+    resolved = staged_report.resolved
+    image_width = staged_report.image_width
+    page_break_rule = staged_report.page_break_rule
+    page_height = staged_report.page_height
+    page_links = staged_report.page_links
+    header_fill = staged_report.header_fill
 
     staged = _document()
     # see STAGED_CSS — the header tone has to be resolved here, because the
@@ -1573,10 +1655,9 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     for index, table in enumerate(resolver.table_html):
         html = _put_table_back(html, index,
                                _staged_table(table, header_fill))
-    for index, width in enumerate(resolver.widths):
-        html = html.replace(IMAGE_TOKEN.format(index), _img_tag(index, width))
-    for index, tag in enumerate(resolver.inline):
-        html = html.replace(SPARK_TOKEN.format(index), tag)
+    html = _swap_tokens(html, IMAGE_TOKEN,
+                        [_img_tag(i, w) for i, w in enumerate(resolver.widths)])
+    html = _swap_tokens(html, SPARK_TOKEN, resolver.inline)
     if page_break_rule:
         html = _PAGEBREAK_P_RE.sub("<hr />", html)
 
@@ -1692,6 +1773,26 @@ def _staged_table(table: str, header_fill: str) -> str:
     staged.setHtml(table)
     found = _BODY_RE.search(staged.toHtml())
     return found.group(1) if found else table
+
+
+def _swap_tokens(html: str, token: str, values: list) -> str:
+    """Every `token` (a "...{}..." template numbered from 0) in `html`
+    swapped for its value, in one pass.
+
+    Not a `str.replace` per value: each of those reads the whole page, and
+    the page grows with every picture put back — a table of 3,000 sparklines
+    took half a minute that way, where one pass takes a blink. A number
+    with no value is left as it was, as a replace would have left it."""
+    if not values:
+        return html
+    head, _sep, tail = token.partition("{}")
+    pattern = re.compile(re.escape(head) + r"(\d+)" + re.escape(tail))
+
+    def value(match):
+        index = int(match.group(1))
+        return values[index] if index < len(values) else match.group(0)
+
+    return pattern.sub(value, html)
 
 
 def _put_table_back(html: str, index: int, table: str) -> str:
