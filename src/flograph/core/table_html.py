@@ -429,11 +429,14 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
 
 def _cell_text(value, style: "CellStyle | None",
                spark_room: "dict | None" = None,
-               row_height: "int | None" = None) -> str:
-    """A cell's text as HTML: formatted, escaped and decorated."""
+               row_height: "int | None" = None,
+               align: "str | None" = None) -> str:
+    """A cell's text as HTML: formatted, escaped and decorated. `align` is
+    where the value sits when marks pinned to the right take a slot of
+    their own beside it (see `_decorate`)."""
     text = _escape(_text(value, style))
     if style is not None:
-        text = _decorate(text, style, spark_room, row_height)
+        text = _decorate(text, style, spark_room, row_height, align)
     return text
 
 
@@ -637,7 +640,8 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
     """One `<td>`: the value, plus whatever the rules said about it.
     `pad` is the top and bottom padding that makes its row as tall as a
     `height` asked; `row_height` is that height, which a spark grows into."""
-    text = _cell_text(value, style, spark_room, row_height)
+    text = _cell_text(value, style, spark_room, row_height,
+                      align or ("right" if numeric else None))
     if style is not None and style.bar is not None:
         text = _bar(text, style, numeric, track, stacked, value_width)
         numeric = False       # the bar table fills the cell; don't re-align
@@ -868,7 +872,8 @@ def _in_a_pill(text: str, style: "CellStyle") -> str:
 
 def _decorate(text: str, style: "CellStyle",
               spark_room: "dict | None" = None,
-              row_height: "int | None" = None) -> str:
+              row_height: "int | None" = None,
+              align: "str | None" = None) -> str:
     """`text` with everything the rules hung on it, arranged as the card
     arranges it: a line above, the value between its side marks, a line
     below. `text` is already escaped; the spans added here are not.
@@ -888,9 +893,11 @@ def _decorate(text: str, style: "CellStyle",
         middle = " ".join(inside)     # `only` / `in` — instead of the value
     else:
         parts = ([span(d) for d in style.at("left")]
-                 + ([_in_a_pill(text, style)] if text or style.pill else [])
-                 + [span(d) for d in style.at("right")])
-        middle = " ".join(p for p in parts if p)
+                 + ([_in_a_pill(text, style)] if text or style.pill else []))
+        value = " ".join(p for p in parts if p)
+        right = " ".join(p for p in (span(d) for d in style.at("right")) if p)
+        middle = (_pinned_right(value, right, align) if value and right
+                  else value or right)
     lines = [" ".join(span(d) for d in style.at("above")),
              middle,
              " ".join(span(d) for d in style.at("below"))]
@@ -900,6 +907,31 @@ def _decorate(text: str, style: "CellStyle",
     # spellings survive and break the line all the same (a probe, not a
     # guess: `<br>` 0 tables, `<br/>` and `<br />` 1).
     return "<br />".join(line for line in lines if line)
+
+
+#: Between the value and the marks pinned to the right of its cell.
+RIGHT_MARK_GAP = 6
+
+
+def _pinned_right(value: str, right: str, align: "str | None") -> str:
+    """The value, then `right` marks held against the cell's right edge.
+
+    The card lays a `right` mark from the cell's edge inwards, so a column
+    of sparks beside names of different lengths starts at one place on
+    every row. Written as "value, space, spark" the spark followed each
+    name wherever it ended instead — ragged down the column, and in a
+    browser stretching the table the whole gap opened up after it. A
+    full-width row of two cells is the shape both Qt's rich text and a
+    browser read the same way (the trick `_bar` uses to line up its
+    tracks): the value takes whatever the marks leave, and the marks'
+    cell, being no wider than its content, sits against the edge.
+    """
+    where = f' align="{align}"' if align else ""
+    return ('<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+            f'<td{where} style="border:none;padding:0">{value}</td>'
+            f'<td align="right" style="border:none;'
+            f'padding:0 0 0 {RIGHT_MARK_GAP}px;white-space:nowrap">'
+            f"{right}</td></tr></table>")
 
 
 def _text(value, style: "CellStyle | None") -> str:

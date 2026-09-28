@@ -254,8 +254,34 @@ class TestOnPaper:
         # break is `<br />`, never a bare `<br>`: Qt's markdown reader drops
         # the whole table a bare one sits in, so it vanished from reports
         assert "<br />" in cell and "<br>" not in cell
-        assert cell.index("A") < cell.index("L") < cell.index("> a <") \
+        assert cell.index("A") < cell.index("L") < cell.index(" a</td>") \
             < cell.index("R")
+
+    def test_a_right_mark_is_held_against_the_cells_edge(self):
+        """The card lays a `right` mark from the cell's edge inwards, so it
+        starts at one place on every row. Written straight after the value
+        it followed each value wherever it ended — ragged down a column of
+        names of different lengths, in a report and in a browser."""
+        frame = pd.DataFrame({"name": ["a", "a much longer name"]})
+        html = frame_to_html(frame, rules=parse_rules(
+            "name = a* => icon R right"))
+        cell = html[html.index("<tbody>"):]
+        assert cell.count('<table width="100%"') == 2
+        assert '<td align="right" style="border:none;padding:0 0 0 6px;' \
+            'white-space:nowrap"><span>R</span></td>' in cell
+
+    def test_a_number_keeps_its_side_beside_a_right_mark(self):
+        frame = pd.DataFrame({"units": [5]})
+        html = frame_to_html(frame, rules=parse_rules(
+            "units > 0 => icon R right"))
+        assert '<td align="right" style="border:none;padding:0">5</td>' \
+            in html
+
+    def test_a_mark_with_no_value_beside_it_needs_no_slot(self):
+        frame = pd.DataFrame({"flag": ["x"]})
+        html = frame_to_html(frame, rules=parse_rules(
+            "flag iconmap only right: x=✓"))
+        assert '<table width="100%"' not in html[html.index("<tbody>"):]
 
     def test_a_pill_prints_as_a_coloured_ground(self):
         frame = pd.DataFrame({"status": ["breach"]})
