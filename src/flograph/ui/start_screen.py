@@ -37,7 +37,9 @@ _BG = theme.CANVAS_BG.name()   # the canvas is always dark, and this is it
 _QSS = f"""
 QWidget#start_screen {{ background: {_BG}; }}
 QLabel#start_title {{ color: #f3f4f6; }}
-QLabel#start_lede, QLabel#start_empty {{ color: #8b8f99; }}
+QLabel#start_lede, QLabel#start_empty, QLabel#start_version {{
+    color: #8b8f99;
+}}
 QLabel#start_heading {{ color: #9ca3af; font-weight: bold; }}
 QPushButton {{
     background: #2a2c33; color: #e5e7eb; border: 1px solid #3a3d46;
@@ -63,6 +65,13 @@ QListWidget::item {{ padding: 4px 6px; border-radius: 4px; }}
 QListWidget::item:hover {{ background: #34363f; color: #f3f4f6; }}
 QScrollArea, QWidget#start_rows {{ background: transparent; border: none; }}
 """
+
+
+def _version_text() -> str:
+    """"v0.1.21", or "" when no version can be found (a bare checkout)."""
+    from ..version import running_version
+    version = running_version()
+    return f"v{version}" if version else ""
 
 
 def example_title(name: str) -> str:
@@ -187,7 +196,16 @@ class StartScreen(QWidget):
         font.setPointSizeF(font.pointSizeF() * 2.0)
         font.setBold(True)
         title.setFont(font)
-        left.addWidget(title)
+        # The version sits on the title's line, small and muted: it is
+        # what a user reads out when reporting a bug, not a headline.
+        self.version_label = QLabel(_version_text())
+        self.version_label.setObjectName("start_version")
+        heading = QHBoxLayout()
+        heading.setSpacing(10)
+        heading.addWidget(title, 0, Qt.AlignBaseline)
+        heading.addWidget(self.version_label, 0, Qt.AlignBaseline)
+        heading.addStretch(1)
+        left.addLayout(heading)
         lede = QLabel("Pick up where you left off, or start something new.")
         lede.setObjectName("start_lede")
         lede.setWordWrap(True)

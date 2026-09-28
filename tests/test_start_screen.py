@@ -72,6 +72,10 @@ class TestShowingIt:
         assert window._canvas_stack.currentWidget() is screen
         assert window.start_screen_visible
 
+    def test_it_says_which_version_is_running(self, window):
+        from flograph.version import running_version
+        assert _screen(window).version_label.text() == f"v{running_version()}"
+
     def test_a_new_window_is_not_on_it(self, window):
         """Only a launch asks for it — every other MainWindow, and all the
         tests that build one, start on the canvas as they always did."""
