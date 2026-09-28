@@ -141,6 +141,13 @@ class NodeInstance:
     # if this node were not there. One of the four run states with active,
     # frozen and manual — the commands that set any of them clear the others.
     bypassed: bool = False
+    # Drop Output (the reverse of Power BI's "Enable load"): on, the node's
+    # value is dropped once the nodes reading it in a run have finished, and
+    # never saved. See core.drop_output.
+    drop_output: bool = False
+    # Runtime only: this node ran, and its value was dropped as Drop Output
+    # asked. Drawn as a badge and explained in the tooltip; never saved.
+    released: bool = False
     # What this node's params and inputs hashed to at the moment it was
     # frozen. Compared after a run to tell a pin that still reflects the
     # graph from one that has been quietly overtaken by an edit upstream;

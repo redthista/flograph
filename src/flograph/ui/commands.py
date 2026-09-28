@@ -414,7 +414,8 @@ class SetManualCommand(QUndoCommand):
         self._old = graph.node(node_id).manual
         self._new = manual
         if manual:
-            self._first = _leave_bypass(graph, node_id)
+            self._first = (_leave_bypass(graph, node_id)
+                           + _stop_dropping(graph, node_id))
 
     def redo(self) -> None:
         _redo_all(self)
@@ -492,7 +493,8 @@ class SetFrozenCommand(QUndoCommand):
             # node, which evicts the pass-through value, so the freeze finds
             # nothing cached and runs the node once for a real value to pin
             # rather than pinning its input.
-            self._first = _leave_bypass(graph, node_id)
+            self._first = (_leave_bypass(graph, node_id)
+                           + _stop_dropping(graph, node_id))
 
     def redo(self) -> None:
         _redo_all(self)
@@ -517,6 +519,15 @@ def _leave_bypass(graph: Graph, node_id: str) -> list:
     return []
 
 
+def _stop_dropping(graph: Graph, node_id: str) -> list:
+    """The step that turns Drop Output off, if it is on. Freeze and
+    Run-only-when-asked both exist to serve a held value, so neither can
+    stand beside a node that drops its own."""
+    if graph.node(node_id).drop_output:
+        return [SetDropOutputCommand(graph, node_id, False)]
+    return []
+
+
 # Sub-steps are composed in Python rather than as Qt child commands: a
 # QUndoCommand child is owned by C++ *and* by its Python wrapper, and the two
 # free it twice when the stack goes. `_first` runs before the command's own
@@ -529,6 +540,36 @@ def _redo_all(command: QUndoCommand) -> None:
 def _undo_all(command: QUndoCommand) -> None:
     for step in reversed(getattr(command, "_first", ())):
         step.undo()
+
+
+class SetDropOutputCommand(QUndoCommand):
+    """Keep a node's output, or drop it once the nodes reading it are done
+    (see core.drop_output). Turning it on also clears Freeze and
+    Run-only-when-asked, in the same step, so undo restores them too."""
+
+    def __init__(self, graph: Graph, node_id: str, drop: bool,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("drop node output" if drop
+                         else "keep node output", parent)
+        self._graph = graph
+        self._node_id = node_id
+        node = graph.node(node_id)
+        self._old = node.drop_output
+        self._new = drop
+        self._first = []
+        if drop:
+            if node.frozen:
+                self._first.append(SetFrozenCommand(graph, node_id, False))
+            if node.manual:
+                self._first.append(SetManualCommand(graph, node_id, False))
+
+    def redo(self) -> None:
+        _redo_all(self)
+        self._graph.set_drop_output(self._node_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_drop_output(self._node_id, self._old)
+        _undo_all(self)
 
 
 class SetBypassCommand(QUndoCommand):

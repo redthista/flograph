@@ -26,6 +26,7 @@ from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 from flograph.core import perf
 from flograph.core.bypass import bypass_outputs, passthrough
 from flograph.core.graph import Graph
+from flograph.core.drop_output import readers
 from flograph.core.links import from_problem
 from flograph.core.node import NodeInstance, NodeStatus
 from flograph.core.reportlinks import report_problem, saves_anyway
@@ -420,8 +421,38 @@ def build_plan(graph: Graph, targets: Iterable[str],
             # cannot pause something that has not produced anything yet, so
             # it runs once to fill the pin and is skipped from then on.
             wanted.discard(node_id)
-    return [nid for nid in graph.topo_order()
-            if nid in wanted and graph.nodes[nid].dirty]
+    order = graph.topo_order()
+    plan = [nid for nid in order if nid in wanted and graph.nodes[nid].dirty]
+    if cache is None:
+        return plan
+    return _with_released(graph, order, plan, wanted, aimed, cache)
+
+
+def _with_released(graph: Graph, order: list[str], plan: list[str],
+                   wanted: set, aimed: set, cache) -> list[str]:
+    """Add back the clean nodes whose value Drop Output dropped, where this
+    run needs it.
+
+    Clean, because nothing about them changed — which is why Run All walks
+    past them and nothing below them re-runs for their sake. But a node in
+    the plan that reads one needs the value, so it runs again first; and so
+    does one somebody aimed at directly, since looking at its output is the
+    usual reason to. Walked bottom-up so a chain of them comes back whole.
+    """
+    needed = set(plan)
+    added = False
+    for nid in reversed(order):
+        if nid in needed or nid not in wanted:
+            continue
+        node = graph.nodes[nid]
+        if not node.released or cache.has(nid):
+            continue
+        if nid in aimed or readers(graph, nid) & needed:
+            needed.add(nid)
+            added = True
+    if not added:
+        return plan
+    return [nid for nid in order if nid in needed]
 
 
 def skipped_summary(graph: Graph, targets: Iterable[str],
@@ -478,6 +509,9 @@ class ExecutionEngine(QObject):
     run_started = Signal()
     run_finished = Signal(bool)            # ok: no node failed
     node_log = Signal(str, str, str)       # node_id, line, stream
+    # a dropping node's value was dropped (Drop Output on): what showed it
+    # — the inspector, an output window — has nothing to show any more
+    output_released = Signal(str)
     node_failed = Signal(str, object)      # node_id, NodeError
     node_succeeded = Signal(str)           # node_id
     # node_id, 1-based position in the plan, plan size. The size is the plan
@@ -547,6 +581,14 @@ class ExecutionEngine(QObject):
         # that has since changed — see _answered_the_question. Lives
         # for the run only; cleared in _finish.
         self._stale: set[str] = set()
+        # Drop Output on: node_id -> the readers still to finish this run.
+        # The value is dropped when the set empties (see _hold / _consumed),
+        # and anything left over when the run ends is dropped then.
+        self._holding: dict[str, set[str]] = {}
+        # The nodes this run was aimed at by name (Run To, Run Selected).
+        # One of them with Drop Output on keeps its value after all: being
+        # looked at is why it was run. See _hold.
+        self._run_aimed: set[str] = set()
         # An exclusive node has the process to itself, so nothing new starts
         # while one is running.
         self._exclusive_running = False
@@ -615,6 +657,7 @@ class ExecutionEngine(QObject):
         self._request_timer.timeout.connect(self._fire_request)
 
         graph.events.dirty_changed.connect(self._on_dirty_changed)
+        graph.events.drop_output_changed.connect(self._on_drop_output_changed)
         graph.events.node_removed.connect(self.cache.evict)
 
     # ------------------------------------------------------------ public API
@@ -660,6 +703,7 @@ class ExecutionEngine(QObject):
         self._token = CancellationToken()
         flags = self.run_flags()
         plan = build_plan(self.graph, targets, self.cache, asked, flags)
+        self._run_aimed = _aimed_at(targets, asked)
         self._plan_total = len(plan)
         self._plan_done = 0
         self._had_failure = False
@@ -701,6 +745,7 @@ class ExecutionEngine(QObject):
         """
         plan = build_plan(self.graph, targets, self.cache, asked,
                           self.run_flags())
+        self._run_aimed |= _aimed_at(targets, asked)
         busy = self._running.keys() | self._pending
         additions = [nid for nid in plan if nid not in busy]
         if not additions:
@@ -715,6 +760,9 @@ class ExecutionEngine(QObject):
         # build_plan walked graph.topo_order(), so the additions sit after
         # everything that could release them and _ready stays ordered
         self._pending.update(additions)
+        # a value held for this run's readers is held for the newcomers too
+        for held, waiting in self._holding.items():
+            waiting |= readers(self.graph, held) & set(additions)
         self._plan_total += len(additions)
         for node_id in additions:
             self.graph.set_status(node_id, NodeStatus.QUEUED)
@@ -1199,6 +1247,7 @@ class ExecutionEngine(QObject):
         # Everything below it goes with it, so there are no successors left
         # to release — the prune is the whole bookkeeping here.
         self._prune_downstream(node_id)
+        self._consumed(node_id)
 
     def _release_successors(self, node_id: str) -> None:
         """One node finished: whoever was waiting only on it can start."""
@@ -1271,6 +1320,7 @@ class ExecutionEngine(QObject):
         for nid in dropped:
             self._remaining_preds.pop(nid, None)
             self.graph.set_status(nid, NodeStatus.IDLE)
+            self._consumed(nid)
         # A reader set to save anyway was spared, but it may have been
         # waiting on what just went: what it waits for now is only what is
         # still to finish.
@@ -1345,9 +1395,12 @@ class ExecutionEngine(QObject):
         self.node_started.emit(node_id, self._plan_done, self._plan_total)
         self.cache.set(node_id, outputs, 0.0,
                        alias_of=alias_of, alias_port=alias_port)
+        self.graph.set_released(node_id, False)
         self.graph.mark_clean(node_id)
         self.graph.set_status(node_id, NodeStatus.DONE, "bypassed")
         self.node_succeeded.emit(node_id)
+        self._hold(node_id)
+        self._consumed(node_id)
         self._release_successors(node_id)
 
     def _start_node(self, node_id: str) -> Optional[str]:
@@ -1489,12 +1542,14 @@ class ExecutionEngine(QObject):
                     with perf.timed("engine: cache set"):
                         self.cache.set(node_id, outputs, wall_time,
                                        alias_of=alias_of, alias_port=alias_port)
+                    self.graph.set_released(node_id, False)
                     if self._answered_the_question(node_id, inflight):
                         self.graph.mark_clean(node_id)
                     else:
                         self._stale.add(node_id)
                     self.graph.set_status(node_id, NodeStatus.DONE)
                     self.node_succeeded.emit(node_id)
+                    self._hold(node_id)
                 self._close_node_run(inflight, "ok", wall_time)
             except Exception as exc:
                 # The body ran; keeping what it returned is what failed. Its
@@ -1512,7 +1567,9 @@ class ExecutionEngine(QObject):
                 # dropped: skipping these two left the node after this one
                 # QUEUED for good and the run with no way to end but Stop.
                 # A successor whose input never made it into the cache is
-                # refused by _blocking_problem, with a reason.
+                # refused by _blocking_problem, with a reason. A value held
+                # for this node to read (Drop Output) is let go either way.
+                self._consumed(node_id)
                 self._release_successors(node_id)
                 self._dispatch()
 
@@ -1529,6 +1586,7 @@ class ExecutionEngine(QObject):
                 self._prune_downstream(node_id)
                 self.node_failed.emit(node_id, error)
         finally:
+            self._consumed(node_id)
             self._dispatch()        # as in _on_node_finished
 
     def _answered_the_question(self, node_id: str,
@@ -1581,6 +1639,11 @@ class ExecutionEngine(QObject):
         self._warm_remaining.clear()
         self._warm_signals.clear()
         self._stale.clear()
+        # a reader that never came — cancelled, or pruned by a failure the
+        # bookkeeping did not see — has no claim left on anything
+        for node_id in list(self._holding):
+            del self._holding[node_id]
+            self._release(node_id)
         self._pressure_timer.stop()
         self._close_record()
         self.run_finished.emit(not self._had_failure)
@@ -1684,7 +1747,55 @@ class ExecutionEngine(QObject):
 
     # ------------------------------------------------------------ reactions
 
+    # ------------------------------------------------------- drop output
+
+    def _hold(self, node_id: str) -> None:
+        """A node just produced its value. With Drop Output off, nothing to
+        do. On, the value stays only while a reader in this run has still
+        to finish — none left, and it goes at once."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or not node.drop_output or node_id in self._run_aimed:
+            return
+        waiting = readers(self.graph, node_id) & (
+            self._pending | set(self._running))
+        if waiting:
+            self._holding[node_id] = waiting
+        else:
+            self._release(node_id)
+
+    def _consumed(self, reader: str) -> None:
+        """`reader` has finished with whatever it read — ran, failed, or
+        left the plan. Any value held only for it can go."""
+        for node_id, waiting in list(self._holding.items()):
+            waiting.discard(reader)
+            if not waiting:
+                del self._holding[node_id]
+                self._release(node_id)
+
+    def _release(self, node_id: str) -> None:
+        """Drop a not-kept node's value. The node stays clean and green; it
+        is marked released so the canvas can say so, and build_plan brings
+        it back when a run needs the value again."""
+        node = self.graph.nodes.get(node_id)
+        if node is None or not node.drop_output or not self.cache.has(node_id):
+            return
+        self.cache.evict(node_id)
+        self.graph.set_released(node_id, True)
+        self.output_released.emit(node_id)
+
+    def _on_drop_output_changed(self, node_id: str, drop: bool) -> None:
+        """Turned off on a node already holding a value: drop it now,
+        unless a run is still to read it (then _hold's bookkeeping will)."""
+        if not drop or node_id in self._holding:
+            return
+        if node_id in self._pending or node_id in self._running:
+            return
+        self._release(node_id)
+
     def _on_dirty_changed(self, node_id: str, dirty: bool) -> None:
+        if dirty and node_id in self.graph.nodes:
+            # dirty says it all now: the next run computes it either way
+            self.graph.set_released(node_id, False)
         if dirty:
             node = self.graph.nodes.get(node_id)
             if node is not None and node.frozen:

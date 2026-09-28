@@ -64,6 +64,8 @@ class GraphEvents:
         self.frozen_changed = Event()  # (node_id: str, frozen: bool)
         self.manual_changed = Event()  # (node_id: str, manual: bool)
         self.bypassed_changed = Event()  # (node_id: str, bypassed: bool)
+        self.drop_output_changed = Event()  # (node_id: str, drop: bool)
+        self.released_changed = Event()  # (node_id: str, released: bool)
         self.preview_enabled_changed = Event()  # (node_id: str, enabled: bool)
         self.port_labels_changed = Event()  # (node_id: str)
         self.flow_pins_changed = Event()    # (node_id: str)

@@ -332,6 +332,25 @@ class TestCanvas:
         assert not item._bypass_badge.isVisible()
         assert item.opacity() == 1.0
 
+    def test_the_line_does_not_hide_the_node_from_a_click(self, qtbot,
+                                                          registry):
+        """The view finds what a right-click is on with itemAt; the overlay
+        covering the node answered instead, and a bypassed node had no
+        context menu."""
+        from flograph.ui.canvas import NodeGraphScene
+        from flograph.ui.canvas.node_item import NodeItem
+        graph = Graph()
+        node = _node(DOUBLE, "t.d")
+        graph.add_node(node)
+        scene = NodeGraphScene(graph, QUndoStack(), registry=registry)
+        graph.set_bypassed(node.id, True)
+        item = scene.node_items[node.id]
+        centre = item.mapToScene(item.boundingRect().center())
+        hits = [i for i in scene.items(centre) if i.isVisible()]
+        assert isinstance(hits[0], NodeItem) or (
+            hits[0].parentItem() is item
+            and not isinstance(hits[0], type(item._bypass_overlay)))
+
     def test_a_bypassed_node_loaded_from_a_file_is_drawn_bypassed(
             self, qtbot, registry):
         from flograph.ui.canvas import NodeGraphScene

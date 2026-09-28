@@ -76,6 +76,26 @@ no input matches comes out empty, and a node below that needs it **fails**,
 so a bypass never quietly takes part of the flow with it. A node with no
 inputs, or none that match an output, can't be bypassed.
 
+### Drop Output
+
+A step that only prepares data for the next one doesn't need to hold on to
+it. Tick **Right-click ▸ Drop Output** and the node runs as usual, hands its result to the nodes that read it, and drops
+it from memory once they have finished. It isn't saved in the project file
+either, which keeps big intermediate tables out of it.
+
+Its light stays **green**: it ran, and it worked. A **struck-through
+cylinder** beside it says the output wasn't kept — grey until the node has
+run, green once its result has been dropped. Hover the node for the
+explanation. The node runs again on its own when a node that reads it has
+to re-run; **Run To This Node** runs it and keeps the result so you can look
+at it in the Inspector.
+
+A node whose output is on show — its own card, a dashboard tile, a report —
+always keeps it, so the option is greyed out there. Drop Output doesn't go
+with Freeze or *Run only when asked* (both exist to serve a kept value):
+turning one on clears the other. The saving is in what's held *after* a run; while
+the next node is reading it the table still has to exist.
+
 ## Frames
 
 **Ctrl+G** wraps the selection in a comment frame. Drag a frame by its

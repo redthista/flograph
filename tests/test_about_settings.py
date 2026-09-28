@@ -126,16 +126,24 @@ class TestTheSettingsGrid:
         """Reported: "can we have a multi line tooltip? easier to read." Qt
         treats a plain string as one unbreakable line, so a paragraph ran
         off the edge of the screen."""
+        import re
         from flograph.ui.settings_dialog import TOOLTIP_WRAP
+
+        def text(tip):          # the words, without markup — only <br> kept
+            return re.sub(r"<(?!br>)[^>]*>", "", tip)
+
         _dialog, grid = self.page(window, "Canvas")
         long_rows = [r for r in self.rows(grid)
-                     if len(r.toolTip(0)) > TOOLTIP_WRAP + 20]
+                     if len(text(r.toolTip(0))) > TOOLTIP_WRAP + 20]
         assert long_rows
         for row in long_rows:
             tip = row.toolTip(0)
             assert tip.startswith("<qt>") and "<br>" in tip
-            assert max(len(line) for line in tip.split("<br>")) \
+            assert max(len(line) for line in text(tip).split("<br>")) \
                 < TOOLTIP_WRAP + 30
+            # ...and Qt must not wrap them again, which it did to every one
+            # of them: a long line, then a short one, all the way down
+            assert "white-space:pre" in tip
 
     def test_it_opens_without_a_horizontal_scrollbar(self, window):
         """Reported: "default size of the settings window should be slightly

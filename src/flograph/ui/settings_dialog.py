@@ -47,12 +47,17 @@ def wrapped_tooltip(text: str) -> str:
     """
     import html
     import textwrap
-    lines = textwrap.wrap(" ".join(text.split()), width=TOOLTIP_WRAP) or [""]
+    # never at a hyphen: "Right-click" split across two lines
+    lines = textwrap.wrap(" ".join(text.split()), width=TOOLTIP_WRAP,
+                          break_on_hyphens=False) or [""]
     # quote=False: this is body text, not an attribute value, and escaping
-    # every apostrophe to &#x27; only makes the source unreadable
-    return ("<qt>"
+    # every apostrophe to &#x27; only makes the source unreadable.
+    # white-space:pre, because Qt word-wraps a rich-text tooltip again at a
+    # width of its own choosing, narrower than these lines: each one broke
+    # in two, long then short, all the way down.
+    return ("<qt><p style='white-space:pre'>"
             + "<br>".join(html.escape(line, quote=False) for line in lines)
-            + "</qt>")
+            + "</p></qt>")
 
 
 class SettingsGrid(QTreeWidget):

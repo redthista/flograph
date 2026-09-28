@@ -486,6 +486,29 @@ class Graph:
         self.events.bypassed_changed.emit(node_id, bypassed)
         self.mark_dirty(node_id)
 
+    def set_drop_output(self, node_id: str, drop: bool) -> None:
+        """Drop this node's output once it has been read, or hold on to it.
+
+        No dirtying either way: nothing the node produces changes. Turning
+        it on lets the engine drop a value already held (unless a run is
+        still using it); turning it off does not bring one back — the
+        next run that wants it runs the node (see engine.build_plan).
+        """
+        node = self.node(node_id)
+        if node.drop_output == drop:
+            return
+        node.drop_output = drop
+        self.events.drop_output_changed.emit(node_id, drop)
+
+    def set_released(self, node_id: str, released: bool) -> None:
+        """The engine's note that this node's value was dropped (or is held
+        again). Runtime only."""
+        node = self.node(node_id)
+        if node.released == released:
+            return
+        node.released = released
+        self.events.released_changed.emit(node_id, released)
+
     def set_locked(self, node_id: str, locked: bool) -> None:
         """Freeze this node's params, code and position against editing."""
         node = self.node(node_id)

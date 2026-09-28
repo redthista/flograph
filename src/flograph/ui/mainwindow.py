@@ -28,6 +28,7 @@ from flograph.core import (
     PortDirection, PortSpec, PortType, Tile, can_connect, parse_spec,
 )
 from flograph.core.bypass import can_bypass
+from flograph.core.drop_output import can_drop_output, settled_on_open
 from flograph.core import dotenv
 from flograph.core import serialization
 from flograph.core import user_nodes
@@ -44,7 +45,7 @@ from .commands import (
     ReorderPagesCommand, SetPageColorCommand,
     SetActiveCommand, SetExclusiveCommand, SetFrameCanvasCommand,
     SetFrameFlagCommand, SetFrameSourceCommand, SetItemCanvasCommand,
-    SetBypassCommand, SetManualCommand,
+    SetBypassCommand, SetDropOutputCommand, SetManualCommand,
     SetFrozenCommand, SetLabelCommand, SetLockedCommand, SetParamCommand,
 )
 from .canvas import ConnectionItem, NodeGraphScene, NodeGraphView
@@ -4643,6 +4644,9 @@ class MainWindow(QMainWindow):
         ids = [node_id] + [i for i in ids if i != node_id]
         many = len(ids) > 1
         menu = QMenu(self)
+        # off by default in QMenu, which silently hid every explanation the
+        # run switches below carry
+        menu.setToolTipsVisible(True)
         if many:
             menu.addSection(f"{len(ids)} nodes selected")
         run_to = menu.addAction("Run These Nodes" if many
@@ -4677,6 +4681,22 @@ class MainWindow(QMainWindow):
             "input it matches, by name and then by type, so everything below "
             "runs as if the node were not there. An output no input matches "
             "comes out empty, and a node that needs it will fail.")
+        drop_action = menu.addAction("Drop Output")
+        drop_action.setCheckable(True)
+        drop_action.setChecked(node.drop_output)
+        droppable = [i for i in ids
+                     if can_drop_output(self.graph, self.graph.nodes[i])]
+        drop_action.setEnabled(node.drop_output or bool(droppable))
+        drop_action.setToolTip(
+            "Tick for a step that only prepares data for the next one: it "
+            "runs as usual, and once the nodes reading it have finished its "
+            "result is dropped from memory and not saved in the file. Its "
+            "light stays green and a crossed-out cylinder shows its output "
+            "was dropped; it runs again by itself when a node that reads "
+            "it has to."
+            if drop_action.isEnabled() else
+            "This node's output is shown on its card, a dashboard or a "
+            "report, so it always keeps it.")
         manual_action = menu.addAction("Run only when asked")
         manual_action.setCheckable(True)
         manual_action.setChecked(node.manual)
@@ -4816,6 +4836,13 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         copy_action = menu.addAction("Copy")
         delete = menu.addAction("Delete")
+        from .settings_dialog import TOOLTIP_WRAP, wrapped_tooltip
+        for action in menu.actions():
+            tip = action.toolTip()
+            # Qt fills an unset tooltip with the action's own text; only a
+            # real explanation needs wrapping
+            if len(tip) > TOOLTIP_WRAP and not tip.startswith("<"):
+                action.setToolTip(wrapped_tooltip(tip))
         chosen = menu.exec(global_pos)
         if chosen is None:
             # Dismissed. Worth its own line rather than falling through the
@@ -4858,6 +4885,12 @@ class MainWindow(QMainWindow):
             self._set_flag_on(
                 ids, "frozen", not node.frozen, SetFrozenCommand,
                 "unfreeze nodes" if node.frozen else "freeze nodes")
+        elif chosen is drop_action:
+            wanted = not node.drop_output
+            targets = droppable if wanted else ids
+            self._set_flag_on(
+                targets, "drop_output", wanted, SetDropOutputCommand,
+                "drop node outputs" if wanted else "keep node outputs")
         elif chosen is bypass_action:
             self._set_bypass_on(ids, not node.bypassed)
         elif chosen is manual_action:
@@ -6071,6 +6104,13 @@ class MainWindow(QMainWindow):
             self.graph.mark_clean(node_id)
             self.graph.set_status(node_id, NodeStatus.DONE)
             self.engine.node_succeeded.emit(node_id)
+        # Drop Output on: nothing of theirs was saved, but their restored
+        # readers vouch for them, so they come back as run-and-released
+        # rather than as a Run All's worth of work for nothing
+        for node_id in settled_on_open(self.graph, registered):
+            self.graph.mark_clean(node_id)
+            self.graph.set_status(node_id, NodeStatus.DONE)
+            self.graph.set_released(node_id, True)
         # The emit storm above ran every card handler against an empty
         # (spilled) entry — that is what placeholders are. Queue what those
         # cards actually display: their own values, plus whatever upstream

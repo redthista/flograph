@@ -121,6 +121,9 @@ class InspectorPanel(QWidget):
 
         engine.node_succeeded.connect(self._on_node_ran)
         engine.node_failed.connect(self._on_node_ran)
+        # a dropped value must not live on in this panel's model — that
+        # would keep the memory Drop Output was turned on to free
+        engine.output_released.connect(self._on_node_ran)
         graph.events.dirty_changed.connect(self._on_dirty_changed)
         graph.events.node_removed.connect(self._on_node_removed)
 
@@ -292,9 +295,17 @@ class InspectorPanel(QWidget):
         self._tabs.tabBar().setVisible(len(ports) > 1)
 
         if entry is None:
-            self._header.setText(f"{node.label} — not computed yet")
+            released = node.released
+            self._header.setText(
+                f"{node.label} — output dropped" if released
+                else f"{node.label} — not computed yet")
             for port in ports:
-                placeholder = QLabel("Run the graph to see this output.")
+                placeholder = QLabel(
+                    "This node ran, but Drop Output is on, so its result "
+                    "was dropped once the nodes reading it were done.\n"
+                    "Run To This Node to see it again."
+                    if released else "Run the graph to see this output.")
+                placeholder.setWordWrap(True)
                 placeholder.setAlignment(Qt.AlignCenter)
                 placeholder.setStyleSheet("color: palette(mid);")
                 self._tabs.addTab(placeholder, port.name)

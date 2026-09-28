@@ -427,6 +427,31 @@ class BypassBadge(NodeBadge):
                          QPointF(self.W - 3.0, self.H - 7.0))
 
 
+class DropBadge(NodeBadge):
+    """A cache cylinder, struck through: Drop Output is on. Grey until the
+    node has run; the status green once its value has been dropped, so the
+    pair — green light, green struck cylinder — reads "ran fine, nothing
+    held"."""
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(self.colour, 1.2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        w, h = self.W, self.H
+        cap = 3.0
+        painter.drawEllipse(QRectF(0.5, 0.5, w - 1.0, cap))
+        body = QPainterPath(QPointF(0.5, 0.5 + cap / 2))
+        body.lineTo(QPointF(0.5, h - cap / 2 - 0.5))
+        body.arcTo(QRectF(0.5, h - cap - 0.5, w - 1.0, cap), 180, 180)
+        body.lineTo(QPointF(w - 0.5, 0.5 + cap / 2))
+        painter.drawPath(body)
+        slash = QPen(self.colour, 1.6)
+        slash.setCapStyle(Qt.RoundCap)
+        painter.setPen(slash)
+        painter.drawLine(QPointF(-0.5, h - 0.5), QPointF(w + 0.5, 0.5))
+
+
 class BypassOverlay(QGraphicsItem):
     """The line through a bypassed node, from each input to the output it
     feeds — the whole of what the node does while bypassed, drawn on it.
@@ -452,6 +477,14 @@ class BypassOverlay(QGraphicsItem):
         pad = PortItem.RADIUS + 16.0
         return QRectF(-pad, -pad, node_item.width + 2 * pad,
                       node_item.body_height + 2 * pad)
+
+    def shape(self) -> QPainterPath:
+        # Nothing to hit. It covers the whole node from above, and the view
+        # finds what a right-click, double-click or drag is on with itemAt:
+        # with a shape it answered "the overlay", which is not a node, and a
+        # bypassed node had no menu. setAcceptedMouseButtons alone does not
+        # keep an item out of itemAt.
+        return QPainterPath()
 
     def refresh(self) -> None:
         self.prepareGeometryChange()
@@ -1055,6 +1088,7 @@ class NodeItem(QGraphicsObject):
         self._bypass_badge = BypassBadge(self)
         self._bypass_badge.colour = theme.BYPASS
         self._bypass_overlay = BypassOverlay(self)
+        self._drop_badge = DropBadge(self)
         self._manual_badge = ManualBadge(self)
         self._heavy_badge = HeavyBadge(self)
         # The node's own two run flags, and the same two as the frames
@@ -1108,6 +1142,7 @@ class NodeItem(QGraphicsObject):
         self.set_frozen(node.frozen)
         self.set_manual(node.manual)
         self.set_bypassed(node.bypassed)
+        self.set_drop_output(node.drop_output, node.released)
         self.set_locked(node.locked)
 
     # ------------------------------------------------------------- geometry
@@ -3331,6 +3366,17 @@ class NodeItem(QGraphicsObject):
         self._bypass_overlay.refresh()
         self._apply_run_flags()
 
+    def set_drop_output(self, drop: bool, released: bool = False) -> None:
+        """Show the struck cylinder while Drop Output is on — grey before
+        the node has run, status-green once its value has been dropped."""
+        self._drop_badge.setVisible(drop)
+        self._drop_badge.colour = (theme.status_color(NodeStatus.DONE)
+                                   if released else theme.NODE_SUBTEXT)
+        self._drop_badge.update()
+        self._layout_badges()
+        self._refresh_tooltip()
+        self.update()
+
     def set_locked(self, locked: bool) -> None:
         """Show the padlock. Refusing the move itself is itemChange's job —
         clearing ItemIsMovable is not enough, because a button node toggles
@@ -3421,16 +3467,16 @@ class NodeItem(QGraphicsObject):
             y = status.center().y() - NodeBadge.H / 2
             x = self.width / 2 - LED_RADIUS - 6.0 - NodeBadge.W
             for badge in (self._heavy_badge, self._freeze_badge,
-                          self._bypass_badge, self._manual_badge,
-                          self._lock_badge):
+                          self._bypass_badge, self._drop_badge,
+                          self._manual_badge, self._lock_badge):
                 if badge.isVisible():
                     badge.setPos(x, y)
                     x -= NodeBadge.W + 3.0
             return
         x = 1.0
         for badge in (self._heavy_badge, self._freeze_badge,
-                      self._bypass_badge, self._manual_badge,
-                      self._lock_badge):
+                      self._bypass_badge, self._drop_badge,
+                      self._manual_badge, self._lock_badge):
             if badge.isVisible():
                 badge.setPos(x, -(NodeBadge.H + 3.0))
                 x += NodeBadge.W + 4.0
@@ -4490,11 +4536,39 @@ class NodeItem(QGraphicsObject):
             self.setToolTip("Manual — Run All walks past this one. Run it "
                             "from the right-click menu, or from an Action "
                             "Button that names it.")
+        elif self.node.drop_output:
+            if self.node.released:
+                head = ("Ran, output dropped — it finished fine (green "
+                        "light), and its result was dropped from memory "
+                        "once the nodes reading it were done (green struck "
+                        "cylinder). Run To This Node to look at it again; it "
+                        "also runs again by itself when a node that reads it "
+                        "has to.")
+            else:
+                head = ("Drop Output is on — when it runs, its result goes "
+                        "to the nodes reading it and is then dropped from "
+                        "memory, and it isn't saved in the file. The struck "
+                        "cylinder turns green once that has happened.")
+            self.setToolTip(head + " Untick Right-click > Drop Output to "
+                            "keep it.")
         elif self.link_card and not self.node.description:
             kind = "Goto" if self.goto_card else "From"
             self.setToolTip(f"{kind}: {self._link_card_text()}")
         else:
             self.setToolTip(self.node.description)
+        self._wrap_tooltip()
+
+    def _wrap_tooltip(self) -> None:
+        """Break a long one-line tooltip into lines, as the settings hints
+        are. Qt shows a plain string as one line however long, and the run
+        state notes and error messages here ran across half the screen. A
+        tip with line breaks of its own (a description, a traceback) is
+        left as its author laid it out."""
+        from ..settings_dialog import TOOLTIP_WRAP, wrapped_tooltip
+        tip = self.toolTip()
+        if (tip and len(tip) > TOOLTIP_WRAP and "\n" not in tip
+                and not tip.startswith("<")):
+            self.setToolTip(wrapped_tooltip(tip))
 
     def _start_pulse(self) -> None:
         if self._pulse_anim is not None:
