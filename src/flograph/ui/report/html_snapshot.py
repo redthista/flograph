@@ -125,11 +125,28 @@ class _Snapshotter:
             settings.setAttribute(
                 QWebEngineSettings.WebAttribute.PrintElementBackgrounds, True)
             view.hide()
-        except Exception:
+        except ImportError:
             self._broken = True
             return None
+        except Exception:
+            return None          # try again next time: not a missing module
+        # A renderer that dies takes the page with it; the next picture
+        # gets a new one instead of timing out on the dead one.
+        try:
+            view.page().renderProcessTerminated.connect(
+                lambda *_args, v=view: self._drop(v))
+        except Exception:
+            pass
         self._view = view
         return view
+
+    def _drop(self, view) -> None:
+        if view is self._view:
+            self._view = None
+            view.deleteLater()
+
+    def unavailable(self) -> bool:
+        return self._broken
 
     def _load(self, view, html: str, width: int, height: int) -> bool:
         """Put `html` in front of the view and wait for it to settle.
@@ -191,6 +208,9 @@ class _Snapshotter:
         self._busy = True
         try:
             if not self._load(view, html, width, height):
+                # a page that will not load may be a dead renderer: start
+                # the next picture on a fresh one
+                self._drop(view)
                 return None
             pdf = self._pdf(view, width, height)
         except Exception:
@@ -247,6 +267,12 @@ def _encode(image) -> "bytes | None":
 
 
 _SNAPSHOTTER = _Snapshotter()
+
+
+def unavailable() -> bool:
+    """Whether web views cannot be pictured here at all — WebEngine is not
+    installed — rather than a page that did not answer this time."""
+    return _SNAPSHOTTER.unavailable()
 
 
 def snapshot(html: str, width: int, height: int,

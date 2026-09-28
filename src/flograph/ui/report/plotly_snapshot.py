@@ -28,6 +28,8 @@ import json
 from collections import deque
 from contextlib import contextmanager
 
+import time
+
 from PySide6.QtCore import QEventLoop, QTimer, QUrl
 
 # Long enough for a slow first paint on a loaded machine, short enough that
@@ -35,6 +37,12 @@ from PySide6.QtCore import QEventLoop, QTimer, QUrl
 LOAD_TIMEOUT_MS = 20000
 DRAW_TIMEOUT_MS = 20000
 POLL_MS = 25
+
+# A page that would not load, or whose renderer died, is not a missing
+# WebEngine: it is tried again, after these pauses, before its charts are
+# given up on. The first load after a restart competes with every card the
+# project opens with, and one slow start used to cost the whole session.
+RETRY_AFTER_S = (5, 15, 45)
 
 # Finished PNGs, keyed by figure content and size. The preview re-renders on
 # a debounce whenever the body is edited, and pushing unchanged charts back
@@ -118,7 +126,17 @@ class _Snapshotter:
     def __init__(self) -> None:
         self._view = None
         self._tmp = None
-        self._broken = False    # a structural failure — stop retrying
+        #: WebEngine or plotly cannot be imported: nothing to retry
+        self._broken = False
+        #: pages in a row that would not load or whose renderer died; reset
+        #: by a page that loads
+        self._failures = 0
+        #: time.monotonic() before which no new page is tried
+        self._retry_at = 0.0
+        self._retry_armed = False
+        #: charts given up on after the last retry — tried again, all of
+        #: them, once a page does load
+        self._given_up: set = set()
         self._busy = False      # re-entrancy guard for the nested loop
         # Background drawing (see `deferred`): one figure at a time, queued.
         self._queue: deque = deque()     # (key, spec json, w, h, scale)
@@ -154,20 +172,81 @@ class _Snapshotter:
                 return None      # no app yet; try again later, not broken
             from ..webprofile import new_view
 
+            if time.monotonic() < self._retry_at:
+                return None      # a page just failed; not again so soon
             view = new_view()
             # A viewport big enough to lay out in; toImage takes its own
             # size, so this is not what decides the picture's dimensions.
             view.resize(1200, 800)
+            self._release_on_quit(view)
             view.load(self._shell_url())
-            if not _await_js(view, "window.__snapReady === true",
-                             LOAD_TIMEOUT_MS):
-                raise RuntimeError("snapshot page never became ready")
-        except Exception:
+        except ImportError:
             self._broken = True
             return None
-        self._view = view
-        self._release_on_quit(view)
+        except Exception:
+            self._page_failed(None)
+            return None
+        if not _await_js(view, "window.__snapReady === true",
+                         LOAD_TIMEOUT_MS):
+            self._page_failed(view)
+            return None
+        self._adopt(view)
         return view
+
+    # ------------------------------------------------ a page's life
+
+    def _adopt(self, view) -> None:
+        """`view` loaded: it is the page now, and a renderer dying under it
+        is noticed at once rather than as a string of draws timing out."""
+        self._view = view
+        self._failures = 0
+        # charts given up on while there was no page get their chance
+        _FAILED.difference_update(self._given_up)
+        self._given_up.clear()
+        try:
+            view.page().renderProcessTerminated.connect(
+                lambda *_args, v=view: self._renderer_gone(v))
+        except Exception:
+            pass
+
+    def _renderer_gone(self, view) -> None:
+        if view is self._view:
+            self._page_failed(view)
+
+    def _page_failed(self, view) -> None:
+        """The page would not load, or its renderer died: drop it, and let
+        a new one be tried after a pause. Charts waiting on it are told —
+        not marked failed, unless this was the last try — so the render
+        that asked for them asks again and gets the next page."""
+        if view is not None:
+            if view is self._view:
+                self._view = None
+            try:
+                view.setPage(None)
+            except Exception:
+                pass
+            view.deleteLater()
+        self._loading = False
+        self._failures += 1
+        pause = RETRY_AFTER_S[min(self._failures, len(RETRY_AFTER_S)) - 1]
+        self._retry_at = time.monotonic() + pause
+        give_up = self._failures > len(RETRY_AFTER_S)
+        job, self._job = self._job, None
+        if self._deadline is not None:
+            self._deadline.stop()
+            self._deadline = None
+        waiting = ([job] if job is not None else []) + [
+            entry[0] for entry in self._queue]
+        self._queue.clear()
+        for key in waiting:
+            self._finish(key, None, transient=not give_up)
+        if give_up:
+            self._given_up.update(waiting)
+
+    def unavailable(self) -> bool:
+        """WebEngine or plotly is missing — as opposed to a page that would
+        not answer, which is tried again."""
+        return self._broken
 
     # ------------------------------------------------ background drawing
 
@@ -190,6 +269,16 @@ class _Snapshotter:
                 self._finish(self._queue.popleft()[0], None)
             return
         if self._view is None:
+            wait = self._retry_at - time.monotonic()
+            if wait > 0:
+                if not self._retry_armed:
+                    self._retry_armed = True
+
+                    def again():
+                        self._retry_armed = False
+                        self._pump()
+                    QTimer.singleShot(int(wait * 1000) + 10, again)
+                return
             self._load_async()
             return
         key, spec, width, height, scale = self._queue.popleft()
@@ -237,10 +326,10 @@ class _Snapshotter:
         self._finish(key, data)
         self._pump()
 
-    def _finish(self, key, data) -> None:
+    def _finish(self, key, data, transient: bool = False) -> None:
         if data:
             _remember(key, data)
-        else:
+        elif not transient:
             _FAILED.add(key)
         for done in self._waiting.pop(key, []):
             try:
@@ -259,11 +348,14 @@ class _Snapshotter:
             return
 
         def release():
+            import shiboken6
             self._loading = False
             self._job = None
             self._queue.clear()
             self._view = None
             self._pending_view = None
+            if not shiboken6.isValid(view):
+                return           # a failed page, already let go
             try:
                 view.setPage(None)
             except Exception:
@@ -286,8 +378,12 @@ class _Snapshotter:
             view = new_view()
             view.resize(1200, 800)
             view.load(self._shell_url())
-        except Exception:
+        except ImportError:
             self._broken = True
+            self._pump()
+            return
+        except Exception:
+            self._page_failed(None)
             self._pump()
             return
         self._loading = True
@@ -298,7 +394,7 @@ class _Snapshotter:
             if value:
                 self._loading = False
                 self._deadline.stop()
-                self._view = view
+                self._adopt(view)
                 self._pump()
             else:
                 QTimer.singleShot(POLL_MS, poll)
@@ -310,8 +406,7 @@ class _Snapshotter:
 
         def give_up():
             if self._loading:
-                self._loading = False
-                self._broken = True
+                self._page_failed(view)
                 self._pump()
 
         self._pending_view = view      # kept alive while it loads
@@ -396,6 +491,12 @@ def snapshot(figure, width: int, height: int,
     if data:
         _remember(key, data)
     return data
+
+
+def unavailable() -> bool:
+    """Whether charts cannot be pictured here at all — WebEngine or plotly
+    is not installed — rather than a page that did not answer this time."""
+    return _SNAPSHOTTER.unavailable()
 
 
 def _remember(key, data: bytes) -> None:

@@ -470,10 +470,29 @@ def plotly_image(value, image_width: int, for_print: bool,
         return value.to_image(format="png", width=width, height=height,
                               scale=scale)
     except Exception:
-        return ("> **⚠ This Plotly chart could not be drawn** — Qt "
-                "WebEngine is not available to take a picture of it. Install "
-                "the full PySide6 package from Manage Packages…, then run "
-                "again.")
+        return _not_drawn("This Plotly chart", _plotly_unavailable())
+
+
+def _plotly_unavailable() -> bool:
+    try:
+        from .plotly_snapshot import unavailable
+    except ImportError:
+        return True
+    return unavailable()
+
+
+def _not_drawn(what: str, unavailable: bool) -> str:
+    """Why a picture is missing — and only "install WebEngine" when that is
+    true. The chart renderer being slow to start, or its page dying, used
+    to say the same thing, sending people to reinstall a PySide6 that was
+    drawing the very same chart on the canvas beside it."""
+    if unavailable:
+        return (f"> **⚠ {what} could not be drawn** — Qt WebEngine is not "
+                "available to take a picture of it. Install the full PySide6 "
+                "package from Manage Packages…, then run again.")
+    return (f"> **⚠ {what} could not be drawn** — the chart renderer did "
+            "not answer. It is tried again as the report updates; if this "
+            "stays, restart flograph.")
 
 
 _PLACEHOLDERS: dict = {}
@@ -1253,9 +1272,12 @@ class _Resolver:
             if image.loadFromData(picture, "PNG") and not image.isNull():
                 return self._token(image)
         self.problems.append(f"“{ref}” could not be drawn")
-        return ("> **⚠ This web view could not be drawn** — Qt WebEngine "
-                "is not available to take a picture of it. Install the full "
-                "PySide6 package from Manage Packages…, then run again.")
+        try:
+            from .html_snapshot import unavailable
+            missing = unavailable()
+        except ImportError:
+            missing = True
+        return _not_drawn("This web view", missing)
 
     def render_value(self, value, ref: str) -> str:
         if value is None:

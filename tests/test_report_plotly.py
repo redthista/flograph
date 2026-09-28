@@ -254,3 +254,113 @@ class TestInTheBackground:
             assert plotly_snapshot.snapshot(figure, 300, 200) is None
         qtbot.wait(50)
         assert ready == [True]
+
+
+class TestAPageThatDoesNotAnswer:
+    """The hidden page that pictures charts, slow to start or killed, used
+    to be written off for the whole session — and every chart after it then
+    said WebEngine was not installed, beside a canvas drawing the same chart
+    in WebEngine perfectly well. A page that does not answer is replaced."""
+
+    @pytest.fixture
+    def snap(self, monkeypatch):
+        fresh = plotly_snapshot._Snapshotter()
+        monkeypatch.setattr(plotly_snapshot, "_SNAPSHOTTER", fresh)
+        monkeypatch.setattr(plotly_snapshot, "LOAD_TIMEOUT_MS", 400)
+        monkeypatch.setattr(plotly_snapshot, "RETRY_AFTER_S", (0.1, 0.1, 0.1))
+        plotly_snapshot.clear_cache()
+        yield fresh
+        plotly_snapshot.clear_cache()
+
+    def _draw(self, qtbot, figure, tries=8):
+        """Ask the way the preview does — in the background, again each
+        time it says it is done — until there is a picture."""
+        for _ in range(tries):
+            ready = []
+            with plotly_snapshot.deferred(lambda: ready.append(True)):
+                got = plotly_snapshot.snapshot(figure, 400, 260)
+            if isinstance(got, bytes) or got is None:
+                return got
+            qtbot.waitUntil(lambda: bool(ready), timeout=45000)
+        return None
+
+    def test_a_first_page_that_never_loads_is_tried_again(
+            self, qtbot, snap, figure, tmp_path):
+        from PySide6.QtCore import QUrl
+        stuck = tmp_path / "stuck.html"
+        stuck.write_text("<html><body>never ready</body></html>")
+        real = snap._shell_url
+        served = []
+
+        def shell_url():
+            served.append(1)
+            if len(served) == 1:
+                return QUrl.fromLocalFile(str(stuck))
+            return real()
+
+        snap._shell_url = shell_url
+        got = self._draw(qtbot, figure)
+        assert len(served) >= 2                 # it was tried again
+        assert not plotly_snapshot.unavailable()
+        if got is None:
+            pytest.skip("Qt WebEngine could not render here")
+        assert got[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_a_renderer_that_dies_is_replaced(self, qtbot, snap, figure):
+        first = self._draw(qtbot, figure)
+        if first is None:
+            pytest.skip("Qt WebEngine could not render here")
+        dead = snap._view
+        snap._renderer_gone(dead)               # what Chromium would signal
+        assert snap._view is None and not plotly_snapshot.unavailable()
+        other = px.line(pd.DataFrame({"x": [1, 2, 3], "y": [2, 3, 1]}),
+                        x="x", y="y")
+        got = self._draw(qtbot, other)
+        assert got[:8] == b"\x89PNG\r\n\x1a\n"
+        assert snap._view is not None and snap._view is not dead
+
+    def test_it_gives_up_after_the_last_retry_and_says_why(
+            self, qtbot, snap, figure, monkeypatch):
+        """Then — and only then — the chart is left, with the page naming
+        a renderer that did not answer rather than a missing install."""
+        from PySide6.QtCore import QUrl
+        monkeypatch.setattr(snap, "_shell_url",
+                            lambda: QUrl("about:blank"))
+        monkeypatch.setattr(type(figure), "to_image",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                RuntimeError("no kaleido")))
+        result = None
+        for _ in range(8):
+            ready = []
+            with plotly_snapshot.deferred(lambda: ready.append(True)):
+                result = plotly_image(figure, 510, for_print=False)
+            if isinstance(result, str):
+                break
+            qtbot.waitUntil(lambda: bool(ready), timeout=45000)
+        assert isinstance(result, str)
+        assert "did not answer" in result
+        assert "Install" not in result
+
+
+class TestTheMessageTellsTheTruth:
+
+    @pytest.fixture
+    def undrawable(self, monkeypatch, figure):
+        monkeypatch.setattr(plotly_snapshot, "snapshot",
+                            lambda *a, **k: None)
+        monkeypatch.setattr(type(figure), "to_image",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                RuntimeError("no kaleido")))
+        return figure
+
+    def test_webengine_present_is_not_told_to_install(
+            self, monkeypatch, undrawable):
+        monkeypatch.setattr(plotly_snapshot, "unavailable", lambda: False)
+        result = plotly_image(undrawable, 510, False)
+        assert "did not answer" in result and "Install" not in result
+
+    def test_webengine_missing_is_told_to_install(
+            self, monkeypatch, undrawable):
+        monkeypatch.setattr(plotly_snapshot, "unavailable", lambda: True)
+        result = plotly_image(undrawable, 510, False)
+        assert "Install the full PySide6" in result
