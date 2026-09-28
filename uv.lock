@@ -474,7 +474,7 @@ wheels = [
 
 [[package]]
 name = "flograph"
-version = "0.1.15"
+version = "0.1.19"
 source = { editable = "." }
 dependencies = [
     { name = "jedi" },
