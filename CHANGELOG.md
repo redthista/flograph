@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **A `right` spark lines up in a report** | A sparkline or icon placed `right` beside a value (`region spark right from jan..dec`) sat straight after the text on a report page and in its web view, so it started at a different place on every row and, in a table stretched across the window, stopped well short of the cell's edge. It now sits against the cell's right edge, starting at the same place on every row, as it does on the card. |
 
 ## 0.1.19
 
