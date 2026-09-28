@@ -402,7 +402,7 @@ def test_save_button_hidden_until_dirty(frame_window):
     frame_window.undo_stack.push(QUndoCommand("edit"))
     frame_window._update_title()
     assert tb._save_btn.isVisibleTo(tb)
-    assert tb._save_btn.text() == "Unsaved changes"
+    assert tb._save_btn.text() == "Save Changes"
 
 
 # -- compact ---------------------------------------------------

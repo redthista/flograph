@@ -842,12 +842,12 @@ class TitleBar(QWidget):
         row.addWidget(self._project_btn)
 
         # Only on screen when it matters: no button while everything is
-        # saved, and its own label ("Unsaved changes") once it appears.
+        # saved, and its own label ("Save Changes") once it appears.
         self._save_btn = QToolButton()
         self._save_btn.setObjectName("save_btn")
         self._save_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._save_btn.setIcon(frame_icon("save", _UNSAVED))
-        self._save_btn.setText("Unsaved changes")
+        self._save_btn.setText("Save Changes")
         self._save_btn.setToolTip("Save the workflow  (Ctrl+S)")
         self._save_btn.clicked.connect(window._save)
         self._save_btn.hide()
