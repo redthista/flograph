@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QIcon, QKeySequence, QPixmap,
+    QAction, QColor, QFont, QIcon, QKeySequence, QPixmap, QValidator,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox,
@@ -191,6 +191,38 @@ def _combo(pairs) -> QComboBox:
     for label, token in pairs:
         box.addItem(label, token)
     return box
+
+
+class _UnsetSpinBox(QSpinBox):
+    """A spin box whose lowest step is a word — "auto" — meaning unset, and
+    which can be **emptied** to get there.
+
+    The word is one step below the least legal number, so the only way back
+    to it used to be stepping down past the minimum: deleting the number,
+    which is what anyone does to take a width off, left the box invalid and
+    Qt put the old width straight back. An empty box, or the start of the
+    word, now reads as the unset step.
+    """
+
+    def _is_unset(self, text: str) -> bool:
+        special = self.specialValueText()
+        if not special:
+            return False
+        typed = text.strip()
+        suffix = self.suffix().strip()
+        if suffix and typed.endswith(suffix):
+            typed = typed[:-len(suffix)].strip()
+        return not typed or special.lower().startswith(typed.lower())
+
+    def validate(self, text, pos):
+        if self._is_unset(text):
+            return QValidator.State.Acceptable, text, pos
+        return super().validate(text, pos)
+
+    def valueFromText(self, text) -> int:
+        if self._is_unset(text):
+            return self.minimum()
+        return super().valueFromText(text)
 
 
 _THIS_COLUMN = "(this column)"
@@ -773,7 +805,7 @@ class RuleBuilder(QDialog):
         fl.addStretch(1)
         f.addRow("", flags)
 
-        self._spark_width = QSpinBox()
+        self._spark_width = _UnsetSpinBox()
         self._spark_width.setRange(MIN_SPARK_WIDTH - 1, MAX_SPARK_WIDTH)
         self._spark_width.setSpecialValueText("auto")
         self._spark_width.setSuffix(" px")
@@ -1104,7 +1136,7 @@ class RuleBuilder(QDialog):
         self._pic_place = _combo(_PICTURE_PLACES)
         self._pic_place.currentIndexChanged.connect(self._refresh)
         f.addRow("Place", self._pic_place)
-        self._pic_size = QSpinBox()
+        self._pic_size = _UnsetSpinBox()
         self._pic_size.setRange(MIN_PICTURE_SIZE - 1, MAX_PICTURE_SIZE)
         self._pic_size.setSpecialValueText("as tall as the row")
         self._pic_size.setValue(MIN_PICTURE_SIZE - 1)
@@ -1242,7 +1274,7 @@ class RuleBuilder(QDialog):
     def _height_spin(self, unset: "str | None" = None) -> QSpinBox:
         """A row height in pixels. With `unset`, one step below the least
         is that word — how a spin box says "leave it alone"."""
-        box = QSpinBox()
+        box = _UnsetSpinBox()
         box.setRange(MIN_ROW_HEIGHT - (1 if unset else 0), MAX_ROW_HEIGHT)
         if unset:
             box.setSpecialValueText(unset)
@@ -1457,7 +1489,7 @@ class RuleBuilder(QDialog):
         self._layout_prop.addItem("Header label", "label")
         f.addRow("Set", self._layout_prop)
 
-        self._layout_width = QSpinBox()
+        self._layout_width = _UnsetSpinBox()
         # one step below the legal minimum is the "auto" position — how a
         # spin box says "unset", and here how a rule says "back to fitting
         # the content" over an earlier pattern rule

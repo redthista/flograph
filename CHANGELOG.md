@@ -5,6 +5,7 @@
 | Category | Change | Details |
 | --- | --- | --- |
 | Fix | **A `right` spark lines up in a report** | A sparkline or icon placed `right` beside a value (`region spark right from jan..dec`) sat straight after the text on a report page and in its web view, so it started at a different place on every row and, in a table stretched across the window, stopped well short of the cell's edge. It now sits against the cell's right edge, starting at the same place on every row, as it does on the card. |
+| Fix | **Deleting a width in Rules… sets it back to auto** | In the **Rules…** builder, a sparkline's **Width**, a column's **Width**, a picture's size and a highlight's row height can be left on *auto*, but once a number was set, deleting it put the number straight back — the only way to *auto* was to step the arrows below the smallest size. An emptied box now goes back to *auto*, and so does typing the start of the word. |
 
 ## 0.1.19
 

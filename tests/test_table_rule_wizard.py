@@ -702,3 +702,51 @@ def test_a_pills_text_and_place_survive_being_edited(build):
     assert b._hl_pill.isChecked() is True
     assert b._hl_badge.text() == "OT"
     assert b._hl_place.currentData() == "right"
+
+
+class TestEmptyingAnAutoBox:
+    """A width box whose lowest step reads "auto" goes back to it when the
+    number is deleted. It used to put the old width straight back, so a
+    spark's width could not be taken off once set."""
+
+    @staticmethod
+    def _clear(qtbot, box, typed=""):
+        from PySide6.QtCore import Qt
+        edit = box.lineEdit()
+        qtbot.keyClick(edit, Qt.Key_A, Qt.ControlModifier)
+        qtbot.keyClick(edit, Qt.Key_Backspace)
+        if typed:
+            qtbot.keyClicks(edit, typed)
+        qtbot.keyClick(edit, Qt.Key_Return)
+
+    def test_a_spark_width_deleted_is_auto(self, qtbot):
+        b = RuleBuilder(COLUMNS + ["jan", "feb", "mar"], rule=parse_rules(
+            "trend spark 90px from jan..mar")[0])
+        qtbot.addWidget(b)
+        assert "90px" in b.line()
+        self._clear(qtbot, b._spark_width)
+        assert b._spark_width.value() == b._spark_width.minimum()
+        assert b._spark_width.text() == "auto"
+        assert "px" not in b.line()
+        _valid(b.line())
+
+    def test_typing_the_word_is_auto_too(self, qtbot):
+        b = RuleBuilder(COLUMNS + ["jan", "feb", "mar"], rule=parse_rules(
+            "trend spark 90px from jan..mar")[0])
+        qtbot.addWidget(b)
+        self._clear(qtbot, b._spark_width, "au")
+        assert b._spark_width.text() == "auto"
+        assert "px" not in b.line()
+
+    def test_a_number_still_types(self, qtbot):
+        b = RuleBuilder(COLUMNS + ["jan", "feb", "mar"], rule=parse_rules(
+            "trend spark from jan..mar")[0])
+        qtbot.addWidget(b)
+        self._clear(qtbot, b._spark_width, "120")
+        assert b._spark_width.value() == 120
+        assert "120px" in b.line()
+
+    def test_a_column_width_deleted_is_auto(self, build, qtbot):
+        b = build()
+        self._clear(qtbot, b._layout_width)
+        assert b._layout_width.value() == b._layout_width.minimum()
