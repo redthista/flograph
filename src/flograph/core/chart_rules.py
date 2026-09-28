@@ -703,8 +703,12 @@ def lint(text: str) -> list[tuple[int, str]]:
 # ------------------------------------------------------------------ apply
 
 def apply_rules(fig, rules, *, frame=None, raw=None, compare=None,
-                x: str = "", ys: tuple = (), aggregate: str = "") -> list[str]:
+                x: str = "", ys: tuple = (), aggregate: str = "",
+                empty: str = "gap") -> list[str]:
     """Apply `rules` to `fig`, in order. Returns what could not be done.
+
+    `empty` is the chart's Empty values setting: "gap" leaves a series'
+    missing points missing, "zero" draws them as 0.
 
     Nothing here raises: a rule naming a column that isn't there, or a
     series on a node with no data to draw from, is reported and skipped so
@@ -714,8 +718,9 @@ def apply_rules(fig, rules, *, frame=None, raw=None, compare=None,
     problems: list[str] = []
     for rule in rules:
         try:
+            extra = {"empty": empty} if rule.kind == "series" else {}
             _APPLIERS[rule.kind](fig, rule, frame, raw, compare, x, ys,
-                                 aggregate)
+                                 aggregate, **extra)
         except Exception as exc:                        # noqa: BLE001
             problems.append(f"line {rule.lineno}: {exc}")
     return problems
@@ -923,7 +928,9 @@ def _apply_config(fig, rule, *_args) -> None:
                             **rule.opts["json"]}
 
 
-def _apply_series(fig, rule, frame, raw, compare, x, ys, aggregate) -> None:
+def _apply_series(fig, rule, frame, raw, compare, x, ys, aggregate,
+                  empty: str = "gap") -> None:
+    import pandas as pd
     import plotly.graph_objects as go
 
     opts = rule.opts
@@ -954,6 +961,8 @@ def _apply_series(fig, rule, frame, raw, compare, x, ys, aggregate) -> None:
             and raw is not None and opts["column"] in raw.columns):
         data = raw
     labels, values, name = _series_values(opts, data, x, ys, aggregate)
+    if empty == "zero":
+        values = [0 if pd.isna(v) else v for v in values]
     style = SERIES_STYLES[opts["style"]]
     mode, dash, fill = style
     marker_line: dict[str, Any] = {}

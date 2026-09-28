@@ -60,6 +60,10 @@ A series is drawn from the same rows as the chart, so with **Group and total**
 set to sum, the bars and the total line agree. A column that the summarising
 took away is read from the raw rows and grouped the same way.
 
+A month with no numbers in it is a gap in the series, not a zero. Set the
+chart's **Empty values** to *zero* to draw it as 0 instead; the setting
+covers the chart's own marks too.
+
 On **Chart per Value**, every panel gets the rules. A compare table holding the
 **Split by** column is cut to each panel; one without it is used whole, so a
 single historic total can sit on every panel.

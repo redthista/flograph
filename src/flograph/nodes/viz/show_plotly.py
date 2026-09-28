@@ -43,6 +43,11 @@ those raw rows on, filtered by whatever was clicked, dragged or zoomed.
 Hover data, size and text have no single value per group, so they are left
 out while it is on.
 
+**Empty values** decides what a missing number looks like: a **gap** (the
+default) — the line breaks, the bar is absent — or a **zero**, drawn as a
+real 0. It covers a missing value in the table, a group whose values were
+all empty, and a `series` from the Chart rules box.
+
 **Kind** picks the chart, and the rest of the panel follows it: only the
 settings that chart actually has appear. Twenty-eight of them, in families:
 
@@ -135,7 +140,7 @@ from typing import Any, Iterable, Optional
 NODE = {
     "label": "Show Plotly",
     "category": "Viz",
-    "version": "2.3",
+    "version": "2.4",
     "card": "webview",
     # Lets the chart's own page write this node's "selected" param when a
     # point is clicked — see "On click" below and flograph.core.bridge.
@@ -536,6 +541,12 @@ _ROWS: list[dict[str, Any]] = [
      "default": "none",
      # not scatter: a scatter is one point per row by nature, and it already
      # sits at the most settings a panel should show (test_plotly_kinds)
+     "kinds": ["line", "bar", "area", "funnel"]},
+    # A missing number is a gap by default: a zero would claim a value
+    # nobody measured. Some charts do mean "none" by empty, and those can
+    # say so here.
+    {"name": "empty", "type": "choice", "label": "Empty values",
+     "options": ["gap", "zero"], "default": "gap",
      "kinds": ["line", "bar", "area", "funnel"]},
     {"name": "z", "type": "columns", "label": "Z column", "multi": False,
      "default": "", "placeholder": "the value at each x/y", "arg": "z"},
@@ -1802,7 +1813,7 @@ def _style_numbers(text) -> list:
 #: the tests refuse.
 _SECTION_GROUPS: list[tuple[str, bool, tuple[str, ...]]] = [
     ("What to plot", False, (
-        "x", "y", "summarise", "z", "x_start", "x_end", "names", "values",
+        "x", "y", "summarise", "empty", "z", "x_start", "x_end", "names", "values",
         "path", "dimensions", "r", "theta", "a", "b", "c")),
     ("Colour and grouping", False, (
         "color", "color_map_column", "size", "facet_row", "facet_col",
@@ -2233,6 +2244,30 @@ def _summarised(ctx, table, kwargs: dict, kind: str):
     return grouped, across
 
 
+def _empty_as_zero(ctx, drawn, kwargs: dict, kind: str):
+    """`drawn` with its missing values as 0, when Empty values says zero.
+
+    Only the value axis — Y, or X for horizontal bars — and only numeric
+    columns: a blank category is not a number, and a text column filled
+    with 0 would grow a "0" category on the axis.
+    """
+    if ctx.params.get("empty", "gap") != "zero" or kind not in _SUMMARISE_KINDS:
+        return drawn
+    import pandas as pd
+
+    across = "x" if kwargs.get("orientation") == "h" else "y"
+    columns = kwargs.get(across)
+    columns = [columns] if isinstance(columns, str) else list(columns or [])
+    filled = {c: drawn[c].fillna(0) for c in columns
+              if c in drawn.columns
+              and pd.api.types.is_numeric_dtype(drawn[c])
+              and drawn[c].isna().any()}
+    if not filled:
+        return drawn
+    ctx.log(f"drew empty values in {', '.join(filled)} as 0")
+    return drawn.assign(**filled)
+
+
 
 def _chart_rules():
     """The chart-rules language, or None on a flograph too old to have it.
@@ -2268,7 +2303,9 @@ def _apply_chart_rules(ctx, fig, frame, raw, compare, kwargs, kind) -> None:
             fig, rules, frame=frame, raw=raw, compare=compare, x=x,
             ys=tuple(_column_list(kwargs.get("y"))),
             aggregate=_SUMMARISE.get(
-                str(ctx.params.get("summarise", "none")), ""))
+                str(ctx.params.get("summarise", "none")), ""),
+            empty=("zero" if ctx.params.get("empty", "gap") == "zero"
+                   and kind in _SUMMARISE_KINDS else "gap"))
     for problem in problems:
         ctx.log(f"chart rule skipped \N{EM DASH} {problem}")
 
@@ -2285,6 +2322,7 @@ def run(ctx, table, compare=None):
     kwargs, ignored = _build(ctx.params, table, px)
     # Group and total summarises what is drawn; `table` below stays raw.
     drawn, totalled = _summarised(ctx, table, kwargs, kind)
+    drawn = _empty_as_zero(ctx, drawn, kwargs, kind)
     _order_categories(kwargs, drawn, kind)
     try:
         # Building a figure is not thread-safe — see _figure_lock.

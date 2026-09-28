@@ -477,6 +477,47 @@ class TestMissingIsAGap:
         assert self.missing(got["F"].y) == [True, False, False]
 
 
+class TestEmptyAsZero:
+    """Empty values: zero — for a chart where empty does mean none. The
+    gap stays the default (TestMissingIsAGap); this is the way back."""
+
+    @pytest.fixture
+    def gappy(self):
+        return pd.DataFrame({
+            "month": ["Jan", "Feb", "Mar"] * 2,
+            "line": ["A"] * 3 + ["B"] * 3,
+            "units": pd.array([10, None, 30, 5, None, 11], dtype="Int64"),
+        })
+
+    def test_the_default_is_a_gap(self, registry):
+        assert registry.get(SHOW).param("empty").default == "gap"
+
+    def test_an_empty_group_draws_as_zero(self, registry, gappy):
+        figure, ctx = chart(registry, {"summarise": "sum", "kind": "line",
+                                       "empty": "zero"}, gappy)
+        (drawn,) = figure.data
+        assert dict(zip(drawn.x, drawn.y)) == {"Jan": 15, "Feb": 0,
+                                               "Mar": 41}
+        assert any("as 0" in line for line in ctx.logs)
+
+    def test_a_raw_missing_value_draws_as_zero(self, registry, gappy):
+        figure, _ = chart(registry, {"kind": "line", "color": "line",
+                                     "empty": "zero"}, gappy)
+        assert [list(t.y) for t in figure.data] == [[10, 0, 30], [5, 0, 11]]
+
+    def test_horizontal_bars_fill_their_x(self, registry, gappy):
+        figure, _ = chart(registry, {"x": "units", "y": "month",
+                                     "orientation": "h", "color": "line",
+                                     "empty": "zero"}, gappy)
+        assert [list(t.x) for t in figure.data] == [[10, 0, 30], [5, 0, 11]]
+
+    def test_a_series_draws_as_zero(self, registry, gappy):
+        figure, _ = chart(registry, {
+            "empty": "zero", "chart_rules": 'series total as "Total"'},
+            gappy)
+        assert list(traces(figure)["Total"].y) == [15, 0, 41]
+
+
 class TestColumnsWithSpaces:
     """A column whose name has a space in it. The builder wrote it bare,
     and the line it wrote read back as a column `Last` and a stray word."""
