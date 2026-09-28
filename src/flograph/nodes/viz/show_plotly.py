@@ -135,7 +135,7 @@ from typing import Any, Iterable, Optional
 NODE = {
     "label": "Show Plotly",
     "category": "Viz",
-    "version": "2.2",
+    "version": "2.3",
     "card": "webview",
     # Lets the chart's own page write this node's "selected" param when a
     # point is clicked — see "On click" below and flograph.core.bridge.
@@ -2217,9 +2217,13 @@ def _summarised(ctx, table, kwargs: dict, kind: str):
         frame = frame.assign(**{c: pd.to_numeric(frame[c], errors="coerce")
                                 for c in values})
     # a line wants its x in order; a bar keeps the order the rows came in
-    grouped = (frame.groupby(keys, dropna=False, observed=True,
-                             sort=kind not in ("bar", "funnel"))[values]
-               .agg(_SUMMARISE[how]).reset_index())
+    groups = frame.groupby(keys, dropna=False, observed=True,
+                           sort=kind not in ("bar", "funnel"))[values]
+    # A group with nothing in it totals to <NA>, not 0: pandas' own sum
+    # makes an empty or all-missing group 0, which drew a missing month as
+    # a fall to zero where every other summary leaves a gap.
+    grouped = (groups.sum(min_count=1) if how == "sum"
+               else groups.agg(_SUMMARISE[how])).reset_index()
     word = _SUMMARISE_WORD[how]
     if len(values) == 1:
         kwargs["labels"] = {values[0]: f"{word} of {values[0]}",

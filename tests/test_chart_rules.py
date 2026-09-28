@@ -420,3 +420,58 @@ class TestTheWizard:
     def test_the_box_offers_the_wizard_on_every_plotly_node(self, registry):
         for type_id in (SHOW, PER_VALUE, STYLE):
             assert registry.get(type_id).param("chart_rules").wizard == "chart"
+
+
+
+class TestMissingIsAGap:
+    """A month with no numbers draws as a gap, not a fall to zero: pandas'
+    own sum makes an all-missing group 0, and every summed path — Group and
+    total, a `series total`, a named `series` column — went through it."""
+
+    @pytest.fixture
+    def gappy(self):
+        return pd.DataFrame({
+            "month": ["Jan", "Feb", "Mar"] * 2,
+            "line": ["A"] * 3 + ["B"] * 3,
+            "units": pd.array([10, None, 30, 5, None, 11], dtype="Int64"),
+        })
+
+    @staticmethod
+    def missing(values):
+        return [pd.isna(v) for v in values]
+
+    def test_group_and_total_leaves_an_empty_month_missing(self, registry,
+                                                          gappy):
+        figure, _ = chart(registry, {"summarise": "sum", "kind": "line"},
+                          gappy)
+        (drawn,) = figure.data
+        by_month = dict(zip(drawn.x, drawn.y))     # a line sorts its x
+        assert pd.isna(by_month["Feb"])
+        assert by_month["Jan"] == 15 and by_month["Mar"] == 41
+
+    def test_a_month_with_some_numbers_still_adds_up(self, registry, gappy):
+        gappy.loc[1, "units"] = 7                  # A has Feb, B does not
+        figure, _ = chart(registry, {"summarise": "sum"}, gappy)
+        assert list(figure.data[0].y) == [15, 7, 41]
+
+    def test_a_total_series_leaves_an_empty_month_missing(self, registry,
+                                                          gappy):
+        figure, _ = chart(registry, {
+            "chart_rules": 'series total as "Total"'}, gappy)
+        assert self.missing(traces(figure)["Total"].y) == [False, True, False]
+
+    def test_a_renamed_compare_column_has_no_zeros_beside_it(
+            self, registry, table):
+        # two tables concatenated with their value columns renamed apart:
+        # each row fills one of the two and leaves the other blank
+        both = pd.concat([
+            pd.DataFrame({"month": ["Jan", "Feb"], "units": [12, 18]}),
+            pd.DataFrame({"month": ["Feb", "Mar"], "forecast": [20, 25]}),
+        ])
+        figure, _ = chart(registry, {"chart_rules":
+                                     'series total from compare as "LY"\n'
+                                     'series forecast from compare as "F"'},
+                          table, compare=both)
+        got = traces(figure)
+        assert self.missing(got["LY"].y) == [False, False, True]
+        assert self.missing(got["F"].y) == [True, False, False]

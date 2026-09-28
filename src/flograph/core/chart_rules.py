@@ -984,13 +984,23 @@ def _series_values(opts, data, x, ys, aggregate):
     rows = data[[x, *columns]].copy()
     numbers = rows[columns].apply(pd.to_numeric, errors="coerce")
     how = {"total": "sum", "average": "mean", "mean": "mean"}.get(how, how)
+    # A row, or an X, with no number in it is <NA> rather than 0 — pandas'
+    # own sum makes nothing 0, which drew a missing month as a fall to zero
+    # (and a renamed column's blank rows as zeros beside the real ones).
     if how == "count":
         per_row = numbers.notna().sum(axis=1)
+    elif how == "sum":
+        per_row = numbers.sum(axis=1, min_count=1)
     else:
         per_row = getattr(numbers, how)(axis=1)
     rows = rows[[x]].assign(_value=per_row)
     grouped = rows.groupby(x, sort=False, dropna=False)["_value"]
-    totals = getattr(grouped, "sum" if how == "count" else how)()
+    if how == "count":
+        totals = grouped.sum()
+    elif how == "sum":
+        totals = grouped.sum(min_count=1)
+    else:
+        totals = getattr(grouped, how)()
     return list(totals.index), list(totals.values), name
 
 
