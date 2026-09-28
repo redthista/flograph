@@ -300,6 +300,7 @@ tab is drawn and nothing else. What it did not settle:
 
 Two notes of Dan's from 0.1.17, both about living with a `webview` card.
 Captured 2026-09-26 and not investigated yet, so neither has a cost.
+AF3 was added 2026-09-28 and has been looked into, so it does have one.
 
 **AF1. A Plotly chart fills the web view's width** (Dan). Today a chart
 has to be given `width = 300%` just to span a small page, and more for a
@@ -312,6 +313,52 @@ differently in a card, a tile and a report, so check all three.
 focused, the zoom % at the bottom of the window would show and set that
 page's zoom: Ctrl+wheel zooms it, and clicking the % puts it back to 100.
 Open: whether the zoom is per card, per page or saved with the project.
+
+**AF3. A live web app on a card: Streamlit, and any URL** (Dan). A node
+whose card, and so its dashboard tile and full-screen view, shows a
+running Streamlit app, with a "live" light saying the server is up. Banked
+2026-09-28 after a design pass. It's about a day of work, and the risk is
+in process lifetime, not rendering.
+- *What helps:* the webview card is already Chromium and loads from a URL
+  (`ui/inspector/plotly_view.py`, `view.load(QUrl...)`), so
+  `http://127.0.0.1:<port>` is the same call. Tiles already maximize, and
+  a report already prints a webview card as a snapshot.
+- *What's missing:* anything that owns a process after `run()` returns.
+  `ctx` has no handle on the app, and it shouldn't get one. So `run()`
+  stays pure. It writes the input to a temp parquet file and returns a
+  spec (script, data path, settings). A `card: "webapp"` host on the UI
+  side owns one `QProcess` per node id, which the card and the tile share.
+  - It restarts only when the script changes.
+  - A data re-run only rewrites the parquet, which the app re-reads (mtime
+    key in `st.cache_data`, or `st.fragment(run_every=)`).
+  - It is killed, whole process group, on node delete, project close and
+    quit. Windows needs a job object for that.
+- *Live light:* the host polls `/_stcore/health` and shows a second dot
+  beside the status LED:
+  - grey: stopped
+  - amber pulse: starting
+  - green: live
+  - red: crashed, with stderr sent to the node's console
+  
+  The right-click menu gets Restart, Stop and Open in Browser.
+- *Defaults, not options:* `--server.address 127.0.0.1` (Streamlit binds
+  to every interface otherwise, which quietly shares the app on the LAN),
+  `--server.headless true`, `--browser.gatherUsageStats false`, and an
+  automatic port.
+- *Config:* plain `PARAMS`, not a rules language. The settings are the app
+  script (a code param, so it gets the pop-out editor), theme following
+  the app, auto-refresh on data, extra args and size. The script lives in
+  the node, so it travels with the `.flograph`, and AC's missing-package
+  notice covers a PC without `streamlit`.
+- *Same host, other kinds:* Dash, Panel and Gradio differ only in the
+  launch command and the health URL. A **Web Page (URL)** node needs no
+  process at all, and could put Grafana, a wiki or Jupyter on a tile.
+- *Later:* the page writing params back to the flow. The `flograph.set()`
+  bridge doesn't reach a localhost page, so it would need a small
+  endpoint.
+- *Costs to say out loud:* a second Python process holding a second copy
+  of the data, so hand it parquet rather than a pickle. A report or PDF
+  only ever gets a snapshot.
 
 ---
 
