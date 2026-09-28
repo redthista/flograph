@@ -6,6 +6,7 @@ words and the keys typed meanwhile arrived in a burst. The embeds still
 resolve on the UI thread; the layout after them is done in the background,
 and the preview is swapped in when it is ready, under a thin loading bar.
 """
+import re
 import threading
 import time
 
@@ -158,22 +159,71 @@ class TestTyping:
         settle(qtbot, page)
         assert written and "Item 399" in written[-1]
 
-    def test_a_table_measured_against_the_page_is_laid_out_here(
+    def test_a_table_measured_against_the_page_is_laid_out_too(
             self, qtbot, env):
-        """`height=` and `fit` rebuild a table once it has been measured,
-        and a rebuilt table paints through the card's pixmap cache — which
-        only the UI thread may touch. Such a page is finished here."""
+        """`height=` measures a table and rebuilds it with the rows that
+        fit — in the background like everything else."""
         page, graph, engine = env
-        staged = stage_report("![[Big|height=200]]", graph, engine.cache,
-                              setup=PageSetup())
-        assert not staged.finishes_anywhere
-        assert stage_report("![[Big]]", graph, engine.cache,
-                            setup=PageSetup()).finishes_anywhere
         graph.set_page_body("p1", "![[Big|height=200]]")
         page.request_preview()
-        assert page._layout_job is None       # done already, on this thread
+        assert page._layout_job is not None
         settle(qtbot, page)
-        assert "Item 1" in shown_text(page)
+        text = shown_text(page)
+        assert "Item 1" in text and "Item 399" not in text   # trimmed
+
+
+class TestTablesAreBuiltInTheBackground:
+    """Building a table — its rules and every sparkline in it — was most
+    of the time the UI thread still spent on a page full of them."""
+
+    def test_staging_leaves_the_table_unbuilt(self, qtbot, env):
+        page, graph, engine = env
+        staged = stage_report("![[Big|rows=400]]", graph, engine.cache,
+                              setup=PageSetup())
+        assert callable(staged.resolver.table_html[0])
+        rendered = finish_body(staged)
+        assert "Item 399" in rendered.document.toPlainText()
+
+    def test_a_table_in_a_column_keeps_the_columns_width(self, qtbot, env):
+        """The build runs after staging, when the column's narrower width
+        is no longer the one in force — so it has to have kept it."""
+        page, graph, engine = env
+        whole = finish_body(stage_report(
+            "![[Big|rows=5]]", graph, engine.cache, setup=PageSetup()))
+        column = finish_body(stage_report(
+            "```columns\n![[Big|rows=5]]\n---\nbeside\n```",
+            graph, engine.cache, setup=PageSetup()))
+        widths = [int(w) for w in re.findall(
+            r'<table[^>]*width="(\d+)"', column.document.toHtml())]
+        full = [int(w) for w in re.findall(
+            r'<table[^>]*width="(\d+)"', whole.document.toHtml())]
+        assert full and widths and min(widths) < max(full)
+
+    def test_a_tiled_picture_is_drawn_off_the_ui_thread(self, qapp):
+        """A tile is composited with QImage, not through the card's pixmap
+        cache, which only the UI thread may touch."""
+        from flograph.core.images import to_data_uri
+        from flograph.ui.report.render import _tiled_picture
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+        from PySide6.QtGui import QImage
+        from flograph.ui import table_delegate
+
+        dot = QImage(8, 8, QImage.Format_ARGB32)
+        dot.fill(Qt.red)
+        store = QByteArray()
+        buffer = QBuffer(store)
+        buffer.open(QIODevice.WriteOnly)
+        dot.save(buffer, "PNG")
+        uri = to_data_uri(bytes(store), "image/png")
+        tag = (f'<img src="{uri}" width="12" height="12" '
+               'data-flograph-tile="#336699;round" style="padding:2px" />')
+        cached_before = len(table_delegate._PIXMAPS)
+        out = []
+        worker = threading.Thread(target=lambda: out.append(_tiled_picture(tag)))
+        worker.start()
+        worker.join()
+        assert out and out[0].startswith('<img src="data:image/png')
+        assert len(table_delegate._PIXMAPS) == cached_before
 
     def test_a_closed_page_drops_its_layout(self, qtbot, env):
         page, _graph, _engine = env

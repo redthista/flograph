@@ -556,11 +556,6 @@ class ReportPage(QWidget):
             return
         self._layout_job = None
         setup, mode, staged = staged
-        if not staged.finishes_anywhere:
-            self._show(generation, page, setup, mode, finish_body(staged))
-            if self.preview_busy():
-                self._timer.start()
-            return
         title, css = page.title, page.custom_css
 
         def work(staged):

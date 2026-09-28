@@ -839,7 +839,9 @@ class _Resolver:
         self.inline: list[str] = []
         # each table embed's HTML, put into the document after the markdown
         # has been read (see TABLE_TOKEN)
-        self.table_html: list[str] = []
+        #: each table's HTML — or, until finish_body builds it, the
+        #: function that builds it
+        self.table_html: list = []
         # the width each image should be drawn at — per image, because a
         # multi-column grid renders its cells narrower than the page
         self.widths: list[int] = []
@@ -1368,26 +1370,34 @@ class _Resolver:
                    if self._table_scale != 1.0 else None)
 
         grand, baked = self._table_totals(ref)
+        # Everything the build reads is taken now: it runs later, when a
+        # column's narrower width is no longer the one in force.
+        width, rows = self._image_width, self._max_rows
 
         def build(rows: int, size: "float | None") -> str:
             return frame_to_html(value, rules, hidden, shown, max_rows=rows,
-                                 width=self._image_width, font_pt=size,
+                                 width=width, font_pt=size,
                                  marker=marker, text_width=_table_text_width,
                                  grand=grand, baked=baked)
 
-        try:
-            html = self._set_aside_pictures(build(self._max_rows, font_pt))
-        except Exception:
-            return frame_to_markdown(value, self._max_rows)
+        def first_build() -> str:
+            try:
+                return self._set_aside_pictures(build(rows, font_pt))
+            except Exception:
+                return _markdown_table_html(frame_to_markdown(value, rows))
+
         if measured:
             self.tables.append(_TablePlacement(
                 ref=ref, marker=marker, build=build,
-                rows=self._max_rows, font_pt=font_pt,
+                rows=rows, font_pt=font_pt,
                 height=self._table_height, fit=self._table_fit))
         # The table goes in after the markdown is read, not through it: Qt's
         # markdown reader took 1.6 s over a 500-row table that setHtml reads
-        # in 0.05 s (AE4). What stands in the markdown is a token.
-        self.table_html.append(html)
+        # in 0.05 s (AE4). What stands in the markdown is a token — and the
+        # table is not built yet. Building it (the formatting rules, every
+        # sparkline) is most of a big table's cost, and finish_body does it,
+        # off the UI thread when a report page's preview is the caller.
+        self.table_html.append(first_build)
         return TABLE_TOKEN.format(len(self.table_html) - 1)
 
     def _set_aside_pictures(self, html: str) -> str:
@@ -1586,9 +1596,13 @@ class StagedReport:
     does that half in the background and the editor keeps up with typing
     (see ReportPage.request_preview).
 
+    The tables are left to that half too: building one — its formatting
+    rules and every sparkline in it — is Qt-free work that grows with the
+    rows, and the part of a page full of sparklines that used to freeze.
+
     Nothing here may be shared with the UI thread while `finish_body` runs:
-    the resolver's tables are rebuilt by `fit_tables`, and its images and
-    widths are read. Staged once, finished once.
+    the resolver's tables are built there and rebuilt by `fit_tables`, and
+    its images and widths are read. Staged once, finished once.
     """
     resolver: "_Resolver"
     resolved: str
@@ -1597,14 +1611,6 @@ class StagedReport:
     page_height: "float | None"
     page_links: bool
     header_fill: str
-
-    @property
-    def finishes_anywhere(self) -> bool:
-        """Whether `finish_body` may run off the UI thread. Not when a
-        table asked for `height=` or `fit`: measuring it can rebuild it,
-        and a rebuilt table's tiled pictures are painted through the
-        table card's pixmap cache — pixmaps being the UI thread's alone."""
-        return not self.resolver.tables
 
 
 @perf.timed('report: stage body')
@@ -1651,8 +1657,12 @@ def finish_body(staged_report: StagedReport) -> RenderedReport:
     staged.setDefaultStyleSheet(staged_css(header_fill))
     staged.setMarkdown(resolved)
     html = staged.toHtml()
-    # tables first: their cells carry picture and spark tokens of their own
+    # tables first: their cells carry picture and spark tokens of their own.
+    # Built here, in order, so their sparklines take their token numbers
+    # before any are swapped back.
     for index, table in enumerate(resolver.table_html):
+        if callable(table):
+            table = resolver.table_html[index] = table()
         html = _put_table_back(html, index,
                                _staged_table(table, header_fill))
     html = _swap_tokens(html, IMAGE_TOKEN,
@@ -1760,6 +1770,16 @@ TABLE_TOKEN = "@@flograph-table-{}@@"
 _BODY_RE = re.compile(r"<body\b[^>]*>(.*)</body>", re.S)
 
 
+def _markdown_table_html(markdown: str) -> str:
+    """A plain markdown table as body HTML — what a table whose styling
+    could not be worked out falls back to, now that it is built after the
+    markdown has been read."""
+    staged = _document()
+    staged.setMarkdown(markdown)
+    found = _BODY_RE.search(staged.toHtml())
+    return found.group(1) if found else markdown
+
+
 def _staged_table(table: str, header_fill: str) -> str:
     """A table's HTML as the staged document writes it back out — the same
     pass the markdown reader used to put it through, minus the markdown.
@@ -1849,8 +1869,9 @@ def _tiled_picture(tag: str) -> str:
                    QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.transparent)
     painter = QPainter(image)
+    # uncached: a report's tables are built off the UI thread
     paint_picture(painter, QRectF(0, 0, image.width(), image.height()),
-                  src.group(1), tile or None, shape or None)
+                  src.group(1), tile or None, shape or None, cached=False)
     painter.end()
     store = QByteArray()
     buffer = QBuffer(store)

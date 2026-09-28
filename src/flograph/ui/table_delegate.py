@@ -119,41 +119,57 @@ def picture_pixmap(uri: str, width: int, height: int,
     if key in _PIXMAPS:
         _PIXMAPS.move_to_end(key)
         return _PIXMAPS[key]
-    from flograph.core.images import parse_data_uri
+    image = picture_image(uri, width, height, ratio)
     pixmap = None
-    parsed = parse_data_uri(uri) if width > 0 and height > 0 else None
-    if parsed is not None:
-        buffer = QBuffer()
-        buffer.setData(QByteArray(parsed[0]))
-        buffer.open(QIODevice.ReadOnly)
-        reader = QImageReader(buffer)
-        reader.setAutoTransform(True)
-        target = QSize(max(1, round(width * ratio)),
-                       max(1, round(height * ratio)))
-        native = reader.size()
-        if native.isValid() and not native.isEmpty():
-            reader.setScaledSize(native.scaled(target, Qt.KeepAspectRatio))
-        image = reader.read()
-        if not image.isNull():
-            if not native.isValid() or native.isEmpty():
-                image = image.scaled(target, Qt.KeepAspectRatio,
-                                     Qt.SmoothTransformation)
-            pixmap = QPixmap.fromImage(image)
-            pixmap.setDevicePixelRatio(ratio)
+    if image is not None:
+        pixmap = QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(ratio)
     _PIXMAPS[key] = pixmap
     while len(_PIXMAPS) > _PIXMAP_CACHE:
         _PIXMAPS.popitem(last=False)
     return pixmap
 
 
+def picture_image(uri: str, width: int, height: int,
+                  ratio: float = 1.0) -> "QImage | None":
+    """`picture_pixmap`'s decode, as a QImage and remembered nowhere — for
+    a thread that is not the UI thread, which may use neither a pixmap nor
+    the cache of them."""
+    from flograph.core.images import parse_data_uri
+    parsed = parse_data_uri(uri) if width > 0 and height > 0 else None
+    if parsed is None:
+        return None
+    buffer = QBuffer()
+    buffer.setData(QByteArray(parsed[0]))
+    buffer.open(QIODevice.ReadOnly)
+    reader = QImageReader(buffer)
+    reader.setAutoTransform(True)
+    target = QSize(max(1, round(width * ratio)),
+                   max(1, round(height * ratio)))
+    native = reader.size()
+    if native.isValid() and not native.isEmpty():
+        reader.setScaledSize(native.scaled(target, Qt.KeepAspectRatio))
+    image = reader.read()
+    if image.isNull():
+        return None
+    if not native.isValid() or native.isEmpty():
+        image = image.scaled(target, Qt.KeepAspectRatio,
+                             Qt.SmoothTransformation)
+    return image
+
+
 def paint_picture(painter, rect: QRectF, uri: str, tile=None, shape=None,
-                  ratio: float = 1.0) -> None:
+                  ratio: float = 1.0, cached: bool = True) -> None:
     """Draw the picture at `uri` fitted into `rect`: on a tile of colour
     `tile` when there is one, both cut to `shape`.
 
     Shared by the card and a report page, which composites a tile into a
     picture because its rich text cannot draw one — so the two agree on
     the radius, the inset and where the picture sits.
+
+    `cached=False` decodes the picture afresh as a QImage rather than
+    taking it from the card's pixmap cache: a report page's tables are
+    built off the UI thread, where a pixmap is not allowed.
     """
     from flograph.core.images import TILE_INSET, tile_radius
     rect = QRectF(rect)
@@ -170,15 +186,24 @@ def paint_picture(painter, rect: QRectF, uri: str, tile=None, shape=None,
         painter.fillPath(clip, QColor(tile))
         pad = min(rect.width(), rect.height()) * TILE_INSET
         inner = rect.adjusted(pad, pad, -pad, -pad)
-    pixmap = picture_pixmap(uri, max(1, round(inner.width())),
-                            max(1, round(inner.height())), ratio)
-    if pixmap is not None:
+    w, h = max(1, round(inner.width())), max(1, round(inner.height()))
+    if cached:
+        picture = picture_pixmap(uri, w, h, ratio)
+    else:
+        picture = picture_image(uri, w, h, ratio)
+        if picture is not None:
+            picture.setDevicePixelRatio(ratio)
+    if picture is not None:
         if clip is not None:
             painter.setClipPath(clip, Qt.IntersectClip)
-        shown_w = pixmap.width() / pixmap.devicePixelRatio()
-        shown_h = pixmap.height() / pixmap.devicePixelRatio()
-        painter.drawPixmap(QPointF(inner.center().x() - shown_w / 2,
-                                   inner.center().y() - shown_h / 2), pixmap)
+        shown_w = picture.width() / picture.devicePixelRatio()
+        shown_h = picture.height() / picture.devicePixelRatio()
+        at = QPointF(inner.center().x() - shown_w / 2,
+                     inner.center().y() - shown_h / 2)
+        if cached:
+            painter.drawPixmap(at, picture)
+        else:
+            painter.drawImage(at, picture)
     painter.restore()
 
 

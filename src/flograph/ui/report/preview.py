@@ -378,7 +378,10 @@ class PagedPreview(QAbstractScrollArea):
         printable = printable_points(self._setup)
         body = body_rect(printable, self._setup)
         cover = 1 if self._setup.cover else 0
-        visible = QRectF(self.viewport().rect())
+        # what needs drawing, not the whole pane: an overlay animating over
+        # a corner repaints that corner, and a page of sparklines drawn in
+        # full for it cost most of a second a frame
+        visible = QRectF(event.rect())
 
         for index in range(self.sheet_count()):
             rect = self._sheet_rect(index)
@@ -397,7 +400,13 @@ class PagedPreview(QAbstractScrollArea):
                             self._date)
             else:
                 page = index - cover
-                paint_body(painter, layout, context, body, page)
+                # the damage, in this sheet's own coordinates
+                dirty = QRectF(visible.translated(-rect.topLeft()))
+                dirty = QRectF(dirty.left() / self._scale,
+                               dirty.top() / self._scale,
+                               dirty.width() / self._scale,
+                               dirty.height() / self._scale)
+                paint_body(painter, layout, context, body, page, dirty)
                 if page or self._setup.bands_on_first_page:
                     paint_furniture(
                         painter, printable, self._setup,

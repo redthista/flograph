@@ -60,8 +60,11 @@ class BusyOverlay(QWidget):
         self._timer.stop()
 
     def _tick(self) -> None:
+        # Only the stripe moves, so only the stripe is repainted. The
+        # overlay is see-through: every pixel of it repainted is a pixel of
+        # the preview underneath drawn again first.
         self._phase = (self._phase + STEP) % 1.0
-        self.update()
+        self.update(0, 0, self.width(), STRIPE_PX)
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)

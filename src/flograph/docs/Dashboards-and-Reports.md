@@ -388,9 +388,7 @@ when you pause typing, and on a page holding a lot of data that takes a
 moment — so it is laid out in the background. Keep typing while it works;
 a sliding stripe and **Updating preview…** over the preview show it is
 behind, and the new pages appear
-when they are ready. A table with `height=` or `fit` is the exception: it
-has to be measured against the page, and that is still done in the
-foreground.
+when they are ready.
 
 **Links work in the preview**, locked or not: a web or mail link opens in
 the browser, and `[the costs](page:Costs)` goes to that page (see *Getting

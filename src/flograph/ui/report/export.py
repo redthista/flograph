@@ -214,18 +214,27 @@ def paint_context():
 
 
 def paint_body(painter: QPainter, layout, context, body: QRectF,
-               index: int) -> None:
+               index: int, dirty: "QRectF | None" = None) -> None:
     """One page's worth of the document, drawn into `body`.
 
     Clip before translating: the clip is taken in the coordinates in force
     when it is set, and those are the page's. Without it a tall image on
     the last page bleeds down into the footer.
+
+    `dirty` is the part of the sheet that needs drawing, in the sheet's
+    coordinates, when that is less than all of it — the preview repainting
+    a strip. The layout is told, not just the painter: the painter would
+    throw away what falls outside, but only after the layout had walked
+    every cell of the page to draw it.
     """
     painter.save()
     painter.setClipRect(body)
     painter.translate(body.left(), body.top() - index * body.height())
     context.clip = QRectF(0, index * body.height(),
                           body.width(), body.height())
+    if dirty is not None:
+        context.clip = context.clip.intersected(dirty.translated(
+            -body.left(), index * body.height() - body.top()))
     layout.draw(painter, context)
     painter.restore()
 
