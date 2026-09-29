@@ -2,12 +2,14 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from flograph.ui.switch import ON, Switch
+from flograph.ui.switch import ON, TRACK_W, Switch
 
 
-def _has_green(widget) -> bool:
+def _has_accent(widget) -> bool:
+    """Is the on colour anywhere on the track? The track only: the label's
+    antialiased text has coloured fringes that can land near a violet."""
     image = widget.grab().toImage()
-    for x in range(0, image.width(), 2):
+    for x in range(0, min(image.width(), TRACK_W + 4), 2):
         for y in range(0, image.height(), 2):
             c = QColor(image.pixel(x, y))
             if abs(c.red() - ON.red()) < 30 and abs(c.green() - ON.green()) < 30 \
@@ -47,15 +49,16 @@ def test_set_before_it_shows_there_is_no_slide(qtbot):
     assert switch.position() == 1.0
 
 
-def test_it_is_green_when_on_and_not_when_off(qtbot):
+def test_it_is_the_accent_when_on_and_not_when_off(qtbot):
     switch = Switch("Live")
     qtbot.addWidget(switch)
     switch.setChecked(True)
     switch.show()
-    assert _has_green(switch)
+    switch.clearFocus()     # the focus ring is a violet too — test the track
+    assert _has_accent(switch)
     switch.setChecked(False)
     qtbot.waitUntil(lambda: switch.position() == 0.0, timeout=2000)
-    assert not _has_green(switch)
+    assert not _has_accent(switch)
 
 
 def test_the_label_is_part_of_its_size_and_is_clickable(qtbot):

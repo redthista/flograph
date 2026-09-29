@@ -7,9 +7,9 @@ on every platform style. A checkable QToolButton had the style's own
 look — on KDE it read "Live | Live", a pressed and an unpressed label
 side by side — and said nothing at a glance about which way it was set.
 
-It speaks the canvas status language: on is the green of run / go, the
-colour a running node already wears; off is a quiet track in the theme's
-own colours, so it suits the light chrome as well as the dark. The knob
+On is flograph's own violet, the brand accent the logo and the unsaved
+mark wear; off is a quiet track in the theme's own colours, so it suits
+the light chrome as well as the dark. The knob
 slides rather than jumps, over about the time a click takes.
 
 A QAbstractButton underneath, checkable, so `toggled`, `setChecked`,
@@ -22,8 +22,8 @@ from PySide6.QtCore import (Property, QEasingCurve, QPointF, QRectF, QSize,
 from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import QAbstractButton
 
-#: run / go — the canvas green (toolbar.RUN)
-ON = QColor("#22c55e")
+#: on — flograph's own violet, the brand accent (theme.BUTTON_ACCENT)
+from flograph.ui.theme import BUTTON_ACCENT as ON  # noqa: E402
 #: the knob: near-white on both themes, a light that sits on either track
 KNOB = QColor("#f4f5f7")
 
@@ -137,9 +137,10 @@ class Switch(QAbstractButton):
         painter.setPen(Qt.NoPen)
 
         if self.hasFocus():
-            from flograph.ui.theme import BUTTON_ACCENT
-            ring = QColor(BUTTON_ACCENT)
-            ring.setAlpha(200)
+            # a lighter tint than the track: in the track's own violet the
+            # ring merged into a switch that was on
+            ring = ON.lighter(145)
+            ring.setAlpha(170)
             painter.setBrush(Qt.NoBrush)
             painter.setPen(ring)
             painter.drawRoundedRect(track.adjusted(-1.5, -1.5, 1.5, 1.5),
