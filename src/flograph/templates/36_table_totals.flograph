@@ -316,7 +316,7 @@
      "mode": "grouped",
      "group_by": "Region",
      "totals": "sum",
-     "format_rules": "Revenue_*  heading \"Revenue\" sum\nUnits_*    heading \"Units\" sum\nRevenue_Q1, Units_Q1  label \"Q1\"\nRevenue_Q2, Units_Q2  label \"Q2\"\nRevenue_*, Revenue  format $,.0f\ntrend  spark area teal last from Revenue_Q1, Revenue_Q2 totals",
+     "format_rules": "Revenue_*  heading \"Revenue\" sum\nUnits_*    heading \"Units\" folded\nRevenue_Q1, Units_Q1  label \"Q1\"\nRevenue_Q2, Units_Q2  label \"Q2\"\nRevenue_*, Revenue  format $,.0f\ntrend  spark area teal last from Revenue_Q1, Revenue_Q2 totals",
      "width": 820,
      "height": 520
     },
@@ -331,9 +331,9 @@
      4240
     ],
     "params": {
-     "text": "**8 · Headings you fold, sparks on the groups.** A pivot to one column per quarter for revenue and for units, grouped by region. Each value heads its quarters: click **Revenue** or **Units** to fold it to the row's total. The `trend` spark ends in `totals`, so each region's row and the grand total draw their revenue by quarter too — fold a region and its trend is still there.",
+     "text": "**8 · Headings you fold, sparks on the groups.** A pivot to one column per quarter for revenue and for units, grouped by region. Each value heads its quarters, and the two fold differently: **Revenue** says `sum`, so folding it leaves one column holding the row's total; **Units** says nothing, so it folds to a narrow blank `⋯` column — there only to click open again — and starts `folded`. The `trend` spark ends in `totals`, so each region's row and the grand total draw their revenue by quarter too — fold a region and its trend is still there.",
      "width": 520,
-     "height": 220
+     "height": 260
     },
     "code": null,
     "label": null
