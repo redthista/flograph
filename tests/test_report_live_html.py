@@ -110,6 +110,16 @@ class TestLiveTables:
         assert 'data-fg-kind="total"' in html
         assert 'data-fg-kind="subtotal" data-fg-level="0"' in html
 
+    def test_a_styled_cell_is_not_boxed_in_the_browser(self):
+        """Paper restates the grid line on a styled cell because Qt drops
+        it; the browser has no grid, so the line would box only the cells a
+        rule touched."""
+        rules = parse_rules("revenue < 25 => fg red, icon ▼ red right")
+        live = frame_to_html(sales(), rules, live=True)
+        paper = frame_to_html(sales(), rules)
+        assert "color:" in live and "1px solid #999" not in live
+        assert "1px solid #999" in paper
+
     def test_paper_table_is_unchanged_by_the_live_option(self):
         rules = parse_rules("total sum\ngroup region")
         assert "data-fg" not in frame_to_html(sales(), rules)

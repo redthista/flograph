@@ -310,7 +310,15 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         # or the page ends up carrying both counts
         out.append(f"<p><i>{marker}Showing {max_rows:,} of "
                    f"{total:,} rows.</i></p>")
-    return "".join(out)
+    html = "".join(out)
+    if live:
+        # A styled cell restates the grid line only because Qt's report
+        # stylesheet draws one round every cell and drops it from a cell
+        # with a style of its own (see _cell). A browser page has no such
+        # grid, so there the restated line boxed exactly the cells a rule
+        # had touched — a "$-39 ▼" in a frame, its neighbours in none.
+        html = html.replace(f"border:{CELL_BORDER};", "")
+    return html
 
 
 def _data_cells(row, columns, arrays, styles, numeric, track, stacked,
