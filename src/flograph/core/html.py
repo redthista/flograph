@@ -54,11 +54,11 @@ def to_html(obj, columns: int = 0, rows: int = 0,
     render = getattr(obj, "to_html", None)
     if callable(render):
         try:
-            return render(full_html=True, include_plotlyjs=True,
-                          default_width="100%", default_height="100%",
-                          post_script=_post_script(obj),
-                          config={"responsive": True,
-                                  **getattr(obj, "_flograph_config", {})})
+            return _with_outlines(
+                render(full_html=True, include_plotlyjs=True,
+                       default_width="100%", default_height="100%",
+                       post_script=_post_script(obj),
+                       config=_config(obj)), [obj])
         except TypeError:
             return wrap(render())
     # folium / branca objects: _repr_html_() wraps the map in an <iframe
@@ -99,8 +99,7 @@ def _fragment(obj, first: bool) -> "str | None":
             return render(full_html=False, include_plotlyjs=bool(first),
                           default_width="100%", default_height="100%",
                           post_script=_post_script(obj),
-                          config={"responsive": True,
-                                  **getattr(obj, "_flograph_config", {})})
+                          config=_config(obj))
         except TypeError:
             return render()
     render = getattr(obj, "_repr_html_", None)
@@ -145,7 +144,7 @@ def _stack(items, columns: int = 0, rows: int = 0,
     # half empty, while a long one keeps its minimum and scrolls.
     minimum = STACK_ITEM_HEIGHT if n_columns == 1 else f"{70 // n_columns + 8}vh"
     body = "\n".join(fragments)
-    return ("<!doctype html><html><head><meta charset='utf-8'><style>"
+    return _with_outlines("<!doctype html><html><head><meta charset='utf-8'><style>"
             "html,body{margin:0;padding:0;height:100%;background:#fff}"
             ".flograph-stack{display:grid;gap:6px;box-sizing:border-box;"
             "min-height:100%;"
@@ -174,7 +173,30 @@ def _stack(items, columns: int = 0, rows: int = 0,
             "document.querySelectorAll('.plotly-graph-div')"
             ".forEach(function(d){try{Plotly.Plots.resize(d)}catch(e){}});"
             "});});</script>"
-            "</body></html>")
+            "</body></html>", usable)
+
+
+def _config(obj) -> dict:
+    """The Plotly config every page gets. `topojsonURL` is the one that
+    matters offline: pointed at a local folder, a map whose outlines are not
+    on disk fails where it can be seen instead of fetching them from
+    cdn.plot.ly (see flograph.geoassets). A node's own config still wins."""
+    from flograph.geoassets import LOCAL_TOPOJSON_URL
+    return {"responsive": True, "topojsonURL": LOCAL_TOPOJSON_URL,
+            **getattr(obj, "_flograph_config", {})}
+
+
+def _with_outlines(html: "str | None", figures) -> "str | None":
+    """`html` carrying the map outlines its Plotly figures are drawn on, so
+    a geo map draws with no network. Only Plotly figures are looked at."""
+    if not html:
+        return html
+    plotly = [f for f in figures
+              if (type(f).__module__ or "").startswith("plotly")]
+    if not plotly:
+        return html
+    from flograph.geoassets import with_outlines
+    return with_outlines(html, plotly)
 
 
 def wrap(html: str) -> str:

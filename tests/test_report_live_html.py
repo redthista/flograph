@@ -167,17 +167,34 @@ class TestLiveCharts:
         data = re.search(r'id="fg-fig-0">(.*?)</script>', html, re.S).group(1)
         assert json.loads(data)["layout"]["title"]["text"] == "Bars</b>"
 
-    @pytest.mark.parametrize("trace", ["Scattergeo", "Choropleth",
-                                       "Scattermap", "Densitymap"])
-    def test_a_map_stays_a_picture_so_nothing_is_fetched(self, qapp,
-                                                         monkeypatch, trace):
-        """A live map would fetch outlines or tiles; the page may fetch
-        nothing, so a map stays the picture the app drew."""
+    @pytest.mark.parametrize("trace", ["Scattermap", "Densitymap"])
+    def test_a_tile_map_stays_a_picture(self, qapp, monkeypatch, trace):
+        """Tiles come from a tile server; the page may fetch nothing."""
         go = pytest.importorskip("plotly.graph_objects")
-        from flograph.ui.report.render import _needs_the_internet
-        fig = go.Figure(getattr(go, trace)())
-        assert _needs_the_internet(fig)
-        assert not _needs_the_internet(figure())
+        rendered = render("![[M|live]]", {"M": go.Figure(getattr(go, trace)())},
+                          monkeypatch=monkeypatch)
+        assert rendered.live_charts == {}
+
+    def test_a_geo_map_is_live_with_its_outlines_in_the_page(
+            self, qapp, monkeypatch):
+        go = pytest.importorskip("plotly.graph_objects")
+        fig = go.Figure(go.Choropleth(locations=["FRA", "DEU"], z=[1, 2]))
+        rendered = render("![[M|live]]", {"M": fig}, monkeypatch=monkeypatch)
+        assert rendered.live_charts[0]["outlines"] == ["world_110m"]
+        html = report_html(rendered, plotly_src="plotly.js")
+        assert 'G["world_110m"]=' in html
+        assert "flograph-map-outlines/" in html
+
+    def test_outlines_not_installed_is_a_problem_naming_the_fix(
+            self, qapp, monkeypatch, tmp_path):
+        go = pytest.importorskip("plotly.graph_objects")
+        from flograph import weblibs
+        monkeypatch.setattr(weblibs, "store_dir", lambda: tmp_path)
+        fig = go.Figure(go.Choropleth(locations=["FRA"], z=[1]),
+                        layout={"geo": {"resolution": 50}})
+        rendered = render("![[M|live]]", {"M": fig}, monkeypatch=monkeypatch)
+        assert rendered.live_charts == {}
+        assert any("Web Libraries" in p for p in rendered.problems)
 
     def test_a_saved_live_page_references_nothing_outside_itself(
             self, qapp, monkeypatch):

@@ -390,10 +390,21 @@ the same HTML it always did. The page is one file with **nothing to fetch**
 — no CDN, no web fonts, no folder beside it — so it opens the same on a
 machine with no internet: the chart library is the one that ships with
 plotly, written into the file once, and only when a chart on the page is
-live. The one kind of chart that cannot be live is a **map**: a live map
-downloads its country outlines or street tiles from the internet, so
-`scatter_geo`, `choropleth` and the tile maps stay the picture flograph
-drew, even with `|live`. The chart's
+live.
+
+**Maps work offline too.** A Plotly geo map (`scatter_geo`, `choropleth`)
+is drawn on a file of country outlines, which plotly would fetch from its
+CDN every time. flograph ships the standard outlines (every `geo.scope`, at
+plotly's default `resolution` of 110) and puts the ones a map needs into
+its page — on the card, in the report's picture, and live in a saved web
+page — so a map draws with no network. The finer outlines for
+`resolution=50` are a Web Library, **Plotly map outlines — fine detail**:
+install it once from **Tools ▸ Web Libraries** (or from files, on a machine
+that can't download) and it is used from then on. A map that needs outlines
+that aren't installed says so in the report's problems rather than fetching
+them. The one kind of map that cannot work offline is a **tile map**
+(`scatter_map`, `density_map`, …): its street or satellite tiles come from
+a tile server, so it stays the picture flograph drew, even with `|live`. The chart's
 picture stays in the file too: it is what a mail client that runs no
 scripts shows, and what the page prints, so a printed page matches the
 PDF. The Pages preview and the PDF are unchanged by any of this.

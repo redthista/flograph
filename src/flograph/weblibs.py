@@ -223,6 +223,36 @@ CATALOGUE: dict[str, Library] = {
             ),
         ),
     ),
+    # Data, not a script: the outlines plotly.js draws a geo map on, which
+    # it would otherwise fetch from cdn.plot.ly every time a map is drawn.
+    # The 1:110m set (plotly's default) ships with flograph — see
+    # flograph/geoassets.py; this is the finer 1:50m set, fetched once for
+    # a map that asks for `resolution=50`. Hashes are of the files served
+    # at cdn.plot.ly/un/ for plotly.js 3.x, taken 2026-09-29.
+    "plotly-map-outlines": Library(
+        name="plotly-map-outlines",
+        title="Plotly map outlines — fine detail",
+        version="2026.09",
+        summary="Country, state and coastline outlines at 1:50m for Plotly "
+                "geo maps drawn at resolution 50. The standard 1:110m "
+                "outlines are built in.",
+        license="Distributed with plotly.js (MIT); boundaries from UN "
+                "geodata",
+        homepage="https://github.com/plotly/plotly.js",
+        assets=tuple(
+            Asset(filename=f"{name}_50m.json",
+                  url=f"https://cdn.plot.ly/un/{name}_50m.json",
+                  sha256=digest, size=size)
+            for name, digest, size in (
+                ("world", "20a160dbd13dd2bfa22f1858c0ae657860ea066d889563c51da383fd9696d759", 1692310),
+                ("usa", "37670105d23a569a56a8ad9da01fdc45582bb66bd6d4f58b22175fa29c98c92f", 304145),
+                ("europe", "411738804af5616439685fece8d9e57ff4b6e65df1c5cd4cb00e394a4807c9d5", 192815),
+                ("asia", "4a3c9f6152c2e360ef1b4637efcf31a62c7f9dfe05222f9eaac817c054d3b84a", 373984),
+                ("africa", "eb59be3a8d250e20db5ed069057f810f765444a42eb433fc4d9907e0747ae274", 121035),
+                ("north-america", "084baaa2363868e675cdd64c1d1f3a9be5c9ec7809dea8dd61cb3e10825df92c", 583805),
+                ("south-america", "694c425d6411e3f5f5e77dcd6b7722b6e47329565141c02a2f241ccd3c873e57", 165124),
+            )),
+    ),
 }
 
 # ------------------------------------------------------------------- store

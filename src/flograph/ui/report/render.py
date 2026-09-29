@@ -807,31 +807,6 @@ def by_wired_input(graph, cache, node_id: str):
     return lookup
 
 
-#: Plotly trace types that fetch from the internet when drawn in a browser:
-#: geo outlines (topojson from cdn.plot.ly) and map tiles (a tile server).
-#: Every other trace type draws from the data it carries.
-ONLINE_TRACES = frozenset({
-    "scattergeo", "choropleth",
-    "scattermap", "choroplethmap", "densitymap",
-    "scattermapbox", "choroplethmapbox", "densitymapbox",
-})
-
-
-def _needs_the_internet(figure) -> bool:
-    """Would this Plotly figure fetch anything when drawn live?"""
-    try:
-        if any(getattr(trace, "type", None) in ONLINE_TRACES
-               for trace in figure.data):
-            return True
-        layout = figure.layout
-        # a map layout with no map trace on it yet still draws its map
-        return any(getattr(layout, key, None) is not None
-                   and bool(getattr(layout, key).to_plotly_json())
-                   for key in ("geo", "map", "mapbox"))
-    except Exception:
-        return True     # not sure: the picture is always safe
-
-
 class _Resolver:
     """Turns each embed into report markdown, collecting images to be
     spliced in afterwards. How an embed finds its value is the `lookup`
@@ -1354,6 +1329,8 @@ class _Resolver:
 
         plotly = plotly_image(value, self._image_width, self._for_print,
                               self._aspect, self._scale_mult)
+        if plotly is not None:
+            self._check_outlines(value, ref)
         if isinstance(plotly, bytes):
             image = QImage()
             image.loadFromData(plotly, "PNG")
@@ -1413,6 +1390,18 @@ class _Resolver:
 
         return format_scalar(value)
 
+    def _check_outlines(self, figure, ref: str) -> None:
+        """A geo map drawn at a resolution whose outlines are not on disk
+        prints as dots on a blank page — and would have fetched them from a
+        CDN before flograph stopped that. Said, with the fix."""
+        from flograph import geoassets
+        try:
+            lost = geoassets.missing(geoassets.names_for(figure))
+        except Exception:
+            return
+        if lost:
+            self.problems.append(f"“{ref}”: {geoassets.install_hint(lost)}")
+
     def _keep_live_chart(self, figure, index: int) -> None:
         """Remember the figure behind picture `index`, for the web page.
 
@@ -1421,16 +1410,21 @@ class _Resolver:
         No size goes with it: the page draws the chart over its picture,
         which was taken at the shape `ratio=`/`height=` asked for.
 
-        A map stays its picture. The web page must work with nothing to
-        fetch — one file, no CDN — and a live map cannot: plotly.js
-        downloads a geo chart's outlines from cdn.plot.ly and a tile map's
-        tiles from a tile server. The picture was drawn here, in the app,
-        so the page carries the map without reaching for anything.
+        The web page must work with nothing to fetch — one file, no CDN. A
+        geo map is live because its outlines travel in the page with it
+        (flograph.geoassets), so it is kept only when they are all on disk.
+        A tile map, or a choropleth whose shapes are a URL, would have to
+        reach the internet, so it stays the picture drawn here.
         """
-        if _needs_the_internet(figure):
+        from flograph import geoassets
+        if geoassets.needs_the_internet(figure):
             return
+        outlines = geoassets.names_for(figure)
+        if geoassets.missing(outlines):
+            return      # said in the problems; the picture is what there is
         try:
-            self.live_charts[index] = {"json": figure.to_json()}
+            self.live_charts[index] = {"json": figure.to_json(),
+                                       "outlines": outlines}
         except Exception:
             pass        # it stays the picture — still a report
 

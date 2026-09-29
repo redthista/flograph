@@ -69,6 +69,16 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
         html = html[:start] + _table_box(table, search, rows) + html[end:]
     head = f"<style>{LIVE_CSS}</style>"
     script = _plotly_script(plotly_src) if drawn else ""
+    if drawn:
+        # a live map's outlines, once for every map on the page, so it
+        # draws with no network (flograph.geoassets)
+        from flograph.geoassets import preload_script
+        outlines = []
+        for chart in charts.values():
+            for name in chart.get("outlines", ()):
+                if name not in outlines:
+                    outlines.append(name)
+        script += preload_script(outlines)
     body = script + f"<script>{LIVE_JS}</script>"
     html = _into(html, "</head>", head)
     return _into(html, "</body>", body)
@@ -331,6 +341,8 @@ LIVE_JS = r"""
     box.fgDrawing = true;
     Plotly.newPlot(host, fig.data || [], layout,
                    {responsive: true, displaylogo: false,
+                    // never cdn.plot.ly: a map's outlines are in the page
+                    topojsonURL: "flograph-map-outlines/",
                     modeBarButtonsToAdd: [{
                       name: "fullscreen", title: "Full screen (Esc to leave)",
                       icon: EXPAND,

@@ -73,7 +73,9 @@ window.__snapStart = function (spec, w, h, s) {
   window.__snap = null;
   var gd = document.getElementById('gd');
   Plotly.newPlot(gd, spec.data || [], spec.layout || {},
-                 {staticPlot: true, responsive: false})
+                 {staticPlot: true, responsive: false,
+                  // never cdn.plot.ly: outlines come preloaded (_start_js)
+                  topojsonURL: 'flograph-map-outlines/'})
     .then(function () {
       // width/height are the layout; scale is the density. Inflating the
       // width instead would shrink every label relative to the chart.
@@ -283,10 +285,8 @@ class _Snapshotter:
             return
         key, spec, width, height, scale = self._queue.popleft()
         self._job = key
-        payload = json.dumps(spec)
         self._view.page().runJavaScript(
-            f"window.__snapStart(JSON.parse({payload}),"
-            f" {int(width)}, {int(height)}, {float(scale)})")
+            _start_js(spec, width, height, scale))
         self._arm_deadline(DRAW_TIMEOUT_MS, lambda: self._job_done(None))
         QTimer.singleShot(POLL_MS, self._poll_job)
 
@@ -438,14 +438,8 @@ class _Snapshotter:
             return None
         self._busy = True
         try:
-            spec = figure.to_json()
-            # Double-encoded on purpose: the JSON becomes a JavaScript
-            # string literal that the page parses, so nothing in the figure
-            # can be read as code on the way in.
-            payload = json.dumps(spec)
             view.page().runJavaScript(
-                f"window.__snapStart(JSON.parse({payload}),"
-                f" {int(width)}, {int(height)}, {float(scale)})")
+                _start_js(figure.to_json(), width, height, scale))
             url = _await_js(view, "window.__snap", DRAW_TIMEOUT_MS)
         except Exception:
             return None
@@ -457,6 +451,18 @@ class _Snapshotter:
             return base64.b64decode(url[len(_DATA_URL):])
         except Exception:
             return None
+
+
+def _start_js(spec: str, width, height, scale) -> str:
+    """The JavaScript that draws one figure: its map outlines first (a geo
+    map is drawn on files from disk, never fetched — flograph.geoassets),
+    then the figure. The figure's JSON is double-encoded on purpose: it
+    becomes a string literal the page parses, so nothing in the figure can
+    be read as code on the way in."""
+    from flograph.geoassets import names_for, preload_js
+    return (preload_js(names_for(spec))
+            + f"window.__snapStart(JSON.parse({json.dumps(spec)}),"
+            f" {int(width)}, {int(height)}, {float(scale)})")
 
 
 _SNAPSHOTTER = _Snapshotter()
