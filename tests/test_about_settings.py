@@ -201,7 +201,8 @@ class TestTheNavTreeAndSearch:
         rows = dict(self.nav_rows(dialog))
         assert rows["Canvas"] == ["Display", "Getting around", "Drag-select",
                                   "Snapping", "Custom colour strength"]
-        assert rows["General"] == ["Appearance", "Window", "Writing",
+        assert rows["General"] == ["Appearance", "Window", "Properties",
+                                   "Writing",
                                    "Execution", "Saving", "Updates", "Reset"]
         assert rows["About"] == []          # prose, no settings
 

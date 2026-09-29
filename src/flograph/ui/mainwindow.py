@@ -5436,6 +5436,8 @@ class MainWindow(QMainWindow):
         set_table_text_size(0.0)             # back to each table's own size
         set_autosize_default(True)
         set_date_formats_setting("")
+        from .properties.params_panel import set_wheel_changes_choices
+        set_wheel_changes_choices(False)
         self.reset_window_layout()
         self._rebuild_recent_menu()
         if self._settings_dialog is not None:

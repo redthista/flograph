@@ -31,6 +31,10 @@ version.
   only those — "what did I set on this chart?"
 - **Reset.** Right-click a setting ▸ **Reset to Default**, or a heading ▸
   **Reset … to Defaults** for the whole section. Each is one undo step.
+- **Scrolling.** The mouse wheel over a closed drop-down scrolls the panel
+  rather than changing the choice, so scrolling down a long list never edits
+  a setting on the way past. **Settings ▸ General ▸ Scrolling over a
+  drop-down** turns wheel-to-change back on.
 
 ## The standard library
 

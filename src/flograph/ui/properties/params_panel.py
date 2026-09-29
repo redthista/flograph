@@ -21,7 +21,8 @@ from PySide6.QtGui import (
     QTextCursor, QUndoStack,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
     QSizePolicy, QSpinBox, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
@@ -62,6 +63,8 @@ _APP = "flograph"
 _SHOW_ABOUT = "properties/show_about"
 #: Per node type and section: "1" open, "0" folded.
 _SECTION_KEY = "properties/sections/{type_id}/{section}"
+#: Settings > General: whether a wheel over a closed drop-down changes it.
+WHEEL_CHOICES_SETTING = "properties/wheel_changes_choices"
 
 #: Item data: which param a row edits, or which section a heading heads.
 _PARAM_ROLE = Qt.UserRole
@@ -75,6 +78,17 @@ def _setting(key: str, default: bool) -> bool:
     if value is None:
         return default
     return str(value).lower() in ("1", "true")
+
+
+def wheel_changes_choices() -> bool:
+    """Settings > General: a wheel over a drop-down in Properties picks the
+    next option. Off by default — scrolling the panel past a row of them
+    would otherwise quietly rewrite whichever one the pointer crossed."""
+    return _setting(WHEEL_CHOICES_SETTING, False)
+
+
+def set_wheel_changes_choices(enabled: bool) -> None:
+    QSettings(_ORG, _APP).setValue(WHEEL_CHOICES_SETTING, bool(enabled))
 
 
 def _store_setting(key: str, value: bool) -> None:
@@ -824,6 +838,16 @@ class ParamsPanel(QWidget):
         if widget is not None:
             widget.setToolTip(tip)
 
+    def eventFilter(self, obj, event) -> bool:
+        # A wheel over a closed drop-down scrolls the panel instead of
+        # changing it, unless Settings > General says otherwise. An open
+        # list is its own popup, so scrolling through it is unaffected.
+        if (event.type() == QEvent.Wheel and isinstance(obj, QComboBox)
+                and not wheel_changes_choices()):
+            QApplication.sendEvent(self.tree.viewport(), event)
+            return True
+        return super().eventFilter(obj, event)
+
     def _add_row(self, label: str, widget: QWidget,
                  parent: Optional[QTreeWidgetItem] = None) -> QTreeWidgetItem:
         item = QTreeWidgetItem([label, ""])
@@ -833,6 +857,12 @@ class ParamsPanel(QWidget):
         else:
             parent.addChild(item)
         self.tree.setItemWidget(item, 1, widget)
+        # a combo may also sit inside a composite row (a picker's box)
+        combos = widget.findChildren(QComboBox)
+        if isinstance(widget, QComboBox):
+            combos.append(widget)
+        for combo in combos:
+            combo.installEventFilter(self)
         # rows default to a single text line's height -- taller widgets
         # (the multiline "text" editor) would get clipped without this, but
         # respect any maximumHeight the widget set on itself (e.g. the "text"

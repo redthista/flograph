@@ -233,6 +233,7 @@ class SettingsDialog(QDialog):
         from .data_table import table_text_size
         from .editor.spell_check import spell_check_enabled, spell_language
         from .spreadsheet import autosize_default_enabled, date_formats_setting
+        from .properties.params_panel import wheel_changes_choices
         from flograph.core.spelling import LANGUAGES
 
         combo_values = {
@@ -269,6 +270,7 @@ class SettingsDialog(QDialog):
             "requirements_notice_checkbox": window.settings.value(
                 "packages/notify_missing", True, type=bool),
             "spell_check_checkbox": spell_check_enabled(),
+            "properties_wheel_choices_checkbox": wheel_changes_choices(),
         }
         spins = {
             "table_text_size_spinbox": table_text_size(),
@@ -578,6 +580,21 @@ class SettingsDialog(QDialog):
                  "flograph's title bar, keeping the icons — their tooltips "
                  "still say what they do. The workflow name stays. Only "
                  "applies with the custom window frame.")
+
+        rows.add_group("Properties")
+
+        from .properties.params_panel import (set_wheel_changes_choices,
+                                              wheel_changes_choices)
+        wheel_check = QCheckBox("Mouse wheel changes drop-downs")
+        wheel_check.setObjectName("properties_wheel_choices_checkbox")
+        wheel_check.setChecked(wheel_changes_choices())
+        wheel_check.toggled.connect(set_wheel_changes_choices)
+        rows.add("Scrolling over a drop-down", wheel_check,
+                 "When off, a mouse wheel over a closed drop-down in the "
+                 "Properties panel scrolls the panel, so running the wheel "
+                 "down a long list of settings never changes one on the way "
+                 "past. Turn it on to pick the next or previous option with "
+                 "the wheel instead. An open list scrolls either way.")
 
         rows.add_group("Writing")
 
