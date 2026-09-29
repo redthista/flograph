@@ -229,6 +229,9 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     **({"preview_zoom": p.preview_zoom}
                        if p.preview_zoom is not None else {}),
                     **({"preview_flow": True} if p.preview_flow else {}),
+                    # only when off, so a file nobody switched stays as it was
+                    **({"preview_on_submit": True}
+                       if not p.preview_live else {}),
                     # a dashboard's look, only once someone has set one
                     **({"background": p.background} if p.background else {}),
                     **({"tile_style": p.tile_style.to_dict()}
@@ -551,6 +554,7 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # sheet to the pane, one under the next"
             preview_zoom=_preview_zoom(entry.get("preview_zoom")),
             preview_flow=bool(entry.get("preview_flow", False)),
+            preview_live=not bool(entry.get("preview_on_submit", False)),
             # absent before dashboards could be formatted, and on any page
             # nobody has — both mean the theme's look
             background=clean_background(entry.get("background")),

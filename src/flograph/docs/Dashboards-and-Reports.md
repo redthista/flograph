@@ -355,6 +355,14 @@ The report toolbar's **Preview** selector has two targets:
   the page's paper and margins. For a narrower reading column, add
   `body { max-width: 50em; margin: 0 auto; }` in the CSS tab.
 
+**Live**, beside the Preview selector, decides when the preview catches up
+with your typing. On (the default), it follows the editor as you type. Off,
+it waits: an **⟳ Update preview** button appears, lit when there is
+something new to show, and **Ctrl+Enter** in the editor does the same.
+Switch it off for a very large page, where every keystroke would otherwise
+wait on a full re-render. Your text is still saved as you type, and a run
+of the flow still refreshes the preview. The choice is saved with the page.
+
 When **Web** is selected, a **CSS** tab appears beside the Markdown editor.
 CSS is saved with the report page and applies to Web preview and saved HTML;
 it does not change the Pages preview or PDF export. The CSS tab includes

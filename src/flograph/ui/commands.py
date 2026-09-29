@@ -1309,10 +1309,12 @@ class SetPagePreviewViewCommand(QUndoCommand):
     """
 
     def __init__(self, graph: Graph, page_id: str, *,
-                 zoom: Any = _KEEP, flow: Any = _KEEP,
+                 zoom: Any = _KEEP, flow: Any = _KEEP, live: Any = _KEEP,
                  parent: Optional[QUndoCommand] = None) -> None:
         page = graph.page(page_id)
-        if flow is _KEEP:
+        if live is not _KEEP:
+            label = "live preview" if live else "preview on request"
+        elif flow is _KEEP:
             label = "zoom"
         else:
             label = ("pages side by side" if flow
@@ -1320,10 +1322,13 @@ class SetPagePreviewViewCommand(QUndoCommand):
         super().__init__(label, parent)
         self._graph = graph
         self._page_id = page_id
-        self._old = (page.preview_zoom, page.preview_flow)
+        self._old = (page.preview_zoom, page.preview_flow,
+                     page.preview_live)
         self._new = (page.preview_zoom if zoom is _KEEP else zoom,
-                     page.preview_flow if flow is _KEEP else flow)
-        self._merges = flow is _KEEP
+                     page.preview_flow if flow is _KEEP else flow,
+                     page.preview_live if live is _KEEP else live)
+        # only zooms merge — a toggle is one click, one undo step
+        self._merges = flow is _KEEP and live is _KEEP
 
     def id(self) -> int:
         return _ID_PAGE_ZOOM if self._merges else -1   # -1: Qt never merges
@@ -1335,10 +1340,10 @@ class SetPagePreviewViewCommand(QUndoCommand):
         self._apply(self._old)
 
     def _apply(self, state) -> None:
-        zoom, flow = state
+        zoom, flow, live = state
         if self._page_id in self._graph.pages:
             self._graph.set_page_preview_view(self._page_id, zoom=zoom,
-                                              flow=flow)
+                                              flow=flow, live=live)
 
     def mergeWith(self, other: QUndoCommand) -> bool:
         if (not isinstance(other, SetPagePreviewViewCommand)

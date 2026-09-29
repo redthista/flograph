@@ -196,6 +196,35 @@ class ReportPage(QWidget):
             "the contact sheet, for seeing where everything falls at once")
         self._flow_btn.toggled.connect(self._flow_toggled)
 
+        # Live, the preview follows the editor; off, it waits to be asked —
+        # Update preview or Ctrl+Enter — so a page too big to re-render on
+        # every keystroke can still be typed into. Saved with the page.
+        self._live_btn = QToolButton()
+        self._live_btn.setCheckable(True)
+        self._live_btn.setChecked(True)
+        self._live_btn.setText("Live")
+        self._live_btn.setToolTip(
+            "On: the preview follows your typing.\n"
+            "Off: it waits until you press Update preview (Ctrl+Enter) — "
+            "for a page too big to re-render on every keystroke. A run of "
+            "the flow still refreshes it.")
+        self._live_btn.toggled.connect(self._live_toggled)
+        self._update_btn = QToolButton()
+        self._update_btn.setText("⟳ Update preview")
+        self._update_btn.setToolTip("Show what you have written (Ctrl+Enter)")
+        self._update_btn.clicked.connect(self._submit)
+        self._update_btn.setVisible(False)
+        self._update_btn.setEnabled(False)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        for keys in ("Ctrl+Return", "Ctrl+Enter"):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(self._submit)
+        #: edits typed since the preview last rendered, with Live off
+        self._pending = False
+        #: an edit typed here is being pushed — see _push_typed
+        self._own_edit = False
+
         self._help_btn = QToolButton()
         self._help_btn.setText("?")
         self._help_btn.setToolTip("What you can write in a report")
@@ -222,6 +251,8 @@ class ReportPage(QWidget):
         toolbar.addWidget(self._flow_btn)
         toolbar.addWidget(QLabel("Preview:"))
         toolbar.addWidget(self._preview_mode)
+        toolbar.addWidget(self._live_btn)
+        toolbar.addWidget(self._update_btn)
         toolbar.addWidget(self._help_btn)
         toolbar.addWidget(self._status, 1)
         toolbar.addWidget(self._setup_btn)
@@ -352,10 +383,7 @@ class ReportPage(QWidget):
         if page is None or text == page.body:
             return
         # merged, so a burst of typing is one undo step
-        self._undo_stack.push(
-            SetPageBodyCommand(self._graph, self.page_id, text))
-        self._busy_bar.show()
-        self._timer.start()
+        self._push_typed(SetPageBodyCommand(self._graph, self.page_id, text))
 
     def _on_css_changed(self) -> None:
         if self._loading:
@@ -364,9 +392,56 @@ class ReportPage(QWidget):
         text = self.css_editor.toPlainText()
         if page is None or text == page.custom_css:
             return
-        self._undo_stack.push(
+        self._push_typed(
             SetPageCustomCssCommand(self._graph, self.page_id, text))
-        self._timer.start()
+
+    def _push_typed(self, command) -> None:
+        """Push an edit typed into this page's editor, then let `_edited`
+        decide about the preview — which is what honours Live being off."""
+        self._push_own(command)
+        self._edited()
+
+    def _push_own(self, command) -> None:
+        """Push a change this page made itself. The model tells every
+        listener about it, this page included; while `_own_edit` is set
+        this page's own handlers leave the preview alone, since the caller
+        knows whether one is wanted (typing: `_edited`; the Live toggle:
+        none at all)."""
+        self._own_edit = True
+        try:
+            self._undo_stack.push(command)
+        finally:
+            self._own_edit = False
+
+    def _edited(self) -> None:
+        """The Markdown or the CSS was typed into: re-render soon, or —
+        with Live off — note that the preview is behind and wait."""
+        if self._live_btn.isChecked():
+            self._busy_bar.show()
+            self._timer.start()
+            return
+        self._pending = True
+        self._update_btn.setEnabled(True)
+
+    def _submit(self) -> None:
+        """Update preview / Ctrl+Enter: render what has been written."""
+        self._timer.stop()
+        self.request_preview()
+
+    def _caught_up(self) -> None:
+        """A render has started from the page as it is now, so nothing
+        typed is waiting any more."""
+        self._pending = False
+        self._update_btn.setEnabled(False)
+
+    def _live_toggled(self, live: bool) -> None:
+        self._update_btn.setVisible(not live)
+        page = self._page()
+        if page is not None and page.preview_live != bool(live):
+            self._push_own(SetPagePreviewViewCommand(
+                self._graph, self.page_id, live=bool(live)))
+        if live and self._pending:
+            self._submit()      # back to live: show what was waiting
 
     def _learn_word(self, word: str) -> None:
         """Remember a word — a column name, a product, a surname. It goes
@@ -413,7 +488,7 @@ class ReportPage(QWidget):
         """An undo, a redo, or a load changed the body under us. Only touch
         the editor when the text really differs — setPlainText resets the
         cursor to the top, which mid-typing would be unusable."""
-        if page.id != self.page_id or self._loading:
+        if page.id != self.page_id or self._loading or self._own_edit:
             return
         if self.editor.toPlainText() != page.body:
             cursor = self.editor.textCursor().position()
@@ -423,7 +498,11 @@ class ReportPage(QWidget):
             moved = self.editor.textCursor()
             moved.setPosition(min(cursor, len(page.body)))
             self.editor.setTextCursor(moved)
-        self._schedule_preview()
+        # an undo is an edit too: live, it shows; otherwise it waits
+        if self._live_btn.isChecked():
+            self._schedule_preview()
+        else:
+            self._edited()
 
     def _on_node_ran(self, *_args) -> None:
         """A run finished, so the embeds have new content to show."""
@@ -435,7 +514,11 @@ class ReportPage(QWidget):
 
     def _on_page_changed(self, page) -> None:
         """This page's own settings changed — page setup, most of all."""
+        if page.id == self.page_id and self._own_edit:
+            return      # typed CSS, or the Live toggle: the caller has it
         if page.id == self.page_id:
+            if self._live_btn.isChecked() != page.preview_live:
+                self._live_btn.setChecked(page.preview_live)   # an undo
             if self.css_editor.toPlainText() != page.custom_css:
                 self._loading = True
                 self.css_editor.setPlainText(page.custom_css)
@@ -475,6 +558,7 @@ class ReportPage(QWidget):
             return
         self._wanted += 1
         generation = self._wanted
+        self._caught_up()
         staged = self._stage(page)
         if staged is None:
             return
@@ -492,6 +576,7 @@ class ReportPage(QWidget):
         preview wanted again; when the running one lands it is dropped as
         out of date and the newest text is laid out instead."""
         self._wanted += 1
+        self._caught_up()
         self._busy_bar.show()
         if self._layout_job is None:
             self._start_layout()
@@ -662,6 +747,8 @@ class ReportPage(QWidget):
             return
         self._flow_btn.setChecked(page.preview_flow)
         self.preview.set_flow(page.preview_flow)
+        self._live_btn.setChecked(page.preview_live)
+        self._update_btn.setVisible(not page.preview_live)
         self.preview.set_zoom(page.preview_zoom)
 
     def _flow_toggled(self, flow: bool) -> None:

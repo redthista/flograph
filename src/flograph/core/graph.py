@@ -265,6 +265,12 @@ class Page:
     # all, only left that way until it was next closed.
     preview_zoom: Optional[float] = None
     preview_flow: bool = False
+    # Report pages: whether the preview follows the editor as you type
+    # (live) or waits to be asked — Update preview, Ctrl+Enter. A page big
+    # enough that every keystroke waits on a re-render is set to wait; the
+    # flow running still refreshes it. Saved with the page: it is the page
+    # that is big, not the machine.
+    preview_live: bool = True
     # Dashboard pages: the colour behind the tiles ("#rrggbb"), None for the
     # theme's canvas, and the look every tile on the page takes unless it
     # says otherwise. A report ignores both.
@@ -1388,7 +1394,7 @@ class Graph:
         return page
 
     def set_page_preview_view(self, page_id: str, *, zoom: Any = _KEEP,
-                              flow: Any = _KEEP) -> Page:
+                              flow: Any = _KEEP, live: Any = _KEEP) -> Page:
         """How a report's paper is being looked at: the zoom, and whether
         the sheets lie side by side.
 
@@ -1402,6 +1408,8 @@ class Graph:
             page.preview_zoom = None if zoom is None else float(zoom)
         if flow is not _KEEP:
             page.preview_flow = bool(flow)
+        if live is not _KEEP:
+            page.preview_live = bool(live)
         self.events.page_changed.emit(page)
         return page
 
