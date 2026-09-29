@@ -80,7 +80,7 @@ _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
           "Sparkline", "Highlight cells / rows", "Icons", "Pictures",
           "Number format", "Tooltip from another column", "Hide columns",
           "Show only these columns", "Column layout", "Wrap text",
-          "Row height", "Totals & groups"]
+          "Row height", "Totals & groups", "Column headings"]
 
 #: The kind combo's index, by name. The stack's pages are added in this
 #: order and `_line` dispatches on it, so the number appears in three
@@ -88,7 +88,7 @@ _KINDS = ["Colour scale", "Auto colour by category", "Data bars",
 #: insertion and quietly breaks on the next.
 (K_SCALE, K_AUTO, K_BAR, K_SPARK, K_HIGHLIGHT, K_ICONS, K_PICTURE, K_NUMBER,
  K_TIP, K_HIDE, K_SHOW, K_LAYOUT, K_WRAP, K_HEIGHT,
- K_TOTALS) = range(len(_KINDS))
+ K_TOTALS, K_HEADINGS) = range(len(_KINDS))
 
 #: Which rows a highlight draws on — the `on …` style word. Empty is the
 #: data rows, which is all a rule could draw on before total rows.
@@ -102,6 +102,23 @@ _ON_CHOICES = [("the data rows", ""),
 _ON_KINDS = {"": (), "totals": ("total", "group", "subtotal"),
              "total": ("total",), "subtotals": ("group", "subtotal"),
              "all": ("data", "total", "group", "subtotal")}
+
+#: The Column headings page's "What" choices, one per kind of line.
+_HEADING_WHAT = [("Put these columns under a heading", "columns"),
+                 ("Set how a heading folds", "heading"),
+                 ("Every heading at once", "all")]
+#: How a heading starts.
+_HEADING_STARTS = [("open", ""), ("folded", "folded")]
+#: Which rows a spark draws on besides the data rows — the word that
+#: ends its line, and the kinds of row each reaches.
+_SPARK_ON_CHOICES = [("the data rows", ""),
+                     ("…and every total and group row", "totals"),
+                     ("…and the group rows and subtotals", "subtotals"),
+                     ("…and the group rows", "groups"),
+                     ("…and the grand total", "grand")]
+_SPARK_ON_KINDS = {"totals": {"total", "group", "subtotal"},
+                   "subtotals": {"group", "subtotal"},
+                   "groups": {"group"}, "grand": {"total"}}
 
 #: The Totals & groups page's "What" choices, one per line it writes.
 _TOTAL_WHAT = [("Total row — every number column", "blanket"),
@@ -169,7 +186,7 @@ _MODE_KIND = {"color_scale": K_SCALE, "auto_color": K_AUTO,
               "header_label": K_LAYOUT, "wrap": K_WRAP,
               "row_height": K_HEIGHT, "image": K_PICTURE,
               "total": K_TOTALS, "subtotal": K_TOTALS, "group": K_TOTALS,
-              "total_style": K_TOTALS}
+              "total_style": K_TOTALS, "heading": K_HEADINGS}
 
 #: The palettes an auto colour can spend, newest-friendly names first.
 #: Taken from `PALETTES` rather than listed here, so a palette added to
@@ -521,6 +538,7 @@ class RuleBuilder(QDialog):
         self._build_wrap_page()
         self._build_height_page()
         self._build_totals_page()
+        self._build_headings_page()
         outer.addWidget(self._stack)
 
         outer.addWidget(QLabel("Rule text:"))
@@ -818,6 +836,13 @@ class RuleBuilder(QDialog):
         self._spark_fate = _combo(_SPARK_FATE_CHOICES)
         self._spark_fate.currentIndexChanged.connect(self._refresh)
         f.addRow("Columns it reads", self._spark_fate)
+        self._spark_on = _combo(_SPARK_ON_CHOICES)
+        self._spark_on.setToolTip(
+            "On a total or group row the spark draws that row's totals of "
+            "the columns it reads — their sums where they have no total "
+            "row of their own.")
+        self._spark_on.currentIndexChanged.connect(self._refresh)
+        f.addRow("Draw on", self._spark_on)
 
         hint = QLabel(
             "Drawn in a column the table doesn't have — type a new name "
@@ -883,6 +908,10 @@ class RuleBuilder(QDialog):
         place = "in" if rule.hide_value else rule.glyph_where
         _pick_data(self._spark_place, "" if place in (None, "left") else place)
         _pick_data(self._spark_fate, rule.take_sources or "")
+        kinds = set(rule.rows_on or ()) - {"data"}
+        _pick_data(self._spark_on, next(
+            (word for word, reach in _SPARK_ON_KINDS.items()
+             if reach == kinds), ""))
 
         entries = [str(e) for e in rule.series or []]
         known = set(self._columns)
@@ -949,6 +978,9 @@ class RuleBuilder(QDialog):
         fate = self._spark_fate.currentData()
         if fate:
             words.append(fate)
+        on = self._spark_on.currentData()
+        if on:
+            words.append(on)
         return " ".join(words) + f" from {series}"
 
     def _build_highlight_page(self) -> None:
@@ -1439,6 +1471,125 @@ class RuleBuilder(QDialog):
             return ""
         return f"{self._style_rows.currentData()} => {', '.join(parts)}"
 
+    def _build_headings_page(self) -> None:
+        """Column headings — core/table_bands.py. The columns picked at the
+        top go under a heading you click to fold; what a folded heading
+        shows is one column, and this page says which."""
+        from flograph.core.table_totals import AGGREGATIONS, AGGREGATION_HELP
+        page = QWidget()
+        f = QFormLayout(page)
+        self._head_what = _combo(_HEADING_WHAT)
+        f.addRow("What", self._head_what)
+        self._head_name = QLineEdit()
+        self._head_name.setPlaceholderText(
+            "Q1   ·   nest with ›:  2024 › Q1")
+        self._head_fold = QComboBox()
+        self._head_fold.addItem("a narrow blank column", "")
+        for name in AGGREGATIONS:
+            self._head_fold.addItem(
+                f"the {name} across the row — {AGGREGATION_HELP[name]}",
+                name)
+        self._head_fold.addItem("a column the table has", "keep")
+        self._head_keep = self._column_combo()
+        # typed as well as picked: the column kept may be a hidden one (a
+        # matrix keeps its folded values out of view), which isn't listed
+        self._head_keep.setEditable(True)
+        self._head_keep.setCurrentIndex(-1)
+        self._head_start = _combo(_HEADING_STARTS)
+        self._head_hint = QLabel()
+        self._head_hint.setWordWrap(True)
+        self._head_rows = {}
+        for label, widget in (("Heading", self._head_name),
+                              ("Folded shows", self._head_fold),
+                              ("That column", self._head_keep),
+                              ("Starts", self._head_start)):
+            f.addRow(label, widget)
+            self._head_rows[widget] = f.labelForField(widget)
+        f.addRow("", self._head_hint)
+        for box in (self._head_what, self._head_fold, self._head_start,
+                    self._head_keep):
+            box.currentIndexChanged.connect(self._sync_headings)
+        if self._head_keep.isEditable():
+            self._head_keep.editTextChanged.connect(self._refresh)
+        self._head_name.textChanged.connect(self._refresh)
+        self._stack.addWidget(page)
+        self._sync_headings()
+
+    def _sync_headings(self) -> None:
+        what = self._head_what.currentData()
+        keep = self._head_fold.currentData() == "keep"
+        # every heading at once has no one column to keep
+        if what == "all" and keep:
+            self._head_fold.setCurrentIndex(0)
+            keep = False
+        shown = {self._head_fold, self._head_start}
+        if what != "all":
+            shown.add(self._head_name)
+        if keep:
+            shown.add(self._head_keep)
+        for widget, label in self._head_rows.items():
+            widget.setVisible(widget in shown)
+            if label is not None:
+                label.setVisible(widget in shown)
+        self._head_hint.setText({
+            "columns": "The columns picked above go under this heading, in "
+                       "a row above their names; click it on the table to "
+                       "fold them to one column. A column belongs to the "
+                       "last heading that names it.",
+            "heading": "Sets how a heading already given its columns folds "
+                       "and starts — a heading several lines fill, or one "
+                       "a matrix made.",
+            "all": "How every heading folds and starts. A heading's own "
+                   "line still has the last word.",
+        }[what])
+        if self._kind.currentIndex() == K_HEADINGS:
+            self._on_kind()
+        self._refresh()
+
+    def _headings_line(self, cols: str) -> str:
+        what = self._head_what.currentData()
+        name = self._head_name.text().strip().replace('"', "")
+        fold = self._head_fold.currentData()
+        extra = []
+        if self._head_start.currentData():
+            extra.append("folded")
+        if fold == "keep":
+            kept = self._head_keep.currentText().strip()
+            if not kept:
+                return ""
+            extra += ["keep", quote_column(kept)]
+        elif fold:
+            extra.append(fold)
+        elif what == "heading":
+            # said outright, because this line only exists to say it
+            extra.append("stub")
+        if what == "all":
+            return "headings " + " ".join(extra) if extra else ""
+        if not name:
+            return ""
+        line = f'heading "{name}"'
+        if what == "columns":
+            if not cols:
+                return ""
+            line = f"{cols} {line}"
+        return " ".join([line] + extra)
+
+    def _load_headings(self, rule) -> None:
+        _pick_data(self._head_what, "columns" if rule.columns
+                   else "heading" if rule.label else "all")
+        self._head_name.setText(rule.label or "")
+        _pick_data(self._head_start,
+                   "folded" if rule.total_place == "closed" else "")
+        fold = rule.total_agg or ""
+        _pick_data(self._head_fold, "" if fold == "stub" else fold)
+        if fold == "keep":
+            idx = self._head_keep.findData(rule.source)
+            if idx >= 0:
+                self._head_keep.setCurrentIndex(idx)
+            elif self._head_keep.isEditable():
+                self._head_keep.setCurrentText(str(rule.source or ""))
+        self._sync_headings()
+
     def _load_totals(self, rule) -> None:
         if rule.mode == "group":
             _pick_data(self._total_what, "group")
@@ -1545,7 +1696,8 @@ class RuleBuilder(QDialog):
         # anyway would promise something the rule cannot keep
         table_wide = idx in (K_WRAP, K_HEIGHT) or (
             idx == K_TOTALS and self._total_what.currentData()
-            in ("blanket", "subtotal", "style"))
+            in ("blanket", "subtotal", "style")) or (
+            idx == K_HEADINGS and self._head_what.currentData() != "columns")
         self._col_list.setEnabled(not table_wide)
         self._col_edit.setEnabled(not table_wide)
         if idx == K_ICONS:
@@ -1630,6 +1782,8 @@ class RuleBuilder(QDialog):
         elif rule.mode in ("total", "subtotal", "group", "total_style"):
             self._load_totals(rule)
             self._select_columns(rule.columns)
+        elif rule.mode == "heading":
+            self._load_headings(rule)
         elif rule.mode == "data_bar":
             self._bar.set_value(bar_token(rule.color))
             self._set_other_col(self._bar_by, rule.source)
@@ -1756,6 +1910,8 @@ class RuleBuilder(QDialog):
             return f"height {self._height.value()}"   # table-wide too
         if kind == K_TOTALS:
             return self._totals_line(cols)
+        if kind == K_HEADINGS:
+            return self._headings_line(cols)
         if not cols:
             return ""
         if kind == K_SCALE:
@@ -2004,10 +2160,6 @@ class RuleManager(QDialog):
     def _edit(self) -> None:
         row = self._list.currentRow()
         if row < 0 or self._entries[row][1] is None:
-            return
-        if self._entries[row][1].mode == "heading":
-            # the builder has no page for a column heading yet, and opening
-            # one on its first page would write that page's rule over it
             return
         dlg = RuleBuilder(self._columns, self, rule=self._entries[row][1])
         if dlg.exec() == QDialog.Accepted and dlg.line():

@@ -385,3 +385,129 @@ class TestSparksOnTotals:
         body = html[html.index("<tbody>"):]
         rows = re.findall(r"<tr>.*?</tr>", body, re.S)
         assert all("<img" in row for row in rows)
+
+
+# ----------------------------------------------------------- Rules… page
+
+@pytest.fixture
+def builder(qtbot):
+    from flograph.ui.properties.table_rule_wizard import RuleBuilder
+
+    def make(rule=None, columns=("region", "jan", "feb", "mar", "q1_total")):
+        b = RuleBuilder(list(columns), rule=rule)
+        qtbot.addWidget(b)
+        return b
+    return make
+
+
+def _pick(b, *names):
+    b._col_list.clearSelection()
+    for i in range(b._col_list.count()):
+        if b._col_list.item(i).text() in names:
+            b._col_list.item(i).setSelected(True)
+
+
+def _choose(box, data):
+    box.setCurrentIndex(box.findData(data))
+
+
+class TestBuilderPage:
+    def test_columns_under_a_heading(self, builder):
+        from flograph.ui.properties.table_rule_wizard import K_HEADINGS
+        b = builder()
+        b._kind.setCurrentIndex(K_HEADINGS)
+        _pick(b, "jan", "feb", "mar")
+        b._head_name.setText("2024 › Q1")
+        _choose(b._head_fold, "sum")
+        _choose(b._head_start, "folded")
+        assert b.line() == 'jan, feb, mar heading "2024 › Q1" folded sum'
+        rule = parse_rules(b.line())[0]
+        assert (rule.mode, rule.label, rule.total_agg, rule.total_place) == (
+            "heading", "2024 › Q1", "sum", "closed")
+
+    def test_no_columns_or_no_name_is_no_line(self, builder):
+        from flograph.ui.properties.table_rule_wizard import K_HEADINGS
+        b = builder()
+        b._kind.setCurrentIndex(K_HEADINGS)
+        b._head_name.setText("Q1")
+        assert b.line() == ""
+        _pick(b, "jan")
+        b._head_name.setText("")
+        assert b.line() == ""
+
+    def test_keep_a_column(self, builder):
+        from flograph.ui.properties.table_rule_wizard import K_HEADINGS
+        b = builder()
+        b._kind.setCurrentIndex(K_HEADINGS)
+        _choose(b._head_what, "heading")
+        b._head_name.setText("Q1")
+        _choose(b._head_fold, "keep")
+        assert b._head_keep.isVisibleTo(b)
+        _choose(b._head_keep, "q1_total")
+        assert b.line() == 'heading "Q1" keep q1_total'
+
+    def test_a_heading_line_says_stub_outright(self, builder):
+        from flograph.ui.properties.table_rule_wizard import K_HEADINGS
+        b = builder()
+        b._kind.setCurrentIndex(K_HEADINGS)
+        _choose(b._head_what, "heading")
+        b._head_name.setText("Q1")
+        assert b.line() == 'heading "Q1" stub'
+
+    def test_every_heading(self, builder):
+        from flograph.ui.properties.table_rule_wizard import K_HEADINGS
+        b = builder()
+        b._kind.setCurrentIndex(K_HEADINGS)
+        _choose(b._head_what, "all")
+        assert not b._col_list.isEnabled()
+        assert not b._head_name.isVisibleTo(b)
+        assert b.line() == ""
+        _choose(b._head_start, "folded")
+        _choose(b._head_fold, "average")
+        assert b.line() == "headings folded average"
+
+    @pytest.mark.parametrize("line", [
+        'jan, feb, mar heading "2024 › Q1" folded sum',
+        'heading "Q1" keep q1_total',
+        'heading "Q1" folded stub',
+        "headings folded",
+    ])
+    def test_a_line_opens_and_comes_back_the_same(self, builder, line):
+        b = builder(rule=parse_rules(line)[0])
+        assert parse_rules(b.line())[0].to_dict() == \
+            parse_rules(line)[0].to_dict()
+
+    def test_a_hidden_kept_column_survives_editing(self, builder):
+        line = 'heading "2024" keep "2024 · average"'
+        b = builder(rule=parse_rules(line)[0])
+        assert parse_rules(b.line())[0].source == "2024 · average"
+
+    def test_the_manager_edits_a_heading_line(self, qtbot, monkeypatch):
+        from PySide6.QtWidgets import QDialog
+
+        from flograph.ui.properties import table_rule_wizard as w
+        m = w.RuleManager('jan, feb heading "Q1"', ["jan", "feb"])
+        qtbot.addWidget(m)
+        opened = []
+        monkeypatch.setattr(w.RuleBuilder, "exec", lambda self: (
+            opened.append(self._kind.currentIndex()), QDialog.Rejected)[1])
+        m._list.setCurrentRow(0)
+        m._edit()
+        assert opened == [w.K_HEADINGS]
+
+
+class TestSparkDrawOn:
+    def test_the_spark_page_writes_the_word(self, builder):
+        from flograph.ui.properties.table_rule_wizard import K_SPARK
+        b = builder()
+        b._kind.setCurrentIndex(K_SPARK)
+        b._col_edit.setText("trend")
+        _choose(b._spark_read, "pattern")
+        b._spark_pattern.setText("m*")
+        _choose(b._spark_on, "subtotals")
+        rule = parse_rules(b.line())[0]
+        assert rule.rows_on == ["data", "group", "subtotal"]
+
+    def test_it_reads_back(self, builder):
+        b = builder(rule=parse_rules("trend spark from jan..mar totals")[0])
+        assert b._spark_on.currentData() == "totals"

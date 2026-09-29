@@ -248,7 +248,8 @@ trend    spark from jan..dec groups          # a group's own row only
 trend    spark from jan..dec grand           # the grand total only
 ```
 
-On a total row it draws that row's months: the total the table prints
+In **Rules…** it is **Draw on**, on the Sparkline page. On a total row it
+draws that row's months: the total the table prints
 under each month where the months are totalled (`jan..dec total average`
 makes it a line of averages), and their **sum** otherwise — worked out for
 the spark alone, so a month that prints no total still has a point on the
@@ -478,7 +479,10 @@ headings folded sum                        # every heading, at once
   totals the data came with.
 
 Right-click the table for **Expand All Column Headings** / **Collapse All
-Column Headings**; a re-run keeps what you folded. Like everything here the
+Column Headings**; a re-run keeps what you folded. In **Rules…** the
+**Column headings** page writes and reopens all three kinds of line — pick
+the columns, name the heading, and choose what it folds to and how it
+starts. Like everything here the
 headings are a view: the table leaving the `table` port has its columns in
 their own order and no summary columns in it. They print on a report page
 and a dashboard tile as they look on the card when it opens — a report has
