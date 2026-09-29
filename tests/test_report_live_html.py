@@ -133,6 +133,60 @@ class TestLiveTables:
         assert "beside" in html     # the column layout survived
 
 
+HEADED = '''jan, feb, mar heading "2024 › Q1" sum
+apr, q2_total heading "2024 › Q2" folded keep q2_total'''
+
+
+def months():
+    return pd.DataFrame({"region": ["N", "S"], "jan": [1, 2], "feb": [3, 4],
+                         "mar": [5, 6], "apr": [7, 8], "q2_total": [7, 8]})
+
+
+class TestLiveHeadings:
+    """Column headings fold in the page: every column any fold state shows
+    is written, with a description the script lays out (measured in
+    QtWebEngine on the demo's tables — see the commit)."""
+
+    def meta(self, html):
+        import html as h
+        found = re.search(r'data-fg-bands="([^"]*)"', html)
+        return json.loads(h.unescape(found.group(1))) if found else None
+
+    def test_every_column_any_fold_shows_is_written(self):
+        live = frame_to_html(months(), parse_rules(HEADED), live=True)
+        heads = re.findall(r"<th[^>]*>([^<]*)</th>", live)
+        # 2024's stub, Q1's sum, then the members; q2_total is Q2's face
+        assert heads == ["region", "⋯", "sum", "jan", "feb", "mar", "apr",
+                         "q2_total"]
+        # Q1's sum is worked out: 1 + 3 + 5
+        assert ">9<" in live
+
+    def test_the_headings_are_described_for_the_page(self):
+        meta = self.meta(frame_to_html(months(), parse_rules(HEADED),
+                                       live=True))
+        assert [h["label"] for h in meta["heads"]] == ["2024", "Q1", "Q2"]
+        assert [h["folded"] for h in meta["heads"]] == [False, False, True]
+        assert [h["parent"] for h in meta["heads"]] == [-1, 0, 0]
+        cols = meta["cols"]
+        assert cols[0] == {"chain": [], "face": -1, "pure": False}
+        assert cols[1] == {"chain": [0], "face": 0, "pure": True}   # stub
+        assert cols[2] == {"chain": [0, 1], "face": 1, "pure": True}  # sum
+        # the kept column is both a member and the folded face
+        assert cols[-1] == {"chain": [0, 2], "face": 2, "pure": False}
+
+    def test_paper_keeps_its_one_laid_out_state(self):
+        paper = frame_to_html(months(), parse_rules(HEADED))
+        assert "data-fg-bands" not in paper
+        assert re.findall(r"<th[^>]*>([^<]*)</th>", paper) == [
+            "region", "2024", "Q1", "Q2", "jan", "feb", "mar", "q2_total"]
+
+    def test_the_page_script_lays_the_headings_out(self):
+        from flograph.ui.report.live import LIVE_CSS, LIVE_JS
+        assert "function setupBands" in LIVE_JS
+        assert "fgFoldColumns" in LIVE_JS
+        assert "th.fg-band" in LIVE_CSS
+
+
 class TestEnclosingTable:
     def test_innermost_table_around_the_marker(self):
         marker = R.table_marker(0)
@@ -250,7 +304,8 @@ class TestLiveThemes:
         only that the pieces are wired."""
         from flograph.ui.report.live import LIVE_CSS, LIVE_JS
         assert '"Expand all"' in LIVE_JS and '"Collapse all"' in LIVE_JS
-        assert "if (grouped) {" in LIVE_JS
+        # grouped rows, folding column headings, or both
+        assert "if (grouped || banded) {" in LIVE_JS
         assert ".fg-bar .fg-tools" in LIVE_CSS
 
     def test_a_live_chart_has_a_full_screen_button(self):

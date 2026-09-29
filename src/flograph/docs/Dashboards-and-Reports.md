@@ -377,6 +377,10 @@ table:
 * a **grouped** table folds: click a group's row to close or open it, or
   use **Expand all** / **Collapse all** above the table. Groups start the
   way the table's `groups` rule says (open, closed, first);
+* **column headings** fold too: click a heading over its columns to fold
+  them to one — its stub, summary or kept column, as on the card — and
+  again to open them. They start as the `heading` rule says, and
+  **Expand all** / **Collapse all** fold columns and rows together;
 * hover a cell for its column name and value;
 * `![[Sales|search]]` is a live table with a search box over it — it
   filters the rows, opening any group with a match, and says how many rows

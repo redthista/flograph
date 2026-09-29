@@ -201,6 +201,10 @@ tr[data-fg-kind="group"][data-fg-folded="1"] > td:first-child::before {
   content: "\\25B8\\00a0";
 }
 tr.fg-hidden { display: none; }
+/* a column heading: click to fold its columns to one, and back */
+.flograph-table th.fg-band { cursor: pointer; user-select: none; text-align: center; }
+.flograph-table th.fg-band::before { content: "\\25BE\\00a0"; opacity: .7; }
+.flograph-table th.fg-band[data-fg-folded="1"]::before { content: "\\25B8\\00a0"; }
 .fg-bar { display: flex; gap: .6em; align-items: center; margin: 0 0 .4em; }
 .fg-bar input {
   flex: 0 1 18em; font: inherit; padding: .3em .55em;
@@ -475,11 +479,103 @@ LIVE_JS = r"""
     before.concat(data, after).forEach(function (r) { body.appendChild(r); });
   }
 
+  // ---- column headings that fold. The table carries every column any fold
+  // state shows (members and each heading's face) and, in data-fg-bands,
+  // which headings sit over which; this lays out the columns and the
+  // heading rows for the current folds, the way table_bands.arrange does.
+  function setupBands(table) {
+    var meta;
+    try { meta = JSON.parse(table.getAttribute("data-fg-bands")); }
+    catch (e) { return; }
+    var lead = meta.lead ? 1 : 0, heads = meta.heads, cols = meta.cols;
+    var folded = heads.map(function (h) { return !!h.folded; });
+    var first = table.tHead.rows[0];
+    var leadTh = lead ? first.cells[0] : null;
+    var colTh = Array.prototype.slice.call(first.cells, lead);
+    table.fgColNames = (leadTh ? [leadTh.textContent.trim()] : []).concat(
+      colTh.map(function (th) { return th.textContent.trim(); }));
+
+    // the headings over a column that are on show: down to the first
+    // folded one, which the column then stands for
+    function covering(c) {
+      var chain = cols[c].chain, out = [];
+      for (var i = 0; i < chain.length; i++) {
+        out.push(chain[i]);
+        if (folded[chain[i]]) break;
+      }
+      return out;
+    }
+    function visible(c) {
+      var chain = cols[c].chain;
+      for (var i = 0; i < chain.length; i++)
+        if (folded[chain[i]]) return cols[c].face === chain[i];
+      return !cols[c].pure;
+    }
+    function bandCell(h, span) {
+      var th = document.createElement("th");
+      th.colSpan = span;
+      th.className = "fg-band";
+      th.setAttribute("data-fg-folded", folded[h] ? "1" : "0");
+      th.textContent = heads[h].label;
+      th.title = folded[h] ? "Show its columns" : "Fold to one column";
+      th.addEventListener("click", function () {
+        folded[h] = !folded[h];
+        layout();
+      });
+      return th;
+    }
+    function layout() {
+      var shown = [], cover = {}, depth = 0;
+      cols.forEach(function (_, c) {
+        if (!visible(c)) return;
+        shown.push(c);
+        cover[c] = covering(c);
+        depth = Math.max(depth, cover[c].length);
+      });
+      Array.prototype.forEach.call(table.tBodies[0].rows, function (row) {
+        for (var c = 0; c < cols.length; c++) {
+          var td = row.cells[c + lead];
+          if (td) td.style.display = visible(c) ? "" : "none";
+        }
+      });
+      var thead = table.tHead;
+      while (thead.rows.length) thead.deleteRow(0);
+      var rows = [];
+      for (var r = 0; r <= depth; r++) rows.push(thead.insertRow());
+      if (leadTh) { leadTh.rowSpan = depth + 1; rows[0].appendChild(leadTh); }
+      for (r = 0; r <= depth; r++) {
+        var i = 0;
+        while (i < shown.length) {
+          var c = shown[i], k = cover[c];
+          if (r < k.length) {
+            var h = k[r], n = 1;
+            while (i + n < shown.length && cover[shown[i + n]].length > r &&
+                   cover[shown[i + n]][r] === h) n++;
+            rows[r].appendChild(bandCell(h, n));
+            i += n;
+            continue;
+          }
+          if (r === k.length) {
+            colTh[c].rowSpan = depth + 1 - r;
+            rows[r].appendChild(colTh[c]);
+          }
+          i++;
+        }
+      }
+    }
+    table.fgFoldColumns = function (value) {
+      folded = folded.map(function () { return value; });
+      layout();
+    };
+    layout();
+  }
+
   function tooltip(table, cell) {
     if (cell.title || cell.tagName !== "TD") return;
     var row = cell.parentNode, k = kind(row);
     var head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
-    var name = head && head.cells[cell.cellIndex]
+    var name = table.fgColNames ? (table.fgColNames[cell.cellIndex] || "")
+             : head && head.cells[cell.cellIndex]
              ? head.cells[cell.cellIndex].textContent.trim() : "";
     var text = cell.textContent.trim();
     if (!text) return;
@@ -491,8 +587,10 @@ LIVE_JS = r"""
     var table = box.querySelector("table");
     if (!table || !table.tBodies.length) return;
     var grouped = !!table.querySelector('tr[data-fg-kind="group"]');
+    var banded = table.hasAttribute("data-fg-bands");
+    if (banded) setupBands(table);
     var simpleHead = table.tHead && table.tHead.rows.length === 1;
-    if (!grouped && simpleHead) {
+    if (!grouped && !banded && simpleHead) {
       table.classList.add("fg-sortable");
       table.tHead.addEventListener("click", function (e) {
         var th = e.target.closest("th");
@@ -531,9 +629,9 @@ LIVE_JS = r"""
         refresh(table);
       });
     }
-    if (grouped) {
-      // every group at once — the same attribute a click on one sets, so
-      // a table opened this way folds and unfolds by hand as before
+    if (grouped || banded) {
+      // every group and every column heading at once — the same state a
+      // click on one sets, so folding one by hand carries on as before
       var tools = document.createElement("span");
       tools.className = "fg-tools";
       [["Expand all", "0"], ["Collapse all", "1"]].forEach(function (each) {
@@ -543,12 +641,13 @@ LIVE_JS = r"""
         button.addEventListener("click", function () {
           table.querySelectorAll('tr[data-fg-kind="group"]').forEach(
             function (g) { g.setAttribute("data-fg-folded", each[1]); });
+          if (table.fgFoldColumns) table.fgFoldColumns(each[1] === "1");
           refresh(table);
         });
         tools.appendChild(button);
       });
       toolbar().appendChild(tools);
-      refresh(table);
+      if (grouped) refresh(table);
     }
   });
 })();

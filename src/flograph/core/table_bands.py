@@ -401,6 +401,69 @@ def arrange(tree: Tree, columns, toggled=()) -> Arrangement:
     return Arrangement(out, spans, depth, faces)
 
 
+def web_columns(tree: Tree, columns) -> list:
+    """Every column a browser table needs to fold its headings itself:
+    `[(name, role)]` in the order `arrange` lays them out, each heading's
+    face placed where its folded self would stand (first), then its members.
+
+    `role` is {"chain": the heading paths the column sits under, outermost
+    first; "face_of": the heading it stands for folded, or None; "pure":
+    it is only ever shown folded (a summary, a stub, a kept column that is
+    otherwise hidden)}. With one fold state, `arrange` picks the columns;
+    with all of them written, the page picks (ui/report/live.py).
+    """
+    cols = [str(c) for c in columns]
+    if not tree:
+        return [(c, {"chain": [], "face_of": None, "pure": False})
+                for c in cols]
+    member_of = tree.member_of
+    out: list = []
+    done: set = set()
+
+    def chain(path):
+        return [path[:i] for i in range(1, len(path) + 1)
+                if path[:i] in tree.headings]
+
+    def emit(path):
+        head = tree.headings[path]
+        if head.face not in head.columns:
+            out.append((head.face, {"chain": chain(path), "face_of": path,
+                                    "pure": True}))
+        for c in head.columns:
+            leaf = member_of[c]
+            if len(leaf) > len(path):
+                sub = leaf[:len(path) + 1]
+                if sub not in done:
+                    done.add(sub)
+                    emit(sub)
+            else:
+                out.append((c, {"chain": chain(leaf),
+                                 "face_of": path if c == head.face else None,
+                                 "pure": False}))
+
+    for c in cols:
+        leaf = member_of.get(c)
+        if leaf is None:
+            out.append((c, {"chain": [], "face_of": None, "pure": False}))
+            continue
+        top = leaf[:1]
+        if top not in done:
+            done.add(top)
+            emit(top)
+    return out
+
+
+def face_label(tree: Tree, path) -> Optional[str]:
+    """What a heading's face column is headed while folded — see
+    `face_header`, which asks the same of a laid-out arrangement."""
+    head = tree.headings.get(tuple(path))
+    if head is None:
+        return None
+    if head.fold == STUB:
+        return STUB_HEADER
+    return head.fold if head.synthetic else None
+
+
 def face_header(tree: Tree, arrangement: "Arrangement | None",
                 column) -> Optional[str]:
     """What a folded heading's column is headed on screen and on paper, or

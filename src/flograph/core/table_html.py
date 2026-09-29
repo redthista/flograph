@@ -27,6 +27,7 @@ core.
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 from html import unescape
@@ -162,7 +163,15 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     if not columns:
         return "> *(no columns)*"
     arrangement = None
-    if tree:
+    # A live table folds its headings in the page, so it carries every
+    # column any fold state shows — members and faces — and a description
+    # of the headings for the page's script to lay out (web_columns).
+    bands = None
+    if tree and live:
+        order = tb.web_columns(tree, columns)
+        columns = [name for name, _ in order]
+        bands = _bands_meta(tree, order)
+    elif tree:
         arrangement = tb.arrange(tree, columns)
         columns = arrangement.names
 
@@ -232,6 +241,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         label = entry.label if entry and entry.label else str(column)
         if not (entry and entry.label) and column in faces:
             label = tb.face_header(tree, arrangement, column) or label
+        elif not (entry and entry.label) and bands and column in bands["labels"]:
+            label = bands["labels"][column] or label
         covered = (max((sp.level + 1 for sp in arrangement.spans
                         if sp.start <= index < sp.end), default=0)
                    if arrangement is not None else 0)
@@ -304,6 +315,13 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                              pad=pad, row_height=asked))
         out.append("</tr>")
     out.append("</tbody></table>")
+    if bands:
+        from html import escape as _attr
+        meta = {"lead": lead, "heads": bands["heads"], "cols": bands["cols"]}
+        out[0] = out[0].replace(
+            'class="flograph-table"',
+            'class="flograph-table" data-fg-bands="'
+            f'{_attr(json.dumps(meta), quote=True)}"', 1)
     if total > max_rows:
         # the marker rides in the note as well as the header: a table that
         # is rebuilt shorter has to take its own "showing N of M" with it,
@@ -409,6 +427,26 @@ def _special_tr(special, plan, columns, specials, numeric, layout_rules,
                            align=entry.align if entry else None))
     cells.append("</tr>")
     return "".join(cells)
+
+
+def _bands_meta(tree, order) -> dict:
+    """The headings of a live table, as its page script reads them: each
+    heading's label, parent and starting fold, and for each column the
+    headings over it and the one it is the face of (ui/report/live.py lays
+    them out the way table_bands.arrange does)."""
+    paths = list(tree.headings)
+    ids = {path: i for i, path in enumerate(paths)}
+    heads = [{"label": tree.headings[p].label,
+              "parent": ids.get(p[:-1], -1),
+              "folded": tree.headings[p].start_folded} for p in paths]
+    cols = [{"chain": [ids[p] for p in role["chain"] if p in ids],
+             "face": ids.get(role["face_of"], -1)
+             if role["face_of"] is not None else -1,
+             "pure": role["pure"]} for _, role in order]
+    from flograph.core import table_bands as tb
+    labels = {name: tb.face_label(tree, role["face_of"])
+              for name, role in order if role["pure"]}
+    return {"heads": heads, "cols": cols, "labels": labels}
 
 
 def _live_tr(special, plan) -> str:
