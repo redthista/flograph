@@ -236,6 +236,25 @@ trend    spark from jan..dec replace     # hidden, and trend goes where they wer
 Hidden is a view, like `hide`: the months are still in the table leaving
 the card, and every other rule can still read them.
 
+### On total and group rows
+
+A spark draws on the data rows only, unless the line ends in `totals`:
+
+```
+trend    spark from jan..dec totals          # every total and group row too
+trend    spark from jan..dec hide totals     # …with the months hidden
+trend    spark from jan..dec subtotals       # the groups, not the grand total
+trend    spark from jan..dec groups          # a group's own row only
+trend    spark from jan..dec grand           # the grand total only
+```
+
+On a total row it draws that row's months: the total the table prints
+under each month where the months are totalled (`jan..dec total average`
+makes it a line of averages), and their **sum** otherwise — worked out for
+the spark alone, so a month that prints no total still has a point on the
+line. A folded group's row keeps its spark, which is what makes a folded
+table a table of trends.
+
 ### How it's drawn
 
 Everything goes between `spark` and `from`, in any order:
@@ -415,6 +434,55 @@ the card lays out its own.
 
 The totals print on a report page and in a dashboard tile exactly as on the
 card, folded groups included.
+
+## Column headings
+
+Rows gather into groups you can fold; columns gather under **headings**
+you can fold the same way. A heading is a line naming its columns:
+
+```
+jan, feb, mar   heading "Q1"               # three columns under one heading
+apr, may, jun   heading "Q2" folded        # …starting folded
+jul, aug, sep   heading "2024 › Q3"        # › nests: 2024 above Q3
+```
+
+The headings sit in rows above the column names, one row per level, each
+spanning its columns; a column no heading covers runs the full height, as a
+merged cell does in a spreadsheet. A heading's columns are gathered where
+the first of them stood. `2024 > Q3` nests too (with spaces round the `>`,
+so a heading can still say `>90 days`), and a column belongs to the last
+heading that names it.
+
+**Click a heading to fold it.** It folds to one column, always — what that
+column holds is up to you:
+
+```
+jan, feb, mar  heading "Q1" sum            # the three added up, row by row
+jan, feb, mar  heading "Q1" average        # any of the total row's words
+heading "Q1" keep q1_total                 # a column the table already has
+heading "2024" folded                      # set a heading already named
+headings folded sum                        # every heading, at once
+```
+
+* Nothing more said: a narrow column headed `⋯`, there to be clicked open
+  again.
+* An aggregation — `sum`, `average`, `median`, `min`, `max`, `range`,
+  `count`, `rows`, `distinct`, `std`, `variance`, `first`, `last`, `mode`:
+  a **summary** worked out across each row of the columns it folds. It is
+  headed by the aggregation and named after the heading, so a rule reaches
+  it by that name (`Q1 scale green`), it sorts, and a **Total row** totals
+  it like any column.
+* `keep <column>`: that column alone. It is one of the heading's columns
+  while the heading is open, and a heading above it does not count it
+  twice — `2024 sum` adds up the months, not the months and the quarter
+  totals the data came with.
+
+Right-click the table for **Expand All Column Headings** / **Collapse All
+Column Headings**; a re-run keeps what you folded. Like everything here the
+headings are a view: the table leaving the `table` port has its columns in
+their own order and no summary columns in it. They print on a report page
+and a dashboard tile as they look on the card when it opens — a report has
+nothing to click.
 
 ## Order of application
 
@@ -690,6 +758,15 @@ the value (there is a column per quarter now), and `autocolour` by another
 column, whose colours are picked per column and wouldn't agree across the
 matrix. The table leaving the `table` port is the matrix, with the carried
 columns in it.
+
+**A matrix gets its column headings.** Pivot on two columns (**Columns**
+`year, quarter`), or several **Values**, and the levels become
+[column headings](#column-headings): `2024` over `Q1 Q2 Q3 Q4`, rather than
+columns called `2024_Q1`. Fold a year and it shows the year worked out the
+way the matrix was — the aggregation over the **rows** beneath it, so a
+folded year of a mean matrix is the mean of that year's rows, not the mean
+of its four quarters. Set **Column headings** to *flat* for the joined
+names instead.
 
 ## Sharing one look across tables
 

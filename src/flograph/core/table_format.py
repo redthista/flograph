@@ -269,7 +269,7 @@ _MODES = {"color_scale", "data_bar", "highlight", "icons", "icon_map",
           "number_format", "column_width", "align", "header_label", "wrap",
           "sort", "color_map", "auto_color", "tooltip", "sparkline",
           "row_height", "image", "total", "subtotal", "group",
-          "total_style"}
+          "total_style", "heading"}
 
 #: The rules that lay out total rows and groups (core/table_totals.py).
 #: Like the layout modes they are read once, never evaluated per cell.
@@ -279,7 +279,7 @@ TOTAL_MODES = frozenset({"total", "subtotal", "group", "total_style"})
 #: once into a `ColumnLayout` and never evaluated per row, so they cost
 #: nothing on a big frame and are not what makes a style "active".
 LAYOUT_MODES = {"column_width", "align", "header_label", "wrap", "sort",
-                "row_height"}
+                "row_height", "heading"}
 
 _ALIGNMENTS = {"left": "left", "right": "right", "center": "center",
                "centre": "center", "middle": "center"}
@@ -1534,6 +1534,13 @@ def _spark_colour(token: "str | None") -> "str | None":
     return None
 
 
+#: The words that put a spark on total rows as well as on the data — the
+#: kinds of row each reaches, as core/table_totals.ROW_KINDS names them.
+_SPARK_ON = {"totals": ("total", "group", "subtotal"),
+             "subtotals": ("group", "subtotal"),
+             "groups": ("group",), "grand": ("total",)}
+
+
 def _parse_spark(lineno: int, columns: list, arg: str) -> Rule:
     """`"bars green last from jan..dec hide"` → a sparkline rule.
 
@@ -1558,15 +1565,23 @@ def _parse_spark(lineno: int, columns: list, arg: str) -> Rule:
     tail = arg[spans[cut].end():].strip()
 
     fate = None
-    # a trailing `hide` / `replace` after the column list — only when a
-    # space, not a comma, sets it off, so a column called "hide" in the
-    # list itself survives
-    words = list(_TOKEN_RE.finditer(tail))
-    if len(words) > 1 and words[-1].group().lower() in _SPARK_FATES:
+    on: list = []
+    # a trailing `hide` / `replace` / `totals` after the column list — only
+    # when a space, not a comma, sets it off, so a column called "hide" in
+    # the list itself survives
+    while True:
+        words = list(_TOKEN_RE.finditer(tail))
+        last = words[-1].group().lower() if len(words) > 1 else ""
+        if last not in _SPARK_FATES and last not in _SPARK_ON:
+            break
         before = tail[:words[-1].start()]
-        if before[-1:].isspace() and not before.rstrip().endswith(","):
-            fate = _SPARK_FATES[words[-1].group().lower()]
-            tail = before.rstrip()
+        if not before[-1:].isspace() or before.rstrip().endswith(","):
+            break
+        if last in _SPARK_FATES:
+            fate = _SPARK_FATES[last]
+        else:
+            on = ["data"] + list(_SPARK_ON[last])
+        tail = before.rstrip()
     series = _column_list(tail)
     if not series:
         raise ValueError(
@@ -1625,6 +1640,10 @@ def _parse_spark(lineno: int, columns: list, arg: str) -> Rule:
             only = True
         elif low in _SPARK_FATES:
             fate = _SPARK_FATES[low]
+        elif low in _SPARK_ON:
+            # drawn on total rows too, from each row's totals — the rows
+            # themselves keep theirs, which is why "data" stays in
+            on = ["data"] + [k for k in _SPARK_ON[low] if k != "data"]
         elif _spark_colour(token) and colour is None:
             colour = _spark_colour(token)
         else:
@@ -1637,7 +1656,7 @@ def _parse_spark(lineno: int, columns: list, arg: str) -> Rule:
                 negative_color=negative, marks=marks, ref=ref,
                 shared=shared, tall=tall, smooth=smooth, thick=thick,
                 spark_width=width, glyph_where=place, hide_value=only,
-                take_sources=fate)
+                take_sources=fate, rows_on=on)
 
 
 def _parse_token_line(lineno: int, line: str) -> Rule:
@@ -2112,6 +2131,9 @@ def _parse_totals_line(lineno: int, line: str) -> "Rule | None":
     tokens = _quoted_tokens(line)
     if not tokens:
         return None
+    heading = _parse_heading_line(lineno, tokens)
+    if heading is not None:
+        return heading
     head = tokens[0].lower()
     rest = tokens[1:]
 
@@ -2177,6 +2199,75 @@ def _parse_totals_line(lineno: int, line: str) -> "Rule | None":
             f"line {lineno}: can't total by {word!r} — use one of "
             f"{', '.join(tt.AGGREGATIONS)}, 'none', or \"text\"")
     return Rule("total", columns, total_agg=agg)
+
+
+_HEADING_WORDS = ("heading", "headings")
+
+
+def _parse_heading_line(lineno: int, tokens: list) -> "Rule | None":
+    """A column-heading line (core/table_bands.py) as a Rule, or None::
+
+        jan, feb, mar  heading "Q1" [folded|open] [sum|…|keep col|stub]
+        heading "Q1" folded sum          # a heading already named
+        headings folded                  # every heading
+
+    The heading's name travels in `label`, the fold's aggregation in
+    `total_agg` (or "stub"), a kept column in `source`, and the starting
+    state in `total_place` — the fields a group line already uses."""
+    from . import table_bands as tb
+    from . import table_totals as tt
+
+    at = next((i for i, t in enumerate(tokens)
+               if t.lower() in _HEADING_WORDS), None)
+    if at is None:
+        return None
+    columns = _column_list(" ".join(tokens[:at])) if at else []
+    if at and not columns:
+        return None
+    label = agg = keep = start = None
+    args = tokens[at + 1:]
+    i = 0
+    while i < len(args):
+        token = args[i]
+        low = token.lower()
+        if _is_quoted(token) and label is None:
+            label = _unquote(token)
+        elif tb.start_word(low):
+            start = tb.start_word(low)
+        elif low == "keep":
+            if i + 1 >= len(args):
+                raise ValueError(
+                    f"line {lineno}: 'keep' names the column a folded "
+                    f"heading shows — 'keep q1_total'")
+            keep = _unquote(args[i + 1])
+            agg = tb.KEEP
+            i += 1
+        elif low in ("stub", "none", "blank"):
+            agg = tb.STUB
+        elif tt.canonical_agg(low):
+            agg = tt.canonical_agg(low)
+        elif label is None:
+            label = token             # `heading Q1 folded` — unquoted
+        else:
+            raise ValueError(
+                f"line {lineno}: don't understand {token!r} in a heading "
+                f"line — give its \"name\", folded or open, and what a fold "
+                f"shows ({', '.join(tt.AGGREGATIONS)}, keep <column>, stub)")
+        i += 1
+    if label is not None and not tb.heading_path(label):
+        label = None
+    if columns and label is None:
+        raise ValueError(
+            f"line {lineno}: name the heading the columns go under — "
+            f"'{', '.join(columns)} heading \"Q1\"'")
+    if not columns and label is None and not (start or agg):
+        return None
+    if agg == tb.KEEP and label is None:
+        raise ValueError(
+            f"line {lineno}: 'keep' belongs to one heading — "
+            f"'heading \"Q1\" keep q1_total'")
+    return Rule(tb.MODE, columns, label=label, total_agg=agg, source=keep,
+                total_place=start)
 
 
 def parse_rules(text: str) -> list[Rule]:
@@ -2367,6 +2458,19 @@ def _summary(rule: Rule) -> str:
                  "first": "outer level open"}.get(rule.total_place or "")
         what = f"grouped by {cols}" if rule.columns else "groups"
         return f"{what}" + (f"  ·  start {start}" if start else "")
+    if rule.mode == "heading":
+        parts = []
+        if rule.total_place:
+            parts.append("starts folded" if rule.total_place == "closed"
+                         else "starts open")
+        if rule.total_agg == "keep":
+            parts.append(f"folded shows {rule.source}")
+        elif rule.total_agg and rule.total_agg != "stub":
+            parts.append(f"folded shows the {rule.total_agg}")
+        what = ("every heading" if not rule.label
+                else f"{cols} under “{rule.label}”" if rule.columns
+                else f"heading “{rule.label}”")
+        return what + (f"  ·  {', '.join(parts)}" if parts else "")
     if rule.mode == "total_style":
         kinds = " and ".join(rule.rows_on) or "total"
         return f"{kinds} rows  ·  styled"
@@ -2570,6 +2674,15 @@ def style_report(style_obj: Any, df=None) -> list[str]:
         # on a `width`, `label` or `show` line that goes on to use it. The
         # same resolution the card applies, so the two agree on what exists.
         known |= set(spark_projection(df, rules)[0].columns.map(str)) - known
+        # …and so is a column heading's summary, and a matrix's folded
+        # values, which ride on the style rather than in the table
+        from . import table_bands
+        grand = style_obj.get("grand") if isinstance(style_obj, dict) else None
+        known |= set(table_bands.with_carried(df, grand)[1])
+        bands = table_bands.plan_from_rules(rules)
+        if bands.active:
+            known |= set(table_bands.resolve(
+                bands, sorted(known), sorted(known)).synthetic_names())
         entries = [c for rule in rules for c in rule.columns
                    if rule.mode != "sparkline" or _is_glob(c)]
         entries += [r.source for r in rules if r.source]
@@ -3408,8 +3521,8 @@ def column_layout(rules, columns) -> dict:
     for rule in rules or []:
         # `wrap` and `sort` are layout rules about the *table*, not about a
         # column, so they have no ColumnLayout entry to fill in
-        if rule.mode not in LAYOUT_MODES or rule.mode in ("wrap", "sort",
-                                                          "row_height"):
+        if rule.mode not in LAYOUT_MODES or rule.mode in (
+                "wrap", "sort", "row_height", "heading"):
             continue
         for name in expand_columns(rule.columns, columns):
             entry = out.setdefault(name, ColumnLayout())

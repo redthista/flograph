@@ -307,8 +307,13 @@ def _matching(patterns, names) -> list[str]:
 
 def build_matrix(table, rows, columns, values=(), agg="sum",
                  order="as they appear", style=None,
-                 totals: bool = False) -> Matrix:
+                 totals: bool = False, headings: bool = True) -> Matrix:
     """`table` as a matrix, with `style`'s rules carried onto its cells.
+
+    `headings` puts the matrix's column levels in column headings
+    (core/table_bands.py) — `2024 › Q1` over `revenue` rather than one
+    column called `revenue_2024_Q1` — each folding to its true value over
+    the rows beneath it (see `_heading_rules`).
 
     `totals` carries each cell column's true grand total on the style
     (``"grand"``): the matrix's own aggregation over the *rows* behind the
@@ -518,6 +523,17 @@ def build_matrix(table, rows, columns, values=(), agg="sum",
             new_rules.append(dataclasses.replace(
                 rule, columns=[], source=column, op="notempty", value=None))
 
+    heading_rules: list[Rule] = []
+    face_grand: dict = {}
+    faces: dict = {}
+    if headings:
+        heading_rules, face_grand, faces = _heading_rules(
+            table, pivoted, rows, columns, values, agg, value_keys, name_of,
+            unique, sort=order == "sorted")
+    # before the reader's own lines, so a `heading "2024" sum` of theirs
+    # still has the last word
+    new_rules = heading_rules + new_rules
+
     frame = frame.reset_index()
     present = {str(c) for c in frame.columns}
 
@@ -546,12 +562,120 @@ def build_matrix(table, rows, columns, values=(), agg="sum",
     if totals:
         grand = _grand_totals(table, columns, values, agg, value_keys,
                               name_of)
+        grand.update(face_grand)
         if grand:
             from .table_totals import canonical_agg
             payload["grand"] = {"agg": canonical_agg(
                 "distinct" if agg == "distinct count" else agg),
                 "values": grand}
+    if faces:
+        # a folded heading's values ride on the style, not in the table:
+        # a node downstream summing every number column would otherwise
+        # count each one twice (see table_bands.with_carried)
+        payload.setdefault("grand", {})["faces"] = faces
     return Matrix(frame=frame, style=payload, notes=notes)
+
+
+def _heading_rules(table, pivoted, rows, columns, values, agg, value_keys,
+                   name_of, unique, sort: bool) -> tuple:
+    """(rules, grand totals, faces) giving a matrix its column headings.
+
+    The levels `flat_names` would have joined into one name become the
+    headings, outermost first, and each cell is headed by its last part
+    alone. A folded heading shows a column worked out the way the matrix
+    was — the aggregation over the *rows* beneath it, pivoted one level
+    coarser — which is the only honest answer for anything but a sum: the
+    mean of three monthly means is not the quarter's mean. Those columns
+    are hidden until a heading is folded (`keep`), and travel as `faces`
+    — {column: a value per matrix row} — on the style.
+    """
+    import pandas as pd
+
+    from .table_bands import MODE, KEEP, path_text
+    from .table_totals import _scalar, canonical_agg
+
+    if not value_keys:
+        return [], {}, {}
+    levels = len(value_keys[0])
+    drop = 0
+    while (levels - drop > 1
+           and len({vk[drop] for vk in value_keys}) == 1):
+        drop += 1
+    if levels - drop < 2:
+        return [], {}, {}             # one level: nothing to head
+    func = _AGG_FUNCS.get(agg, agg)
+    word = canonical_agg("distinct" if agg == "distinct count" else agg) \
+        or agg
+
+    leaf_of: dict = {}                # heading path -> [cell names]
+    labels: dict = {}                 # cell's own label -> [cell names]
+    prefixes: dict = {}               # heading path -> original key prefix
+    for vk in value_keys:
+        kept = [str(p) for p in vk[drop:]]
+        path = tuple(kept[:-1])
+        leaf_of.setdefault(path, []).append(name_of[vk])
+        labels.setdefault(kept[-1], []).append(name_of[vk])
+        for j in range(1, len(kept)):
+            prefixes.setdefault(tuple(kept[:j]), vk[:drop + j])
+
+    coarse: dict = {}                 # pivot columns used -> frame
+
+    def coarse_values(key):
+        """The rows' `agg` for one heading, per matrix row."""
+        value, parts = key[0], tuple(key[1:])
+        m = len(parts)
+        if m not in coarse:
+            if m == 0:
+                coarse[m] = table.groupby(rows, sort=sort, dropna=False)[
+                    values].agg(func)
+            else:
+                coarse[m] = table.pivot_table(
+                    index=rows, columns=columns[:m], values=values,
+                    aggfunc=func, sort=sort)
+        got = coarse[m]
+        column = value if m == 0 else (value, *parts)
+        if m == 1 and column not in got.columns:
+            column = (value, parts[0])
+        return got[column].reindex(pivoted.index)
+
+    def coarse_grand(key):
+        value, parts = key[0], tuple(key[1:])
+        if not parts:
+            series = table[value]
+        else:
+            mask = pd.Series(True, index=table.index)
+            for column, part in zip(columns, parts):
+                mask &= table[column] == part
+            series = table.loc[mask, value]
+        if func == "first":
+            pos = series.first_valid_index()
+            return _scalar(series.loc[pos]) if pos is not None else None
+        try:
+            return _scalar(series.agg(func))
+        except Exception:
+            return None
+
+    rules: list[Rule] = []
+    grand: dict = {}
+    faces: dict = {}
+    for path, key in prefixes.items():
+        text = path_text(path)
+        try:
+            face = unique(f"{text} · {word}")
+            faces[face] = [_scalar(v) for v in coarse_values(key).tolist()]
+        except Exception:
+            continue                  # folds to a stub, which is still true
+        grand[face] = coarse_grand(key)
+        rules.append(Rule(MODE, list(leaf_of.get(path, [])), label=text,
+                          total_agg=KEEP, source=face))
+    for path, cells in leaf_of.items():
+        if path not in prefixes:
+            rules.append(Rule(MODE, list(cells), label=path_text(path)))
+    for label, cells in labels.items():
+        rules.append(Rule("header_label", list(cells), label=label))
+    if faces:
+        rules.append(Rule("header_label", list(faces), label=word))
+    return rules, grand, faces
 
 
 def _grand_totals(table, columns, values, agg, value_keys, name_of) -> dict:

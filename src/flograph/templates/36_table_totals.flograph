@@ -252,6 +252,91 @@
     },
     "code": null,
     "label": null
+   },
+   {
+    "id": "tt_head_matrix",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     3640
+    ],
+    "params": {
+     "mode": "matrix",
+     "matrix_rows": "Region",
+     "matrix_columns": "Quarter",
+     "matrix_values": "Revenue, Units",
+     "matrix_agg": "sum",
+     "totals": "sum",
+     "format_rules": "Revenue  format $,.0f\nRevenue  scale green",
+     "width": 820,
+     "height": 300
+    },
+    "code": null,
+    "label": "7 · A matrix's own headings"
+   },
+   {
+    "id": "tt_head_matrix_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     3640
+    ],
+    "params": {
+     "text": "**7 · Column headings in a matrix.** Revenue *and* units by quarter: each value heads its quarters instead of eight columns called `Revenue_Q1`… Click **Revenue** to fold it to one column — the region's revenue for the year, worked out from its rows. *Column headings ▸ flat* puts the joined names back.",
+     "width": 520,
+     "height": 180
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_pivot",
+    "type": "flograph.transform.pivot",
+    "pos": [
+     0,
+     4240
+    ],
+    "params": {
+     "index": "Region, Product",
+     "columns": "Quarter",
+     "values": "Revenue, Units",
+     "agg": "sum"
+    },
+    "code": null,
+    "label": null
+   },
+   {
+    "id": "tt_head_groups",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     4240
+    ],
+    "params": {
+     "mode": "grouped",
+     "group_by": "Region",
+     "totals": "sum",
+     "format_rules": "Revenue_*  heading \"Revenue\" sum\nUnits_*    heading \"Units\" sum\nRevenue_Q1, Units_Q1  label \"Q1\"\nRevenue_Q2, Units_Q2  label \"Q2\"\nRevenue_*, Revenue  format $,.0f\ntrend  spark area teal last from Revenue_Q1, Revenue_Q2 totals",
+     "width": 820,
+     "height": 520
+    },
+    "code": null,
+    "label": "8 · Headings, and sparks on the groups"
+   },
+   {
+    "id": "tt_head_groups_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     4240
+    ],
+    "params": {
+     "text": "**8 · Headings you fold, sparks on the groups.** A pivot to one column per quarter for revenue and for units, grouped by region. Each value heads its quarters: click **Revenue** or **Units** to fold it to the row's total. The `trend` spark ends in `totals`, so each region's row and the grand total draw their revenue by quarter too — fold a region and its trend is still there.",
+     "width": 520,
+     "height": 220
+    },
+    "code": null,
+    "label": null
    }
   ],
   "connections": [
@@ -331,6 +416,39 @@
      "tt_down",
      "table"
     ]
+   },
+   {
+    "id": "c08",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_head_matrix",
+     "table"
+    ]
+   },
+   {
+    "id": "c09",
+    "src": [
+     "tt_data",
+     "table"
+    ],
+    "dst": [
+     "tt_pivot",
+     "table"
+    ]
+   },
+   {
+    "id": "c10",
+    "src": [
+     "tt_pivot",
+     "pivoted"
+    ],
+    "dst": [
+     "tt_head_groups",
+     "table"
+    ]
    }
   ],
   "frames": [
@@ -344,6 +462,17 @@
      3480
     ],
     "color": "#26415c"
+   },
+   {
+    "id": "tt_frame_heads",
+    "title": "Column headings",
+    "rect": [
+     -60,
+     3560,
+     2960,
+     1320
+    ],
+    "color": "#3b3a5c"
    }
   ],
   "pages": [
@@ -395,6 +524,17 @@
        680,
        300
       ]
+     },
+     {
+      "id": "t5",
+      "node": "tt_head_groups",
+      "port": "table",
+      "rect": [
+       40,
+       1080,
+       1400,
+       520
+      ]
      }
     ]
    },
@@ -402,7 +542,7 @@
     "id": "tt_report",
     "title": "Report",
     "kind": "report",
-    "body": "# Sales by region\n\nThe same tables, printed. Group rows, subtotals and the grand total come out as they are on the card, colours included.\n\n## By region\n\n![[3 · Grouped by region]]\n\n## Region × product, averaged\n\n![[6 · Matrix with a true total]]\n"
+    "body": "# Sales by region\n\nThe same tables, printed. Group rows, subtotals and the grand total come out as they are on the card, colours included.\n\n## By region\n\n![[3 · Grouped by region]]\n\n## Region × product, averaged\n\n![[6 · Matrix with a true total]]\n\n## By region, by quarter\n\nColumn headings print as rows above the names, spanning their columns, and every region's trend is drawn on its own row.\n\n![[8 · Headings, and sparks on the groups]]\n"
    }
   ]
  }

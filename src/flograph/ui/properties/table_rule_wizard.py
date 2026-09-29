@@ -2005,6 +2005,10 @@ class RuleManager(QDialog):
         row = self._list.currentRow()
         if row < 0 or self._entries[row][1] is None:
             return
+        if self._entries[row][1].mode == "heading":
+            # the builder has no page for a column heading yet, and opening
+            # one on its first page would write that page's rule over it
+            return
         dlg = RuleBuilder(self._columns, self, rule=self._entries[row][1])
         if dlg.exec() == QDialog.Accepted and dlg.line():
             self._entries[row] = self._entry_for(dlg.line())

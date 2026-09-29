@@ -10,8 +10,10 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QFont
+
+from flograph.core.table_bands import face_header
 
 from ..table_delegate import BAR_ROLE, DECOR_ROLE, HEIGHT_ROLE, ICON_ROLE
 
@@ -28,6 +30,7 @@ _BLOCK = 1024
 # screenful is a few hundred; this is a table scrolled end to end, many times.
 _STYLE_CACHE_LIMIT = 200_000
 _UNSET = object()
+
 FLOAT_PRECISION = 6
 
 # Above this row count a conditional-format style is not evaluated: the
@@ -94,6 +97,9 @@ def _is_missing(value: Any) -> bool:
 
 
 class PandasModel(QAbstractTableModel):
+    #: a column heading was folded or opened — the heading strip repaints
+    headingsChanged = Signal()
+
     def __init__(self, df: pd.DataFrame, parent=None, rules=None,
                  hidden=None, shown=None, grand=None) -> None:
         super().__init__(parent)
@@ -119,6 +125,34 @@ class PandasModel(QAbstractTableModel):
         if self._plan.grouped:
             hidden = list(hidden or []) + [
                 c for c in self._plan.group_by if c not in (shown or [])]
+        # Column headings (core/table_bands.py): which columns go under
+        # which heading, and the column each shows folded. A summary or a
+        # stub is a column added to the frame, so it sorts, totals and takes
+        # rules like any other; it is kept out of the plain projection
+        # below and put back where its heading is by `arrange`.
+        from flograph.core import table_bands
+        from flograph.core.table_format import visible_columns
+        self._tree = table_bands.Tree()
+        self._arrangement = None
+        #: the headings the reader has folded or opened, against their start
+        self._band_toggled: set = set()
+        #: the data columns on show before headings rearrange them
+        self._band_base: list = []
+        df, carried = table_bands.with_carried(df, grand)
+        if carried:
+            hidden = list(hidden or []) + carried
+        band_plan = table_bands.plan_from_rules(self._all_rules)
+        if band_plan.active:
+            names = [str(c) for c in df.columns]
+            base = visible_columns(names, shown or [], hidden or [])
+            tree = table_bands.resolve(band_plan, base, names)
+            if tree:
+                df = table_bands.with_faces(df, tree)
+                self._tree = tree
+                self._band_base = base
+                hidden = list(hidden or []) + tree.synthetic_names()
+                # the totals see the summaries: a summed Q1 gets its total
+                self._plan = plan_from_rules(self._all_rules, df)
         #: the reader's folds: group paths flipped from how groups start
         self._toggled: set = set()
         #: `Layout` when there are total rows or groups, else None — and
@@ -144,9 +178,21 @@ class PandasModel(QAbstractTableModel):
         # may be globs, and both are a *view* — `self._source` is untouched,
         # so the frame leaving the node's table port is the one that
         # arrived, in its own order.
-        from flograph.core.table_format import visible_columns
         names = [str(c) for c in df.columns]
         keep = visible_columns(names, shown or [], hidden or [])
+        if self._tree:
+            self._arrangement = table_bands.arrange(self._tree, keep)
+            keep = self._arrangement.names
+        self._set_visible(keep)
+        self._set_rules(rules)
+        self._apply_default_sort()
+        self._relayout()
+
+    def _set_visible(self, keep) -> None:
+        """Show the columns named in `keep`, in that order."""
+        # a total row's styles were worked out for the columns then on show
+        self._special_styles = {}
+        names = [str(c) for c in self._df.columns]
         if keep == names:
             self._visible = None            # nothing projected: the fast path
         else:
@@ -169,9 +215,6 @@ class PandasModel(QAbstractTableModel):
                 visible.append(slots[min(n, len(slots) - 1)])
                 taken[c] = n + 1
             self._visible = visible
-        self._set_rules(rules)
-        self._apply_default_sort()
-        self._relayout()
 
     def _src(self, col: int) -> int:
         """A visible column index -> its position in the underlying frame;
@@ -288,7 +331,16 @@ class PandasModel(QAbstractTableModel):
 
     def carry_folds(self, other) -> None:
         """Take `other`'s folds — a re-run's new model keeping the groups
-        the reader had folded, where it groups the same way."""
+        the reader had folded, where it groups the same way, and the
+        column headings folded that it still has."""
+        try:
+            theirs = getattr(other, "_band_toggled", None)
+            if self._tree and theirs:
+                mine = {p for p in theirs if p in self._tree.headings}
+                if mine:
+                    self._refold(mine)
+        except Exception:
+            pass
         try:
             if (other is not None and self.is_grouped()
                     and other.plan().group_by == self._plan.group_by
@@ -299,6 +351,70 @@ class PandasModel(QAbstractTableModel):
                 self.endResetModel()
         except Exception:
             pass
+
+    # ------------------------------------------------------ column headings
+
+    def headings(self):
+        """The `Arrangement` of column headings on show, or None. Its span
+        columns count from the first data column — add `lead_columns()`."""
+        return self._arrangement
+
+    def lead_columns(self) -> int:
+        return self._lead
+
+    def has_headings(self) -> bool:
+        return self._arrangement is not None and bool(self._arrangement.spans)
+
+    def heading_folded(self, path) -> bool:
+        return self._tree.is_folded(path, self._band_toggled)
+
+    def toggle_heading(self, path) -> bool:
+        """Fold or open one heading. Its columns come and go as a removal
+        and an insert, not a reset, so every other column keeps the width
+        it had and the view keeps its scroll position."""
+        from flograph.core import table_bands
+        path = tuple(path)
+        if not self._tree or path not in self._tree.headings:
+            return False
+        old = self._arrangement
+        toggled = set(self._band_toggled) ^ {path}
+        new = table_bands.arrange(self._tree, self._band_base, toggled)
+        was = next((sp for sp in old.spans if sp.path == path), None)
+        now = next((sp for sp in new.spans if sp.path == path), None)
+        if was is None or now is None:
+            return False
+        lead = self._lead
+        self.beginRemoveColumns(QModelIndex(), lead + was.start,
+                                lead + was.end - 1)
+        self._set_visible(old.names[:was.start] + old.names[was.end:])
+        self._arrangement = None
+        self.endRemoveColumns()
+        self.beginInsertColumns(QModelIndex(), lead + now.start,
+                                lead + now.end - 1)
+        self._band_toggled = toggled
+        self._arrangement = new
+        self._set_visible(new.names)
+        self.endInsertColumns()
+        self.headingsChanged.emit()
+        return True
+
+    def set_all_headings(self, folded: bool) -> None:
+        """Expand / Collapse All Column Headings."""
+        if not self._tree:
+            return
+        toggled = {p for p, h in self._tree.headings.items()
+                   if h.start_folded != folded}
+        self._refold(toggled)
+
+    def _refold(self, toggled) -> None:
+        from flograph.core import table_bands
+        self.beginResetModel()
+        self._band_toggled = set(toggled)
+        self._arrangement = table_bands.arrange(
+            self._tree, self._band_base, self._band_toggled)
+        self._set_visible(self._arrangement.names)
+        self.endResetModel()
+        self.headingsChanged.emit()
 
     def _visible_names(self) -> list:
         names = [str(c) for c in self._df.columns]
@@ -832,7 +948,11 @@ class PandasModel(QAbstractTableModel):
                     return " › ".join(self._plan.group_by)
                 # a `label` rule renames the header on screen only; every
                 # rule, sort and export still goes by the real column name
-                return self._labels.get(col, str(self._df.columns[col]))
+                name = str(self._df.columns[col])
+                if col not in self._labels and self._arrangement is not None:
+                    return face_header(self._tree, self._arrangement,
+                                       name) or name
+                return self._labels.get(col, name)
             pos, special = self._at(section)
             if special is not None:
                 return special.label if special.kind == "total" else ""
@@ -848,6 +968,15 @@ class PandasModel(QAbstractTableModel):
                         + " — click a group's arrow to fold it; right-click "
                           "to fold or unfold them all")
             name = str(self._df.columns[col])
+            if self._arrangement is not None \
+                    and name in self._arrangement.faces:
+                from flograph.core.table_bands import path_text
+                head = self._tree.headings[self._arrangement.faces[name]]
+                what = ("folded" if head.fold == "stub"
+                        else f"folded to its {head.fold}"
+                        if head.synthetic else f"folded to {name}")
+                return (f"{path_text(head.path)} — {what}; click the "
+                        f"heading above to open it")
             # The name in full, always: a header cut short by a `width` rule
             # or a dragged edge has nowhere else to be read (AA3). A `label`
             # leads when there is one — it is what the header shows — with

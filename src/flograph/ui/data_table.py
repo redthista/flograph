@@ -23,13 +23,15 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import (
-    QEvent, QItemSelection, QItemSelectionModel, QObject, QSettings, Qt,
-    QTimer, Signal,
+    QEvent, QItemSelection, QItemSelectionModel, QObject, QRect, QSettings,
+    QSize, Qt, QTimer, Signal,
 )
-from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QKeySequence
+from PySide6.QtGui import (
+    QFont, QFontMetrics, QGuiApplication, QKeySequence, QPainter,
+)
 from PySide6.QtWidgets import (
-    QHeaderView, QMenu, QMessageBox, QStyleOptionViewItem, QTableView,
-    QToolTip,
+    QHeaderView, QMenu, QMessageBox, QStyle, QStyleOptionHeader,
+    QStyleOptionViewItem, QTableView, QToolTip,
 )
 
 from flograph.core import perf
@@ -273,11 +275,142 @@ def show_tooltip(global_pos, text: str, widget) -> None:
 
 class TooltipHeader(QHeaderView):
     """The column header, showing its tooltip where the pointer is — see
-    `tooltip_host` for why a plain QHeaderView cannot, on a card."""
+    `tooltip_host` for why a plain QHeaderView cannot, on a card.
+
+    It also draws a table's **column headings** (core/table_bands.py): a
+    band of rows above the column names, one per level of nesting, each
+    heading spanning its columns. Drawn here rather than as a widget of its
+    own above the header, because the header already knows where every
+    column is as the table scrolls and its columns are resized — a second
+    widget would have to be told, every time. A column no heading covers
+    runs the full height, as a merged cell does in a spreadsheet. Each
+    heading cell is painted as a header section by the style, so the grid
+    stylesheet a card carries dresses it exactly as it dresses the names.
+    """
+
+    def setModel(self, model) -> None:
+        old = self.model()
+        if old is not None and hasattr(old, "headingsChanged"):
+            try:
+                old.headingsChanged.disconnect(self._headings_changed)
+            except (RuntimeError, TypeError):
+                pass
+        super().setModel(model)
+        if model is not None and hasattr(model, "headingsChanged"):
+            model.headingsChanged.connect(self._headings_changed)
+        self._headings_changed()
+
+    def _headings_changed(self) -> None:
+        self.updateGeometry()
+        view = self.parent()
+        if isinstance(view, QTableView):
+            view.updateGeometries()
+        self.viewport().update()
+
+    # ------------------------------------------------------------ headings
+
+    def _arrangement(self):
+        model = self.model()
+        if model is None or self.orientation() != Qt.Horizontal:
+            return None
+        has = getattr(model, "has_headings", None)
+        return model.headings() if has is not None and has() else None
+
+    def heading_line(self) -> int:
+        """How tall one row of headings is."""
+        return QFontMetrics(self.font()).height() + 8
+
+    def headings_height(self) -> int:
+        arrangement = self._arrangement()
+        return arrangement.depth * self.heading_line() if arrangement else 0
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        extra = self.headings_height()
+        if extra:
+            hint.setHeight(hint.height() + extra)
+        return hint
+
+    def _covered(self, logical: int) -> int:
+        """How many rows of headings stand over this column."""
+        arrangement = self._arrangement()
+        if arrangement is None:
+            return 0
+        col = logical - self.model().lead_columns()
+        return max((sp.level + 1 for sp in arrangement.spans
+                    if sp.start <= col < sp.end), default=0)
+
+    def heading_at(self, pos):
+        """The heading Span under a point in the viewport, or None."""
+        arrangement = self._arrangement()
+        if arrangement is None:
+            return None
+        level = pos.y() // self.heading_line()
+        if level >= arrangement.depth:
+            return None
+        logical = self.logicalIndexAt(pos.x())
+        if logical < 0:
+            return None
+        return arrangement.span_at(logical - self.model().lead_columns(),
+                                   level)
+
+    def paintSection(self, painter, rect, logical: int) -> None:
+        covered = self._covered(logical)
+        if covered:
+            rect = QRect(rect)
+            rect.setTop(rect.top() + covered * self.heading_line())
+        super().paintSection(painter, rect, logical)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        arrangement = self._arrangement()
+        if arrangement is None:
+            return
+        lead = self.model().lead_columns()
+        line = self.heading_line()
+        painter = QPainter(self.viewport())
+        try:
+            for span in arrangement.spans:
+                first, last = lead + span.start, lead + span.end - 1
+                if self.isSectionHidden(first):
+                    continue
+                left = self.sectionViewportPosition(first)
+                right = (self.sectionViewportPosition(last)
+                         + self.sectionSize(last))
+                if right < 0 or left > self.viewport().width():
+                    continue
+                option = QStyleOptionHeader()
+                self.initStyleOption(option)
+                option.rect = QRect(left, span.level * line, right - left,
+                                    line)
+                option.section = first
+                option.orientation = Qt.Horizontal
+                option.position = QStyleOptionHeader.OnlyOneSection
+                option.textAlignment = Qt.AlignCenter
+                option.text = ("▸ " if span.folded else "▾ ") + span.label
+                option.state |= QStyle.State_Enabled
+                option.fontMetrics = QFontMetrics(self.font())
+                painter.save()
+                painter.setFont(self.font())
+                self.style().drawControl(QStyle.CE_Header, option, painter,
+                                         self)
+                painter.restore()
+        finally:
+            painter.end()
 
     def viewportEvent(self, event) -> bool:
         if event.type() != QEvent.ToolTip:
             return super().viewportEvent(event)
+        span = self.heading_at(event.pos())
+        if span is not None:
+            from flograph.core.table_bands import path_text
+            count = span.end - span.start
+            what = ("folded — click to open it" if span.folded else
+                    f"{count} column{'s' if count != 1 else ''} — click to "
+                    f"fold them")
+            show_tooltip(event.globalPos(),
+                         f"{path_text(span.path)}\n{what}", self.viewport())
+            return True
         model = self.model()
         logical = self.logicalIndexAt(event.pos())
         text = (model.headerData(logical, self.orientation(), Qt.ToolTipRole)
@@ -457,6 +590,11 @@ class DataTableView(QTableView):
             model.layoutChanged.connect(self._remeasure_rows)
             model.rowsInserted.connect(
                 lambda *_: self._size_rows_in_view())
+            # a heading opened or folded: the columns it brought are fitted
+            # as every column was when the table arrived
+            model.columnsInserted.connect(
+                lambda _p, first, last: self.fit_columns_to_data(
+                    range(first, last + 1)))
             self._show_picks()
 
     def _apply_wrapping(self, model) -> None:
@@ -528,7 +666,7 @@ class DataTableView(QTableView):
         self._size_rows_in_view()
 
     @perf.timed('table: fit columns')
-    def fit_columns_to_data(self) -> None:
+    def fit_columns_to_data(self, columns=None) -> None:
         """Size each column to the wider of its header and its sampled
         content, clamped to [MIN_COL_WIDTH, MAX_COL_WIDTH] — unless a
         `width` rule named it, which wins outright."""
@@ -543,7 +681,8 @@ class DataTableView(QTableView):
         # and the content is not consulted, which is the whole point of
         # asking for a fixed column
         layout = getattr(model, "column_layout", None)
-        for col in range(model.columnCount()):
+        for col in (range(model.columnCount()) if columns is None
+                    else columns):
             fixed = layout(col) if layout is not None else None
             if fixed is not None and fixed.width:
                 self.setColumnWidth(col, fixed.width)
@@ -1020,6 +1159,20 @@ class DataTableView(QTableView):
         header needs nothing special: Qt selects the row, and the selection
         becomes the pick as any other does.
         """
+        columns = self.horizontalHeader()
+        if (watched is columns.viewport() and self.model() is not None
+                and event.type() in (QEvent.MouseButtonPress,
+                                     QEvent.MouseButtonRelease,
+                                     QEvent.MouseButtonDblClick)
+                and hasattr(columns, "heading_at")):
+            # a column heading folds on the press, and the whole click is
+            # the heading's — it neither sorts nor selects the columns
+            span = columns.heading_at(event.position().toPoint())
+            if span is not None:
+                if (event.type() == QEvent.MouseButtonPress
+                        and event.button() == Qt.LeftButton):
+                    self.model().toggle_heading(span.path)
+                return True
         if (watched is self.verticalHeader().viewport()
                 and event.type() == QEvent.MouseButtonPress
                 and event.button() == Qt.LeftButton
@@ -1126,6 +1279,12 @@ class DataTableView(QTableView):
             unfold.triggered.connect(lambda: model.set_all_groups(False))
             fold = menu.addAction("Collapse All Groups")
             fold.triggered.connect(lambda: model.set_all_groups(True))
+        if getattr(model, "has_headings", lambda: False)():
+            menu.addSeparator()
+            unfold = menu.addAction("Expand All Column Headings")
+            unfold.triggered.connect(lambda: model.set_all_headings(False))
+            fold = menu.addAction("Collapse All Column Headings")
+            fold.triggered.connect(lambda: model.set_all_headings(True))
 
         if self._pick_mode != "nothing":
             # the way out of a filter that is keeping nothing you want

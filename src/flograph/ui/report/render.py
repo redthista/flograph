@@ -1972,9 +1972,11 @@ def _measure(document, placement: "_TablePlacement") -> "tuple | None":
     if not isinstance(table, QTextTable):
         return None
     rect = document.documentLayout().frameBoundingRect(table)
-    if rect.height() <= 0 or table.rows() < 2:
+    # the header is a row of names, and a row per level of column headings
+    heads = max(1, table.format().headerRowCount())
+    if rect.height() <= 0 or table.rows() <= heads:
         return None
-    return rect.top(), rect.height(), table.rows() - 1      # minus the header
+    return rect.top(), rect.height(), table.rows() - heads
 
 
 @perf.timed('report: fit tables')

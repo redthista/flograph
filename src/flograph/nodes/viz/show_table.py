@@ -196,6 +196,19 @@ All Groups. Several columns nest, outermost first.
 outputs; off, they are only drawn. See **Totals and groups** in the
 Conditional Formatting handbook page.
 
+**Column headings.** Columns gather under a heading you click to fold, the
+way rows gather into groups — a rule line names them:
+
+```
+jan, feb, mar  heading "Q1" sum      # folds to their sum, row by row
+apr, may, jun  heading "2024 › Q2"   # › nests
+heading "Q1" keep q1_total           # …or to a column the table has
+```
+
+A matrix pivoted on two columns gets its headings by itself (**Column
+headings** *nested*), each folding to its true value over the rows beneath.
+A spark ending in `totals` draws on the total and group rows too.
+
 **The row index.** Off by default — a generated 0, 1, 2… says nothing
 on a dashboard. Tick **Show row index** for a table whose index means
 something (dates, names), or to click a row's number to pick it. Like the
@@ -205,7 +218,7 @@ index.
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.8",
+    "version": "1.9",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object",
@@ -246,6 +259,9 @@ PARAMS = [
      "default": "sum", "visible_when": _MATRIX},
     {"name": "matrix_order", "type": "choice", "label": "Order",
      "options": ["as they appear", "sorted"], "default": "as they appear",
+     "visible_when": _MATRIX},
+    {"name": "matrix_headings", "type": "choice", "label": "Column headings",
+     "options": ["nested", "flat"], "default": "nested",
      "visible_when": _MATRIX},
     {"name": "totals", "type": "choice", "label": "Total row",
      "options": ["off"] + _TOTALS, "default": "off"},
@@ -334,7 +350,8 @@ def run(ctx, table, style=None):
             values=column_list(ctx.params.get("matrix_values")),
             agg=ctx.params.get("matrix_agg") or "sum",
             order=ctx.params.get("matrix_order") or "as they appear",
-            style=merged, totals=True)
+            style=merged, totals=True,
+            headings=ctx.params.get("matrix_headings") != "flat")
         for note in built.notes:
             ctx.log(f"matrix — {note}")
         ctx.log(f"matrix: {len(table)} rows -> {len(built.frame)} rows")

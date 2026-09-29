@@ -306,6 +306,11 @@ class Plan:
     #: a total asked for with no column able to take it (`total sum` on a
     #: table of text): said in the log rather than drawn as an empty row
     notes: list = field(default_factory=list)
+    #: column -> how, for the columns a spark drawn on total rows reads and
+    #: no total covers: worked out for every total and group row, carried
+    #: on it as `Special.feeds`, and never printed — a spark's months need
+    #: numbers on a group's row whether or not the months show a subtotal
+    feeds: dict = field(default_factory=dict)
 
     @property
     def has_total(self) -> bool:
@@ -385,6 +390,24 @@ def plan_from_rules(rules, frame) -> Plan:
     # would put a number where its name goes
     for column in grouped_by:
         plan.per_column.pop(column, None)
+    # a spark drawn on total rows (`trend spark from jan..dec totals`)
+    # reads each month's total there — the one the table prints where a
+    # month is totalled, and otherwise its sum, worked out quietly
+    from .table_format import series_columns
+    for rule in rules or ():
+        if (getattr(rule, "mode", None) != "sparkline"
+                or not any(k != "data" for k in (rule.rows_on or ()))):
+            continue
+        try:
+            read = series_columns(rule.series, frame,
+                                  exclude=[str(c) for c in rule.columns])
+        except Exception:
+            continue
+        for column in read:
+            how = plan.per_column.get(column)
+            if (how is None or how[0] != "agg") and column in known \
+                    and _kind_of(column_of(frame, column)) == "number":
+                plan.feeds[column] = "sum"
     return plan
 
 
@@ -405,6 +428,9 @@ class Special:
     count: int = 0
     values: dict = field(default_factory=dict)
     collapsed: bool = False
+    #: what a spark on this row reads that the row does not print — see
+    #: `Plan.feeds`
+    feeds: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -481,12 +507,16 @@ def build_layout(frame, plan: Plan, toggled=None, grand=None,
     bottom: list = []
     if plan.has_total:
         values = _total_values(frame, plan, grand=grand)
+        feeds = {column: aggregate(column_of(frame, column), how)
+                 for column, how in plan.feeds.items()}
         if plan.place in ("top", "both"):
             top.append(special(Special("total", label=plan.label,
-                                       count=n, values=values)))
+                                       count=n, values=values,
+                                       feeds=feeds)))
         if plan.place in ("bottom", "both"):
             bottom.append(special(Special("total", label=plan.label,
-                                          count=n, values=dict(values))))
+                                          count=n, values=dict(values),
+                                          feeds=dict(feeds))))
     if not plan.grouped:
         middle = np.arange(n, dtype=np.int64)
     else:
@@ -511,10 +541,19 @@ def _grouped_entries(frame, plan, toggled, expand_all, special):
     # every level's subtotals, one groupby per level and column
     sums: list = []
     counts: list = []
+    fed: list = []
     for depth in range(len(levels)):
         keys = codes[:depth + 1]
         counts.append(_grouped(frame, keys, None, "rows"))
         per: dict = {}
+        # a spark on the group rows reads every month there, subtotalled
+        # or not: the printed subtotals where there are some, sums else
+        spark_reads = dict(plan.feeds)
+        if not subtotals:
+            spark_reads.update({c: what for c, (kind, what)
+                                in plan.per_column.items() if kind == "agg"})
+        fed.append({column: _grouped(frame, keys, column, how)
+                    for column, how in spark_reads.items()})
         if subtotals:
             for column, (kind, what) in plan.per_column.items():
                 per[column] = (("text", what) if kind == "text"
@@ -554,6 +593,13 @@ def _grouped_entries(frame, plan, toggled, expand_all, special):
                 for column, (kind, what) in sums[depth].items():
                     values[column] = what if kind == "text" \
                         else what.get(gcodes)
+            feeds = {column: got.get(gcodes)
+                     for column, got in fed[depth].items()}
+            if not subtotals or plan.subtotal_place not in ("above", "both"):
+                # the header row prints no subtotals, but its spark still
+                # draws the group's months
+                feeds.update({c: v for c, v in values.items()
+                              if c not in feeds})
             folded = (not expand_all) and is_collapsed(plan, depth, gkey,
                                                        toggled)
             count = counts[depth].get(gcodes, len(members))
@@ -562,7 +608,7 @@ def _grouped_entries(frame, plan, toggled, expand_all, special):
             out.append(np.asarray([special(Special(
                 "group", level=depth, path=gpath, key=gkey,
                 label=text_of(value), count=count, values=header_values,
-                collapsed=folded))], dtype=np.int64))
+                collapsed=folded, feeds=feeds))], dtype=np.int64))
             if folded:
                 continue
             walk(members, depth + 1, gcodes, gpath, gkey)
@@ -570,7 +616,7 @@ def _grouped_entries(frame, plan, toggled, expand_all, special):
                 out.append(np.asarray([special(Special(
                     "subtotal", level=depth, path=gpath, key=gkey,
                     label=f"{text_of(value)} {plan.subtotal_label}", count=count,
-                    values=values))], dtype=np.int64))
+                    values=values, feeds=feeds))], dtype=np.int64))
 
     walk(np.arange(len(frame), dtype=np.int64), 0, (), (), ())
     return (np.concatenate(out) if out
@@ -668,9 +714,13 @@ def special_styles(specials, kind: str, rules, columns, values_of,
     from .table_format import (CellStyle, column_matches, column_stats,
                                evaluate_column, evaluate_rows, readable_fg)
 
-    rows = [values_of(s) for s in specials]
+    # a spark reads the months a row does not print, so they join the
+    # frame the rules are evaluated over — though no cell is drawn for them
+    rows = [{**getattr(s, "feeds", {}), **values_of(s)} for s in specials]
     names = [str(c) for c in columns]
-    frame = pd.DataFrame(rows, columns=names) if rows else None
+    fed = [c for c in dict.fromkeys(k for r in rows for k in r)
+           if c not in names]
+    frame = pd.DataFrame(rows, columns=names + fed) if rows else None
     ground, bold = DEFAULT_LOOK.get(kind, (None, True))
     base = CellStyle(bg=ground, fg=readable_fg(ground) if ground else None,
                      bold=bold)

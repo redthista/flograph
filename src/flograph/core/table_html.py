@@ -127,12 +127,36 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     frame, rules, spark_hidden = spark_projection(frame, rules)
     if spark_hidden:
         hidden = list(hidden) + spark_hidden
+    # again, now the sparks' months are names: a spark drawn on the total
+    # rows needs them totalled there (table_totals.Plan.feeds)
+    plan = tt.plan_from_rules(rules, frame)
     # the same projection the card applies, from the same function: a
     # printed table showing different columns from the dashboard it came
     # off is the exact failure this whole module exists to avoid
+    # column headings (core/table_bands.py), laid out as the card lays
+    # them out when the table arrives: a folded heading prints its one
+    # column, and a summary or a stub is a column added to the frame
+    from flograph.core import table_bands as tb
+    frame, carried = tb.with_carried(frame, grand)
+    if carried:
+        hidden = list(hidden) + carried
+    band_plan = tb.plan_from_rules(rules)
+    tree = None
+    if band_plan.active:
+        names = [str(c) for c in frame.columns]
+        tree = tb.resolve(band_plan, visible_columns(names, shown, hidden),
+                          names)
+        if tree:
+            frame = tb.with_faces(frame, tree)
+            hidden = list(hidden) + tree.synthetic_names()
+            plan = tt.plan_from_rules(rules, frame)
     columns = visible_columns(frame.columns, shown, hidden)
     if not columns:
         return "> *(no columns)*"
+    arrangement = None
+    if tree:
+        arrangement = tb.arrange(tree, columns)
+        columns = arrangement.names
 
     # Before the row cut, not after: `rows=`/`fit` keep the *top* of the
     # table, so sorting afterwards would print an arbitrary thirty rows
@@ -174,13 +198,22 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
 
     size = f' width="{int(width)}"' if width else ""
     text_size = f' style="font-size:{font_pt:g}pt"' if font_pt else ""
-    out = [f'<table{size}{text_size} class="flograph-table"><thead><tr>']
+    out = [f'<table{size}{text_size} class="flograph-table"><thead>']
+    depth = arrangement.depth if arrangement is not None else 0
+    # one row per level of heading, then the names: [(position, cell)]
+    head_rows: list = [[] for _ in range(depth + 1)]
+
+    def spanned(covered: int) -> str:
+        """A cell standing in every heading row below `covered`."""
+        rows = depth + 1 - covered
+        return f' rowspan="{rows}"' if rows > 1 else ""
+
     lead = bool(arranged is not None and plan.grouped)
     if lead:
-        out.append(f"<th>{marker}{_escape(' › '.join(plan.group_by))}</th>")
-        marker_used = True
-    else:
-        marker_used = False
+        head_rows[0].append(
+            (-1, f"<th{spanned(0)}>{_escape(' › '.join(plan.group_by))}"
+                 f"</th>"))
+    faces = arrangement.faces if arrangement is not None else {}
     for index, column in enumerate(columns):
         entry = layout.get(str(column))
         align = _align_attr(entry, numeric[column])
@@ -188,12 +221,30 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         # states one, and the header is that row
         fixed = f' width="{entry.width}"' if entry and entry.width else ""
         label = entry.label if entry and entry.label else str(column)
-        # the marker rides in the first header cell rather than in a
-        # paragraph of its own, which would print as a blank line
-        head = (marker if index == 0 and not marker_used else ""
-                ) + _escape(label)
-        out.append(f"<th{align}{fixed}>{head}</th>")
-    out.append("</tr></thead><tbody>")
+        if not (entry and entry.label) and column in faces:
+            label = tb.face_header(tree, arrangement, column) or label
+        covered = (max((sp.level + 1 for sp in arrangement.spans
+                        if sp.start <= index < sp.end), default=0)
+                   if arrangement is not None else 0)
+        head_rows[covered].append(
+            (index, f"<th{align}{fixed}{spanned(covered)}>"
+                    f"{_escape(label)}</th>"))
+    for span in (arrangement.spans if arrangement is not None else ()):
+        wide = span.end - span.start
+        cols = f' colspan="{wide}"' if wide > 1 else ""
+        head_rows[span.level].append(
+            (span.start, f'<th align="center"{cols}>{_escape(span.label)}'
+                         f'</th>'))
+    for level, cells in enumerate(head_rows):
+        cells.sort(key=lambda c: c[0])
+        html = [cell for _, cell in cells]
+        if level == 0 and html:
+            # the marker rides in the first header cell rather than in a
+            # paragraph of its own, which would print as a blank line
+            at = html[0].index(">") + 1
+            html[0] = html[0][:at] + marker + html[0][at:]
+        out.append("<tr>" + "".join(html) + "</tr>")
+    out.append("</thead><tbody>")
     table_height = row_height_of(rules)
     # each column read once: `shown[column].iloc[row]` per cell was 10,000
     # frame lookups for a 500-row table. `.array[row]` boxes a value
