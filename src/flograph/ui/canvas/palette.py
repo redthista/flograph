@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from flograph.core import NodeRegistry, NodeSpec
+from flograph.core.wire_fit import EXACT, LOOSE
 from flograph.ui import theme
 from flograph.ui.canvas import marks
 from flograph.ui.favorites import Favorites
@@ -64,7 +65,8 @@ class NodePalettePopup(QFrame):
 
     Opened three ways, and the differences are all in what it is given:
     Tab offers the whole library, dropping a wire offers only the nodes
-    that can take it (a predicate), and right-clicking the canvas offers
+    that can take it (a rank — see core.wire_fit), and right-clicking the
+    canvas offers
     the library plus the handful of things that are not nodes — a frame,
     a paste — as `extras`.
     """
@@ -77,7 +79,7 @@ class NodePalettePopup(QFrame):
         super().__init__(parent, Qt.Popup)
         self._registry = registry
         self._favorites = favorites
-        self._predicate: Optional[Callable[[NodeSpec], bool]] = None
+        self._rank: Optional[Callable[[NodeSpec], Optional[int]]] = None
         self._extras: list[tuple[str, str]] = []
         self._favorites.changed.connect(self._refresh_if_open)
         self.setFixedSize(280, 320)
@@ -101,11 +103,17 @@ class NodePalettePopup(QFrame):
             self._refresh(self._search.text())
 
     def popup_at(self, global_pos: QPoint,
-                 predicate: Optional[Callable[[NodeSpec], bool]] = None,
+                 rank: Optional[Callable[[NodeSpec], Optional[int]]] = None,
                  extras: tuple = ()) -> None:
         """Show the popup. `extras` are (label, key) rows that are not nodes;
-        choosing one emits extra_chosen(key) rather than chosen(type_id)."""
-        self._predicate = predicate
+        choosing one emits extra_chosen(key) rather than chosen(type_id).
+
+        `rank` gives each node a tier — `core.wire_fit`'s SUGGESTED, EXACT
+        or LOOSE — or None to leave it out. With nothing typed the list is
+        in tier order, favourites first within each; once there is a query
+        it is in match order, because then you know what you are after.
+        LOOSE rows are drawn dimmer either way."""
+        self._rank = rank
         self._extras = list(extras)
         self._search.clear()
         self._refresh("")
@@ -127,13 +135,23 @@ class NodePalettePopup(QFrame):
         specs = self._registry.search(query)
         favs = [s for s in specs if favorites.contains(s.type_id)]
         rest = [s for s in specs if not favorites.contains(s.type_id)]
+        rows = []
         for spec in favs + rest:
-            if self._predicate is not None and not self._predicate(spec):
-                continue
+            tier = self._rank(spec) if self._rank is not None else EXACT
+            if tier is not None:
+                rows.append((tier, spec))
+        if not query:
+            rows.sort(key=lambda row: row[0])   # stable: favourites stay first
+        for tier, spec in rows:
             prefix = STAR if favorites.contains(spec.type_id) else ""
             item = QListWidgetItem(f"{prefix} {spec.label}    ({spec.category})")
             item.setIcon(spec_icon(spec))
             item.setData(Qt.UserRole, spec.type_id)
+            if tier == LOOSE:
+                # fits only through an `any` port or by widening to object
+                item.setForeground(QColor(theme.NODE_SUBTEXT))
+                item.setToolTip("Takes this wire only loosely — through a "
+                                "port that accepts anything")
             self._list.addItem(item)
         if self._list.count():
             self._list.setCurrentRow(self._starting_row(query, first_node))

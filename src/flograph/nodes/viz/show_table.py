@@ -208,7 +208,8 @@ NODE = {
     "version": "1.8",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
-               ("style", "object", {"optional": True})],
+               ("style", "object",
+                {"optional": True, "suggest": ["flograph.viz.table_style"]})],
     # "filtered" last, so a flow wired before click-to-filter existed keeps
     # every wire on the port it was on
     "outputs": [("table", "dataframe"), ("style", "object"),

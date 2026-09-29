@@ -74,6 +74,7 @@ Every node script must define:
 - Per-instance **Drop Output** (`NodeInstance.drop_output`, rules in `core/drop_output.py`): on, the engine drops the value after the last reader in the run (`scheduler._hold/_consumed/_release`), `released` marks it (runtime only), and `build_plan._with_released` re-runs it when a planned reader or an aimed run needs it. Clean-but-uncached is a real state now — don't "fix" it by dirtying.
 - `version` is the node type's own edition, shown in the properties panel and the library tooltip. **Bump it whenever you change a node's params or behaviour.** It is the only way a user can tell the node in front of them from the one it replaced: the package version cannot, since two checkouts of one release carry the same number, and a node file copied into a user-nodes folder carries no package version at all. New nodes start at `"1.0"`; a test fails if a builtin has none.
 - Optional `PARAMS` list of dicts with `name`, `type`, `default`, etc.
+- Optional port option `suggest` (inputs only): node type ids that usually feed the port. It ranks the palette a dropped wire opens (`core/wire_fit.py`) and picks the port the new node is wired by; it never limits wiring. Every style input names its style node — a new style consumer should too (`test_wire_fit.py` checks each id resolves).
 - `def run(ctx, **inputs) -> dict`: returns dict keyed by output port names
 
 `ctx` is the whole node-facing API and is deliberately small: `ctx.params`,

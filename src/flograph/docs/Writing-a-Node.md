@@ -67,6 +67,9 @@ fits anything).
 
 - An **unconnected optional input arrives as `None`**. A required input that
   is unconnected keeps the node from running.
+- `{"suggest": ["flograph.viz.table_style"]}` on an input names the node
+  types that usually feed it. A wire dragged off the port and dropped on the
+  canvas lists them first in the palette; it never limits what may be wired.
 - `run` receives each input as a **keyword argument** named for the port.
 - `run` returns a **dict keyed by output port name**. A bare value is
   accepted when there is exactly one output.

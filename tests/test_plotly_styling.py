@@ -349,3 +349,187 @@ class TestThePanelStillGates:
         graph, node, combo = self._combo(qtbot, registry, "Legend position")
         combo.setCurrentIndex(combo.findText("bottom"))
         assert graph.node(node.id).params["legend_pos"] == "bottom"
+
+
+def _style(registry, params, style=None):
+    """A Plotly Style's style output: the node run with no figure."""
+    spec = registry.get("flograph.viz.plotly_style")
+    values = spec.default_params()
+    values.update(params)
+    return compile_run(spec.source, "s")(
+        FakeContext(params=values), style=style)["style"]
+
+
+def _styled(registry, type_id, params, table, style):
+    """`_fig` with a style wired into the chart's style input — Chart per
+    Value's whole stack rather than its first panel."""
+    spec = registry.get(type_id)
+    values = spec.default_params()
+    if type_id == PER_VALUE:
+        values.update(split_by="region", x="city", y="units")
+    else:
+        values.update(kind="bar", x="region", y="units")
+    values.update(params)
+    out = compile_run(spec.source, "t")(FakeContext(params=values),
+                                        table=table, style=style)
+    return out["figure"] if type_id == SHOW else out["figures"]
+
+
+def _first(figure):
+    return figure[0] if isinstance(figure, list) else figure
+
+
+class TestTheStyleInput:
+    """A Plotly Style wired into a chart, the way a Table Style is into a
+    Show Table: the style is the base, the chart's own settings win."""
+
+    @both
+    def test_registered_as_an_optional_last_input(self, registry, type_id):
+        spec = registry.get(type_id)
+        port = spec.inputs[-1]
+        assert (port.name, port.optional) == ("style", True)
+        # the old inputs keep their places, so saved wires stay put
+        assert [p.name for p in spec.inputs[:2]] == ["table", "compare"]
+
+    @both
+    def test_margins_and_legend_come_from_the_style(self, registry, type_id,
+                                                    table):
+        style = _style(registry, {"margin": "0", "legend": "hide",
+                                  "legend_pos": "bottom"})
+        figure = _styled(registry, type_id, {}, table, style)
+        if type_id == PER_VALUE:
+            # every panel, and over the stack's own default margins
+            assert all(f.layout.margin.t == 0 for f in figure)
+        figure = _first(figure)
+        margin = figure.layout.margin
+        assert (margin.l, margin.r, margin.t, margin.b) == (0, 0, 0, 0)
+        assert figure.layout.showlegend is False
+        assert figure.layout.legend.orientation == "h"
+
+    @both
+    def test_the_charts_own_setting_wins(self, registry, type_id, table):
+        style = _style(registry, {"legend": "hide", "paper_color": "#111",
+                                  "font_size": 20})
+        figure = _first(_styled(registry, type_id,
+                                {"legend": "show", "paper_color": "#222"},
+                                table, style))
+        assert figure.layout.showlegend is True
+        assert figure.layout.paper_bgcolor == "#222"
+        assert figure.layout.font.size == 20        # not set here: style's
+
+    def test_a_charts_own_title_and_theme_win(self, registry, table):
+        style = _style(registry, {"title": "House",
+                                  "template": "plotly_dark"})
+        own = _styled(registry, SHOW, {"title": "Sales",
+                                       "template": "simple_white"},
+                      table, style)
+        assert own.layout.title.text == "Sales"
+        assert own.layout.template.layout.paper_bgcolor == "white"
+        plain = _styled(registry, SHOW, {}, table, style)
+        assert plain.layout.title.text == "House"
+        assert plain.layout.template.layout.paper_bgcolor == "rgb(17,17,17)"
+
+    def test_a_style_title_leaves_the_panel_titles_alone(self, registry,
+                                                          table):
+        style = _style(registry, {"title": "House"})
+        figures = _styled(registry, PER_VALUE, {}, table, style)
+        assert figures[0].layout.title.text == "region: e"
+
+    def test_log_scale_and_range_from_the_style(self, registry, table):
+        style = _style(registry, {"log_y": "on", "min_y": "1",
+                                  "max_y": "100"})
+        figure = _styled(registry, SHOW, {}, table, style)
+        assert figure.layout.yaxis.type == "log"
+        assert tuple(figure.layout.yaxis.range) == (0, 2)
+
+    @both
+    def test_the_reference_line_keeps_its_dash(self, registry, type_id,
+                                               table):
+        """Plotly Style calls it line_dash; the chart nodes ref_dash."""
+        style = _style(registry, {"line_at": "25", "line_dash": "dot"})
+        figure = _first(_styled(registry, type_id, {}, table, style))
+        assert figure.layout.shapes[0].line.dash == "dot"
+
+    @both
+    def test_style_rules_run_first_and_the_charts_win(self, registry,
+                                                      type_id, table):
+        style = _style(registry, {"chart_rules": "margin 5\nhover unified"})
+        figure = _first(_styled(registry, type_id,
+                                {"chart_rules": "margin 7"}, table, style))
+        assert figure.layout.margin.l == 7
+        assert figure.layout.hovermode == "x unified"
+
+    def test_a_shared_series_rule_draws_from_the_charts_rows(self, registry,
+                                                             table):
+        """Plotly Style alone never sees data; wired in, its rules do."""
+        style = _style(registry, {"chart_rules": "series average"})
+        plain = _styled(registry, SHOW, {}, table, None)
+        figure = _styled(registry, SHOW, {}, table, style)
+        assert len(figure.data) == len(plain.data) + 1
+
+    def test_the_same_as_passing_the_chart_through_the_style(self, registry,
+                                                            table):
+        """With the chart left at its defaults, wiring the style in draws
+        what wiring the chart's figure through the Style node draws."""
+        settings = {"margin": "0", "legend_pos": "inside top left",
+                    "legend_click": "off", "template": "plotly_white",
+                    "colorway": "Bold", "subtitle": "sub", "grid_y": "off",
+                    "y_format": ",.0f", "note": "n", "hovermode": "x",
+                    "line_at": "20", "line_dash": "dot",
+                    "layout_json": '{"bargap": 0.4}'}
+        style = _style(registry, settings)
+        wired = _styled(registry, SHOW, {}, table, style)
+        spec = registry.get("flograph.viz.plotly_style")
+        values = dict(spec.default_params(), **settings)
+        through = compile_run(spec.source, "s")(
+            FakeContext(params=values),
+            figure=_styled(registry, SHOW, {}, table, None))["figure"]
+        assert wired.to_dict()["layout"] == through.to_dict()["layout"]
+
+    @both
+    def test_a_chain_of_styles_applies_in_order(self, registry, type_id,
+                                                table):
+        house = _style(registry, {"margin": "0", "font_size": 11})
+        style = _style(registry, {"font_size": 15}, style=house)
+        figure = _first(_styled(registry, type_id, {}, table, style))
+        assert figure.layout.margin.l == 0
+        assert figure.layout.font.size == 15
+
+    @both
+    def test_a_table_style_on_the_input_says_so(self, registry, type_id,
+                                                table):
+        with pytest.raises(TypeError, match="not a Plotly Style"):
+            _styled(registry, type_id, {}, table,
+                    {"kind": "flograph.table_style", "rules": []})
+
+    @both
+    def test_the_incoming_style_is_not_modified(self, registry, type_id,
+                                                table):
+        style = _style(registry, {"line_at": "3", "line_dash": "dot",
+                                  "chart_rules": "margin 1"})
+        before = repr(style)
+        _styled(registry, type_id, {}, table, style)
+        assert repr(style) == before
+
+
+class TestOneNumberMargins:
+    @both
+    def test_one_number_is_every_side(self, registry, type_id, table):
+        figure = _fig(registry, type_id, {"margin": "0"}, table)
+        margin = figure.layout.margin
+        assert (margin.l, margin.r, margin.t, margin.b) == (0, 0, 0, 0)
+
+    def test_on_the_plotly_style_node(self, registry, table):
+        spec = registry.get("flograph.viz.plotly_style")
+        values = dict(spec.default_params(), margin="12")
+        figure = compile_run(spec.source, "s")(
+            FakeContext(params=values),
+            figure=_fig(registry, SHOW, {}, table))["figure"]
+        assert (figure.layout.margin.l, figure.layout.margin.b) == (12, 12)
+
+    def test_the_margin_rule_takes_one_number(self):
+        from flograph.core import chart_rules
+
+        rules, problems = chart_rules.parse("margin 0")
+        assert problems == []
+        assert rules[0].opts["values"] == [0, 0, 0, 0]

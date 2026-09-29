@@ -115,6 +115,14 @@ The standalone **Plotly Style** node does the same job on a figure this
 node did not draw — a Gantt chart, a figure built in a Python Script, or a
 whole Chart per Value stack styled from one node.
 
+**The style input** takes a Plotly Style's **style** output, the way Show
+Table takes a Table Style: one Style node wired into every chart on a
+dashboard gives them all the same margins, legend, theme and fonts. The
+style is the base and this chart's own settings go on top — anything set
+here wins, anything left at its default comes from the style. Its Chart
+rules are read before this node's own, in the same pass, so a shared
+`series average` works too, and its JSON boxes merge under this node's.
+
 **This node stands alone.** Every chart kind, every setting and the logic
 that turns them into a `px.<kind>()` call live directly below rather than
 in a shared `core` module, so the file can be copied into a user-nodes
@@ -140,7 +148,7 @@ from typing import Any, Iterable, Optional
 NODE = {
     "label": "Show Plotly",
     "category": "Viz",
-    "version": "2.4",
+    "version": "2.5",
     "card": "webview",
     # Lets the chart's own page write this node's "selected" param when a
     # point is clicked — see "On click" below and flograph.core.bridge.
@@ -148,7 +156,9 @@ NODE = {
     # `compare` is the second table a `series … from compare` rule draws
     # from — last year's figures beside this year's, on the same X.
     "inputs": [("table", "dataframe"),
-               ("compare", "dataframe", {"optional": True})],
+               ("compare", "dataframe", {"optional": True}),
+               ("style", "object",
+                {"optional": True, "suggest": ["flograph.viz.plotly_style"]})],
     "outputs": [("figure", "object"), ("selected", "any"),
                 ("table", "dataframe")],
 }
@@ -1530,7 +1540,7 @@ _STYLE_ROWS: list[dict[str, Any]] = [
     {"name": "paper_color", "type": "string", "label": "Card background",
      "default": "", "placeholder": "e.g. #fff"},
     {"name": "margin", "type": "string", "label": "Margins", "default": "",
-     "placeholder": "left,right,top,bottom in pixels"},
+     "placeholder": "0 for none, or left,right,top,bottom in px"},
 
     # The escape hatch. Everything above is a shortcut for a setting people
     # reach for; these three boxes are the rest of plotly, verbatim. A JSON
@@ -1729,6 +1739,8 @@ def _style_fonts(params, layout) -> None:
     if params.get("paper_color"):
         layout["paper_bgcolor"] = params["paper_color"]
     margin = _style_numbers(params.get("margin"))
+    if len(margin) == 1:
+        margin *= 4          # one number is every side — 0 for none
     if len(margin) == 4:
         left, right, top, bottom = margin
         layout["margin"] = {"l": left, "r": right, "t": top, "b": bottom}
@@ -2269,6 +2281,116 @@ def _empty_as_zero(ctx, drawn, kwargs: dict, kind: str):
 
 
 
+# ----------------------------------------------------------------------------
+# The style input — a Plotly Style node's settings wired in, the way a Table
+# Style wires into Show Table. One Style node can then give a whole
+# dashboard's charts the same margins, legend and theme without standing in
+# front of each of them. Kept here rather than imported, like the rest of
+# the styling pass, so this file still stands alone.
+
+#: What a Plotly Style's style output says it is (see plotly_style.py), so a
+#: Table Style or Visual Style wired in by mistake is named, not half-used.
+_STYLE_KIND = "flograph.plotly_style"
+
+#: Boxes that add up rather than one replacing the other: the style's go
+#: first and this chart's own land on top of them.
+_STYLE_MERGED = frozenset({"chart_rules", "layout_json", "traces_json",
+                           "config_json"})
+
+
+def _incoming_style(params, style, skip=()) -> tuple[list, str]:
+    """The style input as layers to apply, and the Chart rules it carries.
+
+    This chart's own settings win, as a Show Table's own rules win over a
+    Table Style's: anything this node has changed from its default is
+    dropped from every layer, so a house style fills in what a chart left
+    alone and never overrides what it set. `skip` names settings the style
+    never gets to make here. The rules boxes are lifted out, to be read in
+    one pass with this chart's own — the style's lines first — because that
+    pass has the chart's rows and so can draw a `series` rule too.
+    """
+    if style is None:
+        return [], ""
+    if not (isinstance(style, dict) and style.get("kind") == _STYLE_KIND
+            and isinstance(style.get("layers"), list)):
+        raise TypeError(
+            f"the style input holds a {type(style).__name__} that is not a "
+            f"Plotly Style — wire a Plotly Style's style output into it (a "
+            f"Table Style or Visual Style styles something else)")
+    defaults = {row["name"]: row.get("default") for row in PARAMS}
+    own = {name for name, default in defaults.items()
+           if name not in _STYLE_MERGED
+           and params.get(name, default) != default}
+    own.update(skip)
+    layers, rules = [], []
+    for layer in style["layers"]:
+        if not isinstance(layer, dict):
+            continue
+        layer = dict(layer)
+        # Plotly Style calls the reference line's dash "line_dash"; here
+        # that name is taken by px's per-series dash column.
+        if "line_dash" in layer:
+            layer["ref_dash"] = layer.pop("line_dash")
+        text = str(layer.pop("chart_rules", "") or "").strip()
+        if text:
+            rules.append(text)
+        kept = {name: value for name, value in layer.items()
+                if name not in own}
+        if kept:
+            layers.append(kept)
+    return layers, "\n".join(rules)
+
+
+def _apply_style_layers(fig, layers) -> None:
+    """Each layer onto the figure, oldest first, as Plotly Style applies it.
+
+    The styling pass above does most of a layer; what it leaves to px on
+    this node — theme, palette, title, log scale and range — is done here.
+    Under the figure lock, because stamping a theme onto a figure is the
+    half of the race `_figure_lock` exists for that happens after px.
+    """
+    if not layers:
+        return
+    import plotly.express as px
+
+    with _figure_lock():
+        for layer in layers:
+            layout: dict[str, Any] = {}
+            if layer.get("template", _KEEP) != _KEEP:
+                layout["template"] = layer["template"]
+            colorway = layer.get("colorway", _KEEP)
+            if colorway != _KEEP:
+                layout["colorway"] = getattr(px.colors.qualitative, colorway)
+            if layer.get("title"):
+                layout["title_text"] = layer["title"]
+            if layer.get("subtitle"):
+                layout["title_subtitle_text"] = layer["subtitle"]
+            if layout:
+                fig.update_layout(**layout)
+            _style_scale(layer, fig)
+            _apply_styling(fig, layer)
+
+
+def _style_scale(layer, fig) -> None:
+    """A layer's log scale and pinned range, in Plotly Style's terms: log
+    is on/off/keep, and a range needs both ends, typed as the numbers to
+    read off the axis even when it is a log one."""
+    for axis, update in (("x", fig.update_xaxes), ("y", fig.update_yaxes)):
+        settings: dict[str, Any] = {}
+        log = layer.get(f"log_{axis}", _KEEP)
+        if log in ("on", "off"):
+            settings["type"] = "log" if log == "on" else "linear"
+        low = _as_bound(layer.get(f"min_{axis}"))
+        high = _as_bound(layer.get(f"max_{axis}"))
+        if low is not None and high is not None:
+            if settings.get("type") == "log" and low > 0 and high > 0:
+                import math
+                low, high = math.log10(low), math.log10(high)
+            settings["range"] = [low, high]
+        if settings:
+            update(**settings)
+
+
 def _chart_rules():
     """The chart-rules language, or None on a flograph too old to have it.
 
@@ -2283,20 +2405,24 @@ def _chart_rules():
     return chart_rules
 
 
-def _apply_chart_rules(ctx, fig, frame, raw, compare, kwargs, kind) -> None:
+def _apply_chart_rules(ctx, fig, frame, raw, compare, kwargs, kind,
+                       inherited="") -> None:
     """The Chart rules box: extra series, and styling beyond the rows.
 
     Runs last, so a rule wins over a setting, and never raises — a line
     that cannot be read, or names a column that isn't there, is logged and
-    skipped, and the chart still draws.
+    skipped, and the chart still draws. `inherited` is the rules a wired
+    Plotly Style carries; they are read first, so this box's own win.
     """
+    text = "\n".join(part for part in (
+        inherited, str(ctx.params.get("chart_rules", "") or "")) if part)
     chart_rules = _chart_rules()
     if chart_rules is None:
-        if str(ctx.params.get("chart_rules", "")).strip():
+        if text.strip():
             ctx.log("Chart rules need a newer flograph — the box was skipped")
         return
 
-    rules, problems = chart_rules.parse(ctx.params.get("chart_rules", ""))
+    rules, problems = chart_rules.parse(text)
     if rules:
         x = kwargs.get("x") if isinstance(kwargs.get("x"), str) else ""
         problems += chart_rules.apply_rules(
@@ -2310,7 +2436,7 @@ def _apply_chart_rules(ctx, fig, frame, raw, compare, kwargs, kind) -> None:
         ctx.log(f"chart rule skipped \N{EM DASH} {problem}")
 
 
-def run(ctx, table, compare=None):
+def run(ctx, table, compare=None, style=None):
     try:
         import plotly.express as px
     except ImportError:
@@ -2319,6 +2445,9 @@ def run(ctx, table, compare=None):
         ) from None
 
     kind = ctx.params.get("kind", "line")
+    # Read before anything is drawn, so a wrong thing on the style input
+    # fails fast rather than after the chart is built.
+    style_layers, style_rules = _incoming_style(ctx.params, style)
     kwargs, ignored = _build(ctx.params, table, px)
     # Group and total summarises what is drawn; `table` below stays raw.
     drawn, totalled = _summarised(ctx, table, kwargs, kind)
@@ -2341,8 +2470,12 @@ def run(ctx, table, compare=None):
     layout = _layout_updates(ctx.params, kind)
     if layout:
         fig.update_layout(**layout)
+    # The wired style is the base; this chart's own styling and rules go on
+    # top of it, so what is set here wins.
+    _apply_style_layers(fig, style_layers)
     _apply_styling(fig, ctx.params)
-    _apply_chart_rules(ctx, fig, drawn, table, compare, kwargs, kind)
+    _apply_chart_rules(ctx, fig, drawn, table, compare, kwargs, kind,
+                       style_rules)
 
     ctx.log(f"plotted {len(fig.data)} trace(s) ({kind})")
     if ignored:

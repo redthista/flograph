@@ -30,7 +30,7 @@ monitor keep the scale of a large graph legible.
 | Action | How |
 | --- | --- |
 | Add a node | **Tab** or right-click — both open the search palette — or drag from the [[Nodes and the Library]] dock |
-| Connect | drag from an output port; drop on empty canvas to pick a compatible node |
+| Connect | drag from a port; drop on empty canvas to pick a compatible node — the node the port is usually fed by first (a style input's style node), then an exact type match, then dimmed nodes that only fit loosely. Typing searches the same list by name |
 | Splice into a wire | drop a library node onto the wire — it lights green while it will take; hold **Alt** to drop without connecting |
 | Replace a node | drop a library node onto it — wires that fit the new node's ports come across |
 | Reroute dot | double-click a wire; double-click the dot again to name it |

@@ -44,7 +44,8 @@ NODE = {
     "label": "Visual Style",
     "category": "Viz",
     "version": "1.0",
-    "inputs": [("style", "object", {"optional": True})],
+    "inputs": [("style", "object",
+                {"optional": True, "suggest": ["flograph.viz.visual_style"]})],
     "outputs": [("style", "object")],
 }
 

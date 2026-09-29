@@ -187,6 +187,7 @@ JSON, no cached results, small and diffable — made to be committed to git.
 | --- | --- |
 | Add node | `Tab` or right-click (both open the search palette), or drag from the library |
 | Connect | drag from a port; drop on empty canvas to pick a compatible node |
+| Drop a wire on empty canvas | the palette lists nodes that can take it — the port's usual partner first (a style input's style node), then exact type matches, then dimmed loose fits |
 | Splice into a wire | drop a library node onto the wire — it lights green while it will take; `Alt` drops without connecting |
 | Replace a node | drop a library node onto it — wires that fit the new node's ports come across |
 | Reroute dot | double-click a wire (double-click the dot again to name it) |

@@ -591,10 +591,12 @@ def _parse_background(parsed, lineno) -> Rule:
 def _parse_margin(parsed, lineno) -> Rule:
     numbers = [_number(text, lineno, "margin")
                for text, _ in parsed if text.strip(",")]
+    if len(numbers) == 1:
+        numbers *= 4                    # `margin 0`: every side the same
     if len(numbers) != 4:
         raise ValueError(
-            f"line {lineno}: margin wants four numbers — left, right, top, "
-            f"bottom")
+            f"line {lineno}: margin wants one number for every side, or "
+            f"four — left, right, top, bottom")
     return Rule("margin", {"values": numbers})
 
 

@@ -86,8 +86,8 @@ class TestEveryBuiltinDeclaresOne:
         # rather than something that drifted. Both nodes are bumped together
         # when their shared Plotly Express surface gains a user-facing option.
         by_id = {s.type_id: s.version for s in builtin_specs}
-        assert by_id["flograph.viz.show_plotly"] == "2.4"
-        assert by_id["flograph.viz.chart_per_value_plotly"] == "2.1"
+        assert by_id["flograph.viz.show_plotly"] == "2.5"
+        assert by_id["flograph.viz.chart_per_value_plotly"] == "2.2"
 
 
 class TestOlderFlographsIgnoreIt:

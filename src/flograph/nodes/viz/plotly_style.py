@@ -64,6 +64,13 @@ Both inputs are optional. With no figure wired in, the node is a style and
 nothing else: it passes the chain on down its **style** output, which is
 how the house-style node at the head of a chain needs no chart of its own.
 
+**Styling many charts from one node.** Show Plotly and Chart per Value
+(Plotly) have a **style** input too, so a figure-less Plotly Style — margins
+`0`, the legend along the bottom, a theme — can be wired straight into every
+chart on a dashboard, as a Table Style is into Show Tables. There the style
+is the base and each chart's own settings win: a chart with its own title
+keeps it, and one left at the defaults takes everything from the style.
+
 The input figure is never modified: the node styles a copy, because the
 upstream node's output is cached and shared with anything else wired to
 it.
@@ -80,10 +87,13 @@ if it is missing.
 NODE = {
     "label": "Plotly Style",
     "category": "Viz",
-    "version": "1.1",
+    "version": "1.2",
     "card": "webview",
-    "inputs": [("figure", "any", {"optional": True}),
-               ("style", "object", {"optional": True})],
+    "inputs": [("figure", "any", {"optional": True, "suggest": [
+        "flograph.viz.show_plotly", "flograph.viz.chart_per_value_plotly",
+        "flograph.viz.gantt"]}),
+               ("style", "object",
+                {"optional": True, "suggest": ["flograph.viz.plotly_style"]})],
     "outputs": [("figure", "any"), ("style", "object")],
 }
 
@@ -269,7 +279,7 @@ PARAMS = _sectioned([
     {"name": "paper_color", "type": "string", "label": "Card background",
      "default": "", "placeholder": "(keep)"},
     {"name": "margin", "type": "string", "label": "Margins", "default": "",
-     "placeholder": "left,right,top,bottom in pixels"},
+     "placeholder": "0 for none, or left,right,top,bottom in px"},
 
     # The escape hatch. Everything above is a shortcut for a setting people
     # reach for; these three boxes are the rest of plotly, verbatim — a JSON
@@ -739,6 +749,8 @@ def _fonts(params, layout) -> None:
     if params.get("paper_color"):
         layout["paper_bgcolor"] = params["paper_color"]
     margin = _numbers(params.get("margin"))
+    if len(margin) == 1:
+        margin *= 4          # one number is every side — 0 for none
     if len(margin) == 4:
         left, right, top, bottom = margin
         layout["margin"] = {"l": left, "r": right, "t": top, "b": bottom}

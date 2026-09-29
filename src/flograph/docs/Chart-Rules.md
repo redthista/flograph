@@ -113,7 +113,7 @@ right`, `inside bottom left`, `inside bottom right`. Also `title "…"`,
 | `line` | `line at 100 on y dashed red label "Target"` |
 | `font` | `font Georgia 12 #333333` |
 | `background` | `background plot #ffffff`, `background paper transparent` |
-| `margin` | `margin 40 20 30 50` (left, right, top, bottom) |
+| `margin` | `margin 40 20 30 50` (left, right, top, bottom), or `margin 0` for every side |
 | `hover` | `hover unified`, `hover off` |
 | `bars` | `bars stack gap 0.2` |
 | `colorbar` | `colorbar hide`, `colorbar title "Score"` |
@@ -134,8 +134,16 @@ the end wins over everything above it.
 
 ## Sharing rules between charts
 
-Put the rules on a **Plotly Style** node instead of the chart, and wire its
-**figure** output into as many charts as you like — or chain styles: a Style
-node's **style** input takes another's output and **appends** to it, so a house
-style can sit at the head of a chain with a per-chart style after it. See
-**Plotly Style**'s own help (F1 from the node) for the chain.
+Put the rules on a **Plotly Style** node with nothing wired into its
+**figure** input, and wire its **style** output into the **style** input of as
+many **Show Plotly** and **Chart per Value (Plotly)** nodes as you like — the
+way a Table Style feeds Show Tables. Each chart reads the style's rules first
+and its own box after, so a chart's own rule wins, and because the chart has its
+rows a shared `series average` line works there too. Settings travel the same
+way: `margin 0` and the legend set once on the Style node reach every chart,
+and a chart that sets its own title or theme keeps it.
+
+Styles also chain: a Style node's **style** input takes another's output and
+**appends** to it, so a house style can sit at the head of a chain with a
+per-chart style after it. See **Plotly Style**'s own help (F1 from the node)
+for the chain.

@@ -102,7 +102,8 @@ NODE = {
     "card": "webview",
     "interactive": True,
     "inputs": [("data", "dataframe", {"optional": True}),
-               ("style", "object", {"optional": True})],
+               ("style", "object",
+                {"optional": True, "suggest": ["flograph.viz.visual_style"]})],
     "outputs": [("html", "string"), ("table", "dataframe"),
                 ("selected", "any"), ("style", "object")],
 }

@@ -4032,17 +4032,17 @@ class MainWindow(QMainWindow):
             return
         # wire-drop flow: add the node and connect it to the dragged wire
         self._pending_wire = None
-        src_node_id, port_name, from_output, port_type = pending
+        src_node_id, port_spec, from_type_id = pending
+        port_name = port_spec.name
+        from_output = port_spec.direction.value == "output"
         node = self.scene.place_here(self.registry.instantiate(
             type_id, pos=(self._palette_scene_pos.x(),
                           self._palette_scene_pos.y())))
-        from flograph.core import can_connect
-        if from_output:
-            match = next((p for p in node.spec.inputs
-                          if can_connect(port_type, p.type)), None)
-        else:
-            match = next((p for p in node.spec.outputs
-                          if can_connect(p.type, port_type)), None)
+        from flograph.core.wire_fit import best_port
+        # the port that asked for it, then by name, then by type — so a
+        # Plotly Style picked off a chart's style input wires its style
+        # output rather than the any-typed figure output listed first
+        match = best_port(node.spec, port_spec, from_type_id)
         self.undo_stack.beginMacro("add connected node")
         self.undo_stack.push(AddNodeCommand(self.graph, node))
         if match is not None:
@@ -4056,8 +4056,11 @@ class MainWindow(QMainWindow):
 
     def _on_wire_dropped(self, port_item, scene_pos: QPointF) -> None:
         """Blueprint behavior: dropping a fresh wire on empty canvas opens the
-        palette filtered to nodes that can accept it."""
-        from flograph.core import PortType, can_connect
+        palette filtered to nodes that can accept it, ranked by how well
+        (core.wire_fit): the node the port suggests, then an exact type
+        match, then the ones that only fit through `any` or `object`."""
+        from flograph.core import PortType
+        from flograph.core.wire_fit import wire_fit
         if port_item.spec.type == PortType.FLOW:
             # An order edge is drawn between two nodes that already exist —
             # "run after" needs something to run after. The palette would
@@ -4069,22 +4072,14 @@ class MainWindow(QMainWindow):
                 "two nodes that already exist. Right-click one for what "
                 "they do.", 6000)
             return
-        from_output = port_item.spec.direction.value == "output"
-        port_type = port_item.spec.type
+        port_spec = port_item.spec
+        source = self.graph.nodes.get(port_item.node_id)
+        from_type_id = source.type_id if source is not None else ""
         self._palette_scene_pos = scene_pos
-        self._pending_wire = (port_item.node_id, port_item.spec.name,
-                              from_output, port_type)
-
-        def compatible(spec) -> bool:
-            ports = spec.inputs if from_output else spec.outputs
-            return any(
-                can_connect(port_type, p.type) if from_output
-                else can_connect(p.type, port_type)
-                for p in ports)
-
+        self._pending_wire = (port_item.node_id, port_spec, from_type_id)
         self._palette_popup.popup_at(
             self.view.mapToGlobal(self.view.mapFromScene(scene_pos)),
-            predicate=compatible)
+            rank=lambda spec: wire_fit(spec, port_spec, from_type_id))
 
     def _show_add_node_menu(self, scene_pos: QPointF,
                             global_pos: QPoint) -> None:

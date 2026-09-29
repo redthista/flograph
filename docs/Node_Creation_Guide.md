@@ -230,6 +230,7 @@ Choosing a type:
 |---|---|---|
 | `{"optional": True}` | inputs | node runs with the port unconnected; the argument arrives as `None`. **You must give the parameter a `=None` default in `run()`.** |
 | `{"spare": True}` | inputs | the trailing "one more slot" of an open-ended stack (see `transform/concatenate.py`). Wiring a spare promotes it to a permanent port and a new spare appears. Implies `optional`. |
+| `{"suggest": ["flograph.viz.plotly_style"]}` | inputs | node type ids that usually feed this port. Dragging a wire back off it (or forward off one of those nodes) and dropping it on empty canvas lists them first, and picking one wires the port that asked. Only ranks the palette — it never limits what may be wired. Give a style/config input its producer node. See `core/wire_fit.py`. |
 
 A **required** (non-optional) input blocks execution while unconnected — the
 node simply does not run. Only make an input optional if `run()` genuinely

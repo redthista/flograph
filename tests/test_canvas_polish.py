@@ -643,6 +643,80 @@ class TestWireDropPalette:
         window.undo_stack.undo()
         assert len(window.graph.nodes) == 1 and not window.graph.connections
 
+    @staticmethod
+    def _drop_from(window, type_id, port, output=False):
+        node = window.registry.instantiate(type_id, pos=(0, 0))
+        window.graph.add_node(node)
+        item = window.scene.node_items[node.id]
+        ports = item.output_ports if output else item.input_ports
+        window._on_wire_dropped(ports[port], QPointF(300, 0))
+        popup = window._palette_popup
+        ids = [popup._list.item(i).data(Qt.UserRole)
+               for i in range(popup._list.count())]
+        return node, ids
+
+    def test_dragging_back_from_a_style_input_leads_with_its_style_node(
+            self, window):
+        _node, ids = self._drop_from(window, "flograph.viz.show_plotly",
+                                     "style")
+        window._palette_popup.hide()
+        assert ids[0] == "flograph.viz.plotly_style"
+
+    def test_dragging_forward_from_a_style_output_leads_with_its_charts(
+            self, window):
+        _node, ids = self._drop_from(window, "flograph.viz.plotly_style",
+                                     "style", output=True)
+        window._palette_popup.hide()
+        assert set(ids[:3]) == {"flograph.viz.show_plotly",
+                                "flograph.viz.chart_per_value_plotly",
+                                "flograph.viz.plotly_style"}
+
+    def test_exact_types_come_before_loose_ones(self, window):
+        """From a table input: nodes putting out a table first, the ones
+        that only fit through an `any` output after, drawn dimmer."""
+        from flograph.core.wire_fit import EXACT, LOOSE, wire_fit
+        node, ids = self._drop_from(window, "flograph.viz.show_plotly",
+                                    "table")
+        popup = window._palette_popup
+        port = node.spec.inputs[0]
+        tiers = [wire_fit(window.registry.get(i), port, node.type_id)
+                 for i in ids]
+        assert tiers == sorted(tiers)
+        loose = tiers.index(LOOSE) if LOOSE in tiers else None
+        if loose is not None:
+            assert EXACT in tiers[:loose]
+            assert popup._list.item(loose).foreground().color().name() != \
+                popup._list.item(0).foreground().color().name()
+        popup.hide()
+
+    def test_a_query_is_in_match_order_not_tier_order(self, window):
+        _node, _ids = self._drop_from(window, "flograph.viz.show_plotly",
+                                      "style")
+        popup = window._palette_popup
+        popup._search.setText("table style")
+        first = popup._list.item(0).data(Qt.UserRole)
+        popup.hide()
+        assert first == "flograph.viz.table_style"
+
+    def test_picking_the_style_node_wires_its_style_output(self, window):
+        """Plotly Style lists its any-typed figure output first; the wire
+        must still land on the style output the chart's port asked for."""
+        chart, _ids = self._drop_from(window, "flograph.viz.show_plotly",
+                                      "style")
+        window._palette_popup.hide()
+        window._add_node_from_palette("flograph.viz.plotly_style")
+        conn = next(iter(window.graph.connections.values()))
+        assert (conn.src_port, conn.dst_node, conn.dst_port) == \
+            ("style", chart.id, "style")
+
+    def test_forward_from_a_style_output_wires_the_style_input(self, window):
+        style, _ids = self._drop_from(window, "flograph.viz.plotly_style",
+                                      "style", output=True)
+        window._palette_popup.hide()
+        window._add_node_from_palette("flograph.viz.show_plotly")
+        conn = next(iter(window.graph.connections.values()))
+        assert (conn.src_node, conn.dst_port) == (style.id, "style")
+
 
 class TestFrameRunButton:
     def test_click_runs_and_sloppy_drag_does_not_move_the_frame(

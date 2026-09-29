@@ -24,6 +24,10 @@ class PortSpec:
     # visible invitation and never a dialog asking how many ports you want.
     # See Graph._grow_input, which owns the mechanics.
     spare: bool = False
+    # inputs only: node type ids this port is usually fed by — a style input
+    # names its style node. Only ranks the palette a dropped wire opens (see
+    # core.wire_fit); it never limits what may be wired.
+    suggest: tuple[str, ...] = ()
 
 
 # --------------------------------------------------------------- flow port

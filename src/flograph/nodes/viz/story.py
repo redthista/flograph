@@ -75,7 +75,8 @@ NODE = {
     "version": "1.0",
     "card": "webview",
     "inputs": ([("steps", "dataframe", {"optional": True}),
-                ("style", "object", {"optional": True})]
+                ("style", "object",
+                {"optional": True, "suggest": ["flograph.viz.visual_style"]})]
                + [(f"scene{n}", "string", {"optional": True})
                   for n in range(1, MAX_SCENES + 1)]),
     "outputs": [("html", "string"), ("style", "object")],

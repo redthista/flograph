@@ -204,6 +204,16 @@ def _parse_ports(
             )
         if not isinstance(opts, dict):
             raise NodeScriptError(f"{where}[{i}]: options must be a dict")
+        suggest = opts.get("suggest", ())
+        if isinstance(suggest, str) or not isinstance(suggest, (list, tuple)) \
+                or not all(isinstance(t, str) for t in suggest):
+            raise NodeScriptError(
+                f"{where}[{i}]: 'suggest' must be a list of node type ids, "
+                f"like ['flograph.viz.plotly_style']")
+        if suggest and direction != PortDirection.INPUT:
+            raise NodeScriptError(
+                f"{where}[{i}]: 'suggest' goes on an input — it names the "
+                f"nodes that usually feed it")
         ports.append(PortSpec(
             name=name,
             type=port_type,
@@ -212,6 +222,7 @@ def _parse_ports(
             # comes with it whether the script said so or not
             optional=bool(opts.get("optional", False)) or bool(opts.get("spare", False)),
             spare=bool(opts.get("spare", False)),
+            suggest=tuple(suggest),
         ))
     return ports
 
