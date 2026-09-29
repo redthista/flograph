@@ -173,6 +173,14 @@ class RenderedReport:
     #: anything outside this process — a report written out as HTML has to
     #: inline them instead, and this is what it inlines. See html.py.
     images: list = field(default_factory=list)
+    #: Only when rendered `live` (for the web page): image index -> the
+    #: Plotly figure that picture was taken of, as {"json": ...}, so the
+    #: HTML can draw the real chart over the picture.
+    live_charts: dict = field(default_factory=dict)
+    #: Only when rendered `live`: (marker, build, search, rows) per table —
+    #: `build()` writes it for a browser (frame_to_html's `live`), and the
+    #: marker finds the Qt table it replaces. See ui/report/live.py.
+    live_tables: list = field(default_factory=list)
 
 
 #: Space between charts in a multi-column stack, in points.
@@ -364,6 +372,11 @@ MAX_SCALE_MULTIPLIER = 4.0
 #: asking for a hundred thousand rows would appear to hang.
 TABLE_ROWS = 30
 MAX_TABLE_ROWS = 2000
+#: Rows a *live* table carries into the web page. More than paper takes,
+#: since the page scrolls the table in a box of `rows=` height and the
+#: search runs over all of them — but a cap, because every row is markup
+#: and a 200,000-row frame would make a page no browser opens quickly.
+LIVE_TABLE_ROWS = 5000
 
 #: The body text size REPORT_CSS sets, in points. A table's `scale=` is a
 #: multiple of it, so `scale=0.8` is 8.8pt rather than a guess.
@@ -802,8 +815,18 @@ class _Resolver:
     def __init__(self, lookup, image_scale: float = 1.0,
                  image_width: int = FIGURE_WIDTH, source=None,
                  nested=None, page_height: "float | None" = None,
-                 cache=None) -> None:
+                 cache=None, live: bool = False) -> None:
         self._lookup = lookup
+        # Rendering for the web page: keep what each chart and table was
+        # made from as well as its picture, so the HTML can put the live
+        # one back (see RenderedReport.live_charts). The document itself is
+        # the same either way — paper never sees any of it.
+        self._live = live
+        # this embed's `static` and `search` flags, for its duration only
+        self._static = False
+        self._search = False
+        self.live_charts: dict = {}
+        self.live_tables: list = []
         # Read for one thing only: the `style` a table card publishes, so
         # an embedded table arrives on the page with the conditional
         # formatting it is showing on the canvas. Everything else about a
@@ -905,7 +928,10 @@ class _Resolver:
         # and leaves the next at the page width.
         was = (self._image_width, self._aspect, self._scale_mult,
                self._max_rows, self._table_scale, self._table_height,
-               self._table_fit, self._table_ratio, self._radius)
+               self._table_fit, self._table_ratio, self._radius,
+               self._static, self._search)
+        self._static = bool((embed.options or {}).get("static"))
+        self._search = bool((embed.options or {}).get("search"))
         self._image_width = self._width_for(embed)
         self._aspect = self._aspect_for(embed)
         self._scale_mult = self._scale_for(embed)
@@ -924,7 +950,8 @@ class _Resolver:
                 self._mark_fit(embed, before)
             (self._image_width, self._aspect, self._scale_mult,
              self._max_rows, self._table_scale, self._table_height,
-             self._table_fit, self._table_ratio, self._radius) = was
+             self._table_fit, self._table_ratio, self._radius,
+             self._static, self._search) = was
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -1302,7 +1329,10 @@ class _Resolver:
         if isinstance(plotly, bytes):
             image = QImage()
             image.loadFromData(plotly, "PNG")
-            return self._token(image)
+            token = self._token(image)
+            if self._live and not self._static:
+                self._keep_live_chart(value, len(self.images) - 1)
+            return token
         if plotly is not None:
             self.problems.append(f"“{ref}” could not be drawn")
             return plotly
@@ -1355,6 +1385,19 @@ class _Resolver:
 
         return format_scalar(value)
 
+    def _keep_live_chart(self, figure, index: int) -> None:
+        """Remember the figure behind picture `index`, for the web page.
+
+        The JSON is taken now, on the UI thread, because the figure is the
+        flow's cached output and the rest of the render may run elsewhere.
+        No size goes with it: the page draws the chart over its picture,
+        which was taken at the shape `ratio=`/`height=` asked for.
+        """
+        try:
+            self.live_charts[index] = {"json": figure.to_json()}
+        except Exception:
+            pass        # it stays the picture — still a report
+
     @perf.timed('report: table embed')
     def _table(self, value, ref: str) -> str:
         """A frame as a table, carrying whatever formatting its card shows.
@@ -1387,7 +1430,11 @@ class _Resolver:
                 "text on the page, not an image")
         rules, hidden, shown = self._table_style(ref)
         measured = self._table_height is not None or self._table_fit
-        marker = table_marker(len(self.tables)) if measured else ""
+        live = self._live and not self._static
+        # numbered by table, not by measured table: a live table needs a
+        # marker too, and two tables must never share one
+        marker = (table_marker(len(self.table_html))
+                  if measured or live else "")
         font_pt = (REPORT_FONT_PT * self._table_scale
                    if self._table_scale != 1.0 else None)
 
@@ -1408,6 +1455,12 @@ class _Resolver:
             except Exception:
                 return _markdown_table_html(frame_to_markdown(value, rows))
 
+        if live:
+            def live_build() -> str:
+                return frame_to_html(value, rules, hidden, shown,
+                                     max_rows=LIVE_TABLE_ROWS, font_pt=font_pt,
+                                     grand=grand, baked=baked, live=True)
+            self.live_tables.append((marker, live_build, self._search, rows))
         if measured:
             self.tables.append(_TablePlacement(
                 ref=ref, marker=marker, build=build,
@@ -1508,7 +1561,8 @@ def source_by_wired_input(graph, node_id: str):
 
 def render_report(body: str, graph, cache, image_scale: float = 1.0,
                   setup=None, page_break_rule: bool = False,
-                  page_links: bool = False) -> RenderedReport:
+                  page_links: bool = False,
+                  live: bool = False) -> RenderedReport:
     """A report *page*: embeds name nodes by label.
 
     Naming a report *card* renders that card's contents onto the page —
@@ -1519,14 +1573,18 @@ def render_report(body: str, graph, cache, image_scale: float = 1.0,
     document and the width they are drawn at has to be decided now; and the
     body height, so an `![[chart|fit]]` can be shrunk to the room left on
     its page. None keeps the A4 default.
+
+    `live` is for the web page: it keeps each chart's figure and each
+    table's frame beside its picture, for ui/report/live.py.
     """
     return finish_body(stage_report(body, graph, cache, image_scale, setup,
-                                    page_break_rule, page_links))
+                                    page_break_rule, page_links, live))
 
 
 def stage_report(body: str, graph, cache, image_scale: float = 1.0,
                  setup=None, page_break_rule: bool = False,
-                 page_links: bool = False) -> "StagedReport":
+                 page_links: bool = False,
+                 live: bool = False) -> "StagedReport":
     """The half of render_report that has to happen on the UI thread — see
     StagedReport. `finish_body` does the rest, on any thread."""
     width = setup.body_width_points() if setup is not None else FIGURE_WIDTH
@@ -1540,7 +1598,7 @@ def stage_report(body: str, graph, cache, image_scale: float = 1.0,
                       nested=nested_by_label(graph, cache),
                       page_break_rule=page_break_rule,
                       page_height=page_height, cache=cache,
-                      page_links=page_links)
+                      page_links=page_links, live=live)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -1576,7 +1634,8 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 nested=None, page_break_rule: bool = False,
                 page_height: "float | None" = None,
                 cache=None, page_links: bool = False,
-                header_fill: str = PAPER_HEADER) -> RenderedReport:
+                header_fill: str = PAPER_HEADER,
+                live: bool = False) -> RenderedReport:
     """Lay a report body out as a document ready to show or print.
 
     Two halves, stage_body and finish_body, run back to back — see
@@ -1601,7 +1660,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
         body, lookup, image_width=image_width, image_scale=image_scale,
         source=source, nested=nested, page_break_rule=page_break_rule,
         page_height=page_height, cache=cache, page_links=page_links,
-        header_fill=header_fill))
+        header_fill=header_fill, live=live))
 
 
 @dataclass
@@ -1641,10 +1700,11 @@ def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                nested=None, page_break_rule: bool = False,
                page_height: "float | None" = None,
                cache=None, page_links: bool = False,
-               header_fill: str = PAPER_HEADER) -> StagedReport:
+               header_fill: str = PAPER_HEADER,
+               live: bool = False) -> StagedReport:
     """Resolve every embed in `body` — the UI-thread half of render_body."""
     resolver = _Resolver(lookup, image_scale, image_width, source, nested,
-                         page_height, cache)
+                         page_height, cache, live=live)
     # Columns first, and they resolve their own embeds as they go: an embed
     # inside a column has to be rendered knowing how wide that column is.
     staged_body = replace_columns(body, resolver.render_columns)
@@ -1719,7 +1779,9 @@ def finish_body(staged_report: StagedReport) -> RenderedReport:
         document=document, problems=resolver.problems,
         animations=resolver.animations,
         image_widths={i: w for i, w in enumerate(resolver.widths)},
-        images=list(resolver.images))
+        images=list(resolver.images),
+        live_charts=dict(resolver.live_charts),
+        live_tables=list(resolver.live_tables))
 
 
 def show_in(view, document) -> None:

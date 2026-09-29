@@ -14,10 +14,11 @@ which also makes the file one thing you can mail rather than a page plus a
 folder.
 
 This is not the Jinja/CSS export shelved as ideas_archived.md item 8. That
-one owns the *layout* — real page rules, running elements, interactive
-Plotly. This
+one owns the *layout* — real page rules, running elements. This
 takes Qt's own HTML as it comes and only fixes the images, which is why it
-fits in a page and needs no template.
+fits in a page and needs no template. The one piece of item 8 that did not
+need the template — live Plotly, and tables that sort, fold and search — is
+live.py, spliced in afterwards.
 """
 from __future__ import annotations
 
@@ -184,8 +185,7 @@ def page_style(setup) -> str:
     """CSS that puts the report on the paper it was set up for.
 
     Not the Jinja/CSS export shelved as ideas_archived.md item 8 — that
-    one owns the layout and can do running headers, counters and
-    interactive Plotly.
+    one owns the layout and can do running headers and counters.
     This is the cheap half: the same page size and margins, so what the
     browser prints lands on the paper the PDF does, with a chart sized for
     the page the same fraction of the width in both.
@@ -222,7 +222,8 @@ table {{ border-collapse: collapse; }}
 
 
 def report_html(rendered, title: str = "", setup=None,
-                auto_refresh: bool = False, custom_css: str = "") -> str:
+                auto_refresh: bool = False, custom_css: str = "",
+                plotly_src: "str | None" = None) -> str:
     """`rendered` as a standalone HTML document.
 
     An animation is written out as the file it arrived as, so a GIF that
@@ -232,8 +233,14 @@ def report_html(rendered, title: str = "", setup=None,
     `setup` puts it on the same paper as the PDF (see page_style); without
     one the page is Qt's own HTML at whatever width the window is.
     `auto_refresh` is for the throwaway copy behind Open in Browser only.
+
+    A report rendered `live` gets its live charts and tables back here
+    (see live.py) — before the pictures are inlined, since a chart's
+    picture is found by its `embed:N` address and stays as its fallback.
+    `plotly_src` is live.make_live's: None inlines Plotly.
     """
-    html = rendered.document.toHtml()
+    from .live import make_live
+    html = make_live(rendered.document.toHtml(), rendered, plotly_src)
     for index, image in enumerate(rendered.images):
         payload = rendered.animations.get(index)
         mime = _animation_mime(payload) if payload else None

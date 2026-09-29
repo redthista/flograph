@@ -75,7 +75,7 @@ class TestTheSyntax:
         """A closed set is what makes a typo reportable at all."""
         assert EMBED_OPTIONS == ("width", "ratio", "height", "scale",
                                  "rows", "radius")
-        assert EMBED_FLAGS == ("fit",)
+        assert EMBED_FLAGS == ("fit", "search", "static")
 
     def test_a_bare_flag_is_recognised_not_taken_as_the_port(self):
         assert parse_options("|fit") == ("", {"fit": True}, [])

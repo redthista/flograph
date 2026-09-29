@@ -110,7 +110,9 @@ class ReportNodeExporter(QObject):
         report_export.prepare_path(request, page.title)
         rendered = render_report(page.body, graph, self._engine.cache,
                                  image_scale=2.0, setup=page.setup,
-                                 page_break_rule=False)
+                                 page_break_rule=False,
+                                 live=request.fmt == "HTML"
+                                 or request.want_html)
         request.problems = [*stale_embeds(graph, page.body),
                             *rendered.problems]
         if request.abandoned:

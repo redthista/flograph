@@ -82,7 +82,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                   max_rows: int = MAX_ROWS,
                   width: "int | None" = None, paper: bool = True,
                   font_pt: "float | None" = None, marker: str = "",
-                  text_width=None, grand=None, baked=None) -> str:
+                  text_width=None, grand=None, baked=None,
+                  live: bool = False) -> str:
     """`frame` as an HTML table carrying `rules` as cell styling.
 
     `hidden` and `shown` are the card's column projection — what to drop
@@ -110,6 +111,13 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     card lays them out, from the same functions: `grand` is a matrix's true
     totals and `baked` the rows Totals in output wrote into the table,
     which come out again before the rows are laid out.
+
+    `live` writes the table for a browser rather than for Qt: every group
+    is laid out, folded or not, and each total and group row says what it
+    is (`data-fg-kind`, `data-fg-level`, `data-fg-folded`) so the page's
+    script can fold it. Qt would drop those attributes — which is why a
+    live table is written straight into the finished HTML (see
+    ui/report/live.py), never through the document.
     """
     frame = _as_frame(frame)
     if frame is None:
@@ -169,7 +177,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     arranged = None
     if plan.active:
         try:
-            arranged = tt.build_layout(frame, plan, grand=grand)
+            arranged = tt.build_layout(frame, plan, grand=grand,
+                                       expand_all=live)
         except Exception:
             arranged = None
     if arranged is not None:
@@ -261,10 +270,12 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
     data_row = -1
     for _pos, special in sequence:
         if special is not None:
-            out.append(_special_tr(special, plan, columns, specials, numeric,
-                                   layout_rules=layout_rules_of(rules,
-                                                                columns),
-                                   lead=lead, rules=rules))
+            tr = _special_tr(special, plan, columns, specials, numeric,
+                             layout_rules=layout_rules_of(rules, columns),
+                             lead=lead, rules=rules)
+            if live:
+                tr = _live_tr(special, plan) + tr[len("<tr>"):]
+            out.append(tr)
             continue
         data_row += 1
         row = data_row
@@ -390,6 +401,19 @@ def _special_tr(special, plan, columns, specials, numeric, layout_rules,
                            align=entry.align if entry else None))
     cells.append("</tr>")
     return "".join(cells)
+
+
+def _live_tr(special, plan) -> str:
+    """The opening tag of a total or group row in a live table — what the
+    page's script reads to fold a group (see ui/report/live.py). A group
+    starts folded the way the card's `groups` rule says; the reader's own
+    clicks on the card are not carried, since the page is a fresh reading."""
+    from flograph.core import table_totals as tt
+    folded = (' data-fg-folded="1"' if special.kind == "group"
+              and tt.is_collapsed(plan, special.level, special.key, ())
+              else "")
+    return (f'<tr data-fg-kind="{special.kind}" '
+            f'data-fg-level="{special.level}"{folded}>')
 
 
 def _align_attr(entry, numeric: bool) -> str:

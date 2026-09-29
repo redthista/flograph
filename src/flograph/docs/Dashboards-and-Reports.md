@@ -365,10 +365,26 @@ Use **Save snippet...** to store the current stylesheet for reuse. Snippets
 are kept in flograph's user data directory as `.css` files and appear in the
 starter-theme picker on future report pages.
 
-Plotly outputs in report pages currently remain static pictures, including in
-Web preview. Interactive Plotly charts are available on Show Plotly cards;
-interactive Plotly report embeds are planned for the browser-native export
-target.
+**The web page is live.** In Web preview and in **Save HTML…** (and a Save
+Report node saving HTML), a Plotly chart is the real chart — hover for
+values, zoom, pan, click the legend to hide a series — and a table is a
+browser table:
+
+* it carries every row (up to 5,000) and scrolls in a box `rows=` tall,
+  rather than stopping at "showing 30 of …" the way paper has to;
+* click a column heading to sort by it, and again to reverse;
+* a **grouped** table folds: click a group's row to close or open it. Groups
+  start the way the table's `groups` rule says (open, closed, first);
+* hover a cell for its column name and value;
+* `![[Sales|search]]` puts a search box over the table — it filters the
+  rows, opening any group with a match, and says how many rows it found.
+
+`![[Chart|static]]` keeps any one embed as the picture (or plain table) the
+PDF gets. The page is still one file with nothing to fetch: the chart
+library is the one that ships with plotly, written into the file once. The
+chart's picture stays in the file too — it is what a mail client that runs
+no scripts shows, and what the page prints, so a printed page matches the
+PDF. The Pages preview and the PDF are unchanged by any of this.
 
 An embed written **inside code** — `![[Sales]]` in backticks, or in a
 fenced block — is left exactly as typed. That is how a page explains its own

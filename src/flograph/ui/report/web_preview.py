@@ -19,6 +19,11 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+#: Where the preview's page finds Plotly: a copy written beside it once,
+#: rather than 4 MB of script inlined into a page rewritten on every
+#: keystroke. A file you keep inlines it instead (see live.make_live).
+PREVIEW_PLOTLY = "flograph-plotly.js"
+
 
 class WebPreview(QWidget):
     """A continuously scrolling report preview backed by QWebEngineView."""
@@ -75,6 +80,9 @@ class WebPreview(QWidget):
             self._folder = tempfile.TemporaryDirectory(
                 prefix="flograph-report-")
             self._path = Path(self._folder.name) / f"{uuid.uuid4().hex}.html"
+            from .live import plotly_js
+            (Path(self._folder.name) / PREVIEW_PLOTLY).write_text(
+                plotly_js(), encoding="utf-8")
         self._path.write_text(html, encoding="utf-8")
         position = self.browser.page().scrollPosition()
         if self._scroll is None and (position.x() or position.y()):

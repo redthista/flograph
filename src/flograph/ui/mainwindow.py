@@ -2467,7 +2467,7 @@ class MainWindow(QMainWindow):
         if path is None:
             return
         with busy(self, f"Exporting {Path(path).name}…"):
-            rendered = widget.rendered(for_print=True)
+            rendered = widget.rendered(for_print=True, live=True)
         self._write_html(rendered, path, page.title,
                          setup=page.setup, custom_css=page.custom_css)
 

@@ -27,7 +27,7 @@ from ..commands import (SetPageBodyCommand, SetPageCustomCssCommand,
                         SetPagePreviewViewCommand)
 from .preview import PagedPreview
 from .render import finish_body, render_report, stage_report
-from .web_preview import WebPreview
+from .web_preview import PREVIEW_PLOTLY, WebPreview
 
 # How long typing has to pause before the preview re-renders. Re-rendering
 # is cheap for text but redraws every embedded chart, so it is not something
@@ -520,7 +520,8 @@ class ReportPage(QWidget):
         started = time.perf_counter()
         with deferred(self._pictures_ready):
             staged = stage_report(page.body, self._graph, self._engine.cache,
-                                  setup=setup, page_links=True)
+                                  setup=setup, page_links=True,
+                                  live=mode == "web")
         # `stage_report` **re-enters the event loop** — a web-view embed is
         # printed to PDF, and that waits. So the window can close while this
         # method is part-way through, and the preview we checked above can be
@@ -611,7 +612,8 @@ class ReportPage(QWidget):
             self._stop_animations()
             if html is None:
                 html = report_html(rendered, page.title, setup=setup,
-                                   custom_css=page.custom_css)
+                                   custom_css=page.custom_css,
+                                   plotly_src=PREVIEW_PLOTLY)
             self.web_preview.set_html(html)
             self._status.setText(self._problem_text())
             return
@@ -795,7 +797,7 @@ class ReportPage(QWidget):
 
     # ------------------------------------------------------------- exporting
 
-    def rendered(self, for_print: bool = False):
+    def rendered(self, for_print: bool = False, live: bool = False):
         """The document as it would print, freshly rendered.
 
         `for_print` rasterises the charts to PRINT_DPI — same layout, same
@@ -803,13 +805,16 @@ class ReportPage(QWidget):
         as fuzzy on paper. It also drops the preview's page-break rules: on
         paper the break is the break, and a line drawn at the bottom of the
         previous page would be a leftover from a preview trick.
+
+        `live` keeps the figures and frames behind the charts and tables,
+        for Save HTML to make them live again (ui/report/live.py).
         """
         page = self._page()
         return render_report(page.body if page else "", self._graph,
                              self._engine.cache,
                              image_scale=2.0 if for_print else 1.0,
                              setup=page.setup if page else None,
-                             page_break_rule=not for_print)
+                             page_break_rule=not for_print, live=live)
 
     def show_help(self) -> None:
         """The report reference. Kept on the page rather than the window so
@@ -842,7 +847,8 @@ def _lay_out(staged, setup, mode: str, title: str, css: str):
     try:
         if mode == "web":
             from .html import report_html
-            html = report_html(rendered, title, setup=setup, custom_css=css)
+            html = report_html(rendered, title, setup=setup, custom_css=css,
+                               plotly_src=PREVIEW_PLOTLY)
         else:
             pages = paginate_in_background(rendered.document, setup)
     finally:
