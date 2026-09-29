@@ -199,10 +199,9 @@ class ReportPage(QWidget):
         # Live, the preview follows the editor; off, it waits to be asked —
         # Update preview or Ctrl+Enter — so a page too big to re-render on
         # every keystroke can still be typed into. Saved with the page.
-        self._live_btn = QToolButton()
-        self._live_btn.setCheckable(True)
+        from ..switch import Switch
+        self._live_btn = Switch("Live")
         self._live_btn.setChecked(True)
-        self._live_btn.setText("Live")
         self._live_btn.setToolTip(
             "On: the preview follows your typing.\n"
             "Off: it waits until you press Update preview (Ctrl+Enter) — "
