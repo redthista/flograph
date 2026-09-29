@@ -206,7 +206,15 @@ tr.fg-hidden { display: none; }
   flex: 0 1 18em; font: inherit; padding: .3em .55em;
   border: 1px solid #c8c8c8; border-radius: 4px;
 }
-.fg-bar span { opacity: .65; font-size: .9em; }
+.fg-bar .fg-count { opacity: .65; font-size: .9em; }
+/* in the page's own colours, so every theme — light or dark — suits them */
+.fg-bar .fg-tools { margin-left: auto; display: flex; gap: .35em; }
+.fg-bar button {
+  font: inherit; font-size: .85em; color: inherit; cursor: pointer;
+  padding: .25em .7em; border-radius: 4px; background: transparent;
+  border: 1px solid rgba(128, 128, 128, .45);
+}
+.fg-bar button:hover { background: rgba(128, 128, 128, .14); }
 /* Paper gets the picture, which is the PDF's own at print resolution.
    A live chart re-laid out for the printed page came out squashed in a
    column layout — Plotly resizes to a box that is mid-reflow — and a
@@ -502,21 +510,46 @@ LIVE_JS = r"""
       // only this table's own cells, not a data bar's inner table
       if (cell && cell.closest("table") === table) tooltip(table, cell);
     });
+    var bar = null;
+    function toolbar() {
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.className = "fg-bar";
+        box.insertBefore(bar, box.firstChild);
+      }
+      return bar;
+    }
     if (box.dataset.fgSearch) {
-      var bar = document.createElement("div");
-      bar.className = "fg-bar";
       var input = document.createElement("input");
       input.type = "search"; input.placeholder = "Search…";
       var count = document.createElement("span");
-      bar.appendChild(input); bar.appendChild(count);
-      box.insertBefore(bar, box.firstChild);
+      count.className = "fg-count";
+      toolbar().appendChild(input); bar.appendChild(count);
       table.fgCount = count;
       input.addEventListener("input", function () {
         table.fgQuery = input.value.trim();
         refresh(table);
       });
     }
-    if (grouped) refresh(table);
+    if (grouped) {
+      // every group at once — the same attribute a click on one sets, so
+      // a table opened this way folds and unfolds by hand as before
+      var tools = document.createElement("span");
+      tools.className = "fg-tools";
+      [["Expand all", "0"], ["Collapse all", "1"]].forEach(function (each) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.textContent = each[0];
+        button.addEventListener("click", function () {
+          table.querySelectorAll('tr[data-fg-kind="group"]').forEach(
+            function (g) { g.setAttribute("data-fg-folded", each[1]); });
+          refresh(table);
+        });
+        tools.appendChild(button);
+      });
+      toolbar().appendChild(tools);
+      refresh(table);
+    }
   });
 })();
 """

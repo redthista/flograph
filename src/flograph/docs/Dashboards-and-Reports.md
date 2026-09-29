@@ -374,8 +374,9 @@ table:
 * it carries every row (up to 5,000) and scrolls in a box `rows=` tall,
   rather than stopping at "showing 30 of …" the way paper has to;
 * click a column heading to sort by it, and again to reverse;
-* a **grouped** table folds: click a group's row to close or open it. Groups
-  start the way the table's `groups` rule says (open, closed, first);
+* a **grouped** table folds: click a group's row to close or open it, or
+  use **Expand all** / **Collapse all** above the table. Groups start the
+  way the table's `groups` rule says (open, closed, first);
 * hover a cell for its column name and value;
 * `![[Sales|search]]` is a live table with a search box over it — it
   filters the rows, opening any group with a match, and says how many rows

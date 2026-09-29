@@ -244,6 +244,15 @@ class TestLiveThemes:
         assert ".flograph-table > tbody > tr > td" in css
         assert css.count("{") == css.count("}")
 
+    def test_a_grouped_table_has_expand_and_collapse_all(self):
+        """Clicked in QtWebEngine on the demo's nested table: 21 of 57 rows
+        at the start, 57 expanded, 5 collapsed (see the commit); here,
+        only that the pieces are wired."""
+        from flograph.ui.report.live import LIVE_CSS, LIVE_JS
+        assert '"Expand all"' in LIVE_JS and '"Collapse all"' in LIVE_JS
+        assert "if (grouped) {" in LIVE_JS
+        assert ".fg-bar .fg-tools" in LIVE_CSS
+
     def test_a_live_chart_has_a_full_screen_button(self):
         """Clicked in a real browser engine it was measured filling the
         viewport and redrawing to it, and Esc put it back (see the commit);

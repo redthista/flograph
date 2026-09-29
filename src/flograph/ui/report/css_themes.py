@@ -385,7 +385,9 @@ p > img, .fg-chart:not(.fg-drawn) > img { opacity: 0.9; }
 }
 .fg-bar input:focus { border-color: var(--accent);
                       box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18); }
-.fg-bar span { color: var(--muted); }
+.fg-bar .fg-count { color: var(--muted); }
+.fg-bar button { color: var(--ink); border-color: var(--line); }
+.fg-bar button:hover { border-color: var(--accent); color: var(--accent); }
 .fg-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .fg-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 .fg-scroll { scrollbar-color: var(--line) transparent; }
