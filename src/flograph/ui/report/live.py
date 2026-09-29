@@ -51,10 +51,12 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
     if not charts and not tables:
         return html
     drawn = 0
+    images = getattr(rendered, "images", None) or []
     for index, chart in charts.items():
+        shape = _shape_of(images[index] if index < len(images) else None)
         html, hit = re.subn(_IMG_RE.format(index),
-                            lambda m, i=index, c=chart: _chart_box(m.group(0),
-                                                                   i, c),
+                            lambda m, i=index, c=chart, k=shape:
+                            _chart_box(m.group(0), i, c, k),
                             html, count=1)
         drawn += hit
     for marker, build, search, rows in tables:
@@ -84,22 +86,35 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
     return _into(html, "</body>", body)
 
 
-def _chart_box(img: str, index: int, chart: dict) -> str:
+def _shape_of(image) -> str:
+    """`aspect-ratio` for a chart box, from its picture's pixels, or ""."""
+    try:
+        w, h = image.width(), image.height()
+    except Exception:
+        return ""
+    return f"aspect-ratio:{w} / {h};" if w > 0 and h > 0 else ""
+
+
+def _chart_box(img: str, index: int, chart: dict, shape: str = "") -> str:
     """The picture inside a box the live chart will be drawn over, with the
     figure beside it.
 
-    The picture stays in the page, invisible, once the chart is up: it is
-    what gives the box its size. It was taken at the figure's own shape,
-    so the chart lands exactly where it was and the page does not jump —
-    and a box sized any other way collapses inside a column layout's
-    auto-sized cell (it did: `aspect-ratio` on an empty box in a table
-    cell has no width to be a ratio of).
+    The box is the picture's width and the picture's shape from the first
+    layout, stated rather than left to the picture: in a column layout's
+    auto-sized cell, Firefox laid the box out before the picture had
+    decoded and Plotly drew a chart a few pixels tall. With both stated
+    the box has a size before anything loads. (A theme's `--chart-shape`
+    overrides the shape — it says `!important`.) The picture stays in the
+    box, invisible, as the fallback and for print.
     """
     width = re.search(r'\bwidth="(\d+)"', img)
-    size = f"width:{width.group(1)}px;" if width else ""
+    size = (f"width:{width.group(1)}px;" if width else "") + shape
     # `</` would end the script element early — a label with "</b>" in it
     data = chart["json"].replace("</", "<\\/")
-    return (f'<div class="fg-chart" data-fg-chart="{index}" '
+    design = chart.get("design") or ()
+    design = (f' data-fg-design="{int(design[0])},{int(design[1])}"'
+              if len(design) == 2 else "")
+    return (f'<div class="fg-chart" data-fg-chart="{index}"{design} '
             f'style="{size}">{img}</div>'
             f'<script type="application/json" id="fg-fig-{index}">'
             f"{data}</script>")
@@ -172,10 +187,23 @@ def _into(html: str, tag: str, block: str) -> str:
 
 LIVE_CSS = """
 .fg-chart { max-width: 100%; margin: 0.6em auto; position: relative; }
+/* a ```columns block: Qt fixed its cells at the paper's widths, which on
+   a screen left two charts side by side at a quarter of the page each;
+   here the columns share the width, and a chart fills its column */
+table[style*="border-style:none"] { width: 100%; table-layout: fixed; }
+table[style*="border-style:none"] .fg-chart { width: 100% !important; }
 .fg-chart > img { display: block; width: 100%; height: auto; margin: 0; }
 .fg-chart.fg-drawn > img { visibility: hidden; }
 .fg-chart > .fg-plot { position: absolute; inset: 0; }
-.fg-table { margin: 0.6em 0; }
+/* as wide as the table, so its bar (search, Expand all) sits over it and
+   not at the far side of the page; a theme's full-width card overrides */
+.fg-table { margin: 0.6em 0; width: fit-content; max-width: 100%; }
+/* Qt pads a report's cells from its own stylesheet; a browser's default
+   is a pixel, which ran "$9,937$10,519" together. Every live table gets
+   the same room; a theme sets its own. */
+.fg-scroll .flograph-table > thead > tr > th,
+.fg-scroll .flograph-table > tbody > tr > td { padding: 3px 9px; }
+.fg-scroll .flograph-table > thead > tr > th { vertical-align: bottom; }
 .fg-scroll {
   max-height: calc(var(--fg-rows, 30) * 2.1em + 2.6em);
   overflow: auto;
@@ -225,7 +253,8 @@ tr.fg-hidden { display: none; }
    chart someone has zoomed into is not the one the report is about. */
 /* full screen: the box fills the screen (or the window, where full screen
    is refused), whatever shape a theme gave it; the chart redraws to fit */
-.fg-chart.fg-full {
+/* the class twice: it must beat a theme's !important column shape */
+.fg-chart.fg-full.fg-full {
   position: fixed !important; inset: 0 !important; z-index: 2147483000;
   width: auto !important; height: auto !important; max-width: none !important;
   aspect-ratio: auto !important; margin: 0 !important;
@@ -328,6 +357,31 @@ LIVE_JS = r"""
     if (e.key === "Escape" && full) leaveFull();
   });
 
+  // A chart is never drawn smaller than it was designed. Plotly lays out in
+  // real pixels with real-size text, so a 700px figure redrawn into a 250px
+  // column spent the whole box on its margins, legend and labels and drew
+  // a sliver of plot. Narrower than its design, it is drawn at the design
+  // size and scaled down — exactly as its picture is; plotly.js reads the
+  // CSS scale for hover and drag. Wider (a full-width card, full screen),
+  // it is redrawn to the room it has.
+  function fit(box, host) {
+    var design = (box.dataset.fgDesign || "").split(",").map(Number);
+    var css = getComputedStyle(box);
+    var padX = parseFloat(css.paddingLeft) + parseFloat(css.paddingRight);
+    var padY = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
+    var w = box.clientWidth - padX, h = box.clientHeight - padY;
+    if (design.length === 2 && design[0] > 0 && w > 0 && w < design[0]) {
+      var k = w / design[0];
+      host.style.cssText =
+        "position:absolute;right:auto;bottom:auto;" +
+        "left:" + css.paddingLeft + ";top:" + css.paddingTop + ";" +
+        "width:" + design[0] + "px;height:" + (h / k) + "px;" +
+        "transform:scale(" + k + ");transform-origin:0 0";
+    } else {
+      host.style.cssText = "";
+    }
+  }
+
   function drawChart(box) {
     if (box.classList.contains("fg-drawn") || box.fgDrawing || !window.Plotly)
       return;
@@ -350,6 +404,7 @@ LIVE_JS = r"""
     var host = document.createElement("div");
     host.className = "fg-plot";
     box.appendChild(host);
+    fit(box, host);
     box.fgDrawing = true;
     Plotly.newPlot(host, fig.data || [], layout,
                    {responsive: true, displaylogo: false,
@@ -366,8 +421,10 @@ LIVE_JS = r"""
         // changes size with the page — a column, a template that makes
         // charts full width — has to be told.
         if ("ResizeObserver" in window) {
-          new ResizeObserver(function () { Plotly.Plots.resize(host); })
-            .observe(box);
+          new ResizeObserver(function () {
+            fit(box, host);
+            Plotly.Plots.resize(host);
+          }).observe(box);
         }
       })
       .catch(function () {    // the picture stays

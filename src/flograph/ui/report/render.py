@@ -1423,8 +1423,13 @@ class _Resolver:
         if geoassets.missing(outlines):
             return      # said in the problems; the picture is what there is
         try:
+            # the size it was designed at: the page never draws it smaller,
+            # it scales that down instead — as the picture is
+            design = plotly_geometry(figure, self._image_width, False,
+                                     self._aspect)[:2]
             self.live_charts[index] = {"json": figure.to_json(),
-                                       "outlines": outlines}
+                                       "outlines": outlines,
+                                       "design": list(design)}
         except Exception:
             pass        # it stays the picture — still a report
 

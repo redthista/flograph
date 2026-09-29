@@ -91,7 +91,7 @@ li { margin: 1px 0 !important; }
 
 /* charts: a thin panel at the theme's shape */
 .fg-chart {
-  width: 100% !important; aspect-ratio: var(--chart-shape);
+  width: 100% !important; aspect-ratio: var(--chart-shape) !important;
   border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
   margin: 6px 0 !important; background: var(--fg-chart-paper);
 }
@@ -99,7 +99,7 @@ li { margin: 1px 0 !important; }
 p > img { border: 1px solid var(--line); border-radius: 6px; }
 
 /* live tables */
-.fg-table { margin: 6px 0 !important; }
+.fg-table { margin: 6px 0 !important; width: auto; }
 .fg-scroll { border: 1px solid var(--line); border-radius: 6px; }
 .fg-scroll .flograph-table { width: 100%; border-collapse: collapse; }
 .flograph-table > thead > tr > th {
@@ -133,7 +133,7 @@ p > img { border: 1px solid var(--line); border-radius: 6px; }
 /* ```columns: an even grid with a gutter */
 table[style*="border-style:none"] { width: 100% !important; table-layout: fixed; }
 table[style*="border-style:none"] > tbody > tr > td { padding: 0 6px !important; }
-table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.45 / 1; }
+table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.45 / 1 !important; }
 """
 
 
@@ -218,12 +218,12 @@ li { margin: 2px 0 !important; }
   background: var(--card); border-radius: 12px; box-shadow: var(--shadow);
 }
 .fg-chart {
-  width: 100% !important; aspect-ratio: var(--chart-shape);
+  width: 100% !important; aspect-ratio: var(--chart-shape) !important;
   overflow: hidden; margin: 8px 0 !important;
 }
 .fg-chart > img { height: 100%; object-fit: contain; }
 p > img { padding: 8px; box-sizing: border-box; }
-.fg-table { padding: 12px 14px; margin: 8px 0 !important; }
+.fg-table { padding: 12px 14px; margin: 8px 0 !important; width: auto; }
 .fg-scroll .flograph-table { width: 100%; border-collapse: collapse; }
 .flograph-table > thead > tr > th {
   font-size: 11px; font-weight: 600; color: var(--muted);
@@ -261,7 +261,7 @@ table[style*="border-style:none"] { width: 100% !important; table-layout: fixed;
 table[style*="border-style:none"] > tbody > tr > td { padding: 0 7px !important; }
 table[style*="border-style:none"] > tbody > tr > td:first-child { padding-left: 0 !important; }
 table[style*="border-style:none"] > tbody > tr > td:last-child { padding-right: 0 !important; }
-table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1; }
+table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1 !important; }
 
 @media print {
   body { background: #fff; }
@@ -346,13 +346,13 @@ li::marker { color: var(--accent); }
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 .fg-chart {
-  width: 100% !important; aspect-ratio: var(--chart-shape);
+  width: 100% !important; aspect-ratio: var(--chart-shape) !important;
   overflow: hidden; margin: 8px 0 !important;
 }
 .fg-chart > img { height: 100%; object-fit: contain; }
 /* a picture was drawn for paper; dim it rather than let it glare */
 p > img, .fg-chart:not(.fg-drawn) > img { opacity: 0.9; }
-.fg-table { padding: 10px 12px; margin: 8px 0 !important; }
+.fg-table { padding: 10px 12px; margin: 8px 0 !important; width: auto; }
 .fg-scroll .flograph-table { width: 100%; border-collapse: collapse; }
 .flograph-table > thead > tr > th {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
@@ -396,7 +396,7 @@ table[style*="border-style:none"] { width: 100% !important; table-layout: fixed;
 table[style*="border-style:none"] > tbody > tr > td { padding: 0 7px !important; }
 table[style*="border-style:none"] > tbody > tr > td:first-child { padding-left: 0 !important; }
 table[style*="border-style:none"] > tbody > tr > td:last-child { padding-right: 0 !important; }
-table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1; }
+table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1 !important; }
 
 /* paper does not print backgrounds: go back to ink on white */
 @media print {
