@@ -822,8 +822,10 @@ class _Resolver:
         # one back (see RenderedReport.live_charts). The document itself is
         # the same either way — paper never sees any of it.
         self._live = live
-        # this embed's `static` and `search` flags, for its duration only
-        self._static = False
+        # this embed's `live` and `search` flags, for its duration only —
+        # live is opt-in per embed, and a search box only exists on a live
+        # table, so asking for one asks for the other
+        self._wants_live = False
         self._search = False
         self.live_charts: dict = {}
         self.live_tables: list = []
@@ -929,9 +931,10 @@ class _Resolver:
         was = (self._image_width, self._aspect, self._scale_mult,
                self._max_rows, self._table_scale, self._table_height,
                self._table_fit, self._table_ratio, self._radius,
-               self._static, self._search)
-        self._static = bool((embed.options or {}).get("static"))
+               self._wants_live, self._search)
         self._search = bool((embed.options or {}).get("search"))
+        self._wants_live = (bool((embed.options or {}).get("live"))
+                            or self._search)
         self._image_width = self._width_for(embed)
         self._aspect = self._aspect_for(embed)
         self._scale_mult = self._scale_for(embed)
@@ -951,7 +954,7 @@ class _Resolver:
             (self._image_width, self._aspect, self._scale_mult,
              self._max_rows, self._table_scale, self._table_height,
              self._table_fit, self._table_ratio, self._radius,
-             self._static, self._search) = was
+             self._wants_live, self._search) = was
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -1330,7 +1333,7 @@ class _Resolver:
             image = QImage()
             image.loadFromData(plotly, "PNG")
             token = self._token(image)
-            if self._live and not self._static:
+            if self._live and self._wants_live:
                 self._keep_live_chart(value, len(self.images) - 1)
             return token
         if plotly is not None:
@@ -1430,7 +1433,7 @@ class _Resolver:
                 "text on the page, not an image")
         rules, hidden, shown = self._table_style(ref)
         measured = self._table_height is not None or self._table_fit
-        live = self._live and not self._static
+        live = self._live and self._wants_live
         # numbered by table, not by measured table: a live table needs a
         # marker too, and two tables must never share one
         marker = (table_marker(len(self.table_html))

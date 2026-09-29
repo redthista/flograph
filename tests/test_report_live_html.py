@@ -3,7 +3,9 @@
 A report written out as HTML used to be the PDF's document as Qt writes
 it: every Plotly chart a photograph, every table a grid nobody could sort
 or search. Rendered `live`, the resolver keeps the figure and the frame
-beside each picture and table, and the HTML puts the live one back.
+beside each picture and table that asked for it (`|live`, `|search`), and
+the HTML puts the live one back. Opt-in: an embed that asks for nothing is
+exactly what the PDF has.
 
 The paper half must not move at all, so the first tests are about what
 does *not* change.
@@ -51,13 +53,14 @@ def _plain(rendered) -> str:
 
 class TestPaperIsUntouched:
     def test_not_live_keeps_nothing(self, qapp, monkeypatch):
-        rendered = render("![[T]]", {"T": sales()}, monkeypatch=monkeypatch,
-                          live=False)
+        # asked for, but this render is for paper
+        rendered = render("![[T|live]]", {"T": sales()},
+                          monkeypatch=monkeypatch, live=False)
         assert rendered.live_charts == {} and rendered.live_tables == []
         assert "fg-table" not in report_html(rendered)
 
     def test_live_lays_out_the_same_document(self, qapp, monkeypatch):
-        body = "# Head\n\n![[T]]\n\ntext"
+        body = "# Head\n\n![[T|live]]\n\ntext"
         paper = render(body, {"T": sales()}, monkeypatch=monkeypatch,
                        live=False)
         live = render(body, {"T": sales()}, monkeypatch=monkeypatch)
@@ -65,9 +68,9 @@ class TestPaperIsUntouched:
 
 
 class TestFlags:
-    def test_search_and_static_are_known_flags(self):
-        _, options, unknown = parse_options("search|static")
-        assert options == {"search": True, "static": True}
+    def test_live_and_search_are_known_flags(self):
+        _, options, unknown = parse_options("live|search")
+        assert options == {"live": True, "search": True}
         assert unknown == []
 
 
@@ -84,14 +87,14 @@ class TestLiveTables:
 
     def test_a_live_table_carries_every_row(self, qapp, monkeypatch):
         big = pd.DataFrame({"n": range(120)})
-        html = report_html(render("![[T]]", {"T": big},
+        html = report_html(render("![[T|live]]", {"T": big},
                                   monkeypatch=monkeypatch))
         # paper would cut at 30 with a note; the page scrolls instead
         assert ">119<" in html
         assert "Showing" not in html
 
-    def test_static_keeps_the_paper_table(self, qapp, monkeypatch):
-        html = report_html(render("![[T|static]]", {"T": sales()},
+    def test_a_plain_embed_keeps_the_paper_table(self, qapp, monkeypatch):
+        html = report_html(render("![[T]]", {"T": sales()},
                                   monkeypatch=monkeypatch))
         assert 'class="fg-table"' not in html
         assert "<script>" not in html
@@ -113,7 +116,7 @@ class TestLiveTables:
 
     def test_a_table_in_columns_replaces_only_itself(self, qapp,
                                                      monkeypatch):
-        body = "```columns\n![[T]]\n---\nbeside\n```\n"
+        body = "```columns\n![[T|live]]\n---\nbeside\n```\n"
         html = report_html(render(body, {"T": sales()},
                                   monkeypatch=monkeypatch))
         assert html.count('class="fg-table"') == 1
@@ -141,7 +144,8 @@ class TestEnclosingTable:
 class TestLiveCharts:
     def test_a_plotly_chart_is_kept_beside_its_picture(self, qapp,
                                                        monkeypatch):
-        rendered = render("![[C]]", {"C": figure()}, monkeypatch=monkeypatch)
+        rendered = render("![[C|live]]", {"C": figure()},
+                          monkeypatch=monkeypatch)
         assert list(rendered.live_charts) == [0]
         html = report_html(rendered, plotly_src="plotly.js")
         assert 'class="fg-chart"' in html
@@ -153,19 +157,49 @@ class TestLiveCharts:
         data = re.search(r'id="fg-fig-0">(.*?)</script>', html, re.S).group(1)
         assert json.loads(data)["layout"]["title"]["text"] == "Bars</b>"
 
-    def test_static_chart_stays_a_picture(self, qapp, monkeypatch):
-        rendered = render("![[C|static]]", {"C": figure()},
+    def test_a_plain_chart_stays_a_picture(self, qapp, monkeypatch):
+        rendered = render("![[C]]", {"C": figure()},
                           monkeypatch=monkeypatch)
         assert rendered.live_charts == {}
+        # and nothing live on the page means no Plotly in the file
+        html = report_html(rendered)
+        assert "fg-chart" not in html and len(html) < 1_000_000
 
     def test_plotly_is_inlined_once_for_a_file_you_keep(self, qapp,
                                                         monkeypatch):
-        html = report_html(render("![[C]]\n\n![[C]]", {"C": figure()},
+        html = report_html(render("![[C|live]]\n\n![[C|live]]",
+                                  {"C": figure()},
                                   monkeypatch=monkeypatch))
         assert html.count('class="fg-chart"') == 2
         # one copy of plotly.js, not one per chart
         assert html.count("Plotly.newPlot") <= 2
         assert len(html) < 2 * 4_000_000 + 500_000
+
+
+class TestLiveThemes:
+    def test_the_live_themes_are_offered(self):
+        from flograph.ui.report.html import CSS_TEMPLATES
+        for name in ("Compact", "Dashboard", "Midnight"):
+            assert name in CSS_TEMPLATES
+        # the old three are still there, in their old order, first
+        assert list(CSS_TEMPLATES)[:3] == ["Clean", "Editorial", "Slate"]
+
+    @pytest.mark.parametrize("name", ["Compact", "Dashboard", "Midnight"])
+    def test_a_live_theme_themes_the_charts_too(self, name):
+        from flograph.ui.report.css_themes import LIVE_THEMES
+        css = LIVE_THEMES[name]
+        for var in ("--fg-chart-paper", "--fg-chart-ink", "--fg-chart-grid",
+                    "--fg-chart-font", "--chart-shape"):
+            assert var + ":" in css
+        # a data bar is a table inside a cell: only the outer cells are styled
+        assert ".flograph-table > tbody > tr > td" in css
+        assert css.count("{") == css.count("}")
+
+    def test_the_page_script_reads_the_chart_variables(self):
+        from flograph.ui.report.live import LIVE_JS
+        for var in ("--fg-chart-paper", "--fg-chart-plot", "--fg-chart-ink",
+                    "--fg-chart-grid", "--fg-chart-font"):
+            assert var in LIVE_JS
 
 
 def test_make_live_leaves_a_plain_report_alone():

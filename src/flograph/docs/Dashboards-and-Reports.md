@@ -365,10 +365,11 @@ Use **Save snippet...** to store the current stylesheet for reuse. Snippets
 are kept in flograph's user data directory as `.css` files and appear in the
 starter-theme picker on future report pages.
 
-**The web page is live.** In Web preview and in **Save HTML…** (and a Save
-Report node saving HTML), a Plotly chart is the real chart — hover for
-values, zoom, pan, click the legend to hide a series — and a table is a
-browser table:
+**Live charts and tables.** Add `|live` to an embed and, in Web preview and
+in **Save HTML…** (and a Save Report node saving HTML), it becomes the real
+thing. `![[Revenue|live]]` is the Plotly chart itself — hover for values,
+zoom, pan, click the legend to hide a series. `![[Sales|live]]` is a browser
+table:
 
 * it carries every row (up to 5,000) and scrolls in a box `rows=` tall,
   rather than stopping at "showing 30 of …" the way paper has to;
@@ -376,15 +377,27 @@ browser table:
 * a **grouped** table folds: click a group's row to close or open it. Groups
   start the way the table's `groups` rule says (open, closed, first);
 * hover a cell for its column name and value;
-* `![[Sales|search]]` puts a search box over the table — it filters the
-  rows, opening any group with a match, and says how many rows it found.
+* `![[Sales|search]]` is a live table with a search box over it — it
+  filters the rows, opening any group with a match, and says how many rows
+  it found.
 
-`![[Chart|static]]` keeps any one embed as the picture (or plain table) the
-PDF gets. The page is still one file with nothing to fetch: the chart
-library is the one that ships with plotly, written into the file once. The
-chart's picture stays in the file too — it is what a mail client that runs
-no scripts shows, and what the page prints, so a printed page matches the
+Live is opt-in, one embed at a time, so a report nobody has touched saves
+the same HTML it always did. The page is still one file with nothing to
+fetch: the chart library is the one that ships with plotly, written into
+the file once — and only when a chart on the page is live. The chart's
+picture stays in the file too: it is what a mail client that runs no
+scripts shows, and what the page prints, so a printed page matches the
 PDF. The Pages preview and the PDF are unchanged by any of this.
+
+Three of the CSS tab's starter themes are made for live pages: **Compact**
+(dense, hairline rules, numbers that line up), **Dashboard** (every chart
+and table on a card, a quote becomes the headline insight) and
+**Midnight** (a dark control room). They theme the live charts as well —
+a dark page gets dark charts — through five variables any stylesheet can
+set: `--fg-chart-paper`, `--fg-chart-plot`, `--fg-chart-ink`,
+`--fg-chart-grid` and `--fg-chart-font`. They also give every chart the
+same wide shape (`--chart-shape`); delete that line to keep each chart's
+own.
 
 An embed written **inside code** — `![[Sales]]` in backticks, or in a
 fenced block — is left exactly as typed. That is how a page explains its own

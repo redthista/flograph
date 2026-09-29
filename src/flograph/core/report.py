@@ -57,10 +57,12 @@ EMBED_OPTIONS = ("width", "ratio", "height", "scale", "rows", "radius")
 #:
 #: `fit` — shrink this chart, or trim this table, so it fits the space left
 #: on the page rather than starting a new one and leaving a gap.
-#: `search` — in the web page, put a search box over this table.
-#: `static` — in the web page, keep this embed the picture (or plain
-#:            table) the PDF gets, rather than the live chart or table.
-EMBED_FLAGS = ("fit", "search", "static")
+#: `live`   — in the web page, the real chart (hover, zoom) or a table
+#:            that sorts, folds and scrolls, instead of the PDF's picture
+#:            or printed table. Opt-in, so a report nobody touched saves
+#:            the same HTML it always did.
+#: `search` — a live table with a search box over it (implies `live`).
+EMBED_FLAGS = ("fit", "live", "search")
 
 
 def parse_options(rest: str) -> "tuple[str, dict, list]":

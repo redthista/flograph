@@ -53,10 +53,12 @@ produced, name it:</p>
     <td>200 points of page: the rows that fit inside it</td></tr>
 <tr><td><code>![[Sales|fit]]</code></td>
     <td>the rows that fit the room left on the page</td></tr>
+<tr><td><code>![[Chart|live]]</code></td>
+    <td>web page: the real chart &mdash; hover, zoom, legend</td></tr>
+<tr><td><code>![[Sales|live]]</code></td>
+    <td>web page: a table that sorts, folds its groups and scrolls</td></tr>
 <tr><td><code>![[Sales|search]]</code></td>
-    <td>web page: a search box over the table</td></tr>
-<tr><td><code>![[Chart|static]]</code></td>
-    <td>web page: the PDF's picture, not the live chart or table</td></tr>
+    <td>web page: a live table with a search box</td></tr>
 <tr><td><code>![[Chart|figure|width=60%]]</code></td>
     <td>a port <i>and</i> a width</td></tr>
 </table>

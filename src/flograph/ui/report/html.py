@@ -142,6 +142,12 @@ td, th { padding: 7px 9px; }
 """,
 }
 
+# The themes made for live pages — compact, and aware of the live charts
+# and tables. Kept in their own module: they are long, and they are about
+# Qt's markup in a way the three above are not.
+from .css_themes import LIVE_THEMES  # noqa: E402
+CSS_TEMPLATES.update(LIVE_THEMES)
+
 
 def _data_uri(payload: bytes, mime: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(payload).decode('ascii')}"

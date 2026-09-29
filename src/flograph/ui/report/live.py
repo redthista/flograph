@@ -23,8 +23,11 @@ The page stays one file with nothing to fetch. Plotly's script is the one
 that ships inside the plotly package, inlined once however many charts
 there are — never a CDN, the same rule the Web Libraries follow.
 
-What an embed can ask for: `search` puts a search box over a table,
-`static` keeps an embed the way the PDF has it.
+Opt-in, per embed: `![[Chart|live]]`, `![[Sales|live]]`, and
+`![[Sales|search]]` for a live table with a search box. An embed that asks
+for neither is exactly what the PDF has, so a report nobody has touched
+saves the HTML it always did — and carries no Plotly unless a chart is
+live.
 """
 from __future__ import annotations
 
@@ -174,6 +177,9 @@ LIVE_CSS = """
 }
 .fg-scroll thead tr + tr th { top: 2em; }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(0,0,0,.05); }
+/* a data bar is a small table in the cell; Qt sizes the column to it, a
+   browser column can be wider — keep it at the right, under its heading */
+.fg-scroll .flograph-table > tbody > tr > td > table { margin-left: auto; }
 .fg-sortable thead th { cursor: pointer; user-select: none; }
 .fg-sortable thead th[data-fg-sort="asc"]::after { content: " \\25B2"; font-size: .75em; }
 .fg-sortable thead th[data-fg-sort="desc"]::after { content: " \\25BC"; font-size: .75em; }
@@ -210,22 +216,80 @@ LIVE_JS = r"""
   "use strict";
 
   // ---- charts: drawn as they scroll into view, so a page of forty is quick
+  // A stylesheet can theme the live charts: a template sets these on the
+  // page (or on one box) and they are laid over the figure's own layout.
+  // Unset, the chart is exactly as the node drew it.
+  function themed(box, layout) {
+    var css = getComputedStyle(box);
+    function v(name) { return css.getPropertyValue(name).trim(); }
+    var paper = v("--fg-chart-paper"), plot = v("--fg-chart-plot");
+    var ink = v("--fg-chart-ink"), grid = v("--fg-chart-grid");
+    var font = v("--fg-chart-font");
+    function unink(o) { if (o && typeof o === "object" && o.font) delete o.font.color; }
+    if (paper) layout.paper_bgcolor = paper;
+    if (plot) layout.plot_bgcolor = plot;
+    if (ink || font) {
+      layout.font = Object.assign({}, layout.font);
+      if (ink) { layout.font.color = ink; unink(layout.title); }
+      if (font) layout.font.family = font;
+    }
+    if (grid || ink) {
+      ["xaxis", "yaxis"].forEach(function (key) {
+        if (!layout[key]) layout[key] = {};
+      });
+      Object.keys(layout).forEach(function (key) {
+        if (!/^[xy]axis\d*$/.test(key)) return;
+        var axis = layout[key] = Object.assign({}, layout[key]);
+        if (grid) { axis.gridcolor = grid; axis.zerolinecolor = grid;
+                    axis.linecolor = grid; }
+        if (ink) unink(axis.title);
+      });
+    }
+    if (paper || ink) {
+      layout.legend = Object.assign({bgcolor: "rgba(0,0,0,0)"}, layout.legend);
+      if (ink) unink(layout.legend);
+    }
+    return layout;
+  }
+
   function drawChart(box) {
-    if (box.classList.contains("fg-drawn") || !window.Plotly) return;
+    if (box.classList.contains("fg-drawn") || box.fgDrawing || !window.Plotly)
+      return;
+    // The picture sizes the box. Drawn before it has decoded, the box has
+    // no height yet and Plotly draws a squashed chart it never corrects
+    // (Firefox, in a column layout) — so wait for it.
+    var img = box.querySelector("img");
+    if (img && !img.complete) {
+      img.addEventListener("load", function () { drawChart(box); },
+                           {once: true});
+      return;
+    }
     var data = document.getElementById("fg-fig-" + box.dataset.fgChart);
     if (!data) return;
     var fig;
     try { fig = JSON.parse(data.textContent); } catch (e) { return; }
-    var layout = fig.layout || {};
+    var layout = themed(box, fig.layout || {});
     delete layout.width; delete layout.height;   // the box sets the size
     layout.autosize = true;
     var host = document.createElement("div");
     host.className = "fg-plot";
     box.appendChild(host);
+    box.fgDrawing = true;
     Plotly.newPlot(host, fig.data || [], layout,
                    {responsive: true, displaylogo: false})
-      .then(function () { box.classList.add("fg-drawn"); })
-      .catch(function () { host.remove(); });   // the picture stays
+      .then(function () {
+        box.classList.add("fg-drawn");
+        // Plotly's own `responsive` hears only the window. A box that
+        // changes size with the page — a column, a template that makes
+        // charts full width — has to be told.
+        if ("ResizeObserver" in window) {
+          new ResizeObserver(function () { Plotly.Plots.resize(host); })
+            .observe(box);
+        }
+      })
+      .catch(function () {    // the picture stays
+        host.remove(); box.fgDrawing = false;
+      });
   }
   var boxes = document.querySelectorAll(".fg-chart");
   if ("IntersectionObserver" in window) {
