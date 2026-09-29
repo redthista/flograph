@@ -167,6 +167,28 @@ class TestLiveCharts:
         data = re.search(r'id="fg-fig-0">(.*?)</script>', html, re.S).group(1)
         assert json.loads(data)["layout"]["title"]["text"] == "Bars</b>"
 
+    @pytest.mark.parametrize("trace", ["Scattergeo", "Choropleth",
+                                       "Scattermap", "Densitymap"])
+    def test_a_map_stays_a_picture_so_nothing_is_fetched(self, qapp,
+                                                         monkeypatch, trace):
+        """A live map would fetch outlines or tiles; the page may fetch
+        nothing, so a map stays the picture the app drew."""
+        go = pytest.importorskip("plotly.graph_objects")
+        from flograph.ui.report.render import _needs_the_internet
+        fig = go.Figure(getattr(go, trace)())
+        assert _needs_the_internet(fig)
+        assert not _needs_the_internet(figure())
+
+    def test_a_saved_live_page_references_nothing_outside_itself(
+            self, qapp, monkeypatch):
+        html = report_html(render("![[C|live]]\n\n![[T|search]]",
+                                  {"C": figure(), "T": sales()},
+                                  monkeypatch=monkeypatch))
+        page = re.sub(r"<script>/\*\*.*?</script>", "", html, flags=re.S)
+        assert "fg-chart" in page
+        assert not re.search(r'(?:src|href)="(?:https?:)?//', page)
+        assert "@import" not in page and "url(http" not in page
+
     def test_a_plain_chart_stays_a_picture(self, qapp, monkeypatch):
         rendered = render("![[C]]", {"C": figure()},
                           monkeypatch=monkeypatch)
@@ -204,6 +226,15 @@ class TestLiveThemes:
         # a data bar is a table inside a cell: only the outer cells are styled
         assert ".flograph-table > tbody > tr > td" in css
         assert css.count("{") == css.count("}")
+
+    def test_a_live_chart_has_a_full_screen_button(self):
+        """Clicked in a real browser engine it was measured filling the
+        viewport and redrawing to it, and Esc put it back (see the commit);
+        here, only that the pieces are wired."""
+        from flograph.ui.report.live import LIVE_CSS, LIVE_JS
+        assert "modeBarButtonsToAdd" in LIVE_JS and "toggleFull(box)" in LIVE_JS
+        assert "requestFullscreen" in LIVE_JS and '"Escape"' in LIVE_JS
+        assert ".fg-chart.fg-full" in LIVE_CSS
 
     def test_the_page_script_reads_the_chart_variables(self):
         from flograph.ui.report.live import LIVE_JS

@@ -381,10 +381,19 @@ table:
   filters the rows, opening any group with a match, and says how many rows
   it found.
 
+A live chart's toolbar (it appears when you point at the chart) has a
+**full screen** button at its right-hand end: the chart is redrawn to fill
+the screen — or the preview, inside flograph — and **Esc** puts it back.
+
 Live is opt-in, one embed at a time, so a report nobody has touched saves
-the same HTML it always did. The page is still one file with nothing to
-fetch: the chart library is the one that ships with plotly, written into
-the file once — and only when a chart on the page is live. The chart's
+the same HTML it always did. The page is one file with **nothing to fetch**
+— no CDN, no web fonts, no folder beside it — so it opens the same on a
+machine with no internet: the chart library is the one that ships with
+plotly, written into the file once, and only when a chart on the page is
+live. The one kind of chart that cannot be live is a **map**: a live map
+downloads its country outlines or street tiles from the internet, so
+`scatter_geo`, `choropleth` and the tile maps stay the picture flograph
+drew, even with `|live`. The chart's
 picture stays in the file too: it is what a mail client that runs no
 scripts shows, and what the page prints, so a printed page matches the
 PDF. The Pages preview and the PDF are unchanged by any of this.

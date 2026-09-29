@@ -807,6 +807,31 @@ def by_wired_input(graph, cache, node_id: str):
     return lookup
 
 
+#: Plotly trace types that fetch from the internet when drawn in a browser:
+#: geo outlines (topojson from cdn.plot.ly) and map tiles (a tile server).
+#: Every other trace type draws from the data it carries.
+ONLINE_TRACES = frozenset({
+    "scattergeo", "choropleth",
+    "scattermap", "choroplethmap", "densitymap",
+    "scattermapbox", "choroplethmapbox", "densitymapbox",
+})
+
+
+def _needs_the_internet(figure) -> bool:
+    """Would this Plotly figure fetch anything when drawn live?"""
+    try:
+        if any(getattr(trace, "type", None) in ONLINE_TRACES
+               for trace in figure.data):
+            return True
+        layout = figure.layout
+        # a map layout with no map trace on it yet still draws its map
+        return any(getattr(layout, key, None) is not None
+                   and bool(getattr(layout, key).to_plotly_json())
+                   for key in ("geo", "map", "mapbox"))
+    except Exception:
+        return True     # not sure: the picture is always safe
+
+
 class _Resolver:
     """Turns each embed into report markdown, collecting images to be
     spliced in afterwards. How an embed finds its value is the `lookup`
@@ -1395,7 +1420,15 @@ class _Resolver:
         flow's cached output and the rest of the render may run elsewhere.
         No size goes with it: the page draws the chart over its picture,
         which was taken at the shape `ratio=`/`height=` asked for.
+
+        A map stays its picture. The web page must work with nothing to
+        fetch — one file, no CDN — and a live map cannot: plotly.js
+        downloads a geo chart's outlines from cdn.plot.ly and a tile map's
+        tiles from a tile server. The picture was drawn here, in the app,
+        so the page carries the map without reaching for anything.
         """
+        if _needs_the_internet(figure):
+            return
         try:
             self.live_charts[index] = {"json": figure.to_json()}
         except Exception:

@@ -201,6 +201,21 @@ tr.fg-hidden { display: none; }
    A live chart re-laid out for the printed page came out squashed in a
    column layout — Plotly resizes to a box that is mid-reflow — and a
    chart someone has zoomed into is not the one the report is about. */
+/* full screen: the box fills the screen (or the window, where full screen
+   is refused), whatever shape a theme gave it; the chart redraws to fit */
+.fg-chart.fg-full {
+  position: fixed !important; inset: 0 !important; z-index: 2147483000;
+  width: auto !important; height: auto !important; max-width: none !important;
+  aspect-ratio: auto !important; margin: 0 !important;
+  border-radius: 0 !important; border: 0 !important;
+  background: var(--fg-chart-paper, #ffffff);
+  padding: 12px; box-sizing: border-box;
+}
+.fg-chart.fg-full > .fg-plot { inset: 12px; }
+.fg-chart.fg-full > img { display: none; }
+.fg-chart:fullscreen { width: 100vw !important; height: 100vh !important; }
+.fg-chart::backdrop { background: var(--fg-chart-paper, #ffffff); }
+html.fg-full-page, html.fg-full-page body { overflow: hidden !important; }
 @media print {
   .fg-chart.fg-drawn > img { visibility: visible; }
   .fg-chart > .fg-plot { display: none; }
@@ -252,6 +267,45 @@ LIVE_JS = r"""
     return layout;
   }
 
+  // ---- full screen: the chart redrawn at the size of the screen, not a
+  // picture of it scaled up. The browser's own full screen where it is
+  // allowed; where it is not — the app's Web preview, a page in a frame —
+  // the box fills the window instead. Esc, or the button again, puts it back.
+  var EXPAND = {width: 24, height: 24,
+                path: "M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2" +
+                      "v3zM14 5v2h3v3h2V5h-5z"};
+  var full = null;              // the box that is full screen, if any
+
+  function leaveFull() {
+    if (!full) return;
+    var box = full;
+    full = null;
+    box.classList.remove("fg-full");
+    document.documentElement.classList.remove("fg-full-page");
+    if (document.fullscreenElement === box && document.exitFullscreen)
+      document.exitFullscreen().catch(function () {});
+  }
+
+  function toggleFull(box) {
+    if (full === box) { leaveFull(); return; }
+    leaveFull();
+    full = box;
+    box.classList.add("fg-full");
+    document.documentElement.classList.add("fg-full-page");
+    if (box.requestFullscreen) {
+      // refused (no permission, not allowed in a frame): the window it is
+      box.requestFullscreen().catch(function () {});
+    }
+  }
+
+  // leaving the browser's full screen by its own means (Esc, F11) ends ours
+  document.addEventListener("fullscreenchange", function () {
+    if (full && document.fullscreenElement !== full) leaveFull();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && full) leaveFull();
+  });
+
   function drawChart(box) {
     if (box.classList.contains("fg-drawn") || box.fgDrawing || !window.Plotly)
       return;
@@ -276,7 +330,12 @@ LIVE_JS = r"""
     box.appendChild(host);
     box.fgDrawing = true;
     Plotly.newPlot(host, fig.data || [], layout,
-                   {responsive: true, displaylogo: false})
+                   {responsive: true, displaylogo: false,
+                    modeBarButtonsToAdd: [{
+                      name: "fullscreen", title: "Full screen (Esc to leave)",
+                      icon: EXPAND,
+                      click: function () { toggleFull(box); }
+                    }]})
       .then(function () {
         box.classList.add("fg-drawn");
         // Plotly's own `responsive` hears only the window. A box that
