@@ -585,16 +585,18 @@ class SettingsDialog(QDialog):
 
         from .properties.params_panel import (set_wheel_changes_choices,
                                               wheel_changes_choices)
-        wheel_check = QCheckBox("Mouse wheel changes drop-downs")
+        wheel_check = QCheckBox(
+            "Mouse wheel changes drop-downs and number boxes")
         wheel_check.setObjectName("properties_wheel_choices_checkbox")
         wheel_check.setChecked(wheel_changes_choices())
         wheel_check.toggled.connect(set_wheel_changes_choices)
-        rows.add("Scrolling over a drop-down", wheel_check,
-                 "When off, a mouse wheel over a closed drop-down in the "
-                 "Properties panel scrolls the panel, so running the wheel "
-                 "down a long list of settings never changes one on the way "
-                 "past. Turn it on to pick the next or previous option with "
-                 "the wheel instead. An open list scrolls either way.")
+        rows.add("Scrolling over a setting", wheel_check,
+                 "When off, a mouse wheel over a closed drop-down or a "
+                 "number box in the Properties panel scrolls the panel, so "
+                 "running the wheel down a long list of settings never "
+                 "changes one on the way past. Turn it on to pick the next "
+                 "or previous option, or step the number, with the wheel "
+                 "instead. An open list scrolls either way.")
 
         rows.add_group("Writing")
 

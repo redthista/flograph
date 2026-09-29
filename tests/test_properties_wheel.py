@@ -1,9 +1,10 @@
-"""A mouse wheel over a closed drop-down in Properties scrolls the panel
-instead of changing the choice, unless Settings > General turns it back on."""
+"""A mouse wheel over a closed drop-down or a number box in Properties
+scrolls the panel instead of changing the setting, unless Settings > General turns it back on."""
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QUndoStack, QWheelEvent
-from PySide6.QtWidgets import QApplication, QComboBox
+from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox,
+                               QSpinBox)
 
 from flograph.core import Graph
 from tests.conftest import make_node
@@ -16,6 +17,8 @@ NODE = {
 PARAMS = [
     {"name": "mode", "type": "choice", "options": ["a", "b", "c"],
      "default": "b"},
+    {"name": "count", "type": "int", "default": 5},
+    {"name": "ratio", "type": "float", "default": 0.5},
 ]
 def run(ctx):
     return None
@@ -76,3 +79,25 @@ def test_setting_lets_the_wheel_change_it(panel):
     _wheel_down(combo)
     assert combo.currentData() == "c"
     assert graph.nodes[node.id].params["mode"] == "c"
+
+
+def test_wheel_leaves_number_boxes_alone_by_default(panel):
+    panel, graph, node = panel
+    spin = panel.findChild(QSpinBox)
+    double = panel.findChild(QDoubleSpinBox)
+    _wheel_down(spin)
+    _wheel_down(double)
+    assert spin.value() == 5
+    assert double.value() == 0.5
+    assert "count" not in graph.nodes[node.id].params or \
+        graph.nodes[node.id].params["count"] == 5
+
+
+def test_setting_lets_the_wheel_step_a_number(panel):
+    from flograph.ui.properties.params_panel import set_wheel_changes_choices
+    panel, graph, node = panel
+    set_wheel_changes_choices(True)
+    spin = panel.findChild(QSpinBox)
+    _wheel_down(spin)
+    assert spin.value() == 4
+    assert graph.nodes[node.id].params["count"] == 4

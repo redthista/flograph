@@ -21,7 +21,7 @@ from PySide6.QtGui import (
     QTextCursor, QUndoStack,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QAbstractItemView, QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
     QSizePolicy, QSpinBox, QToolButton, QTreeWidget, QTreeWidgetItem,
@@ -57,13 +57,17 @@ class _NodeRefCombo(QComboBox):
         super().showPopup()
 
 
+#: What a wheel only scrolls past (see ParamsPanel.eventFilter).
+_WHEEL_GUARDED = (QComboBox, QAbstractSpinBox)
+
 _ORG = "flograph"
 _APP = "flograph"
 #: Whether the ⓘ paragraph is open — one choice for every node.
 _SHOW_ABOUT = "properties/show_about"
 #: Per node type and section: "1" open, "0" folded.
 _SECTION_KEY = "properties/sections/{type_id}/{section}"
-#: Settings > General: whether a wheel over a closed drop-down changes it.
+#: Settings > General: whether a wheel over a closed drop-down or a number
+#: box changes it.
 WHEEL_CHOICES_SETTING = "properties/wheel_changes_choices"
 
 #: Item data: which param a row edits, or which section a heading heads.
@@ -81,9 +85,10 @@ def _setting(key: str, default: bool) -> bool:
 
 
 def wheel_changes_choices() -> bool:
-    """Settings > General: a wheel over a drop-down in Properties picks the
-    next option. Off by default — scrolling the panel past a row of them
-    would otherwise quietly rewrite whichever one the pointer crossed."""
+    """Settings > General: a wheel over a drop-down or number box in
+    Properties picks the next option or steps the number. Off by default —
+    scrolling the panel past a row of them would otherwise quietly rewrite
+    whichever one the pointer crossed."""
     return _setting(WHEEL_CHOICES_SETTING, False)
 
 
@@ -839,10 +844,11 @@ class ParamsPanel(QWidget):
             widget.setToolTip(tip)
 
     def eventFilter(self, obj, event) -> bool:
-        # A wheel over a closed drop-down scrolls the panel instead of
-        # changing it, unless Settings > General says otherwise. An open
+        # A wheel over a closed drop-down or a number box scrolls the panel
+        # instead of changing it, unless Settings > General says otherwise. An open
         # list is its own popup, so scrolling through it is unaffected.
-        if (event.type() == QEvent.Wheel and isinstance(obj, QComboBox)
+        if (event.type() == QEvent.Wheel
+                and isinstance(obj, _WHEEL_GUARDED)
                 and not wheel_changes_choices()):
             QApplication.sendEvent(self.tree.viewport(), event)
             return True
@@ -857,12 +863,12 @@ class ParamsPanel(QWidget):
         else:
             parent.addChild(item)
         self.tree.setItemWidget(item, 1, widget)
-        # a combo may also sit inside a composite row (a picker's box)
-        combos = widget.findChildren(QComboBox)
-        if isinstance(widget, QComboBox):
-            combos.append(widget)
-        for combo in combos:
-            combo.installEventFilter(self)
+        # one may also sit inside a composite row (a picker's box)
+        guarded = widget.findChildren(QWidget)
+        guarded.append(widget)
+        for child in guarded:
+            if isinstance(child, _WHEEL_GUARDED):
+                child.installEventFilter(self)
         # rows default to a single text line's height -- taller widgets
         # (the multiline "text" editor) would get clipped without this, but
         # respect any maximumHeight the widget set on itself (e.g. the "text"
