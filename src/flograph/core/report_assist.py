@@ -66,7 +66,7 @@ OPTION_HINTS = {
     "ratio": "the shape a chart is drawn at — 16:9, 4x3, 1.5",
     "height": "an exact height in points; a table shows the rows that fit",
     "scale": "a chart's detail (2 = finer); a table's text size",
-    "rows": "how many rows of a table to show",
+    "rows": "how many rows of a table to show — all for the whole table",
     "radius": "round a picture's corners, in points",
 }
 FLAG_HINTS = {
@@ -81,7 +81,7 @@ OPTION_VALUES = {
     "ratio": ("16:9", "4:3", "3:2", "1:1", "21:9"),
     "height": ("180", "240", "320"),
     "scale": ("2", "1.5", "0.8"),
-    "rows": ("10", "30", "50"),
+    "rows": ("10", "30", "50", "all"),
     "radius": ("8", "14"),
 }
 COMMANDS = {

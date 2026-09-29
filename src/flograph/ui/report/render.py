@@ -377,6 +377,8 @@ MAX_TABLE_ROWS = 2000
 #: search runs over all of them — but a cap, because every row is markup
 #: and a 200,000-row frame would make a page no browser opens quickly.
 LIVE_TABLE_ROWS = 5000
+#: What `rows=` accepts for "the whole table".
+ALL_ROWS = ("all", "full", "*")
 
 #: The body text size REPORT_CSS sets, in points. A table's `scale=` is a
 #: multiple of it, so `scale=0.8` is 8.8pt rather than a guess.
@@ -827,6 +829,7 @@ class _Resolver:
         # table, so asking for one asks for the other
         self._wants_live = False
         self._search = False
+        self._rows_all = False
         self.live_charts: dict = {}
         self.live_tables: list = []
         # Read for one thing only: the `style` a table card publishes, so
@@ -931,7 +934,9 @@ class _Resolver:
         was = (self._image_width, self._aspect, self._scale_mult,
                self._max_rows, self._table_scale, self._table_height,
                self._table_fit, self._table_ratio, self._radius,
-               self._wants_live, self._search)
+               self._wants_live, self._search, self._rows_all)
+        self._rows_all = (str((embed.options or {}).get("rows", "")).strip()
+                          .lower() in ALL_ROWS)
         self._search = bool((embed.options or {}).get("search"))
         self._wants_live = (bool((embed.options or {}).get("live"))
                             or self._search)
@@ -954,7 +959,7 @@ class _Resolver:
             (self._image_width, self._aspect, self._scale_mult,
              self._max_rows, self._table_scale, self._table_height,
              self._table_fit, self._table_ratio, self._radius,
-             self._wants_live, self._search) = was
+             self._wants_live, self._search, self._rows_all) = was
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -1037,15 +1042,23 @@ class _Resolver:
         """`rows=50` shows fifty rows of a table before the "showing N of
         M" note. The default is deliberately short — a report is a summary,
         and a table that runs for nine pages is nearly always an accident —
-        but "nearly always" is why it can be asked for."""
+        but "nearly always" is why it can be asked for.
+
+        `rows=all` asks for the whole table: on paper as many rows as
+        `rows=` may ever ask for (MAX_TABLE_ROWS), and live, no scroll box
+        at all — the table runs its full length down the page.
+        """
         raw = str((embed.options or {}).get("rows", "")).strip()
         if not raw:
             return TABLE_ROWS
+        if raw.lower() in ALL_ROWS:
+            return MAX_TABLE_ROWS
         try:
             value = int(float(raw))
         except ValueError:
             self.problems.append(
-                f"“{embed.ref}”: “{raw}” is not a row count — try 50")
+                f"“{embed.ref}”: “{raw}” is not a row count — try 50, "
+                f"or all")
             return TABLE_ROWS
         return max(1, min(MAX_TABLE_ROWS, value))
 
@@ -1495,7 +1508,9 @@ class _Resolver:
                 return frame_to_html(value, rules, hidden, shown,
                                      max_rows=LIVE_TABLE_ROWS, font_pt=font_pt,
                                      grand=grand, baked=baked, live=True)
-            self.live_tables.append((marker, live_build, self._search, rows))
+            # 0 = the whole table, no scroll box (`rows=all`)
+            self.live_tables.append((marker, live_build, self._search,
+                                     0 if self._rows_all else rows))
         if measured:
             self.tables.append(_TablePlacement(
                 ref=ref, marker=marker, build=build,

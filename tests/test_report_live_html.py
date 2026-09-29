@@ -93,6 +93,47 @@ class TestLiveTables:
         assert ">119<" in html
         assert "Showing" not in html
 
+    def test_rows_sets_the_height_of_the_scroll_box(self, qapp, monkeypatch):
+        big = pd.DataFrame({"n": range(120)})
+        html = report_html(render("![[T|live|rows=12]]", {"T": big},
+                                  monkeypatch=monkeypatch))
+        assert "--fg-rows:12" in html
+        assert 'class="fg-table fg-whole"' not in html
+        assert ">119<" in html          # every row is there, in the box
+
+    def test_rows_all_is_the_whole_table_with_no_scroll_box(
+            self, qapp, monkeypatch):
+        big = pd.DataFrame({"n": range(120)})
+        rendered = render("![[T|live|rows=all]]", {"T": big},
+                          monkeypatch=monkeypatch)
+        assert rendered.problems == []
+        html = report_html(rendered)
+        assert 'class="fg-table fg-whole"' in html
+        assert "--fg-rows" not in html.split('class="fg-table')[1][:80]
+        assert ">119<" in html
+
+    def test_rows_all_on_paper_is_every_row_not_thirty(
+            self, qapp, monkeypatch):
+        big = pd.DataFrame({"n": range(120)})
+        rendered = render("![[T|rows=all]]", {"T": big},
+                          monkeypatch=monkeypatch, live=False)
+        text = rendered.document.toPlainText()
+        assert "119" in text and "Showing" not in text
+
+    def test_totals_are_pinned_while_the_box_scrolls(self):
+        """Measured in QtWebEngine on the demo: scrolled 281px, a top total
+        sits flush under the headings; scrolled 182px, a bottom total
+        flush on the box's bottom edge (see the commit)."""
+        from flograph.ui.report.live import LIVE_CSS, LIVE_JS
+        assert "function pinTotals" in LIVE_JS and "pinTotals(table)" in LIVE_JS
+        assert "tr.fg-pin-bottom > td { bottom: 0; }" in LIVE_CSS
+        assert "top: var(--fg-head-h, 0px);" in LIVE_CSS
+
+    def test_a_row_count_that_is_neither_says_so(self, qapp, monkeypatch):
+        rendered = render("![[T|live|rows=lots]]", {"T": sales()},
+                          monkeypatch=monkeypatch)
+        assert any("or all" in p for p in rendered.problems)
+
     def test_a_plain_embed_keeps_the_paper_table(self, qapp, monkeypatch):
         html = report_html(render("![[T]]", {"T": sales()},
                                   monkeypatch=monkeypatch))

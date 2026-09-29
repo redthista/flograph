@@ -121,7 +121,12 @@ def _chart_box(img: str, index: int, chart: dict, shape: str = "") -> str:
 
 
 def _table_box(table: str, search: bool, rows: int) -> str:
+    """A live table in its box: `rows` tall and scrolling, or — rows 0,
+    `rows=all` — its whole length, no scroll box at all."""
     flag = ' data-fg-search="1"' if search else ""
+    if rows <= 0:
+        return (f'<div class="fg-table fg-whole"{flag}>'
+                f'<div class="fg-scroll">{table}</div></div>')
     return (f'<div class="fg-table"{flag} style="--fg-rows:{int(rows)}">'
             f'<div class="fg-scroll">{table}</div></div>')
 
@@ -209,6 +214,19 @@ table[style*="border-style:none"] .fg-chart { width: 100% !important; }
   overflow: auto;
 }
 .fg-scroll table { border-collapse: collapse; }
+/* A grand total stays in sight while its table scrolls: pinned to the
+   bottom of the box, or under the headings for one at the top. The
+   total's own colour usually shows; this is the fallback, since a pinned
+   cell over scrolling rows must not be see-through. */
+.fg-scroll .flograph-table > tbody > tr.fg-pin > td {
+  position: sticky; z-index: 1; background-color: #f2f3f5;
+}
+.fg-scroll .flograph-table > tbody > tr.fg-pin-bottom > td { bottom: 0; }
+.fg-scroll .flograph-table > tbody > tr.fg-pin-top > td {
+  top: var(--fg-head-h, 0px);
+}
+/* `rows=all`: the whole table down the page, no box to scroll */
+.fg-table.fg-whole > .fg-scroll { max-height: none; overflow: visible; }
 .fg-scroll thead th {
   position: sticky; top: 0; z-index: 1;
   background: var(--fg-head, #eeeeee);
@@ -578,6 +596,7 @@ LIVE_JS = r"""
       th.addEventListener("click", function () {
         folded[h] = !folded[h];
         layout();
+        measureHead(table);
       });
       return th;
     }
@@ -623,8 +642,26 @@ LIVE_JS = r"""
     table.fgFoldColumns = function (value) {
       folded = folded.map(function () { return value; });
       layout();
+      measureHead(table);
     };
     layout();
+  }
+
+  // ---- a grand total stays in sight while the table scrolls: the ones
+  // above the first data row pin under the headings, the rest to the
+  // bottom of the box (CSS .fg-pin). The headings' height is measured,
+  // since folding column headings changes how many rows it has.
+  function measureHead(table) {
+    if (table.tHead)
+      table.style.setProperty("--fg-head-h", table.tHead.offsetHeight + "px");
+  }
+  function pinTotals(table) {
+    var above = true;
+    Array.prototype.forEach.call(table.tBodies[0].rows, function (r) {
+      if (kind(r) !== "total") { above = false; return; }
+      r.classList.add("fg-pin", above ? "fg-pin-top" : "fg-pin-bottom");
+    });
+    measureHead(table);
   }
 
   function tooltip(table, cell) {
@@ -646,6 +683,7 @@ LIVE_JS = r"""
     var grouped = !!table.querySelector('tr[data-fg-kind="group"]');
     var banded = table.hasAttribute("data-fg-bands");
     if (banded) setupBands(table);
+    pinTotals(table);
     var simpleHead = table.tHead && table.tHead.rows.length === 1;
     if (!grouped && !banded && simpleHead) {
       table.classList.add("fg-sortable");

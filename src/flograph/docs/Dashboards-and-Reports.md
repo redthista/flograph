@@ -371,8 +371,12 @@ thing. `![[Revenue|live]]` is the Plotly chart itself — hover for values,
 zoom, pan, click the legend to hide a series. `![[Sales|live]]` is a browser
 table:
 
-* it carries every row (up to 5,000) and scrolls in a box `rows=` tall,
-  rather than stopping at "showing 30 of …" the way paper has to;
+* it carries every row (up to 5,000) and scrolls in a box `rows=` tall
+  (`rows=12` for a short box), rather than stopping at "showing 30 of …"
+  the way paper has to. `rows=all` drops the box: the whole table runs
+  down the page — and on paper, prints every row rather than the first 30;
+* the grand total stays in sight while the box scrolls — pinned under the
+  headings, or to the bottom of the box, wherever the table puts it;
 * click a column heading to sort by it, and again to reverse;
 * a **grouped** table folds: click a group's row to close or open it, or
   use **Expand all** / **Collapse all** above the table. Groups start the
