@@ -341,6 +341,19 @@ in, at the size the card is set to. The design comes with it: layout, CSS,
 colours, web fonts. Resize the card to change how the HTML lays out;
 `width=` places the result on the page.
 
+### Colour as you type
+
+A report page's Markdown is coloured by what each part does: headings, an
+embed's name (bold) and its options, `:::` blocks and their `==` tabs, code
+spans and fences (a ```columns block is layout, so what is in it is
+coloured as Markdown), links — a `page:` link in its own colour — lists,
+quotes and front matter. An embed with a typo stands out because it isn't
+coloured like one. The CSS tab is coloured as code: selectors (a `.class`
+and a `:hover` picked out), property names and custom properties, numbers
+with their units, `!important`, comments, strings, `@` rules, and every
+`#hex` colour shown on a swatch of itself. The spelling check still runs
+over the Markdown. Both follow the app's light or dark theme.
+
 ### Problems as you type
 
 A report page's Markdown and CSS are checked as you write. A wavy line marks

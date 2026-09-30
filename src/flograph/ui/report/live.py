@@ -59,6 +59,7 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
                             _chart_box(m.group(0), i, c, k),
                             html, count=1)
         drawn += hit
+    shares = dict(getattr(rendered, "table_widths", None) or ())
     for marker, build, search, rows in tables:
         span = _enclosing_table(html, marker)
         if span is None:
@@ -68,7 +69,8 @@ def make_live(html: str, rendered, plotly_src: "str | None" = None) -> str:
         except Exception:
             continue            # stays Qt's table — still the report
         start, end = span
-        html = html[:start] + _table_box(table, search, rows) + html[end:]
+        box = _table_box(table, search, rows, shares.get(marker, ""))
+        html = html[:start] + box + html[end:]
     head = f"<style>{LIVE_CSS}</style>"
     script = _plotly_script(plotly_src) if drawn else ""
     if drawn:
@@ -120,15 +122,52 @@ def _chart_box(img: str, index: int, chart: dict, shape: str = "") -> str:
             f"{data}</script>")
 
 
-def _table_box(table: str, search: bool, rows: int) -> str:
+def _table_box(table: str, search: bool, rows: int, share: str = "") -> str:
     """A live table in its box: `rows` tall and scrolling, or — rows 0,
-    `rows=all` — its whole length, no scroll box at all."""
+    `rows=all` — its whole length, no scroll box at all. `share` ("90%",
+    from `width=90%`) makes the box that share of the page, and the table
+    fill it; without one the box is as wide as the table."""
     flag = ' data-fg-search="1"' if search else ""
+    sized = ""
+    if share:
+        flag += " data-fg-share"
+        sized = f"width:{_css_share(share)};"
     if rows <= 0:
-        return (f'<div class="fg-table fg-whole"{flag}>'
+        style = f' style="{sized}"' if sized else ""
+        return (f'<div class="fg-table fg-whole"{flag}{style}>'
                 f'<div class="fg-scroll">{table}</div></div>')
-    return (f'<div class="fg-table"{flag} style="--fg-rows:{int(rows)}">'
+    return (f'<div class="fg-table"{flag} style="{sized}--fg-rows:{int(rows)}">'
             f'<div class="fg-scroll">{table}</div></div>')
+
+
+def _css_share(share: str) -> str:
+    """`90%` as a CSS width — a number and a %, nothing else gets in."""
+    try:
+        return f"{min(100.0, max(1.0, float(share.rstrip('%')))):g}%"
+    except ValueError:
+        return "100%"
+
+
+_TABLE_OPEN_RE = re.compile(r"<table\b[^>]*>", re.IGNORECASE)
+
+
+def size_tables(html: str, rendered) -> str:
+    """Every plain (not live) table given `width=N%`, that share of the
+    web page: Qt wrote it at a fixed width in points — the paper's — which a
+    browser reads as pixels, so on a wide window `width=100%` stopped at
+    the table's own columns. (A live table was sized in its box.)"""
+    for marker, share in getattr(rendered, "table_widths", None) or ():
+        span = _enclosing_table(html, marker)
+        if span is None:
+            continue                    # live: replaced, and sized there
+        start, _end = span
+        tag = _TABLE_OPEN_RE.match(html, start)
+        if tag is None:
+            continue
+        opening = re.sub(r'\swidth="[^"]*"', "", tag.group(0))
+        opening = opening[:-1] + f' width="{_css_share(share)}">'
+        html = html[:start] + opening + html[tag.end():]
+    return html
 
 
 def _enclosing_table(html: str, marker: str) -> "tuple | None":
@@ -203,6 +242,8 @@ table[style*="border-style:none"] .fg-chart { width: 100% !important; }
 /* as wide as the table, so its bar (search, Expand all) sits over it and
    not at the far side of the page; a theme's full-width card overrides */
 .fg-table { margin: 0.6em 0; width: fit-content; max-width: 100%; }
+/* `width=90%`: the box is that share of the page, and the table fills it */
+.fg-table[data-fg-share] .flograph-table { width: 100%; }
 /* Qt pads a report's cells from its own stylesheet; a browser's default
    is a pixel, which ran "$9,937$10,519" together. Every live table gets
    the same room; a theme sets its own. */

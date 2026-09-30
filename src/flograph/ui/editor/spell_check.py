@@ -143,7 +143,13 @@ class SpellHighlighter(QSyntaxHighlighter):
         if was_fenced or fenced or not spell_check_enabled():
             return
         for start, end, _word in self.checker.unknown(text):
-            self.setFormat(start, end - start, self._format)
+            # laid over whatever colour a subclass gave the word (a report
+            # page's Markdown colouring), not in place of it
+            for at in range(start, end):
+                merged = QTextCharFormat(self.format(at))
+                merged.setUnderlineStyle(self._format.underlineStyle())
+                merged.setUnderlineColor(self._format.underlineColor())
+                self.setFormat(at, 1, merged)
 
 
 class SpellingMenu(QObject):

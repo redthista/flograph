@@ -61,6 +61,11 @@ produced, name it:</p>
     <td>web page: a live table with a search box</td></tr>
 <tr><td><code>![[Chart|figure|width=60%]]</code></td>
     <td>a port <i>and</i> a width</td></tr>
+<tr><td><code>![[Sales|width=100%]]</code></td>
+    <td>a table across the page &mdash; on the web page, that share of the
+        window</td></tr>
+<tr><td><code>![[Sales|width=auto]]</code></td>
+    <td>a table only as wide as its columns</td></tr>
 </table>
 <p><b>Width is the answer to "the chart went onto the next page".</b> A
 chart is placed at its full size, so one that will not fit in what is left
@@ -127,6 +132,15 @@ renders as a stack, which is how one embed becomes one chart per region.</p>
 charts, tables and all — rather than reproducing its source text.</p>
 <p>An embed that resolves to nothing says so <i>on the page</i> and in the
 problems row under the editor, rather than leaving a silent gap.</p>
+
+<h3>Colour as you type</h3>
+<p>The Markdown is coloured by what each part does &mdash; headings, an
+embed's name and its options, <code>:::</code> blocks and <code>==</code>
+tabs, code, links (a page link in its own colour), front matter &mdash; so
+an embed with a typo in it stands out by not looking like one. The CSS is
+coloured as code: selectors, property names, values and units, comments,
+strings, and every <code>#colour</code> on a swatch of itself. The spelling
+check still runs over the Markdown's words.</p>
 
 <h3>Problems as you type</h3>
 <p>The Markdown and the CSS are checked as you write, and a wavy line marks

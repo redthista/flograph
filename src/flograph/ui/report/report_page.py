@@ -58,6 +58,12 @@ reads the way you want.
 LINT_DELAY_MS = 300
 
 
+def _is_dark(editor) -> bool:
+    """Whether an editor's page is dark — which of syntax.py's palettes
+    reads on it."""
+    return editor.palette().base().color().lightness() < 128
+
+
 def _quoted(message: str) -> str:
     """The first “name” a problem mentions — the embed it is about."""
     import re
@@ -111,12 +117,20 @@ class ReportPage(QWidget):
         # exported HTML are built from the text, never from this widget, so
         # "never on the final output" needs no rule of its own — and in
         # view mode the box is hidden, which is the other half of the ask.
-        from ..editor.spell_check import SpellHighlighter, SpellingMenu
-        self._speller = SpellHighlighter(self.editor.document())
+        # The Markdown in colour (syntax.py) — a heading, an embed, a
+        # ::: block reads as what it is — with the spell check on top: the
+        # highlighter is the spell highlighter, since a document takes one.
+        from ..editor.spell_check import SpellingMenu
+        from .syntax import MarkdownHighlighter
+        self._speller = MarkdownHighlighter(self.editor.document(),
+                                            dark=_is_dark(self.editor))
         SpellingMenu(self.editor, self._speller, self._learn_word)
         self.css_editor = QPlainTextEdit()
         self.css_editor.setObjectName("report_css_source")
         self.css_editor.setFont(font)
+        from .syntax import CssHighlighter
+        self._css_colours = CssHighlighter(self.css_editor.document(),
+                                           dark=_is_dark(self.css_editor))
         self.css_editor.setPlaceholderText(
             "CSS used by Web preview and saved HTML, for example:\n\n"
             "body { font-family: sans-serif; }\n"
@@ -879,6 +893,14 @@ class ReportPage(QWidget):
             self._timer.start()
         if self._animator is not None:
             self._animator.set_playing(True)
+
+    def changeEvent(self, event) -> None:
+        """The app went light or dark: the editors' colours follow."""
+        super().changeEvent(event)
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.PaletteChange and hasattr(self, "_css_colours"):
+            self._speller.set_dark(_is_dark(self.editor))
+            self._css_colours.set_dark(_is_dark(self.css_editor))
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)

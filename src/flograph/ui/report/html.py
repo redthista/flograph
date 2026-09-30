@@ -296,8 +296,9 @@ def report_html(rendered, title: str = "", setup=None,
     after the paper's styles and before the page's own CSS, so a theme can
     restyle all of it.
     """
-    from .live import make_live
+    from .live import make_live, size_tables
     html = make_live(rendered.document.toHtml(), rendered, plotly_src)
+    html = size_tables(html, rendered)
     for index, image in enumerate(rendered.images):
         payload = rendered.animations.get(index)
         mime = _animation_mime(payload) if payload else None

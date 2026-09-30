@@ -187,6 +187,9 @@ class RenderedReport:
     #: The page's front matter (core.web_layout.split_front_matter): taken
     #: off the text, whatever the target, and laid over the web settings.
     front_matter: dict = field(default_factory=dict)
+    #: Only when rendered `live`: (marker, "90%") per table given a
+    #: percentage width — see html.size_tables.
+    table_widths: list = field(default_factory=list)
 
 
 #: Space between charts in a multi-column stack, in points.
@@ -836,6 +839,12 @@ class _Resolver:
         self._wants_live = False
         self._search = False
         self._rows_all = False
+        #: the embed's `width=` as written: a table reads `auto` and a
+        #: percentage from it (see _table)
+        self._width_raw = ""
+        #: (marker, "90%") for each table given a percentage width: the web
+        #: page sizes it to that share of the page (html.size_tables)
+        self.table_widths: list = []
         self.live_charts: dict = {}
         self.live_tables: list = []
         #: every `:::` block, when rendering for the web — see stage_body
@@ -944,7 +953,10 @@ class _Resolver:
         was = (self._image_width, self._aspect, self._scale_mult,
                self._max_rows, self._table_scale, self._table_height,
                self._table_fit, self._table_ratio, self._radius,
-               self._wants_live, self._search, self._rows_all)
+               self._wants_live, self._search, self._rows_all,
+               self._width_raw)
+        self._width_raw = str((embed.options or {}).get("width", "")
+                              ).strip().lower()
         self._rows_all = (str((embed.options or {}).get("rows", "")).strip()
                           .lower() in ALL_ROWS)
         self._search = bool((embed.options or {}).get("search"))
@@ -969,7 +981,8 @@ class _Resolver:
             (self._image_width, self._aspect, self._scale_mult,
              self._max_rows, self._table_scale, self._table_height,
              self._table_fit, self._table_ratio, self._radius,
-             self._wants_live, self._search, self._rows_all) = was
+             self._wants_live, self._search, self._rows_all,
+             self._width_raw) = was
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -993,7 +1006,9 @@ class _Resolver:
         only reading that gives the same result for two different charts.
         """
         raw = (embed.options or {}).get("width", "").strip()
-        if not raw:
+        if not raw or raw.lower() == "auto":
+            # auto: a chart at the width it would have had; a table as
+            # wide as its columns (_table)
             return self._image_width
         try:
             if raw.endswith("%"):
@@ -1002,7 +1017,8 @@ class _Resolver:
             return max(40, int(float(raw.removesuffix("pt").strip())))
         except ValueError:
             self.problems.append(
-                f"“{embed.ref}”: “{raw}” is not a width — try 50% or 280")
+                f"“{embed.ref}”: “{raw}” is not a width — try 50%, 280 "
+                "or auto")
             return self._image_width
 
     def _aspect_for(self, embed) -> "float | None":
@@ -1489,17 +1505,27 @@ class _Resolver:
         rules, hidden, shown = self._table_style(ref)
         measured = self._table_height is not None or self._table_fit
         live = self._live and self._wants_live
+        # `width=90%` is 90% of the text column on paper; on the web page,
+        # which is as wide as the window, it is 90% of the page — so the
+        # table is found again there by its marker (html.size_tables)
+        share = (self._width_raw if self._live
+                 and self._width_raw.endswith("%") else "")
         # numbered by table, not by measured table: a live table needs a
         # marker too, and two tables must never share one
         marker = (table_marker(len(self.table_html))
-                  if measured or live else "")
+                  if measured or live or share else "")
+        if share:
+            self.table_widths.append((marker, share))
         font_pt = (REPORT_FONT_PT * self._table_scale
                    if self._table_scale != 1.0 else None)
 
         grand, baked = self._table_totals(ref)
         # Everything the build reads is taken now: it runs later, when a
-        # column's narrower width is no longer the one in force.
+        # column's narrower width is no longer the one in force. `auto` is
+        # no width: the table is as wide as its columns.
         width, rows = self._image_width, self._max_rows
+        if self._width_raw == "auto":
+            width = None
 
         def build(rows: int, size: "float | None") -> str:
             return frame_to_html(value, rules, hidden, shown, max_rows=rows,
@@ -1852,7 +1878,8 @@ def finish_body(staged_report: StagedReport) -> RenderedReport:
         live_charts=dict(resolver.live_charts),
         live_tables=list(resolver.live_tables),
         blocks=list(resolver.blocks),
-        front_matter=dict(resolver.front_matter))
+        front_matter=dict(resolver.front_matter),
+        table_widths=list(resolver.table_widths))
 
 
 def show_in(view, document) -> None:

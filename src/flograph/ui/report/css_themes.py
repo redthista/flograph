@@ -28,6 +28,56 @@ own `group =>` colours instead.
 """
 from __future__ import annotations
 
+def _plain_tables(head_bg: str, head_ink: str, line: str, group_bg: str,
+                  group_ink: str, track: str, table_bg: str = "transparent",
+                  head_rule: str = "", vertical: bool = True,
+                  dark: bool = False, extra: str = "") -> str:
+    """A theme's look for a *plain* table: one Qt wrote — an embed without
+    `|live`, or a Markdown table — which arrives dressed for paper, its
+    colours inline: a grey header, #999 grid lines on every cell, grey
+    total and group rows (#cdced1) and a pale track behind each data bar
+    (#eceef1). The table itself is `cellspacing="2"`; a data bar's own
+    small tables are 0, so they are left alone.
+
+    `dark`: a cell a rule coloured keeps its colour, but its words, unless
+    the rule gave them a colour, are the page's — white on a pastel. They
+    are set dark instead.
+    """
+    t = 'table[cellspacing="2"]'
+    cells = f"{t} > thead > tr > td, {t} > tbody > tr > td"
+    side = "" if vertical else (
+        f"\n  border-left: 0 !important; border-right: 0 !important;")
+    rule = head_rule or line
+    css = f"""
+/* plain tables: an embed without |live, or a Markdown table (Qt wrote it
+   for paper, colours inline) */
+{t} {{ border-collapse: collapse !important; background: {table_bg};
+  margin: 8px 0 !important; }}
+{cells} {{
+  border-color: {line} !important; padding: 4px 10px !important;{side}
+}}
+{t} > thead > tr > td {{
+  background-color: {head_bg} !important;
+  border-bottom: 1px solid {rule} !important;
+}}
+{t} > thead > tr > td p, {t} > thead > tr > td span {{
+  background-color: transparent !important; color: {head_ink} !important;
+}}
+{t} > tbody > tr > td[bgcolor="#cdced1"] {{ background-color: {group_bg} !important; }}
+{t} > tbody > tr > td[bgcolor="#cdced1"] p,
+{t} > tbody > tr > td[bgcolor="#cdced1"] span {{
+  background-color: transparent !important; color: {group_ink} !important;
+}}
+table[bgcolor="#eceef1"] {{ background-color: {track} !important; }}
+"""
+    if dark:
+        css += f"""{t} > tbody > tr > td[bgcolor]:not([bgcolor="#cdced1"]) span:not([style*=" color:"]) {{
+  color: #14161c !important;
+}}
+"""
+    return css + extra
+
+
 COMPACT = """/* Compact — dense and exact. Small type, hairline rules, numbers that
    line up, headings that label rather than shout. Made for live pages:
    the charts take the theme too (see the --fg-chart- lines). */
@@ -89,7 +139,7 @@ p[style*="margin-left:40px; margin-right:40px"] {
   border-left: 3px solid var(--accent); background: #f3f6fd;
   color: #26314a; max-width: none;
 }
-span[style*="font-family:'monospace'"] {
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
   font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace !important;
   font-size: 0.92em !important; background: var(--band);
   border: 1px solid var(--line); border-radius: 3px; padding: 0 3px;
@@ -242,7 +292,7 @@ p[style*="margin-left:40px; margin-right:40px"]::before {
   width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
   color: #fff; font: 700 13px/22px Georgia, serif; text-align: center;
 }
-span[style*="font-family:'monospace'"] {
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
   font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace !important;
   font-size: 0.9em !important; background: var(--accent-soft);
   color: var(--accent); border-radius: 4px; padding: 1px 5px;
@@ -409,7 +459,7 @@ p[style*="margin-left:40px; margin-right:40px"] {
   border: 1px solid rgba(34, 211, 238, 0.25); border-left: 3px solid var(--accent);
   border-radius: 8px;
 }
-span[style*="font-family:'monospace'"] {
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
   font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace !important;
   font-size: 0.9em !important; color: var(--accent);
   background: rgba(34, 211, 238, 0.08); border-radius: 4px; padding: 0 4px;
@@ -597,7 +647,7 @@ p[style*="margin-left:40px; margin-right:40px"] {
   border-left: 3px solid var(--accent);
   font-family: var(--serif); font-size: 16px; line-height: 1.45; color: var(--ink);
 }
-span[style*="font-family:'monospace'"] {
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
   font-family: "JetBrains Mono", "IBM Plex Mono", Consolas, monospace !important;
   font-size: 0.88em !important; background: var(--paper-2);
   border-radius: 2px; padding: 0 3px;
@@ -794,7 +844,7 @@ p[style*="margin-left:40px; margin-right:40px"] {
   background: rgba(63, 208, 123, 0.06); color: #dff7e9;
 }
 p[style*="margin-left:40px; margin-right:40px"]::before { content: "\\00BB  "; color: var(--green); }
-span[style*="font-family:'monospace'"] {
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
   color: var(--amber); background: rgba(255, 176, 0, 0.08); padding: 0 3px;
 }
 ul { margin: 6px 0 !important; padding-left: 16px; }
@@ -1020,7 +1070,7 @@ p[style*="margin-left:40px; margin-right:40px"] {
     var(--grad) border-box;
   box-shadow: 0 18px 50px rgba(124, 108, 246, 0.18);
 }
-span[style*="font-family:'monospace'"] {
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
   font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace !important;
   font-size: 0.88em !important; color: #d6ceff;
   background: rgba(157, 140, 255, 0.14); border-radius: 5px; padding: 1px 5px;
@@ -1155,6 +1205,14 @@ details.fg-details[open] > summary { border-bottom-color: var(--line); }
 }
 """
 
+
+# every live theme dresses the plain tables too
+COMPACT += _plain_tables("transparent", "#687085", "#e4e7ed", "#f5f7fa", "#1b2130", "#eef1f6", head_rule="#c9ced8", vertical=False)
+DASHBOARD += _plain_tables("#ffffff", "#64708a", "#e6e9f0", "#f6f7fb", "#172033", "#eef0f5", table_bg="#ffffff", head_rule="#e6e9f0", vertical=False)
+MIDNIGHT += _plain_tables("#111830", "#8491b3", "#222c4d", "#172042", "#ffffff", "rgba(255, 255, 255, 0.07)", table_bg="#111830", head_rule="#22d3ee", dark=True)
+LEDGER += _plain_tables("transparent", "#6f6857", "#dcd4c2", "#f2ede1", "#1d1b16", "#f2ede1", head_rule="#1d1b16", vertical=False, extra='table[cellspacing="2"] { border-top: 2px solid #1d1b16 !important; border-bottom: 2px solid #1d1b16 !important; }\n')
+TERMINAL += _plain_tables("#121821", "#ffb000", "#1c232e", "#151c27", "#ffffff", "rgba(255, 255, 255, 0.07)", table_bg="#0d1117", head_rule="#ffb000", dark=True)
+AURORA += _plain_tables("#161b38", "#a4acd3", "rgba(255, 255, 255, 0.08)", "#1a1f44", "#ffffff", "rgba(255, 255, 255, 0.08)", table_bg="rgba(255, 255, 255, 0.04)", head_rule="rgba(157, 140, 255, 0.45)", vertical=False, dark=True)
 
 LIVE_THEMES = {
     "Compact": COMPACT,

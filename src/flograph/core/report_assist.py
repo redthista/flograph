@@ -63,7 +63,8 @@ class Completion:
 #: test holds this to core.report's closed set, so a new option cannot
 #: arrive without its line here.
 OPTION_HINTS = {
-    "width": "placement width — 50% of the column, or 280 points",
+    "width": "placement width — 50%, 280 points, or auto (a table as wide "
+             "as its columns)",
     "ratio": "the shape a chart is drawn at — 16:9, 4x3, 1.5",
     "height": "an exact height in points; a table shows the rows that fit",
     "scale": "a chart's detail (2 = finer); a table's text size",
@@ -78,7 +79,7 @@ FLAG_HINTS = {
 #: A few values worth offering once `key=` is typed. Not a closed list —
 #: anything the option accepts can still be typed.
 OPTION_VALUES = {
-    "width": ("50%", "60%", "75%", "100%", "280"),
+    "width": ("50%", "60%", "75%", "100%", "280", "auto"),
     "ratio": ("16:9", "4:3", "3:2", "1:1", "21:9"),
     "height": ("180", "240", "320"),
     "scale": ("2", "1.5", "0.8"),
