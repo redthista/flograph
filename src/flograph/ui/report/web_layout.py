@@ -15,15 +15,19 @@ one under another under its name, sections as their browser's own folding
   branch, follows the reading place, and hides behind a button. Whether a
   reader keeps it open is theirs (remembered in their browser); where it
   starts is the page's.
-- **Top bar**: `links` jumps along the top-level sections of one long page;
-  `pages` shows one of them at a time, like the pages of a site, with what
-  comes before the first as a header on every one. Top level is the
-  highest heading level used at least twice — a report with one `#` title
-  and a `##` per region splits by region.
+- **Top bar**: the top-level sections, marking the one being read. With
+  a sidebar too and `split` on, the bar takes the top level and the
+  sidebar lists only the headings inside the current section (one list
+  per section, swapped as the reader moves).
+- **Paged** (with either of those to go by): one top-level section at a
+  time, like the pages of a site, with what comes before the first as a
+  header on every one. Top level is the highest heading level used at
+  least twice — a report with one `#` title and a `##` per region splits
+  by region.
 - **The address**: `#page=costs&tab.region=north&open=notes&at=q3` — the
   page, each tab not on its first part, each section not in its starting
   state, and the heading being read — kept up to date as the reader goes
-  (replaceState; a new page of a `pages` site is a Back step). A plain
+  (replaceState; a new page of a paged site is a Back step). A plain
   `#heading` still works, and opens whatever hides it. Off with the page's
   **Keep the view in the address** setting.
 - **Printing** shows everything: every tab, every page, sections open.
@@ -63,7 +67,9 @@ def apply_layout(html: str, rendered, settings: "WebSettings | None" = None,
         html = _with_blocks(html, blocks, used)
     head = f"<style>{LAYOUT_CSS}{_width_css(settings.width)}</style>"
     config = {"sidebar": settings.sidebar, "depth": settings.depth,
-              "navbar": settings.navbar, "share": settings.share_state,
+              "topbar": settings.topbar, "split": settings.split,
+              "paged": settings.paged and settings.has_nav(),
+              "share": settings.share_state,
               "title": title}
     # `</` can't close the script from inside a JSON string once escaped
     payload = json.dumps(config).replace("</", "<\\/")
@@ -271,6 +277,8 @@ html.fg-side-on .fg-side { transform: none; }
 }
 .fg-side nav { overflow-y: auto; padding: 0 8px 16px; flex: 1; }
 .fg-side ul { list-style: none; margin: 0; padding: 0; }
+.fg-side ul[hidden] { display: none; }
+.fg-side-empty { color: var(--fg-nav-muted); padding: 4px 8px; margin: 0; }
 .fg-side ul ul { padding-left: 12px; margin-left: 9px; border-left: 1px solid var(--fg-nav-line); }
 .fg-side li.fg-fold > ul { display: none; }
 .fg-side .fg-row { display: flex; align-items: center; }
@@ -391,7 +399,7 @@ LAYOUT_JS = r"""
     printed = []; applying = false;
   });
 
-  // ---------------------------------------- the top level: links or pages
+  // ------------------------------------------ the top level, and pages
   function isHeading(el) { return /^H[1-6]$/.test(el.tagName); }
   var bodyHeads = Array.prototype.filter.call(body.children, isHeading);
   var level = 0;
@@ -402,8 +410,11 @@ LAYOUT_JS = r"""
     if (!level && bodyHeads.length) { level = +bodyHeads[0].tagName[1]; }
   })();
   var tops = bodyHeads.filter(function (h) { return +h.tagName[1] === level && h.id; });
+  var hasTop = !!cfg.topbar, hasSide = cfg.sidebar !== "off";
+  // the bar takes the top level, the sidebar what is under it
+  var split = hasTop && hasSide && cfg.split !== false && tops.length > 0;
   var pages = [];
-  if (cfg.navbar === "pages" && tops.length) {
+  if (cfg.paged && (hasTop || hasSide) && tops.length) {
     // each top-level heading and what follows it, up to the next, is a page;
     // what comes before the first is a header on every one
     var current = null;
@@ -425,16 +436,25 @@ LAYOUT_JS = r"""
   function showPage(page) {
     if (!page) { return; }
     pages.forEach(function (p) { p.classList.toggle("fg-on", p === page); });
-    markTop(page.getAttribute("data-page"));
+    markSection(page.getAttribute("data-page"));
+  }
+  // the top-level section a heading is in: the last top-level heading at
+  // or before it, "" for anything above the first
+  function sectionOf(el) {
+    var id = "";
+    tops.forEach(function (h) {
+      if (h === el || (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) { id = h.id; }
+    });
+    return id;
   }
 
   var top = null, topLinks = {};
-  if (cfg.navbar === "links" || cfg.navbar === "pages") {
+  if (hasTop) {
     root.classList.add("fg-has-top");
     top = document.createElement("header");
     top.className = "fg-top";
     var html = "";
-    if (cfg.sidebar !== "off") {
+    if (hasSide) {
       html += '<button type="button" class="fg-icon-btn fg-menu" title="Contents" aria-label="Contents">☰</button>';
     }
     if (cfg.title) {
@@ -460,28 +480,39 @@ LAYOUT_JS = r"""
     });
     body.insertBefore(top, body.firstChild);
   }
-  function markTop(id) {
-    Object.keys(topLinks).forEach(function (k) { topLinks[k].classList.toggle("fg-on", k === id); });
-  }
-  if (pages.length) { showPage(pages[0]); }
 
   // ------------------------------------------------------------ sidebar
-  var sideLinks = {};
-  var depth = Math.max(1, Math.min(6, cfg.depth || 3));
-  if (cfg.sidebar !== "off") {
+  var sideLinks = {}, sideLists = {}, sideTitle = null, sideEmpty = null;
+  var sectionId = null;
+  if (hasSide) {
     var heads = all("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]").filter(function (h) {
-      return !h.closest(".fg-top, .fg-side");
+      return !h.closest(".fg-top, .fg-side") && (!split || +h.tagName[1] > level);
     });
     var base = 7;
     heads.forEach(function (h) { base = Math.min(base, +h.tagName[1]); });
+    var depth = cfg.depth > 0 ? Math.min(6, cfg.depth) : 6;   // 0: every level
     heads = heads.filter(function (h) { return +h.tagName[1] < base + depth; });
     var side = document.createElement("aside");
     side.className = "fg-side";
     side.setAttribute("aria-label", "Contents");
-    side.innerHTML = '<div class="fg-side-head"><span>Contents</span>' +
-      '<button type="button" class="fg-icon-btn fg-side-close" title="Hide contents" aria-label="Hide contents">«</button></div><nav><ul></ul></nav>';
-    var stack = [{ level: 0, ul: side.querySelector("ul"), li: null }];
+    side.innerHTML = '<div class="fg-side-head"><span class="fg-side-title">Contents</span>' +
+      '<button type="button" class="fg-icon-btn fg-side-close" title="Hide contents" aria-label="Hide contents">«</button></div>' +
+      '<nav><p class="fg-side-empty" hidden>Nothing below this section’s heading.</p></nav>';
+    sideTitle = side.querySelector(".fg-side-title");
+    sideEmpty = side.querySelector(".fg-side-empty");
+    var nav = side.querySelector("nav");
+    // one list for the whole page, or — split — one per top-level section
+    var stacks = {};
     heads.forEach(function (h) {
+      var key = split ? sectionOf(h) : "";
+      if (!stacks[key]) {
+        var ul = document.createElement("ul");
+        ul.setAttribute("data-section", key);
+        nav.appendChild(ul);
+        sideLists[key] = ul;
+        stacks[key] = [{ level: 0, ul: ul, li: null }];
+      }
+      var stack = stacks[key];
       var n = +h.tagName[1];
       while (stack.length > 1 && stack[stack.length - 1].level >= n) { stack.pop(); }
       var parent = stack[stack.length - 1];
@@ -540,6 +571,20 @@ LAYOUT_JS = r"""
     });
   }
 
+  // the top-level section being read: lit in the bar and, split, the one
+  // whose headings the sidebar lists
+  function markSection(id) {
+    id = id || "";
+    Object.keys(topLinks).forEach(function (k) { topLinks[k].classList.toggle("fg-on", k === id); });
+    if (!split || id === sectionId) { sectionId = id; return; }
+    sectionId = id;
+    Object.keys(sideLists).forEach(function (k) { sideLists[k].hidden = k !== id; });
+    var head = id && document.getElementById(id);
+    if (sideTitle) { sideTitle.textContent = head ? head.textContent.trim() : "Contents"; }
+    if (sideEmpty) { sideEmpty.hidden = !!sideLists[id] || !id; }
+  }
+  if (pages.length) { showPage(pages[0]); } else { markSection(""); }
+
   // ----------------------------------------------- reveal and go to it
   function reveal(el) {
     var node = el;
@@ -586,12 +631,8 @@ LAYOUT_JS = r"""
       var nav = a.closest("nav"), r = a.getBoundingClientRect(), n = nav.getBoundingClientRect();
       if (r.top < n.top || r.bottom > n.bottom) { a.scrollIntoView({ block: "nearest" }); }
     }
-    if (!pages.length && id) {
-      var el = document.getElementById(id), topId = null;
-      tops.forEach(function (h) {
-        if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING || h === el) { topId = h.id; }
-      });
-      markTop(topId);
+    if (!pages.length) {
+      markSection(id ? sectionOf(document.getElementById(id)) : "");
     }
   }
   var spyHeads = all("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]");

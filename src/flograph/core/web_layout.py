@@ -180,7 +180,6 @@ def slug(text: str, used: set) -> str:
 # ---------------------------------------------------------------- settings
 
 SIDEBAR = ("off", "open", "closed")
-NAVBAR = ("off", "links", "pages")
 #: Content widths offered, in CSS pixels; 0 is the whole window.
 WIDTHS = (0, 1400, 1100, 820)
 
@@ -190,17 +189,29 @@ class WebSettings:
     """How a report page's web version is laid out. Defaults are the page as
     it was before any of this existed: no sidebar, no bar, full width.
 
-    `sidebar` lists the page's headings down the left, down to `depth`
-    (1–6), and starts `open` or `closed`. `navbar` is a bar across the top:
-    `links` jumps to each top-level section of one long page; `pages` shows
-    one section at a time, like the pages of a site. `width` holds the text
-    to a column that many pixels wide, 0 for the window. `share_state` keeps
-    the open tab, page, folded sections and place in the page's address,
-    so a copied link opens where it was copied from.
+    Where the way round is, and how the page is cut up, are separate
+    choices, so any mix of them works:
+
+    - `sidebar` lists the page's headings down the left and starts `open`
+      or `closed` (behind a button); `depth` is how many levels it lists,
+      0 for every one there is.
+    - `topbar` is a bar across the top naming the page's top-level
+      sections. With both, `split` has the bar take the top level and the
+      sidebar only what is under the section being read — the shape of a
+      documentation site.
+    - `paged` shows one top-level section at a time, like the pages of a
+      site, from whichever of the two is there.
+
+    `width` holds the text to a column that many pixels wide, 0 for the
+    window. `share_state` keeps the open page, tab and sections and the
+    place in the page's address, so a copied link opens where it was
+    copied from.
     """
     sidebar: str = "off"
-    depth: int = 3
-    navbar: str = "off"
+    depth: int = 0
+    topbar: bool = False
+    split: bool = True
+    paged: bool = False
     width: int = 0
     share_state: bool = True
 
@@ -217,18 +228,17 @@ class WebSettings:
         settings = cls()
         if data.get("sidebar") in SIDEBAR:
             settings.sidebar = data["sidebar"]
-        if data.get("navbar") in NAVBAR:
-            settings.navbar = data["navbar"]
+        for name in ("topbar", "split", "paged", "share_state"):
+            if name in data:
+                setattr(settings, name, bool(data[name]))
         try:
-            settings.depth = min(6, max(1, int(data.get("depth", 3))))
+            settings.depth = min(6, max(0, int(data.get("depth", 0))))
         except (TypeError, ValueError):
             pass
         try:
             settings.width = max(0, int(data.get("width", 0)))
         except (TypeError, ValueError):
             pass
-        if "share_state" in data:
-            settings.share_state = bool(data["share_state"])
         return settings
 
     def copy(self) -> "WebSettings":
@@ -237,6 +247,7 @@ class WebSettings:
     def is_default(self) -> bool:
         return not self.to_dict()
 
-    def wants_script(self) -> bool:
-        """Whether the page needs the layout script with no block in it."""
-        return self.sidebar != "off" or self.navbar != "off"
+    def has_nav(self) -> bool:
+        """A sidebar or a top bar — something to go from page to page by,
+        which `paged` needs: without one it is ignored."""
+        return self.sidebar != "off" or self.topbar

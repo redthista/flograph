@@ -219,14 +219,19 @@ and Page Setup is still at the bottom of that menu for then.</p>
 <tr><td><b>Sidebar of headings</b></td>
     <td>the page's headings down the left, folding by branch and following
         where the reader is; shown, or hidden behind a &#9776; button.
-        <b>Heading levels listed</b> says how deep it goes.</td></tr>
-<tr><td><b>Top bar</b></td>
-    <td><i>Links to each section</i> jumps along one long page;
-        <i>Each section its own page</i> shows one at a time, like the
-        pages of a site, with anything above the first section as a header
-        on every one. A section is the biggest heading used more than
-        once &mdash; one <code>#</code> title over <code>##</code> regions
-        makes a page per region.</td></tr>
+        <b>Heading levels listed</b> is <i>Auto</i> (every level) or a
+        depth.</td></tr>
+<tr><td><b>Top bar of the top-level sections</b></td>
+    <td>the page's title and its sections across the top. With the
+        sidebar too, <i>Only what is under the top bar's section</i> (on)
+        has the bar take the sections and the sidebar the headings inside
+        the one being read.</td></tr>
+<tr><td><b>Each section its own page</b></td>
+    <td>one section at a time, like the pages of a site, gone between from
+        the top bar or the sidebar; anything above the first section is a
+        header on every one. A section is the biggest heading used more
+        than once &mdash; one <code>#</code> title over <code>##</code>
+        regions makes a page per region.</td></tr>
 <tr><td><b>Text width</b></td>
     <td>the whole window, or a column held to a width for reading.</td></tr>
 <tr><td><b>Keep the view in the page address</b></td>

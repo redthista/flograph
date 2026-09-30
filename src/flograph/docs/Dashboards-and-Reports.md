@@ -481,13 +481,19 @@ report, and is saved with it (each choice is one undo step):
   branch and following the heading you are reading. *Shown*, or *Hidden
   behind a button* (☰) until the reader wants it; whoever reads it can
   open and close it, and their browser remembers. **Heading levels listed**
-  says how deep it goes. On a narrow window it slides over the page.
-* **Top bar** — the page's title and its sections across the top.
-  *Links to each section* jumps along one long page and marks where you
-  are; *Each section its own page* shows one section at a time, like the
-  pages of a website, with anything above the first section as a header on
-  every page. A section is the biggest heading used more than once, so one
-  `#` title over a `##` per region makes a page per region.
+  is *Auto* — every level there is — or a depth from 1 to 6. On a narrow
+  window it slides over the page.
+* **Top bar of the top-level sections** — the page's title and its
+  sections across the top, marking the one you are in. With the sidebar
+  as well, **Only what is under the top bar's section** (in the Sidebar
+  menu, on by default) splits the work the way a documentation site does:
+  the bar lists the sections, and the sidebar, titled with the section's
+  name, lists only the headings inside the one being read.
+* **Each section its own page** — one section at a time, like the pages of
+  a website, with anything above the first section as a header on every
+  page. It works from the top bar, the sidebar or both, so it needs one of
+  them. A section is the biggest heading used more than once, so one `#`
+  title over a `##` per region makes a page per region.
 * **Text width** — the whole window, or a column held to 1400, 1100 or 820
   pixels.
 * **Keep the view in the page address** (on) — the page, each tab not on its

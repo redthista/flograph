@@ -113,26 +113,36 @@ class TestTheSettings:
         assert WebSettings().is_default()
 
     def test_round_trip_and_bad_values(self):
-        web = WebSettings(sidebar="closed", depth=2, navbar="pages",
-                          width=1100, share_state=False)
+        web = WebSettings(sidebar="closed", depth=2, topbar=True,
+                          split=False, paged=True, width=1100,
+                          share_state=False)
         assert WebSettings.from_dict(web.to_dict()) == web
         odd = WebSettings.from_dict({"sidebar": "sideways", "depth": 99,
-                                     "width": "wide", "navbar": 3})
+                                     "width": "wide"})
         assert odd == WebSettings(depth=6)
+
+    def test_every_heading_level_unless_told(self):
+        assert WebSettings().depth == 0          # Auto
+        assert WebSettings.from_dict({"depth": -3}).depth == 0
+
+    def test_pages_need_something_to_go_between_them_by(self):
+        assert not WebSettings(paged=True).has_nav()
+        assert WebSettings(paged=True, sidebar="open").has_nav()
+        assert WebSettings(paged=True, topbar=True).has_nav()
 
     def test_saved_with_the_page(self, qapp):
         graph = Graph()
         graph.add_page(Page(id="p1", kind="report",
-                            web=WebSettings(sidebar="open", navbar="links")))
+                            web=WebSettings(sidebar="open", topbar=True)))
         graph.add_page(Page(id="p2", kind="report"))
         data = graph_to_dict(graph)
         pages = {p["id"]: p for p in data["graph"]["pages"]}
-        assert pages["p1"]["web"] == {"sidebar": "open", "navbar": "links"}
+        assert pages["p1"]["web"] == {"sidebar": "open", "topbar": True}
         assert "web" not in pages["p2"]      # a page nobody set up says nothing
         from flograph.core.registry import NodeRegistry
         back = graph_from_dict(data, NodeRegistry())
         assert back.pages["p1"].web == WebSettings(sidebar="open",
-                                                   navbar="links")
+                                                   topbar=True)
         assert back.pages["p2"].web == WebSettings()
 
     def test_changing_them_is_one_undo_step(self, qapp):
@@ -176,11 +186,18 @@ class TestTheWebPage:
     def test_settings_alone_switch_the_layout_on(self, qapp):
         rendered = render("# Plain\n\n## One\n\n## Two")
         html = report_html(rendered, "Plain",
-                           web=WebSettings(sidebar="open", navbar="pages"))
+                           web=WebSettings(sidebar="open", topbar=True,
+                                           paged=True))
         config = re.search(r'id="fg-layout-config">(.*?)</script>',
                            html).group(1)
-        assert '"navbar": "pages"' in config and '"title": "Plain"' in config
+        assert '"paged": true' in config and '"title": "Plain"' in config
+        assert '"topbar": true' in config and '"depth": 0' in config
         assert '<h2 id="one"' in html
+
+    def test_paged_with_no_way_round_is_not_paged(self, qapp):
+        html = report_html(render("# A\n\n## B\n\n## C"), "t",
+                           web=WebSettings(paged=True, width=820))
+        assert '"paged": false' in html
 
     def test_width_holds_the_text_to_a_column(self, qapp):
         html = report_html(render("# x"), "t", web=WebSettings(width=820))
@@ -188,7 +205,7 @@ class TestTheWebPage:
 
     def test_a_title_cannot_close_the_script(self, qapp):
         html = apply_layout("<html><head></head><body></body></html>",
-                            render("x"), WebSettings(navbar="links"),
+                            render("x"), WebSettings(topbar=True),
                             "</script><b>")
         assert "</script><b>" not in html
 
@@ -241,11 +258,11 @@ class TestTheToolbar:
         next(a for a in sidebar.actions() if a.text() == "Shown").trigger()
         assert graph.pages["p1"].web.sidebar == "open"
         menu = widget.web_menu()
-        top = next(a for a in menu.actions() if a.text() == "Top bar").menu()
-        pages = next(a for a in top.actions()
+        pages = next(a for a in menu.actions()
                      if a.text() == "Each section its own page")
+        assert pages.isEnabled()        # the sidebar is there to go by
         pages.trigger()
-        assert graph.pages["p1"].web.navbar == "pages"
+        assert graph.pages["p1"].web.paged
         stack.undo()
         assert graph.pages["p1"].web == WebSettings(sidebar="open")
         # the menu shows what the page has
@@ -254,3 +271,28 @@ class TestTheToolbar:
                        if a.text() == "Sidebar of headings").menu()
         assert next(a for a in sidebar.actions()
                     if a.text() == "Shown").isChecked()
+
+    def test_the_sidebar_split_waits_for_a_top_bar(self, page):
+        widget, graph, _stack = page
+
+        def split_action():
+            side = next(a for a in widget.web_menu().actions()
+                        if a.text() == "Sidebar of headings").menu()
+            return next(a for a in side.actions()
+                        if a.text().startswith("Only what is under"))
+
+        assert not split_action().isEnabled()
+        top = next(a for a in widget.web_menu().actions()
+                   if a.text() == "Top bar of the top-level sections")
+        top.trigger()
+        assert graph.pages["p1"].web.topbar
+        assert split_action().isEnabled() and split_action().isChecked()
+
+    def test_heading_levels_start_on_auto(self, page):
+        widget, _graph, _stack = page
+        side = next(a for a in widget.web_menu().actions()
+                    if a.text() == "Sidebar of headings").menu()
+        levels = next(a for a in side.actions()
+                      if a.text() == "Heading levels listed").menu()
+        checked = [a.text() for a in levels.actions() if a.isChecked()]
+        assert checked == ["Auto (every level)"]

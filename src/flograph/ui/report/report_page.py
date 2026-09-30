@@ -898,20 +898,39 @@ class ReportPage(QWidget):
                 action.triggered.connect(
                     lambda _=False, v=value: self._set_web(**{name: v}))
 
+        def toggle(parent, label, on, name, tip, enabled=True):
+            action = parent.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(on)
+            action.setEnabled(enabled)
+            action.setToolTip(tip)
+            action.triggered.connect(
+                lambda checked, n=name: self._set_web(**{n: bool(checked)}))
+            return action
+
         side = submenu(menu, "Sidebar of headings")
+        side.setToolTipsVisible(True)
         choose(side, [("Off", "off"), ("Shown", "open"),
                       ("Hidden behind a button", "closed")],
                web.sidebar, "sidebar")
         side.addSeparator()
         depth = submenu(side, "Heading levels listed")
         hashes = "######"
-        choose(depth, [(f"{n} (down to {hashes[:n]})", n)
-                       for n in range(1, 7)], web.depth, "depth")
-        top = submenu(menu, "Top bar")
-        choose(top, [("Off", "off"),
-                     ("Links to each section", "links"),
-                     ("Each section its own page", "pages")],
-               web.navbar, "navbar")
+        choose(depth, [("Auto (every level)", 0)] +
+               [(f"{n} (down to {hashes[:n]})", n) for n in range(1, 7)],
+               web.depth, "depth")
+        toggle(side, "Only what is under the top bar's section", web.split,
+               "split",
+               "With a top bar: the bar lists the top-level sections and the "
+               "sidebar the headings inside the one being read",
+               enabled=web.topbar)
+        toggle(menu, "Top bar of the top-level sections", web.topbar,
+               "topbar",
+               "The page's title and its top-level sections across the top")
+        toggle(menu, "Each section its own page", web.paged, "paged",
+               "Show one top-level section at a time, like the pages of a "
+               "site, from the sidebar or the top bar",
+               enabled=web.has_nav())
         width = submenu(menu, "Text width")
         names = {0: "The whole window", 1400: "Wide (1400 px)",
                  1100: "Medium (1100 px)", 820: "Reading column (820 px)"}
