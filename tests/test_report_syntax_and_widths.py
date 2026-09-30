@@ -164,3 +164,26 @@ class TestCompactCells:
         from flograph.ui.report.live import LIVE_CSS
         box = re.search(r"\.fg-table \{[^}]*\}", LIVE_CSS).group(0)
         assert "box-sizing: border-box" in box
+
+
+class TestAMarkStaysWithItsValue:
+    """Joined by an ordinary space, a squeezed column broke "● 243" at it:
+    the value went under its icon and that cell doubled its row's height."""
+
+    def cell(self, rules_text, value=243):
+        from flograph.core.table_format import parse_rules
+        from flograph.core.table_html import frame_to_html
+        html = frame_to_html(pd.DataFrame({"units": [value]}),
+                             parse_rules(rules_text), (), ())
+        body = html.split("<tbody>")[-1]
+        return re.search(r"<td[^>]*>(.*?)</td>", body, re.S).group(1)
+
+    def test_an_icon_and_its_value_are_joined_by_a_no_break_space(self):
+        cell = self.cell("units icons traffic")
+        assert re.search(r"</span>&nbsp;243", cell)
+        assert "</span> 243" not in cell
+
+    def test_two_marks_side_by_side_do_not_part(self):
+        cell = self.cell("units icons traffic\nunits > 100 => icon ✓ green left")
+        assert "</span> <span" not in cell and "</span> 243" not in cell
+        assert "</span>&nbsp;<span" in cell

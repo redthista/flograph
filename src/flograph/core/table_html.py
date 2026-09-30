@@ -1009,14 +1009,19 @@ def _decorate(text: str, style: "CellStyle",
     def span(d) -> str:
         return _decor_span(d, spark_room, row_height)
 
+    # A mark and its value are held together by a no-break space: joined by
+    # an ordinary one, a column squeezed narrow broke "● 243" at the space,
+    # the value went under its icon, and that one cell made its row twice
+    # the height of the rows around it.
     inside = [span(d) for d in style.at("in")]
     if inside:
-        middle = " ".join(inside)     # `only` / `in` — instead of the value
+        middle = MARK_JOIN.join(inside)   # `only` / `in` — instead of the value
     else:
         parts = ([span(d) for d in style.at("left")]
                  + ([_in_a_pill(text, style)] if text or style.pill else []))
-        value = " ".join(p for p in parts if p)
-        right = " ".join(p for p in (span(d) for d in style.at("right")) if p)
+        value = MARK_JOIN.join(p for p in parts if p)
+        right = MARK_JOIN.join(
+            p for p in (span(d) for d in style.at("right")) if p)
         middle = (_pinned_right(value, right, align) if value and right
                   else value or right)
     lines = [" ".join(span(d) for d in style.at("above")),
@@ -1032,6 +1037,10 @@ def _decorate(text: str, style: "CellStyle",
 
 #: Between the value and the marks pinned to the right of its cell.
 RIGHT_MARK_GAP = 6
+
+#: Between a mark and its value, or two marks side by side: a space that
+#: does not break, in Qt's rich text and in a browser alike.
+MARK_JOIN = "&nbsp;"
 
 
 def _pinned_right(value: str, right: str, align: "str | None") -> str:

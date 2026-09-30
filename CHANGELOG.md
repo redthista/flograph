@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **An icon stays on the line with its value** | In a report table, a conditional-format icon beside a value — a traffic light from `icons traffic`, an `icon ✓ left`, two marks side by side — was joined to it by an ordinary space, so a column squeezed narrow broke the line there: the value dropped under its icon and that one cell made its whole row twice the height of the rows around it. The mark and its value are now held together, on the web page and on paper. |
 
 ## 0.1.22
 
