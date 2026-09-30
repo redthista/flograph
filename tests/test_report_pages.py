@@ -579,11 +579,13 @@ class TestTheWidget:
         assert "flograph-table" in page.css_editor.toPlainText()
         assert graph.pages["p1"].custom_css == page.css_editor.toPlainText()
 
-    def test_problems_are_shown_beside_the_toolbar(self, env):
+    def test_problems_are_shown_under_the_editor(self, env):
         page, _graph, _stack, _tmp = env
         page.editor.setPlainText("![[Ghost]]")
         page.refresh_preview()
-        assert page.problems and "⚠" in page._status.text()
+        assert page.problems
+        assert not page._problems_bar.isHidden()
+        assert any("Ghost" in p.message for p in page.problem_list())
 
     def test_only_nodes_with_output_are_offered(self, env):
         page, graph, _stack, _tmp = env

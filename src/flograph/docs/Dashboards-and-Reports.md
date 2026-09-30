@@ -341,6 +341,29 @@ in, at the size the card is set to. The design comes with it: layout, CSS,
 colours, web fonts. Resize the card to change how the HTML lays out;
 `width=` places the result on the page.
 
+### Problems as you type
+
+A report page's Markdown and CSS are checked as you write. A wavy line marks
+what is wrong — **red** for what will go wrong on the page, **amber** for
+what may not be what you meant — and resting the pointer on the line says
+what. In the Markdown: an embed that names no node, or a port the node
+hasn't got; an option nothing reads (`widht=50%`); a `![[` with no `]]`; a
+`:::` block never closed, or of a kind there isn't (`::: warning`); `==`
+outside a tabs block, or a tabs block with no tabs; a code fence never
+closed; a columns block with one column; a link to a page that doesn't
+exist; and front matter it can't read. In the CSS (in the Web preview,
+where the CSS applies): braces, strings and comments never closed, a
+declaration with no `:`, a missing `;` that runs two declarations into
+one, and an `@import` or `url(https://…)` — a saved report fetches nothing,
+so on a machine without internet those would simply not be there.
+
+Everything wrong with the page — these, and what the preview finds, such as
+a chart that hasn't run — is one row under the editor: a dot (red if
+anything is an error), how many, and the first of them. Click it for the
+whole list, and click a problem to go to its line. With nothing wrong, the
+row isn't there. The starter themes and the examples are held to linting
+clean, so a mark is worth reading.
+
 ### Web report preview
 
 The report toolbar's **Preview** selector has two targets:

@@ -54,6 +54,17 @@ reads the way you want.
 """
 
 
+#: How long typing has to pause before the editors are linted again.
+LINT_DELAY_MS = 300
+
+
+def _quoted(message: str) -> str:
+    """The first “name” a problem mentions — the embed it is about."""
+    import re
+    found = re.search(r"“([^”]+)”", message or "")
+    return found.group(1) if found else ""
+
+
 #: What ReportPage._layout_job holds while the embeds are being resolved.
 _STAGING = object()
 
@@ -253,8 +264,17 @@ class ReportPage(QWidget):
         self._export_btn = QPushButton("Export PDF…")
         self._export_btn.clicked.connect(
             lambda: self.export_requested.emit(self.page_id))
-        self._status = QLabel("")
-        self._status.setStyleSheet("color: #b45309;")
+        # What is wrong with the page — the lint's finds as you type and the
+        # render's — as one row under the editor that opens into a list
+        # (problems_bar.py); it used to be an orange sentence up here.
+        from .problems_bar import ProblemsBar
+        self._problems_bar = ProblemsBar()
+        self._problems_bar.jump.connect(self._jump_to)
+        self._lint = {"markdown": [], "css": []}
+        self._lint_timer = QTimer(self)
+        self._lint_timer.setSingleShot(True)
+        self._lint_timer.setInterval(LINT_DELAY_MS)
+        self._lint_timer.timeout.connect(self.run_lint)
 
         # A widget, not a bare layout, so locked mode can hide the strip
         # whole — a layout has no visibility of its own.
@@ -268,14 +288,22 @@ class ReportPage(QWidget):
         toolbar.addWidget(self._live_btn)
         toolbar.addWidget(self._update_btn)
         toolbar.addWidget(self._help_btn)
-        toolbar.addWidget(self._status, 1)
+        toolbar.addStretch(1)
         toolbar.addWidget(self._setup_btn)
         toolbar.addWidget(self._web_btn)
         toolbar.addWidget(self._html_btn)
         toolbar.addWidget(self._export_btn)
 
+        # the editors, and their problems under them
+        self._editor_pane = QWidget()
+        pane = QVBoxLayout(self._editor_pane)
+        pane.setContentsMargins(0, 0, 0, 0)
+        pane.setSpacing(0)
+        pane.addWidget(self._editor_tabs, 1)
+        pane.addWidget(self._problems_bar)
+
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._editor_tabs)
+        splitter.addWidget(self._editor_pane)
         splitter.addWidget(preview_pane)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
@@ -307,6 +335,11 @@ class ReportPage(QWidget):
         # the same door out.
         self.editor.textChanged.connect(self._on_text_changed)
         self.css_editor.textChanged.connect(self._on_css_changed)
+        self.editor.textChanged.connect(self._lint_timer.start)
+        self.css_editor.textChanged.connect(self._lint_timer.start)
+        from .lint_tips import LintTips
+        self._lint_tips = [LintTips(self.editor, lambda: self._lint["markdown"]),
+                           LintTips(self.css_editor, lambda: self._lint["css"])]
 
         self._event_subs = [
             (graph.events.page_body_changed, self._on_body_changed),
@@ -356,7 +389,7 @@ class ReportPage(QWidget):
         so the one surface that is always reachable carries all of it.
         """
         self._view_mode = bool(view_mode)
-        self._editor_tabs.setVisible(not self._view_mode)
+        self._editor_pane.setVisible(not self._view_mode)
         self._toolbar.setVisible(not self._view_mode)
 
     def view_mode(self) -> bool:
@@ -718,7 +751,7 @@ class ReportPage(QWidget):
                                    custom_css=page.custom_css,
                                    plotly_src=PREVIEW_PLOTLY, web=page.web)
             self.web_preview.set_html(html)
-            self._status.setText(self._problem_text())
+            self.run_lint()
             return
         # the reader may have scrolled while the layout ran — keep that
         position = self.preview.verticalScrollBar().value()
@@ -731,7 +764,7 @@ class ReportPage(QWidget):
         # a re-render on every keystroke that jumped to the top would make
         # the preview useless while writing past the first screenful
         self.preview.verticalScrollBar().setValue(position)
-        self._status.setText(self._problem_text())
+        self.run_lint()
 
     def preview_mode(self) -> str:
         return self._preview_mode.currentData() or "pages"
@@ -852,12 +885,66 @@ class ReportPage(QWidget):
         if self._animator is not None:
             self._animator.set_playing(False)
 
-    def _problem_text(self) -> str:
-        if not self.problems:
-            return ""
-        first = self.problems[0]
-        more = f" (+{len(self.problems) - 1} more)" if len(self.problems) > 1 else ""
-        return f"⚠ {first}{more}"
+    # ------------------------------------------------------------- problems
+
+    def run_lint(self) -> None:
+        """Lint both editors, mark what is found, and show it with the
+        render's own problems in the bar under the editor."""
+        import shiboken6
+        if not shiboken6.isValid(self):
+            return
+        from flograph.core.report_lint import lint_css, lint_report
+        from ..editor.diagnostics import underline_selections
+        from .completion import page_vocabulary
+        vocabulary = page_vocabulary(self._graph, self._engine.cache)
+        labels = {name.label: (tuple(name.ports) or None)
+                  for name in vocabulary.names}
+        markdown = lint_report(self.editor.toPlainText(), labels,
+                               vocabulary.pages)
+        web = self.preview_mode() == "web"
+        # the CSS is the web page's; on Pages it does nothing to lint for
+        css = lint_css(self.css_editor.toPlainText()) if web else []
+        self._lint = {"markdown": markdown, "css": css}
+        self.editor.setExtraSelections(
+            underline_selections(self.editor.document(), markdown))
+        self.css_editor.setExtraSelections(
+            underline_selections(self.css_editor.document(), css))
+        self._problems_bar.set_problems(self._all_problems())
+
+    def _all_problems(self) -> list:
+        from .problems_bar import Problem
+        found = [Problem(source, d.message, d.line, d.severity)
+                 for source in ("markdown", "css")
+                 for d in self._lint[source]]
+        linted = " ".join(d.message for d in self._lint["markdown"])
+        lines = self.editor.toPlainText().split("\n")
+        for message in dict.fromkeys(self.problems or ()):
+            ref = _quoted(message)
+            # the lint already marked this embed, at its line
+            if ref and f"“{ref}”" in linted:
+                continue
+            line = next((i + 1 for i, text in enumerate(lines)
+                         if ref and f"![[{ref}" in text.replace("![[ ", "![[")),
+                        None)
+            found.append(Problem("preview", message, line, "error"))
+        return found
+
+    def _jump_to(self, source: str, line: int) -> None:
+        """A problem was clicked: its editor, at its line."""
+        from PySide6.QtGui import QTextCursor
+        editor = self.css_editor if source == "css" else self.editor
+        self._editor_tabs.setCurrentIndex(1 if source == "css" else 0)
+        block = editor.document().findBlockByNumber(max(0, line - 1))
+        if not block.isValid():
+            return
+        cursor = QTextCursor(block)
+        editor.setTextCursor(cursor)
+        editor.centerCursor()
+        editor.setFocus()
+
+    def problem_list(self) -> list:
+        """Every problem the bar shows — for tests."""
+        return self._problems_bar.problems()
 
     # ----------------------------------------------------------- insert menu
 

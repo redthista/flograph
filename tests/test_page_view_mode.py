@@ -722,7 +722,8 @@ class TestReportViewMode:
         page = add_page(window, "r1", kind="report")
         page.set_view_mode(True)
         assert not page.editor.isVisibleTo(page)
-        assert page._editor_tabs.isHidden()   # what locking actually hides
+        # what locking actually hides: the editors and their problems row
+        assert page._editor_pane.isHidden()
         assert page._toolbar.isHidden()
 
     def test_the_preview_stays(self, window):
@@ -735,7 +736,7 @@ class TestReportViewMode:
         page.set_view_mode(True)
         page.set_view_mode(False)
         assert page.editor.isVisibleTo(page)
-        assert not page._editor_tabs.isHidden()
+        assert not page._editor_pane.isHidden()
         assert not page._toolbar.isHidden()
 
     def test_the_report_toolbar_carries_no_lock(self, window):

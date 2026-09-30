@@ -126,7 +126,22 @@ renders as a stack, which is how one embed becomes one chart per region.</p>
 <p>Naming a <b>Report card</b> renders that card's contents onto the page —
 charts, tables and all — rather than reproducing its source text.</p>
 <p>An embed that resolves to nothing says so <i>on the page</i> and in the
-warning strip above, rather than leaving a silent gap.</p>
+problems row under the editor, rather than leaving a silent gap.</p>
+
+<h3>Problems as you type</h3>
+<p>The Markdown and the CSS are checked as you write, and a wavy line marks
+what is wrong &mdash; red for what will go wrong on the page, amber for what
+may not be what you meant. Rest the pointer on a marked line to read it.
+The Markdown is checked for embeds that name no node or no port, options
+nothing reads, <code>:::</code> blocks never closed or of an unknown kind,
+<code>==</code> outside a tabs block, code fences never closed, links to
+pages that don't exist, and front matter it can't read; the CSS for braces,
+strings and comments never closed, a declaration missing its
+<code>:</code> or <code>;</code>, and anything that would fetch from the
+internet, which a saved report never does.</p>
+<p>Every problem &mdash; these, and what the preview finds &mdash; is
+counted in one row under the editor. Click it for the list; click a problem
+there to go to its line.</p>
 
 <h3>Markdown</h3>
 <p><code># Heading</code>, <code>## Subheading</code>,
