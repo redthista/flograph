@@ -61,6 +61,15 @@ table thead td p, table thead td span {
 .flograph-table tr:nth-child(even) { background: #eff6ff; }
 td, th { padding: 7px 9px; }
 img { display: block; margin: 1.5em auto; }
+/* the web layout: sidebar, top bar, tabs, sections that fold */
+:root {
+  --fg-nav-line: #e5e7eb; --fg-nav-hover: #eff6ff; --fg-nav-bg: #ffffff;
+}
+.fg-side { background: #f9fafb; }
+.fg-top { border-bottom: 2px solid #2563eb; }
+details.fg-details { background: #ffffff; }
+details.fg-details > summary { color: #1d4ed8; }
+.fg-tabbar > button.fg-on { color: #1d4ed8; }
 """,
     "Editorial": """body {
   font-family: Georgia, "Times New Roman", serif;
@@ -89,6 +98,20 @@ table thead td p, table thead td span {
 .flograph-table tr:nth-child(even) { background: #f5f5f4; }
 td, th { padding: 8px 10px; }
 img { display: block; margin: 2em auto; }
+/* the web layout: warm bars, sections as margin notes, small-caps tabs */
+:root {
+  --fg-nav-bg: #fafaf9; --fg-nav-ink: #292524; --fg-nav-muted: #78716c;
+  --fg-nav-line: #e7e5e4; --fg-nav-hover: #fef9c3;
+}
+.fg-top-title { font-family: Georgia, "Times New Roman", serif; font-size: 16px; }
+.fg-tabbar > button { font-variant: small-caps; letter-spacing: 0.05em; }
+.fg-tabbar > button.fg-on { color: #a16207; }
+details.fg-details {
+  border: 0; border-left: 3px solid #a16207; border-radius: 0; background: #fefce8;
+}
+details.fg-details > summary { font-family: system-ui, sans-serif; }
+details.fg-details[open] > summary { border-bottom: 0; }
+.fg-pager a { border-radius: 0; border-width: 0 0 2px; border-color: #a16207; }
 """,
     "Slate": """body {
   font-family: Inter, system-ui, sans-serif;
@@ -146,6 +169,22 @@ table table > tr > td:first-child {
 }
 .flograph-table tr:nth-child(even) { background: #273449; }
 td, th { padding: 7px 9px; }
+/* a ```columns block is layout, not a table of data: no white cells */
+table[style*="border-style:none"] > tbody > tr > td {
+  background-color: transparent !important;
+}
+table[style*="border-style:none"] > tbody > tr > td > p,
+table[style*="border-style:none"] > tbody > tr > td > p *,
+table[style*="border-style:none"] > tbody > tr > td > h1 *,
+table[style*="border-style:none"] > tbody > tr > td > h2 *,
+table[style*="border-style:none"] > tbody > tr > td > h3 * {
+  color: #e2e8f0 !important;
+}
+/* the web layout: panels in the page's own blues */
+details.fg-details { background: #111c33; }
+details.fg-details[open] > summary { background: #16233f; }
+.fg-tabbar > button.fg-on { color: #7dd3fc; }
+.fg-drop { box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); }
 """,
 }
 

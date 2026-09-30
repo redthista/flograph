@@ -184,6 +184,7 @@ LAYOUT_CSS = """
   --fg-nav-line: #e3e5ea;
   --fg-nav-hover: rgba(124, 108, 246, 0.09);
   --fg-side-w: 264px;
+  --fg-nav-font: system-ui, -apple-system, "Segoe UI", sans-serif;
   --fg-top-h: 0px;
   /* Qt sets the body a size smaller than the text it writes (every
      paragraph carries its own); a tab or a section's title matches the
@@ -219,7 +220,9 @@ details.fg-details[open] > summary { border-bottom: 1px solid var(--fg-nav-line)
 .fg-tabs { margin: 16px 0; }
 .fg-tabbar { display: none; }
 html.fg-js .fg-tabbar {
-  display: flex; gap: 2px; overflow-x: auto;
+  /* sideways only: a label a pixel taller than the bar (small caps, a
+     theme's own font) must not grow a vertical scroll bar */
+  display: flex; gap: 2px; overflow-x: auto; overflow-y: hidden;
   border-bottom: 1px solid var(--fg-nav-line);
 }
 .fg-tabbar > button {
@@ -249,7 +252,7 @@ html.fg-js .fg-page:not(.fg-on) { display: none; }
   padding: 0 16px; box-sizing: border-box;
   background: var(--fg-nav-bg); color: var(--fg-nav-ink);
   border-bottom: 1px solid var(--fg-nav-line);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px;
+  font-family: var(--fg-nav-font); font-size: 14px;
 }
 .fg-top-title {
   font-weight: 650; white-space: nowrap; overflow: hidden;
@@ -300,7 +303,7 @@ html.fg-has-top body { padding-top: calc(var(--fg-top-h) + 20px) !important; }
   width: var(--fg-side-w); box-sizing: border-box; z-index: 55;
   background: var(--fg-nav-bg); color: var(--fg-nav-ink);
   border-right: 1px solid var(--fg-nav-line);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13.5px;
+  font-family: var(--fg-nav-font); font-size: 13.5px;
   display: flex; flex-direction: column;
   transform: translateX(-100%);
 }
@@ -311,7 +314,13 @@ html.fg-side-on .fg-side { transform: none; }
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-nav-muted);
 }
 .fg-side nav { overflow-y: auto; padding: 0 8px 16px; flex: 1; }
-.fg-side ul { list-style: none; margin: 0; padding: 0; }
+.fg-side ul {
+  list-style: none; margin: 0 !important; padding: 0;
+  /* a theme's lists are content: a card, a marker, a margin */
+  background: none !important; box-shadow: none !important; border-radius: 0 !important;
+}
+.fg-side li { margin: 0 !important; }
+.fg-side li::marker { content: none; }
 .fg-side ul[hidden] { display: none; }
 .fg-side-empty { color: var(--fg-nav-muted); padding: 4px 8px; margin: 0; }
 

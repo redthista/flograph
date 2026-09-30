@@ -142,6 +142,28 @@ p > img { border: 1px solid var(--line); border-radius: 6px; }
 table[style*="border-style:none"] { width: 100% !important; table-layout: fixed; }
 table[style*="border-style:none"] > tbody > tr > td { padding: 0 6px !important; }
 table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.45 / 1 !important; }
+
+/* the web layout: tight bars, hairline sections, tabs that label */
+:root { --fg-side-w: 236px; --fg-nav-font: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif; }
+html.fg-has-top { --fg-top-h: 42px; }
+.fg-top { font-size: 12.5px; }
+.fg-top-title { font-size: 13px; letter-spacing: -0.01em; }
+.fg-top-links a { padding: 0 10px; }
+.fg-side { font-size: 12.5px; background: #fafbfc; }
+.fg-side a { padding: 3px 8px; }
+.fg-side-head { font-size: 10.5px; letter-spacing: 0.1em; padding: 12px 10px 6px 14px; }
+.fg-tabs { margin: 10px 0; }
+.fg-tabbar > button {
+  padding: 6px 10px; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+details.fg-details { border-radius: 6px; margin: 8px 0; }
+details.fg-details > summary { padding: 6px 10px; font-size: 12.5px; }
+.fg-details-body { padding: 4px 12px 8px; }
+.fg-drop { border-radius: 0 0 6px 6px; font-size: 12.5px; }
+.fg-drop a { padding: 5px 10px; }
+.fg-pager a { border-radius: 6px; padding: 7px 11px; }
+.fg-pager span { font-size: 12.5px; }
 """
 
 
@@ -279,9 +301,40 @@ table[style*="border-style:none"] > tbody > tr > td:first-child { padding-left: 
 table[style*="border-style:none"] > tbody > tr > td:last-child { padding-right: 0 !important; }
 table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1 !important; }
 
+/* the web layout: bars and sections are cards; tabs a segmented control */
+:root { --fg-nav-font: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif; }
+.fg-top { border-bottom: 0; box-shadow: var(--shadow); }
+.fg-side { border-right: 0; box-shadow: var(--shadow); }
+.fg-side a.fg-on { background: var(--accent-soft); }
+/* the title's band sits under the bar rather than behind it */
+html.fg-has-top h1 { margin-top: -20px !important; }
+.fg-tabbar { border-bottom: 0 !important; gap: 4px !important; padding: 4px;
+  background: #e3e7ef; border-radius: 10px; width: fit-content; max-width: 100%; }
+.fg-tabbar > button {
+  border: 0; border-radius: 7px; padding: 6px 14px; margin: 0; font-weight: 600;
+}
+.fg-tabbar > button:hover { background: rgba(255, 255, 255, 0.6); }
+.fg-tabbar > button.fg-on { background: var(--card); color: var(--accent);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12); }
+.fg-tab { padding-top: 10px; }
+details.fg-details { border: 0; border-radius: 12px; background: var(--card);
+  box-shadow: var(--shadow); }
+details.fg-details > summary { padding: 12px 16px; }
+details.fg-details[open] > summary { border-bottom-color: var(--line); }
+.fg-details-body { padding: 8px 16px 14px; }
+/* a card inside a card is only its content */
+.fg-details-body .fg-chart, .fg-details-body .fg-table { box-shadow: none;
+  border: 1px solid var(--line); }
+.fg-drop { border: 0; border-radius: 12px; margin-top: 6px; box-shadow: 0 12px 32px rgba(16, 24, 40, 0.14); }
+.fg-pager { border-top: 0; }
+.fg-pager a { border: 0; border-radius: 12px; background: var(--card); box-shadow: var(--shadow); }
+.fg-inside { list-style: none; padding: 8px !important; }
+.fg-inside a { display: block; padding: 6px 10px; border-radius: 8px; text-decoration: none; }
+.fg-inside a:hover { background: var(--accent-soft); }
+
 @media print {
   body { background: #fff; }
-  .fg-chart, .fg-table, p > img, ul, h1 { box-shadow: none; border: 1px solid var(--line); }
+  .fg-chart, .fg-table, p > img, ul, h1, details.fg-details { box-shadow: none; border: 1px solid var(--line); }
 }
 """
 
@@ -432,6 +485,35 @@ table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1 !important; 
   .flograph-table > tbody > tr > td { color: #111; }
   .flograph-table > tbody > tr[data-fg-kind] > td {
     background-color: #eee !important; color: #111 !important; }
+}
+
+/* the web layout: dark glass bars, panels for sections, a lit tab */
+:root { --fg-nav-font: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif; }
+.fg-top { background: rgba(13, 20, 40, 0.82);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.fg-top-title { background: linear-gradient(90deg, #ffffff, var(--accent));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.fg-top-links a.fg-on { text-shadow: 0 0 12px rgba(34, 211, 238, 0.55); }
+.fg-side { background: linear-gradient(180deg, #0d1428, #0a0f1c); }
+.fg-side a.fg-on { box-shadow: inset 2px 0 0 var(--accent); border-radius: 0 6px 6px 0; }
+.fg-side ul ul { border-left-color: #1d2747; }
+.fg-tabbar > button { font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; }
+.fg-tabbar > button.fg-on { color: var(--accent);
+  box-shadow: 0 8px 14px -10px rgba(34, 211, 238, 0.9); }
+details.fg-details { background: var(--panel); border-color: var(--line);
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+details.fg-details > summary { color: #ffffff; }
+details.fg-details[open] > summary { background: var(--panel-2); }
+.fg-details-body .fg-chart, .fg-details-body .fg-table { box-shadow: none; }
+.fg-drop { background: #0d1428; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55),
+  0 0 0 1px rgba(34, 211, 238, 0.12); }
+.fg-pager a { background: var(--panel); }
+.fg-pager a:hover { box-shadow: 0 0 0 1px var(--accent), 0 0 18px rgba(34, 211, 238, 0.2); }
+.fg-icon-btn { background: var(--panel); }
+@media print {
+  details.fg-details { background: #fff; box-shadow: none; }
+  details.fg-details > summary, details.fg-details[open] > summary { color: #111; background: none; }
 }
 """
 

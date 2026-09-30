@@ -523,10 +523,19 @@ report, and is saved with it (each choice is one undo step):
 
 Printed from the browser, everything prints: every tab, every page, every
 section open, and no bars. A page with no blocks and the default layout
-saves exactly the HTML it always did. The five themes colour the bars and
-tabs to match; a stylesheet of your own can set `--fg-accent`,
-`--fg-nav-bg`, `--fg-nav-ink`, `--fg-nav-muted`, `--fg-nav-line` and
-`--fg-nav-hover`.
+saves exactly the HTML it always did.
+
+Every starter theme in the CSS tab dresses the bars, tabs, sections and
+drop-downs in its own way: **Compact** keeps them tight and hairline,
+**Dashboard** makes them cards with a segmented tab control, **Midnight**
+gives dark glass bars and lit tabs, **Editorial** turns a folding section
+into a margin note with small-caps tabs, and **Clean** and **Slate** tint
+them to match. A stylesheet of your own can set `--fg-accent`,
+`--fg-nav-bg`, `--fg-nav-ink`, `--fg-nav-muted`, `--fg-nav-line`,
+`--fg-nav-hover`, `--fg-nav-font`, `--fg-side-w` (the sidebar's width) and
+`--fg-top-h` (the top bar's height, set on `html.fg-has-top`), or style
+`.fg-side`, `.fg-top`, `.fg-tabbar`, `details.fg-details`, `.fg-drop` and
+`.fg-pager` directly.
 
 An embed written **inside code** — `![[Sales]]` in backticks, or in a
 fenced block — is left exactly as typed. That is how a page explains its own
