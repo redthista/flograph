@@ -41,6 +41,7 @@ from .graph import (Connection, Frame, FramePort, Graph, GraphError, Page,
                     Shape, Tile)
 from .node import NodeInstance, NodeSpec, NodeStatus
 from .page_setup import PageSetup
+from .web_layout import WebSettings
 from .tile_style import TileStyle, clean_background
 from .ports import PortDirection, PortSpec
 from .ports import PortDirection, PortSpec, is_flow
@@ -222,6 +223,10 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
                     # only what the user changed — see PageSetup.to_dict
                     "setup": p.setup.to_dict(),
                     "preview_mode": p.preview_mode,
+                    # only what the user changed, like setup — and only
+                    # once they have changed something
+                    **({"web": p.web.to_dict()}
+                       if not p.web.is_default() else {}),
                     # only a page somebody has set up to be read a
                     # particular way says so, like a tile's aspect: a
                     # zoom of None is "fit to the pane", which is the
@@ -549,6 +554,9 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             setup=PageSetup.from_dict(entry.get("setup")),
             preview_mode=("web" if entry.get("preview_mode") == "web"
                           else "pages"),
+            # absent before web settings existed and on any page left at
+            # the defaults — both mean the page as it always was
+            web=WebSettings.from_dict(entry.get("web")),
             # absent before a report remembered how it was being read, and
             # absent on any page nobody has set up — both mean "fit a
             # sheet to the pane, one under the next"

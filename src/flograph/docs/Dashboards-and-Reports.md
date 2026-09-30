@@ -345,15 +345,20 @@ colours, web fonts. Resize the card to change how the HTML lays out;
 
 The report toolbar's **Preview** selector has two targets:
 
-* **Pages** shows the PDF-faithful paginated document. It is the default and
-  remains the right view for checking paper size, page breaks, covers and
-  running headers or footers.
-* **Web** shows the report as a continuously scrolling browser document. It
-  uses the same HTML path as the saved HTML file, so browser CSS is applied
-  as it will be outside flograph. It fills the width of the window, as the
-  saved HTML does in a browser; printed from a browser, it goes back onto
-  the page's paper and margins. For a narrower reading column, add
-  `body { max-width: 50em; margin: 0 auto; }` in the CSS tab.
+* **Web** shows the report as a continuously scrolling browser document —
+  where a new report page opens. It uses the same HTML path as the saved
+  HTML file, so browser CSS is applied as it will be outside flograph. It
+  fills the width of the window, as the saved HTML does in a browser;
+  printed from a browser, it goes back onto the page's paper and margins.
+  **Web Layout ▾** on its toolbar sets a narrower reading column, a sidebar
+  and a top bar — see *Web layout* below.
+* **Pages** shows the PDF-faithful paginated document: the right view for
+  checking paper size, page breaks, covers and running headers or footers.
+  **Page Setup…** is on its toolbar; in Web it is at the bottom of Web
+  Layout ▾, since paper only matters once the page is printed.
+
+A page keeps the preview it was saved with, so a report saved on Pages
+opens on Pages.
 
 **Live**, beside the Preview selector, decides when the preview catches up
 with your typing. On (the default), it follows the editor as you type. Off,
@@ -435,6 +440,71 @@ set: `--fg-chart-paper`, `--fg-chart-plot`, `--fg-chart-ink`,
 `--fg-chart-grid` and `--fg-chart-font`. They also give every chart the
 same wide shape (`--chart-shape`); delete that line to keep each chart's
 own.
+
+#### Sections that fold, and tabs
+
+Two blocks give a web page its shape. A **details** block is a section the
+reader opens with a click — the method, the small print, the full table:
+
+```text
+::: details How this was worked out
+Anything goes in here, embeds and columns too.
+:::
+```
+
+`|open` after the title (`::: details Assumptions|open`) starts it open. A
+**tabs** block shows one part at a time; `==` and a name starts each part:
+
+```text
+::: tabs Region
+== North
+![[North sales|live]]
+== South
+![[South sales|live]]
+:::
+```
+
+Blocks nest, a block can hold a ```columns block, and a column can hold a
+block. The tab block's name (*Region*) is optional — it is what the page's
+address calls it. Type `:::` and a letter for the list. On **paper** — the
+Pages preview, the PDF — there is nothing to click, so a section prints
+whole under its title in bold, and every tab prints one after another under
+its name. A live chart in a tab that isn't showing is drawn when the tab is
+opened.
+
+#### Web layout
+
+**Web Layout ▾** on the Web preview's toolbar shapes the page around the
+report, and is saved with it (each choice is one undo step):
+
+* **Sidebar of headings** — the page's headings down the left, folding by
+  branch and following the heading you are reading. *Shown*, or *Hidden
+  behind a button* (☰) until the reader wants it; whoever reads it can
+  open and close it, and their browser remembers. **Heading levels listed**
+  says how deep it goes. On a narrow window it slides over the page.
+* **Top bar** — the page's title and its sections across the top.
+  *Links to each section* jumps along one long page and marks where you
+  are; *Each section its own page* shows one section at a time, like the
+  pages of a website, with anything above the first section as a header on
+  every page. A section is the biggest heading used more than once, so one
+  `#` title over a `##` per region makes a page per region.
+* **Text width** — the whole window, or a column held to 1400, 1100 or 820
+  pixels.
+* **Keep the view in the page address** (on) — the page, each tab not on its
+  first part, each section opened or closed, and the heading being read
+  are written into the address as the reader goes:
+  `report.html#page=costs&tab.region=south&open=method&at=travel`. Copy
+  the address and whoever opens it lands in the same place. A plain
+  `#heading` link works too — every heading has an id made from its words
+  — and opens whatever tab, section or page hides it. Going to another page
+  of a paged site is a step the browser's **Back** button undoes.
+
+Printed from the browser, everything prints: every tab, every page, every
+section open, and no bars. A page with no blocks and the default layout
+saves exactly the HTML it always did. The five themes colour the bars and
+tabs to match; a stylesheet of your own can set `--fg-accent`,
+`--fg-nav-bg`, `--fg-nav-ink`, `--fg-nav-muted`, `--fg-nav-line` and
+`--fg-nav-hover`.
 
 An embed written **inside code** — `![[Sales]]` in backticks, or in a
 fenced block — is left exactly as typed. That is how a page explains its own

@@ -1272,6 +1272,25 @@ class SetPageSetupCommand(QUndoCommand):
         self._graph.set_page_setup(self._page_id, self._old)
 
 
+class SetPageWebCommand(QUndoCommand):
+    """Replace a report page's web settings (sidebar, top bar, width, the
+    address). Copied both ways, like SetPageSetupCommand."""
+
+    def __init__(self, graph: Graph, page_id: str, web,
+                 parent: Optional[QUndoCommand] = None) -> None:
+        super().__init__("web settings", parent)
+        self._graph = graph
+        self._page_id = page_id
+        self._old = graph.page(page_id).web.copy()
+        self._new = web.copy()
+
+    def redo(self) -> None:
+        self._graph.set_page_web(self._page_id, self._new)
+
+    def undo(self) -> None:
+        self._graph.set_page_web(self._page_id, self._old)
+
+
 class SetPagePreviewModeCommand(QUndoCommand):
     """Select the report preview target, saved with the page."""
 
@@ -1413,6 +1432,7 @@ class DuplicatePageCommand(QUndoCommand):
             # copied, not shared: two pages pointing at one mutable setup
             # would mean editing either one changed both
             setup=src.setup.copy(),
+            web=src.web.copy(),
             preview_mode=src.preview_mode,
             # the copy opens the way the original was being read
             preview_zoom=src.preview_zoom,

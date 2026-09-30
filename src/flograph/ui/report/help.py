@@ -112,7 +112,8 @@ drops down (the ones that have produced something first); after a
 <code>|</code> it offers that node's ports, the options above and
 <code>fit</code>; after <code>ratio=</code> or <code>width=</code>, a few
 values. It also completes page titles in a <code>(page:</code> link,
-<code>columns</code> after <code>```</code>, and <code>\\pagebreak</code>.
+<code>columns</code> after <code>```</code>, <code>details</code> and
+<code>tabs</code> after <code>:::</code>, and <code>\\pagebreak</code>.
 <b>Enter</b> or <b>Tab</b> takes the highlighted entry, <b>Escape</b> puts
 the list away, and <b>Ctrl+Space</b> asks for it wherever the caret is. A
 Report card's editor on the canvas does the same, with the card's own
@@ -172,6 +173,27 @@ embeds.</p>
 drawn full size and squeezed, so it stays readable. A per-embed
 <code>width=</code> inside a column is a fraction of the column.</p>
 
+<h3>Sections that fold, and tabs</h3>
+<p>For the web page. A <b>details</b> block is a section the reader opens
+with a click &mdash; the method, the small print, the full table:</p>
+<pre>::: details How this was worked out
+Anything goes in here, embeds and columns too.
+:::</pre>
+<p>Add <code>|open</code> after the title to start it open. A <b>tabs</b>
+block shows one part at a time, each starting with <code>==</code> and its
+name:</p>
+<pre>::: tabs Region
+== North
+![[North sales|live]]
+== South
+![[South sales|live]]
+:::</pre>
+<p>Blocks nest, and a block can hold a <code>```columns</code> block. The
+tab block's own name (<i>Region</i>) is optional; it is what the page's
+address calls it. On <b>paper</b> there is nothing to click, so a section
+prints whole under its title in bold, and every tab prints one after
+another under its name.</p>
+
 <h3>Page breaks</h3>
 <p>Start a new page with any of these, on a line of its own:</p>
 <p><code>\\pagebreak</code> &nbsp; <code>\\newpage</code> &nbsp;
@@ -188,6 +210,34 @@ preview shows the real pages, so what you see is what prints.</p>
 <p>So a footer of <code>Page {{page}} of {{pages}}</code> reads
 "Page 3 of 11". An unknown field is left on the page as written, so a typo
 shows rather than disappearing.</p>
+
+<h3>Web layout</h3>
+<p>In the <b>Web</b> preview, <b>Web Layout &#9662;</b> takes Page Setup's
+place on the toolbar &mdash; paper only matters once the page is printed,
+and Page Setup is still at the bottom of that menu for then.</p>
+<table cellspacing="0" cellpadding="4">
+<tr><td><b>Sidebar of headings</b></td>
+    <td>the page's headings down the left, folding by branch and following
+        where the reader is; shown, or hidden behind a &#9776; button.
+        <b>Heading levels listed</b> says how deep it goes.</td></tr>
+<tr><td><b>Top bar</b></td>
+    <td><i>Links to each section</i> jumps along one long page;
+        <i>Each section its own page</i> shows one at a time, like the
+        pages of a site, with anything above the first section as a header
+        on every one. A section is the biggest heading used more than
+        once &mdash; one <code>#</code> title over <code>##</code> regions
+        makes a page per region.</td></tr>
+<tr><td><b>Text width</b></td>
+    <td>the whole window, or a column held to a width for reading.</td></tr>
+<tr><td><b>Keep the view in the page address</b></td>
+    <td>the page, tab and open sections, and the heading being read, go in
+        the address (<code>#page=costs&amp;tab.region=south</code>), so a
+        link copied from the browser opens it just so. A plain
+        <code>#heading</code> link works too, and opens whatever hides
+        it.</td></tr>
+</table>
+<p>Printing the web page prints all of it: every tab, every page, every
+section open.</p>
 
 <h3>Reading the preview</h3>
 <p>The preview shows the real pages. <b>Ctrl+wheel</b> zooms; plain wheel

@@ -17,6 +17,7 @@ from .events import GraphEvents
 from .layers import next_z, order_of
 from .node import NodeInstance, NodeStatus, NodeSpec
 from .page_setup import PageSetup
+from .web_layout import WebSettings
 from .tile_style import TileStyle, clean_background
 from .ports import PortDirection, PortSpec, is_flow
 
@@ -251,7 +252,10 @@ class Page:
     # nobody has set up behaves exactly as before.
     setup: PageSetup = field(default_factory=PageSetup)
     # Report pages: the preview target. Pages is the PDF-faithful view;
-    # web is the continuously scrolling browser view.
+    # web is the continuously scrolling browser view. A report page made in
+    # the window opens on web (MainWindow._add_page) — most reports are read
+    # on a screen before they are printed; "pages" stays the model's and
+    # the file's default, so a page saved without one reads as it did.
     preview_mode: str = "pages"
     # Report pages: how the paper is being looked at — an explicit zoom
     # (None fits a sheet to the pane) and whether the sheets lie left to
@@ -271,6 +275,10 @@ class Page:
     # flow running still refreshes it. Saved with the page: it is the page
     # that is big, not the machine.
     preview_live: bool = True
+    # Report pages: the web version's shape — a sidebar of the headings, a
+    # bar across the top, how wide the text runs, whether the address keeps
+    # what is open (core.web_layout). The PDF ignores it.
+    web: WebSettings = field(default_factory=WebSettings)
     # Dashboard pages: the colour behind the tiles ("#rrggbb"), None for the
     # theme's canvas, and the look every tile on the page takes unless it
     # says otherwise. A report ignores both.
@@ -1382,6 +1390,15 @@ class Graph:
         """
         page = self.page(page_id)
         page.setup = setup.copy() if setup is not None else PageSetup()
+        self.events.page_changed.emit(page)
+        self._report_changed(page_id)
+        return page
+
+    def set_page_web(self, page_id: str, web: WebSettings) -> Page:
+        """Replace a report page's web settings — a copy, for the reason
+        set_page_setup stores one."""
+        page = self.page(page_id)
+        page.web = web.copy() if web is not None else WebSettings()
         self.events.page_changed.emit(page)
         self._report_changed(page_id)
         return page

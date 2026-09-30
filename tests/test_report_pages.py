@@ -649,6 +649,13 @@ class TestInTheWindow:
         page_id = next(iter(window.graph.pages))
         assert "![[" in window.graph.pages[page_id].body
 
+    def test_a_new_report_opens_on_the_web_preview(self, window):
+        window._add_page("report")
+        window._add_page("dashboard")
+        report, dashboard = window.graph.pages.values()
+        assert report.preview_mode == "web"
+        assert dashboard.preview_mode == "pages"    # nothing to preview
+
     def test_report_pages_are_titled_as_reports(self, window):
         window._add_page("report")
         window._add_page("dashboard")

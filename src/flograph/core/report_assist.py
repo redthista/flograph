@@ -10,6 +10,7 @@ which of those is being typed and what could go there:
     ![[Sales|ratio=  a few shapes: 16:9, 4:3, …
     [costs](page:    page titles
     ```co            columns
+    ::: d            details, tabs
     \\pa             pagebreak
 
 Qt-free, and fed a `Vocabulary` rather than a graph, so the report page and
@@ -91,6 +92,11 @@ COMMANDS = {
 FENCES = {
     "columns": "side-by-side columns, --- between them",
 }
+#: The `:::` blocks (core.web_layout) — what folds and what tabs.
+BLOCKS = {
+    "details": "a section that folds on the web page — |open starts it open",
+    "tabs": "one part at a time on the web page — == Name starts each part",
+}
 
 _LABEL_RE = re.compile(r"!\[\[\s*([^\]|\n]*)$")
 _SEGMENT_RE = re.compile(
@@ -99,6 +105,7 @@ _PAGE_RE = re.compile(r"\]\(page:([^)\s]*)$", re.IGNORECASE)
 _ANGLE_PAGE_RE = re.compile(r"<page:([^>\n]*)$", re.IGNORECASE)
 _FENCE_RE = re.compile(r"^\s*```([A-Za-z]*)$")
 _COMMAND_RE = re.compile(r"^\s*\\([A-Za-z]*)$")
+_BLOCK_RE = re.compile(r"^\s*:{3,}[ \t]*([A-Za-z]*)$")
 
 
 def suggest(before: str, after: str, vocabulary: Vocabulary
@@ -109,6 +116,14 @@ def suggest(before: str, after: str, vocabulary: Vocabulary
     if fence:
         return _completion(before, fence.group(1), [
             Suggestion(word, hint) for word, hint in FENCES.items()],
+            eager=False)
+    block = _BLOCK_RE.search(before)
+    if block:
+        return _completion(before, block.group(1), [
+            Suggestion(word + " ", hint, label=word)
+            for word, hint in BLOCKS.items()],
+            # a bare ::: is also how a block ends — Enter there must end
+            # the line, not take "details"
             eager=False)
     command = _COMMAND_RE.search(before)
     if command:

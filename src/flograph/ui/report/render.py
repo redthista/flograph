@@ -181,6 +181,9 @@ class RenderedReport:
     #: `build()` writes it for a browser (frame_to_html's `live`), and the
     #: marker finds the Qt table it replaces. See ui/report/live.py.
     live_tables: list = field(default_factory=list)
+    #: Only when rendered `live`: every `:::` block (core.web_layout.Block),
+    #: numbered as its tokens are — ui/report/web_layout.py builds them.
+    blocks: list = field(default_factory=list)
 
 
 #: Space between charts in a multi-column stack, in points.
@@ -832,6 +835,8 @@ class _Resolver:
         self._rows_all = False
         self.live_charts: dict = {}
         self.live_tables: list = []
+        #: every `:::` block, when rendering for the web — see stage_body
+        self.blocks: list = []
         # Read for one thing only: the `style` a table card publishes, so
         # an embedded table arrives on the page with the conditional
         # formatting it is showing on the canvas. Everything else about a
@@ -1755,6 +1760,12 @@ def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     """Resolve every embed in `body` — the UI-thread half of render_body."""
     resolver = _Resolver(lookup, image_scale, image_width, source, nested,
                          page_height, cache, live=live)
+    # Folding sections and tabs before columns: a block may hold a columns
+    # block, and a column a block. On the web each edge becomes a token that
+    # web_layout.py turns into the element; on paper, the block written out
+    # flat (see core.web_layout).
+    from flograph.core.web_layout import expand_blocks
+    body = expand_blocks(body, web=live, blocks=resolver.blocks)
     # Columns first, and they resolve their own embeds as they go: an embed
     # inside a column has to be rendered knowing how wide that column is.
     staged_body = replace_columns(body, resolver.render_columns)
@@ -1831,7 +1842,8 @@ def finish_body(staged_report: StagedReport) -> RenderedReport:
         image_widths={i: w for i, w in enumerate(resolver.widths)},
         images=list(resolver.images),
         live_charts=dict(resolver.live_charts),
-        live_tables=list(resolver.live_tables))
+        live_tables=list(resolver.live_tables),
+        blocks=list(resolver.blocks))
 
 
 def show_in(view, document) -> None:

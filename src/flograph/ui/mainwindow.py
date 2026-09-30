@@ -2432,12 +2432,13 @@ class MainWindow(QMainWindow):
         return path if path.lower().endswith(suffix) else path + suffix
 
     def _write_html(self, rendered, path: str, title: str,
-                    setup=None, custom_css: str = "") -> None:
+                    setup=None, custom_css: str = "", web=None) -> None:
         """Shared by the page's Save HTML and the card's."""
         from .report import report_html
         try:
             Path(path).write_text(report_html(
-                rendered, title, setup=setup, custom_css=custom_css),
+                rendered, title, setup=setup, custom_css=custom_css,
+                web=web),
                                   encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
@@ -2469,7 +2470,8 @@ class MainWindow(QMainWindow):
         with busy(self, f"Exporting {Path(path).name}…"):
             rendered = widget.rendered(for_print=True, live=True)
         self._write_html(rendered, path, page.title,
-                         setup=page.setup, custom_css=page.custom_css)
+                         setup=page.setup, custom_css=page.custom_css,
+                         web=page.web)
 
     @perf.timed('export: report pdf')
     def _export_report_pdf(self, page_id: str) -> None:
@@ -3084,7 +3086,10 @@ class MainWindow(QMainWindow):
                     kind=kind,
                     # a blank report page is a blank text box with no clue
                     # that ![[...]] is a thing, so it starts with the syntax
-                    body=STARTER_BODY if kind == "report" else "")
+                    body=STARTER_BODY if kind == "report" else "",
+                    # a new report opens on the Web preview: most are read
+                    # on a screen before anyone prints one (Page.preview_mode)
+                    preview_mode="web" if kind == "report" else "pages")
         self.undo_stack.beginMacro(f"add {kind} page")
         self.undo_stack.push(AddPageCommand(self.graph, page))
         # canvas tabs live next to the Model tab that heads them (G12/G13)

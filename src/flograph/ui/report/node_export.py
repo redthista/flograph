@@ -122,7 +122,7 @@ class ReportNodeExporter(QObject):
         html = ""
         if request.fmt == "HTML" or request.want_html:
             html = report_html(rendered, page.title, setup=page.setup,
-                               custom_css=page.custom_css)
+                               custom_css=page.custom_css, web=page.web)
         if request.path:
             if request.fmt == "PDF":
                 export_pdf(rendered.document, request.path, title=page.title,

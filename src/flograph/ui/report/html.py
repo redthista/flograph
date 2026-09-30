@@ -40,6 +40,7 @@ CSS_TEMPLATES = {
   color: #1f2937;
   background: #f3f4f6;
 }
+:root { --fg-accent: #2563eb; }
 body > * { max-width: 100%; }
 h1, h2, h3 { color: #111827; }
 h1 { border-bottom: 2px solid #2563eb; padding-bottom: 0.3em; }
@@ -67,6 +68,7 @@ img { display: block; margin: 1.5em auto; }
   color: #292524;
   background: #fafaf9;
 }
+:root { --fg-accent: #a16207; }
 h1, h2, h3 { font-family: system-ui, sans-serif; color: #292524; }
 h1 { font-size: 2.2em; letter-spacing: -0.02em; }
 h2 { margin-top: 2em; border-bottom: 1px solid #d6d3d1; padding-bottom: 0.2em; }
@@ -93,6 +95,11 @@ img { display: block; margin: 2em auto; }
   line-height: 1.5;
   color: #e2e8f0;
   background: #0f172a;
+}
+:root {
+  --fg-accent: #38bdf8; --fg-nav-bg: #111c33; --fg-nav-ink: #e2e8f0;
+  --fg-nav-muted: #94a3b8; --fg-nav-line: #1e293b;
+  --fg-nav-hover: rgba(56, 189, 248, 0.1);
 }
 h1, h2, h3 { color: #f8fafc; }
 h1 { border-bottom: 2px solid #38bdf8; padding-bottom: 0.3em; }
@@ -229,7 +236,7 @@ table {{ border-collapse: collapse; }}
 
 def report_html(rendered, title: str = "", setup=None,
                 auto_refresh: bool = False, custom_css: str = "",
-                plotly_src: "str | None" = None) -> str:
+                plotly_src: "str | None" = None, web=None) -> str:
     """`rendered` as a standalone HTML document.
 
     An animation is written out as the file it arrived as, so a GIF that
@@ -244,6 +251,11 @@ def report_html(rendered, title: str = "", setup=None,
     (see live.py) — before the pictures are inlined, since a chart's
     picture is found by its `embed:N` address and stays as its fallback.
     `plotly_src` is live.make_live's: None inlines Plotly.
+
+    `web` is the page's WebSettings (core.web_layout): its sidebar, top bar
+    and width, and the `:::` blocks built — see web_layout.py. Laid on
+    after the paper's styles and before the page's own CSS, so a theme can
+    restyle all of it.
     """
     from .live import make_live
     html = make_live(rendered.document.toHtml(), rendered, plotly_src)
@@ -256,6 +268,8 @@ def report_html(rendered, title: str = "", setup=None,
         html = html.replace(_SRC.format(f"embed:{index}"), _SRC.format(uri))
     if setup is not None:
         html = _styled(html, page_style(setup))
+    from .web_layout import apply_layout
+    html = apply_layout(html, rendered, web, title)
     if custom_css:
         html = _styled(html, custom_css)
     if auto_refresh:

@@ -24,7 +24,7 @@ from flograph.core import Graph
 
 from ..commands import (SetPageBodyCommand, SetPageCustomCssCommand,
                         SetPagePreviewModeCommand,
-                        SetPagePreviewViewCommand)
+                        SetPagePreviewViewCommand, SetPageWebCommand)
 from .preview import PagedPreview
 from .render import finish_body, render_report, stage_report
 from .web_preview import PREVIEW_PLOTLY, WebPreview
@@ -43,11 +43,14 @@ Write in markdown. Pull anything the flow produced in by name:
 
     ![[Node Label]]         a chart, a table, a number, or markdown text
     ![[Node Label|port]]    a particular output port
+    ::: details Title       a section that folds on the web page (end it with :::)
+    ::: tabs                one part at a time, each starting == Name
 
 A node that *returns markdown* is inlined as written — so a whole section
 can be built by a Python Script node rather than typed here.
 
-Use **Export PDF…** when it reads the way you want.
+Use **Save HTML…** for the web page, or **Export PDF…** for paper, when it
+reads the way you want.
 """
 
 
@@ -185,6 +188,18 @@ class ReportPage(QWidget):
             "headers and footers")
         self._setup_btn.clicked.connect(
             lambda: self.page_setup_requested.emit(self.page_id))
+        # The Web preview's own settings, where Page Setup sits on Pages:
+        # paper means nothing to a page read in a browser until it is
+        # printed, and what does mean something — a sidebar, a bar across
+        # the top, how wide the text runs — has no place on paper. A menu
+        # rather than a dialog: each is one choice, seen at once.
+        self._web_btn = QToolButton()
+        self._web_btn.setText("Web Layout ▾")
+        self._web_btn.setToolTip(
+            "How the web page is laid out: a sidebar of its headings, a "
+            "bar across the top, how wide the text runs, and whether the "
+            "address keeps the open tab and sections")
+        self._web_btn.clicked.connect(self._show_web_menu)
         # A view option, not a page setting: it changes how the pages are
         # arranged on screen and nothing about what prints, so it belongs on
         # the toolbar rather than in Page Setup.
@@ -255,6 +270,7 @@ class ReportPage(QWidget):
         toolbar.addWidget(self._help_btn)
         toolbar.addWidget(self._status, 1)
         toolbar.addWidget(self._setup_btn)
+        toolbar.addWidget(self._web_btn)
         toolbar.addWidget(self._html_btn)
         toolbar.addWidget(self._export_btn)
 
@@ -319,7 +335,10 @@ class ReportPage(QWidget):
         self._set_preview_mode(page.preview_mode if page is not None else "pages")
         self._apply_preview_view(page)
         if page is not None and page.preview_mode == "web":
-            self.refresh_preview()
+            # when it is first looked at, not now: a web preview starts
+            # Chromium, and a project whose reports all open on Web would
+            # otherwise start it for every report page as the file opens
+            self._schedule_preview()
 
     # ------------------------------------------------------------- the mode
 
@@ -641,10 +660,10 @@ class ReportPage(QWidget):
             return
         self._layout_job = None
         setup, mode, staged = staged
-        title, css = page.title, page.custom_css
+        title, css, web = page.title, page.custom_css, page.web.copy()
 
         def work(staged):
-            return _lay_out(staged, setup, mode, title, css)
+            return _lay_out(staged, setup, mode, title, css, web)
 
         self._layout_job = LayoutJob(generation, staged, work,
                                      self._layout_done)
@@ -697,7 +716,7 @@ class ReportPage(QWidget):
             if html is None:
                 html = report_html(rendered, page.title, setup=setup,
                                    custom_css=page.custom_css,
-                                   plotly_src=PREVIEW_PLOTLY)
+                                   plotly_src=PREVIEW_PLOTLY, web=page.web)
             self.web_preview.set_html(html)
             self._status.setText(self._problem_text())
             return
@@ -726,6 +745,8 @@ class ReportPage(QWidget):
             self._preview_mode.blockSignals(False)
         self._preview_stack.setCurrentIndex(1 if mode == "web" else 0)
         self._flow_btn.setVisible(mode == "pages")
+        self._setup_btn.setVisible(mode == "pages")
+        self._web_btn.setVisible(mode == "web")
         self._editor_tabs.tabBar().setVisible(mode == "web")
         self._editor_tabs.tabBar().setTabVisible(1, mode == "web")
         if mode == "pages" and self._editor_tabs.currentIndex() == 1:
@@ -850,6 +871,83 @@ class ReportPage(QWidget):
         from .render import duplicate_labels
         return duplicate_labels(self._graph)
 
+    def web_menu(self) -> QMenu:
+        """Web Layout ▾ — every web setting, each applied as it is picked
+        (one undo step each)."""
+        from flograph.core.web_layout import WIDTHS
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        page = self._page()
+        if page is None:
+            return menu
+        web = page.web
+
+        def submenu(parent, title):
+            # made with its parent, not addMenu(title): the menu is shown
+            # after this returns, and PySide lets the Python side own one
+            # addMenu makes — deleted with this frame, an empty submenu
+            child = QMenu(title, parent)
+            parent.addMenu(child)
+            return child
+
+        def choose(submenu, options, current, name):
+            for label, value in options:
+                action = submenu.addAction(label)
+                action.setCheckable(True)
+                action.setChecked(value == current)
+                action.triggered.connect(
+                    lambda _=False, v=value: self._set_web(**{name: v}))
+
+        side = submenu(menu, "Sidebar of headings")
+        choose(side, [("Off", "off"), ("Shown", "open"),
+                      ("Hidden behind a button", "closed")],
+               web.sidebar, "sidebar")
+        side.addSeparator()
+        depth = submenu(side, "Heading levels listed")
+        hashes = "######"
+        choose(depth, [(f"{n} (down to {hashes[:n]})", n)
+                       for n in range(1, 7)], web.depth, "depth")
+        top = submenu(menu, "Top bar")
+        choose(top, [("Off", "off"),
+                     ("Links to each section", "links"),
+                     ("Each section its own page", "pages")],
+               web.navbar, "navbar")
+        width = submenu(menu, "Text width")
+        names = {0: "The whole window", 1400: "Wide (1400 px)",
+                 1100: "Medium (1100 px)", 820: "Reading column (820 px)"}
+        options = [(names[w], w) for w in WIDTHS]
+        if web.width not in WIDTHS:
+            options.append((f"{web.width} px", web.width))
+        choose(width, options, web.width, "width")
+        menu.addSeparator()
+        share = menu.addAction("Keep the view in the page address")
+        share.setCheckable(True)
+        share.setChecked(web.share_state)
+        share.setToolTip(
+            "The open tab, page and sections, and the heading being read, "
+            "go in the address, so a copied link opens the page as it was")
+        share.triggered.connect(
+            lambda on: self._set_web(share_state=bool(on)))
+        menu.addSeparator()
+        menu.addAction("Page Setup (printing and PDF)…").triggered.connect(
+            lambda: self.page_setup_requested.emit(self.page_id))
+        return menu
+
+    def _show_web_menu(self) -> None:
+        self.web_menu().exec(self._web_btn.mapToGlobal(
+            self._web_btn.rect().bottomLeft()))
+
+    def _set_web(self, **changes) -> None:
+        page = self._page()
+        if page is None:
+            return
+        web = page.web.copy()
+        for name, value in changes.items():
+            setattr(web, name, value)
+        if web != page.web:
+            self._undo_stack.push(
+                SetPageWebCommand(self._graph, self.page_id, web))
+
     def _show_insert_menu(self) -> None:
         menu = QMenu(self)
         nodes = self.embeddable_nodes()
@@ -920,7 +1018,7 @@ class ReportPage(QWidget):
         return page.setup if page is not None else PageSetup()
 
 
-def _lay_out(staged, setup, mode: str, title: str, css: str):
+def _lay_out(staged, setup, mode: str, title: str, css: str, web=None):
     """The background half of a preview render: finish the document, then
     paginate it for the paper or write it out for the browser. Runs on the
     layout pool's thread (see layout_job), and hands the document back to
@@ -934,7 +1032,7 @@ def _lay_out(staged, setup, mode: str, title: str, css: str):
         if mode == "web":
             from .html import report_html
             html = report_html(rendered, title, setup=setup, custom_css=css,
-                               plotly_src=PREVIEW_PLOTLY)
+                               plotly_src=PREVIEW_PLOTLY, web=web)
         else:
             pages = paginate_in_background(rendered.document, setup)
     finally:

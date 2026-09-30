@@ -45,6 +45,14 @@ COMPACT = """/* Compact — dense and exact. Small type, hairline rules, numbers
   --fg-chart-ink: #3b4356;
   --fg-chart-grid: #edf0f4;
   --fg-chart-font: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif;
+  /* the web layout: sidebar, top bar, tabs, folding sections */
+  --fg-text-size: 12.5px;
+  --fg-accent: #2563eb;
+  --fg-nav-bg: #ffffff;
+  --fg-nav-ink: #1b2130;
+  --fg-nav-muted: #687085;
+  --fg-nav-line: #e4e7ed;
+  --fg-nav-hover: rgba(37, 99, 235, 0.07);
 }
 body {
   font-family: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif !important;
@@ -157,6 +165,14 @@ DASHBOARD = """/* Dashboard — every chart and table on a card, on a quiet canv
   --fg-chart-ink: #384259;
   --fg-chart-grid: #eef0f5;
   --fg-chart-font: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif;
+  /* the web layout: sidebar, top bar, tabs, folding sections */
+  --fg-text-size: 13px;
+  --fg-accent: #4f46e5;
+  --fg-nav-bg: #ffffff;
+  --fg-nav-ink: #172033;
+  --fg-nav-muted: #64708a;
+  --fg-nav-line: #e6e9f0;
+  --fg-nav-hover: #eef0ff;
 }
 body {
   font-family: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif !important;
@@ -289,6 +305,14 @@ MIDNIGHT = """/* Midnight — a dark control room: dense, high-contrast, cyan fo
   --fg-chart-ink: #b9c4e2;
   --fg-chart-grid: #1f2a4a;
   --fg-chart-font: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif;
+  /* the web layout: sidebar, top bar, tabs, folding sections */
+  --fg-text-size: 12.5px;
+  --fg-accent: #22d3ee;
+  --fg-nav-bg: #0d1428;
+  --fg-nav-ink: #dbe3f7;
+  --fg-nav-muted: #8491b3;
+  --fg-nav-line: #222c4d;
+  --fg-nav-hover: rgba(34, 211, 238, 0.1);
 }
 body {
   font-family: Inter, "Segoe UI", "Noto Sans", system-ui, sans-serif !important;

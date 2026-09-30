@@ -88,8 +88,13 @@ class WebPreview(QWidget):
         if self._scroll is None and (position.x() or position.y()):
             self._scroll = (position.x(), position.y())
         url = QUrl.fromLocalFile(str(self._path))
-        # the same URL again is a reload of the rewritten file
-        if self.browser.url() == url:
+        # the same file again is a reload of the rewritten file — compared
+        # without the #…, which the page keeps up to date with the open tab
+        # and sections (web_layout.py); a reload keeps it, so the preview
+        # stays on the tab being looked at as it re-renders
+        shown = QUrl(self.browser.url())
+        shown.setFragment(None)
+        if shown == url:
             self.browser.reload()
         else:
             self.browser.load(url)
