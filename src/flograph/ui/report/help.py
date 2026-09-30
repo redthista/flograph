@@ -251,6 +251,20 @@ and Page Setup is still at the bottom of that menu for then.</p>
 <p>Printing the web page prints all of it: every tab, every page, every
 section open.</p>
 
+<h3>Title, heading and icon</h3>
+<p><b>Web Layout &#9662; &rarr; Title, heading and icon&#8230;</b> names the
+web page: its browser tab, the top bar's heading, and a tab icon (an emoji
+or a letter or two). Or write them &mdash; and any Web Layout setting
+&mdash; as <b>front matter</b>, first thing on the page, which wins:</p>
+<pre>---
+title: Q3 Sales Review
+icon: &#x1F4CA;
+heading: Sales review
+sidebar: open
+pages: headings
+---</pre>
+<p>It is settings, not text: it never shows on the page or on paper.</p>
+
 <h3>Reading the preview</h3>
 <p>The preview shows the real pages. <b>Ctrl+wheel</b> zooms; plain wheel
 scrolls. The <b>&#9646;&#9646;</b> button lays the pages out left-to-right

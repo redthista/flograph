@@ -431,15 +431,31 @@ picture stays in the file too: it is what a mail client that runs no
 scripts shows, and what the page prints, so a printed page matches the
 PDF. The Pages preview and the PDF are unchanged by any of this.
 
-Three of the CSS tab's starter themes are made for live pages: **Compact**
-(dense, hairline rules, numbers that line up), **Dashboard** (every chart
-and table on a card, a quote becomes the headline insight) and
-**Midnight** (a dark control room). They theme the live charts as well —
-a dark page gets dark charts — through five variables any stylesheet can
-set: `--fg-chart-paper`, `--fg-chart-plot`, `--fg-chart-ink`,
-`--fg-chart-grid` and `--fg-chart-font`. They also give every chart the
-same wide shape (`--chart-shape`); delete that line to keep each chart's
-own.
+Six of the CSS tab's starter themes are made for live pages:
+
+* **Compact** — dense, hairline rules, numbers that line up.
+* **Dashboard** — every chart and table on a card; a quote becomes the
+  headline insight.
+* **Midnight** — a dark control room.
+* **Ledger** — the financial broadsheet: warm paper, serif headings,
+  tables ruled only above, below and under their headings (booktabs),
+  totals underlined twice as an accountant would, figures in columns.
+* **Terminal** — the trading desk: near-black, monospace, amber for what
+  matters, a grid table where every figure has its own box, panel
+  headings, a search box that is a `>` prompt, and a top bar of
+  numbered function keys. The densest of them.
+* **Aurora** — the showpiece: frosted-glass panels over a night sky of
+  colour, gradient headings, a lit pill for the open tab, a glowing total
+  row — with tables kept tight and high-contrast for reading numbers.
+
+They theme the live charts as well — a dark page gets dark charts, a map
+loses its white ground — through variables any stylesheet can set:
+`--fg-chart-paper`, `--fg-chart-plot`, `--fg-chart-ink`,
+`--fg-chart-grid`, `--fg-chart-font`, and `--fg-chart-colors`, a comma
+list that recolours the series: a colour the chart took from its palette
+becomes the theme's colour in the same place, and one a chart set on
+purpose is left alone. They also give every chart the same wide shape
+(`--chart-shape`); delete that line to keep each chart's own.
 
 #### Sections that fold, and tabs
 
@@ -527,12 +543,46 @@ Printed from the browser, everything prints: every tab, every page, every
 section open, and no bars. A page with no blocks and the default layout
 saves exactly the HTML it always did.
 
+#### Title, heading and icon — and front matter
+
+**Web Layout ▾ → Title, heading and icon…** sets what the browser's tab
+(and a bookmark) calls the page, the name at the left of the top bar, and
+the tab's icon — an emoji or a letter or two, drawn into the page itself,
+so it needs no file and no network. Left empty, each is the page's title.
+
+All of it — and every Web Layout setting — can also be written at the top
+of the page's text as **front matter**, the block static-site generators
+use, which wins over the menu:
+
+```text
+---
+title: Q3 Sales Review
+icon: 📊
+heading: Sales review
+sidebar: open
+top bar: yes
+pages: headings
+width: reading
+---
+```
+
+The words it takes: `title`, `heading`, `icon`; `sidebar` (open, closed,
+off); `depth` (auto or 1–6); `top bar`, `menus`, `split`, `pager`,
+`share` (yes / no); `pages` (off, sections, headings); `width` (full,
+wide, medium, reading, or a number of pixels). A value it cannot read is
+ignored. The block is taken off before the page is drawn, so it never
+shows — not on the web page, the Pages preview or the PDF. It only counts
+when it is the very first thing on the page and every line in it is a
+`name: value`, so a report that just starts with a rule keeps it.
+
 Every starter theme in the CSS tab dresses the bars, tabs, sections and
 drop-downs in its own way: **Compact** keeps them tight and hairline,
 **Dashboard** makes them cards with a segmented tab control, **Midnight**
 gives dark glass bars and lit tabs, **Editorial** turns a folding section
-into a margin note with small-caps tabs, and **Clean** and **Slate** tint
-them to match. A stylesheet of your own can set `--fg-accent`,
+into a margin note with small-caps tabs, **Ledger** rules them like a
+newspaper and opens sections with a plus, **Terminal** squares them off
+with `[+]` sections and function-key sections, **Aurora** frosts them and
+lights the open tab, and **Clean** and **Slate** tint them to match. A stylesheet of your own can set `--fg-accent`,
 `--fg-nav-bg`, `--fg-nav-ink`, `--fg-nav-muted`, `--fg-nav-line`,
 `--fg-nav-hover`, `--fg-nav-font`, `--fg-side-w` (the sidebar's width) and
 `--fg-top-h` (the top bar's height, set on `html.fg-has-top`), or style

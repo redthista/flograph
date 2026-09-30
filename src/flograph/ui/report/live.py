@@ -303,6 +303,44 @@ LIVE_JS = r"""
   // A stylesheet can theme the live charts: a template sets these on the
   // page (or on one box) and they are laid over the figure's own layout.
   // Unset, the chart is exactly as the node drew it.
+  // A theme's own series colours (--fg-chart-colors, a comma list). Plotly
+  // Express writes each series' colour into the figure, taken from its
+  // template's palette, so setting a palette is not enough: a colour that
+  // came from the palette becomes the theme's colour in the same place.
+  // One a chart set on purpose — not in the palette — is left alone.
+  var PLOTLY_COLORS = ["#636efa", "#ef553b", "#00cc96", "#ab63fa", "#ffa15a",
+                       "#19d3f3", "#ff6692", "#b6e880", "#ff97ff", "#fecb52"];
+  function recolor(box, fig) {
+    var list = getComputedStyle(box).getPropertyValue("--fg-chart-colors").trim();
+    if (!list) return;
+    var colors = list.split(",").map(function (c) { return c.trim(); })
+                     .filter(Boolean);
+    if (!colors.length) return;
+    var layout = fig.layout = fig.layout || {};
+    var template = layout.template && layout.template.layout;
+    var from = (template && template.colorway) || layout.colorway || PLOTLY_COLORS;
+    var map = {};
+    from.forEach(function (c, i) {
+      map[String(c).toLowerCase()] = colors[i % colors.length];
+    });
+    function swap(v) {
+      if (typeof v === "string") { return map[v.toLowerCase()] || v; }
+      if (Array.isArray(v)) { return v.map(swap); }
+      return v;
+    }
+    (fig.data || []).forEach(function (trace) {
+      ["marker", "line"].forEach(function (key) {
+        var part = trace[key];
+        if (!part) return;
+        if (part.color !== undefined) part.color = swap(part.color);
+        if (part.colors !== undefined) part.colors = swap(part.colors);
+      });
+      if (trace.fillcolor) trace.fillcolor = swap(trace.fillcolor);
+    });
+    layout.colorway = colors;
+    if (template) template.colorway = colors;
+  }
+
   function themed(box, layout) {
     var css = getComputedStyle(box);
     function v(name) { return css.getPropertyValue(name).trim(); }
@@ -327,6 +365,14 @@ LIVE_JS = r"""
         if (grid) { axis.gridcolor = grid; axis.zerolinecolor = grid;
                     axis.linecolor = grid; }
         if (ink) unink(axis.title);
+      });
+    }
+    // a map's own ground comes from its template — white, which on a dark
+    // page is a white slab round the globe
+    if (plot) {
+      Object.keys(layout).forEach(function (key) {
+        if (!/^geo\d*$/.test(key)) return;
+        layout[key] = Object.assign({}, layout[key], {bgcolor: plot});
       });
     }
     if (paper || ink) {
@@ -416,6 +462,7 @@ LIVE_JS = r"""
     if (!data) return;
     var fig;
     try { fig = JSON.parse(data.textContent); } catch (e) { return; }
+    recolor(box, fig);
     var layout = themed(box, fig.layout || {});
     delete layout.width; delete layout.height;   // the box sets the size
     layout.autosize = true;

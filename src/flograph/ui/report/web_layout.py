@@ -64,7 +64,7 @@ def apply_layout(html: str, rendered, settings: "WebSettings | None" = None,
     """
     settings = settings or WebSettings()
     blocks = list(getattr(rendered, "blocks", None) or [])
-    if not blocks and settings.is_default():
+    if not blocks and settings.layout_is_default():
         return html
     used: set = set()
     html = _with_heading_ids(html, used)
@@ -84,6 +84,27 @@ def apply_layout(html: str, rendered, settings: "WebSettings | None" = None,
             f"{payload}</script><script>{LAYOUT_JS}</script>")
     html = _before(html, "</head>", head)
     return _before(html, "</body>", body)
+
+
+def icon_link(icon: str) -> str:
+    """The browser tab's icon: a `data:image/…` picture as it is, or an
+    emoji or a letter or two drawn into an SVG. Never a web address — the
+    page fetches nothing."""
+    from urllib.parse import quote
+    icon = (icon or "").strip()
+    if not icon:
+        return ""
+    if icon.lower().startswith("data:image/"):
+        href = icon.replace('"', "%22")
+    else:
+        text = _html.escape(icon[:3])
+        size = 88 if len(icon) <= 2 else 58
+        svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+               f"<text x='50' y='54' font-size='{size}' text-anchor='middle' "
+               "dominant-baseline='middle' font-family='system-ui, sans-serif' "
+               f"font-weight='700'>{text}</text></svg>")
+        href = "data:image/svg+xml," + quote(svg)
+    return f'<link rel="icon" href="{href}">'
 
 
 def _before(html: str, tag: str, block: str) -> str:

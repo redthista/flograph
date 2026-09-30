@@ -307,8 +307,15 @@ def report_html(rendered, title: str = "", setup=None,
         html = html.replace(_SRC.format(f"embed:{index}"), _SRC.format(uri))
     if setup is not None:
         html = _styled(html, page_style(setup))
-    from .web_layout import apply_layout
-    html = apply_layout(html, rendered, web, title)
+    from flograph.core.web_layout import WebSettings
+    from .web_layout import apply_layout, icon_link
+    # the page's front matter wins over its Web Layout settings
+    web = (web or WebSettings()).with_front_matter(
+        getattr(rendered, "front_matter", None) or {})
+    html = apply_layout(html, rendered, web, web.heading or web.title or title)
+    if web.icon:
+        html = _styled(html, "", head_extra=icon_link(web.icon))
+    title = web.title or title
     if custom_css:
         html = _styled(html, custom_css)
     if auto_refresh:
@@ -347,7 +354,9 @@ def _styled(html: str, css: str, head_extra: str = "") -> str:
     if not block:
         return html
     if re.search(r"</head>", html, re.IGNORECASE):
-        return re.sub(r"</head>", block + "</head>", html, count=1,
+        # a function, not a string: a replacement string reads backslashes,
+        # and CSS is full of them (content: "\25B8", an icon font's "\f101")
+        return re.sub(r"</head>", lambda m: block + m.group(0), html, count=1,
                       flags=re.IGNORECASE)
     return block + html
 
@@ -360,10 +369,10 @@ def _titled(html: str, title: str) -> str:
         return html
     tag = f"<title>{_escape(title)}</title>"
     if re.search(r"<title>", html, re.IGNORECASE):
-        return re.sub(r"<title>.*?</title>", tag, html,
+        return re.sub(r"<title>.*?</title>", lambda m: tag, html,
                       count=1, flags=re.IGNORECASE | re.DOTALL)
     if re.search(r"<head[^>]*>", html, re.IGNORECASE):
-        return re.sub(r"(<head[^>]*>)", r"\1" + tag, html,
+        return re.sub(r"(<head[^>]*>)", lambda m: m.group(1) + tag, html,
                       count=1, flags=re.IGNORECASE)
     return tag + html
 

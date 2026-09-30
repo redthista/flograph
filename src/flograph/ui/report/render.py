@@ -184,6 +184,9 @@ class RenderedReport:
     #: Only when rendered `live`: every `:::` block (core.web_layout.Block),
     #: numbered as its tokens are — ui/report/web_layout.py builds them.
     blocks: list = field(default_factory=list)
+    #: The page's front matter (core.web_layout.split_front_matter): taken
+    #: off the text, whatever the target, and laid over the web settings.
+    front_matter: dict = field(default_factory=dict)
 
 
 #: Space between charts in a multi-column stack, in points.
@@ -837,6 +840,8 @@ class _Resolver:
         self.live_tables: list = []
         #: every `:::` block, when rendering for the web — see stage_body
         self.blocks: list = []
+        #: the text's front matter, taken off it before anything else
+        self.front_matter: dict = {}
         # Read for one thing only: the `style` a table card publishes, so
         # an embedded table arrives on the page with the conditional
         # formatting it is showing on the canvas. Everything else about a
@@ -1764,7 +1769,10 @@ def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     # block, and a column a block. On the web each edge becomes a token that
     # web_layout.py turns into the element; on paper, the block written out
     # flat (see core.web_layout).
-    from flograph.core.web_layout import expand_blocks
+    from flograph.core.web_layout import expand_blocks, split_front_matter
+    # Front matter first: it is settings, not text — on paper or the web
+    # it would otherwise draw as a rule and a heading
+    resolver.front_matter, body = split_front_matter(body)
     body = expand_blocks(body, web=live, blocks=resolver.blocks)
     # Columns first, and they resolve their own embeds as they go: an embed
     # inside a column has to be rendered knowing how wide that column is.
@@ -1843,7 +1851,8 @@ def finish_body(staged_report: StagedReport) -> RenderedReport:
         images=list(resolver.images),
         live_charts=dict(resolver.live_charts),
         live_tables=list(resolver.live_tables),
-        blocks=list(resolver.blocks))
+        blocks=list(resolver.blocks),
+        front_matter=dict(resolver.front_matter))
 
 
 def show_in(view, document) -> None:

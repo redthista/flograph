@@ -908,6 +908,14 @@ class ReportPage(QWidget):
                 lambda checked, n=name: self._set_web(**{n: bool(checked)}))
             return action
 
+        names = menu.addAction("Title, heading and icon…")
+        names.setToolTip(
+            "What the browser's tab calls the page, the name in the top "
+            "bar, and the tab's icon — front matter at the top of the page "
+            "overrides these")
+        names.triggered.connect(self.edit_web_names)
+        menu.addSeparator()
+
         side = submenu(menu, "Sidebar of headings")
         side.setToolTipsVisible(True)
         choose(side, [("Off", "off"), ("Shown", "open"),
@@ -968,6 +976,42 @@ class ReportPage(QWidget):
         menu.addAction("Page Setup (printing and PDF)…").triggered.connect(
             lambda: self.page_setup_requested.emit(self.page_id))
         return menu
+
+    def edit_web_names(self) -> None:
+        """Title, heading and icon…: the three names a web page goes by,
+        in one undo step."""
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout,
+                                       QLineEdit)
+        page = self._page()
+        if page is None:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Title, heading and icon")
+        form = QFormLayout(dialog)
+        title = QLineEdit(page.web.title)
+        title.setPlaceholderText(page.title)
+        heading = QLineEdit(page.web.heading)
+        heading.setPlaceholderText("the title")
+        icon = QLineEdit(page.web.icon)
+        icon.setPlaceholderText("an emoji or a letter or two — 📊, Q3")
+        form.addRow("Browser tab title:", title)
+        form.addRow("Top bar heading:", heading)
+        form.addRow("Tab icon:", icon)
+        note = QLabel(
+            "Empty keeps the default. Front matter at the top of the page "
+            "(<code>title:</code>, <code>heading:</code>, <code>icon:</code> "
+            "between two <code>---</code> lines) overrides these.")
+        note.setWordWrap(True)
+        form.addRow(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        self._names_dialog = dialog      # for tests
+        if dialog.exec() == QDialog.Accepted:
+            self._set_web(title=title.text().strip(),
+                          heading=heading.text().strip(),
+                          icon=icon.text().strip())
 
     def _show_web_menu(self) -> None:
         self.web_menu().exec(self._web_btn.mapToGlobal(

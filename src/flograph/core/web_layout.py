@@ -211,6 +211,15 @@ class WebSettings:
     window. `share_state` keeps the open page, tab and sections and the
     place in the page's address, so a copied link opens where it was
     copied from.
+
+    `title` is what the browser's tab (and a bookmark) calls the page, ""
+    for the page's own title; `heading` is the name at the left of the top
+    bar, "" for the title; `icon` is the tab's icon — an emoji or a letter
+    or two, or a `data:image/…` picture (never a web address: the page
+    fetches nothing).
+
+    Any of it can also be set in **front matter** at the top of the page's
+    text, which wins — see `split_front_matter`.
     """
     sidebar: str = "off"
     depth: int = 0
@@ -221,6 +230,9 @@ class WebSettings:
     pager: bool = False
     width: int = 0
     share_state: bool = True
+    title: str = ""
+    heading: str = ""
+    icon: str = ""
 
     def to_dict(self) -> dict:
         """Only what differs from the defaults, like PageSetup's."""
@@ -235,6 +247,9 @@ class WebSettings:
         settings = cls()
         if data.get("sidebar") in SIDEBAR:
             settings.sidebar = data["sidebar"]
+        for name in ("title", "heading", "icon"):
+            if isinstance(data.get(name), str):
+                setattr(settings, name, data[name].strip())
         for name in ("topbar", "menus", "split", "pager", "share_state"):
             if name in data:
                 setattr(settings, name, bool(data[name]))
@@ -258,7 +273,145 @@ class WebSettings:
     def is_default(self) -> bool:
         return not self.to_dict()
 
+    def layout_is_default(self) -> bool:
+        """Nothing about the layout asked for — a name or an icon alone
+        changes the tab, not the page."""
+        return not (set(self.to_dict()) - {"title", "heading", "icon"})
+
+    def with_front_matter(self, meta: dict) -> "WebSettings":
+        """A copy with the page's front matter laid over it."""
+        settings = self.copy()
+        for key, value in (meta or {}).items():
+            _apply_matter(settings, key, value)
+        return settings
+
     def has_nav(self) -> bool:
         """A sidebar or a top bar — something to go from page to page by,
         which `paged` needs: without one it is ignored."""
         return self.sidebar != "off" or self.topbar
+
+
+# ------------------------------------------------------------ front matter
+#
+#     ---
+#     title: Q3 Sales Review
+#     icon: 📊
+#     heading: Sales review
+#     sidebar: open
+#     pages: headings
+#     ---
+#
+# The block static-site generators put at the top of a Markdown file,
+# because that is where anyone who has built a docs site will reach for
+# it. `key: value` lines between two `---` lines, first thing in the text;
+# it is taken off before the page is drawn, so paper never shows it. It
+# only counts as front matter when every line is a `key: value` (or blank,
+# or a `#` comment) and at least one key is one of these — a report that
+# happens to start with a rule and a line of text keeps them.
+
+def _norm(key: str) -> str:
+    return re.sub(r"[\s_\-]+", "", key.lower())
+
+
+_TRUE = {"yes", "on", "true", "1", "show", "shown"}
+_FALSE = {"no", "off", "false", "0", "none", "hide", "hidden"}
+
+#: front matter's words for each setting (spaces, _ and - ignored)
+_KEYS = {
+    "title": "title", "pagetitle": "title", "tabtitle": "title",
+    "icon": "icon", "favicon": "icon",
+    "heading": "heading", "header": "heading", "brand": "heading",
+    "sidebar": "sidebar", "depth": "depth", "levels": "depth",
+    "headinglevels": "depth",
+    "topbar": "topbar", "navbar": "topbar",
+    "menus": "menus", "dropdowns": "menus",
+    "split": "split", "pages": "paged", "paged": "paged",
+    "pager": "pager", "previousnext": "pager", "prevnext": "pager",
+    "width": "width", "share": "share_state", "address": "share_state",
+    "sharestate": "share_state",
+}
+_WIDTH_WORDS = {"full": 0, "window": 0, "wide": 1400, "medium": 1100,
+                "reading": 820, "narrow": 820}
+
+
+def _bool(value: str):
+    word = value.strip().lower()
+    if word in _TRUE:
+        return True
+    if word in _FALSE:
+        return False
+    return None
+
+
+def _apply_matter(settings: "WebSettings", key: str, value) -> None:
+    """One front-matter line onto `settings`; a value it can't read is
+    ignored, so a typo leaves that setting as the page had it."""
+    name = _KEYS.get(_norm(key))
+    text = str(value).strip()
+    if name in ("title", "heading", "icon"):
+        setattr(settings, name, text)
+    elif name == "sidebar":
+        word = text.lower()
+        if word in ("open", "shown", "show", "on", "yes", "true"):
+            settings.sidebar = "open"
+        elif word in ("closed", "hidden", "hide", "button", "collapsed"):
+            settings.sidebar = "closed"
+        elif word in ("off", "no", "none", "false"):
+            settings.sidebar = "off"
+    elif name == "depth":
+        word = text.lower()
+        if word in ("auto", "all", "every", "0"):
+            settings.depth = 0
+        elif word.isdigit():
+            settings.depth = min(6, max(1, int(word)))
+    elif name in ("topbar", "menus", "split", "pager", "share_state"):
+        on = _bool(text)
+        if on is not None:
+            setattr(settings, name, on)
+    elif name == "paged":
+        word = text.lower()
+        if word in ("sections", "section", "top", "yes", "on", "true"):
+            settings.paged = "sections"
+        elif word in ("headings", "heading", "every", "all"):
+            settings.paged = "headings"
+        elif word in ("off", "no", "none", "false", "one"):
+            settings.paged = "off"
+    elif name == "width":
+        word = text.lower().removesuffix("px").strip()
+        if word in _WIDTH_WORDS:
+            settings.width = _WIDTH_WORDS[word]
+        elif word.isdigit():
+            settings.width = int(word)
+
+
+_MATTER_LINE_RE = re.compile(r"^\s*([A-Za-z][\w \-]*?)\s*:\s*(.*?)\s*$")
+
+
+def split_front_matter(text: str) -> "tuple[dict, str]":
+    """`(front matter, the rest of the text)`, or `({}, text)` when the
+    text does not start with front matter. Values lose one pair of
+    surrounding quotes, as YAML's would."""
+    if not text:
+        return {}, text or ""
+    body = text.lstrip("\ufeff")
+    lines = body.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+    meta = {}
+    for index, line in enumerate(lines[1:60], start=1):
+        stripped = line.strip()
+        if stripped in ("---", "..."):
+            if not any(_norm(key) in _KEYS for key in meta):
+                return {}, text
+            rest = "\n".join(lines[index + 1:])
+            return meta, rest.lstrip("\n")
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _MATTER_LINE_RE.match(line)
+        if not match:
+            return {}, text
+        value = match.group(2)
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        meta[match.group(1).strip()] = value
+    return {}, text
