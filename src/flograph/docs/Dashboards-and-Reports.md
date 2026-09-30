@@ -494,11 +494,19 @@ report, and is saved with it (each choice is one undo step):
   listed** says): point at the section, or click its ▾ on a touch screen.
   The section's name still goes to the section, and a section with nothing
   inside it stays a plain link.
-* **Each section its own page** — one section at a time, like the pages of
-  a website, with anything above the first section as a header on every
-  page. It works from the top bar, the sidebar or both, so it needs one of
-  them. A section is the biggest heading used more than once, so one `#`
-  title over a `##` per region makes a page per region.
+* **Pages** — one page at a time, like a website, gone between from the
+  top bar, the sidebar or both (so it needs one of them):
+  * *One per top-level section* — a section and everything under it. A
+    section is the biggest heading used more than once, so one `#` title
+    over a `##` per region makes a page per region.
+  * *One per heading* — every heading the sidebar lists is a page of its
+    own: pick one and you see only what is under it, down to the next
+    heading. A heading with nothing of its own lists the pages inside it.
+    A heading inside a tab, a folding section or a column stays on the
+    page it is part of.
+
+  Anything above the first section is a header on every page, and every
+  page ends on **← Previous** and **Next →**.
 * **Text width** — the whole window, or a column held to 1400, 1100 or 820
   pixels.
 * **Keep the view in the page address** (on) — the page, each tab not on its

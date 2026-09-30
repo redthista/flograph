@@ -180,6 +180,7 @@ def slug(text: str, used: set) -> str:
 # ---------------------------------------------------------------- settings
 
 SIDEBAR = ("off", "open", "closed")
+PAGED = ("off", "sections", "headings")
 #: Content widths offered, in CSS pixels; 0 is the whole window.
 WIDTHS = (0, 1400, 1100, 820)
 
@@ -200,8 +201,10 @@ class WebSettings:
       sidebar only what is under the section being read — the shape of a
       documentation site. `menus` gives each section in the bar a
       drop-down of the headings inside it.
-    - `paged` shows one top-level section at a time, like the pages of a
-      site, from whichever of the two is there.
+    - `paged` shows one page at a time, like the pages of a site, from
+      whichever of the two is there: `sections` cuts a page at each
+      top-level heading, `headings` at every heading the sidebar lists, so
+      picking any entry shows only what is under it; `off` is one page.
 
     `width` holds the text to a column that many pixels wide, 0 for the
     window. `share_state` keeps the open page, tab and sections and the
@@ -213,7 +216,7 @@ class WebSettings:
     topbar: bool = False
     menus: bool = False
     split: bool = True
-    paged: bool = False
+    paged: str = "off"
     width: int = 0
     share_state: bool = True
 
@@ -230,9 +233,13 @@ class WebSettings:
         settings = cls()
         if data.get("sidebar") in SIDEBAR:
             settings.sidebar = data["sidebar"]
-        for name in ("topbar", "menus", "split", "paged", "share_state"):
+        for name in ("topbar", "menus", "split", "share_state"):
             if name in data:
                 setattr(settings, name, bool(data[name]))
+        if data.get("paged") in PAGED:
+            settings.paged = data["paged"]
+        elif data.get("paged") is True:
+            settings.paged = "sections"      # when it was on or off
         try:
             settings.depth = min(6, max(0, int(data.get("depth", 0))))
         except (TypeError, ValueError):

@@ -19,9 +19,12 @@ one under another under its name, sections as their browser's own folding
   a sidebar too and `split` on, the bar takes the top level and the
   sidebar lists only the headings inside the current section (one list
   per section, swapped as the reader moves).
-- **Paged** (with either of those to go by): one top-level section at a
-  time, like the pages of a site, with what comes before the first as a
-  header on every one. Top level is the highest heading level used at
+- **Paged** (with either of those to go by): one page at a time, like
+  the pages of a site — a page per top-level section (`sections`), or per
+  heading as deep as the sidebar lists (`headings`), so picking any entry
+  shows only what is under it. What comes before the first page is a
+  header on every one; a page that is only its heading lists the pages
+  inside it, and each ends on Previous / Next. Top level is the highest heading level used at
   least twice — a report with one `#` title and a `##` per region splits
   by region.
 - **The address**: `#page=costs&tab.region=north&open=notes&at=q3` — the
@@ -69,7 +72,7 @@ def apply_layout(html: str, rendered, settings: "WebSettings | None" = None,
     config = {"sidebar": settings.sidebar, "depth": settings.depth,
               "topbar": settings.topbar, "split": settings.split,
               "menus": settings.topbar and settings.menus,
-              "paged": settings.paged and settings.has_nav(),
+              "paged": settings.paged if settings.has_nav() else "off",
               "share": settings.share_state,
               "title": title}
     # `</` can't close the script from inside a JSON string once escaped
@@ -309,6 +312,26 @@ html.fg-side-on .fg-side { transform: none; }
 .fg-side ul { list-style: none; margin: 0; padding: 0; }
 .fg-side ul[hidden] { display: none; }
 .fg-side-empty { color: var(--fg-nav-muted); padding: 4px 8px; margin: 0; }
+
+/* ---- a page's way on */
+.fg-pager {
+  display: flex; justify-content: space-between; gap: 16px;
+  margin: 36px 0 8px; padding-top: 16px; border-top: 1px solid var(--fg-nav-line);
+}
+.fg-pager a {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
+  border: 1px solid var(--fg-nav-line); border-radius: 10px;
+  color: inherit; text-decoration: none; max-width: 45%;
+}
+.fg-pager a:hover { border-color: var(--fg-accent); }
+.fg-pager a.fg-next { text-align: right; margin-left: auto; }
+.fg-pager small { color: var(--fg-nav-muted); font-size: 12px; }
+.fg-pager span { color: var(--fg-accent); font-weight: 600; font-size: var(--fg-text-size); }
+.fg-pager a.fg-prev small::before { content: "←  "; }
+.fg-pager a.fg-next small::after { content: "  →"; }
+.fg-inside { margin: 12px 0; padding-left: 20px; }
+.fg-inside a { color: var(--fg-accent); }
+html:not(.fg-js) .fg-pager { display: none; }
 .fg-side ul ul { padding-left: 12px; margin-left: 9px; border-left: 1px solid var(--fg-nav-line); }
 .fg-side li.fg-fold > ul { display: none; }
 .fg-side .fg-row { display: flex; align-items: center; }
@@ -354,7 +377,7 @@ html:not(.fg-js) .fg-side, html:not(.fg-js) .fg-top,
 html:not(.fg-js) .fg-side-open { display: none; }
 
 @media print {
-  .fg-side, .fg-top, .fg-side-open, .fg-tabbar { display: none !important; }
+  .fg-side, .fg-top, .fg-side-open, .fg-tabbar, .fg-pager, .fg-inside { display: none !important; }
   html.fg-has-top body { padding-top: 0 !important; }
   html.fg-side-on body { margin-left: 0 !important; }
   .fg-tab, .fg-page { display: block !important; }
@@ -444,15 +467,29 @@ LAYOUT_JS = r"""
   // the bar takes the top level, the sidebar what is under it
   var split = hasTop && hasSide && cfg.split !== false && tops.length > 0;
   var pages = [];
-  if (cfg.paged && (hasTop || hasSide) && tops.length) {
-    // each top-level heading and what follows it, up to the next, is a page;
-    // what comes before the first is a header on every one
+  // where a page starts: at each top-level heading ("sections"), or at
+  // every heading from the top level down as deep as the sidebar lists
+  // ("headings"). Only headings in the page's own flow — one inside a tab,
+  // a folded section or a column stays on the page it is in. What comes
+  // before the first is a header on every page.
+  var starts = [];
+  if (cfg.paged === "sections") {
+    starts = tops;
+  } else if (cfg.paged === "headings") {
+    var least = 7;
+    bodyHeads.forEach(function (h) { least = Math.min(least, +h.tagName[1]); });
+    starts = bodyHeads.filter(function (h) {
+      var n = +h.tagName[1];
+      return h.id && n >= level && (!(cfg.depth > 0) || n < least + cfg.depth);
+    });
+  }
+  if (starts.length && (hasTop || hasSide)) {
     var current = null;
     Array.prototype.slice.call(body.childNodes).forEach(function (node) {
       if (node.nodeType === 1 && (node.tagName === "SCRIPT" || node.tagName === "STYLE")) {
         current = null; return;
       }
-      if (node.nodeType === 1 && tops.indexOf(node) !== -1) {
+      if (node.nodeType === 1 && starts.indexOf(node) !== -1) {
         current = document.createElement("section");
         current.className = "fg-page";
         current.setAttribute("data-page", node.id);
@@ -461,12 +498,51 @@ LAYOUT_JS = r"""
       }
       if (current) { current.appendChild(node); }
     });
+    pages.forEach(function (page, i) {
+      var head = page.firstElementChild, n = +head.tagName[1];
+      // a page that is only its heading lists the pages inside it, rather
+      // than standing empty
+      if (page.children.length === 1) {
+        var inside = [];
+        for (var j = i + 1; j < pages.length; j++) {
+          var h = pages[j].firstElementChild;
+          if (+h.tagName[1] <= n) { break; }
+          if (+h.tagName[1] === n + 1 || !inside.length) { inside.push(h); }
+        }
+        if (inside.length) {
+          var list = document.createElement("ul");
+          list.className = "fg-inside";
+          inside.forEach(function (h) {
+            var li = document.createElement("li"), a = document.createElement("a");
+            a.href = "#" + h.id; a.textContent = h.textContent.trim();
+            li.appendChild(a); list.appendChild(li);
+          });
+          page.appendChild(list);
+        }
+      }
+      // and every page ends on the way to the ones either side
+      var pager = document.createElement("nav");
+      pager.className = "fg-pager";
+      pager.setAttribute("aria-label", "Pages");
+      [[pages[i - 1], "fg-prev", "Previous"], [pages[i + 1], "fg-next", "Next"]].forEach(function (x) {
+        if (!x[0]) { pager.appendChild(document.createElement("span")); return; }
+        var h = x[0].firstElementChild, a = document.createElement("a");
+        a.href = "#" + h.id; a.className = x[1];
+        a.innerHTML = '<small></small><span></span>';
+        a.firstChild.textContent = x[2];
+        a.lastChild.textContent = h.textContent.trim();
+        pager.appendChild(a);
+      });
+      page.appendChild(pager);
+    });
   }
   function pageOf(el) { return el.closest ? el.closest(".fg-page") : null; }
   function showPage(page) {
     if (!page) { return; }
+    var was = pages.filter(function (p) { return p.classList.contains("fg-on"); })[0];
     pages.forEach(function (p) { p.classList.toggle("fg-on", p === page); });
-    markSection(page.getAttribute("data-page"));
+    markSection(sectionOf(document.getElementById(page.getAttribute("data-page"))));
+    if (was && was !== page) { window.scrollTo(0, 0); }
   }
   // the top-level section a heading is in: the last top-level heading at
   // or before it, "" for anything above the first
@@ -735,15 +811,16 @@ LAYOUT_JS = r"""
     var line = parseFloat(getComputedStyle(root).getPropertyValue("--fg-top-h")) || 0;
     line += 24;
     var hit = null;
+    // on a paged site, the page being shown is what is being read — the
+    // header above every page is not, however high up it sits
+    var shown = pages.length ? pages.filter(function (p) { return p.classList.contains("fg-on"); })[0] : null;
     for (var i = 0; i < spyHeads.length; i++) {
       var h = spyHeads[i];
+      if (shown && !shown.contains(h)) { continue; }
       if (!h.offsetParent && h.getClientRects().length === 0) { continue; }
       if (h.getBoundingClientRect().top <= line) { hit = h; } else { break; }
     }
-    if (!hit && pages.length) {
-      var shown = pages.filter(function (p) { return p.classList.contains("fg-on"); })[0];
-      if (shown) { hit = document.getElementById(shown.getAttribute("data-page")); }
-    }
+    if (!hit && shown) { hit = document.getElementById(shown.getAttribute("data-page")); }
     setActive(hit ? hit.id : null);
     clearTimeout(atTimer);
     atTimer = setTimeout(function () { changed(false); }, 400);

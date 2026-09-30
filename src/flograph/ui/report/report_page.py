@@ -932,10 +932,16 @@ class ReportPage(QWidget):
                "Each section in the top bar opens a menu of the headings "
                "inside it — on hover, or its arrow",
                enabled=web.topbar)
-        toggle(menu, "Each section its own page", web.paged, "paged",
-               "Show one top-level section at a time, like the pages of a "
-               "site, from the sidebar or the top bar",
-               enabled=web.has_nav())
+        pages = submenu(menu, "Pages")
+        pages.setEnabled(web.has_nav())
+        pages.setToolTipsVisible(True)
+        choose(pages, [("Off (one long page)", "off"),
+                       ("One per top-level section", "sections"),
+                       ("One per heading", "headings")],
+               web.paged, "paged")
+        pages.menuAction().setToolTip(
+            "Show one page at a time, like a website, gone between from "
+            "the sidebar or the top bar — needs one of them")
         width = submenu(menu, "Text width")
         names = {0: "The whole window", 1400: "Wide (1400 px)",
                  1100: "Medium (1100 px)", 820: "Reading column (820 px)"}

@@ -114,7 +114,7 @@ class TestTheSettings:
 
     def test_round_trip_and_bad_values(self):
         web = WebSettings(sidebar="closed", depth=2, topbar=True,
-                          split=False, paged=True, width=1100,
+                          split=False, paged="headings", width=1100,
                           share_state=False)
         assert WebSettings.from_dict(web.to_dict()) == web
         odd = WebSettings.from_dict({"sidebar": "sideways", "depth": 99,
@@ -126,9 +126,13 @@ class TestTheSettings:
         assert WebSettings.from_dict({"depth": -3}).depth == 0
 
     def test_pages_need_something_to_go_between_them_by(self):
-        assert not WebSettings(paged=True).has_nav()
-        assert WebSettings(paged=True, sidebar="open").has_nav()
-        assert WebSettings(paged=True, topbar=True).has_nav()
+        assert not WebSettings(paged="sections").has_nav()
+        assert WebSettings(paged="sections", sidebar="open").has_nav()
+        assert WebSettings(paged="sections", topbar=True).has_nav()
+
+    def test_paging_that_was_on_or_off_reads_as_sections(self):
+        assert WebSettings.from_dict({"paged": True}).paged == "sections"
+        assert WebSettings.from_dict({"paged": "pages"}).paged == "off"
 
     def test_saved_with_the_page(self, qapp):
         graph = Graph()
@@ -187,10 +191,11 @@ class TestTheWebPage:
         rendered = render("# Plain\n\n## One\n\n## Two")
         html = report_html(rendered, "Plain",
                            web=WebSettings(sidebar="open", topbar=True,
-                                           paged=True))
+                                           paged="headings"))
         config = re.search(r'id="fg-layout-config">(.*?)</script>',
                            html).group(1)
-        assert '"paged": true' in config and '"title": "Plain"' in config
+        assert '"paged": "headings"' in config
+        assert '"title": "Plain"' in config
         assert '"topbar": true' in config and '"depth": 0' in config
         assert '<h2 id="one"' in html
 
@@ -205,8 +210,8 @@ class TestTheWebPage:
 
     def test_paged_with_no_way_round_is_not_paged(self, qapp):
         html = report_html(render("# A\n\n## B\n\n## C"), "t",
-                           web=WebSettings(paged=True, width=820))
-        assert '"paged": false' in html
+                           web=WebSettings(paged="headings", width=820))
+        assert '"paged": "off"' in html
 
     def test_width_holds_the_text_to_a_column(self, qapp):
         html = report_html(render("# x"), "t", web=WebSettings(width=820))
@@ -267,11 +272,11 @@ class TestTheToolbar:
         next(a for a in sidebar.actions() if a.text() == "Shown").trigger()
         assert graph.pages["p1"].web.sidebar == "open"
         menu = widget.web_menu()
-        pages = next(a for a in menu.actions()
-                     if a.text() == "Each section its own page")
+        pages = next(a for a in menu.actions() if a.text() == "Pages").menu()
         assert pages.isEnabled()        # the sidebar is there to go by
-        pages.trigger()
-        assert graph.pages["p1"].web.paged
+        next(a for a in pages.actions()
+             if a.text() == "One per heading").trigger()
+        assert graph.pages["p1"].web.paged == "headings"
         stack.undo()
         assert graph.pages["p1"].web == WebSettings(sidebar="open")
         # the menu shows what the page has
