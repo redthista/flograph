@@ -1508,8 +1508,15 @@ class _Resolver:
         # `width=90%` is 90% of the text column on paper; on the web page,
         # which is as wide as the window, it is 90% of the page — so the
         # table is found again there by its marker (html.size_tables)
-        share = (self._width_raw if self._live
-                 and self._width_raw.endswith("%") else "")
+        # A table given no width at all is the column's width on paper —
+        # 510 points, which a browser read as 510 pixels, so on a wide
+        # window it stopped there and its text wrapped early. On the web
+        # page it is as wide as its columns, up to the page ("auto").
+        share = ""
+        if self._live and self._width_raw.endswith("%"):
+            share = self._width_raw
+        elif self._live and not self._width_raw:
+            share = "auto"
         # numbered by table, not by measured table: a live table needs a
         # marker too, and two tables must never share one
         marker = (table_marker(len(self.table_html))

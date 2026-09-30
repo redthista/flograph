@@ -107,9 +107,23 @@ class TestTableWidth:
         assert not re.search(r'<table[^>]*width="',
                              paper.document.toHtml())
 
-    def test_none_is_as_it_was(self, qapp, plain):
+    def test_none_is_as_wide_as_its_columns_on_the_web(self, qapp, plain):
+        # Qt's width is the paper column's, 510 points — read as 510 pixels
+        # it capped the table on a wide window
         html = report_html(render("![[T]]", plain), "t")
+        assert "width=" not in first_table(html)
+
+    def test_none_keeps_the_column_width_on_paper(self, qapp, plain):
+        paper = render("![[T]]", plain, live=False)
+        assert re.search(r'<table[^>]*width="\d+"', paper.document.toHtml())
+
+    def test_points_stay_points(self, qapp, plain):
+        html = report_html(render("![[T|width=280]]", plain), "t")
         assert re.search(r'width="\d+"', first_table(html))
+
+    def test_no_reading_width_inside_a_cell(self):
+        from flograph.ui.report.css_themes import COMPACT_CELLS
+        assert "max-width: none" in COMPACT_CELLS
 
     def test_a_live_table_fills_its_share(self, qapp, plain):
         html = report_html(render("![[T|live|width=75%]]", plain), "t")

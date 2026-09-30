@@ -38,7 +38,7 @@ COMPACT_CELLS = """
 /* tables stay compact: a cell's value is a paragraph (Qt writes it so),
    and the page's paragraph spacing is not meant for it */
 .flograph-table td p, .flograph-table th p,
-table[cellspacing="2"] td p { margin: 0 !important; }
+table[cellspacing="2"] td p { margin: 0 !important; max-width: none !important; }
 .flograph-table, table[cellspacing="2"] { line-height: 1.3; }
 /* a chart drawn as a picture sits in a paragraph: no reading width for it */
 p:has(> img) { max-width: none !important; }

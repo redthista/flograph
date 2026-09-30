@@ -155,7 +155,11 @@ def size_tables(html: str, rendered) -> str:
     """Every plain (not live) table given `width=N%`, that share of the
     web page: Qt wrote it at a fixed width in points — the paper's — which a
     browser reads as pixels, so on a wide window `width=100%` stopped at
-    the table's own columns. (A live table was sized in its box.)"""
+    the table's own columns. (A live table was sized in its box.)
+
+    A table given no width (`auto` here) loses Qt's fixed one: as wide as
+    its columns, and its text wraps at the page's edge rather than at the
+    paper column's 510 pixels."""
     for marker, share in getattr(rendered, "table_widths", None) or ():
         span = _enclosing_table(html, marker)
         if span is None:
@@ -165,7 +169,8 @@ def size_tables(html: str, rendered) -> str:
         if tag is None:
             continue
         opening = re.sub(r'\swidth="[^"]*"', "", tag.group(0))
-        opening = opening[:-1] + f' width="{_css_share(share)}">'
+        if share != "auto":
+            opening = opening[:-1] + f' width="{_css_share(share)}">'
         html = html[:start] + opening + html[tag.end():]
     return html
 

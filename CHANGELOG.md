@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **A table without a width uses the web page's width** | A table embedded with no `width=` was written at the paper column's width — 510 points, which a browser reads as 510 pixels — so on a wide window it stopped there and its text wrapped early, whatever the theme. On the web page it is now as wide as its columns and grows to the page's full width, wrapping long text at the page's edge; on paper it still spans the text column. `width=90%` and `width=280` are unchanged. Compact's and Ledger's reading width no longer wraps the text inside a table cell. |
 | Fix | **Tables stay compact under every theme** | A report's tables were compact with no CSS and ballooned under a theme: each cell's value is a paragraph, so a theme's paragraph spacing and line height reached every row — under Aurora a plain table's rows grew from 21px to 36px. All nine starter themes now keep paragraph spacing out of table cells, set tables at a tighter line height and trim cell padding, so rows come out about the size they are with no CSS. Clean, Editorial and Slate no longer pad the small table inside a data-bar cell. A `width=100%` live table no longer sticks out past the page by its panel's padding (Dashboard, Midnight, Aurora), and a chart drawn as a picture is no longer held to a theme's reading width (Compact, Ledger). A theme copied into a page before this keeps its old look: pick it again under the CSS tab's **Starter theme** to take the new one. |
 
 ## 0.1.21
