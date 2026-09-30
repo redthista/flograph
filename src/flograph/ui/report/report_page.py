@@ -902,6 +902,15 @@ class ReportPage(QWidget):
             self._speller.set_dark(_is_dark(self.editor))
             self._css_colours.set_dark(_is_dark(self.css_editor))
 
+    def contextMenuEvent(self, event) -> None:
+        """A right-click that reached the page itself, past the editors and
+        the preview, which have menus of their own. Passed on it reaches
+        the dock host, whose menu is the list of docks — which is what
+        locking this page from its tab's menu opened over it on Wayland,
+        the menu's leftover right-click arriving here (ui/menu_guard). The
+        dashboard page stops it the same way."""
+        event.accept()
+
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
         if self._animator is not None:

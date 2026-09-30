@@ -271,6 +271,32 @@ class TestTheSurfacesRefuse:
         # the work the guard above skips
         assert host._menu_target is None
 
+    def test_the_dock_host_refuses_a_right_click_from_outside_itself(self, qtbot):
+        """What the log caught on Wayland: the leftover of a tab menu,
+        re-sent up from a report page that ignored it — not spontaneous
+        any more, so past the timing guard — at y = -8, over the page bar.
+        A right-click on the dock host is always inside it."""
+        from PySide6.QtGui import QContextMenuEvent
+        from flograph.ui.dock_host import DockHost
+        host = DockHost()
+        qtbot.addWidget(host)
+        host.resize(400, 300)
+        opened = []
+        host.createPopupMenu = lambda: opened.append(True)
+        event = QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(214, -8),
+                                  QPoint(214, -8))
+        host.contextMenuEvent(event)
+        assert event.isAccepted() and opened == []
+
+    def test_a_report_page_stops_a_right_click_that_reaches_it(self):
+        """As the dashboard page does: passed on, it reaches the dock
+        host and opens the list of docks over the report."""
+        from flograph.ui.report.report_page import ReportPage
+        event = FakeContextEvent()
+        event.accept = lambda: setattr(event, "accepted", True)
+        ReportPage.contextMenuEvent(None, event)
+        assert event.accepted
+
     def test_the_main_window_swallows_a_stray_event(self, qtbot):
         """The outer window's bare right-click menu lists the dock host's
         docks too — "Node Library, Code, …" after locking a page from its

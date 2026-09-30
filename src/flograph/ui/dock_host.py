@@ -39,6 +39,15 @@ class DockHost(QMainWindow):
             # this is the last place that leak can come out.
             event.accept()
             return
+        if (event.reason() == QContextMenuEvent.Reason.Mouse
+                and not self.rect().contains(event.pos())):
+            # A right-click here is inside this window, always. One from
+            # outside it is a page tab menu's leftover, re-sent on its way
+            # up from a page that ignored it — so no longer "spontaneous",
+            # which is how it slipped past the guard above: it arrived at
+            # y = -8, over the page bar. See ui/menu_guard.
+            event.accept()
+            return
         self._menu_target = self._dock_at(event.pos())
         super().contextMenuEvent(event)
 
