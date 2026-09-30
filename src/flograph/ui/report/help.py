@@ -225,7 +225,9 @@ and Page Setup is still at the bottom of that menu for then.</p>
     <td>the page's title and its sections across the top. With the
         sidebar too, <i>Only what is under the top bar's section</i> (on)
         has the bar take the sections and the sidebar the headings inside
-        the one being read.</td></tr>
+        the one being read. <b>Drop-down of each section's headings</b>
+        gives every section in the bar a menu of what is inside it, opened
+        by pointing at it or with its arrow.</td></tr>
 <tr><td><b>Each section its own page</b></td>
     <td>one section at a time, like the pages of a site, gone between from
         the top bar or the sidebar; anything above the first section is a

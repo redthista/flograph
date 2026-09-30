@@ -198,7 +198,8 @@ class WebSettings:
     - `topbar` is a bar across the top naming the page's top-level
       sections. With both, `split` has the bar take the top level and the
       sidebar only what is under the section being read — the shape of a
-      documentation site.
+      documentation site. `menus` gives each section in the bar a
+      drop-down of the headings inside it.
     - `paged` shows one top-level section at a time, like the pages of a
       site, from whichever of the two is there.
 
@@ -210,6 +211,7 @@ class WebSettings:
     sidebar: str = "off"
     depth: int = 0
     topbar: bool = False
+    menus: bool = False
     split: bool = True
     paged: bool = False
     width: int = 0
@@ -228,7 +230,7 @@ class WebSettings:
         settings = cls()
         if data.get("sidebar") in SIDEBAR:
             settings.sidebar = data["sidebar"]
-        for name in ("topbar", "split", "paged", "share_state"):
+        for name in ("topbar", "menus", "split", "paged", "share_state"):
             if name in data:
                 setattr(settings, name, bool(data[name]))
         try:

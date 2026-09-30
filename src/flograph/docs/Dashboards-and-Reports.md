@@ -488,7 +488,12 @@ report, and is saved with it (each choice is one undo step):
   as well, **Only what is under the top bar's section** (in the Sidebar
   menu, on by default) splits the work the way a documentation site does:
   the bar lists the sections, and the sidebar, titled with the section's
-  name, lists only the headings inside the one being read.
+  name, lists only the headings inside the one being read. **Drop-down of
+  each section's headings** gives each section in the bar a menu of the
+  headings inside it, indented by level (as deep as **Heading levels
+  listed** says): point at the section, or click its ▾ on a touch screen.
+  The section's name still goes to the section, and a section with nothing
+  inside it stays a plain link.
 * **Each section its own page** — one section at a time, like the pages of
   a website, with anything above the first section as a header on every
   page. It works from the top bar, the sidebar or both, so it needs one of

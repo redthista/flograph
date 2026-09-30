@@ -68,6 +68,7 @@ def apply_layout(html: str, rendered, settings: "WebSettings | None" = None,
     head = f"<style>{LAYOUT_CSS}{_width_css(settings.width)}</style>"
     config = {"sidebar": settings.sidebar, "depth": settings.depth,
               "topbar": settings.topbar, "split": settings.split,
+              "menus": settings.topbar and settings.menus,
               "paged": settings.paged and settings.has_nav(),
               "share": settings.share_state,
               "title": title}
@@ -258,6 +259,35 @@ html.fg-js .fg-page:not(.fg-on) { display: none; }
 .fg-top-links a:hover { color: var(--fg-nav-ink); background: var(--fg-nav-hover); }
 .fg-top-links a.fg-on { color: var(--fg-nav-ink); border-bottom-color: var(--fg-accent); font-weight: 600; }
 html.fg-has-top body { padding-top: calc(var(--fg-top-h) + 20px) !important; }
+/* drop-downs: the bar can't scroll sideways and still let them out */
+.fg-top-links.fg-has-menus { overflow: visible; }
+.fg-top-item { position: relative; display: flex; align-items: stretch; height: 100%; }
+.fg-top-item > a { padding-right: 4px !important; }
+.fg-caret {
+  appearance: none; border: 0; background: none; cursor: pointer; padding: 0 10px 0 4px;
+  color: var(--fg-nav-muted); border-bottom: 2px solid transparent;
+}
+.fg-caret::before {
+  content: ""; display: inline-block; width: 5px; height: 5px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg); margin-bottom: 3px;
+}
+.fg-top-item > a.fg-on + .fg-caret { border-bottom-color: var(--fg-accent); color: var(--fg-nav-ink); }
+.fg-top-item:hover > .fg-caret, .fg-top-item:hover > a { background: var(--fg-nav-hover); color: var(--fg-nav-ink); }
+.fg-drop {
+  display: none; position: absolute; top: 100%; left: 0; min-width: 220px;
+  max-height: 70vh; overflow-y: auto; padding: 6px;
+  background: var(--fg-nav-bg); color: var(--fg-nav-ink);
+  border: 1px solid var(--fg-nav-line); border-radius: 0 0 10px 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+.fg-top-item:hover > .fg-drop, .fg-top-item.fg-open > .fg-drop { display: block; }
+.fg-top-item.fg-hush > .fg-drop { display: none; }
+.fg-drop a {
+  display: block; padding: 7px 12px; border-radius: 6px; white-space: nowrap;
+  color: inherit; text-decoration: none;
+}
+.fg-drop a:hover { background: var(--fg-nav-hover); color: var(--fg-accent); }
 
 /* ---- the sidebar */
 .fg-side {
@@ -472,13 +502,76 @@ LAYOUT_JS = r"""
       });
     }
     var links = top.querySelector(".fg-top-links");
+    var menuDepth = cfg.depth > 0 ? Math.min(6, cfg.depth) : 6;   // 0: every level
     tops.forEach(function (h) {
       var a = document.createElement("a");
       a.href = "#" + h.id; a.textContent = h.textContent.trim();
-      links.appendChild(a);
       topLinks[h.id] = a;
+      var under = cfg.menus ? headingsUnder(h).filter(function (x) {
+        return +x.tagName[1] <= level + menuDepth;
+      }) : [];
+      if (!under.length) { links.appendChild(a); return; }
+      // a drop-down of the headings inside the section: open on hover, or
+      // on the arrow for a touch screen or the keyboard; the name itself
+      // still goes to the section
+      var item = document.createElement("div");
+      item.className = "fg-top-item";
+      item.appendChild(a);
+      var caret = document.createElement("button");
+      caret.type = "button"; caret.className = "fg-caret";
+      caret.setAttribute("aria-label", "Inside " + a.textContent);
+      caret.setAttribute("aria-expanded", "false");
+      item.appendChild(caret);
+      var drop = document.createElement("div");
+      drop.className = "fg-drop";
+      under.forEach(function (x) {
+        var link = document.createElement("a");
+        link.href = "#" + x.id; link.textContent = x.textContent.trim();
+        link.style.paddingLeft = (12 + 14 * (+x.tagName[1] - level - 1)) + "px";
+        drop.appendChild(link);
+      });
+      item.appendChild(drop);
+      caret.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var opening = !item.classList.contains("fg-open");
+        closeMenus();
+        item.classList.toggle("fg-open", opening);
+        caret.setAttribute("aria-expanded", opening ? "true" : "false");
+      });
+      // gone once a heading in it is picked, until the pointer leaves
+      drop.addEventListener("click", function () {
+        closeMenus();
+        item.classList.add("fg-hush");
+      });
+      item.addEventListener("mouseleave", function () { item.classList.remove("fg-hush"); });
+      links.appendChild(item);
     });
+    if (cfg.menus) { links.classList.add("fg-has-menus"); }
     body.insertBefore(top, body.firstChild);
+    document.addEventListener("click", function (e) {
+      if (!e.target.closest || !e.target.closest(".fg-top-item")) { closeMenus(); }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { closeMenus(); }
+    });
+  }
+  function closeMenus() {
+    all(".fg-top-item.fg-open").forEach(function (item) {
+      item.classList.remove("fg-open");
+      var caret = item.querySelector(".fg-caret");
+      if (caret) { caret.setAttribute("aria-expanded", "false"); }
+    });
+  }
+  // the headings inside a top-level section, in order: everything after its
+  // heading and before the next top-level one, at a lower level
+  function headingsUnder(h) {
+    var next = tops[tops.indexOf(h) + 1] || null;
+    return all("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]").filter(function (x) {
+      if (x === h || +x.tagName[1] <= level || x.closest(".fg-top, .fg-side")) { return false; }
+      var after = h.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING;
+      var before = !next || (next.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_PRECEDING);
+      return after && before;
+    });
   }
 
   // ------------------------------------------------------------ sidebar

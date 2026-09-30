@@ -194,6 +194,15 @@ class TestTheWebPage:
         assert '"topbar": true' in config and '"depth": 0' in config
         assert '<h2 id="one"' in html
 
+    def test_drop_downs_only_come_with_a_top_bar(self, qapp):
+        rendered = render("# A\n\n## B\n\n### B1\n\n## C")
+        on = report_html(rendered, "t",
+                         web=WebSettings(topbar=True, menus=True))
+        assert '"menus": true' in on and ".fg-drop" in on
+        off = report_html(rendered, "t",
+                          web=WebSettings(sidebar="open", menus=True))
+        assert '"menus": false' in off
+
     def test_paged_with_no_way_round_is_not_paged(self, qapp):
         html = report_html(render("# A\n\n## B\n\n## C"), "t",
                            web=WebSettings(paged=True, width=820))
@@ -287,6 +296,11 @@ class TestTheToolbar:
         top.trigger()
         assert graph.pages["p1"].web.topbar
         assert split_action().isEnabled() and split_action().isChecked()
+        menus = next(a for a in widget.web_menu().actions()
+                     if a.text() == "Drop-down of each section's headings")
+        assert menus.isEnabled() and not menus.isChecked()
+        menus.trigger()
+        assert graph.pages["p1"].web.menus
 
     def test_heading_levels_start_on_auto(self, page):
         widget, _graph, _stack = page

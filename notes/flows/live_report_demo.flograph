@@ -623,6 +623,7 @@
     "web": {
      "sidebar": "open",
      "topbar": true,
+     "menus": true,
      "paged": true,
      "width": 1400
     }

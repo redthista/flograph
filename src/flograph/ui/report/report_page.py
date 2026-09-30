@@ -927,6 +927,11 @@ class ReportPage(QWidget):
         toggle(menu, "Top bar of the top-level sections", web.topbar,
                "topbar",
                "The page's title and its top-level sections across the top")
+        toggle(menu, "Drop-down of each section's headings", web.menus,
+               "menus",
+               "Each section in the top bar opens a menu of the headings "
+               "inside it — on hover, or its arrow",
+               enabled=web.topbar)
         toggle(menu, "Each section its own page", web.paged, "paged",
                "Show one top-level section at a time, like the pages of a "
                "site, from the sidebar or the top bar",
