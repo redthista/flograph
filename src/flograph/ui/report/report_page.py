@@ -992,7 +992,7 @@ class ReportPage(QWidget):
     def web_menu(self) -> QMenu:
         """Web Layout ▾ — every web setting, each applied as it is picked
         (one undo step each)."""
-        from flograph.core.web_layout import WIDTHS
+        from flograph.core.web_layout import FULL_WIDTH, WIDTHS
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
         page = self._page()
@@ -1075,8 +1075,9 @@ class ReportPage(QWidget):
             "Show one page at a time, like a website, gone between from "
             "the sidebar or the top bar — needs one of them")
         width = submenu(menu, "Text width")
-        names = {0: "The whole window", 1400: "Wide (1400 px)",
-                 1100: "Medium (1100 px)", 820: "Reading column (820 px)"}
+        names = {0: "The theme's width", FULL_WIDTH: "The whole window",
+                 1400: "Wide (1400 px)", 1100: "Medium (1100 px)",
+                 820: "Reading column (820 px)"}
         options = [(names[w], w) for w in WIDTHS]
         if web.width not in WIDTHS:
             options.append((f"{web.width} px", web.width))

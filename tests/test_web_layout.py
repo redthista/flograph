@@ -17,7 +17,7 @@ from flograph.core.graph import Page
 from flograph.core.report_assist import Vocabulary, suggest
 from flograph.core.serialization import graph_from_dict, graph_to_dict
 from flograph.core.web_layout import (BLOCK_P_RE, Block, WebSettings,
-                                      expand_blocks, slug)
+                                      expand_blocks, slug, split_front_matter)
 from flograph.ui.commands import SetPageWebCommand
 from flograph.ui.report import render as R
 from flograph.ui.report.html import report_html
@@ -334,3 +334,29 @@ class TestTheToolbar:
                       if a.text() == "Heading levels listed").menu()
         checked = [a.text() for a in levels.actions() if a.isChecked()]
         assert checked == ["Auto (every level)"]
+
+
+class TestTextWidth:
+    """Text width under a theme with a width of its own: the theme's
+    `body { max-width }` won, so every choice left the page at about
+    1,200 px, and "the whole window" (0) had never set anything at all."""
+
+    def test_the_whole_window_is_its_own_choice_and_is_kept(self):
+        from flograph.core.web_layout import FULL_WIDTH, WIDTHS
+        assert FULL_WIDTH in WIDTHS and 0 in WIDTHS
+        saved = WebSettings(width=FULL_WIDTH).to_dict()
+        assert WebSettings.from_dict(saved).width == FULL_WIDTH
+
+    @pytest.mark.parametrize("word, width", [
+        ("full", -1), ("window", -1), ("theme", 0), ("wide", 1400), ("820px", 820)])
+    def test_front_matter_words(self, word, width):
+        matter, _ = split_front_matter(f"---\nwidth: {word}\n---\n# x")
+        assert WebSettings().with_front_matter(matter).width == width
+
+    def test_the_rules_outweigh_a_themes_body(self):
+        from flograph.core.web_layout import FULL_WIDTH
+        from flograph.ui.report.web_layout import _width_css
+        assert _width_css(0) == ""
+        assert "html body { max-width: none !important; }" in _width_css(FULL_WIDTH)
+        assert re.search(r"html body \{ max-width: var\(--fg-width\) !important;",
+                         _width_css(1100))

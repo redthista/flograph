@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Text width works under every theme** | **Web Layout ▸ Text width** did nothing under a starter theme that sets its own page width (Compact, Dashboard, Midnight, Ledger, Aurora): the theme's rule won, so every choice left the page at about 1,200 pixels, and **The whole window** had only ever meant "no width of our own". The choice now wins over the theme: **The whole window** fills the window, and 1400, 1100 or 820 hold the page to that width. The default is now called **The theme's width** and is unchanged. In front matter, `width: full` means the whole window and `width: theme` the default. |
 
 ## 0.1.23
 

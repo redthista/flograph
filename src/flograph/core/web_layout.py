@@ -181,8 +181,13 @@ def slug(text: str, used: set) -> str:
 
 SIDEBAR = ("off", "open", "closed")
 PAGED = ("off", "sections", "headings")
-#: Content widths offered, in CSS pixels; 0 is the whole window.
-WIDTHS = (0, 1400, 1100, 820)
+#: The whole window, over a theme's own width (a starter theme holds its
+#: page to about 1200 px, which "the whole window" used to leave in place).
+FULL_WIDTH = -1
+#: Content widths offered, in CSS pixels. 0 leaves it to the theme — with
+#: no theme, the whole window; FULL_WIDTH is the whole window whatever the
+#: theme says; a number holds the text to that width, over the theme's.
+WIDTHS = (0, FULL_WIDTH, 1400, 1100, 820)
 
 
 @dataclass
@@ -207,8 +212,9 @@ class WebSettings:
       picking any entry shows only what is under it; `off` is one page.
       `pager` ends each page on Previous / Next links.
 
-    `width` holds the text to a column that many pixels wide, 0 for the
-    window. `share_state` keeps the open page, tab and sections and the
+    `width` holds the text to a column that many pixels wide; 0 leaves
+    it to the theme (the window, with none) and FULL_WIDTH is the whole
+    window over the theme's own width. `share_state` keeps the open page, tab and sections and the
     place in the page's address, so a copied link opens where it was
     copied from.
 
@@ -262,7 +268,7 @@ class WebSettings:
         except (TypeError, ValueError):
             pass
         try:
-            settings.width = max(0, int(data.get("width", 0)))
+            settings.width = max(FULL_WIDTH, int(data.get("width", 0)))
         except (TypeError, ValueError):
             pass
         return settings
@@ -330,8 +336,9 @@ _KEYS = {
     "width": "width", "share": "share_state", "address": "share_state",
     "sharestate": "share_state",
 }
-_WIDTH_WORDS = {"full": 0, "window": 0, "wide": 1400, "medium": 1100,
-                "reading": 820, "narrow": 820}
+_WIDTH_WORDS = {"full": FULL_WIDTH, "window": FULL_WIDTH, "theme": 0,
+                "auto": 0, "wide": 1400, "medium": 1100, "reading": 820,
+                "narrow": 820}
 
 
 def _bool(value: str):

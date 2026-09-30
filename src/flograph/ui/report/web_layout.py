@@ -43,7 +43,7 @@ import html as _html
 import json
 import re
 
-from flograph.core.web_layout import BLOCK_P_RE, WebSettings, slug
+from flograph.core.web_layout import BLOCK_P_RE, FULL_WIDTH, WebSettings, slug
 
 _HEADING_RE = re.compile(r"<h([1-6])\b([^>]*)>(.*?)</h\1\s*>",
                          re.IGNORECASE | re.DOTALL)
@@ -180,12 +180,26 @@ def _with_blocks(html: str, blocks: list, used: set) -> str:
 
 
 def _width_css(width: int) -> str:
+    """The page's width on screen, over the theme's own.
+
+    `html body`, not `body`: a starter theme holds its body to a width of
+    its own, some with `!important`, and a rule of equal weight later in
+    the page won — Text width did nothing under Compact, Aurora or Ledger,
+    and "the whole window" had never been anything but the theme's width.
+    """
     if not width:
         return ""
+    if width == FULL_WIDTH:
+        return """
+@media screen {
+  html body { max-width: none !important; }
+}
+"""
     return f"""
 :root {{ --fg-width: {int(width)}px; }}
 @media screen {{
-  body {{ max-width: var(--fg-width); margin-left: auto !important;
+  html body {{ max-width: var(--fg-width) !important;
+         margin-left: auto !important;
          margin-right: auto !important; box-sizing: border-box; }}
 }}
 @media screen and (min-width: 900px) {{

@@ -564,8 +564,10 @@ report, and is saved with it (each choice is one undo step):
   bar, so a page you pick shows that page and nothing else. Tick
   **Previous / Next at the foot of each page** (in the same menu, off to
   start with) to end every page on **← Previous** and **Next →** links.
-* **Text width** — the whole window, or a column held to 1400, 1100 or 820
-  pixels.
+* **Text width** — **The theme's width** (the default: each starter theme
+  holds its page to about 1,200 pixels, and with no theme it is the whole
+  window), **The whole window** whatever the theme says, or a column held
+  to 1400, 1100 or 820 pixels. The choice wins over the theme's own width.
 * **Keep the view in the page address** (on) — the page, each tab not on its
   first part, each section opened or closed, and the heading being read
   are written into the address as the reader goes:
@@ -604,8 +606,9 @@ width: reading
 
 The words it takes: `title`, `heading`, `icon`; `sidebar` (open, closed,
 off); `depth` (auto or 1–6); `top bar`, `menus`, `split`, `pager`,
-`share` (yes / no); `pages` (off, sections, headings); `width` (full,
-wide, medium, reading, or a number of pixels). A value it cannot read is
+`share` (yes / no); `pages` (off, sections, headings); `width` (theme,
+full, wide, medium, reading, or a number of pixels — `full` is the whole
+window over the theme's width). A value it cannot read is
 ignored. The block is taken off before the page is drawn, so it never
 shows — not on the web page, the Pages preview or the PDF. It only counts
 when it is the very first thing on the page and every line in it is a

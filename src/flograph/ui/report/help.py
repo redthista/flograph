@@ -269,7 +269,9 @@ and Page Setup is still at the bottom of that menu for then.</p>
         <code>#</code> title over <code>##</code> regions makes a page per
         region.</td></tr>
 <tr><td><b>Text width</b></td>
-    <td>the whole window, or a column held to a width for reading.</td></tr>
+    <td>the theme's own width (the default), the whole window whatever the
+        theme says, or a column held to a width for reading &mdash; the
+        choice wins over the theme's.</td></tr>
 <tr><td><b>Keep the view in the page address</b></td>
     <td>the page, tab and open sections, and the heading being read, go in
         the address (<code>#page=costs&amp;tab.region=south</code>), so a
