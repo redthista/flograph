@@ -254,7 +254,9 @@ class TestOnPaper:
         # break is `<br />`, never a bare `<br>`: Qt's markdown reader drops
         # the whole table a bare one sits in, so it vanished from reports
         assert "<br />" in cell and "<br>" not in cell
-        assert cell.index("A") < cell.index("L") < cell.index(" a</td>") \
+        # the left mark and the value are held together by a no-break
+        # space, so a squeezed column cannot put the value under its mark
+        assert cell.index("A") < cell.index("L") < cell.index("&nbsp;a</td>") \
             < cell.index("R")
 
     def test_a_right_mark_is_held_against_the_cells_edge(self):
