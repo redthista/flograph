@@ -271,6 +271,22 @@ class TestTheSurfacesRefuse:
         # the work the guard above skips
         assert host._menu_target is None
 
+    def test_the_main_window_swallows_a_stray_event(self, qtbot):
+        """The outer window's bare right-click menu lists the dock host's
+        docks too — "Node Library, Code, …" after locking a page from its
+        tab's menu, when the leftover landed outside the dock host."""
+        from flograph.core.registry import NodeRegistry
+        from flograph.ui.mainwindow import MainWindow
+        window = MainWindow(NodeRegistry())
+        window.confirm_close = False
+        qtbot.addWidget(window)
+        opened = []
+        window.createPopupMenu = lambda: opened.append(True)
+        menu_guard.menu_closed()
+        event = FakeContextEvent()
+        window.contextMenuEvent(event)
+        assert event.accepted and opened == []
+
 
 class TestTheBeltIsFastened:
     """Every menu that can open underneath one of the page bar's consults
@@ -283,18 +299,20 @@ class TestTheBeltIsFastened:
         from flograph.ui.dashboard.dashboard_view import DashboardView
         from flograph.ui.data_table import DataTableView
         from flograph.ui.dock_host import DockHost
+        from flograph.ui.mainwindow import MainWindow
         from flograph.ui.spreadsheet.view import SpreadsheetView
         return [
             LibraryTree._on_context_menu,
             NodeGraphView.contextMenuEvent,
             DashboardView.contextMenuEvent,
             DockHost.contextMenuEvent,
+            MainWindow.contextMenuEvent,
             DataTableView._show_menu,
             SpreadsheetView._column_menu,
             SpreadsheetView._row_menu,
         ]
 
-    @pytest.mark.parametrize("index", range(7))
+    @pytest.mark.parametrize("index", range(8))
     def test_the_surface_consults_the_guard(self, index):
         function = self.surfaces()[index]
         source = inspect.getsource(function)

@@ -1229,6 +1229,21 @@ class MainWindow(QMainWindow):
         if checked and self.isVisible():
             self._verify_gpu_viewport_soon()
 
+    def contextMenuEvent(self, event) -> None:
+        """The outer window's own right-click menu is Qt's list of docks —
+        and it lists the dock host's too, so a stray event here opens
+        "Node Library, Code, …" just as one reaching the dock host would.
+        What lands here is anything outside the dock host: the page bar's
+        row, the strips around a page. Locking a page from its tab's menu
+        hides the page's side panels and moves what is under the pointer,
+        and the menu's leftover right-click (ui/menu_guard) came out here —
+        the one window the guard had missed."""
+        from . import menu_guard
+        if menu_guard.stray(event):
+            event.accept()
+            return
+        super().contextMenuEvent(event)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         # A GL context is only created on first paint, so verifying a
