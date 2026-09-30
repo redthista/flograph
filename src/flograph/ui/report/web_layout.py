@@ -377,6 +377,14 @@ li.fg-fold > .fg-row > .fg-twist::before { transform: rotate(-45deg); margin-bot
 .fg-icon-btn:hover { border-color: var(--fg-accent); color: var(--fg-accent); }
 .fg-side-open { position: fixed; left: 12px; top: calc(var(--fg-top-h) + 12px); z-index: 50; }
 html.fg-has-top .fg-side-open { display: none; }
+/* with the sidebar put away and no top bar to hold its button, the
+   button floats at the top left — the page keeps clear of it rather than
+   sliding its first words underneath */
+@media screen {
+  html.fg-has-side:not(.fg-has-top):not(.fg-side-on) body {
+    padding-left: 62px !important;
+  }
+}
 html.fg-side-on .fg-side-open { display: none; }
 @media screen and (min-width: 900px) {
   html.fg-side-on body { margin-left: var(--fg-side-w) !important; }
@@ -695,6 +703,7 @@ LAYOUT_JS = r"""
     heads.forEach(function (h) { base = Math.min(base, +h.tagName[1]); });
     var depth = cfg.depth > 0 ? Math.min(6, cfg.depth) : 6;   // 0: every level
     heads = heads.filter(function (h) { return +h.tagName[1] < base + depth; });
+    root.classList.add("fg-has-side");
     var side = document.createElement("aside");
     side.className = "fg-side";
     side.setAttribute("aria-label", "Contents");
