@@ -30,6 +30,7 @@ from contextlib import contextmanager
 
 import time
 
+import shiboken6
 from PySide6.QtCore import QEventLoop, QTimer, QUrl
 
 # Long enough for a slow first paint on a loaded machine, short enough that
@@ -101,6 +102,8 @@ def _await_js(view, expression: str, timeout_ms: int):
     answer: dict = {}
 
     def got(value):
+        if "done" in answer:
+            return
         if value:
             answer["value"] = value
             loop.quit()
@@ -108,6 +111,10 @@ def _await_js(view, expression: str, timeout_ms: int):
             QTimer.singleShot(POLL_MS, poll)
 
     def poll():
+        # a poll queued before the wait ended can fire after it — by then
+        # the view may be gone
+        if "done" in answer or not shiboken6.isValid(view):
+            return
         view.page().runJavaScript(expression, got)
 
     deadline = QTimer()
@@ -119,6 +126,7 @@ def _await_js(view, expression: str, timeout_ms: int):
     # kicking off a second render inside this one.
     loop.exec(QEventLoop.ExcludeUserInputEvents)
     deadline.stop()
+    answer["done"] = True
     return answer.get("value")
 
 

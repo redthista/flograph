@@ -345,7 +345,7 @@ colours, web fonts. Resize the card to change how the HTML lays out;
 
 A report page's Markdown is coloured by what each part does: headings, an
 embed's name (bold) and its options, `:::` blocks and their `==` tabs, code
-spans and fences (a ```columns block is layout, so what is in it is
+spans and fences (a `columns` block is layout, so what is in it is
 coloured as Markdown), links — a `page:` link in its own colour — lists,
 quotes and front matter. An embed with a typo stands out because it isn't
 coloured like one. The CSS tab is coloured as code: selectors (a `.class`
