@@ -4,6 +4,7 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Fix | **Tables stay compact under every theme** | A report's tables were compact with no CSS and ballooned under a theme: each cell's value is a paragraph, so a theme's paragraph spacing and line height reached every row — under Aurora a plain table's rows grew from 21px to 36px. All nine starter themes now keep paragraph spacing out of table cells, set tables at a tighter line height and trim cell padding, so rows come out about the size they are with no CSS. Clean, Editorial and Slate no longer pad the small table inside a data-bar cell. A `width=100%` live table no longer sticks out past the page by its panel's padding (Dashboard, Midnight, Aurora), and a chart drawn as a picture is no longer held to a theme's reading width (Compact, Ledger). A theme copied into a page before this keeps its old look: pick it again under the CSS tab's **Starter theme** to take the new one. |
 
 ## 0.1.21
 

@@ -59,7 +59,13 @@ table thead td p, table thead td span {
   background-color: #1d4ed8 !important;
 }
 .flograph-table tr:nth-child(even) { background: #eff6ff; }
-td, th { padding: 7px 9px; }
+.flograph-table > thead > tr > th, .flograph-table > tbody > tr > td {
+  padding: 3px 9px;
+}
+/* a plain table keeps Qt's own spacing between cells: little padding */
+table[cellspacing="2"] > thead > tr > td, table[cellspacing="2"] > tbody > tr > td {
+  padding: 1px 6px;
+}
 img { display: block; margin: 1.5em auto; }
 /* the web layout: sidebar, top bar, tabs, sections that fold */
 :root {
@@ -96,7 +102,13 @@ table thead td p, table thead td span {
   background-color: #44403c !important;
 }
 .flograph-table tr:nth-child(even) { background: #f5f5f4; }
-td, th { padding: 8px 10px; }
+.flograph-table > thead > tr > th, .flograph-table > tbody > tr > td {
+  padding: 3px 10px;
+}
+/* a plain table keeps Qt's own spacing between cells: little padding */
+table[cellspacing="2"] > thead > tr > td, table[cellspacing="2"] > tbody > tr > td {
+  padding: 1px 6px;
+}
 img { display: block; margin: 2em auto; }
 /* the web layout: warm bars, sections as margin notes, small-caps tabs */
 :root {
@@ -168,7 +180,13 @@ table table > tr > td:first-child {
   background-color: inherit !important;
 }
 .flograph-table tr:nth-child(even) { background: #273449; }
-td, th { padding: 7px 9px; }
+.flograph-table > thead > tr > th, .flograph-table > tbody > tr > td {
+  padding: 3px 9px;
+}
+/* a plain table keeps Qt's own spacing between cells: little padding */
+table[cellspacing="2"] > thead > tr > td, table[cellspacing="2"] > tbody > tr > td {
+  padding: 1px 6px;
+}
 /* a ```columns block is layout, not a table of data: no white cells */
 table[style*="border-style:none"] > tbody > tr > td {
   background-color: transparent !important;
@@ -191,7 +209,9 @@ details.fg-details[open] > summary { background: #16233f; }
 # The themes made for live pages — compact, and aware of the live charts
 # and tables. Kept in their own module: they are long, and they are about
 # Qt's markup in a way the three above are not.
-from .css_themes import LIVE_THEMES  # noqa: E402
+from .css_themes import COMPACT_CELLS, LIVE_THEMES  # noqa: E402
+for _name in ("Clean", "Editorial", "Slate"):
+    CSS_TEMPLATES[_name] += COMPACT_CELLS
 CSS_TEMPLATES.update(LIVE_THEMES)
 
 

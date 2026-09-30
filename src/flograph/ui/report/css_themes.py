@@ -28,10 +28,28 @@ own `group =>` colours instead.
 """
 from __future__ import annotations
 
+#: Every starter theme ends with this. Qt writes a table cell's value as a
+#: paragraph, so a theme's paragraph spacing (`p { margin: 4px 0 }`) and
+#: its roomy line height reached every row — Aurora's plain-table rows came
+#: out 36px tall against 21px with no theme at all. Tables keep the page's
+#: type but not its paragraph spacing. A ```columns block is layout, not a
+#: table of data, and keeps its paragraphs as they are.
+COMPACT_CELLS = """
+/* tables stay compact: a cell's value is a paragraph (Qt writes it so),
+   and the page's paragraph spacing is not meant for it */
+.flograph-table td p, .flograph-table th p,
+table[cellspacing="2"] td p { margin: 0 !important; }
+.flograph-table, table[cellspacing="2"] { line-height: 1.3; }
+/* a chart drawn as a picture sits in a paragraph: no reading width for it */
+p:has(> img) { max-width: none !important; }
+"""
+
+
 def _plain_tables(head_bg: str, head_ink: str, line: str, group_bg: str,
                   group_ink: str, track: str, table_bg: str = "transparent",
                   head_rule: str = "", vertical: bool = True,
-                  dark: bool = False, extra: str = "") -> str:
+                  dark: bool = False, extra: str = "",
+                  pad: str = "3px 9px") -> str:
     """A theme's look for a *plain* table: one Qt wrote — an embed without
     `|live`, or a Markdown table — which arrives dressed for paper, its
     colours inline: a grey header, #999 grid lines on every cell, grey
@@ -54,7 +72,7 @@ def _plain_tables(head_bg: str, head_ink: str, line: str, group_bg: str,
 {t} {{ border-collapse: collapse !important; background: {table_bg};
   margin: 8px 0 !important; }}
 {cells} {{
-  border-color: {line} !important; padding: 4px 10px !important;{side}
+  border-color: {line} !important; padding: {pad} !important;{side}
 }}
 {t} > thead > tr > td {{
   background-color: {head_bg} !important;
@@ -80,7 +98,7 @@ table[bgcolor="#eceef1"] {{ background-color: {track} !important; }}
   color: #14161c !important;
 }}
 """
-    return css + extra
+    return css + extra + COMPACT_CELLS
 
 
 COMPACT = """/* Compact — dense and exact. Small type, hairline rules, numbers that
@@ -168,7 +186,7 @@ p > img { border: 1px solid var(--line); border-radius: 6px; }
 .flograph-table > thead > tr > th {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--muted);
-  padding: 6px 8px; border-bottom: 1px solid var(--line-strong);
+  padding: 4px 8px; border-bottom: 1px solid var(--line-strong);
   white-space: nowrap;
 }
 .flograph-table > tbody > tr > td {
@@ -316,14 +334,14 @@ li { margin: 2px 0 !important; }
 }
 .fg-chart > img { height: 100%; object-fit: contain; }
 p > img { padding: 8px; box-sizing: border-box; }
-.fg-table { padding: 12px 14px; margin: 8px 0 !important; width: auto; }
+.fg-table { padding: 8px 10px; margin: 8px 0 !important; width: auto; }
 .fg-scroll .flograph-table { width: 100%; border-collapse: collapse; }
 .flograph-table > thead > tr > th {
   font-size: 11px; font-weight: 600; color: var(--muted);
-  padding: 7px 9px; border-bottom: 2px solid var(--line); white-space: nowrap;
+  padding: 4px 9px; border-bottom: 2px solid var(--line); white-space: nowrap;
 }
 .flograph-table > tbody > tr > td {
-  padding: 5px 9px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  padding: 3px 9px; border-bottom: 1px solid var(--line); white-space: nowrap;
 }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(79, 70, 229, 0.05); }
 .flograph-table table[bgcolor] { background-color: var(--band); }
@@ -484,15 +502,15 @@ li::marker { color: var(--accent); }
 .fg-chart > img { height: 100%; object-fit: contain; }
 /* a picture was drawn for paper; dim it rather than let it glare */
 p > img, .fg-chart:not(.fg-drawn) > img { opacity: 0.9; }
-.fg-table { padding: 10px 12px; margin: 8px 0 !important; width: auto; }
+.fg-table { padding: 8px 10px; margin: 8px 0 !important; width: auto; }
 .fg-scroll .flograph-table { width: 100%; border-collapse: collapse; }
 .flograph-table > thead > tr > th {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--muted);
-  padding: 7px 9px; border-bottom: 1px solid var(--accent); white-space: nowrap;
+  padding: 4px 9px; border-bottom: 1px solid var(--accent); white-space: nowrap;
 }
 .flograph-table > tbody > tr > td {
-  padding: 4px 9px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  padding: 3px 9px; border-bottom: 1px solid var(--line); white-space: nowrap;
   color: var(--ink);
 }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(34, 211, 238, 0.07); }
@@ -676,7 +694,7 @@ li::marker { color: var(--accent); }
 .fg-scroll .flograph-table { border-collapse: collapse; width: 100%; }
 .flograph-table > thead > tr > th {
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--muted); padding: 7px 12px 5px !important;
+  color: var(--muted); padding: 5px 12px 4px !important;
   border-bottom: 1px solid var(--rule); white-space: nowrap;
 }
 .flograph-table th.fg-band {
@@ -685,7 +703,7 @@ li::marker { color: var(--accent); }
   border-bottom: 1px solid var(--hair);
 }
 .flograph-table > tbody > tr > td {
-  padding: 4px 12px !important; border-bottom: 1px solid var(--hair); white-space: nowrap;
+  padding: 3px 12px !important; border-bottom: 1px solid var(--hair); white-space: nowrap;
 }
 .flograph-table > tbody > tr:last-child > td { border-bottom: 0; }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px var(--accent-soft); }
@@ -1098,16 +1116,16 @@ li::marker { color: var(--pink); }
 /* clear glass is no ground for a chart that fills the screen */
 .fg-chart.fg-full.fg-full { background: var(--sky) !important; }
 .fg-chart::backdrop { background: var(--sky); }
-.fg-table { padding: 12px 14px; margin: 10px 0 !important; }
+.fg-table { padding: 8px 10px; margin: 10px 0 !important; }
 .fg-scroll .flograph-table { border-collapse: collapse; width: 100%; }
 .flograph-table > thead > tr > th {
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--muted); padding: 7px 10px !important;
+  color: var(--muted); padding: 4px 10px !important;
   border-bottom: 1px solid rgba(157, 140, 255, 0.45); white-space: nowrap;
 }
 .flograph-table th.fg-band { color: #d6ceff; border-bottom-color: var(--line); }
 .flograph-table > tbody > tr > td {
-  padding: 4px 10px !important; color: var(--ink);
+  padding: 3px 10px !important; color: var(--ink);
   border-bottom: 1px solid var(--line); white-space: nowrap;
 }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(157, 140, 255, 0.10); }
@@ -1212,12 +1230,12 @@ details.fg-details[open] > summary { border-bottom-color: var(--line); }
 
 
 # every live theme dresses the plain tables too
-COMPACT += _plain_tables("transparent", "#687085", "#e4e7ed", "#f5f7fa", "#1b2130", "#eef1f6", head_rule="#c9ced8", vertical=False)
+COMPACT += _plain_tables("transparent", "#687085", "#e4e7ed", "#f5f7fa", "#1b2130", "#eef1f6", head_rule="#c9ced8", vertical=False, pad="3px 8px")
 DASHBOARD += _plain_tables("#ffffff", "#64708a", "#e6e9f0", "#f6f7fb", "#172033", "#eef0f5", table_bg="#ffffff", head_rule="#e6e9f0", vertical=False)
 MIDNIGHT += _plain_tables("#111830", "#8491b3", "#222c4d", "#172042", "#ffffff", "rgba(255, 255, 255, 0.07)", table_bg="#111830", head_rule="#22d3ee", dark=True)
-LEDGER += _plain_tables("transparent", "#6f6857", "#dcd4c2", "#f2ede1", "#1d1b16", "#f2ede1", head_rule="#1d1b16", vertical=False, extra='table[cellspacing="2"] { border-top: 2px solid #1d1b16 !important; border-bottom: 2px solid #1d1b16 !important; }\n')
-TERMINAL += _plain_tables("#121821", "#ffb000", "#1c232e", "#151c27", "#ffffff", "rgba(255, 255, 255, 0.07)", table_bg="#0d1117", head_rule="#ffb000", dark=True)
-AURORA += _plain_tables("#161b38", "#a4acd3", "rgba(255, 255, 255, 0.08)", "#1a1f44", "#ffffff", "rgba(255, 255, 255, 0.08)", table_bg="rgba(255, 255, 255, 0.04)", head_rule="rgba(157, 140, 255, 0.45)", vertical=False, dark=True)
+LEDGER += _plain_tables("transparent", "#6f6857", "#dcd4c2", "#f2ede1", "#1d1b16", "#f2ede1", head_rule="#1d1b16", vertical=False, pad="3px 12px", extra='table[cellspacing="2"] { border-top: 2px solid #1d1b16 !important; border-bottom: 2px solid #1d1b16 !important; }\n')
+TERMINAL += _plain_tables("#121821", "#ffb000", "#1c232e", "#151c27", "#ffffff", "rgba(255, 255, 255, 0.07)", table_bg="#0d1117", head_rule="#ffb000", dark=True, pad="2px 8px")
+AURORA += _plain_tables("#161b38", "#a4acd3", "rgba(255, 255, 255, 0.08)", "#1a1f44", "#ffffff", "rgba(255, 255, 255, 0.08)", table_bg="rgba(255, 255, 255, 0.04)", head_rule="rgba(157, 140, 255, 0.45)", vertical=False, dark=True, pad="3px 10px")
 
 LIVE_THEMES = {
     "Compact": COMPACT,

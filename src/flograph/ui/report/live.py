@@ -241,7 +241,8 @@ table[style*="border-style:none"] .fg-chart { width: 100% !important; }
 .fg-chart > .fg-plot { position: absolute; inset: 0; }
 /* as wide as the table, so its bar (search, Expand all) sits over it and
    not at the far side of the page; a theme's full-width card overrides */
-.fg-table { margin: 0.6em 0; width: fit-content; max-width: 100%; }
+.fg-table { margin: 0.6em 0; width: fit-content; max-width: 100%;
+  box-sizing: border-box; }   /* a theme's padding and border stay inside a width=N% */
 /* `width=90%`: the box is that share of the page, and the table fills it */
 .fg-table[data-fg-share] .flograph-table { width: 100%; }
 /* Qt pads a report's cells from its own stylesheet; a browser's default

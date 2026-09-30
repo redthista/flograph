@@ -127,3 +127,26 @@ class TestPlainTablesInTheThemes:
         assert 'table[bgcolor="#eceef1"]' in css       # a bar's track
         # a table's figures are not code
         assert "span[style*=\"font-family:'monospace'\"]:not(td *)" in css
+
+
+class TestCompactCells:
+    """A cell's value is a paragraph (Qt writes it so): a theme's paragraph
+    spacing reached every row, and Aurora's plain rows came out 36px tall
+    against 21px with no theme. Every starter theme now keeps it out."""
+
+    @pytest.mark.parametrize("name", sorted(CSS_TEMPLATES))
+    def test_every_theme_keeps_paragraph_spacing_out_of_cells(self, name):
+        from flograph.ui.report.css_themes import COMPACT_CELLS
+        css = CSS_TEMPLATES[name]
+        # last, after the theme's own `p { margin }`, so it wins
+        assert css.rstrip().endswith(COMPACT_CELLS.rstrip())
+
+    @pytest.mark.parametrize("name", sorted(CSS_TEMPLATES))
+    def test_no_theme_pads_every_cell(self, name):
+        # a bare `td` rule also pads the little table inside a data bar
+        assert not re.search(r"(?m)^td, th \{", CSS_TEMPLATES[name])
+
+    def test_a_live_table_box_keeps_its_padding_inside_its_width(self):
+        from flograph.ui.report.live import LIVE_CSS
+        box = re.search(r"\.fg-table \{[^}]*\}", LIVE_CSS).group(0)
+        assert "box-sizing: border-box" in box
