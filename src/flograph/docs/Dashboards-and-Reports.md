@@ -505,8 +505,11 @@ report, and is saved with it (each choice is one undo step):
     A heading inside a tab, a folding section or a column stays on the
     page it is part of.
 
-  Anything above the first section is a header on every page, and every
-  page ends on **← Previous** and **Next →**.
+  Anything above the first section — the title, an introduction — is the
+  first page, reached from its entry in the sidebar or the title in the top
+  bar, so a page you pick shows that page and nothing else. Tick
+  **Previous / Next at the foot of each page** (in the same menu, off to
+  start with) to end every page on **← Previous** and **Next →** links.
 * **Text width** — the whole window, or a column held to 1400, 1100 or 820
   pixels.
 * **Keep the view in the page address** (on) — the page, each tab not on its

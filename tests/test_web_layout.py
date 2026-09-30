@@ -208,6 +208,15 @@ class TestTheWebPage:
                           web=WebSettings(sidebar="open", menus=True))
         assert '"menus": false' in off
 
+    def test_previous_and_next_are_asked_for(self, qapp):
+        rendered = render("# A\n\n## B\n\n## C")
+        off = report_html(rendered, "t", web=WebSettings(
+            sidebar="open", paged="headings"))
+        assert '"pager": false' in off
+        on = report_html(rendered, "t", web=WebSettings(
+            sidebar="open", paged="headings", pager=True))
+        assert '"pager": true' in on
+
     def test_paged_with_no_way_round_is_not_paged(self, qapp):
         html = report_html(render("# A\n\n## B\n\n## C"), "t",
                            web=WebSettings(paged="headings", width=820))
@@ -277,7 +286,17 @@ class TestTheToolbar:
         next(a for a in pages.actions()
              if a.text() == "One per heading").trigger()
         assert graph.pages["p1"].web.paged == "headings"
-        stack.undo()
+        # Previous / Next: off to start with, there once there are pages
+        pages = next(a for a in widget.web_menu().actions()
+                     if a.text() == "Pages").menu()
+        pager = next(a for a in pages.actions()
+                     if a.text().startswith("Previous / Next"))
+        assert pager.isEnabled() and not pager.isChecked()
+        pager.trigger()
+        assert graph.pages["p1"].web.pager
+        stack.undo()                    # Previous / Next
+        assert not graph.pages["p1"].web.pager
+        stack.undo()                    # the pages
         assert graph.pages["p1"].web == WebSettings(sidebar="open")
         # the menu shows what the page has
         menu = widget.web_menu()

@@ -939,6 +939,11 @@ class ReportPage(QWidget):
                        ("One per top-level section", "sections"),
                        ("One per heading", "headings")],
                web.paged, "paged")
+        pages.addSeparator()
+        toggle(pages, "Previous / Next at the foot of each page", web.pager,
+               "pager",
+               "Each page ends on links to the page before and after it",
+               enabled=web.paged != "off")
         pages.menuAction().setToolTip(
             "Show one page at a time, like a website, gone between from "
             "the sidebar or the top bar — needs one of them")

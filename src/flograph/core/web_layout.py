@@ -205,6 +205,7 @@ class WebSettings:
       whichever of the two is there: `sections` cuts a page at each
       top-level heading, `headings` at every heading the sidebar lists, so
       picking any entry shows only what is under it; `off` is one page.
+      `pager` ends each page on Previous / Next links.
 
     `width` holds the text to a column that many pixels wide, 0 for the
     window. `share_state` keeps the open page, tab and sections and the
@@ -217,6 +218,7 @@ class WebSettings:
     menus: bool = False
     split: bool = True
     paged: str = "off"
+    pager: bool = False
     width: int = 0
     share_state: bool = True
 
@@ -233,7 +235,7 @@ class WebSettings:
         settings = cls()
         if data.get("sidebar") in SIDEBAR:
             settings.sidebar = data["sidebar"]
-        for name in ("topbar", "menus", "split", "share_state"):
+        for name in ("topbar", "menus", "split", "pager", "share_state"):
             if name in data:
                 setattr(settings, name, bool(data[name]))
         if data.get("paged") in PAGED:

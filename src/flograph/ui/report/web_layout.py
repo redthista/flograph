@@ -22,9 +22,10 @@ one under another under its name, sections as their browser's own folding
 - **Paged** (with either of those to go by): one page at a time, like
   the pages of a site — a page per top-level section (`sections`), or per
   heading as deep as the sidebar lists (`headings`), so picking any entry
-  shows only what is under it. What comes before the first page is a
-  header on every one; a page that is only its heading lists the pages
-  inside it, and each ends on Previous / Next. Top level is the highest heading level used at
+  shows only what is under it. What comes before the first section — the
+  title, an introduction — is the first page, not a header over every
+  one; a page that is only its heading lists the pages inside it, and
+  (`pager`) each can end on Previous / Next. Top level is the highest heading level used at
   least twice — a report with one `#` title and a `##` per region splits
   by region.
 - **The address**: `#page=costs&tab.region=north&open=notes&at=q3` — the
@@ -73,6 +74,7 @@ def apply_layout(html: str, rendered, settings: "WebSettings | None" = None,
               "topbar": settings.topbar, "split": settings.split,
               "menus": settings.topbar and settings.menus,
               "paged": settings.paged if settings.has_nav() else "off",
+              "pager": settings.pager,
               "share": settings.share_state,
               "title": title}
     # `</` can't close the script from inside a JSON string once escaped
@@ -471,7 +473,7 @@ LAYOUT_JS = r"""
   // every heading from the top level down as deep as the sidebar lists
   // ("headings"). Only headings in the page's own flow — one inside a tab,
   // a folded section or a column stays on the page it is in. What comes
-  // before the first is a header on every page.
+  // before the first is the first page.
   var starts = [];
   if (cfg.paged === "sections") {
     starts = tops;
@@ -495,18 +497,40 @@ LAYOUT_JS = r"""
         current.setAttribute("data-page", node.id);
         body.insertBefore(current, node);
         pages.push(current);
+      } else if (!current && !pages.length && node.nodeType === 1) {
+        // what comes before the first page — the title, an introduction —
+        // is a page of its own, the first: picking a page shows that page
+        // and nothing else
+        current = document.createElement("section");
+        current.className = "fg-page fg-home";
+        body.insertBefore(current, node);
+        pages.push(current);
       }
       if (current) { current.appendChild(node); }
     });
+    pages.forEach(function (page) {
+      if (page.getAttribute("data-page")) { return; }
+      var named = page.querySelector("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]");
+      if (named) {
+        page.setAttribute("data-page", named.id);
+      } else {
+        page.id = "fg-home";
+        page.setAttribute("data-page", "fg-home");
+      }
+    });
+    function pageName(page) {
+      var head = document.getElementById(page.getAttribute("data-page"));
+      return head && isHeading(head) ? head.textContent.trim() : (cfg.title || "Start");
+    }
     pages.forEach(function (page, i) {
-      var head = page.firstElementChild, n = +head.tagName[1];
+      var head = page.firstElementChild;
       // a page that is only its heading lists the pages inside it, rather
       // than standing empty
-      if (page.children.length === 1) {
-        var inside = [];
+      if (page.children.length === 1 && isHeading(head)) {
+        var n = +head.tagName[1], inside = [];
         for (var j = i + 1; j < pages.length; j++) {
           var h = pages[j].firstElementChild;
-          if (+h.tagName[1] <= n) { break; }
+          if (!isHeading(h) || +h.tagName[1] <= n) { break; }
           if (+h.tagName[1] === n + 1 || !inside.length) { inside.push(h); }
         }
         if (inside.length) {
@@ -520,17 +544,18 @@ LAYOUT_JS = r"""
           page.appendChild(list);
         }
       }
-      // and every page ends on the way to the ones either side
+      // and, if the page asks, ends on the way to the ones either side
+      if (!cfg.pager) { return; }
       var pager = document.createElement("nav");
       pager.className = "fg-pager";
       pager.setAttribute("aria-label", "Pages");
       [[pages[i - 1], "fg-prev", "Previous"], [pages[i + 1], "fg-next", "Next"]].forEach(function (x) {
         if (!x[0]) { pager.appendChild(document.createElement("span")); return; }
-        var h = x[0].firstElementChild, a = document.createElement("a");
-        a.href = "#" + h.id; a.className = x[1];
+        var a = document.createElement("a");
+        a.href = "#" + x[0].getAttribute("data-page"); a.className = x[1];
         a.innerHTML = '<small></small><span></span>';
         a.firstChild.textContent = x[2];
-        a.lastChild.textContent = h.textContent.trim();
+        a.lastChild.textContent = pageName(x[0]);
         pager.appendChild(a);
       });
       page.appendChild(pager);

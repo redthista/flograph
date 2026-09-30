@@ -232,9 +232,10 @@ and Page Setup is still at the bottom of that menu for then.</p>
     <td>one page at a time, like a website, gone between from the top bar
         or the sidebar: <i>One per top-level section</i>, or <i>One per
         heading</i> &mdash; pick any heading and you see only what is under
-        it, down to the next heading. Anything above the first section is
-        a header on every page, and each page ends on Previous / Next. A
-        section is the biggest heading used more than once &mdash; one
+        it, down to the next heading. Anything above the first section
+        &mdash; the title, an introduction &mdash; is the first page.
+        <i>Previous / Next at the foot of each page</i> adds a link to the
+        pages either side. A section is the biggest heading used more than once &mdash; one
         <code>#</code> title over <code>##</code> regions makes a page per
         region.</td></tr>
 <tr><td><b>Text width</b></td>
