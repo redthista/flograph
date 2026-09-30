@@ -17,8 +17,9 @@ one under another under its name, sections as their browser's own folding
   starts is the page's.
 - **Top bar**: the top-level sections, marking the one being read. With
   a sidebar too and `split` on, the bar takes the top level and the
-  sidebar lists only the headings inside the current section (one list
-  per section, swapped as the reader moves).
+  sidebar lists only the current section — its heading and the headings
+  inside it (one list per section, swapped as the reader moves; all of
+  them on the opening page, which is in no section).
 - **Paged** (with either of those to go by): one page at a time, like
   the pages of a site — a page per top-level section (`sections`), or per
   heading as deep as the sidebar lists (`headings`), so picking any entry
@@ -697,7 +698,9 @@ LAYOUT_JS = r"""
   var sectionId = null;
   if (hasSide) {
     var heads = all("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]").filter(function (h) {
-      return !h.closest(".fg-top, .fg-side") && (!split || +h.tagName[1] > level);
+      // split: the section's own heading heads its list, so its page is
+      // one click away from anywhere inside it
+      return !h.closest(".fg-top, .fg-side") && (!split || +h.tagName[1] >= level);
     });
     var base = 7;
     heads.forEach(function (h) { base = Math.min(base, +h.tagName[1]); });
@@ -790,10 +793,10 @@ LAYOUT_JS = r"""
     Object.keys(topLinks).forEach(function (k) { topLinks[k].classList.toggle("fg-on", k === id); });
     if (!split || id === sectionId) { sectionId = id; return; }
     sectionId = id;
-    Object.keys(sideLists).forEach(function (k) { sideLists[k].hidden = k !== id; });
-    var head = id && document.getElementById(id);
-    if (sideTitle) { sideTitle.textContent = head ? head.textContent.trim() : "Contents"; }
-    if (sideEmpty) { sideEmpty.hidden = !!sideLists[id] || !id; }
+    // in a section, its own list; above the first one (the opening page),
+    // every section's, so the sidebar is never empty
+    Object.keys(sideLists).forEach(function (k) { sideLists[k].hidden = !!id && k !== id; });
+    if (sideEmpty) { sideEmpty.hidden = !id || !!sideLists[id]; }
   }
   if (pages.length) { showPage(pages[0]); } else { markSection(""); }
 

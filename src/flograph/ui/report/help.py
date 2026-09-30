@@ -224,8 +224,9 @@ and Page Setup is still at the bottom of that menu for then.</p>
 <tr><td><b>Top bar of the top-level sections</b></td>
     <td>the page's title and its sections across the top. With the
         sidebar too, <i>Only what is under the top bar's section</i> (on)
-        has the bar take the sections and the sidebar the headings inside
-        the one being read. <b>Drop-down of each section's headings</b>
+        has the bar take the sections and the sidebar the one being read
+        &mdash; its own heading first, then the headings inside it.
+        <b>Drop-down of each section's headings</b>
         gives every section in the bar a menu of what is inside it, opened
         by pointing at it or with its arrow.</td></tr>
 <tr><td><b>Pages</b></td>

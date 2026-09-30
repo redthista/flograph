@@ -922,7 +922,8 @@ class ReportPage(QWidget):
         toggle(side, "Only what is under the top bar's section", web.split,
                "split",
                "With a top bar: the bar lists the top-level sections and the "
-               "sidebar the headings inside the one being read",
+               "sidebar the one being read — its heading and the headings "
+               "inside it",
                enabled=web.topbar)
         toggle(menu, "Top bar of the top-level sections", web.topbar,
                "topbar",
