@@ -69,6 +69,11 @@ def _plain_tables(head_bg: str, head_ink: str, line: str, group_bg: str,
   background-color: transparent !important; color: {group_ink} !important;
 }}
 table[bgcolor="#eceef1"] {{ background-color: {track} !important; }}
+/* the figure beside a data bar: Qt sets it in monospace so it lines up —
+   the theme's own face, with even-width digits, does that too */
+{t} td span[style*="monospace"] {{
+  font-family: inherit !important; font-variant-numeric: tabular-nums;
+}}
 """
     if dark:
         css += f"""{t} > tbody > tr > td[bgcolor]:not([bgcolor="#cdced1"]) span:not([style*=" color:"]) {{
