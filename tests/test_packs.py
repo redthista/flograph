@@ -272,6 +272,21 @@ class TestSaveLoad:
         assert "Tools ▸ Node Packs" in node.status_message
 
 
+class TestExamples:
+    def test_pack_examples_join_the_examples_list(self, tmp_path, user_dir):
+        from flograph.ui.start_screen import example_entries
+        root = make_pack(tmp_path / "dev", "ex_pack", name="Ex Pack")
+        (root / "examples").mkdir()
+        (root / "examples" / "1 First try.flograph").write_text("{}")
+        packs.link(user_dir, root)
+        NodeRegistry().load_installed_packs(user_dir)
+        titles = [t for t, _ in example_entries()]
+        assert titles[-1].startswith("Ex Pack ▸ ")
+        packs.set_enabled(user_dir, "ex_pack", False)
+        NodeRegistry().load_installed_packs(user_dir)
+        assert not any(t.startswith("Ex Pack") for t, _ in example_entries())
+
+
 class TestCli:
     def test_link_list_disable(self, tmp_path, user_dir, capsys):
         from flograph.pack_cli import main

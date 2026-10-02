@@ -514,6 +514,11 @@ def loaded(pack_id: str) -> Optional[Pack]:
     return _LOADED.get(pack_id)
 
 
+def loaded_packs() -> list[Pack]:
+    """The packs registered this session (enabled ones only)."""
+    return list(_LOADED.values())
+
+
 def used_by(type_ids: Iterable[str]) -> dict[str, dict]:
     """{pack id: {"name", "version"}} for the packs these node types need.
 
@@ -556,6 +561,8 @@ def expose(packs: Iterable[Pack]) -> None:
     """
     if _FINDER not in sys.meta_path:
         sys.meta_path.insert(0, _FINDER)
+    packs = list(packs)
+    _LOADED.clear()
     for pack in packs:
         _LOADED[pack.id] = pack
         if pack.lib_dir.is_dir():

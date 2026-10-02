@@ -95,9 +95,16 @@ def example_entries() -> list:
                    if entry.name.endswith(".flograph")]
     except (ModuleNotFoundError, FileNotFoundError):
         entries = []
-    return sorted(((example_title(entry.name), Path(str(entry)))
-                   for entry in entries),
-                  key=lambda item: item[0].casefold())
+    builtin = sorted(((example_title(entry.name), Path(str(entry)))
+                      for entry in entries),
+                     key=lambda item: item[0].casefold())
+    # then each loaded node pack's own examples, under the pack's name
+    from flograph.core import packs
+    extra = []
+    for pack in sorted(packs.loaded_packs(), key=lambda p: p.name.casefold()):
+        for path in pack.examples():
+            extra.append((f"{pack.name} ▸ {example_title(path.name)}", path))
+    return builtin + extra
 
 
 def edited_ago(mtime: float, now: Optional[float] = None) -> str:

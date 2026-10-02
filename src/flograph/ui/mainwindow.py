@@ -3587,6 +3587,7 @@ class MainWindow(QMainWindow):
         from flograph.paths import user_data_dir
         errors = self.registry.load_installed_packs(user_data_dir())
         self.library_tree.reload()
+        self._fill_examples_menu()
         if errors:
             path, reason = errors[0]
             more = f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""
@@ -5973,9 +5974,15 @@ class MainWindow(QMainWindow):
 
     def _build_examples_menu(self, file_menu: QMenu) -> None:
         # the start screen lists the same examples; one list feeds both
+        self._examples_menu = file_menu.addMenu("Open &Example")
+        self._fill_examples_menu()
+
+    def _fill_examples_menu(self) -> None:
+        """(Re)list the examples — again after node packs change, since a
+        pack brings examples of its own."""
         from .start_screen import example_entries
 
-        self._examples_menu = file_menu.addMenu("Open &Example")
+        self._examples_menu.clear()
         items = example_entries()
         self._examples_menu.setEnabled(bool(items))
         for title, path in items:
