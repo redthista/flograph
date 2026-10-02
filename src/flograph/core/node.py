@@ -75,6 +75,10 @@ class NodeSpec:
     # inputs by name and then by type; a dict names the input each output is
     # fed from while the node is bypassed; False says it cannot be bypassed.
     bypass: Any = None
+    # id of the node pack this type came from (see core.packs); None for
+    # builtins, user nodes and forks. A pack node is read-only like a builtin
+    # -- editing it forks the instance -- and lives in its own library section.
+    pack: Optional[str] = None
 
     def input(self, name: str) -> Optional[PortSpec]:
         if is_flow(name):

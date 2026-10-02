@@ -864,6 +864,8 @@ class MainWindow(QMainWindow):
                                    self._show_packages)
         self.action_weblibs = act("&Web Libraries…", None,
                                   self._show_weblibs)
+        self.action_node_packs = act("Node Pac&ks…", None,
+                                     self._show_node_packs)
         self.action_requirements = act("What This Flow &Needs…", None,
                                        self._show_requirements)
         self.action_ai_settings = act("AI Assistant &Settings…", None,
@@ -915,6 +917,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction(self.action_packages)
         tools_menu.addAction(self.action_weblibs)
+        tools_menu.addAction(self.action_node_packs)
         tools_menu.addAction(self.action_requirements)
         tools_menu.addAction(self.action_ai_settings)
         tools_menu.addAction(self.action_secrets)
@@ -3562,6 +3565,40 @@ class MainWindow(QMainWindow):
             self._packages_dialog = dialog
         dialog.show()
         dialog.raise_()
+
+    def _show_node_packs(self) -> None:
+        from .packs_dialog import NodePacksDialog
+        dialog = getattr(self, "_node_packs_dialog", None)
+        if dialog is None:
+            dialog = NodePacksDialog(self)
+            self._node_packs_dialog = dialog
+        else:
+            dialog.refresh()
+        dialog.show()
+        dialog.raise_()
+
+    def reload_packs(self) -> None:
+        """Re-register every node pack and rebuild the library.
+
+        Instances already on the canvas keep the spec they were made with;
+        like a reloaded user node, the new script applies to nodes placed
+        (or a flow opened) after this.
+        """
+        from flograph.paths import user_data_dir
+        errors = self.registry.load_installed_packs(user_data_dir())
+        self.library_tree.reload()
+        if errors:
+            path, reason = errors[0]
+            more = f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""
+            self.show_status(
+                f"Node pack file {path.name} was skipped{more}: {reason}",
+                10000)
+        else:
+            self.show_status("Node packs reloaded", 3000)
+
+    def open_example(self, path) -> None:
+        """Open a flow as an example: unsaved, so Save asks where."""
+        self._open_example(Path(path))
 
     def show_packages_for(self, names: list) -> None:
         """Manage Packages with `names` already in its install box — how

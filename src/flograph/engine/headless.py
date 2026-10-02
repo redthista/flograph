@@ -23,7 +23,7 @@ from flograph.core import NodeRegistry, NodeStatus, serialization
 from flograph.core.varlinks import (
     ASSIGNMENTS_PARAM, is_vars, parse_assignments,
 )
-from flograph.paths import user_nodes_dir
+from flograph.paths import user_data_dir, user_nodes_dir
 
 from .scheduler import ExecutionEngine
 
@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     registry = NodeRegistry()
     registry.load_builtins()
     registry.load_user_nodes(user_nodes_dir())
+    registry.load_installed_packs(user_data_dir())
     graph = serialization.load(project, registry)
     for line in graph.dropped_connections:
         print(f"wire left off, it no longer fits its nodes: {line}",

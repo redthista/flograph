@@ -468,6 +468,25 @@ nodes directory) and they appear in the library on next launch. If a node's
 import is missing, it loads as a broken placeholder that keeps its code and
 params — install the package, re-apply the code, and it repairs itself.
 
+### Node packs
+
+A **node pack** is a folder of node scripts with a `pack.toml` manifest, and
+optionally a `lib/` of Python code its nodes share (importable as
+`flograph_packs.<id>`, imported once and kept — the home for a loaded model
+or an open connection). **Tools ▸ Node Packs…** installs one from a .zip or
+links a folder in place, lists what each pack still needs from pip, and
+gives each pack its own library section. The same from a terminal:
+
+```bash
+flograph pack link ~/src/my_packs      # a pack, or a folder of packs
+flograph pack install image_generation-0.1.0.zip
+flograph pack list
+```
+
+A saved flow records the packs it used, so on a machine without one its
+nodes say which pack to install. See the handbook's **Node Packs** page for
+the layout and manifest.
+
 ### AI assistant (optional)
 
 **Tools > AI Assistant Settings** points flograph at any local

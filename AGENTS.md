@@ -49,6 +49,16 @@ flograph
 - **`flograph/core/` is Qt-free.** No PySide6, no pandas, no matplotlib at top level. Enforced by poison test.
 - **QUndoCommands are the sole writers to the graph.** UI items react to graph events; never mutate the graph directly from a click handler.
 - **Nodes are text scripts, never imported.** They live under `src/flograph/nodes/<category>/` and are parsed by `flograph.core.script.parse_spec()`.
+- **Node packs** (`core/packs.py`, Qt-free) are add-on folders: `pack.toml`
+  + `nodes/` + optional `lib/`. Pack nodes get `pack.<id>.<stem>` type ids
+  and `NodeSpec.pack`; `builtin` stays False, so code that means "a user
+  node" must test `type_id.startswith("user.")` or `not spec.pack`, never
+  `not spec.builtin`. `lib/` is reached through a meta-path finder as
+  `flograph_packs.<id>` — imported once, so it is where long-lived state
+  (a loaded model) belongs. Found via `FLOGRAPH_PACKS`, `packs.json`
+  links, and `<user dir>/packs/`. A saved flow carries no pack code, only a
+  top-level `"packs"` record that names the pack a missing node needs.
+  UI: `ui/packs_dialog.py` (Tools ▸ Node Packs); CLI: `pack_cli.py`.
 - **Nodes can run at the same time.** The engine starts every node whose
   upstream nodes have finished, up to a worker limit (Settings > General >
   Nodes to run at once; `engine.scheduler.default_workers` when it is Auto).

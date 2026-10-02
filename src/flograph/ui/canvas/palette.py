@@ -252,9 +252,16 @@ class LibraryTree(QTreeWidget):
         self.clear()
         builtin: dict[str, list[NodeSpec]] = {}
         user: dict[Optional[str], list[NodeSpec]] = {}
+        # pack id -> category -> specs: a pack is its own section, so an
+        # add-on never mixes into the builtin categories it happens to share
+        # a name with, and removing one takes its whole section with it
+        packed: dict[str, dict[str, list[NodeSpec]]] = {}
         for spec in self._registry.all():
             if spec.builtin:
                 builtin.setdefault(spec.category, []).append(spec)
+            elif spec.pack:
+                packed.setdefault(spec.pack, {}).setdefault(
+                    spec.category, []).append(spec)
             else:
                 user.setdefault(spec.group or None, []).append(spec)
 
@@ -275,6 +282,8 @@ class LibraryTree(QTreeWidget):
                 top.addChild(self._node_item(spec, favorite=True))
             top.setExpanded(True)
 
+        self._build_pack_sections(packed)
+
         user_top = self._section(self.USER_SECTION)
         user_top.setData(0, Qt.UserRole + 1, self.USER_SECTION)  # section marker
         for group in sorted(user, key=lambda g: (g is not None, g or "")):
@@ -293,6 +302,41 @@ class LibraryTree(QTreeWidget):
 
         # re-apply whatever search / favorites-only filter was active
         self.filter(self._last_query)
+
+    def _build_pack_sections(
+            self, packed: "dict[str, dict[str, list[NodeSpec]]]") -> None:
+        """One section per node pack, titled with the pack's name.
+
+        A pack with one category lists its nodes straight under the
+        section; with several, each category is a branch — the same two
+        shapes the User Nodes section takes with and without groups.
+        """
+        infos = getattr(self._registry, "packs", {}) or {}
+
+        def title(pack_id: str) -> str:
+            info = infos.get(pack_id)
+            return info.name if info is not None else pack_id
+
+        for pack_id in sorted(packed, key=lambda p: title(p).lower()):
+            top = self._section(title(pack_id))
+            top.setData(0, SECTION_ROLE, f"pack:{pack_id}")
+            info = infos.get(pack_id)
+            if info is not None:
+                top.setToolTip(0, "\n".join(filter(None, (
+                    f"{info.name} {info.version} — node pack",
+                    info.description, str(info.root)))))
+            categories = packed[pack_id]
+            for category in sorted(categories):
+                parent = top
+                if len(categories) > 1:
+                    parent = QTreeWidgetItem([category])
+                    parent.setFlags(parent.flags() & ~Qt.ItemIsDragEnabled)
+                    top.addChild(parent)
+                    parent.setExpanded(True)
+                for spec in sorted(categories[category],
+                                   key=lambda s: s.label.lower()):
+                    parent.addChild(self._node_item(spec, favorite=True))
+            top.setExpanded(True)
 
     def _build_frames_section(self) -> None:
         """Saved frames, grouped by folder like the user nodes above.

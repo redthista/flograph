@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     from flograph.core import NodeRegistry
-    from flograph.paths import user_nodes_dir
+    from flograph.paths import user_data_dir, user_nodes_dir
     from flograph.ui import window_frame
     from flograph.ui.mainwindow import MainWindow
     from flograph.ui.theme import apply_theme
@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     registry = NodeRegistry()
     registry.load_builtins()
     registry.load_user_nodes(user_nodes_dir())
+    registry.load_installed_packs(user_data_dir())
 
     window = MainWindow(registry)
     window.resize(1400, 900)

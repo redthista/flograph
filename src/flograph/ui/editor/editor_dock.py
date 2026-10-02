@@ -298,7 +298,7 @@ class EditorPanel(QWidget):
         library = self._registry.maybe_get(node.type_id)
         self._badge.setVisible(node.forked)
         self._reset_btn.setVisible(node.forked and library is not None
-                                   and library.builtin)
+                                   and (library.builtin or bool(library.pack)))
         # any bound node's current code can be promoted to a user library node
         self._save_user_btn.setVisible(not node.spec.broken)
         self._ask_ai_btn.setVisible(True)

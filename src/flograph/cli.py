@@ -4,6 +4,7 @@
     flograph path/to/flow.flograph       open the GUI with that project loaded
     flograph run flow.flograph           run the flow to completion, no GUI
     flograph run flow.flograph --var region=North   ... with a Variables override
+    flograph pack list|install|link|...  manage node packs (see pack_cli)
     flograph --version
 
 `run` is the headless path (see `flograph.engine.headless`): it loads the
@@ -50,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "run":
         from flograph.engine.headless import main as headless_main
         return headless_main(args[1:])
+
+    if args and args[0] == "pack":
+        from flograph.pack_cli import main as pack_main
+        return pack_main(args[1:])
 
     if args and args[0] in ("-V", "--version"):
         print(f"flograph {_version()}")

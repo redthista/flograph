@@ -918,6 +918,13 @@ class ParamsPanel(QWidget):
                          if spec.unset_label and option == str(spec.default)
                          else option)
                 combo.addItem(label, option)
+            if (value is not None and str(value)
+                    and combo.findData(str(value)) < 0):
+                # A value this machine does not offer — a model file a
+                # shared flow names, an option a newer node version dropped.
+                # Listed as itself rather than shown as the first option, so
+                # the panel never claims a setting the node will not use.
+                combo.addItem(f"{value} (not found)", str(value))
             if value is not None and combo.findData(str(value)) >= 0:
                 combo.setCurrentIndex(combo.findData(str(value)))
             combo.currentIndexChanged.connect(

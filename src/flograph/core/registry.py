@@ -8,14 +8,20 @@ from __future__ import annotations
 
 import importlib.resources
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .node import NodeInstance, NodeSpec
 from .script import NodeScriptError, parse_spec
 
+if TYPE_CHECKING:
+    from .packs import Pack
+
 
 class NodeRegistry:
     def __init__(self) -> None:
+        #: every pack found at the last load, enabled or not, by id
+        self.packs: dict = {}
+        self.disabled_packs: set[str] = set()
         self._specs: dict[str, NodeSpec] = {}
 
     def register(self, spec: NodeSpec) -> None:
@@ -105,10 +111,53 @@ class NodeRegistry:
         return errors
 
     def reload_user_nodes(self, directory: Path) -> list[tuple[Path, str]]:
-        """Drop all currently-registered user (non-builtin) specs and rescan."""
+        """Drop all currently-registered user specs and rescan."""
         self._specs = {tid: spec for tid, spec in self._specs.items()
-                       if spec.builtin}
+                       if spec.builtin or spec.pack}
         return self.load_user_nodes(directory)
+
+    def load_packs(self, packs: "list[Pack]",
+                   disabled: "set[str] | frozenset[str]" = frozenset()
+                   ) -> list[tuple[Path, str]]:
+        """Register every node of every enabled pack (see core.packs).
+
+        Like user nodes, a malformed script is skipped and reported rather
+        than aborting startup: a pack is somebody else's code, and one bad
+        file in it must not cost the user the rest of their library.
+        """
+        from . import packs as packs_mod
+        errors: list[tuple[Path, str]] = []
+        enabled = [p for p in packs if p.id not in disabled]
+        packs_mod.expose(enabled)
+        self.packs = {p.id: p for p in packs}
+        self.disabled_packs = set(disabled)
+        for pack in enabled:
+            for type_id, path in pack.node_files():
+                try:
+                    spec = parse_spec(path.read_text(encoding="utf-8"),
+                                      type_id, builtin=False)
+                except (NodeScriptError, OSError, UnicodeDecodeError) as exc:
+                    errors.append((path, str(exc)))
+                    continue
+                spec.pack = pack.id
+                self.register(spec)
+        return errors
+
+    def reload_packs(self, packs: "list[Pack]",
+                     disabled: "set[str] | frozenset[str]" = frozenset()
+                     ) -> list[tuple[Path, str]]:
+        """Drop every pack node and register the packs given afresh."""
+        self._specs = {tid: spec for tid, spec in self._specs.items()
+                       if not spec.pack}
+        return self.load_packs(packs, disabled)
+
+    def load_installed_packs(self, user_dir: Path) -> list[tuple[Path, str]]:
+        """Discover this machine's packs and register them — the one call
+        the app and the headless runner both make at startup."""
+        from . import packs as packs_mod
+        found, errors = packs_mod.discover(user_dir)
+        disabled = set(packs_mod.load_config(user_dir)["disabled"])
+        return errors + self.reload_packs(found, disabled)
 
     def search(self, query: str) -> list[NodeSpec]:
         """Fuzzy search over labels (and, weaker, categories) for the palette."""

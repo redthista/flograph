@@ -9,6 +9,7 @@
 - **Building nodes**
   - [[Writing a Node]]
   - [[Node Cookbook]]
+  - [[Node Packs]]
 - **Sharing results**
   - [[Dashboards and Reports]]
   - [[Conditional Formatting]]

@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from ..version import running_version as _running_version
-from . import dotenv
+from . import dotenv, packs
 from .datatypes import PortType
 from .graph import (Connection, Frame, FramePort, Graph, GraphError, Page,
                     Shape, Tile)
@@ -108,9 +108,12 @@ def _portable_code(node: NodeInstance) -> "str | None":
 
 
 def graph_to_dict(graph: Graph) -> dict[str, Any]:
+    # only a flow that uses a node pack says so: every other file is as it was
+    used_packs = packs.used_by(n.type_id for n in graph.nodes.values())
     return {
         "flograph_version": FLOGRAPH_VERSION,
         "schema": SCHEMA_VERSION,
+        **({"packs": used_packs} if used_packs else {}),
         "graph": {
             "nodes": [
                 {
@@ -384,6 +387,8 @@ def graph_from_dict(data: dict[str, Any], registry: NodeRegistry) -> Graph:
             # left with no reason on purpose: an unresolvable type_id keeps
             # its own long-standing wording below
             spec = registry.maybe_get(type_id)
+        if spec is None and broken_reason is None and packs.pack_id_of(type_id):
+            broken_reason = packs.missing_reason(type_id, data.get("packs"))
         if spec is None:
             spec = _broken_spec(
                 type_id,
