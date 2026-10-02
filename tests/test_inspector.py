@@ -462,3 +462,21 @@ class TestSpecView:
         spec_model = spec_view.model()
         assert list(spec_model._df["column"]) == ["a", "b"]
         assert "int" in spec_model._df["type"][0]
+
+
+def test_object_view_shortens_long_strings_inside_containers(qtbot):
+    """A data: URI or an image's bytes nested in a dict shows as its start
+    and its size, not a screenful of base64 that hides the other fields;
+    a string that *is* the output is still shown whole."""
+    from flograph.ui.inspector.object_view import ObjectView
+    view = ObjectView()
+    qtbot.addWidget(view)
+    uri = "data:image/png;base64," + "A" * 5000
+    view.set_value({"kind": "image", "source": uri, "bytes": b"x" * 4000,
+                    "nested": [{"deep": uri}]})
+    text = view.toPlainText()
+    assert "AAAA" * 100 not in text
+    assert "5,022 chars" in text and "<4,000 bytes>" in text
+    assert "'kind': 'image'" in text
+    view.set_value("B" * 2000)
+    assert "B" * 2000 in view.toPlainText()
