@@ -2,25 +2,25 @@
 
 A pack is a folder with a ``pack.toml`` manifest beside its node scripts:
 
-    image_generation/
+    crm_connectors/
         pack.toml            [pack] id, name, version, requires, ...
         nodes/               node scripts, exactly like the builtins:
-            sampler.py           -> pack.image_generation.sampler
-            extra/upscale.py     -> pack.image_generation.extra.upscale
+            fetch_orders.py      -> pack.crm_connectors.fetch_orders
+            extra/sync.py        -> pack.crm_connectors.extra.sync
         lib/                 optional Python code the nodes share, importable
-                             as ``flograph_packs.image_generation``
+                             as ``flograph_packs.crm_connectors``
         examples/            optional .flograph files that show it off
         README.md            optional
 
 Why a pack is more than a folder of user nodes. A node script is executed,
 never imported (see core.script), so anything it defines is rebuilt every
 time it runs. That is right for a node and wrong for what a pack usually
-brings with it: a model that takes ten seconds to load, a connection pool,
+brings with it: a connection pool, a client that takes seconds to set up,
 a few hundred lines of helpers every node of the pack calls. ``lib/`` is the
 home for those. It is reached through an import hook rather than sys.path,
 so two packs can each have a ``utils.py`` without one shadowing the other,
 and nothing in it runs until a node's ``run()`` first imports it — loading
-the library never imports torch.
+the library never imports a pack's heavy dependencies.
 
 Where packs come from, in order (an id seen twice keeps its first):
 
@@ -88,8 +88,8 @@ SETTING_TYPES = {"folder": str, "file": str, "string": str, "bool": bool,
 
 @dataclass
 class PackSetting:
-    """One setting a pack declares in its manifest — a models folder, an API
-    endpoint — edited from Tools ▸ Node Packs ▸ Settings and read by the
+    """One setting a pack declares in its manifest — a data folder, a server
+    address — edited from Tools ▸ Node Packs ▸ Settings and read by the
     pack's own code with `settings(pack_id)`. A setting belongs to the
     machine, not to a flow: it is never saved in a .flograph."""
     name: str
@@ -128,7 +128,8 @@ class Pack:
     author: str = ""
     homepage: str = ""
     requires: list[str] = field(default_factory=list)
-    #: an extra package index the requirements need (torch's CUDA wheels)
+    #: an extra package index the requirements need (a vendor's own, or a
+    #: GPU build of a library)
     index_url: str = ""
     #: "installed", "linked" or "env" — how this machine found it
     source: str = "installed"
@@ -244,7 +245,7 @@ def _read_settings_table(entries, path: Path) -> list[PackSetting]:
         name = entry.get("name")
         if not isinstance(name, str) or not _STEM_RE.match(name):
             raise PackError(f"{path}: a setting needs a name like "
-                            f"models_dir (got {name!r})")
+                            f"data_dir (got {name!r})")
         if any(s.name == name for s in out):
             raise PackError(f"{path}: setting {name!r} is declared twice")
         kind = entry.get("type", "string")
@@ -312,7 +313,7 @@ def write_settings(user_dir: Path, pack: Pack, values: dict) -> dict:
 
 def settings(pack_id: str, user_dir: Optional[Path] = None) -> dict:
     """A pack's settings, for the pack's own code (``lib/``, a node's
-    ``run()``): ``packs.settings("image_generation")["models_dir"]``.
+    ``run()``): ``packs.settings("crm_connectors")["server"]``.
 
     Read from disk on every call — it is a small file — so a change made in
     the Settings dialog applies to the very next run, with no reload. An id

@@ -254,8 +254,8 @@ class NodePacksDialog(QDialog):
         from .pack_settings_dialog import PackSettingsDialog
         dialog = PackSettingsDialog(pack, user_data_dir(), self)
         if dialog.exec() == QDialog.Accepted:
-            # a setting often feeds a node's dropdown (a models folder
-            # fills every model list), and those are built at load
+            # a setting often feeds a node's dropdown (a data folder
+            # fills a list of files), and those are built at load
             self._changed(pack.id)
 
     def _remove(self) -> None:

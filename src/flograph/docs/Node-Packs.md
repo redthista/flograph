@@ -1,9 +1,10 @@
 # Node Packs
 
-A **node pack** adds a whole set of nodes to the library at once — an
-image-generation pack, a pack of connectors for one company system, the
-nodes a team shares. Each pack gets its own section in the library, titled
-with the pack's name.
+A **node pack** adds a whole set of nodes to the library at once — a pack
+of connectors for one company system, the nodes a team shares, or a
+capability flograph does not ship with, such as image generation. Packs
+are distributed on their own, not with flograph. Each pack gets its own
+section in the library, titled with the pack's name.
 
 ## Adding a pack
 
@@ -89,16 +90,16 @@ is built.
 
 ### Settings
 
-A pack that needs something set once per computer — where its models
-live, a server address — declares it in `pack.toml`, and **Node Packs ▸
+A pack that needs something set once per computer — where its files
+live, the address of the server it talks to — declares it in `pack.toml`, and **Node Packs ▸
 Settings…** shows a form for it:
 
 ```toml
 [[settings]]
-name = "models_dir"
-type = "folder"            # folder, file, string, bool, int, float, choice
-label = "Models folder"
-placeholder = "Found automatically"
+name = "server"
+type = "string"            # folder, file, string, bool, int, float, choice
+label = "Server address"
+placeholder = "https://crm.example.com"
 help = "One line under the box saying what it is for."
 ```
 
@@ -106,7 +107,7 @@ The pack's own code reads them back by its id:
 
 ```python
 from flograph.core import packs
-folder = packs.settings("my_pack")["models_dir"]   # "" until it is set
+server = packs.settings("my_pack")["server"]   # "" until it is set
 ```
 
 They are read fresh on every call, so a change applies to the next run.

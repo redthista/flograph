@@ -328,10 +328,10 @@ class TestLibrarySection:
 
 SETTINGS_TOML = '''
 [[settings]]
-name = "models_dir"
+name = "data_dir"
 type = "folder"
-label = "Models folder"
-help = "Where the models are"
+label = "Data folder"
+help = "Where the data files are"
 
 [[settings]]
 name = "steps"
@@ -362,11 +362,11 @@ class TestSettings:
     def test_manifest_declares_settings(self, tmp_path):
         pack = packs.read_manifest(with_settings(make_pack(tmp_path)))
         got = {s.name: (s.type, s.label, s.default) for s in pack.settings}
-        assert got == {"models_dir": ("folder", "Models folder", ""),
+        assert got == {"data_dir": ("folder", "Data folder", ""),
                        "steps": ("int", "Steps", 20),
                        "fast": ("bool", "Fast", True),
                        "mode": ("choice", "Mode", "b")}
-        assert pack.settings[0].help == "Where the models are"
+        assert pack.settings[0].help == "Where the data files are"
 
     @pytest.mark.parametrize("extra, needle", [
         ('[[settings]]\nname = "x"\ntype = "colour"\n', "type 'colour'"),
@@ -383,12 +383,12 @@ class TestSettings:
     def test_round_trip_keeps_only_changes(self, tmp_path, user_dir):
         pack = packs.read_manifest(with_settings(make_pack(tmp_path)))
         assert packs.read_settings(user_dir, pack) == {
-            "models_dir": "", "steps": 20, "fast": True, "mode": "b"}
+            "data_dir": "", "steps": 20, "fast": True, "mode": "b"}
         saved = packs.write_settings(user_dir, pack, {
-            "models_dir": "/m", "steps": 20, "mode": "a", "nope": 1})
+            "data_dir": "/m", "steps": 20, "mode": "a", "nope": 1})
         # the default (steps 20) and the undeclared name are not written
-        assert saved == {"models_dir": "/m", "mode": "a"}
-        assert packs.read_settings(user_dir, pack)["models_dir"] == "/m"
+        assert saved == {"data_dir": "/m", "mode": "a"}
+        assert packs.read_settings(user_dir, pack)["data_dir"] == "/m"
 
     def test_hand_edited_nonsense_falls_back_to_defaults(self, tmp_path,
                                                          user_dir):
@@ -413,17 +413,17 @@ class TestSettings:
         pack = packs.read_manifest(with_settings(make_pack(tmp_path)))
         dialog = PackSettingsDialog(pack, user_dir)
         qtbot.addWidget(dialog)
-        read, write, _ = dialog._editors["models_dir"]
+        read, write, _ = dialog._editors["data_dir"]
         write(str(tmp_path))
         dialog._editors["steps"][1](12)
         dialog._editors["mode"][1]("a")
         dialog.accept()
         got = packs.read_settings(user_dir, pack)
-        assert (got["models_dir"], got["steps"], got["mode"]) == (
+        assert (got["data_dir"], got["steps"], got["mode"]) == (
             str(tmp_path), 12, "a")
         dialog2 = PackSettingsDialog(pack, user_dir)
         qtbot.addWidget(dialog2)
         assert dialog2.values()["steps"] == 12
         dialog2._defaults()
-        assert dialog2.values() == {"models_dir": "", "steps": 20,
+        assert dialog2.values() == {"data_dir": "", "steps": 20,
                                     "fast": True, "mode": "b"}

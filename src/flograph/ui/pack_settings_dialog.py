@@ -4,8 +4,8 @@ A pack lists its settings in ``pack.toml`` (``[[settings]]``, see
 core.packs.PackSetting) and reads them back with ``packs.settings(id)``;
 this is the form between the two, built from the declarations, so a pack
 gets a settings page without shipping any Qt of its own. Saving reloads the
-packs, because what a setting changes is often a node's dropdown — a models
-folder fills every model list — and those are built when a script loads.
+packs, because what a setting changes is often a node's dropdown — a data
+folder fills a list of files — and those are built when a script loads.
 """
 from __future__ import annotations
 
