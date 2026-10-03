@@ -87,5 +87,34 @@ requirements costs nothing when the library loads — but keep any import a
 script makes at its *top level* light, because that runs when the library
 is built.
 
+### Settings
+
+A pack that needs something set once per computer — where its models
+live, a server address — declares it in `pack.toml`, and **Node Packs ▸
+Settings…** shows a form for it:
+
+```toml
+[[settings]]
+name = "models_dir"
+type = "folder"            # folder, file, string, bool, int, float, choice
+label = "Models folder"
+placeholder = "Found automatically"
+help = "One line under the box saying what it is for."
+```
+
+The pack's own code reads them back by its id:
+
+```python
+from flograph.core import packs
+folder = packs.settings("my_pack")["models_dir"]   # "" until it is set
+```
+
+They are read fresh on every call, so a change applies to the next run.
+Settings belong to the computer, not to a flow — they are never saved in a
+.flograph, and removing and reinstalling a pack keeps them. Saving the form
+reloads the packs, so a dropdown a setting fills (a list of model files) is
+rebuilt; nodes already on the canvas keep the list they had until the flow
+is opened again.
+
 To share a pack, select it in **Node Packs** and use **More ▸ Export as
 .zip…**.

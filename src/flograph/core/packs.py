@@ -80,6 +80,43 @@ class PackExistsError(PackError):
     """Installing would replace a pack already installed under that id."""
 
 
+#: what a ``[[settings]]`` entry's ``type`` may be, and the Python value each
+#: holds; "folder" and "file" are paths kept as text ("" = not set)
+SETTING_TYPES = {"folder": str, "file": str, "string": str, "bool": bool,
+                 "int": int, "float": float, "choice": str}
+
+
+@dataclass
+class PackSetting:
+    """One setting a pack declares in its manifest — a models folder, an API
+    endpoint — edited from Tools ▸ Node Packs ▸ Settings and read by the
+    pack's own code with `settings(pack_id)`. A setting belongs to the
+    machine, not to a flow: it is never saved in a .flograph."""
+    name: str
+    type: str
+    label: str
+    default: object = ""
+    help: str = ""
+    options: list = field(default_factory=list)   # "choice" only
+    placeholder: str = ""
+
+    def coerce(self, value):
+        """`value` as this setting's type, or the default when it is not
+        one — a hand-edited settings file must not break the pack."""
+        kind = SETTING_TYPES[self.type]
+        try:
+            if kind is bool:
+                if isinstance(value, bool):
+                    return value
+                raise ValueError(value)
+            got = kind(value)
+        except (TypeError, ValueError):
+            return self.default
+        if self.type == "choice" and got not in self.options:
+            return self.default
+        return got
+
+
 @dataclass
 class Pack:
     """One pack as read from its manifest."""
@@ -95,6 +132,8 @@ class Pack:
     index_url: str = ""
     #: "installed", "linked" or "env" — how this machine found it
     source: str = "installed"
+    #: the manifest's [[settings]], in order
+    settings: list[PackSetting] = field(default_factory=list)
 
     @property
     def nodes_dir(self) -> Path:
@@ -189,7 +228,103 @@ def read_manifest(root: Path, source: str = "installed") -> Pack:
         requires=[r.strip() for r in requires if r.strip()],
         index_url=str(table.get("index_url") or ""),
         source=source,
+        settings=_read_settings_table(data.get("settings", []), path),
     )
+
+
+def _read_settings_table(entries, path: Path) -> list[PackSetting]:
+    """The manifest's ``[[settings]]`` entries. Raises PackError on one
+    that names no type the dialog can edit, or a name used twice."""
+    if not isinstance(entries, list):
+        raise PackError(f"{path}: settings must be [[settings]] tables")
+    out: list[PackSetting] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise PackError(f"{path}: settings must be [[settings]] tables")
+        name = entry.get("name")
+        if not isinstance(name, str) or not _STEM_RE.match(name):
+            raise PackError(f"{path}: a setting needs a name like "
+                            f"models_dir (got {name!r})")
+        if any(s.name == name for s in out):
+            raise PackError(f"{path}: setting {name!r} is declared twice")
+        kind = entry.get("type", "string")
+        if kind not in SETTING_TYPES:
+            raise PackError(f"{path}: setting {name!r} has type {kind!r} — "
+                            "use one of " + ", ".join(SETTING_TYPES))
+        options = [str(o) for o in entry.get("options", [])]
+        if kind == "choice" and not options:
+            raise PackError(f"{path}: choice setting {name!r} needs options")
+        fallback = {"bool": False, "int": 0, "float": 0.0}.get(
+            kind, options[0] if options else "")
+        setting = PackSetting(
+            name=name, type=kind,
+            label=str(entry.get("label") or name.replace("_", " ").capitalize()),
+            default=fallback, help=str(entry.get("help") or ""),
+            options=options, placeholder=str(entry.get("placeholder") or ""))
+        if "default" in entry:
+            setting.default = setting.coerce(entry["default"])
+        out.append(setting)
+    return out
+
+
+# ------------------------------------------------------------------ settings
+
+SETTINGS_DIR = "pack_settings"
+
+
+def settings_path(user_dir: Path, pack_id: str) -> Path:
+    """Where a pack's settings are kept: one JSON file per pack, beside —
+    not inside — the packs folder, so removing and reinstalling a pack
+    keeps them."""
+    return Path(user_dir) / SETTINGS_DIR / f"{pack_id}.json"
+
+
+def read_settings(user_dir: Path, pack: Pack) -> dict:
+    """Every declared setting's value: what was saved, else its default."""
+    try:
+        stored = json.loads(settings_path(user_dir, pack.id)
+                            .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    return {s.name: s.coerce(stored[s.name]) if s.name in stored
+            else s.default for s in pack.settings}
+
+
+def write_settings(user_dir: Path, pack: Pack, values: dict) -> dict:
+    """Save `values` (declared names only, coerced); returns what was
+    saved. A value equal to its default is not written, so a default the
+    pack changes later reaches people who never touched it."""
+    out = {}
+    for s in pack.settings:
+        if s.name in values:
+            value = s.coerce(values[s.name])
+            if value != s.default:
+                out[s.name] = value
+    path = settings_path(user_dir, pack.id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return out
+
+
+def settings(pack_id: str, user_dir: Optional[Path] = None) -> dict:
+    """A pack's settings, for the pack's own code (``lib/``, a node's
+    ``run()``): ``packs.settings("image_generation")["models_dir"]``.
+
+    Read from disk on every call — it is a small file — so a change made in
+    the Settings dialog applies to the very next run, with no reload. An id
+    that is not loaded (a script run outside the app) gives {}.
+    """
+    pack = _LOADED.get(pack_id)
+    if pack is None:
+        return {}
+    if user_dir is None:
+        from flograph.paths import user_data_dir
+        user_dir = user_data_dir()
+    return read_settings(user_dir, pack)
 
 
 # ------------------------------------------------------------------ config

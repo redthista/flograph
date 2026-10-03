@@ -79,6 +79,7 @@ class NodePacksDialog(QDialog):
         self._remove_btn = button("Remove", self._remove)
         self._toggle_btn = button("Disable", self._toggle)
         self._reqs_btn = button("Install Requirements…", self._install_reqs)
+        self._settings_btn = button("Settings…", self._settings)
         self._more_btn = QPushButton("More")
         more = QMenu(self._more_btn)
         more.addAction("Open Pack Folder", self._open_folder)
@@ -94,8 +95,8 @@ class NodePacksDialog(QDialog):
         top_row.addStretch(1)
         top_row.addWidget(reload_btn)
         row = QHBoxLayout()
-        for btn in (self._reqs_btn, self._toggle_btn, self._remove_btn,
-                    self._more_btn):
+        for btn in (self._settings_btn, self._reqs_btn, self._toggle_btn,
+                    self._remove_btn, self._more_btn):
             row.addWidget(btn)
         row.addStretch(1)
         row.addWidget(close_btn)
@@ -143,6 +144,7 @@ class NodePacksDialog(QDialog):
         for btn in (self._remove_btn, self._toggle_btn, self._reqs_btn,
                     self._more_btn):
             btn.setEnabled(pack is not None)
+        self._settings_btn.setEnabled(pack is not None and bool(pack.settings))
         lines: list[str] = []
         if pack is not None:
             disabled = pack.id in self._disabled
@@ -151,6 +153,8 @@ class NodePacksDialog(QDialog):
                 "Unlink" if pack.source == "linked" else "Remove")
             missing = packs.missing_requirements(pack)
             self._reqs_btn.setEnabled(bool(missing))
+            self._settings_btn.setToolTip(
+                "" if pack.settings else f"{pack.name} has no settings")
             lines.append(f"{pack.name} {pack.version}"
                          + (f" — {pack.author}" if pack.author else ""))
             if pack.description:
@@ -242,6 +246,17 @@ class NodePacksDialog(QDialog):
         pack = self._current()
         if pack is not None:
             self._window.show_packages_for(packs.missing_requirements(pack))
+
+    def _settings(self) -> None:
+        pack = self._current()
+        if pack is None or not pack.settings:
+            return
+        from .pack_settings_dialog import PackSettingsDialog
+        dialog = PackSettingsDialog(pack, user_data_dir(), self)
+        if dialog.exec() == QDialog.Accepted:
+            # a setting often feeds a node's dropdown (a models folder
+            # fills every model list), and those are built at load
+            self._changed(pack.id)
 
     def _remove(self) -> None:
         pack = self._current()
