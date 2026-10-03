@@ -13,7 +13,7 @@ Chunk letters are stable — an entry keeps its id for life so notes and
 commit messages that cite one still point at something, and an id is never
 reused once its entry goes. Gaps (A, B, D, E, H, J, K, most of G, O, P,
 Q, R, T, V, X, Y, Z, AA, AB, AC and AE) are where shipped work used to be;
-AF is the newest chunk, not a gap. Old numbers are kept
+AF and AG are the newest chunks, not gaps. Old numbers are kept
 as "(was N)" where a code comment still cites them.
 
 Undecided and declined ideas live in `ideas_archived.md` — also not a done
@@ -359,6 +359,70 @@ in process lifetime, not rendering.
 - *Costs to say out loud:* a second Python process holding a second copy
   of the data, so hand it parquet rather than a pickle. A report or PDF
   only ever gets a snapshot.
+
+---
+
+## AG. Controls in a report's Web view
+
+**AG1. An interactive web app in the report view** (Dan, 2026-10-03).
+Sliders, text boxes, buttons and slicers from the canvas, embedded in a
+report page and working in its Web view. Moving one re-runs the flow and
+the report follows, the way a dashboard does. Looked into 2026-10-03 and
+banked; nothing is built.
+
+- *Today:* an embed of a control shows only its *value* (`render_value`),
+  so `![[Threshold]]` prints `50`. A Slicer shows its filtered table, and
+  an Action Button shows nothing useful. `ui/report/render.py` has no
+  handling for control, slicer or button cards.
+- *What helps:*
+  - The webview bridge (`core/bridge.py`, `ui/web_bridge.py`) works with
+    no network, and its loop guard drops a write that changes nothing.
+  - `MainWindow._on_button_fired` already handles every button action.
+  - A slicer commits with one `SetParamCommand` on `selected`.
+  - `core/controls.py` keeps one set of bounds, clamping and options, so
+    a web widget can't disagree with the canvas card.
+  - Live charts already put HTML into Qt's output afterwards through an
+    `embed:N` placeholder (`ui/report/live.py`). Widgets go in the same way.
+- *Phases:*
+  1. **Draw the widgets.** Slider, Number, Text, Date, Toggle and Choice
+     map onto native inputs. Between Slider needs a small two-thumb
+     widget. Slicer is the big one, since its Qt version is 1,500 lines
+     (`ui/slicer_list.py`): list and dropdown layouts first, the tree
+     later. The HTML is built Qt-free from the spec and params. About
+     the size of the live-tables work.
+  2. **Send changes back.** The bridge only writes the page's *own* node
+     and needs `NODE["interactive"]`. A report needs "set this param on
+     that node", vetted per kind: a control may write `value`, a slicer
+     `selected`, and a button may only fire. Every write goes through
+     undo, and the canvas card and dashboard tile follow on their own.
+     A slider commits on release and a text box on Enter or blur. Small.
+  3. **Update in place, not by reloading.** *The risky part.* The Web
+     preview rewrites its temp file and reloads Chromium on every render
+     (`ui/report/web_preview.py`). With a control in the page, that
+     recreates it mid-drag, drops keyboard focus and flashes. The fix
+     morphs the page in place: unchanged parts stay put, a chart whose
+     data changed redraws with `Plotly.react`, and the control being used
+     is left alone. Speed counts too. Each render also makes still
+     pictures of live charts and paginates, and the Web view needs
+     neither. Measure render time per slider move before promising it
+     feels live.
+  4. **Saved HTML, Save Report and PDF.** A file has no Python behind it,
+     so its controls are drawn disabled at their current settings. On
+     paper a control prints as "Caption: value". Outside the app, a truly
+     live page is FD1's `flograph serve` (`future_ideas.md`). This builds
+     toward it: the same widget HTML and the same `set()` messages, sent
+     over a WebSocket instead of QWebChannel.
+- *Open:*
+  - **How a control gets into a report.** Suggested: a control or button
+    embedded on a line of its own draws the widget, and one inside a
+    sentence stays its value. The Slicer widget is opt-in with a flag,
+    like `|live`, so reports showing its table don't change.
+  - **When a slider re-runs.** On release, or while dragging, which is
+    only worth it if phase 3 turns out fast.
+  - Build 1 and 2, then measure before committing to 3.
+- *Later:* a slicer filtering live tables in the browser, with no re-run.
+  This is the cross-filtering follow-up from the live report work, and it
+  would also work in a saved file.
 
 ---
 
