@@ -140,7 +140,8 @@ class ReportPage(QWidget):
         self._css_template = QComboBox()
         self._css_template.addItem("Choose a starter theme…")
         self._css_sources = {}
-        for name, css in CSS_TEMPLATES.items():
+        for name, css in sorted(CSS_TEMPLATES.items(),
+                                key=lambda item: item[0].casefold()):
             self._css_template.addItem(name)
             self._css_sources[name] = css
         for path in list_snippets():

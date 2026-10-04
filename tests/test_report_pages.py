@@ -579,6 +579,14 @@ class TestTheWidget:
         assert "flograph-table" in page.css_editor.toPlainText()
         assert graph.pages["p1"].custom_css == page.css_editor.toPlainText()
 
+    def test_starter_themes_are_listed_alphabetically(self, env):
+        from flograph.ui.report.html import CSS_TEMPLATES
+        page = env[0]
+        combo = page._css_template
+        names = [combo.itemText(i) for i in range(1, combo.count())
+                 if combo.itemText(i) in CSS_TEMPLATES]
+        assert names == sorted(CSS_TEMPLATES, key=str.casefold)
+
     def test_problems_are_shown_under_the_editor(self, env):
         page, _graph, _stack, _tmp = env
         page.editor.setPlainText("![[Ghost]]")
