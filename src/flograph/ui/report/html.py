@@ -156,28 +156,23 @@ table thead td p, table thead td span {
   background-color: #0369a1 !important;
 }
 .flograph-table tbody td:not([bgcolor]),
-table tbody td:not([bgcolor]),
-table > tr > td[style*="border-top"]:not([bgcolor]):not([style*="background"]) {
+table tbody td:not([bgcolor]) {
   background-color: #ffffff !important;
   color: #1f2937 !important;
 }
-.flograph-table tbody td:not([bgcolor]) *,
-table tbody td:not([bgcolor]) *,
-table > tr > td[style*="border-top"]:not([bgcolor]):not([style*="background"]) * {
+/* the words, not a mark a rule coloured (an icon's ● keeps its colour) */
+.flograph-table tbody td:not([bgcolor]) *:not([style*="color:"]),
+table tbody td:not([bgcolor]) *:not([style*="color:"]) {
   color: #1f2937 !important;
 }
 .flograph-table tbody tr:nth-child(even) td:not([bgcolor]),
-table tbody tr:nth-child(even) td:not([bgcolor]),
-table > tr:nth-of-type(odd) > td[style*="border-top"]:not([bgcolor]):not([style*="background"]) {
+table tbody tr:nth-child(even) td:not([bgcolor]) {
   background-color: #f1f5f9 !important;
 }
-/* Data bars use a nested layout table. Its value cell must inherit the
-   outer row's colour; only the track itself should have a light background. */
+/* A plain table's data bar is a small table in the cell: its cells take
+   the row's colour; only the track itself has a light background. */
 table table td:not([bgcolor]) {
   background-color: transparent !important;
-}
-table table > tr > td:first-child {
-  background-color: inherit !important;
 }
 .flograph-table tr:nth-child(even) { background: #273449; }
 .flograph-table > thead > tr > th, .flograph-table > tbody > tr > td {

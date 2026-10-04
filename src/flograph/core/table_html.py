@@ -69,6 +69,9 @@ STACK_BELOW = 380
 #: without being mistaken for a filled cell.
 BAR_TRACK_COLOR = "#eceef1"
 
+#: A bar's colour when its rule names none.
+BAR_COLOR = "#3b6299"
+
 #: Added to a bar column's measured value width: a width exactly the widest
 #: text's leaves nothing for a bold rule, or for a font that sets a hair
 #: wider on the page than it measured.
@@ -283,7 +286,7 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         if special is not None:
             tr = _special_tr(special, plan, columns, specials, numeric,
                              layout_rules=layout_rules_of(rules, columns),
-                             lead=lead, rules=rules)
+                             lead=lead, rules=rules, live=live)
             if live:
                 tr = _live_tr(special, plan) + tr[len("<tr>"):]
             out.append(tr)
@@ -294,7 +297,7 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
             out.append("<tr><td></td>")
             out.extend(_data_cells(row, columns, arrays, styles, numeric,
                                    track, stacked, layout, value_widths,
-                                   rooms, table_height, font_pt))
+                                   rooms, table_height, font_pt, live))
             out.append("</tr>")
             continue
         # Qt's rich text has no row height to set — `height` on a row or a
@@ -312,7 +315,7 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                              align=entry.align if entry else None,
                              value_width=value_widths.get(column),
                              spark_room=rooms.get(column),
-                             pad=pad, row_height=asked))
+                             pad=pad, row_height=asked, live=live))
         out.append("</tr>")
     out.append("</tbody></table>")
     if bands:
@@ -328,19 +331,12 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         # or the page ends up carrying both counts
         out.append(f"<p><i>{marker}Showing {max_rows:,} of "
                    f"{total:,} rows.</i></p>")
-    html = "".join(out)
-    if live:
-        # A styled cell restates the grid line only because Qt's report
-        # stylesheet draws one round every cell and drops it from a cell
-        # with a style of its own (see _cell). A browser page has no such
-        # grid, so there the restated line boxed exactly the cells a rule
-        # had touched — a "$-39 ▼" in a frame, its neighbours in none.
-        html = html.replace(f"border:{CELL_BORDER};", "")
-    return html
+    return "".join(out)
 
 
 def _data_cells(row, columns, arrays, styles, numeric, track, stacked,
-                layout, value_widths, rooms, table_height, font_pt) -> list:
+                layout, value_widths, rooms, table_height, font_pt,
+                live: bool = False) -> list:
     """A data row's `<td>`s — the loop body of frame_to_html, for a grouped
     table whose rows start with an empty group cell."""
     asked = _asked_height(row, columns, styles, table_height)
@@ -354,7 +350,7 @@ def _data_cells(row, columns, arrays, styles, numeric, track, stacked,
                            align=entry.align if entry else None,
                            value_width=value_widths.get(column),
                            spark_room=rooms.get(column),
-                           pad=pad, row_height=asked))
+                           pad=pad, row_height=asked, live=live))
     return cells
 
 
@@ -390,7 +386,7 @@ def _special_rows(layout, plan, columns, rules, paper) -> dict:
 
 
 def _special_tr(special, plan, columns, specials, numeric, layout_rules,
-                lead: bool, rules) -> str:
+                lead: bool, rules, live: bool = False) -> str:
     """A total or group row as a `<tr>`."""
     import dataclasses
 
@@ -409,7 +405,7 @@ def _special_tr(special, plan, columns, specials, numeric, layout_rules,
             text = special.label
         style = first
         cells.append(_cell(None, dataclasses.replace(style, text=text)
-                           if style is not None else None, False))
+                           if style is not None else None, False, live=live))
     where = None if plan.grouped else tt.label_column(plan, names)
     for column, name in zip(columns, names):
         style = found.get(name)
@@ -424,7 +420,7 @@ def _special_tr(special, plan, columns, specials, numeric, layout_rules,
         cells.append(_cell(None, dataclasses.replace(style, text=text or " ")
                            if style is not None else None,
                            numeric[column] and name in special.values,
-                           align=entry.align if entry else None))
+                           align=entry.align if entry else None, live=live))
     cells.append("</tr>")
     return "".join(cells)
 
@@ -551,13 +547,13 @@ def _cell_styles(frame, shown, columns, rules, paper: bool) -> dict:
 def _cell_text(value, style: "CellStyle | None",
                spark_room: "dict | None" = None,
                row_height: "int | None" = None,
-               align: "str | None" = None) -> str:
+               align: "str | None" = None, live: bool = False) -> str:
     """A cell's text as HTML: formatted, escaped and decorated. `align` is
     where the value sits when marks pinned to the right take a slot of
     their own beside it (see `_decorate`)."""
     text = _escape(_text(value, style))
     if style is not None:
-        text = _decorate(text, style, spark_room, row_height, align)
+        text = _decorate(text, style, spark_room, row_height, align, live)
     return text
 
 
@@ -757,13 +753,18 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
           value_width: "int | None" = None,
           spark_room: "dict | None" = None,
           pad: "float | None" = None,
-          row_height: "int | None" = None) -> str:
+          row_height: "int | None" = None,
+          live: bool = False) -> str:
     """One `<td>`: the value, plus whatever the rules said about it.
     `pad` is the top and bottom padding that makes its row as tall as a
-    `height` asked; `row_height` is that height, which a spark grows into."""
+    `height` asked; `row_height` is that height, which a spark grows into.
+    `live` writes it for a browser (see frame_to_html)."""
     text = _cell_text(value, style, spark_room, row_height,
-                      align or ("right" if numeric else None))
-    if style is not None and style.bar is not None:
+                      align or ("right" if numeric else None), live)
+    if style is not None and style.bar is not None and live:
+        # the value takes the cell's own alignment, so it stays right
+        text = _live_bar(text, style, stacked)
+    elif style is not None and style.bar is not None:
         text = _bar(text, style, numeric, track, stacked, value_width)
         numeric = False       # the bar table fills the cell; don't re-align
     css = []
@@ -776,12 +777,14 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
             css.append(f"color:{style.fg}")
         if style.bold:
             css.append("font-weight:bold")
-    if css:
+    if css and not live:
         # Qt's rich text takes a cell's own style *over* the report
         # stylesheet's border width: give a cell any inline style at all — a
         # `height`'s padding, a fill, a colour — and its grid lines went,
         # keeping only their colour (a probe, not a guess). So a styled cell
         # says its border again, the same one REPORT_CSS gives every cell.
+        # A browser page has no such grid, so a live cell does not: there
+        # the restated line boxed exactly the cells a rule had touched.
         css.insert(0, f"border:{CELL_BORDER}")
     attrs = f' style="{";".join(css)}"' if css else ""
     if style is not None and style.tooltip:
@@ -815,7 +818,7 @@ def _bar(text: str, style: CellStyle, numeric: bool,
     but the alternative is Qt wrapping the number to make room.
     """
     fraction = max(-1.0, min(1.0, float(style.bar)))
-    colour = style.bar_color or "#3b6299"
+    colour = style.bar_color or BAR_COLOR
     align = ' align="right"' if numeric else ""
     track = (_centred_track(fraction, colour) if style.bar_mode == "center"
              else _left_track(fraction, colour))
@@ -838,6 +841,30 @@ def _bar(text: str, style: CellStyle, numeric: bool,
     return (f'<table cellspacing="0" cellpadding="0"><tr>{value_cell}'
             f'<td width="{track_width}" style="border:none;padding:0">'
             f"{track}</td></tr></table>")
+
+
+def _live_bar(text: str, style: CellStyle, stacked: bool = False) -> str:
+    """A data bar for a browser: the value, then a track drawn by one
+    gradient (`.fg-db` in live.py's LIVE_CSS) — not the two tables in a
+    cell that `_bar` needs for Qt, which came to ~390 bytes a cell.
+
+    The filled run is `--a` to `--b` along the track: from the start for an
+    ordinary bar, from the middle either way for a centred one. The value
+    takes all the room the track leaves, so every track in a column ends
+    at the cell's edge and they start level with no widths to measure.
+    """
+    fraction = max(-1.0, min(1.0, float(style.bar)))
+    if style.bar_mode == "center":
+        half = max(0, min(50, round(abs(fraction) * 50)))
+        start, end = (50 - half, 50) if fraction < 0 else (50, 50 + half)
+    else:
+        start, end = 0, max(0, min(100, round(abs(fraction) * 100)))
+    css = ([f"--a:{start}%"] if start else []) + [
+        f"--b:{end}%", f"--c:{style.bar_color or BAR_COLOR}"]
+    track = f'<i style="{";".join(css)}"></i>'
+    value = f"<span>{text}</span>" if text else ""
+    kind = "fg-db fg-under" if stacked else "fg-db"
+    return f'<span class="{kind}">{value}{track}</span>'
 
 
 def _left_track(fraction: float, colour: str) -> str:
@@ -994,7 +1021,7 @@ def _in_a_pill(text: str, style: "CellStyle") -> str:
 def _decorate(text: str, style: "CellStyle",
               spark_room: "dict | None" = None,
               row_height: "int | None" = None,
-              align: "str | None" = None) -> str:
+              align: "str | None" = None, live: bool = False) -> str:
     """`text` with everything the rules hung on it, arranged as the card
     arranges it: a line above, the value between its side marks, a line
     below. `text` is already escaped; the spans added here are not.
@@ -1022,7 +1049,8 @@ def _decorate(text: str, style: "CellStyle",
         value = MARK_JOIN.join(p for p in parts if p)
         right = MARK_JOIN.join(
             p for p in (span(d) for d in style.at("right")) if p)
-        middle = (_pinned_right(value, right, align) if value and right
+        middle = (_pinned_right(value, right, align, live)
+                  if value and right
                   else value or right)
     lines = [" ".join(span(d) for d in style.at("above")),
              middle,
@@ -1043,7 +1071,8 @@ RIGHT_MARK_GAP = 6
 MARK_JOIN = "&nbsp;"
 
 
-def _pinned_right(value: str, right: str, align: "str | None") -> str:
+def _pinned_right(value: str, right: str, align: "str | None",
+                  live: bool = False) -> str:
     """The value, then `right` marks held against the cell's right edge.
 
     The card lays a `right` mark from the cell's edge inwards, so a column
@@ -1055,7 +1084,13 @@ def _pinned_right(value: str, right: str, align: "str | None") -> str:
     browser read the same way (the trick `_bar` uses to line up its
     tracks): the value takes whatever the marks leave, and the marks'
     cell, being no wider than its content, sits against the edge.
+
+    `live`: a browser has flex, so the same shape is two spans in one
+    (`.fg-pr` in live.py's LIVE_CSS) rather than a table in the cell.
     """
+    if live:
+        return (f'<span class="fg-pr"><span>{value}</span>'
+                f"<span>{right}</span></span>")
     where = f' align="{align}"' if align else ""
     return ('<table width="100%" cellspacing="0" cellpadding="0"><tr>'
             f'<td{where} style="border:none;padding:0">{value}</td>'

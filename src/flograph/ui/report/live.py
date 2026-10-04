@@ -280,9 +280,25 @@ table[style*="border-style:none"] .fg-chart { width: 100% !important; }
 }
 .fg-scroll thead tr + tr th { top: 2em; }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(0,0,0,.05); }
-/* a data bar is a small table in the cell; Qt sizes the column to it, a
-   browser column can be wider — keep it at the right, under its heading */
-.fg-scroll .flograph-table > tbody > tr > td > table { margin-left: auto; }
+/* a data bar (core/table_html._live_bar): the value, then a track whose
+   filled run is --a..--b in --c. The value takes the room the track
+   leaves, so every track in a column ends at the cell's edge. A theme
+   recolours the empty track with `.fg-db > i { background-color }`. */
+.fg-db, .fg-pr { display: flex; align-items: center; gap: 6px; }
+.fg-db { justify-content: flex-end; }
+.fg-db > span, .fg-pr > span:first-child { flex: 1 1 auto; min-width: 0; }
+.fg-db > span { white-space: nowrap; }
+.fg-db > i {
+  flex: none; width: 54px; height: 1.15em; background-color: #eceef1;
+  background-image: linear-gradient(to right, transparent var(--a, 0%),
+    var(--c, #3b6299) var(--a, 0%) var(--b), transparent var(--b));
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+/* a table too narrow for both on a line: the track under its value */
+.fg-db.fg-under { flex-direction: column; align-items: stretch; gap: 2px; }
+.fg-db.fg-under > i { width: auto; }
+/* marks pinned to the cell's right edge, beside the value */
+.fg-pr > span + span { flex: none; white-space: nowrap; }
 .fg-sortable thead th { cursor: pointer; user-select: none; }
 .fg-sortable thead th[data-fg-sort="asc"]::after { content: " \\25B2"; font-size: .75em; }
 .fg-sortable thead th[data-fg-sort="desc"]::after { content: " \\25BC"; font-size: .75em; }

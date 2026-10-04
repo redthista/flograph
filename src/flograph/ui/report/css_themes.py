@@ -20,11 +20,11 @@ box (the chart redraws to fit, labels at their real size); delete that
 line to keep each chart's own shape.
 
 **A table's own cells are not the theme's to repaint.** Only the live
-table's outer cells are styled (`.flograph-table > tbody > tr > td`): a
-data bar is a small table inside a cell and must be left alone, and a
-colour a rule put on a cell is kept. The total, group and subtotal rows do
-take the theme's colours — delete the "structure rows" block to keep your
-own `group =>` colours instead.
+table's outer cells are styled (`.flograph-table > tbody > tr > td`), and
+a colour a rule put on a cell is kept. A data bar's empty track is
+`.fg-db > i`, whose `background-color` is the theme's to set. The total,
+group and subtotal rows do take the theme's colours — delete the
+"structure rows" block to keep your own `group =>` colours instead.
 """
 from __future__ import annotations
 
@@ -194,7 +194,7 @@ p > img { border: 1px solid var(--line); border-radius: 6px; }
   white-space: nowrap;
 }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, 0.06); }
-.flograph-table table[bgcolor] { background-color: var(--band); }
+.fg-db > i { background-color: var(--band); }
 /* structure rows: total, group, subtotal (delete to keep your own colours) */
 .flograph-table > tbody > tr[data-fg-kind] > td {
   background-color: var(--band) !important; color: var(--ink) !important;
@@ -344,7 +344,7 @@ p > img { padding: 8px; box-sizing: border-box; }
   padding: 3px 9px; border-bottom: 1px solid var(--line); white-space: nowrap;
 }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(79, 70, 229, 0.05); }
-.flograph-table table[bgcolor] { background-color: var(--band); }
+.fg-db > i { background-color: var(--band); }
 /* structure rows: total, group, subtotal (delete to keep your own colours) */
 .flograph-table > tbody > tr[data-fg-kind] > td {
   background-color: var(--band) !important; color: var(--ink) !important;
@@ -527,7 +527,7 @@ p > img, .fg-chart:not(.fg-drawn) > img { opacity: 0.9; }
   background-color: #1b2657 !important; border-top: 1px solid var(--accent) !important;
 }
 /* a data bar's empty track was drawn for white paper */
-.flograph-table table[bgcolor] { background-color: rgba(255, 255, 255, 0.07); }
+.fg-db > i { background-color: rgba(255, 255, 255, 0.07); }
 .fg-bar input {
   font-size: 12px; padding: 5px 10px; color: var(--ink);
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
@@ -708,7 +708,7 @@ li::marker { color: var(--accent); }
 .flograph-table > tbody > tr:last-child > td { border-bottom: 0; }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px var(--accent-soft); }
 .fg-sortable thead th[data-fg-sort]::after { color: var(--accent); }
-.flograph-table table[bgcolor] { background-color: var(--paper-2); }
+.fg-db > i { background-color: var(--paper-2); }
 /* structure rows: total, group, subtotal (delete to keep your own colours) */
 .flograph-table > tbody > tr[data-fg-kind] > td {
   background-color: var(--paper) !important; color: var(--ink) !important;
@@ -903,7 +903,7 @@ p > img { border: 1px solid var(--line-2); opacity: 0.9; }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(255, 176, 0, 0.08); }
 .fg-sortable thead th[data-fg-sort] { color: #fff; }
 .fg-sortable thead th[data-fg-sort]::after { color: var(--amber); }
-.flograph-table table[bgcolor] { background-color: rgba(255, 255, 255, 0.07); }
+.fg-db > i { background-color: rgba(255, 255, 255, 0.07); }
 /* structure rows: total, group, subtotal (delete to keep your own colours) */
 .flograph-table > tbody > tr[data-fg-kind] > td {
   background-color: #151c27 !important; color: #ffffff !important;
@@ -1131,7 +1131,7 @@ li::marker { color: var(--pink); }
 .fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(157, 140, 255, 0.10); }
 .fg-sortable thead th[data-fg-sort] { color: #ffffff; }
 .fg-sortable thead th[data-fg-sort]::after { color: var(--cyan); }
-.flograph-table table[bgcolor] { background-color: rgba(255, 255, 255, 0.08); }
+.fg-db > i { background-color: rgba(255, 255, 255, 0.08); }
 /* structure rows: total, group, subtotal (delete to keep your own colours) */
 .flograph-table > tbody > tr[data-fg-kind] > td {
   background-color: #1a1f44 !important; color: #ffffff !important;
