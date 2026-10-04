@@ -113,6 +113,16 @@ class TestThemes:
                   if ".fg-db > i" in css]
         assert styled, "no theme recolours a live bar's track"
 
+    def test_slate_paints_only_cells_no_rule_coloured(self):
+        # Slate's white cells and dark words used to be `td:not([bgcolor])`
+        # with !important — which a live cell's inline colours (a scale,
+        # a highlight, a group row, `fg red`) never escape
+        slate = CSS_TEMPLATES["Slate"]
+        assert 'td:not([bgcolor]):not([style*="background"]) {' in slate
+        assert ':not([style^="color:"]):not([style*=";color:"])' in slate
+        live = table("units > 10 => bg red, fg #ffffff", live=True)
+        assert re.search(r'<td[^>]*style="background-color:[^"]*;color:', live)
+
     def test_the_bar_s_class_is_its_own(self):
         # `.fg-bar` is the live table's search strip, `tr.fg-pin` a pinned
         # total row: the bar must not answer to either

@@ -155,23 +155,24 @@ table thead td p, table thead td span {
   color: #ffffff !important;
   background-color: #0369a1 !important;
 }
-.flograph-table tbody td:not([bgcolor]),
-table tbody td:not([bgcolor]) {
+/* Body cells are white with dark words, striped — except where a rule
+   coloured the cell: a scale, a highlight, a group or total row (a
+   `bgcolor` from Qt, an inline background in a live table), or `fg red`
+   (`color:` inline in a live table, on the cell's span from Qt). */
+table > tbody > tr > td:not([bgcolor]):not([style*="background"]) {
   background-color: #ffffff !important;
-  color: #1f2937 !important;
 }
-/* the words, not a mark a rule coloured (an icon's ● keeps its colour) */
-.flograph-table tbody td:not([bgcolor]) *:not([style*="color:"]),
-table tbody td:not([bgcolor]) *:not([style*="color:"]) {
-  color: #1f2937 !important;
-}
-.flograph-table tbody tr:nth-child(even) td:not([bgcolor]),
-table tbody tr:nth-child(even) td:not([bgcolor]) {
+table > tbody > tr:nth-child(even) > td:not([bgcolor]):not([style*="background"]) {
   background-color: #f1f5f9 !important;
+}
+table tbody td:not([style^="color:"]):not([style*=";color:"]):not([style*=" color:"]),
+table tbody td:not([style^="color:"]):not([style*=";color:"]):not([style*=" color:"])
+  *:not([style*="color:"]) {
+  color: #1f2937 !important;
 }
 /* A plain table's data bar is a small table in the cell: its cells take
    the row's colour; only the track itself has a light background. */
-table table td:not([bgcolor]) {
+table table > tbody > tr > td:not([bgcolor]):not([style*="background"]) {
   background-color: transparent !important;
 }
 .flograph-table tr:nth-child(even) { background: #273449; }
