@@ -109,7 +109,7 @@ class TestNamesDialog:
 
 class TestThemes:
     @pytest.mark.parametrize("name", ["Ledger", "Terminal", "Aurora",
-                                      "Studio"])
+                                      "Studio", "Swiss"])
     def test_the_new_themes_are_offered_and_whole(self, name):
         css = CSS_TEMPLATES[name]
         assert css.count("{") == css.count("}")

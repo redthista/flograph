@@ -467,7 +467,7 @@ picture stays in the file too: it is what a mail client that runs no
 scripts shows, and what the page prints, so a printed page matches the
 PDF. The Pages preview and the PDF are unchanged by any of this.
 
-Seven of the CSS tab's starter themes are made for live pages:
+Eight of the CSS tab's starter themes are made for live pages:
 
 * **Compact** — dense, hairline rules, numbers that line up.
 * **Dashboard** — every chart and table on a card; a quote becomes the
@@ -487,6 +487,11 @@ Seven of the CSS tab's starter themes are made for live pages:
   table on a panel, small capital headings, dense tables, on warm paper
   with a teal accent. No gradients or glow — modern, simple and
   functional.
+* **Swiss** — the International Typographic Style: white paper, black
+  type and one signal red; heavy grotesk headings, every section numbered
+  under a thick black rule, a quote set large as a pull quote, tables
+  ruled in black with no fills, square corners and no shadows. On a phone
+  the columns of a ```` ```columns ```` block stack.
 
 They theme the live charts as well — a dark page gets dark charts, a map
 loses its white ground — through variables any stylesheet can set:

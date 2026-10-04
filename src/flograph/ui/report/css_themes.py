@@ -1406,6 +1406,205 @@ details.fg-details[open] > summary { background: var(--panel-2); }
 """
 STUDIO += _plain_tables("#fbf8f1", "#6f6857", "#e2dac8", "#f2ede1", "#1d1b16", "#ebe4d4", table_bg="#fbf8f1", head_rule="#0e5a61", vertical=False, pad="3px 9px")
 
+SWISS = """/* Swiss — the International Typographic Style. White paper, black type,
+   one signal red. Heavy grotesk headings set tight, every section numbered
+   under a thick black rule, tables ruled in black with no fills, square
+   corners and no shadows: the grid does the work. The charts take the
+   palette (see the --fg-chart- lines). */
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f2f2f2;
+  --ink: #111111;
+  --muted: #6b6b6b;
+  --line: #d9d9d9;
+  --accent: #e30613;
+  --accent-soft: rgba(227, 6, 19, 0.06);
+  --track: #ececec;
+  --sans: "Helvetica Neue", Helvetica, Arial, "Nimbus Sans", "Liberation Sans", Inter, system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --fg-head: #ffffff;
+  --chart-shape: 2.6 / 1;
+  --fg-chart-paper: #ffffff;
+  --fg-chart-plot: #ffffff;
+  --fg-chart-ink: #111111;
+  --fg-chart-grid: #e6e6e6;
+  --fg-chart-font: "Helvetica Neue", Helvetica, Arial, "Nimbus Sans", "Liberation Sans", Inter, system-ui, sans-serif;
+  --fg-chart-colors: #e30613, #111111, #8c8c8c, #0057b8, #f2a900, #c4c4c4, #3a7d44, #5c2d91;
+  /* the web layout: sidebar, top bar, tabs, folding sections */
+  --fg-text-size: 13px;
+  --fg-accent: #e30613;
+  --fg-nav-bg: #ffffff;
+  --fg-nav-ink: #111111;
+  --fg-nav-muted: #6b6b6b;
+  --fg-nav-line: #111111;
+  --fg-nav-hover: rgba(227, 6, 19, 0.06);
+  --fg-nav-font: "Helvetica Neue", Helvetica, Arial, "Nimbus Sans", "Liberation Sans", Inter, system-ui, sans-serif;
+}
+body {
+  font-family: var(--sans) !important;
+  font-size: 13.5px !important;
+  line-height: 1.5;
+  color: var(--ink) !important;
+  background: var(--bg) !important;
+  max-width: 1200px;
+  margin: 0 auto !important;
+  padding: 30px 36px 56px !important;
+  font-variant-numeric: tabular-nums;
+  counter-reset: fg-section;
+}
+::selection { background: var(--accent); color: #ffffff; }
+span[style*="font-family:'sans-serif'"] { font-family: inherit !important; }
+p span, li, li span, h1 span, h2 span, h3 span { font-size: inherit !important; }
+p { margin: 4px 0 !important; max-width: 78ch; }
+a { color: var(--ink); text-decoration-color: var(--accent);
+    text-decoration-thickness: 2px; text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
+/* Qt puts its own blue and underline on the span inside a link */
+a > span[style*="color:#0000ff"] { color: inherit !important; text-decoration: inherit !important; }
+strong, b { font-weight: 700; }
+
+/* headings: big and tight; each section numbered under a black rule */
+h1 {
+  font-size: clamp(30px, 6vw, 44px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.02;
+  margin: 0 0 14px !important; padding: 0 0 14px !important;
+  border-bottom: 6px solid var(--ink);
+}
+h1 + p { font-size: 17px; line-height: 1.4; color: var(--ink); max-width: 60ch; }
+h2 {
+  counter-increment: fg-section;
+  display: flex; align-items: baseline; gap: 14px;
+  font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1;
+  margin: 40px 0 12px !important; padding: 10px 0 0 !important;
+  border-top: 3px solid var(--ink);
+}
+h2::before {
+  content: counter(fg-section, decimal-leading-zero);
+  font-size: 13px; font-weight: 700; letter-spacing: 0; color: var(--accent);
+  min-width: 26px;
+}
+h3 {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  margin: 20px 0 6px !important;
+}
+
+/* > quote: a pull quote, large, on a red rule */
+p[style*="margin-left:40px; margin-right:40px"] {
+  margin: 18px 0 !important; padding: 2px 0 2px 18px;
+  border-left: 6px solid var(--accent);
+  font-size: 19px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em;
+  max-width: 52ch;
+}
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
+  font-family: var(--mono) !important; font-size: 0.88em !important;
+  background: var(--panel-2); padding: 0 4px;
+}
+ul, ol { margin: 8px 0 !important; padding-left: 20px; }
+li::marker { color: var(--accent); font-weight: 700; }
+hr { border: 0; border-top: 1px solid var(--ink); margin: 28px 0; }
+
+/* charts: no frame but a black hairline above, like a figure on a grid */
+.fg-chart, p > img { background: var(--panel); border-top: 1px solid var(--ink); }
+.fg-chart {
+  width: 100% !important; aspect-ratio: var(--chart-shape) !important;
+  overflow: hidden; margin: 10px 0 !important;
+}
+.fg-chart > img { height: 100%; object-fit: contain; }
+p > img { padding-top: 8px; max-width: 100%; height: auto; }
+
+/* live tables: black rules, no fills; a rule's own colours are kept */
+.fg-table { margin: 10px 0 !important; }
+.fg-scroll .flograph-table { width: 100%; border-collapse: collapse;
+  border-top: 3px solid var(--ink); }
+.flograph-table > thead > tr > th {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink); background: var(--fg-head);
+  padding: 6px 10px 5px; border-bottom: 1px solid var(--ink); white-space: nowrap;
+}
+.flograph-table > tbody > tr > td {
+  padding: 4px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px var(--accent-soft); }
+.fg-sortable thead th[data-fg-sort] { color: var(--accent); }
+.fg-sortable thead th[data-fg-sort]::after { color: var(--accent); }
+/* structure rows: total, group, subtotal (delete to keep your own colours) */
+.flograph-table > tbody > tr[data-fg-kind] > td {
+  background-color: transparent !important; color: var(--ink) !important;
+  border: 0 !important; border-bottom: 1px solid var(--ink) !important;
+  font-weight: 700;
+}
+.flograph-table > tbody > tr[data-fg-kind="group"] > td { padding-top: 10px; }
+.flograph-table > tbody > tr[data-fg-kind="group"] > td:first-child::before { color: var(--accent); }
+.flograph-table > tbody > tr[data-fg-kind="total"] > td {
+  border-top: 3px solid var(--ink) !important; border-bottom: 0 !important;
+}
+.fg-db > i { background-color: var(--track); }
+/* the strip over a |search table: a line to write on */
+.fg-bar input {
+  font: inherit; font-size: 13px; padding: 5px 2px; color: var(--ink);
+  background: transparent; border: 0; border-bottom: 2px solid var(--ink);
+  border-radius: 0; outline: none; min-width: 220px;
+}
+.fg-bar input:focus { border-bottom-color: var(--accent); }
+.fg-bar .fg-count { color: var(--muted); }
+.fg-bar button {
+  font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--ink); border-radius: 0; white-space: nowrap;
+}
+.fg-bar button:hover { background: var(--ink); color: #ffffff; }
+.fg-scroll { scrollbar-color: var(--ink) transparent; }
+
+/* columns: the grid's gutters */
+table[style*="border-style:none"] { width: 100% !important; table-layout: fixed; }
+table[style*="border-style:none"] > tbody > tr > td { padding: 0 12px !important; }
+table[style*="border-style:none"] > tbody > tr > td:first-child { padding-left: 0 !important; }
+table[style*="border-style:none"] > tbody > tr > td:last-child { padding-right: 0 !important; }
+table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1 !important; }
+
+/* the web layout: black rules, red for where you are */
+.fg-top { background: var(--bg); border-bottom: 3px solid var(--ink); }
+.fg-top-title { font-weight: 800; letter-spacing: -0.02em; }
+.fg-top-links a { font-weight: 600; }
+.fg-top-links a.fg-on { color: var(--accent); border-bottom-color: var(--accent); }
+.fg-side { background: var(--bg); border-right: 1px solid var(--ink); }
+.fg-side a.fg-on { color: var(--accent); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+.fg-tabbar { border-bottom: 1px solid var(--ink); }
+.fg-tabbar > button { font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted); }
+.fg-tabbar > button.fg-on { color: var(--ink); border-bottom-color: var(--accent);
+  box-shadow: inset 0 -3px 0 var(--accent); }
+details.fg-details { background: var(--bg); border: 0; border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink); border-radius: 0; }
+details.fg-details + details.fg-details { border-top: 0; }
+details.fg-details > summary { font-weight: 700; color: var(--ink); }
+details.fg-details[open] > summary { border-bottom-color: var(--line); }
+.fg-drop { background: var(--bg); border: 1px solid var(--ink); border-radius: 0;
+  box-shadow: 6px 6px 0 var(--ink); }
+.fg-pager a { background: var(--bg); border: 1px solid var(--ink); border-radius: 0; }
+.fg-pager a:hover { background: var(--ink); color: #ffffff; }
+.fg-icon-btn { background: var(--bg); border-radius: 0; }
+
+/* a phone: less margin, taller charts, columns one under another */
+@media (max-width: 640px) {
+  body { padding: 18px 16px 40px !important; }
+  h2 { font-size: 19px; margin-top: 30px !important; }
+  p[style*="margin-left:40px; margin-right:40px"] { font-size: 16px; }
+  .fg-chart { aspect-ratio: 1.5 / 1 !important; }
+  table[style*="border-style:none"], table[style*="border-style:none"] > tbody,
+  table[style*="border-style:none"] > tbody > tr,
+  table[style*="border-style:none"] > tbody > tr > td {
+    display: block; width: auto !important; padding: 0 !important;
+  }
+}
+
+@media print {
+  .fg-drop { box-shadow: none; }
+  h2 { break-after: avoid; }
+}
+"""
+SWISS += _plain_tables("#ffffff", "#111111", "#d9d9d9", "#ffffff", "#111111", "#ececec", head_rule="#111111", vertical=False, pad="4px 10px")
+
 LIVE_THEMES = {
     "Compact": COMPACT,
     "Dashboard": DASHBOARD,
@@ -1414,4 +1613,5 @@ LIVE_THEMES = {
     "Terminal": TERMINAL,
     "Aurora": AURORA,
     "Studio": STUDIO,
+    "Swiss": SWISS,
 }

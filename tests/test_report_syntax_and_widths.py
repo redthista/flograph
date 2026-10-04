@@ -133,7 +133,8 @@ class TestTableWidth:
 
 class TestPlainTablesInTheThemes:
     @pytest.mark.parametrize("name", ["Compact", "Dashboard", "Midnight",
-                                      "Ledger", "Terminal", "Aurora", "Studio"])
+                                      "Ledger", "Terminal", "Aurora", "Studio",
+                                      "Swiss"])
     def test_each_live_theme_dresses_them(self, name):
         css = CSS_TEMPLATES[name]
         assert 'table[cellspacing="2"]' in css
