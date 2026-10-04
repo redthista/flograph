@@ -1,0 +1,207 @@
+{
+ "flograph_version": "0.1.24",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "ws_data",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     0
+    ],
+    "code": null,
+    "label": "Sales",
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"Region\", \"type\": \"text\"}, {\"name\": \"Product\", \"type\": \"text\"}, {\"name\": \"Units\", \"type\": \"integer\"}, {\"name\": \"Revenue\", \"type\": \"number\"}, {\"name\": \"Change\", \"type\": \"number\"}, {\"name\": \"Margin\", \"type\": \"number\"}, {\"name\": \"Status\", \"type\": \"text\"}], \"rows\": [[\"North\", \"Widgets\", 371, 6678, -0.03, 0.08, \"risk\"], [\"North\", \"Gadgets\", 880, 10560, -0.06, 0.08, \"risk\"], [\"North\", \"Gizmos\", 559, 10062, -0.32, 0.29, \"behind\"], [\"North\", \"Doohickeys\", 111, 1998, -0.28, 0.28, \"behind\"], [\"North\", \"Sprockets\", 886, 10632, 0.41, 0.4, \"ok\"], [\"South\", \"Widgets\", 636, 7632, 0.11, 0.27, \"ok\"], [\"South\", \"Gadgets\", 266, 3192, 0.1, 0.12, \"risk\"], [\"South\", \"Gizmos\", 469, 8442, 0.08, 0.36, \"risk\"], [\"South\", \"Doohickeys\", 613, 11034, -0.27, 0.36, \"behind\"], [\"South\", \"Sprockets\", 232, 5800, -0.27, 0.44, \"behind\"], [\"East\", \"Widgets\", 617, 7404, 0.15, 0.32, \"ok\"], [\"East\", \"Gadgets\", 584, 18104, 0.27, 0.31, \"ok\"], [\"East\", \"Gizmos\", 504, 12600, -0.11, 0.49, \"behind\"], [\"East\", \"Doohickeys\", 755, 13590, -0.28, 0.22, \"behind\"], [\"East\", \"Sprockets\", 546, 13650, 0.23, 0.21, \"ok\"], [\"West\", \"Widgets\", 114, 1368, 0.06, 0.14, \"risk\"], [\"West\", \"Gadgets\", 390, 7020, 0.4, 0.28, \"ok\"], [\"West\", \"Gizmos\", 724, 8688, 0.26, 0.37, \"ok\"], [\"West\", \"Doohickeys\", 936, 23400, -0.08, 0.24, \"risk\"], [\"West\", \"Sprockets\", 548, 16988, -0.29, 0.1, \"behind\"]]}",
+     "width": 460,
+     "height": 560
+    }
+   },
+   {
+    "id": "ws_intro",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     700
+    ],
+    "code": null,
+    "label": null,
+    "params": {
+     "text": "## Smaller report web pages\n\nThree tables, three report pages (no theme, **Slate**, **Midnight**) with one body. Open a page — it starts on the **Web** preview — then **Save HTML…** and inspect it:\n\n- a live data bar is `<span class=\"fg-db\">` + one `<i>` track, not two tables in the cell\n- a plain (paper) table's cells say `border:1px solid #999999` instead of twelve declarations",
+     "width": 460,
+     "height": 220
+    }
+   },
+   {
+    "id": "ws_bars",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     0
+    ],
+    "code": null,
+    "label": "Bars",
+    "params": {
+     "format_rules": "Revenue  format $,.0f\nUnits    bar blue\nChange   bar green\nChange   format +0%\nMargin   bar purple only\nMargin   width 90",
+     "width": 680,
+     "height": 460
+    }
+   },
+   {
+    "id": "ws_bars_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     0
+    ],
+    "code": null,
+    "label": null,
+    "params": {
+     "text": "**Bars.** `Units bar blue` — ordinary. `Change` has negatives, so its bar grows from the middle either way. `Margin bar purple only` draws the bar instead of the number. In a live table every track ends level at the cell's right edge.",
+     "width": 520,
+     "height": 140
+    }
+   },
+   {
+    "id": "ws_marks",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     620
+    ],
+    "code": null,
+    "label": "Marks",
+    "params": {
+     "format_rules": "Revenue  format $,.0f\nChange   format +0%\nChange < 0 => fg red, icon ▼ red right\nChange > 0 => fg green, icon ▲ green right\nStatus   iconmap Status: ok=● green, risk=● amber, behind=● red",
+     "width": 680,
+     "height": 460
+    }
+   },
+   {
+    "id": "ws_marks_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     620
+    ],
+    "code": null,
+    "label": null,
+    "params": {
+     "text": "**Marks pinned right.** ▲ / ▼ sit against the cell's right edge (`.fg-pr`, two spans), and the status lights keep their colours — under Slate they used to all come out dark grey.",
+     "width": 520,
+     "height": 120
+    }
+   },
+   {
+    "id": "ws_grouped",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     700,
+     1240
+    ],
+    "code": null,
+    "label": "Grouped",
+    "params": {
+     "format_rules": "Revenue  format $,.0f\nRevenue  bar blue\nChange   format +0%\nChange < 0 => fg red, icon ▼ red right, on all",
+     "width": 680,
+     "height": 520,
+     "mode": "grouped",
+     "group_by": "Region",
+     "totals": "sum"
+    }
+   },
+   {
+    "id": "ws_grouped_note",
+    "type": "flograph.util.note",
+    "pos": [
+     1620,
+     1240
+    ],
+    "code": null,
+    "label": null,
+    "params": {
+     "text": "**Grouped, with totals.** Bars on the data rows, ▼ on every row kind (`on all`). Under Slate this table's rows were ~80px tall with invisible tracks before the new bar.",
+     "width": 520,
+     "height": 120
+    }
+   }
+  ],
+  "connections": [
+   {
+    "id": "c1",
+    "src": [
+     "ws_data",
+     "table"
+    ],
+    "dst": [
+     "ws_bars",
+     "table"
+    ]
+   },
+   {
+    "id": "c2",
+    "src": [
+     "ws_data",
+     "table"
+    ],
+    "dst": [
+     "ws_marks",
+     "table"
+    ]
+   },
+   {
+    "id": "c3",
+    "src": [
+     "ws_data",
+     "table"
+    ],
+    "dst": [
+     "ws_grouped",
+     "table"
+    ]
+   }
+  ],
+  "frames": [
+   {
+    "id": "ws_f1",
+    "title": "Tables the report embeds",
+    "rect": [
+     660,
+     -80,
+     1520,
+     1880
+    ],
+    "color": "#33415c"
+   }
+  ],
+  "pages": [
+   {
+    "id": "ws_p_plain",
+    "title": "No theme",
+    "kind": "report",
+    "body": "# Report web page size\n\nEvery table below is **live** (`|live`): sort it by clicking a heading. The\nlast one is the same data as a **plain** table — what an embed without\n`|live` writes, and what the PDF prints.\n\n## 1 · Data bars\n\nOrdinary, centred for negatives, and bar-only.\n\n![[Bars|live|rows=all]]\n\n## 2 · Marks pinned right, coloured icons\n\n![[Marks|live|rows=all]]\n\n## 3 · Grouped, with totals\n\n![[Grouped|live|rows=all]]\n\n## 4 · The plain table\n\nQt's own markup, now with each cell's style said in a few words.\n\n![[Bars|rows=all]]\n",
+    "preview_mode": "web",
+    "group": "Web size"
+   },
+   {
+    "id": "ws_p_slate",
+    "title": "Slate",
+    "kind": "report",
+    "body": "# Report web page size\n\nEvery table below is **live** (`|live`): sort it by clicking a heading. The\nlast one is the same data as a **plain** table — what an embed without\n`|live` writes, and what the PDF prints.\n\n## 1 · Data bars\n\nOrdinary, centred for negatives, and bar-only.\n\n![[Bars|live|rows=all]]\n\n## 2 · Marks pinned right, coloured icons\n\n![[Marks|live|rows=all]]\n\n## 3 · Grouped, with totals\n\n![[Grouped|live|rows=all]]\n\n## 4 · The plain table\n\nQt's own markup, now with each cell's style said in a few words.\n\n![[Bars|rows=all]]\n",
+    "preview_mode": "web",
+    "group": "Web size",
+    "custom_css": "body {\n  font-family: Inter, system-ui, sans-serif;\n  line-height: 1.5;\n  color: #e2e8f0;\n  background: #0f172a;\n}\n:root {\n  --fg-accent: #38bdf8; --fg-nav-bg: #111c33; --fg-nav-ink: #e2e8f0;\n  --fg-nav-muted: #94a3b8; --fg-nav-line: #1e293b;\n  --fg-nav-hover: rgba(56, 189, 248, 0.1);\n}\nh1, h2, h3 { color: #f8fafc; }\nh1 { border-bottom: 2px solid #38bdf8; padding-bottom: 0.3em; }\nh2 { color: #7dd3fc; margin-top: 1.6em; }\na { color: #67e8f9; }\nblockquote { color: #fde68a; border-left-color: #f59e0b; }\ntable { width: 100%; margin: 1.2em 0; }\n.flograph-table { background: #1e293b; }\ntable thead,\ntable thead tr,\ntable thead th,\ntable thead td {\n  background-color: #0369a1 !important;\n  color: #ffffff !important;\n}\n.flograph-table thead th *, .flograph-table thead td *,\ntable thead td p, table thead td span {\n  color: #ffffff !important;\n  background-color: #0369a1 !important;\n}\n.flograph-table tbody td:not([bgcolor]),\ntable tbody td:not([bgcolor]) {\n  background-color: #ffffff !important;\n  color: #1f2937 !important;\n}\n/* the words, not a mark a rule coloured (an icon's ● keeps its colour) */\n.flograph-table tbody td:not([bgcolor]) *:not([style*=\"color:\"]),\ntable tbody td:not([bgcolor]) *:not([style*=\"color:\"]) {\n  color: #1f2937 !important;\n}\n.flograph-table tbody tr:nth-child(even) td:not([bgcolor]),\ntable tbody tr:nth-child(even) td:not([bgcolor]) {\n  background-color: #f1f5f9 !important;\n}\n/* A plain table's data bar is a small table in the cell: its cells take\n   the row's colour; only the track itself has a light background. */\ntable table td:not([bgcolor]) {\n  background-color: transparent !important;\n}\n.flograph-table tr:nth-child(even) { background: #273449; }\n.flograph-table > thead > tr > th, .flograph-table > tbody > tr > td {\n  padding: 3px 9px;\n}\n/* a plain table keeps Qt's own spacing between cells: little padding */\ntable[cellspacing=\"2\"] > thead > tr > td, table[cellspacing=\"2\"] > tbody > tr > td {\n  padding: 1px 6px;\n}\n/* a ```columns block is layout, not a table of data: no white cells */\ntable[style*=\"border-style:none\"] > tbody > tr > td {\n  background-color: transparent !important;\n}\ntable[style*=\"border-style:none\"] > tbody > tr > td > p,\ntable[style*=\"border-style:none\"] > tbody > tr > td > p *,\ntable[style*=\"border-style:none\"] > tbody > tr > td > h1 *,\ntable[style*=\"border-style:none\"] > tbody > tr > td > h2 *,\ntable[style*=\"border-style:none\"] > tbody > tr > td > h3 * {\n  color: #e2e8f0 !important;\n}\n/* the web layout: panels in the page's own blues */\ndetails.fg-details { background: #111c33; }\ndetails.fg-details[open] > summary { background: #16233f; }\n.fg-tabbar > button.fg-on { color: #7dd3fc; }\n.fg-drop { box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); }\n\n/* tables stay compact: a cell's value is a paragraph (Qt writes it so),\n   and the page's paragraph spacing is not meant for it */\n.flograph-table td p, .flograph-table th p,\ntable[cellspacing=\"2\"] td p { margin: 0 !important; max-width: none !important; }\n.flograph-table, table[cellspacing=\"2\"] { line-height: 1.3; }\n/* a chart drawn as a picture sits in a paragraph: no reading width for it */\np:has(> img) { max-width: none !important; }\n"
+   },
+   {
+    "id": "ws_p_midnight",
+    "title": "Midnight",
+    "kind": "report",
+    "body": "# Report web page size\n\nEvery table below is **live** (`|live`): sort it by clicking a heading. The\nlast one is the same data as a **plain** table — what an embed without\n`|live` writes, and what the PDF prints.\n\n## 1 · Data bars\n\nOrdinary, centred for negatives, and bar-only.\n\n![[Bars|live|rows=all]]\n\n## 2 · Marks pinned right, coloured icons\n\n![[Marks|live|rows=all]]\n\n## 3 · Grouped, with totals\n\n![[Grouped|live|rows=all]]\n\n## 4 · The plain table\n\nQt's own markup, now with each cell's style said in a few words.\n\n![[Bars|rows=all]]\n",
+    "preview_mode": "web",
+    "group": "Web size",
+    "custom_css": "/* Midnight — a dark control room: dense, high-contrast, cyan for what\n   moves. The live charts turn dark with it (see the --fg-chart- lines);\n   printed, it goes back to ink on white. */\n:root {\n  --bg: #0a0f1c;\n  --panel: #111830;\n  --panel-2: #172042;\n  --ink: #dbe3f7;\n  --muted: #8491b3;\n  --line: #222c4d;\n  --accent: #22d3ee;\n  --accent-2: #a78bfa;\n  --fg-head: #111830;\n  --chart-shape: 2.6 / 1;\n  --fg-chart-paper: #111830;\n  --fg-chart-plot: #111830;\n  --fg-chart-ink: #b9c4e2;\n  --fg-chart-grid: #1f2a4a;\n  --fg-chart-font: Inter, \"Segoe UI\", \"Noto Sans\", system-ui, sans-serif;\n  /* the web layout: sidebar, top bar, tabs, folding sections */\n  --fg-text-size: 12.5px;\n  --fg-accent: #22d3ee;\n  --fg-nav-bg: #0d1428;\n  --fg-nav-ink: #dbe3f7;\n  --fg-nav-muted: #8491b3;\n  --fg-nav-line: #222c4d;\n  --fg-nav-hover: rgba(34, 211, 238, 0.1);\n}\nbody {\n  font-family: Inter, \"Segoe UI\", \"Noto Sans\", system-ui, sans-serif !important;\n  font-size: 12.5px !important;\n  line-height: 1.5;\n  color: var(--ink) !important;\n  background: radial-gradient(1200px 500px at 15% -10%, #16224a 0%, transparent 60%),\n              var(--bg) !important;\n  background-attachment: fixed !important;\n  max-width: 1220px;\n  margin: 0 auto !important;\n  padding: 26px 30px 48px !important;\n  font-variant-numeric: tabular-nums;\n}\nspan[style*=\"font-family:'sans-serif'\"] { font-family: inherit !important; }\np span, li, li span, h1 span, h2 span, h3 span { font-size: inherit !important; }\np { margin: 4px 0 !important; }\na { color: var(--accent); }\n\nh1 {\n  font-size: 23px; font-weight: 750; letter-spacing: -0.02em;\n  margin: 0 0 10px !important; padding: 0 !important;\n  background: linear-gradient(90deg, #ffffff 0%, var(--accent) 55%, var(--accent-2) 100%);\n  -webkit-background-clip: text; background-clip: text; color: transparent;\n  width: fit-content;   /* the gradient spans the words, not the page */\n}\nh1 + p { color: var(--muted); }\nh2 {\n  display: flex; align-items: center; gap: 10px;\n  font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;\n  text-transform: uppercase; color: var(--accent);\n  margin: 26px 0 8px !important;\n}\nh2::after { content: \"\"; flex: 1; height: 1px;\n            background: linear-gradient(90deg, var(--line), transparent); }\nh3 { font-size: 12.5px; color: #ffffff; margin: 16px 0 4px !important; }\n\np[style*=\"margin-left:40px; margin-right:40px\"] {\n  margin: 12px 0 !important; padding: 10px 14px;\n  background: linear-gradient(90deg, rgba(34, 211, 238, 0.10), rgba(34, 211, 238, 0.02));\n  border: 1px solid rgba(34, 211, 238, 0.25); border-left: 3px solid var(--accent);\n  border-radius: 8px;\n}\nspan[style*=\"font-family:'monospace'\"]:not(td *) {   /* code, not a table's figures */\n  font-family: \"JetBrains Mono\", \"Cascadia Code\", Consolas, monospace !important;\n  font-size: 0.9em !important; color: var(--accent);\n  background: rgba(34, 211, 238, 0.08); border-radius: 4px; padding: 0 4px;\n}\nul { margin: 8px 0 !important; padding-left: 18px; }\nli::marker { color: var(--accent); }\n\n/* panels */\n.fg-chart, .fg-table, p > img {\n  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;\n  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 10px 30px rgba(0, 0, 0, 0.35);\n}\n.fg-chart {\n  width: 100% !important; aspect-ratio: var(--chart-shape) !important;\n  overflow: hidden; margin: 8px 0 !important;\n}\n.fg-chart > img { height: 100%; object-fit: contain; }\n/* a picture was drawn for paper; dim it rather than let it glare */\np > img, .fg-chart:not(.fg-drawn) > img { opacity: 0.9; }\n.fg-table { padding: 8px 10px; margin: 8px 0 !important; width: auto; }\n.fg-scroll .flograph-table { width: 100%; border-collapse: collapse; }\n.flograph-table > thead > tr > th {\n  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;\n  text-transform: uppercase; color: var(--muted);\n  padding: 4px 9px; border-bottom: 1px solid var(--accent); white-space: nowrap;\n}\n.flograph-table > tbody > tr > td {\n  padding: 3px 9px; border-bottom: 1px solid var(--line); white-space: nowrap;\n  color: var(--ink);\n}\n.fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px rgba(34, 211, 238, 0.07); }\n/* structure rows: total, group, subtotal (delete to keep your own colours) */\n.flograph-table > tbody > tr[data-fg-kind] > td {\n  background-color: var(--panel-2) !important; color: #ffffff !important;\n  border: 0 !important; border-bottom: 1px solid var(--line) !important;\n  font-weight: 650;\n}\n.flograph-table > tbody > tr[data-fg-kind=\"group\"] > td:first-child {\n  color: var(--accent) !important;\n}\n.flograph-table > tbody > tr[data-fg-kind=\"total\"] > td {\n  background-color: #1b2657 !important; border-top: 1px solid var(--accent) !important;\n}\n/* a data bar's empty track was drawn for white paper */\n.fg-db > i { background-color: rgba(255, 255, 255, 0.07); }\n.fg-bar input {\n  font-size: 12px; padding: 5px 10px; color: var(--ink);\n  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;\n  outline: none;\n}\n.fg-bar input:focus { border-color: var(--accent);\n                      box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18); }\n.fg-bar .fg-count { color: var(--muted); }\n.fg-bar button { color: var(--ink); border-color: var(--line); }\n.fg-bar button:hover { border-color: var(--accent); color: var(--accent); }\n.fg-scroll::-webkit-scrollbar { width: 8px; height: 8px; }\n.fg-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }\n.fg-scroll { scrollbar-color: var(--line) transparent; }\n\ntable[style*=\"border-style:none\"] { width: 100% !important; table-layout: fixed; }\ntable[style*=\"border-style:none\"] > tbody > tr > td { padding: 0 7px !important; }\ntable[style*=\"border-style:none\"] > tbody > tr > td:first-child { padding-left: 0 !important; }\ntable[style*=\"border-style:none\"] > tbody > tr > td:last-child { padding-right: 0 !important; }\ntable[style*=\"border-style:none\"] .fg-chart { aspect-ratio: 1.4 / 1 !important; }\n\n/* paper does not print backgrounds: go back to ink on white */\n@media print {\n  body { background: #fff !important; color: #111 !important; }\n  h1 { background: none; color: #111; }\n  h2, h3 { color: #111; }\n  .fg-chart, .fg-table, p > img { background: #fff; box-shadow: none;\n                                  border-color: #ccc; }\n  .flograph-table > tbody > tr > td { color: #111; }\n  .flograph-table > tbody > tr[data-fg-kind] > td {\n    background-color: #eee !important; color: #111 !important; }\n}\n\n/* the web layout: dark glass bars, panels for sections, a lit tab */\n:root { --fg-nav-font: Inter, \"Segoe UI\", \"Noto Sans\", system-ui, sans-serif; }\n.fg-top { background: rgba(13, 20, 40, 0.82);\n  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }\n.fg-top-title { background: linear-gradient(90deg, #ffffff, var(--accent));\n  -webkit-background-clip: text; background-clip: text; color: transparent; }\n.fg-top-links a.fg-on { text-shadow: 0 0 12px rgba(34, 211, 238, 0.55); }\n.fg-side { background: linear-gradient(180deg, #0d1428, #0a0f1c); }\n.fg-side a.fg-on { box-shadow: inset 2px 0 0 var(--accent); border-radius: 0 6px 6px 0; }\n.fg-side ul ul { border-left-color: #1d2747; }\n.fg-tabbar > button { font-size: 11px; font-weight: 600; letter-spacing: 0.08em;\n  text-transform: uppercase; }\n.fg-tabbar > button.fg-on { color: var(--accent);\n  box-shadow: 0 8px 14px -10px rgba(34, 211, 238, 0.9); }\ndetails.fg-details { background: var(--panel); border-color: var(--line);\n  border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }\ndetails.fg-details > summary { color: #ffffff; }\ndetails.fg-details[open] > summary { background: var(--panel-2); }\n.fg-details-body .fg-chart, .fg-details-body .fg-table { box-shadow: none; }\n.fg-drop { background: #0d1428; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55),\n  0 0 0 1px rgba(34, 211, 238, 0.12); }\n.fg-pager a { background: var(--panel); }\n.fg-pager a:hover { box-shadow: 0 0 0 1px var(--accent), 0 0 18px rgba(34, 211, 238, 0.2); }\n.fg-icon-btn { background: var(--panel); }\n@media print {\n  details.fg-details { background: #fff; box-shadow: none; }\n  details.fg-details > summary, details.fg-details[open] > summary { color: #111; background: none; }\n}\n\n/* plain tables: an embed without |live, or a Markdown table (Qt wrote it\n   for paper, colours inline) */\ntable[cellspacing=\"2\"] { border-collapse: collapse !important; background: #111830;\n  margin: 8px 0 !important; }\ntable[cellspacing=\"2\"] > thead > tr > td, table[cellspacing=\"2\"] > tbody > tr > td {\n  border-color: #222c4d !important; padding: 3px 9px !important;\n}\ntable[cellspacing=\"2\"] > thead > tr > td {\n  background-color: #111830 !important;\n  border-bottom: 1px solid #22d3ee !important;\n}\ntable[cellspacing=\"2\"] > thead > tr > td p, table[cellspacing=\"2\"] > thead > tr > td span {\n  background-color: transparent !important; color: #8491b3 !important;\n}\ntable[cellspacing=\"2\"] > tbody > tr > td[bgcolor=\"#cdced1\"] { background-color: #172042 !important; }\ntable[cellspacing=\"2\"] > tbody > tr > td[bgcolor=\"#cdced1\"] p,\ntable[cellspacing=\"2\"] > tbody > tr > td[bgcolor=\"#cdced1\"] span {\n  background-color: transparent !important; color: #ffffff !important;\n}\ntable[bgcolor=\"#eceef1\"] { background-color: rgba(255, 255, 255, 0.07) !important; }\n/* the figure beside a data bar: Qt sets it in monospace so it lines up —\n   the theme's own face, with even-width digits, does that too */\ntable[cellspacing=\"2\"] td span[style*=\"monospace\"] {\n  font-family: inherit !important; font-variant-numeric: tabular-nums;\n}\ntable[cellspacing=\"2\"] > tbody > tr > td[bgcolor]:not([bgcolor=\"#cdced1\"]) span:not([style*=\" color:\"]) {\n  color: #14161c !important;\n}\n\n/* tables stay compact: a cell's value is a paragraph (Qt writes it so),\n   and the page's paragraph spacing is not meant for it */\n.flograph-table td p, .flograph-table th p,\ntable[cellspacing=\"2\"] td p { margin: 0 !important; max-width: none !important; }\n.flograph-table, table[cellspacing=\"2\"] { line-height: 1.3; }\n/* a chart drawn as a picture sits in a paragraph: no reading width for it */\np:has(> img) { max-width: none !important; }\n"
+   }
+  ]
+ }
+}
