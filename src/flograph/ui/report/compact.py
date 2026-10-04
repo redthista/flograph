@@ -1,4 +1,4 @@
-"""Qt's HTML, said in fewer bytes — and only in ways a browser cannot see.
+"""Qt's HTML, said in fewer bytes, and read by a browser as Qt meant it.
 
 QTextDocument.toHtml writes every declaration it knows, on every element:
 a table cell carries its padding, then each of its four borders three
@@ -7,17 +7,20 @@ margins and two of Qt's own properties. A 30-row table came out at
 107 KB, 91% of it `style=` attributes — most of it the same 400 bytes
 again in every cell.
 
-Most of that does nothing in a browser at all:
+Some of that does nothing in a browser at all:
 
 * `-qt-block-indent`, `-qt-paragraph-type`, … are Qt's — a browser drops
   any property it does not know.
-* `padding-left:7` has no unit. The page is in standards mode (Qt's
-  doctype says HTML 4.0 strict), where a length without a unit is invalid
-  and the declaration is thrown away; the cell is drawn with no padding
-  either way. A *zero* stays — `0` needs no unit, and it is what beats a
-  `<td>`'s own 1px.
 * `text-indent:0px` is the initial value. It is inherited, so it only goes
   when nothing in the document indents.
+
+One thing is *mended* rather than shortened: Qt writes padding with no
+unit (`padding-left:7`). The page is in standards mode (Qt's doctype says
+HTML 4.0 strict), where a length without a unit is invalid and thrown
+away — so every plain table's cells sat with no padding on the web, and a
+data bar's value touched its track, where the PDF (Qt reads it as pixels)
+has the room. It is written in `px`, so the web page spaces a table as the
+PDF does.
 
 and the rest says in one declaration what it said in four or twelve:
 four equal margins are `margin`, four sides of one border are `border`.
@@ -50,8 +53,11 @@ _SIDES = ("top", "right", "bottom", "left")
 
 #: What may fold to a shorthand when its four sides agree, and the family
 #: of properties that could also set it.
-_FOLDS = (("margin-{}", "margin"), ("padding-{}", "padding"),
-          ("border-{}-color", "border"), ("border-{}-style", "border"))
+#: The last says whether sides that differ may fold too (`padding:3px 7px`)
+#: — not a margin, whose long spelling a quote's selector reads.
+_FOLDS = (("margin-{}", "margin", False), ("padding-{}", "padding", True),
+          ("border-{}-color", "border", False),
+          ("border-{}-style", "border", False))
 
 #: Any text-indent in the document that is not the initial value.
 _INDENTED = re.compile(r"text-indent:\s*(?!0(?:px)?\s*(?:;|$|\"))", re.I)
@@ -82,15 +88,15 @@ def _compact_style(style: str, drop_indent: bool) -> str:
         if key.startswith("-qt-"):
             continue
         if key.startswith("padding") and _is_unitless(value):
-            continue
+            value += "px"           # what Qt meant, and what the PDF has
         if key == "text-indent" and drop_indent and value in ("0", "0px"):
             continue
         decls.append((name, value))
     if not decls:
         return ""
     decls = _fold_border(decls)
-    for template, family in _FOLDS:
-        decls = _fold_sides(decls, template, family)
+    for template, family, uneven in _FOLDS:
+        decls = _fold_sides(decls, template, family, uneven)
     # Qt's own spelling, which the themes' selectors are written against
     return " " + "; ".join(f"{n}:{v}" for n, v in decls) + ";"
 
@@ -121,18 +127,30 @@ def _is_unitless(value: str) -> bool:
             and float(value) != 0)
 
 
-def _fold_sides(decls: list, template: str, family: str) -> list:
-    """Four equal sides as one shorthand — `margin-top:0px; …` as
-    `margin:0px`, `border-top-color:#000; …` as `border-color:#000`.
+def _fold_sides(decls: list, template: str, family: str,
+                uneven: bool = False) -> list:
+    """Four sides as one shorthand — `margin-top:0px; …` as `margin:0px`,
+    `border-top-color:#000; …` as `border-color:#000`, and with `uneven`
+    sides that differ too, in CSS's shortest order (`padding:3px 7px`).
     `template` names a side's property (`margin-{}`), `family` everything
     that could also set it (`border` for a border colour)."""
     found = {n.lower(): v for n, v in decls}
     names = [template.format(s) for s in _SIDES]
-    values = {found.get(n) for n in names}
-    if not all(n in found for n in names) or len(values) != 1:
+    if not all(n in found for n in names):
         return decls
-    return _replace(decls, set(names), (template.replace("-{}", ""),
-                                        values.pop()), family)
+    top, right, bottom, left = (found[n] for n in names)
+    if len({top, right, bottom, left}) != 1 and not uneven:
+        return decls
+    if left != right:
+        value = f"{top} {right} {bottom} {left}"
+    elif top != bottom:
+        value = f"{top} {right} {bottom}"
+    elif top != right:
+        value = f"{top} {right}"
+    else:
+        value = top
+    return _replace(decls, set(names), (template.replace("-{}", ""), value),
+                    family)
 
 
 def _fold_border(decls: list) -> list:

@@ -35,17 +35,26 @@ def styles(html):
 class TestACell:
     def test_a_qt_cell_shrinks_to_what_a_browser_reads(self):
         out = compact_qt_html(QT_CELL)
-        assert styles(out) == [" border:1px solid #999999;", " margin:0px;",
+        assert styles(out) == [" padding:3px 7px; border:1px solid #999999;",
+                               " margin:0px;",
                                " font-family:'sans-serif'; font-size:11pt;"]
         assert len(out) < len(QT_CELL) / 2.5
         assert "west" in out
 
-    def test_a_padding_without_a_unit_goes_but_zero_stays(self):
-        # standards mode throws `7` away; `0` is valid and beats a td's 1px
+    def test_a_padding_without_a_unit_gets_one(self):
+        # standards mode throws `6` away, and a data bar's value touched its
+        # track; Qt (and so the PDF) reads it as pixels
         out = compact_qt_html('<td style=" padding-left:0; padding-right:6; '
                               'padding-top:0; padding-bottom:0;">x</td>')
-        assert styles(out) == [" padding-left:0; padding-top:0; "
-                               "padding-bottom:0;"]
+        assert styles(out) == [" padding:0 6px 0 0;"]
+
+    def test_three_and_two_value_paddings(self):
+        def pad(t, r, b, l):
+            return styles(compact_qt_html(
+                f'<td style=" padding-left:{l}; padding-right:{r}; '
+                f'padding-top:{t}; padding-bottom:{b};">'))[0]
+        assert pad(3, 7, 3, 7) == " padding:3px 7px;"
+        assert pad(1, 7, 3, 7) == " padding:1px 7px 3px;"
 
     def test_four_equal_paddings_fold(self):
         out = compact_qt_html('<td style=" padding-left:0; padding-right:0; '
@@ -152,6 +161,7 @@ class TestTheWebPage:
         big = report_html(rendered, "R")
         assert len(small) < len(big) / 2.5
         assert "-qt-" not in small and "padding-left:7" not in small
+        assert "padding:3px 7px" in small
 
     def test_what_the_themes_select_on_survives(self, monkeypatch):
         from flograph.ui.report.html import report_html
