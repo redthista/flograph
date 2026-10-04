@@ -316,8 +316,10 @@ def report_html(rendered, title: str = "", setup=None,
     after the paper's styles and before the page's own CSS, so a theme can
     restyle all of it.
     """
+    from .compact import compact_qt_html
     from .live import make_live, size_tables
-    html = make_live(rendered.document.toHtml(), rendered, plotly_src)
+    html = compact_qt_html(rendered.document.toHtml())
+    html = make_live(html, rendered, plotly_src)
     html = size_tables(html, rendered)
     for index, image in enumerate(rendered.images):
         payload = rendered.animations.get(index)
