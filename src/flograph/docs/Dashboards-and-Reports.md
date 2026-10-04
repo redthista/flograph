@@ -467,7 +467,7 @@ picture stays in the file too: it is what a mail client that runs no
 scripts shows, and what the page prints, so a printed page matches the
 PDF. The Pages preview and the PDF are unchanged by any of this.
 
-Six of the CSS tab's starter themes are made for live pages:
+Seven of the CSS tab's starter themes are made for live pages:
 
 * **Compact** — dense, hairline rules, numbers that line up.
 * **Dashboard** — every chart and table on a card; a quote becomes the
@@ -483,6 +483,10 @@ Six of the CSS tab's starter themes are made for live pages:
 * **Aurora** — the showpiece: frosted-glass panels over a night sky of
   colour, gradient headings, a lit pill for the open tab, a glowing total
   row — with tables kept tight and high-contrast for reading numbers.
+* **Studio** — Midnight's layout in Ledger's colours: every chart and
+  table on a panel, small capital headings, dense tables, on warm paper
+  with a teal accent. No gradients or glow — modern, simple and
+  functional.
 
 They theme the live charts as well — a dark page gets dark charts, a map
 loses its white ground — through variables any stylesheet can set:
@@ -621,7 +625,7 @@ gives dark glass bars and lit tabs, **Editorial** turns a folding section
 into a margin note with small-caps tabs, **Ledger** rules them like a
 newspaper and opens sections with a plus, **Terminal** squares them off
 with `[+]` sections and function-key sections, **Aurora** frosts them and
-lights the open tab, and **Clean** and **Slate** tint them to match. A stylesheet of your own can set `--fg-accent`,
+lights the open tab, **Studio** sets them on paper panels with a teal mark, and **Clean** and **Slate** tint them to match. A stylesheet of your own can set `--fg-accent`,
 `--fg-nav-bg`, `--fg-nav-ink`, `--fg-nav-muted`, `--fg-nav-line`,
 `--fg-nav-hover`, `--fg-nav-font`, `--fg-side-w` (the sidebar's width) and
 `--fg-top-h` (the top bar's height, set on `html.fg-has-top`), or style

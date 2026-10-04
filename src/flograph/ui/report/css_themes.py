@@ -71,6 +71,8 @@ def _plain_tables(head_bg: str, head_ink: str, line: str, group_bg: str,
    for paper, colours inline) */
 {t} {{ border-collapse: collapse !important; background: {table_bg};
   margin: 8px 0 !important; }}
+/* a ```columns block is a table too, but layout: no table's ground */
+{t}[style*="border-style:none"] {{ background: transparent !important; }}
 {cells} {{
   border-color: {line} !important; padding: {pad} !important;{side}
 }}
@@ -1237,6 +1239,173 @@ LEDGER += _plain_tables("transparent", "#6f6857", "#dcd4c2", "#f2ede1", "#1d1b16
 TERMINAL += _plain_tables("#121821", "#ffb000", "#1c232e", "#151c27", "#ffffff", "rgba(255, 255, 255, 0.07)", table_bg="#0d1117", head_rule="#ffb000", dark=True, pad="2px 8px")
 AURORA += _plain_tables("#161b38", "#a4acd3", "rgba(255, 255, 255, 0.08)", "#1a1f44", "#ffffff", "rgba(255, 255, 255, 0.08)", table_bg="rgba(255, 255, 255, 0.04)", head_rule="rgba(157, 140, 255, 0.45)", vertical=False, dark=True, pad="3px 10px")
 
+STUDIO = """/* Studio — Midnight's layout in Ledger's colours. Every chart and table
+   on a panel, small capital headings with a rule running out from them,
+   dense tables with figures in columns — on warm paper, in ink, with
+   Ledger's teal for what is live or chosen. No gradients, no glow, one
+   sans face: modern, simple and functional. The charts take the paper
+   and the palette (see the --fg-chart- lines). */
+:root {
+  --bg: #f4efe4;
+  --panel: #fbf8f1;
+  --panel-2: #f2ede1;
+  --ink: #1d1b16;
+  --muted: #6f6857;
+  --line: #e2dac8;
+  --accent: #0e5a61;
+  --accent-soft: rgba(14, 90, 97, 0.07);
+  --track: #ebe4d4;
+  --sans: Inter, "Source Sans 3", "Segoe UI", "Noto Sans", system-ui, sans-serif;
+  --fg-head: #fbf8f1;
+  --chart-shape: 2.6 / 1;
+  --fg-chart-paper: #fbf8f1;
+  --fg-chart-plot: #fbf8f1;
+  --fg-chart-ink: #3d392f;
+  --fg-chart-grid: #e7e0d0;
+  --fg-chart-font: Inter, "Source Sans 3", "Segoe UI", "Noto Sans", system-ui, sans-serif;
+  --fg-chart-colors: #0e5a61, #c8553d, #d9a441, #5b7f95, #8c6d9f, #6b8f4e, #9c9484, #2d3142;
+  /* the web layout: sidebar, top bar, tabs, folding sections */
+  --fg-text-size: 13px;
+  --fg-accent: #0e5a61;
+  --fg-nav-bg: #f9f5ec;
+  --fg-nav-ink: #1d1b16;
+  --fg-nav-muted: #6f6857;
+  --fg-nav-line: #e2dac8;
+  --fg-nav-hover: rgba(14, 90, 97, 0.07);
+  --fg-nav-font: Inter, "Source Sans 3", "Segoe UI", "Noto Sans", system-ui, sans-serif;
+}
+body {
+  font-family: var(--sans) !important;
+  font-size: 13px !important;
+  line-height: 1.5;
+  color: var(--ink) !important;
+  background: var(--bg) !important;
+  max-width: 1220px;
+  margin: 0 auto !important;
+  padding: 26px 30px 48px !important;
+  font-variant-numeric: tabular-nums;
+}
+::selection { background: rgba(14, 90, 97, 0.18); }
+span[style*="font-family:'sans-serif'"] { font-family: inherit !important; }
+p span, li, li span, h1 span, h2 span, h3 span { font-size: inherit !important; }
+p { margin: 4px 0 !important; }
+a { color: var(--accent); text-underline-offset: 2px; }
+
+h1 {
+  font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2;
+  margin: 0 0 10px !important; padding: 0 !important; color: var(--ink);
+}
+h1 + p { color: var(--muted); }
+h2 {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--accent);
+  margin: 26px 0 8px !important;
+}
+h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+h3 { font-size: 13px; color: var(--ink); margin: 16px 0 4px !important; }
+
+p[style*="margin-left:40px; margin-right:40px"] {
+  margin: 12px 0 !important; padding: 10px 14px;
+  background: var(--accent-soft); border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+}
+span[style*="font-family:'monospace'"]:not(td *) {   /* code, not a table's figures */
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace !important;
+  font-size: 0.9em !important; color: var(--accent);
+  background: var(--accent-soft); border-radius: 4px; padding: 0 4px;
+}
+ul { margin: 8px 0 !important; padding-left: 18px; }
+li::marker { color: var(--accent); }
+
+/* panels */
+.fg-chart, .fg-table, p > img {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(29, 27, 22, 0.05);
+}
+.fg-chart {
+  width: 100% !important; aspect-ratio: var(--chart-shape) !important;
+  overflow: hidden; margin: 8px 0 !important;
+}
+.fg-chart > img { height: 100%; object-fit: contain; }
+.fg-table { padding: 8px 10px; margin: 8px 0 !important; width: auto; }
+.fg-scroll .flograph-table { width: 100%; border-collapse: collapse; }
+.flograph-table > thead > tr > th {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted); background: var(--panel);
+  padding: 4px 9px; border-bottom: 1px solid var(--accent); white-space: nowrap;
+}
+.flograph-table > tbody > tr > td {
+  padding: 3px 9px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.flograph-table > tbody > tr:last-child > td { border-bottom: 0; }
+.fg-scroll tbody tr:hover > td { box-shadow: inset 0 0 0 9999px var(--accent-soft); }
+.fg-sortable thead th[data-fg-sort]::after { color: var(--accent); }
+/* structure rows: total, group, subtotal (delete to keep your own colours) */
+.flograph-table > tbody > tr[data-fg-kind] > td {
+  background-color: var(--panel-2) !important; color: var(--ink) !important;
+  border: 0 !important; border-bottom: 1px solid var(--line) !important;
+  font-weight: 650;
+}
+.flograph-table > tbody > tr[data-fg-kind="group"] > td:first-child {
+  color: var(--accent) !important;
+}
+.flograph-table > tbody > tr[data-fg-kind="total"] > td {
+  border-top: 1px solid var(--ink) !important;
+}
+.fg-db > i { background-color: var(--track); }
+.fg-bar input {
+  font-size: 12.5px; padding: 5px 10px; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  outline: none;
+}
+.fg-bar input:focus { border-color: var(--accent);
+                      box-shadow: 0 0 0 3px rgba(14, 90, 97, 0.14); }
+.fg-bar .fg-count { color: var(--muted); }
+.fg-bar button { color: var(--ink); border-color: var(--line); background: var(--panel); }
+.fg-bar button:hover { border-color: var(--accent); color: var(--accent); }
+.fg-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.fg-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+.fg-scroll { scrollbar-color: var(--line) transparent; }
+
+table[style*="border-style:none"] { width: 100% !important; table-layout: fixed; }
+table[style*="border-style:none"] > tbody > tr > td { padding: 0 7px !important; }
+table[style*="border-style:none"] > tbody > tr > td:first-child { padding-left: 0 !important; }
+table[style*="border-style:none"] > tbody > tr > td:last-child { padding-right: 0 !important; }
+table[style*="border-style:none"] .fg-chart { aspect-ratio: 1.4 / 1 !important; }
+
+@media print {
+  body { background: #fff !important; }
+  .fg-chart, .fg-table, p > img { background: #fff; box-shadow: none; border-color: #ccc; }
+}
+
+/* the web layout: paper bars, a teal mark for where you are */
+.fg-top { background: rgba(249, 245, 236, 0.9); border-bottom: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.fg-top-title { font-weight: 700; letter-spacing: -0.01em; }
+.fg-top-links a.fg-on { color: var(--accent); }
+.fg-side { background: var(--fg-nav-bg); border-right: 1px solid var(--line); }
+.fg-side a.fg-on { box-shadow: inset 2px 0 0 var(--accent); border-radius: 0 6px 6px 0; }
+.fg-tabbar > button { font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; }
+.fg-tabbar > button.fg-on { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+details.fg-details { background: var(--panel); border-color: var(--line);
+  border-radius: 10px; box-shadow: 0 1px 2px rgba(29, 27, 22, 0.05); }
+details.fg-details > summary { color: var(--ink); }
+details.fg-details[open] > summary { background: var(--panel-2); }
+.fg-details-body .fg-chart, .fg-details-body .fg-table { box-shadow: none; }
+.fg-drop { background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 10px 28px rgba(29, 27, 22, 0.12); }
+.fg-pager a { background: var(--panel); }
+.fg-pager a:hover { box-shadow: 0 0 0 1px var(--accent); }
+.fg-icon-btn { background: var(--panel); }
+@media print {
+  details.fg-details { background: #fff; box-shadow: none; }
+  details.fg-details[open] > summary { background: none; }
+}
+"""
+STUDIO += _plain_tables("#fbf8f1", "#6f6857", "#e2dac8", "#f2ede1", "#1d1b16", "#ebe4d4", table_bg="#fbf8f1", head_rule="#0e5a61", vertical=False, pad="3px 9px")
+
 LIVE_THEMES = {
     "Compact": COMPACT,
     "Dashboard": DASHBOARD,
@@ -1244,4 +1413,5 @@ LIVE_THEMES = {
     "Ledger": LEDGER,
     "Terminal": TERMINAL,
     "Aurora": AURORA,
+    "Studio": STUDIO,
 }
