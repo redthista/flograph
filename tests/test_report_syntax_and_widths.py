@@ -67,6 +67,24 @@ class TestCssColour:
                    for r in swatch)
         assert colours(document, 0).get(":hover") == LIGHT["pseudo"]
 
+    def test_swatches_read_colours_as_css_does(self, qapp):
+        from PySide6.QtCore import Qt
+        # Qt reads #11223380 as #AARRGGBB; CSS means #RRGGBBAA. rgb() and
+        # hsl() get a swatch too, so every colour shown can be picked.
+        document = QTextDocument()
+        document.setPlainText("a {\n  color: #11223380;\n"
+                              "  fill: rgb(255 0 0);\n  stroke: hsl(240, 100%, 50%);\n}")
+        CssHighlighter(document).rehighlight()
+
+        def backgrounds(line):
+            return [r.format.background().color()
+                    for r in document.findBlockByNumber(line).layout().formats()
+                    if r.format.background().style() != Qt.NoBrush]
+        hex8 = backgrounds(1)[0]
+        assert (hex8.red(), hex8.green(), hex8.blue(), hex8.alpha()) == (17, 34, 51, 128)
+        assert backgrounds(2)[0].name() == "#ff0000"
+        assert backgrounds(3)[0].name() == "#0000ff"
+
     def test_a_comment_over_lines(self, qapp):
         document = QTextDocument()
         document.setPlainText("/* one\n two */\nb { color: red; }")

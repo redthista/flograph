@@ -1106,18 +1106,25 @@ class SetPageBodyCommand(QUndoCommand):
 
 
 class SetPageCustomCssCommand(QUndoCommand):
-    """One report stylesheet edit, merged like Markdown body edits."""
+    """One report stylesheet edit, merged like Markdown body edits.
+
+    `merge=False` is a step of its own — a colour picked from the colour
+    dialog — which neither swallows the typing before it nor is swallowed
+    by the typing after."""
 
     def __init__(self, graph: Graph, page_id: str, css: str,
-                 parent: Optional[QUndoCommand] = None) -> None:
-        super().__init__("edit report CSS", parent)
+                 parent: Optional[QUndoCommand] = None,
+                 merge: bool = True) -> None:
+        super().__init__("edit report CSS" if merge else "pick a colour",
+                         parent)
         self._graph = graph
         self._page_id = page_id
         self._old = graph.page(page_id).custom_css
         self._new = css
+        self._merge = merge
 
     def id(self) -> int:
-        return _ID_PAGE_CSS
+        return _ID_PAGE_CSS if self._merge else -1
 
     def redo(self) -> None:
         self._graph.set_page_custom_css(self._page_id, self._new)

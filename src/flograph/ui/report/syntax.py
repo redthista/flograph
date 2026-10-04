@@ -10,7 +10,8 @@ highlighter only.
 
 The CSS is coloured the way any code editor would: selectors, property
 names, values, numbers with their units, comments, strings, `@` rules and
-`!important`, and every `#hex` colour shown on a swatch of itself.
+`!important`, and every `#hex`, `rgb()` and `hsl()` colour shown on a
+swatch of itself (double-click one to pick another: css_colour_pick.py).
 
 Two palettes, for a light editor and a dark one; `set_dark` swaps them
 when the app's theme changes.
@@ -20,6 +21,8 @@ from __future__ import annotations
 import re
 
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
+
+from flograph.core.css_colour import parse as parse_colour
 
 from ..editor.spell_check import SpellHighlighter, opens_or_closes_a_fence
 
@@ -233,6 +236,7 @@ _CSS_TOKEN_RE = re.compile(
     r"(?P<important>!important)"
     r"|(?P<at>@[\w-]+)"
     r"|(?P<hex>#[0-9a-fA-F]{3,8}\b)"
+    r"|(?P<func>\b(?:rgba?|hsla?)\([^()]*\))"
     r"|(?P<var>var\(\s*--[\w-]+\s*\))"
     r"|(?P<number>-?\b\d+(?:\.\d+)?(?:px|em|rem|%|pt|vh|vw|vmin|vmax|ch|ex|s|ms|deg|fr|dpi)?\b|-?\.\d+)"
     r"|(?P<punct>[{}();:,>+~])")
@@ -318,15 +322,20 @@ class CssHighlighter(QSyntaxHighlighter):
         for match in _CSS_TOKEN_RE.finditer(code):
             kind = match.lastgroup
             start, length = match.start(), match.end() - match.start()
-            if kind == "hex":
+            if kind in ("hex", "func"):
                 if start < selector_end:
                     continue            # an #id, not a colour
-                swatch = QColor(match.group(0))
+                # read as CSS reads it: Qt takes 8 hex digits as #AARRGGBB,
+                # CSS as #RRGGBBAA — the same parser the colour picker uses
+                rgba = parse_colour(match.group(0))
                 fmt = QTextCharFormat()
-                if swatch.isValid():
+                if rgba is not None:
+                    swatch = QColor(*rgba)
                     fmt.setBackground(swatch)
-                    fmt.setForeground(QColor("#000000" if swatch.lightness()
-                                             > 140 else "#ffffff"))
+                    if rgba[3] >= 128:   # see-through: the editor's own ink
+                        fmt.setForeground(QColor(
+                            "#000000" if swatch.lightness() > 140
+                            else "#ffffff"))
                 self.setFormat(start, length, fmt)
             elif kind == "var":
                 self.setFormat(start, length, self._fmt("custom"))

@@ -131,6 +131,11 @@ class ReportPage(QWidget):
         from .syntax import CssHighlighter
         self._css_colours = CssHighlighter(self.css_editor.document(),
                                            dark=_is_dark(self.css_editor))
+        # double-click a colour (or right-click it) for the colour dialog
+        self._css_picking = False
+        from .css_colour_pick import CssColourPicker
+        self._css_picker = CssColourPicker(self.css_editor,
+                                           step=self._css_own_step)
         self.css_editor.setPlaceholderText(
             "CSS used by Web preview and saved HTML, for example:\n\n"
             "body { font-family: sans-serif; }\n"
@@ -459,7 +464,17 @@ class ReportPage(QWidget):
         if page is None or text == page.custom_css:
             return
         self._push_typed(
-            SetPageCustomCssCommand(self._graph, self.page_id, text))
+            SetPageCustomCssCommand(self._graph, self.page_id, text,
+                                    merge=not self._css_picking))
+
+    def _css_own_step(self, edit) -> None:
+        """Make the CSS edit `edit` does an undo step of its own — a colour
+        picked from the dialog, which should not merge with typing."""
+        self._css_picking = True
+        try:
+            edit()
+        finally:
+            self._css_picking = False
 
     def _push_typed(self, command) -> None:
         """Push an edit typed into this page's editor, then let `_edited`

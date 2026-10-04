@@ -351,7 +351,11 @@ quotes and front matter. An embed with a typo stands out because it isn't
 coloured like one. The CSS tab is coloured as code: selectors (a `.class`
 and a `:hover` picked out), property names and custom properties, numbers
 with their units, `!important`, comments, strings, `@` rules, and every
-`#hex` colour shown on a swatch of itself. The spelling check still runs
+`#hex`, `rgb()` and `hsl()` colour shown on a swatch of itself.
+**Double-click a colour** — or right-click it for **Pick Colour…** — to
+choose another in the colour dialog (transparency included); it is written
+back the way it was written (a hex stays hex, `rgba(…)` stays `rgba(…)`),
+and one Undo puts the old one back. The spelling check still runs
 over the Markdown. Both follow the app's light or dark theme.
 
 ### Problems as you type
