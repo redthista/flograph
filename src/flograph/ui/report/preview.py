@@ -104,10 +104,13 @@ def link_tooltip(href: str) -> str:
     """What resting on a link says: the page a `page:` link goes to, or the
     address anything else opens."""
     from flograph.core.page_nav import is_page_link, link_target
+    from flograph.core.report import button_target
     if not href:
         return ""
     if is_page_link(href):
         return f"Go to the page “{link_target(href)}”"
+    if button_target(href):
+        return "Press the button (it is left out of the PDF and the HTML)"
     return href
 
 

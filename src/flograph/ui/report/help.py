@@ -183,6 +183,19 @@ locked page too, which is how a report handed over becomes the way round a
 project. On <b>paper and in saved HTML</b> there is no page to go to, so a
 page link prints as its plain words; a web link stays a link.</p>
 
+<h3>Buttons, and lines for the app only</h3>
+<table cellspacing="0" cellpadding="4">
+<tr><td><code>![[Refresh Data]]</code></td>
+    <td>an <b>Action Button</b>, on a line of its own: a button in the
+        preview that does what the button does on the canvas</td></tr>
+<tr><td><code>apponly:: Click it for today's figures.</code></td>
+    <td>shown in the preview, left out of the PDF and the HTML</td></tr>
+</table>
+<p>A button is drawn only in the app's preview, Pages or Web &mdash; a
+saved file has no flow behind it, so the PDF, Save HTML and the Save Report
+node leave it out. To refresh the data, set the button to <b>Run nodes</b>,
+name the node that reads it and tick <b>Update what follows</b>.</p>
+
 <h3>Columns</h3>
 <p>Text on the left, a chart on the right — a fenced <code>columns</code>
 block, with <code>---</code> on its own line between the columns:</p>

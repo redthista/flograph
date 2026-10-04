@@ -85,6 +85,8 @@ class ReportPage(QWidget):
     #: a `page:` link was clicked in the preview — the window decides which
     #: page the words mean, as it does for a Note's
     page_link_clicked = Signal(str)   # the link, as written
+    #: an Action Button embedded in the page was clicked: its node id
+    button_clicked = Signal(str)
 
     def __init__(self, graph: Graph, engine, undo_stack: QUndoStack,
                  page_id: str, parent=None) -> None:
@@ -186,6 +188,7 @@ class ReportPage(QWidget):
         self.preview = PagedPreview()
         self.preview.link_activated.connect(self._follow_link)
         self.web_preview = WebPreview()
+        self.web_preview.link_activated.connect(self._follow_link)
         self._preview_stack = QStackedWidget()
         self._preview_stack.addWidget(self.preview)
         self._preview_stack.addWidget(self.web_preview)
@@ -687,7 +690,7 @@ class ReportPage(QWidget):
         with deferred(self._pictures_ready):
             staged = stage_report(page.body, self._graph, self._engine.cache,
                                   setup=setup, page_links=True,
-                                  live=mode == "web")
+                                  live=mode == "web", in_app=True)
         # `stage_report` **re-enters the event loop** — a web-view embed is
         # printed to PDF, and that waits. So the window can close while this
         # method is part-way through, and the preview we checked above can be
@@ -862,11 +865,17 @@ class ReportPage(QWidget):
         self.refresh_preview()
 
     def _follow_link(self, href: str) -> None:
-        """A link clicked on the paper: `page:` to another page of this
-        project, web and mail links to the browser, anything else nowhere."""
+        """A link clicked in the preview: `page:` to another page of this
+        project, an Action Button to whatever it does, web and mail links to
+        the browser, anything else nowhere."""
         from flograph.core.page_nav import is_page_link
+        from flograph.core.report import button_target
         if is_page_link(href):
             self.page_link_clicked.emit(href)
+            return
+        node_id = button_target(href)
+        if node_id:
+            self.button_clicked.emit(node_id)
             return
         from ..web_links import open_web_link
         open_web_link(href)

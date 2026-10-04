@@ -2264,6 +2264,7 @@ class MainWindow(QMainWindow):
         widget.page_setup_requested.connect(self._edit_page_setup)
         widget.export_html_requested.connect(self._export_report_html)
         widget.page_link_clicked.connect(self._follow_page_link)
+        widget.button_clicked.connect(self._on_button_fired)
         # kept in the same dict as dashboards: everything the window does
         # with a page — switching, removing, disposing — is the same for
         # both, and only the two places that need the difference ask
@@ -3792,6 +3793,13 @@ class MainWindow(QMainWindow):
         if node.params.get("clear_cache", True):
             for target_id in targets:
                 self.graph.mark_dirty(target_id)
+        if asked is None and node.params.get("downstream", False):
+            # what follows comes along, but only the named nodes count as
+            # aimed at: a manual node below them still waits to be asked
+            asked = list(targets)
+            for target_id in asked:
+                targets.extend(n for n in self.graph.downstream(target_id)
+                               if n not in targets)
         self.engine.run_targets(targets, asked)
 
     def _go_to_page(self, node) -> None:

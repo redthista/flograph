@@ -281,6 +281,50 @@ def replace_embeds(text: str, render) -> str:
     return EMBED_RE.sub(substitute, text or "")
 
 
+#: A line that is for the app only: `apponly:: Click Refresh for today's
+#: figures`. The report page's own preview shows the rest of the line as if
+#: the tag were not there; the PDF, the saved HTML and Save Report leave the
+#: whole line out. That is what lets one report carry the words that only
+#: make sense beside a working button and still export clean.
+APP_ONLY_RE = re.compile(r"^([ \t]*)apponly::[ \t]?", re.IGNORECASE | re.MULTILINE)
+_APP_ONLY_LINE_RE = re.compile(r"^[ \t]*apponly::.*(?:\n|\Z)",
+                               re.IGNORECASE | re.MULTILINE)
+
+
+def app_only_lines(text: str, in_app: bool) -> str:
+    """`text` with its `apponly::` lines kept untagged (`in_app`) or taken
+    out (anywhere else). A tag written inside a code block is an example of
+    the syntax and is left alone."""
+    if not text or "::" not in text:
+        return text or ""
+    spans = _protected_spans(text)
+    if in_app:
+        return APP_ONLY_RE.sub(
+            lambda m: m.group(0) if _is_protected(spans, m.start())
+            else m.group(1), text)
+    return _APP_ONLY_LINE_RE.sub(
+        lambda m: m.group(0) if _is_protected(spans, m.start()) else "",
+        text)
+
+
+#: Where an Action Button embedded in a report points, by node id so a
+#: rename does not strand it. Only the app's own preview follows it — see
+#: `ui.report.render._Resolver._button`.
+BUTTON_SCHEME = "flograph-button:"
+
+
+def button_href(node_id: str) -> str:
+    return f"{BUTTON_SCHEME}{node_id}"
+
+
+def button_target(href) -> str:
+    """The node id a button link names, or "" when it is not one."""
+    href = str(href or "").strip()
+    if not href.lower().startswith(BUTTON_SCHEME):
+        return ""
+    return href[len(BUTTON_SCHEME):].strip()
+
+
 def nodes_labelled(graph, ref: str) -> list:
     """Every node an embed's ref names — its label, case-insensitively.
 

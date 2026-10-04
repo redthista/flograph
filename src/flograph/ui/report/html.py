@@ -317,6 +317,7 @@ def report_html(rendered, title: str = "", setup=None,
     html = compact_qt_html(rendered.document.toHtml())
     html = make_live(html, rendered, plotly_src)
     html = size_tables(html, rendered)
+    html = web_buttons(html)
     for index, image in enumerate(rendered.images):
         payload = rendered.animations.get(index)
         mime = _animation_mime(payload) if payload else None
@@ -340,6 +341,39 @@ def report_html(rendered, title: str = "", setup=None,
     if auto_refresh:
         html = _styled(html, "", head_extra=_AUTO_REFRESH)
     return _titled(html, title)
+
+
+#: An Action Button in a report, as the Web preview draws it. Only the
+#: app's preview ever has one (render._Resolver._button), so no file anyone
+#: keeps carries it. In the accent a web layout sets, so a theme that
+#: recolours the page recolours its buttons too.
+BUTTON_CSS = """
+a.fg-button {
+  display: inline-block; padding: .45em 1.15em; border-radius: 8px;
+  background: var(--fg-accent, #7c6cf6); color: #ffffff !important;
+  font-weight: 600; text-decoration: none !important; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18); user-select: none;
+}
+a.fg-button:hover { filter: brightness(1.08); }
+a.fg-button:active { transform: translateY(1px); }
+@media print { a.fg-button { display: none; } }
+"""
+
+_BUTTON_RE = re.compile(r'<a\b[^>]*\bhref="(flograph-button:[^"]*)"[^>]*>(.*?)</a>',
+                        re.IGNORECASE | re.DOTALL)
+
+
+def web_buttons(html: str) -> str:
+    """Each button link Qt wrote — an anchor round a coloured span, padded
+    with no-break spaces because rich text has no padding — as a real
+    button-shaped link."""
+    def face(match: re.Match) -> str:
+        text = re.sub(r"<[^>]+>", "", match.group(2)).replace("&nbsp;", " ")
+        text = " ".join(text.split())
+        return f'<a class="fg-button" href="{match.group(1)}">{text}</a>'
+
+    html, count = _BUTTON_RE.subn(face, html)
+    return _styled(html, BUTTON_CSS) if count else html
 
 
 #: Injected only into the throwaway copy behind Open in Browser, never into

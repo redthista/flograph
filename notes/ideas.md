@@ -371,9 +371,14 @@ the report follows, the way a dashboard does. Looked into 2026-10-03 and
 banked; nothing is built.
 
 - *Today:* an embed of a control shows only its *value* (`render_value`),
-  so `![[Threshold]]` prints `50`. A Slicer shows its filtered table, and
-  an Action Button shows nothing useful. `ui/report/render.py` has no
-  handling for control, slicer or button cards.
+  so `![[Threshold]]` prints `50`, and a Slicer shows its filtered table.
+  `ui/report/render.py` has no handling for control or slicer cards.
+  **Buttons are done** (2026-10-04): an Action Button embed is a
+  `flograph-button:` link in the app's preview only (`_Resolver._button`,
+  `in_app`), the Web preview hands `page:`/button links to the window
+  (`web_preview._link_page`), and `apponly::` lines (`core/report.py`)
+  keep a page's app-only words out of exports. A control could ride the
+  same `in_app` switch.
 - *What helps:*
   - The webview bridge (`core/bridge.py`, `ui/web_bridge.py`) works with
     no network, and its loop guard drops a write that changes nothing.

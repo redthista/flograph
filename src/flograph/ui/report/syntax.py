@@ -23,6 +23,7 @@ import re
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 
 from flograph.core.css_colour import parse as parse_colour
+from flograph.core.report import APP_ONLY_RE
 
 from ..editor.spell_check import SpellHighlighter, opens_or_closes_a_fence
 
@@ -177,57 +178,71 @@ class MarkdownHighlighter(SpellHighlighter):
             self.setFormat(0, len(text), f["fence"])
             self.setCurrentBlockState(self.IN_FENCE)
             return
-        self._line(text)
+        tag = APP_ONLY_RE.match(text)
+        if tag:
+            self.setFormat(0, tag.end(), self._formats["block"])
+            self._line(text[tag.end():], at=tag.end())
+        else:
+            self._line(text)
         super().highlightBlock(text)        # the spelling, over the colour
         if was_columns:
             self.setCurrentBlockState(self.IN_COLUMNS)
 
-    def _line(self, text: str) -> None:
+    def _line(self, text: str, at: int = 0) -> None:
+        """Colour `text`, which starts `at` characters into the line
+        (after an `apponly::` tag, the rest is coloured as a line)."""
         f = self._formats
+
+        def set_format(start, length, fmt):
+            self.setFormat(at + start, length, fmt)
+
+        def paint(start, length, name):
+            self._paint(at + start, length, name)
+
         heading = _HEADING_RE.match(text)
         if heading:
-            self.setFormat(0, len(text), f["heading"])
-            self._paint(0, len(heading.group(1)), "mark")
+            set_format(0, len(text), f["heading"])
+            paint(0, len(heading.group(1)), "mark")
         elif _BLOCK_RE.match(text):
-            self.setFormat(0, len(text), f["block"])
+            set_format(0, len(text), f["block"])
             bar = text.find("|")
             if bar != -1:
-                self.setFormat(bar, len(text) - bar, f["option"])
+                set_format(bar, len(text) - bar, f["option"])
             return
         elif _TAB_RE.match(text):
             match = _TAB_RE.match(text)
-            self.setFormat(0, len(match.group(1)), f["block"])
-            self.setFormat(len(match.group(1)), len(match.group(2)),
-                           f["block"])
+            set_format(0, len(match.group(1)), f["block"])
+            set_format(len(match.group(1)), len(match.group(2)),
+                       f["block"])
             return
         elif _BREAK_RE.match(text) or _RULE_RE.match(text):
-            self.setFormat(0, len(text), f["rule"])
+            set_format(0, len(text), f["rule"])
             return
         elif _QUOTE_RE.match(text):
-            self.setFormat(0, len(text), f["quote"])
+            set_format(0, len(text), f["quote"])
         listed = _LIST_RE.match(text)
         if listed:
-            self.setFormat(listed.start(1), len(listed.group(1)), f["list"])
+            set_format(listed.start(1), len(listed.group(1)), f["list"])
         for match in _BOLD_RE.finditer(text):
-            self._paint(match.start(), match.end() - match.start(), "bold")
+            paint(match.start(), match.end() - match.start(), "bold")
         for match in _ITALIC_RE.finditer(text):
-            self._paint(match.start(), match.end() - match.start(), "italic")
+            paint(match.start(), match.end() - match.start(), "italic")
         for match in _LINK_RE.finditer(text):
-            self.setFormat(match.start(1), len(match.group(1)), f["link"])
-            self.setFormat(match.start(2), len(match.group(2)),
-                           f["page"] if match.group(4) else f["mark"])
+            set_format(match.start(1), len(match.group(1)), f["link"])
+            set_format(match.start(2), len(match.group(2)),
+                       f["page"] if match.group(4) else f["mark"])
         for match in _EMBED_RE.finditer(text):
-            self.setFormat(match.start(1), 3, f["embed"])
-            self.setFormat(match.start(2), len(match.group(2)),
-                           f["embed_name"])
+            set_format(match.start(1), 3, f["embed"])
+            set_format(match.start(2), len(match.group(2)),
+                       f["embed_name"])
             if match.group(3):
-                self.setFormat(match.start(3), len(match.group(3)),
-                               f["option"])
-            self.setFormat(match.start(4), 2, f["embed"])
+                set_format(match.start(3), len(match.group(3)),
+                           f["option"])
+            set_format(match.start(4), 2, f["embed"])
         # last: nothing inside backticks is anything but code
         for match in _CODE_RE.finditer(text):
-            self.setFormat(match.start(), match.end() - match.start(),
-                           f["code"])
+            set_format(match.start(), match.end() - match.start(),
+                       f["code"])
 
 
 # --------------------------------------------------------------------- css

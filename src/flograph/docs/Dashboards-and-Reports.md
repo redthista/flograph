@@ -663,7 +663,30 @@ when they are ready.
 
 **Links work in the preview**, locked or not: a web or mail link opens in
 the browser, and `[the costs](page:Costs)` goes to that page (see *Getting
-around a dashboard*). Rest on one to see where it goes.
+around a dashboard*). Rest on one to see where it goes. Both work in the
+**Web** preview too.
+
+**A button in a report.** Embed an **Action Button** on a line of its own —
+`![[Refresh Data]]` — and the preview, Pages or Web, draws it as a button
+that does whatever the button does on the canvas: run nodes, run a frame or
+the whole flow, show a message or go to a page. For a refresh, set it to
+**Run nodes**, name the node that reads the data, and tick **Update what
+follows**: the source re-reads and every chart and table built from it runs
+again, so the report redraws with the new figures. A button is for the app
+only — the PDF, **Save HTML…** and the **Save Report** node leave it out,
+since a file has no flow behind it to run.
+
+**Lines for the app only.** Start a line with `apponly::` and it shows in
+the preview, without the tag, and is left out of the PDF and the HTML:
+
+```
+apponly:: Click **Refresh Data** for today's figures.
+apponly:: ![[Refresh Data]]
+```
+
+So one report serves both: the working copy in the app, with its buttons
+and the words that go with them, and the clean copy you send. The tag goes
+at the very start of the line; written inside a code block it is left alone.
 
 **A report remembers how you were reading it.** Ctrl+wheel zooms the paper,
 and the **▦** button lays the sheets left to right so several sit side by

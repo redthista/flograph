@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from .report import find_embeds
+from .report import app_only_lines, find_embeds
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .graph import Connection, Graph
@@ -71,12 +71,18 @@ def readers_of(graph: "Graph", page_id: str) -> list[str]:
 def embedded_nodes(graph: "Graph", body: str) -> list[str]:
     """Every node a page's text embeds, by label, in first-seen order. A
     label two nodes share names both: the page shows a warning for it, and
-    depending on both is the answer that can never be stale."""
-    wanted = {e.ref.strip().casefold() for e in find_embeds(body or "")}
+    depending on both is the answer that can never be stale.
+
+    What a saved report shows, that is: an `apponly::` line never reaches
+    the file, and an Action Button is drawn only in the app's preview, so
+    neither is something a saver has to wait for or be dirtied by."""
+    saved = app_only_lines(body or "", in_app=False)
+    wanted = {e.ref.strip().casefold() for e in find_embeds(saved)}
     if not wanted:
         return []
     return [node_id for node_id, node in graph.nodes.items()
-            if node.label.casefold() in wanted]
+            if node.label.casefold() in wanted
+            and getattr(node.spec, "card", None) != "button"]
 
 
 def resolve_report_links(graph: "Graph") -> dict[str, "Connection"]:

@@ -35,7 +35,8 @@ from PySide6.QtGui import (QImage, QImageReader, QPainter, QPainterPath,
 from flograph.core import perf
 from flograph.core.aspect import parse_aspect
 from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
-                                  PAGEBREAK_TOKEN, format_scalar,
+                                  PAGEBREAK_TOKEN, app_only_lines,
+                                  button_href, format_scalar,
                                   frame_to_markdown, inline_markdown,
                                   mark_page_breaks, missing_embed,
                                   nodes_labelled, replace_columns,
@@ -826,8 +827,13 @@ class _Resolver:
     def __init__(self, lookup, image_scale: float = 1.0,
                  image_width: int = FIGURE_WIDTH, source=None,
                  nested=None, page_height: "float | None" = None,
-                 cache=None, live: bool = False) -> None:
+                 cache=None, live: bool = False,
+                 in_app: bool = False) -> None:
         self._lookup = lookup
+        # The report page's own preview, Pages or Web: the one render a
+        # click can come back from, so the only one an Action Button is
+        # drawn in (see _button).
+        self._in_app = in_app
         # Rendering for the web page: keep what each chart and table was
         # made from as well as its picture, so the HTML can put the live
         # one back (see RenderedReport.live_charts). The document itself is
@@ -940,6 +946,9 @@ class _Resolver:
         nested = self._nested(embed.ref, embed.port) if self._nested else None
         if nested is not None:
             return self._render_nested(embed.ref, *nested)
+        button = self._button(self._node_for(embed.ref))
+        if button is not None:
+            return button
         value, failure, problem = self._lookup(embed.ref, embed.port)
         if failure:
             self.problems.append(problem)
@@ -983,6 +992,34 @@ class _Resolver:
              self._table_fit, self._table_ratio, self._radius,
              self._wants_live, self._search, self._rows_all,
              self._width_raw) = was
+
+    def _button(self, node) -> "str | None":
+        """An Action Button embedded in the report, or None when `node` is
+        not one.
+
+        A button is something to press, and only the app's preview has
+        anything behind it: there it is a link the page hands to the
+        window, which does whatever the button does on the canvas. Paper
+        and a saved file have no flow to run, so there it is left out
+        altogether — a button that does nothing tells the reader nothing.
+
+        Set aside as a token like a sparkline, because the markdown reader
+        would take the colours off a link written in markdown.
+        """
+        from ..canvas.node_item import card_kind
+        if node is None or card_kind(node) != "button":
+            return None
+        if not self._in_app:
+            return ""
+        from html import escape
+        from flograph.ui import theme
+        self.inline.append(
+            f'<a href="{button_href(node.id)}" style="text-decoration:none;">'
+            f'<span style="background-color:{theme.BUTTON_ACCENT.name()};'
+            f' color:#ffffff; font-weight:600;">'
+            f'&nbsp;&nbsp;▶&nbsp;&nbsp;{escape(node.label)}&nbsp;&nbsp;'
+            '</span></a>')
+        return SPARK_TOKEN.format(len(self.inline) - 1)
 
     def _mark_fit(self, embed, before: int) -> None:
         """Record the images this embed added as candidates for the
@@ -1169,7 +1206,8 @@ class _Resolver:
         self._lookup, self._source = lookup, source
         self._depth += 1
         try:
-            return replace_embeds(body, self.render)
+            return replace_embeds(app_only_lines(body, self._in_app),
+                                  self.render)
         finally:
             self._lookup, self._source, self._depth = was
 
@@ -1655,7 +1693,8 @@ def source_by_wired_input(graph, node_id: str):
 def render_report(body: str, graph, cache, image_scale: float = 1.0,
                   setup=None, page_break_rule: bool = False,
                   page_links: bool = False,
-                  live: bool = False) -> RenderedReport:
+                  live: bool = False,
+                  in_app: bool = False) -> RenderedReport:
     """A report *page*: embeds name nodes by label.
 
     Naming a report *card* renders that card's contents onto the page —
@@ -1671,15 +1710,21 @@ def render_report(body: str, graph, cache, image_scale: float = 1.0,
     table's frame beside its picture, for ui/report/live.py.
     """
     return finish_body(stage_report(body, graph, cache, image_scale, setup,
-                                    page_break_rule, page_links, live))
+                                    page_break_rule, page_links, live,
+                                    in_app))
 
 
 def stage_report(body: str, graph, cache, image_scale: float = 1.0,
                  setup=None, page_break_rule: bool = False,
                  page_links: bool = False,
-                 live: bool = False) -> "StagedReport":
+                 live: bool = False,
+                 in_app: bool = False) -> "StagedReport":
     """The half of render_report that has to happen on the UI thread — see
-    StagedReport. `finish_body` does the rest, on any thread."""
+    StagedReport. `finish_body` does the rest, on any thread.
+
+    `in_app` is the page's own preview: its Action Buttons are drawn and
+    its `apponly::` lines kept. Everything that leaves the app — the PDF,
+    the HTML, Save Report — renders without it."""
     width = setup.body_width_points() if setup is not None else FIGURE_WIDTH
     page_height = None
     if setup is not None:
@@ -1691,7 +1736,7 @@ def stage_report(body: str, graph, cache, image_scale: float = 1.0,
                       nested=nested_by_label(graph, cache),
                       page_break_rule=page_break_rule,
                       page_height=page_height, cache=cache,
-                      page_links=page_links, live=live)
+                      page_links=page_links, live=live, in_app=in_app)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -1794,10 +1839,10 @@ def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                page_height: "float | None" = None,
                cache=None, page_links: bool = False,
                header_fill: str = PAPER_HEADER,
-               live: bool = False) -> StagedReport:
+               live: bool = False, in_app: bool = False) -> StagedReport:
     """Resolve every embed in `body` — the UI-thread half of render_body."""
     resolver = _Resolver(lookup, image_scale, image_width, source, nested,
-                         page_height, cache, live=live)
+                         page_height, cache, live=live, in_app=in_app)
     # Folding sections and tabs before columns: a block may hold a columns
     # block, and a column a block. On the web each edge becomes a token that
     # web_layout.py turns into the element; on paper, the block written out
@@ -1806,6 +1851,7 @@ def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
     # Front matter first: it is settings, not text — on paper or the web
     # it would otherwise draw as a rule and a heading
     resolver.front_matter, body = split_front_matter(body)
+    body = app_only_lines(body, in_app)
     body = expand_blocks(body, web=live, blocks=resolver.blocks)
     # Columns first, and they resolve their own embeds as they go: an embed
     # inside a column has to be rendered knowing how wide that column is.

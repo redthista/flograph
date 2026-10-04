@@ -41,12 +41,25 @@ _H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 # way), so it is left exactly as written.
 # A ``double-tick`` span exists precisely so that its content may contain
 # backticks, so it must not be written as "anything but a backtick".
-_CODE_RE = re.compile(r"(```.*?```|~~~.*?~~~|``.+?``|`[^`\n]+`)", re.DOTALL)
+# As Markdown reads them: a fence opens at the start of a line and closes on
+# a line of its own, and a span closes on a run of backticks as long as the
+# one that opened it. Pairing any two ``` instead let a ```` ```columns ````
+# span in a sentence open a "fence" that ran on to the next real one, and
+# every block after it was read inside out.
+_CODE_RE = re.compile(
+    r"^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[ \t]*$"
+    r"|(?P<ticks>`+)(?!`)[^\n]+?(?<!`)(?P=ticks)(?!`)",
+    re.MULTILINE | re.DOTALL)
 
 
 def _outside_code(text: str, fn) -> str:
-    parts = _CODE_RE.split(text)
-    return "".join(fn(p) if i % 2 == 0 else p for i, p in enumerate(parts))
+    out, at = [], 0
+    for match in _CODE_RE.finditer(text):
+        out.append(fn(text[at:match.start()]))
+        out.append(match.group(0))
+        at = match.end()
+    out.append(fn(text[at:]))
+    return "".join(out)
 
 
 def _slug(name: str) -> str:

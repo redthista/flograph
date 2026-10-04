@@ -250,3 +250,13 @@ class TestBundledPages:
         (tmp_path / "Only.md").write_text("# Only\n", encoding="utf-8")
         monkeypatch.setenv("FLOGRAPH_DOCS_DIR", str(tmp_path))
         assert set(catalog()) == {"only"}
+
+
+def test_a_quoted_fence_in_a_sentence_does_not_open_one():
+    """A ```` ```columns ```` span in prose used to pair with the next real
+    fence, so the example block after it was read as live links."""
+    text = ("a ```` ```columns ```` block, and a bare ```columns too\n\n"
+            "```text\n![[North sales|live]]\n```\n\n"
+            "```\napponly:: ![[Refresh Data]]\n```\n")
+    _out, missing = render_links(text, {})
+    assert missing == []
