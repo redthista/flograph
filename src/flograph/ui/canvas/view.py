@@ -744,6 +744,8 @@ class NodeGraphView(ZoomPanGraphicsView):
         from .connection_item import ConnectionItem
         from .shape_item import ShapeItem
         from .. import menu_guard
+        # a right-click mid-pan: the menu will take the pan button's release
+        self.cancel_pan()
         scene = self.scene()
         if (scene is not None and scene.canvas_drag_active
                 and held_mouse_buttons() & Qt.LeftButton):

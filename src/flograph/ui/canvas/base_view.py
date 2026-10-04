@@ -528,6 +528,12 @@ class ZoomPanGraphicsView(QGraphicsView):
             self._band_held_frames = frozenset(self._selected_frames())
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._panning and not event.buttons() & self._pan_button:
+            # the button came up somewhere else — a menu opened mid-pan
+            # took its release — so no release handler will end this pan.
+            # Left alone the canvas follows the bare pointer until the
+            # button is clicked again.
+            self.cancel_pan()
         if self._panning:
             delta = event.position() - self._pan_last
             self._pan_last = event.position()

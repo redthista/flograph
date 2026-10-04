@@ -262,6 +262,25 @@ class TestLeftDragPan:
         assert _origin(window.view).x() < origin.x()
         assert not window.view._panning
 
+    def test_a_pan_whose_release_went_elsewhere_ends_on_the_next_move(
+            self, window):
+        # middle held, right-click opens a menu, the menu eats the middle
+        # release: the next bare move must not go on panning
+        start, mid = QPoint(60, 60), QPoint(100, 100)
+        _mouse(window.view, QMouseEvent.Type.MouseButtonPress, start,
+               Qt.MiddleButton, button=Qt.MiddleButton)
+        _mouse(window.view, QMouseEvent.Type.MouseMove, mid, Qt.MiddleButton,
+               button=Qt.NoButton)
+        origin = _origin(window.view)
+        _mouse(window.view, QMouseEvent.Type.MouseMove, QPoint(200, 200),
+               Qt.NoButton, button=Qt.NoButton)
+        assert _origin(window.view) == origin
+        assert not window.view._panning
+        # nor does a later left drag, the button the pan never owned
+        _mouse(window.view, QMouseEvent.Type.MouseMove, QPoint(250, 250),
+               Qt.LeftButton, button=Qt.NoButton)
+        assert _origin(window.view) == origin
+
 
 class TestADashboardPage:
     @pytest.fixture
