@@ -825,6 +825,12 @@ def _bar(text: str, style: CellStyle, numeric: bool,
     if stacked:
         where = "right" if numeric else "left"
         return f'<div align="{where}">{text}</div>{track}'
+    if not text:
+        # `only`: no value to sit beside, so the track is the cell — the
+        # whole column wide, as the card draws it. Given the value's empty
+        # cell and a fixed track instead, a column wider than the track
+        # left the bar stranded at one side of it.
+        return track
     # No width on the outer table. The value cell states the width its
     # whole column measured (see _value_widths), so every track starts at
     # the same place, and `white-space:nowrap` is what makes stating one

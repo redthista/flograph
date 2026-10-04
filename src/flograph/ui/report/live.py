@@ -294,6 +294,8 @@ table[style*="border-style:none"] .fg-chart { width: 100% !important; }
     var(--c, #3b6299) var(--a, 0%) var(--b), transparent var(--b));
   -webkit-print-color-adjust: exact; print-color-adjust: exact;
 }
+/* `only`: no value beside it, so the track is the whole cell */
+.fg-db > i:only-child { flex: 1 1 auto; width: auto; min-width: 54px; }
 /* a table too narrow for both on a line: the track under its value */
 .fg-db.fg-under { flex-direction: column; align-items: stretch; gap: 2px; }
 .fg-db.fg-under > i { width: auto; }

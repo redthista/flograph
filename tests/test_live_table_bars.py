@@ -70,6 +70,22 @@ class TestPaperIsUnchanged:
         assert 'bgcolor="#eceef1"' in html and html.count("<table") > 1
 
 
+class TestOnlyFillsTheCell:
+    """`bar … only` has no value to sit beside, so its track is the cell.
+    It was the value's empty cell plus a fixed 54px track, which left the
+    bar stranded at one side of any wider column."""
+
+    def test_on_paper_the_track_is_the_cell_s_only_content(self):
+        html = table("units bar only\nunits width 140")
+        cells = re.findall(r"<td[^>]*>(<table.*?</table>)</td>", html)
+        assert cells and all(c.startswith('<table width="100%"')
+                             for c in cells)
+        assert 'width="54"' not in html
+
+    def test_live_the_track_grows(self):
+        assert ".fg-db > i:only-child { flex: 1 1 auto;" in LIVE_CSS
+
+
 class TestMarksPinnedRight:
     RULE = "delta < 0 => icon ▼ red right"
 

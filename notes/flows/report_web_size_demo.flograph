@@ -43,7 +43,7 @@
     "code": null,
     "label": "Bars",
     "params": {
-     "format_rules": "Revenue  format $,.0f\nUnits    bar blue\nChange   bar green\nChange   format +0%\nMargin   bar purple only\nMargin   width 90",
+     "format_rules": "Revenue  format $,.0f\nUnits    bar blue\nChange   bar green\nChange   format +.0%\nMargin   bar purple only\nMargin   width 90",
      "width": 680,
      "height": 460
     }
@@ -73,7 +73,7 @@
     "code": null,
     "label": "Marks",
     "params": {
-     "format_rules": "Revenue  format $,.0f\nChange   format +0%\nChange < 0 => fg red, icon ▼ red right\nChange > 0 => fg green, icon ▲ green right\nStatus   iconmap Status: ok=● green, risk=● amber, behind=● red",
+     "format_rules": "Revenue  format $,.0f\nChange   format +.0%\nChange < 0 => fg red, icon ▼ red right\nChange > 0 => fg green, icon ▲ green right\nStatus   iconmap Status: ok=● green, risk=● amber, behind=● red",
      "width": 680,
      "height": 460
     }
@@ -103,7 +103,7 @@
     "code": null,
     "label": "Grouped",
     "params": {
-     "format_rules": "Revenue  format $,.0f\nRevenue  bar blue\nChange   format +0%\nChange < 0 => fg red, icon ▼ red right, on all",
+     "format_rules": "Revenue  format $,.0f\nRevenue  bar blue\nChange   format +.0%\nChange < 0 => fg red, icon ▼ red right, on all",
      "width": 680,
      "height": 520,
      "mode": "grouped",
