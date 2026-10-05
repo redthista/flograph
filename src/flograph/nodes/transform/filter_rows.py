@@ -12,7 +12,9 @@ text that reads as dates, as a CSV's often is — compares the value as a
 date: `2026-10-05`, `5 Oct 2026`, or `05/10/2026` (day first). A date with
 no time compares whole days, so `<= 2026-10-05` keeps all of the 5th, and
 *equals* a day matches any time on it. A blank cell matches nothing — so
-*does not contain* and *does not equal* keep it.
+*does not contain* and *does not equal* keep it. *is blank* finds the
+empty cells (nothing in them, or only spaces) and *is not blank* the rest;
+neither needs a Value.
 
 **Advanced options ▸ Query expression** takes a pandas query instead, e.g.
 `price > 5 and region == 'North'`. A column with a space in its name can be
@@ -34,17 +36,21 @@ NODE = {
 # The comparisons, by the label the Match dropdown shows.
 ORDER = {"> greater than": "gt", ">= greater than or equal": "ge",
          "< less than": "lt", "<= less than or equal": "le"}
+# The matches that look only at the cell, so need no Value.
+BLANK = ["is blank", "is not blank"]
 MATCHES = ["contains", "does not contain", "starts with", "ends with",
-           "equals", "does not equal", *ORDER]
+           "equals", "does not equal", *ORDER, *BLANK]
+_NEEDS_VALUE = {"match": [m for m in MATCHES if m not in BLANK]}
 PARAMS = [
     {"name": "column", "type": "columns", "label": "Column", "default": "",
      "multi": False},
     {"name": "match", "type": "choice", "label": "Match",
      "options": MATCHES, "default": "contains"},
     {"name": "value", "type": "string", "label": "Value", "default": "",
-     "placeholder": "apple, app*, 100 or 2026-10-05"},
+     "placeholder": "apple, app*, 100 or 2026-10-05",
+     "visible_when": _NEEDS_VALUE},
     {"name": "case_sensitive", "type": "bool", "label": "Match case",
-     "default": False},
+     "default": False, "visible_when": _NEEDS_VALUE},
     {"name": "keep_rejected", "type": "bool", "label": "Output rejected rows",
      "default": True},
     {"name": "query", "type": "string", "label": "Query expression",
@@ -70,6 +76,10 @@ def _condition_mask(table, p):
     value = str(p.get("value") or "").strip()
     case = bool(p.get("case_sensitive"))
     cells = table[column]
+    if match in BLANK:
+        blank = cells.map(lambda v: not (t := _cell_text(v)) or not t.strip())
+        blank = blank.astype(bool)
+        return blank if match == "is blank" else ~blank
 
     negate = match.startswith("does not")
     is_date = is_datetime64_any_dtype(cells)
@@ -229,11 +239,12 @@ def _query_mask(table, query):
 
 def run(ctx, table):
     p = ctx.params
-    value = str(p.get("value") or "").strip()
+    # A condition is on once it has a value to look for — or needs none.
+    condition = bool(str(p.get("value") or "").strip()) or p.get("match") in BLANK
     query = str(p.get("query") or "").strip()
-    if not value and not query:
+    if not condition and not query:
         return {"filtered": table, "rejected": table.iloc[0:0]}
-    mask = _condition_mask(table, p) if value else None
+    mask = _condition_mask(table, p) if condition else None
     if query:
         asked = _query_mask(table, query)
         mask = asked if mask is None else mask & asked

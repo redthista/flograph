@@ -201,6 +201,33 @@ class TestDates:
             cond(registry, df, "when", "> greater than", "tomorrowish")
 
 
+class TestBlank:
+    @pytest.fixture
+    def df(self):
+        return pd.DataFrame({
+            "name": ["a", "", "   ", None, "b"],
+            "price": [1.0, None, 3.0, None, 0.0],
+            "when": pd.to_datetime(["2026-10-05", None, "2026-10-06",
+                                    None, None]),
+        })
+
+    @pytest.mark.parametrize("column,blank", [
+        ("name", [1, 2, 3]), ("price", [1, 3]), ("when", [1, 3, 4]),
+    ])
+    def test_blank_and_not_blank(self, registry, df, column, blank):
+        rows = set(range(len(df)))
+        assert list(cond(registry, df, column, "is blank", "").index) == blank
+        assert list(cond(registry, df, column, "is not blank", "").index) \
+            == sorted(rows - set(blank))
+
+    def test_a_value_left_over_is_ignored(self, registry, df):
+        assert list(cond(registry, df, "price", "is blank", "5").index) == [1, 3]
+
+    def test_needs_a_column(self, registry, df):
+        with pytest.raises(ValueError, match="Pick the column"):
+            cond(registry, df, "", "is blank", "")
+
+
 def test_text_compares_alphabetically(registry):
     df = pd.DataFrame({"name": ["apple", "Banana", "cherry", None]})
     assert cond(registry, df, "name", ">= greater than or equal",
