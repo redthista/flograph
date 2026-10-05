@@ -249,12 +249,12 @@ class TestReplaceNode:
         g_top, _ = graph.connect(a.id, "table", cat.id, "top")
         g_bottom, _ = graph.connect(b.id, "table", cat.id, "bottom")
 
-        # filter_rows has one dataframe input: the top wire fits, the bottom
+        # sort has one dataframe input: the top wire fits, the bottom
         # one has no home, and the outgoing wire follows the node across
-        assert scene.replace_node_with("flograph.transform.filter_rows",
+        assert scene.replace_node_with("flograph.transform.sort",
                                        cat.id)
         new = [n for n in graph.nodes.values()
-               if n.type_id == "flograph.transform.filter_rows"][0]
+               if n.type_id == "flograph.transform.sort"][0]
         assert cat.id not in graph.nodes
         pairs = {(c.src_node, c.src_port, c.dst_node, c.dst_port)
                  for c in graph.connections.values()}

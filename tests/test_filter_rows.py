@@ -232,3 +232,235 @@ def test_text_compares_alphabetically(registry):
     df = pd.DataFrame({"name": ["apple", "Banana", "cherry", None]})
     assert cond(registry, df, "name", ">= greater than or equal",
                 "b")["name"].tolist() == ["Banana", "cherry"]
+
+
+@pytest.fixture
+def regions():
+    return pd.DataFrame({"region": ["North", "south", "East", "West", None],
+                         "units": [10, 20, 30, 40, 50]})
+
+
+class TestOneOf:
+    @pytest.mark.parametrize("value", ["North, South", "north\nSOUTH\n"])
+    def test_commas_or_lines(self, registry, regions, value):
+        out = cond(registry, regions, "region", "is one of", value)
+        assert out["units"].tolist() == [10, 20]
+
+    def test_not_one_of_keeps_blanks(self, registry, regions):
+        out = cond(registry, regions, "region", "is not one of", "North,South")
+        assert out["units"].tolist() == [30, 40, 50]
+
+    def test_numbers(self, registry, regions):
+        assert cond(registry, regions, "units", "is one of",
+                    "20, 40")["units"].tolist() == [20, 40]
+
+    def test_wildcards(self, registry, regions):
+        assert cond(registry, regions, "region", "is one of",
+                    "n*, *st")["units"].tolist() == [10, 30, 40]
+
+    def test_a_wired_list(self, registry, regions):
+        out = run_node(registry, TYPE, {"column": "region",
+                                        "match": "is one of"},
+                       table=regions, value=["East", "West"])
+        assert out["filtered"]["units"].tolist() == [30, 40]
+
+
+    def test_a_wired_table_uses_its_matching_column(self, registry, regions):
+        other = pd.DataFrame({"region": ["West", "North", "West"],
+                              "x": [1, 2, 3]})
+        out = run_node(registry, TYPE, {"column": "region",
+                                        "match": "is one of"},
+                       table=regions, value=other)
+        assert out["filtered"]["units"].tolist() == [10, 40]
+
+    def test_a_wired_one_column_table_or_series(self, registry, regions):
+        for wired in (pd.DataFrame({"name": ["East"]}),
+                      pd.Series(["East", None])):
+            out = run_node(registry, TYPE, {"column": "region",
+                                            "match": "is one of"},
+                           table=regions, value=wired)
+            assert out["filtered"]["units"].tolist() == [30]
+
+    def test_a_wired_table_with_no_matching_column(self, registry, regions):
+        with pytest.raises(ValueError, match="needs a column named"):
+            run_node(registry, TYPE, {"column": "region",
+                                      "match": "is one of"}, table=regions,
+                     value=pd.DataFrame({"a": [1], "b": [2]}))
+
+
+class TestBetween:
+    def test_numbers_both_ends_included(self, registry, regions):
+        assert cond(registry, regions, "units", "between", "20",
+                    value_to="40")["units"].tolist() == [20, 30, 40]
+
+    def test_dates_include_the_whole_last_day(self, registry):
+        df = pd.DataFrame({"when": pd.to_datetime(
+            ["2026-09-30 23:00", "2026-10-01", "2026-10-31 18:00",
+             "2026-11-01"], format="mixed")})
+        out = cond(registry, df, "when", "between", "01/10/2026",
+                   value_to="2026-10-31")
+        assert len(out) == 2
+
+    def test_needs_both_ends(self, registry, regions):
+        with pytest.raises(ValueError, match="both ends"):
+            cond(registry, regions, "units", "between", "20")
+
+    def test_wired_from_a_between_slider(self, registry, regions):
+        out = run_node(registry, TYPE, {"column": "units",
+                                        "match": "between"},
+                       table=regions, value=15, value_to=35.0)
+        assert out["filtered"]["units"].tolist() == [20, 30]
+
+
+class TestPattern:
+    def test_a_regex(self, registry, regions):
+        assert cond(registry, regions, "region", "matches pattern (regex)",
+                    "^(n|s)")["units"].tolist() == [10, 20]
+
+    def test_a_bad_regex_says_so(self, registry, regions):
+        with pytest.raises(ValueError, match="isn't a valid pattern"):
+            cond(registry, regions, "region", "matches pattern (regex)", "*x")
+
+
+class TestRelativeDates:
+    @pytest.fixture
+    def df(self):
+        today = pd.Timestamp.now().normalize()
+        days = [-40, -8, -7, -6, -1, 0, 1]
+        return pd.DataFrame({
+            "ago": days,
+            "when": [today + pd.Timedelta(days=d, hours=9) for d in days],
+            "as text": [(today + pd.Timedelta(days=d)).strftime("%d/%m/%Y")
+                        for d in days],
+        })
+
+    def ago(self, out):
+        return out["ago"].tolist()
+
+    def test_today(self, registry, df):
+        assert self.ago(cond(registry, df, "when", "equals", "today")) == [0]
+
+    def test_yesterday_and_tomorrow(self, registry, df):
+        assert self.ago(cond(registry, df, "when", "equals",
+                             "yesterday")) == [-1]
+        assert self.ago(cond(registry, df, "when", "equals",
+                             "Tomorrow")) == [1]
+
+    def test_today_minus_n(self, registry, df):
+        assert self.ago(cond(registry, df, "when", ">= greater than or equal",
+                             "today - 7")) == [-7, -6, -1, 0, 1]
+        assert self.ago(cond(registry, df, "when", "< less than",
+                             "today-1 week")) == [-40, -8]
+
+    def test_last_n_days_includes_today(self, registry, df):
+        # the last 7 days: today and the 6 before it
+        assert self.ago(cond(registry, df, "when", "equals",
+                             "last 7 days")) == [-6, -1, 0]
+
+    def test_equals_on_dates_held_as_text(self, registry, df):
+        assert self.ago(cond(registry, df, "as text", "equals",
+                             "last 7 days")) == [-6, -1, 0]
+        assert self.ago(cond(registry, df, "as text", "equals",
+                             "today")) == [0]
+        assert self.ago(cond(registry, df, "as text", "does not equal",
+                             "today")) == [-40, -8, -7, -6, -1, 1]
+
+    def test_on_dates_held_as_text(self, registry, df):
+        assert self.ago(cond(registry, df, "as text", "<= less than or equal",
+                             "today")) == [-40, -8, -7, -6, -1, 0]
+
+    def test_this_month_and_year(self, registry):
+        today = pd.Timestamp.now().normalize()
+        first = today.replace(day=1)
+        df = pd.DataFrame({"when": [first - pd.Timedelta(days=1), first,
+                                    first + pd.offsets.MonthEnd(0)]})
+        assert len(cond(registry, df, "when", "equals", "this month")) == 2
+        assert len(cond(registry, df, "when", "equals", "last month")) == 1
+        assert len(cond(registry, df, "when", "equals", "this year")) == (
+            3 if today.month > 1 else 2)
+
+    def test_a_year_and_a_month(self, registry):
+        df = pd.DataFrame({"when": pd.to_datetime(
+            ["2025-12-31", "2026-01-01", "2026-10-15", "2027-01-01"])})
+        assert len(cond(registry, df, "when", "equals", "2026")) == 2
+        assert len(cond(registry, df, "when", "> greater than", "2026")) == 1
+        assert len(cond(registry, df, "when", "equals", "2026-10")) == 1
+
+    def test_unknown_words_are_not_dates(self, registry, df):
+        with pytest.raises(ValueError, match="isn't a date"):
+            cond(registry, df, "when", "> greater than", "today - 3 fortnights")
+
+
+class TestWiredValue:
+    def test_replaces_the_box(self, registry, regions):
+        out = run_node(registry, TYPE, {"column": "units",
+                                        "match": "> greater than",
+                                        "value": "999"},
+                       table=regions, value=30)
+        assert out["filtered"]["units"].tolist() == [40, 50]
+
+    def test_a_date_control(self, registry):
+        import datetime
+        df = pd.DataFrame({"when": pd.to_datetime(
+            ["2026-10-04", "2026-10-05 15:00", "2026-10-06"], format="mixed")})
+        for wired in ("2026-10-05", datetime.date(2026, 10, 5),
+                      pd.Timestamp("2026-10-05")):
+            out = run_node(registry, TYPE, {"column": "when",
+                                            "match": "equals"},
+                           table=df, value=wired)
+            assert len(out["filtered"]) == 1, wired
+
+    def test_nothing_wired_uses_the_box(self, registry, regions):
+        out = run_node(registry, TYPE, {"column": "units", "value": "20",
+                                        "match": "equals"},
+                       table=regions, value=None)
+        assert out["filtered"]["units"].tolist() == [20]
+
+
+class TestConditionsBox:
+    def test_and_or_and_lines(self, registry, regions):
+        out = run_node(registry, TYPE, {
+            "conditions": "region = north or south or east\nunits >= 20"},
+            table=regions)
+        assert out["filtered"]["units"].tolist() == [20, 30]
+
+    def test_matches_like_the_dropdowns(self, registry, regions):
+        # case-insensitive, wildcards, blanks
+        out = run_node(registry, TYPE, {
+            "conditions": "region does not contain OR\nregion is not empty"},
+            table=regions)
+        assert out["filtered"]["units"].tolist() == [20, 30, 40]
+
+    def test_dates_in_the_box(self, registry):
+        df = pd.DataFrame({"when": pd.to_datetime(["2026-10-04",
+                                                   "2026-10-05 15:00"], format="mixed")})
+        out = run_node(registry, TYPE, {"conditions": "when = 2026-10-05"},
+                       table=df)
+        assert len(out["filtered"]) == 1
+
+    def test_with_the_dropdowns(self, registry, regions):
+        out = run_node(registry, TYPE, {
+            "column": "units", "match": "< less than", "value": "40",
+            "conditions": "region starts with n or ends with t"},
+            table=regions)
+        assert out["filtered"]["units"].tolist() == [10, 30]
+
+    def test_a_bad_line_says_which(self, registry, regions):
+        with pytest.raises(ValueError, match="Conditions line 2"):
+            run_node(registry, TYPE, {"conditions": "units > 1\nnonsense"},
+                     table=regions)
+
+
+class TestSharedGrammar:
+    def test_does_not_contain_parses(self):
+        from flograph.core.conditions import parse_condition
+        assert parse_condition("x", "name does not contain a") == [
+            [("name", "not contains", "a", False)]]
+
+    def test_conditional_column_gets_it_too(self, registry):
+        df = pd.DataFrame({"name": ["apple", "pear"]})
+        out = run_node(registry, "flograph.transform.conditional_column",
+                       {"output_column": "c",
+                        "rules": "name does not contain app => yes\n=> no"},
+                       table=df)
+        assert out["c"].tolist() == ["no", "yes"]

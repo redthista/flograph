@@ -13,8 +13,8 @@ score >= 70    => C
 ```
 
 The left-hand side is `column operator value`. Operators: `=`, `!=`, `<`,
-`<=`, `>`, `>=`, `contains`, `starts`, `ends`, `matches` (regex), `is empty`,
-`is not empty`. Numbers compare numerically; everything else as text. Results
+`<=`, `>`, `>=`, `contains`, `does not contain`, `starts`, `ends`,
+`matches` (regex), `is empty`, `is not empty`. Numbers compare numerically; everything else as text. Results
 that look like a number become one; `@column` copies that column's value for
 the row.
 
@@ -37,7 +37,7 @@ is spelled, or in backticks: `` `unit price` > 5 ``.
 NODE = {
     "label": "Conditional Column",
     "category": "Transform",
-    "version": "1.1",
+    "version": "1.2",
     "inputs": [("table", "dataframe")],
     "outputs": [("table", "dataframe")],
 }
@@ -50,16 +50,6 @@ PARAMS = [
                     "units >= 100 and region = North => high\n"
                     "units >= 50 or priority = yes => medium\n=> low"},
 ]
-
-_SUFFIX_OPS = ["is not empty", "is empty"]
-_WORD_OPS = [("contains", "contains"), ("starts with", "starts"),
-             ("ends with", "ends"), ("starts", "starts"),
-             ("ends", "ends"), ("matches", "matches")]
-_SYM_OPS = [("!=", "!="), ("<=", "<="), (">=", ">="), ("==", "="),
-            ("=", "="), ("<", "<"), (">", ">")]
-# stands in for a backticked column while the operator is looked for, so a
-# name with an operator word or symbol in it can't be mistaken for one
-_HELD = "\x00"
 
 
 def _coerce(text):
@@ -76,76 +66,9 @@ def _coerce(text):
         return t
 
 
-def _find_operator(cond):
-    """(column, operator, value) for the left-most operator, or None."""
-    low = cond.lower()
-    for op in _SUFFIX_OPS:
-        if low == op or low.endswith(f" {op}"):
-            return cond[:len(cond) - len(op)].strip(), op, None
-    found = []
-    for token, canon in _WORD_OPS:
-        idx = low.find(f" {token} ")
-        if idx != -1:
-            found.append((idx, -len(token), idx + len(token) + 2, canon))
-        elif low.startswith(f"{token} "):
-            # `and starts with x`: the column is carried from the last one
-            found.append((0, -len(token), len(token) + 1, canon))
-    for token, canon in _SYM_OPS:
-        idx = cond.find(token)
-        if idx != -1:
-            found.append((idx, -len(token), idx + len(token), canon))
-    if not found:
-        return None
-    # left-most wins, so `note = it contains x` compares note; at one place
-    # the longer token, so `<=` is never read as `<`
-    idx, _, value_at, canon = min(found)
-    return cond[:idx].strip(), canon, cond[value_at:].strip()
-
-
-def _parse_clause(lineno, clause, previous):
-    from flograph.core.column_refs import is_quoted, unquote
-
-    text = clause.strip()
-    if not text:
-        raise ValueError(f"rule {lineno}: nothing between 'and' / 'or'")
-    held = None
-    probe = text
-    if text.startswith("`"):
-        end = text.find("`", 1)
-        if end == -1:
-            raise ValueError(f"rule {lineno}: no closing ` in {text!r}")
-        held = text[1:end]
-        probe = f"{_HELD} {text[end + 1:].strip()}"
-    found = _find_operator(probe)
-    if found is not None and held is not None and found[0] != _HELD:
-        raise ValueError(f"rule {lineno}: expected an operator straight "
-                         f"after `{held}` in {text!r}")
-    if found is not None:
-        column, op, value = found
-        if column == _HELD:
-            column = held
-        elif not column:
-            if previous is None:
-                raise ValueError(f"rule {lineno}: no column before {op!r} "
-                                 f"in {text!r}")
-            column = previous[0]
-        else:
-            column = unquote(column)
-    elif previous is not None and previous[2] is not None:
-        # a bare value: the column and operator before it, again
-        column, op, value = previous[0], previous[1], text
-    else:
-        raise ValueError(f"rule {lineno}: no operator found in condition "
-                         f"{text!r}")
-    quoted = value is not None and is_quoted(value)
-    if value is not None:
-        value = unquote(value)
-    return (column, op, value, quoted)
-
-
 def _parse_rule(lineno, line, columns=()):
-    from flograph.core.column_refs import (find_outside_quotes,
-                                           quote_bare_columns, split_keyword)
+    from flograph.core.column_refs import find_outside_quotes
+    from flograph.core.conditions import parse_condition
 
     at = find_outside_quotes(line, "=>")
     if at == -1:
@@ -154,15 +77,7 @@ def _parse_rule(lineno, line, columns=()):
     cond, result = line[:at].strip(), line[at + 2:].strip()
     if not cond:
         return (None, result)  # else / fallback
-    cond = quote_bare_columns(cond, columns)
-    groups, previous = [], None
-    for alternative in split_keyword(cond, "or"):
-        group = []
-        for clause in split_keyword(alternative, "and"):
-            previous = _parse_clause(lineno, clause, previous)
-            group.append(previous)
-        groups.append(group)
-    return (groups, result)
+    return (parse_condition(f"rule {lineno}", cond, columns), result)
 
 
 def _mask(df, column, op, value, quoted=False):
@@ -176,8 +91,10 @@ def _mask(df, column, op, value, quoted=False):
         return s.isna() | (s.astype("string").str.strip() == "").fillna(False)
     if op == "is not empty":
         return ~(s.isna() | (s.astype("string").str.strip() == "").fillna(False))
-    if op in ("contains", "starts", "ends", "matches"):
+    if op in ("contains", "not contains", "starts", "ends", "matches"):
         text = s.astype("string")
+        if op == "not contains":
+            return ~text.str.contains(value, regex=False, na=False)
         if op == "contains":
             return text.str.contains(value, regex=False, na=False)
         if op == "starts":
