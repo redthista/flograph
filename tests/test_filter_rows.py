@@ -1,5 +1,6 @@
-"""Filter Rows: Text match mode, the rejected-port switch, and the hint for a
-bad pattern in a Query."""
+"""Filter Rows: Column/Match/Value conditions on text, numbers and dates,
+the rejected-port switch, the Advanced query, and the hint for a bad
+pattern in one."""
 import pandas as pd
 import pytest
 
@@ -18,8 +19,8 @@ def fruit():
 
 
 def text(registry, df, match, value, **extra):
-    params = {"mode": "Text match", "column": "product name",
-              "match": match, "text": value, **extra}
+    params = {"column": "product name",
+              "match": match, "value": value, **extra}
     return run_node(registry, TYPE, params, table=df)
 
 
@@ -66,8 +67,8 @@ class TestTextMatch:
         assert names(text(registry, df, "contains", "(")) == ["(x)"]
 
     def test_numbers_match_as_they_read(self, registry, fruit):
-        out = run_node(registry, TYPE, {"mode": "Text match", "column": "qty",
-                                        "match": "equals", "text": "3"},
+        out = run_node(registry, TYPE, {"column": "qty",
+                                        "match": "equals", "value": "3"},
                        table=fruit)
         assert out["filtered"]["qty"].tolist() == [3.0]
 
@@ -76,8 +77,8 @@ class TestTextMatch:
 
     def test_unknown_column_says_so(self, registry, fruit):
         with pytest.raises(ValueError, match="No column named 'nope'"):
-            run_node(registry, TYPE, {"mode": "Text match", "column": "nope",
-                                      "text": "x"}, table=fruit)
+            run_node(registry, TYPE, {"column": "nope",
+                                      "value": "x"}, table=fruit)
 
 
 class TestRejected:
@@ -98,12 +99,109 @@ class TestRejected:
 
 
 class TestQuery:
-    def test_still_the_default(self, registry, fruit):
+    def test_a_query_on_its_own_as_before(self, registry, fruit):
         out = run_node(registry, TYPE, {"query": "qty > 4"}, table=fruit)
         assert len(out["filtered"]) == 2 and len(out["rejected"]) == 4
 
+    def test_a_condition_and_a_query_must_both_pass(self, registry, fruit):
+        out = text(registry, fruit, "contains", "apple", query="qty > 1")
+        assert names(out) == ["pineapple"]
+        assert len(out["rejected"]) == 5
+
     def test_a_bad_pattern_gets_a_hint(self, registry, fruit):
-        with pytest.raises(ValueError, match="Text match"):
+        with pytest.raises(ValueError, match="Column, Match and Value"):
             run_node(registry, TYPE, {
                 "query": "`product name`.str.contains('*apple*')"},
                 table=fruit)
+
+
+def cond(registry, df, column, match, value, **extra):
+    return run_node(registry, TYPE, {"column": column,
+                                     "match": match, "value": value, **extra},
+                    table=df)["filtered"]
+
+
+class TestNumbers:
+    @pytest.fixture
+    def df(self):
+        return pd.DataFrame({"price": [1.5, 5.0, 10.0, None],
+                             "as text": ["1.5", "5", "10", "n/a"]})
+
+    @pytest.mark.parametrize("match,value,expected", [
+        ("> greater than", "5", [10.0]),
+        (">= greater than or equal", "5", [5.0, 10.0]),
+        ("< less than", "5", [1.5]),
+        ("<= less than or equal", "5", [1.5, 5.0]),
+        ("equals", "5", [5.0]),
+        ("does not equal", "5", [1.5, 10.0, None]),
+    ])
+    def test_number_column(self, registry, df, match, value, expected):
+        out = cond(registry, df, "price", match, value)["price"]
+        assert out.astype(object).where(out.notna(), None).tolist() == expected
+
+    def test_numbers_held_as_text_compare_as_numbers(self, registry, df):
+        # As text, "10" < "5"; as numbers it isn't. "n/a" never passes.
+        assert cond(registry, df, "as text", "> greater than",
+                    "2")["as text"].tolist() == ["5", "10"]
+
+    def test_a_word_against_a_number_column_says_so(self, registry, df):
+        with pytest.raises(ValueError, match="isn't a number"):
+            cond(registry, df, "price", "> greater than", "lots")
+
+
+class TestDates:
+    @pytest.fixture
+    def df(self):
+        return pd.DataFrame({
+            "when": pd.to_datetime(["2026-10-04 09:00", "2026-10-05 00:00",
+                                    "2026-10-05 17:30", "2026-10-06 08:00",
+                                    None]),
+            "as text": ["2026-10-04", "05/10/2026", "5 Oct 2026 17:30",
+                        "06/10/2026", "soon"],
+        })
+
+    def days(self, out, col="when"):
+        return [str(v)[:16] for v in out[col]]
+
+    def test_after_a_day_is_after_all_of_it(self, registry, df):
+        assert self.days(cond(registry, df, "when", "> greater than",
+                              "2026-10-05")) == ["2026-10-06 08:00"]
+
+    def test_up_to_a_day_includes_all_of_it(self, registry, df):
+        assert len(cond(registry, df, "when", "<= less than or equal",
+                        "2026-10-05")) == 3
+
+    def test_equals_a_day_matches_any_time_on_it(self, registry, df):
+        assert len(cond(registry, df, "when", "equals", "2026-10-05")) == 2
+
+    def test_a_time_compares_exactly(self, registry, df):
+        assert self.days(cond(registry, df, "when", ">= greater than or equal",
+                              "2026-10-05 12:00")) == [
+            "2026-10-05 17:30", "2026-10-06 08:00"]
+
+    @pytest.mark.parametrize("value", ["2026-10-05", "05/10/2026",
+                                       "5 Oct 2026"])
+    def test_iso_and_day_first_mean_the_same_day(self, registry, df, value):
+        assert len(cond(registry, df, "when", "equals", value)) == 2
+
+    def test_dates_held_as_text(self, registry, df):
+        # 05/10/2026 is the 5th of October, not the 10th of May.
+        assert cond(registry, df, "as text", ">= greater than or equal",
+                    "2026-10-05")["as text"].tolist() == [
+            "05/10/2026", "5 Oct 2026 17:30", "06/10/2026"]
+
+    def test_time_zones(self, registry):
+        df = pd.DataFrame({"when": pd.to_datetime(
+            ["2026-10-04 23:00", "2026-10-05 10:00"]).tz_localize("UTC")})
+        assert len(cond(registry, df, "when", ">= greater than or equal",
+                        "2026-10-05")) == 1
+
+    def test_not_a_date_says_so(self, registry, df):
+        with pytest.raises(ValueError, match="isn't a date"):
+            cond(registry, df, "when", "> greater than", "tomorrowish")
+
+
+def test_text_compares_alphabetically(registry):
+    df = pd.DataFrame({"name": ["apple", "Banana", "cherry", None]})
+    assert cond(registry, df, "name", ">= greater than or equal",
+                "b")["name"].tolist() == ["Banana", "cherry"]

@@ -66,8 +66,9 @@ in: open one, click a node to see the data on it, press **F5** to re-run.
 2. **Add a transform.** Drag from the Read File node's output port and drop
    on empty canvas; the search popup offers compatible nodes. Pick **Filter
    Rows**. The wire is made for you.
-3. **Configure it.** Select the Filter Rows node and set the condition in the
-   **Properties** panel on the right.
+3. **Configure it.** Select the Filter Rows node and, in the **Properties**
+   panel on the right, pick a **Column**, how to **Match** (contains, `>`,
+   equals, …) and a **Value** — say `price`, `> greater than`, `5`.
 4. **See a result.** Add a **Show Table** or **Show Plot** node the same way.
    It becomes a live card on the canvas — the node *is* the view.
 5. **Run.** **F5** runs everything; **F6** runs just the selection;
