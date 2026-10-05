@@ -1,9 +1,15 @@
 """Filter Rows
 
-Keep the rows of a DataFrame that match; the rows that don't come out of
-the second port.
+Keep the rows that match; the rest come out of "rejected".
+• Pick a Column, how to Match, and a Value.
+• Text: contains, starts with, equals… — * is any text, ? one character.
+• Lists: is one of — North, South, n*
+• Numbers and dates: > >= < <= between — 100, 2026-10-05, today - 7, this month
+• Empty cells: is blank / is not blank
+• Wire a control into "value" to filter from a dashboard.
+• Several conditions, or a pandas query: Advanced options.
 
-Pick a **Column**, how to **Match** and a **Value** — no code.
+In detail:
 
 - **Text:** contains, starts with, ends with, equals (and their
   opposites). `*` stands for any run of characters and `?` for one; every
