@@ -4,6 +4,8 @@
 
 | Category | Change | Details |
 | --- | --- | --- |
+| Feature | **Filter Rows: Text match** | Filter Rows has a **Filter by** choice. **Query** is the pandas expression it always took; **Text match** needs no code — pick a **Column**, how to **Match** (contains, does not contain, starts with, ends with, equals, does not equal) and the **Text**. `*` stands for any characters and `?` for one; every other character means itself, so `a.b` or `(x)` are found as typed. Case is ignored unless **Match case** is ticked, and a blank cell contains nothing (so *does not contain* keeps it). A query whose `.str.contains('*apple*')` used to fail with "nothing to repeat at position 0" now says why and how to fix it. (Filter Rows 1.2.) |
+| Performance | **Filter Rows without the rejected rows** | Untick **Output rejected rows** when nothing reads Filter Rows' second port: it then carries an empty table, so a large table that is mostly kept isn't held in the cache a second time. |
 
 ## 0.1.24
 
