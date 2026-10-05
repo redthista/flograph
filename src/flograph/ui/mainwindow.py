@@ -151,6 +151,9 @@ class MainWindow(QMainWindow):
         # the canvas tab whose zoom and place the view holds right now
         self._view_shows_tab = None
         self.engine = ExecutionEngine(self.graph, parent=self)
+        # what `![[flograph.status]]` and the other app facts read
+        from flograph.core import app_facts
+        app_facts.set_provider(self.graph, self._app_state)
         # Save Report nodes render their page through the window: they ask
         # from a worker and this answers on the GUI thread.
         from .report.node_export import ReportNodeExporter
@@ -3801,6 +3804,18 @@ class MainWindow(QMainWindow):
                 targets.extend(n for n in self.graph.downstream(target_id)
                                if n not in targets)
         self.engine.run_targets(targets, asked)
+
+    def _app_state(self):
+        """What a report's `flograph.` facts know about this window: the
+        file it has open and the engine's last run (core.app_facts)."""
+        from flograph.core.app_facts import AppState, LastRun
+        record = self.engine.history.latest
+        last = (LastRun(finished=record.when + record.wall_time,
+                        seconds=record.wall_time, ok=record.ok,
+                        cancelled=record.cancelled)
+                if record is not None else None)
+        return AppState(file_path=self._project_path or "",
+                        running=self.engine.active, last_run=last)
 
     def _go_to_page(self, node) -> None:
         """An Action Button set to Go to page (AB2): the way round a

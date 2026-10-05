@@ -34,9 +34,11 @@ from PySide6.QtGui import (QImage, QImageReader, QPainter, QPainterPath,
 # by name so the renderer, and the tests that reach it through here, keep it.
 from flograph.core import perf
 from flograph.core.aspect import parse_aspect
+from flograph.core.app_facts import fact_name
 from flograph.core.report import (IMAGE_TOKEN, IMAGE_TOKEN_URL,
                                   PAGEBREAK_TOKEN, app_only_lines,
-                                  button_href, format_scalar,
+                                  button_href, escape_markdown,
+                                  format_scalar,
                                   frame_to_markdown, inline_markdown,
                                   mark_page_breaks, missing_embed,
                                   nodes_labelled, replace_columns,
@@ -828,8 +830,11 @@ class _Resolver:
                  image_width: int = FIGURE_WIDTH, source=None,
                  nested=None, page_height: "float | None" = None,
                  cache=None, live: bool = False,
-                 in_app: bool = False) -> None:
+                 in_app: bool = False, graph=None) -> None:
         self._lookup = lookup
+        # for `![[flograph.…]]` — what a report can say about the app
+        # itself (core.app_facts); None answers from nothing but the clock
+        self._graph = graph
         # The report page's own preview, Pages or Web: the one render a
         # click can come back from, so the only one an Action Button is
         # drawn in (see _button).
@@ -946,6 +951,9 @@ class _Resolver:
         nested = self._nested(embed.ref, embed.port) if self._nested else None
         if nested is not None:
             return self._render_nested(embed.ref, *nested)
+        fact = fact_name(embed.ref)
+        if fact is not None:
+            return self._fact(fact)
         button = self._button(self._node_for(embed.ref))
         if button is not None:
             return button
@@ -992,6 +1000,39 @@ class _Resolver:
              self._table_fit, self._table_ratio, self._radius,
              self._wants_live, self._search, self._rows_all,
              self._width_raw) = was
+
+    #: the status pill's colours, by Status.kind: (ground, words)
+    STATUS_COLOURS = {
+        "ok": ("#dcfce7", "#166534"),
+        "stale": ("#fef3c7", "#92400e"),
+        "running": ("#dbeafe", "#1e40af"),
+        "failed": ("#fee2e2", "#991b1b"),
+        "stopped": ("#e5e7eb", "#374151"),
+        "never": ("#e5e7eb", "#374151"),
+    }
+
+    def _fact(self, name: str) -> str:
+        """An app fact (core.app_facts): words, set as words, or — for
+        `status` — a pill in the colour of the flow's state. Paper gets
+        them too: the date a report was printed is worth printing."""
+        from html import escape
+        from flograph.core import app_facts
+        state = app_facts.state_for(self._graph)
+        if name == "status":
+            status = app_facts.status(self._graph, state)
+            ground, ink = self.STATUS_COLOURS.get(
+                status.kind, self.STATUS_COLOURS["never"])
+            self.inline.append(
+                f'<span style="background-color:{ground}; color:{ink};'
+                f' font-weight:600;">&nbsp;●&nbsp;{escape(status.text)}'
+                '&nbsp;</span>')
+            return SPARK_TOKEN.format(len(self.inline) - 1)
+        words = app_facts.value(name, self._graph, state)
+        if words is None:
+            self.problems.append(
+                f"no app fact called “{app_facts.PREFIX}{name}”")
+            return app_facts.unknown_fact(name)
+        return escape_markdown(words)
 
     def _button(self, node) -> "str | None":
         """An Action Button embedded in the report, or None when `node` is
@@ -1736,7 +1777,8 @@ def stage_report(body: str, graph, cache, image_scale: float = 1.0,
                       nested=nested_by_label(graph, cache),
                       page_break_rule=page_break_rule,
                       page_height=page_height, cache=cache,
-                      page_links=page_links, live=live, in_app=in_app)
+                      page_links=page_links, live=live, in_app=in_app,
+                      graph=graph)
 
 
 def render_card(body: str, graph, cache, node_id: str,
@@ -1763,7 +1805,7 @@ def render_card(body: str, graph, cache, node_id: str,
                        source=source_by_wired_input(graph, node_id),
                        nested=nested_by_wired_input(graph, cache, node_id),
                        page_break_rule=page_break_rule, cache=cache,
-                       header_fill=header_fill)
+                       header_fill=header_fill, graph=graph)
 
 
 @perf.timed('report: render body')
@@ -1773,7 +1815,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                 page_height: "float | None" = None,
                 cache=None, page_links: bool = False,
                 header_fill: str = PAPER_HEADER,
-                live: bool = False) -> RenderedReport:
+                live: bool = False, graph=None) -> RenderedReport:
     """Lay a report body out as a document ready to show or print.
 
     Two halves, stage_body and finish_body, run back to back — see
@@ -1798,7 +1840,7 @@ def render_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
         body, lookup, image_width=image_width, image_scale=image_scale,
         source=source, nested=nested, page_break_rule=page_break_rule,
         page_height=page_height, cache=cache, page_links=page_links,
-        header_fill=header_fill, live=live))
+        header_fill=header_fill, live=live, graph=graph))
 
 
 @dataclass
@@ -1839,10 +1881,12 @@ def stage_body(body: str, lookup, image_width: int = FIGURE_WIDTH,
                page_height: "float | None" = None,
                cache=None, page_links: bool = False,
                header_fill: str = PAPER_HEADER,
-               live: bool = False, in_app: bool = False) -> StagedReport:
+               live: bool = False, in_app: bool = False,
+               graph=None) -> StagedReport:
     """Resolve every embed in `body` — the UI-thread half of render_body."""
     resolver = _Resolver(lookup, image_scale, image_width, source, nested,
-                         page_height, cache, live=live, in_app=in_app)
+                         page_height, cache, live=live, in_app=in_app,
+                         graph=graph)
     # Folding sections and tabs before columns: a block may hold a columns
     # block, and a column a block. On the web each edge becomes a token that
     # web_layout.py turns into the element; on paper, the block written out

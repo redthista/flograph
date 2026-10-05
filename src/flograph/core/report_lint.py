@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from typing import Iterable, Optional
 
+from .app_facts import FACTS, PREFIX, fact_name
 from .report import EMBED_FLAGS, EMBED_OPTIONS, parse_options
 from .text_assist import Diagnostic
 from .web_layout import KINDS, _KEYS, _norm
@@ -128,6 +129,13 @@ def _lint_line(line: str, number: int, labels, pages, found) -> None:
     for match in _EMBED_RE.finditer(plain):
         ref = match.group(1).strip()
         port, options, unknown = parse_options(match.group(2))
+        fact = fact_name(ref)
+        if fact is not None:
+            if fact not in FACTS:
+                found.append(Diagnostic(
+                    number, f"no app fact is called “{ref}” — "
+                    + ", ".join(PREFIX + key for key in FACTS), "error"))
+            continue
         if labels is not None:
             if ref not in labels:
                 found.append(Diagnostic(

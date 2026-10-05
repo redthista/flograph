@@ -193,7 +193,8 @@ def page_vocabulary(graph, cache) -> Vocabulary:
     something first, and every page a link can go to."""
     from flograph.core.page_nav import reader_pages
     from .render import duplicate_labels
-    return Vocabulary(names=_node_names(graph, cache, duplicate_labels(graph)),
+    return Vocabulary(names=_node_names(graph, cache, duplicate_labels(graph))
+                      + app_fact_names(),
                       pages=[p.title for p in reader_pages(graph.pages)])
 
 
@@ -209,8 +210,16 @@ def card_vocabulary(graph, cache, node) -> Vocabulary:
              for port in node.spec.inputs]
     names += _node_names(graph, cache, duplicate_labels(graph),
                          skip=node.id)
+    names += app_fact_names()
     return Vocabulary(names=names,
                       pages=[p.title for p in reader_pages(graph.pages)])
+
+
+def app_fact_names() -> list:
+    """`flograph.status` and the rest (core.app_facts), after the nodes:
+    typing `flo` brings them to the top all the same."""
+    from flograph.core.app_facts import FACTS, PREFIX
+    return [Name(PREFIX + key, hint) for key, hint in FACTS.items()]
 
 
 def _node_names(graph, cache, ambiguous, skip=None) -> list:

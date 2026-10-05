@@ -687,6 +687,28 @@ apponly:: ![[Refresh Data]]
 So one report serves both: the working copy in the app, with its buttons
 and the words that go with them, and the clean copy you send. The tag goes
 at the very start of the line; written inside a code block it is left alone.
+Type `app` at the start of a line and the autocomplete offers it.
+
+**What a report can say about the app.** An embed under `flograph.` names
+something about the app rather than a node — `![[flograph.status]]` is a
+coloured pill saying whether the flow is **up to date**, **out of date**,
+**running** or has **failed**, with when it last ran and how long that
+took. It redraws as a run starts and ends. The rest are words, so they sit
+in a sentence: `Data as of ![[flograph.last_run]] on ![[flograph.date]].`
+
+| Embed | Shows |
+| --- | --- |
+| `flograph.status` | the flow's state, the last run and how long it took |
+| `flograph.date`, `flograph.time` | today's date, and the time the page was drawn |
+| `flograph.last_run`, `flograph.run_time`, `flograph.run_result` | when the last run finished, how long it took, and OK, failed or stopped |
+| `flograph.nodes`, `flograph.out_of_date`, `flograph.failed` | how many nodes, how many waiting to run, how many failed |
+| `flograph.file`, `flograph.file_size`, `flograph.saved` | the project file, its size, and when it was saved |
+| `flograph.memory`, `flograph.version` | the memory flograph is using, and its version |
+
+Type `![[flo` and the autocomplete lists them all. They print in the PDF
+and the HTML too — the date a report went out is worth printing — so put
+`apponly::` in front of one that is only for you:
+`apponly:: ![[flograph.status]]`.
 
 **A report remembers how you were reading it.** Ctrl+wheel zooms the paper,
 and the **▦** button lays the sheets left to right so several sit side by

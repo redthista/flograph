@@ -325,6 +325,15 @@ def button_target(href) -> str:
     return href[len(BUTTON_SCHEME):].strip()
 
 
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_\[\]<>#|~])")
+
+
+def escape_markdown(text: str) -> str:
+    """`text` as itself in markdown: a file called `q3_final_v2.flograph`
+    must not come out half in italics."""
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", str(text))
+
+
 def nodes_labelled(graph, ref: str) -> list:
     """Every node an embed's ref names — its label, case-insensitively.
 

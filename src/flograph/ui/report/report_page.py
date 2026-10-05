@@ -382,6 +382,8 @@ class ReportPage(QWidget):
             event.connect(callback)
         engine.node_succeeded.connect(self._on_node_ran)
         engine.node_failed.connect(self._on_node_ran)
+        engine.run_started.connect(self._on_run_state)
+        engine.run_finished.connect(self._on_run_state)
 
         self.preview.zoom_changed.connect(self._zoom_changed)
 
@@ -429,6 +431,8 @@ class ReportPage(QWidget):
         self._event_subs = []
         self._engine.node_succeeded.disconnect(self._on_node_ran)
         self._engine.node_failed.disconnect(self._on_node_ran)
+        self._engine.run_started.disconnect(self._on_run_state)
+        self._engine.run_finished.disconnect(self._on_run_state)
         self._timer.stop()
         # a layout still running finds the page gone and drops its result
         self._layout_job = None
@@ -591,6 +595,14 @@ class ReportPage(QWidget):
     def _on_node_ran(self, *_args) -> None:
         """A run finished, so the embeds have new content to show."""
         self._schedule_preview()
+
+    def _on_run_state(self, *_args) -> None:
+        """A run started or ended: a page showing `flograph.status` (or any
+        app fact) has something new to say, even if no node it embeds ran."""
+        from flograph.core.app_facts import PREFIX
+        page = self._page()
+        if page is not None and PREFIX in (page.body or "").casefold():
+            self._schedule_preview()
 
     def _on_param_changed(self, *_args) -> None:
         """Any node's param changed — it may be one this report embeds."""

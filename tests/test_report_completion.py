@@ -121,7 +121,10 @@ class TestVocabulary:
         graph.add_page(Page(id="c", title="Model", kind="canvas"))
 
         vocab = page_vocabulary(graph, cache)
-        assert [n.label for n in vocab.names] == ["Zeta", "Alpha"]
+        from flograph.core.app_facts import FACTS
+        # the nodes, then the app facts (flograph.status, …) after them
+        assert [n.label for n in vocab.names] == [
+            "Zeta", "Alpha", *("flograph." + key for key in FACTS)]
         assert vocab.names[1].hint == "not run yet"
         assert vocab.names[0].ports == ("value",)
         assert vocab.pages == ["Report"]

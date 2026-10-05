@@ -196,6 +196,18 @@ saved file has no flow behind it, so the PDF, Save HTML and the Save Report
 node leave it out. To refresh the data, set the button to <b>Run nodes</b>,
 name the node that reads it and tick <b>Update what follows</b>.</p>
 
+<h3>What the app knows</h3>
+<p>An embed under <code>flograph.</code> names something about the app,
+not a node. <code>![[flograph.status]]</code> is a coloured pill: up to
+date, out of date, running or failed, with the last run beside it. The rest
+are words for a sentence: <code>flograph.date</code>,
+<code>time</code>, <code>last_run</code>, <code>run_time</code>,
+<code>run_result</code>, <code>nodes</code>, <code>out_of_date</code>,
+<code>failed</code>, <code>file</code>, <code>file_size</code>,
+<code>saved</code>, <code>memory</code>, <code>version</code>. Type
+<code>![[flo</code> for the list. They print too &mdash; put
+<code>apponly::</code> before one that is only for the app.</p>
+
 <h3>Columns</h3>
 <p>Text on the left, a chart on the right — a fenced <code>columns</code>
 block, with <code>---</code> on its own line between the columns:</p>

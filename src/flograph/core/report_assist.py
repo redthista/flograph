@@ -107,6 +107,9 @@ _ANGLE_PAGE_RE = re.compile(r"<page:([^>\n]*)$", re.IGNORECASE)
 _FENCE_RE = re.compile(r"^\s*```([A-Za-z]*)$")
 _COMMAND_RE = re.compile(r"^\s*\\([A-Za-z]*)$")
 _BLOCK_RE = re.compile(r"^\s*:{3,}[ \t]*([A-Za-z]*)$")
+#: `app` typed at the start of a line: the `apponly::` tag (core.report)
+_APP_ONLY_RE = re.compile(r"^\s*([Aa][A-Za-z]*)$")
+APP_ONLY_HINT = "this line shows in the app only — not in the PDF or HTML"
 
 
 def suggest(before: str, after: str, vocabulary: Vocabulary
@@ -125,6 +128,13 @@ def suggest(before: str, after: str, vocabulary: Vocabulary
             for word, hint in BLOCKS.items()],
             # a bare ::: is also how a block ends — Enter there must end
             # the line, not take "details"
+            eager=False)
+    tag = _APP_ONLY_RE.search(before)
+    if tag and len(tag.group(1)) >= 3 and "apponly".startswith(
+            tag.group(1).lower()):
+        return _completion(before, tag.group(1), [
+            Suggestion("apponly:: ", APP_ONLY_HINT, label="apponly::")],
+            # a word at the start of a line is also ordinary writing
             eager=False)
     command = _COMMAND_RE.search(before)
     if command:

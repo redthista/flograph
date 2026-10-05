@@ -180,6 +180,9 @@ class TestReportPageAnimates:
                 self.cache = cache
                 self.node_succeeded = Event()
                 self.node_failed = Event()
+                # a page showing `flograph.status` redraws on these
+                self.run_started = Event()
+                self.run_finished = Event()
 
         from flograph.ui.report.report_page import ReportPage
         engine = _Engine(cache)
