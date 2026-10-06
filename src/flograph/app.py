@@ -84,7 +84,44 @@ def main(argv: list[str] | None = None) -> int:
         # nothing named to open: offer what was open last rather than an
         # empty canvas (O1)
         window.show_start_screen()
-    return app.exec()
+    code = app.exec()
+    _tear_down(window)
+    return code
+
+
+def _tear_down(window) -> None:
+    """Destroy the window while the application is still whole.
+
+    Left alone, the window outlives `app.exec()` and is deleted by PySide's
+    exit-time sweep, which visits every Python-owned object in no particular
+    order. A web view (a Plotly card, a Web View card, a report renderer)
+    frees GPU resources as it dies, and when the sweep reaches it after the
+    GL state it leans on has gone, Qt WebEngine aborts the process with
+    "Failed to restore OpenGL context after clean-up." — a crash on every
+    close that hits it, after the user's work is saved but loud all the same
+    (notes/issues.md). So the web views go first, then the window, and both
+    before Python starts finalizing.
+    """
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    # views already handed to deleteLater die the ordinary way first
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    try:
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+    except ImportError:
+        QWebEngineView = None
+    if QWebEngineView is not None:
+        views = [w for w in QApplication.allWidgets()
+                 if isinstance(w, QWebEngineView)]
+        for view in views:
+            # deleting one can take another with it (a parent view's page)
+            if shiboken6.isValid(view):
+                shiboken6.delete(view)
+    if shiboken6.isValid(window):
+        shiboken6.delete(window)
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 if __name__ == "__main__":
