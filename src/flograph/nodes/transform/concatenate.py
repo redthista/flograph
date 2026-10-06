@@ -1,9 +1,11 @@
 """Concatenate
 
 Stack the rows of DataFrames on top of each other — as many as you like.
-Connect **top** and **bottom** to start; every time you fill the empty
-port at the bottom another one appears below it, so stacking five sources
-is one node rather than a chain of four.
+Only **top** has to be connected — with nothing else wired the table
+passes straight through, so you can build and check the flow before the
+other sources exist. Every time you fill the empty port at the bottom
+another one appears below it, so stacking five sources is one node rather
+than a chain of four.
 
 Union keeps every column and fills gaps with missing values; intersection
 keeps only the columns all the connected tables share.
@@ -11,10 +13,10 @@ keeps only the columns all the connected tables share.
 NODE = {
     "label": "Concatenate",
     "category": "Transform",
-    "version": "1.0",
+    "version": "1.1",
     "inputs": [
         ("top", "dataframe"),
-        ("bottom", "dataframe"),
+        ("bottom", "dataframe", {"optional": True}),
         # the always-empty slot at the bottom: wiring it adds a permanent
         # port (in3, in4, ...) and a fresh empty slot appears below
         ("more", "dataframe", {"optional": True, "spare": True}),

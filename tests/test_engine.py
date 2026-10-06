@@ -168,6 +168,29 @@ def run(ctx, table):
     assert ran == []
 
 
+def test_concatenate_runs_with_only_top_connected(qtbot, registry):
+    """Wiring just one table is how a stack is built and checked before
+    the other sources exist, so the engine must not hold the node back
+    for an empty "bottom"."""
+    import pandas as pd
+    graph = Graph()
+    source = graph.add_node(NodeInstance.create(parse_spec("""
+NODE = {"label": "Table", "category": "Test",
+        "inputs": [], "outputs": [("table", "dataframe")]}
+def run(ctx):
+    import pandas as pd
+    return pd.DataFrame({"a": [1, 2, 3]})
+""", "test.table")))
+    concat = graph.add_node(NodeInstance.create(
+        registry.get("flograph.transform.concatenate")))
+    graph.connect(source.id, "table", concat.id, "top")
+    engine, _ = make_engine(graph)
+    ok = wait_run(qtbot, engine, engine.run_all)
+    assert ok, concat.status_message
+    out = engine.cache.outputs_for(concat.id)["combined"]
+    pd.testing.assert_frame_equal(out, pd.DataFrame({"a": [1, 2, 3]}))
+
+
 def test_stdout_capture_per_node(qtbot):
     graph = Graph()
     node = graph.add_node(NodeInstance.create(parse_spec("""
