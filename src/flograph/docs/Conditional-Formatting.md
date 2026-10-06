@@ -661,6 +661,21 @@ the `*` rule that would otherwise catch it:
 severity  colormap: critical=#7f1d1d, c*=red, w*=amber
 ```
 
+An `iconmap` can give **every** match instead of the first: write `all`
+among its other words (`first` is the default, and may be written too).
+Each key that catches the value adds its icon, side by side, in the order
+the keys are written — so a cell reading `fix, test` gets both marks:
+
+```
+tags    iconmap all: *fix*=🔧, *test*=🧪 green, *late*=🔥
+tags    iconmap all right: *fix*=🔧, *test*=🧪     # after the value instead
+```
+
+Two keys that hand over the same icon and colour give it once. In the rule
+builder it is **show every matching icon** under the value table. A
+[matrix](#a-matrix-rules-before-and-after-the-pivot) cell still takes one key, the first listed, because a
+cell built from several rows already has to choose.
+
 ## A note that explains a cell
 
 Some numbers need a sentence, and giving that sentence a column of its own

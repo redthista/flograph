@@ -1082,7 +1082,8 @@ class RuleBuilder(QDialog):
         self._map.setHorizontalHeaderLabels(["value", "icon", "colour"])
         self._map.horizontalHeaderItem(0).setToolTip(
             _WILDCARD_HELP + " A value the map names outright wins over a "
-            "pattern, and among patterns the first row that matches wins.")
+            "pattern, and among patterns the first row that matches wins — "
+            "unless 'every matching icon' is ticked below.")
         self._map.setMaximumHeight(150)
         self._map.horizontalHeader().setStretchLastSection(True)
         self._map.cellChanged.connect(self._refresh)
@@ -1096,6 +1097,12 @@ class RuleBuilder(QDialog):
         row.addWidget(rm)
         row.addStretch(1)
         mv.addLayout(row)
+        self._map_all = QCheckBox("show every matching icon, not just the first")
+        self._map_all.setToolTip(
+            "A value caught by two rows — 'fix, test' by *fix* and *test* — "
+            "gets both icons, side by side, in the order the rows are written.")
+        self._map_all.toggled.connect(self._refresh)
+        mv.addWidget(self._map_all)
         self._add_map_row()
         self._add_map_row()
         v.addWidget(self._icon_map_box)
@@ -1681,6 +1688,7 @@ class RuleBuilder(QDialog):
             src = rule.source if rule.source not in rule.columns else None
             self._set_other_col(self._icon_by, src)
             _pick_data(self._icon_shape, rule.picture_shape or "")
+            self._map_all.setChecked(bool(rule.map_all))
             self._map.setRowCount(0)
             for value, pair in (rule.mapping or {}).items():
                 glyph = pair[0] if pair else ""
@@ -1867,6 +1875,7 @@ class RuleBuilder(QDialog):
                 lead += "pill " if self._icon_pill.isChecked() else ""
                 shape = self._icon_shape.currentData()
                 lead += f"{shape} " if shape else ""
+                lead += "all " if self._map_all.isChecked() else ""
                 return (f"{cols} iconmap {lead}{source}: "
                         + ", ".join(pairs))
             rev = " reverse" if self._icon_reverse.isChecked() else ""

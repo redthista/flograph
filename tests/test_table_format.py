@@ -7,7 +7,7 @@ import pytest
 from flograph.core.table_format import (
     CellStyle, ColumnLayout, Rule, _column_list, column_layout, column_matches,
     column_stats, evaluate_column, evaluate_rows, expand_columns, merge_styles,
-    is_pattern, map_pair, parse_op_value, parse_rules, parse_rules_lenient,
+    is_pattern, map_pair, map_pairs, parse_op_value, parse_rules, parse_rules_lenient,
     quote_column, readable_fg, rule_summary, rules_from_style, style_payload,
     style_report, split_rules, value_matches, wraps_text,
 )
@@ -411,6 +411,57 @@ class TestWildcardValues:
         styles = evaluate_column(frame["status"], [rule],
                                  column_stats(frame["status"]), frame=frame)
         assert styles[0].bg == styles[1].bg != styles[2].bg
+
+
+class TestIconMapAll:
+    """`iconmap all`: every key a value matches adds its icon, side by side,
+    rather than the first one written winning the cell."""
+
+    FRAME = pd.DataFrame({"tags": ["fix, test", "fix", "test", "none"]})
+
+    def _glyphs(self, line):
+        (rule,) = parse_rules(line)
+        styles = evaluate_column(self.FRAME["tags"], [rule],
+                                 column_stats(self.FRAME["tags"]),
+                                 frame=self.FRAME)
+        return [[d.text for d in s.decorations] if s else [] for s in styles]
+
+    def test_first_is_still_the_default(self):
+        assert self._glyphs("tags iconmap: *fix*=🔧, *test*=🧪") == \
+            [["🔧"], ["🔧"], ["🧪"], []]
+
+    def test_all_gives_every_match_in_written_order(self):
+        assert self._glyphs("tags iconmap all: *test*=🧪, *fix*=🔧") == \
+            [["🧪", "🔧"], ["🔧"], ["🧪"], []]
+
+    def test_first_can_be_said_out_loud(self):
+        (rule,) = parse_rules("tags iconmap first: *fix*=🔧")
+        assert not rule.map_all and rule.source == ""
+
+    @pytest.mark.parametrize("line", [
+        "tags iconmap all right pill: *fix*=🔧 red",
+        "tags iconmap right all pill: *fix*=🔧 red",
+        "tags iconmap pill right all: *fix*=🔧 red",
+    ])
+    def test_it_sits_among_the_other_modifiers_in_any_order(self, line):
+        (rule,) = parse_rules(line)
+        assert (rule.map_all, rule.glyph_where, rule.as_pill, rule.source) \
+            == (True, "right", True, "")
+
+    def test_an_exact_key_comes_first_and_a_repeated_mark_once(self):
+        mapping = parse_rules(
+            "t iconmap all: *a*=✓ green, ab=★, *b*=✓ green")[0].mapping
+        assert [p[0] for p in map_pairs(mapping, "ab")] == ["★", "✓"]
+
+    def test_a_column_called_all_is_still_a_source(self):
+        (rule,) = parse_rules('t iconmap "all": x=✓')
+        assert rule.source == "all" and not rule.map_all
+        assert quote_column("all") == '"all"'
+
+    def test_it_survives_the_style_port(self):
+        (rule,) = parse_rules("t iconmap all: *a*=✓")
+        assert Rule.from_dict(rule.to_dict()).map_all
+        assert "every match" in rule_summary(rule)
 
 
 class TestValueMatches:

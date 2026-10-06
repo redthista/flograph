@@ -444,6 +444,20 @@ class TestValueHidden:
         assert b.line() == "units iconmap only sla: breach=✗"
         assert _valid(b.line()).hide_value
 
+    def test_an_icon_map_can_show_every_matching_icon(self, build):
+        b = build()
+        b._kind.setCurrentIndex(K_ICONS)
+        b._icon_style.setCurrentIndex(1)
+        _select(b, "units")
+        _pick_other(b._icon_by, "sla")
+        b._map.item(0, 0).setText("*a*")
+        b._map.cellWidget(0, 1).setText("✓")
+        b._map_all.setChecked(True)
+        assert b.line() == "units iconmap all sla: *a*=✓"
+        rule = _valid(b.line())
+        assert rule.map_all and rule.source == "sla"
+        assert build(rule)._map_all.isChecked()
+
     def test_it_round_trips_through_the_builder(self, build):
         rule = parse_rules("score icons traffic only")[0]
         b = build(rule)

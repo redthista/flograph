@@ -73,6 +73,12 @@ pay for it::
     sla     iconmap right: breach=✗, ok=✓
     grade   icons traffic in                # the icon *is* the cell
 
+An ``iconmap`` gives a value the icon of the **first** key that matches it.
+With ``all`` it gives one for **every** key that matches, side by side —
+the way a cell reading "fix, test" gets both marks from two patterns::
+
+    tags    iconmap all: *fix*=🔧, *test*=🧪 green
+
 ``over``/``top`` and ``under``/``bottom`` are accepted for ``above`` and
 ``below``, and ``instead``/``inplace`` for ``in``.
 
@@ -371,6 +377,10 @@ class Rule:
     # `highlight` with an `if <col> …` clause (the tested column).
     source: Optional[str] = None              # column whose value decides it
     mapping: Optional[dict] = None            # exact value -> [glyph, colour]
+    #: icon_map: every key the value matches adds its icon, not only the
+    #: first — `iconmap all: *fix*=🔧, *test*=🧪` marks a cell holding both
+    #: with both. A bool like `as_pill`: False is absence.
+    map_all: bool = False
     # number_format
     number_spec: Optional[str] = None
     #: draw the format *instead of* the value — Power BI's "icon only" /
@@ -1026,6 +1036,28 @@ def map_pair(mapping: dict, value: Any):
     return None
 
 
+def map_pairs(mapping: dict, value: Any) -> list:
+    """Every entry a cell's value takes out of an `iconmap all`: its own
+    key first if the map names it, then each pattern key that catches it,
+    in the order they are written. Two keys handing over the same mark
+    give it once — a value caught by ``*a*`` and ``*b*`` that both map to
+    ✓ is one tick, not two."""
+    text = str(value).strip()
+    found = []
+    pair = (mapping or {}).get(text)
+    if pair is not None:
+        found.append(pair)
+    for key, candidate in (mapping or {}).items():
+        if (key != text and (_is_quoted(key) or _is_glob(key))
+                and value_matches(key, text)):
+            found.append(candidate)
+    out = []
+    for pair in found:
+        if pair and pair[0] and list(pair) not in out:
+            out.append(list(pair))
+    return out
+
+
 def expand_columns(patterns, columns) -> list[str]:
     """The concrete column names `patterns` selects, de-duplicated.
 
@@ -1081,7 +1113,8 @@ def quote_column(name: str) -> str:
     if (any(ch in name for ch in ', "\'')
             or name.lower() in _KEYWORDS
             or name.lower() in _LEADING_KEYWORDS
-            or name.lower() in _HEIGHT_WORDS):
+            or name.lower() in _HEIGHT_WORDS
+            or name.lower() in _MAP_COUNT_WORDS):
         return '"' + name.replace('"', "") + '"'
     return name
 
@@ -1375,6 +1408,12 @@ _PLACE_WORDS = {
     "below": "below", "under": "below", "bottom": "below",
     "in": "in", "inplace": "in", "instead": "in",
 }
+
+
+#: How many of an `iconmap`'s keys a value may take: ``first`` (the
+#: default, and all there was before) or ``all``, an icon for each key
+#: that matches.
+_MAP_COUNT_WORDS = {"all": True, "first": False}
 
 
 def _split_flag(arg: str, words: dict) -> tuple:
@@ -1753,12 +1792,33 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         arg, pill = _split_pill(arg)
         arg, size = _split_size(lineno, arg)
         arg, shape = _split_flag(arg, _SHAPE_WORDS)
+        every = None
+        if keyword == "iconmap":
+            # `all` / `first` may sit among the others in any order, so
+            # the whole set is peeled again until nothing more comes off
+            while True:
+                before = arg
+                arg, hit = _split_flag(arg, _MAP_COUNT_WORDS)
+                every = hit if hit is not None else every
+                arg, o = _split_only(arg)
+                only = only or o
+                arg, p = _split_place(arg)
+                place = p or place
+                arg, q = _split_pill(arg)
+                pill = pill or q
+                arg, z = _split_size(lineno, arg)
+                size = z or size
+                arg, h = _split_flag(arg, _SHAPE_WORDS)
+                shape = h or shape
+                if arg == before:
+                    break
         keyword = "iconmap" if keyword == "iconmap" else "colormap"
         source, mapping = _parse_value_map(lineno, arg, keyword)
         mode = "icon_map" if keyword == "iconmap" else "color_map"
         return Rule(mode, columns, source=source, mapping=mapping,
                     hide_value=only, glyph_where=place, as_pill=pill,
-                    picture_size=size, picture_shape=shape)
+                    picture_size=size, picture_shape=shape,
+                    map_all=bool(every))
     if keyword == "tooltip":
         # `revenue tooltip note` and `revenue tooltip by note` mean the
         # same thing: the whole argument *is* the source column, and the
@@ -2382,7 +2442,8 @@ def _summary(rule: Rule) -> str:
                 f"{potted}{by}{place}{only}")
     if rule.mode == "icon_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
-        return f"{cols}  ·  icon from {whence}{potted}{place}{only}"
+        every = ", every match" if rule.map_all else ""
+        return f"{cols}  ·  icon from {whence}{every}{potted}{place}{only}"
     if rule.mode == "color_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
         return f"{cols}  ·  colour from {whence}{potted}{only}"
@@ -3083,28 +3144,36 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                 for i, v in enumerate(src):
                     if _is_missing(v):
                         continue
-                    pair = map_pair(mapping, v)
-                    if not pair or not pair[0]:
+                    if rule.mode == "icon_map" and rule.map_all:
+                        pairs = map_pairs(mapping, v)
+                    else:
+                        pair = map_pair(mapping, v)
+                        pairs = [pair] if pair and pair[0] else []
+                    if not pairs:
                         continue
-                    first = pair[0]
-                    second = pair[1] if len(pair) > 1 else None
+                    first = pairs[0][0]
+                    second = pairs[0][1] if len(pairs[0]) > 1 else None
                     if rule.mode == "icon_map":
                         # `pill` re-reads the mapped colour: it is the ink
                         # on a bare glyph, and the fill once the glyph is
                         # in a lozenge — there is no third colour in the
                         # map to be both.
-                        if rule.as_pill and second:
-                            deco = _mark(first, pill=second,
-                                         color=readable_fg(second),
-                                         where=_place(rule),
-                                         size=rule.picture_size,
-                                         shape=rule.picture_shape)
-                        else:
-                            deco = _mark(first, color=second,
-                                         where=_place(rule),
-                                         size=rule.picture_size,
-                                         shape=rule.picture_shape)
-                        contrib[i] = CellStyle(decorations=[deco])
+                        decos = []
+                        for pair in pairs:
+                            glyph = pair[0]
+                            ink = pair[1] if len(pair) > 1 else None
+                            if rule.as_pill and ink:
+                                decos.append(_mark(
+                                    glyph, pill=ink, color=readable_fg(ink),
+                                    where=_place(rule),
+                                    size=rule.picture_size,
+                                    shape=rule.picture_shape))
+                            else:
+                                decos.append(_mark(
+                                    glyph, color=ink, where=_place(rule),
+                                    size=rule.picture_size,
+                                    shape=rule.picture_shape))
+                        contrib[i] = CellStyle(decorations=decos)
                     elif rule.as_pill:
                         # a category pill: the mapped colour wraps the
                         # value rather than flooding the cell, which is
