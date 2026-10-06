@@ -334,3 +334,38 @@ class TestDiskWatch:
         assert "Cache on disk" in tip
         assert "uncompressed" in tip
         assert "%" in tip
+
+
+class TestEstimateSizeOnBigValues:
+    """Past EXACT_ITEMS rows the Python objects are sampled, not walked:
+    this runs on the GUI thread for every node that finishes, and the full
+    walk cost ~0.4 s a frame — far more once those pages were in swap."""
+
+    def test_a_big_object_frame_comes_within_a_few_percent(self):
+        import numpy as np
+        rng = np.random.default_rng(0)
+        words = np.array([f"w{i}" * (i % 5 + 1) for i in range(300)],
+                         dtype=object)
+        n = 50_000
+        df = pd.DataFrame({
+            "obj": pd.Series(words[rng.integers(0, 300, n)], dtype=object),
+            "py": pd.Series(words[rng.integers(0, 300, n)]).astype(
+                "string[python]"),
+            "num": rng.random(n),
+            "mixed": pd.Series([1, "a", 2.5, None] * (n // 4), dtype=object),
+        }).set_index("obj", drop=False)
+        exact = int(df.memory_usage(deep=True).sum())
+        assert abs(estimate_size(df) - exact) / exact < 0.03
+        series = df["obj"]
+        exact = int(series.memory_usage(deep=True))
+        assert abs(estimate_size(series) - exact) / exact < 0.03
+
+    def test_numbers_only_are_still_exact(self):
+        df = pd.DataFrame({"a": range(50_000), "b": [0.5] * 50_000})
+        assert estimate_size(df) == int(df.memory_usage(deep=True).sum())
+
+    def test_a_long_list_is_scaled_from_a_sample(self):
+        rows = [{"a": i, "b": "x" * 10} for i in range(50_000)]
+        each = estimate_size(rows[0])
+        total = estimate_size(rows)
+        assert 0.9 * each * 50_000 < total < 1.1 * each * 50_000 + 10 ** 6

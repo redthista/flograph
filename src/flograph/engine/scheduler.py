@@ -112,9 +112,6 @@ class _InFlight:
     # was running* means the result coming back answers a question nobody
     # is asking any more. See _on_node_finished.
     params: dict = field(default_factory=dict)
-    # The worker's signals, kept so Stop can cut an abandoned node loose:
-    # its result goes nowhere rather than into the cache (see cancel).
-    signals: object = None
 
 
 # Values a node cannot change in place at all, so there is nothing to guard.
@@ -1079,24 +1076,20 @@ class ExecutionEngine(QObject):
         return frozenset(self._abandoned)
 
     def _abandon(self, node_id: str, inflight: "_InFlight") -> None:
-        signals = inflight.signals
-        if signals is not None:
-            # Its outcome no longer goes to the run: not into the cache, not
-            # onto the cards. Its log lines still arrive — what a stuck node
-            # prints on its way out is worth seeing.
-            for signal, slot in ((signals.finished, self._on_node_finished),
-                                 (signals.failed, self._on_node_failed),
-                                 (signals.progressed, self._on_node_progress)):
-                try:
-                    signal.disconnect(slot)
-                except (RuntimeError, TypeError):
-                    pass
-            # Bound methods, never lambdas: a lambda has no receiver, so
-            # PySide would run it on the worker thread that emitted — and
-            # from there touch the graph. A method of this QObject is
-            # queued onto the GUI thread like every other result.
-            signals.finished.connect(self._on_abandoned_finished)
-            signals.failed.connect(self._on_abandoned_failed)
+        # Its outcome no longer goes to the run: not into the cache, not
+        # onto the cards. Its log lines still arrive — what a stuck node
+        # prints on its way out is worth seeing.
+        #
+        # The worker's signals stay connected on purpose, and the
+        # completion slots recognise an abandoned node's result by asking
+        # `_abandoned` (see _not_ours). Swapping the connection over here
+        # looked equivalent and is not: Qt does not recall a queued result
+        # that was already posted when a connection changes. A node that
+        # finished just before Stop — routine when the window is busy and
+        # results queue up — delivered to the old slot and never reached
+        # the new one, so it stayed abandoned for good: holding a worker
+        # slot, never startable again, and every later run that needed it
+        # sat queued with no way to end.
         self._close_node_run(inflight, "cancelled", None)
         self._abandoned.add(node_id)
         if node_id in self.graph.nodes:
@@ -1107,17 +1100,6 @@ class ExecutionEngine(QObject):
                 "stopping — still finishing in the background; its result "
                 "will be thrown away")
         self.abandoned_changed.emit()
-
-    def _on_abandoned_finished(self, node_id: str, _outputs: dict,
-                               _wall_time: float) -> None:
-        self._on_abandoned_done(node_id)
-
-    def _on_abandoned_failed(self, node_id: str, error) -> None:
-        # One that stopped at its check_cancelled() says so, as a stopped
-        # node always has; one that failed on its way out is not news.
-        self._on_abandoned_done(
-            node_id, "cancelled" if getattr(error, "cancelled", False)
-            else None)
 
     def _on_abandoned_done(self, node_id: str,
                            message: "Optional[str]" = None) -> None:
@@ -1438,7 +1420,6 @@ class ExecutionEngine(QObject):
         signals.logged.connect(self.node_log)
         signals.progressed.connect(self._on_node_progress)
 
-        inflight.signals = signals
         self._running[node_id] = inflight
         if is_exclusive(node):
             self._exclusive_running = True
@@ -1530,6 +1511,8 @@ class ExecutionEngine(QObject):
         return None, None
 
     def _on_node_finished(self, node_id: str, outputs: dict, wall_time: float) -> None:
+        if self._not_ours(node_id):
+            return
         # timed in the body, not by decorator: this is a slot on a worker
         # signal, and the engine's connections stay plain bound methods
         with perf.timed("engine: node finished"):
@@ -1574,6 +1557,8 @@ class ExecutionEngine(QObject):
                 self._dispatch()
 
     def _on_node_failed(self, node_id: str, error: NodeError) -> None:
+        if self._not_ours(node_id, error):
+            return
         inflight = self._retire(node_id)
         self._had_failure = self._had_failure or not error.cancelled
         try:
@@ -1588,6 +1573,24 @@ class ExecutionEngine(QObject):
         finally:
             self._consumed(node_id)
             self._dispatch()        # as in _on_node_finished
+
+    def _not_ours(self, node_id: str, error=None) -> bool:
+        """True for a result the run must not take: an abandoned node's, or
+        one that nothing is waiting for.
+
+        A node cannot be abandoned and running at once — _dispatch will not
+        start one until its abandoned thread has returned — so membership
+        alone says whose result this is, whenever it was posted.
+        """
+        if node_id in self._abandoned:
+            # One that stopped at its check_cancelled() says so, as a
+            # stopped node always has; one that finished, or failed on its
+            # way out, is not news.
+            cancelled = getattr(error, "cancelled", False)
+            self._on_abandoned_done(node_id,
+                                    "cancelled" if cancelled else None)
+            return True
+        return node_id not in self._running
 
     def _answered_the_question(self, node_id: str,
                                inflight: "Optional[_InFlight]") -> bool:

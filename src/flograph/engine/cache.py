@@ -456,11 +456,26 @@ def estimate_size(value: Any) -> int:
         return 0
 
 
+# Up to EXACT_ITEMS items a value is measured item by item; past it, SAMPLE
+# of them, spread evenly, stand in for the rest. estimate_size runs on the GUI thread
+# for every node that finishes, and pandas' deep measure walks every Python
+# object in an object column — 0.8 s for a 2M-row frame of six such columns,
+# far longer once those pages are in swap, which is exactly when a big flow
+# is finishing nodes fastest. The deep figure is itself only a footprint,
+# not resident memory (Python strings share and intern; measured against
+# RSS it is off by ~1.5x either way), so a sample within a percent of it
+# loses nothing worth having.
+EXACT_ITEMS = 10_000
+SAMPLE = 1_000
+
+
 def _measure(value: Any) -> int:
     import sys
     pd = sys.modules.get("pandas")
     if pd is not None:
         if isinstance(value, (pd.DataFrame, pd.Series, pd.Index)):
+            if len(value) > EXACT_ITEMS:
+                return _sampled_pandas(pd, value)
             used = value.memory_usage(deep=True)
             # A DataFrame answers with a Series, one entry per column; a
             # Series and an Index answer with a plain int. Calling .sum() on
@@ -471,12 +486,75 @@ def _measure(value: Any) -> int:
     if np is not None and isinstance(value, np.ndarray):
         return int(value.nbytes)
     if isinstance(value, dict):
-        return sys.getsizeof(value) + sum(
-            estimate_size(k) + estimate_size(v) for k, v in value.items()
-        )
+        items = value.items()
+        return sys.getsizeof(value) + _scaled(
+            len(value), (estimate_size(k) + estimate_size(v)
+                         for k, v in _spread(items, len(value))))
     if isinstance(value, (list, tuple, set)):
-        return sys.getsizeof(value) + sum(estimate_size(v) for v in value)
+        return sys.getsizeof(value) + _scaled(
+            len(value), (estimate_size(v) for v in _spread(value, len(value))))
     try:
         return sys.getsizeof(value)
     except Exception:
         return 0
+
+
+def _spread(items, count: int):
+    """Every item, or SAMPLE of them spread evenly across `items`."""
+    if count <= EXACT_ITEMS:
+        return items
+    step = count // SAMPLE
+    if isinstance(items, (list, tuple)):
+        return items[::step][:SAMPLE]
+    import itertools
+    return itertools.islice(items, 0, step * SAMPLE, step)
+
+
+def _scaled(count: int, sizes) -> int:
+    """The sum of `sizes`, scaled up to `count` items if it was a sample."""
+    total = seen = 0
+    for size in sizes:
+        total += size
+        seen += 1
+    return total if not seen or seen >= count else total * count // seen
+
+
+def _sampled_pandas(pd, value) -> int:
+    """What `memory_usage(deep=True)` would say, without walking every row.
+
+    For pandas the deep figure is the shallow one plus `sys.getsizeof` of
+    each Python object held in an object or python-backed string column (or
+    index); every other dtype's deep figure *is* its shallow one. So only
+    those columns are sampled, and a frame of numbers and Arrow strings
+    costs what it always did.
+    """
+    if isinstance(value, pd.DataFrame):
+        total = int(value.memory_usage(deep=False, index=False).sum())
+        columns = [value.iloc[:, i] for i, dtype in enumerate(value.dtypes)
+                   if _holds_objects(dtype)]
+        index = value.index
+    elif isinstance(value, pd.Series):
+        total = int(value.memory_usage(deep=False, index=False))
+        columns = [value] if _holds_objects(value.dtype) else []
+        index = value.index
+    else:
+        total = int(value.memory_usage(deep=False))
+        columns = [value] if _holds_objects(value.dtype) else []
+        index = None
+    if index is not None:
+        total += int(index.memory_usage(deep=False))
+        if _holds_objects(index.dtype):
+            columns.append(index)
+    import sys
+    for column in columns:
+        count = len(column)
+        step = max(1, count // SAMPLE)
+        picks = (column[::step] if isinstance(column, pd.Index)
+                 else column.iloc[::step])[:SAMPLE]
+        total += _scaled(count, (sys.getsizeof(item)
+                                 for item in picks.to_numpy(dtype=object)))
+    return total
+
+
+def _holds_objects(dtype) -> bool:
+    return dtype == object or getattr(dtype, "storage", None) == "python"

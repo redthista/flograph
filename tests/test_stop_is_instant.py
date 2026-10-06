@@ -198,3 +198,73 @@ def test_the_status_line_names_what_is_still_finishing(qtbot, monkeypatch,
     gates.release("f")
     qtbot.waitUntil(lambda: not win.engine.abandoned_nodes, timeout=5000)
     assert "nothing from it was kept" in win._status_label.text()
+
+
+FAILS = '''
+NODE = {"label": "Fails", "category": "Test", "inputs": [],
+        "outputs": [("value", "any")]}
+def run(ctx):
+    raise ValueError("boom")
+'''
+
+
+def _stop_with_the_result_already_posted(engine):
+    """Stop, landing after the node's thread has returned and its result is
+    queued but before the window got to it — what a busy window does to a
+    big flow all the time. waitForDone blocks without running the event
+    loop, so the queued result is still undelivered when cancel() runs."""
+    engine.run_all()
+    assert engine.pool.waitForDone(5000)
+    engine.cancel()
+
+
+def test_a_result_posted_before_stop_does_not_strand_the_node(qtbot):
+    """Stop used to swap the worker's signal over to an "abandoned" slot,
+    but Qt delivers a result posted before the swap to the old slot — so
+    the abandoned slot never heard it and the node stayed abandoned for
+    good: its light stuck on "stopping", a worker slot held for ever, and
+    every later run that needed it queued with no way to finish."""
+    graph = Graph()
+    quick = add(graph, QUICK, "test.quick")
+    engine = ExecutionEngine(graph)
+    _stop_with_the_result_already_posted(engine)
+    assert quick.id in engine.abandoned_nodes
+
+    qtbot.waitUntil(lambda: not engine.abandoned_nodes, timeout=5000)
+    assert graph.node(quick.id).status is NodeStatus.IDLE
+    assert not engine.cache.has(quick.id)          # thrown away, as promised
+    assert graph.node(quick.id).dirty
+
+    with qtbot.waitSignal(engine.run_finished, timeout=5000) as blocker:
+        engine.run_all()
+    assert blocker.args[0]
+    assert engine.cache.has(quick.id)
+    assert not graph.node(quick.id).dirty
+
+
+def test_a_failure_posted_before_stop_does_not_strand_the_node(qtbot):
+    graph = Graph()
+    failing = add(graph, FAILS, "test.fails")
+    engine = ExecutionEngine(graph)
+    failed = []
+    engine.node_failed.connect(lambda node_id, _e: failed.append(node_id))
+    _stop_with_the_result_already_posted(engine)
+
+    qtbot.waitUntil(lambda: not engine.abandoned_nodes, timeout=5000)
+    assert failed == []          # not this run's news any more
+    assert graph.node(failing.id).status is NodeStatus.IDLE
+
+
+def test_a_late_result_cannot_reach_the_next_run(qtbot):
+    """Nor may it touch a run started after Stop: it would be cached as
+    that run's answer, and release successors that run never counted."""
+    graph = Graph()
+    quick = add(graph, QUICK, "test.quick")
+    engine = ExecutionEngine(graph)
+    _stop_with_the_result_already_posted(engine)
+    with qtbot.waitSignal(engine.run_finished, timeout=5000) as blocker:
+        engine.run_all()        # queued behind the old thread's result
+    assert blocker.args[0]
+    assert not engine.abandoned_nodes
+    assert engine.cache.has(quick.id)
+    assert graph.node(quick.id).status is NodeStatus.DONE
