@@ -78,6 +78,10 @@ With ``all`` it gives one for **every** key that matches, side by side —
 the way a cell reading "fix, test" gets both marks from two patterns::
 
     tags    iconmap all: *fix*=🔧, *test*=🧪 green
+    tags    iconmap all gap 0: *fix*=🔧, *test*=🧪   # set touching
+
+``gap N`` is the space between the marks, in pixels on the card — the
+ordinary spacing is 4.
 
 ``over``/``top`` and ``under``/``bottom`` are accepted for ``above`` and
 ``below``, and ``instead``/``inplace`` for ``in``.
@@ -381,6 +385,9 @@ class Rule:
     #: first — `iconmap all: *fix*=🔧, *test*=🧪` marks a cell holding both
     #: with both. A bool like `as_pill`: False is absence.
     map_all: bool = False
+    #: icon_map: pixels between the marks it puts side by side — `gap 0`
+    #: sets them touching. None is the table's ordinary spacing.
+    mark_gap: Optional[int] = None
     # number_format
     number_spec: Optional[str] = None
     #: draw the format *instead of* the value — Power BI's "icon only" /
@@ -541,6 +548,9 @@ class Decoration:
     #: to: "square", "rounded" or "circle". None and None draw it as it is.
     tile: Optional[str] = None
     shape: Optional[str] = None
+    #: Pixels on the card between this mark and the next one beside it.
+    #: None is the default spacing; 0 sets them touching.
+    gap: Optional[int] = None
 
     def to_dict(self) -> dict:
         out = {"text": self.text}
@@ -560,6 +570,8 @@ class Decoration:
             out["tile"] = self.tile
         if self.shape:
             out["shape"] = self.shape
+        if self.gap is not None:
+            out["gap"] = self.gap
         return out
 
     @classmethod
@@ -578,7 +590,9 @@ class Decoration:
                    image=d.get("image") or None,
                    size=d.get("size") or None,
                    tile=d.get("tile") or None,
-                   shape=d.get("shape") or None)
+                   shape=d.get("shape") or None,
+                   gap=(int(d["gap"]) if d.get("gap") is not None
+                        else None))
 
 
 @dataclass
@@ -1245,6 +1259,33 @@ def _picture_size(lineno: int, token: Any) -> int:
     return size
 
 
+#: The widest `gap` a rule may ask for between two marks, in card pixels.
+MAX_MARK_GAP = 40
+
+
+def _split_gap(lineno: int, arg: str) -> tuple:
+    """Pull a `gap 6` (or `gap 6px`) off either end of a keyword argument:
+    the space between the marks an `iconmap` sets side by side."""
+    text = arg.strip()
+    lead = re.match(r"gap\s+(\d+)(?:px)?(?=[\s:]|$)", text, re.IGNORECASE)
+    trail = None if lead else re.search(r"\sgap\s+(\d+)(?:px)?$", text,
+                                        re.IGNORECASE)
+    hit = lead or trail
+    if hit is None:
+        if re.match(r"gap(?=[\s:]|$)", text, re.IGNORECASE):
+            raise ValueError(f"line {lineno}: 'gap' needs a number of "
+                             f"pixels — 'gap 2'")
+        return text, None
+    gap = int(hit.group(1))
+    if gap > MAX_MARK_GAP:
+        raise ValueError(f"line {lineno}: gap {gap} is wider than "
+                         f"{MAX_MARK_GAP}px")
+    if lead:
+        rest = text[lead.end():]
+        return (rest if rest.startswith(":") else rest.strip()), gap
+    return text[:trail.start()].strip(), gap
+
+
 def _split_size(lineno: int, arg: str) -> tuple:
     """Pull a `32px` off either end of a keyword argument — how tall the
     pictures an `iconmap` pastes are drawn."""
@@ -1793,6 +1834,7 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         arg, size = _split_size(lineno, arg)
         arg, shape = _split_flag(arg, _SHAPE_WORDS)
         every = None
+        gap = None
         if keyword == "iconmap":
             # `all` / `first` may sit among the others in any order, so
             # the whole set is peeled again until nothing more comes off
@@ -1810,6 +1852,8 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
                 size = z or size
                 arg, h = _split_flag(arg, _SHAPE_WORDS)
                 shape = h or shape
+                arg, w = _split_gap(lineno, arg)
+                gap = w if w is not None else gap
                 if arg == before:
                     break
         keyword = "iconmap" if keyword == "iconmap" else "colormap"
@@ -1818,7 +1862,7 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
         return Rule(mode, columns, source=source, mapping=mapping,
                     hide_value=only, glyph_where=place, as_pill=pill,
                     picture_size=size, picture_shape=shape,
-                    map_all=bool(every))
+                    map_all=bool(every), mark_gap=gap)
     if keyword == "tooltip":
         # `revenue tooltip note` and `revenue tooltip by note` mean the
         # same thing: the whole argument *is* the source column, and the
@@ -2443,6 +2487,8 @@ def _summary(rule: Rule) -> str:
     if rule.mode == "icon_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
         every = ", every match" if rule.map_all else ""
+        if rule.mark_gap is not None:
+            every += f", {rule.mark_gap}px apart"
         return f"{cols}  ·  icon from {whence}{every}{potted}{place}{only}"
     if rule.mode == "color_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
@@ -2917,7 +2963,7 @@ def _place(rule) -> str:
 
 
 def _mark(text, *, color=None, pill=None, where="left", size=None,
-          shape=None) -> "Decoration":
+          shape=None, gap=None) -> "Decoration":
     """The decoration a rule's mark makes: a picture when what was typed as
     the mark is one — base64 pasted where a glyph goes — else the text.
 
@@ -2929,8 +2975,10 @@ def _mark(text, *, color=None, pill=None, where="left", size=None,
     if uri is not None:
         tile = pill or color
         return Decoration(image=uri, where=where, size=size, tile=tile,
-                          shape=shape or ("rounded" if tile else None))
-    return Decoration(text=text, color=color, pill=pill, where=where)
+                          shape=shape or ("rounded" if tile else None),
+                          gap=gap)
+    return Decoration(text=text, color=color, pill=pill, where=where,
+                      gap=gap)
 
 
 def _picture_place(rule) -> str:
@@ -3167,12 +3215,14 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                                     glyph, pill=ink, color=readable_fg(ink),
                                     where=_place(rule),
                                     size=rule.picture_size,
-                                    shape=rule.picture_shape))
+                                    shape=rule.picture_shape,
+                                    gap=rule.mark_gap))
                             else:
                                 decos.append(_mark(
                                     glyph, color=ink, where=_place(rule),
                                     size=rule.picture_size,
-                                    shape=rule.picture_shape))
+                                    shape=rule.picture_shape,
+                                    gap=rule.mark_gap))
                         contrib[i] = CellStyle(decorations=decos)
                     elif rule.as_pill:
                         # a category pill: the mapped colour wraps the

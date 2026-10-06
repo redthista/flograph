@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from flograph.core import sparkline as _sparkline
 from flograph.core.images import DATA_PREFIX, picture_uri
 from flograph.core.table_format import (
-    DEFAULT_PALETTE, MAX_PICTURE_SIZE, MAX_ROW_HEIGHT, MAX_RULE_WIDTH,
+    DEFAULT_PALETTE, MAX_MARK_GAP, MAX_PICTURE_SIZE, MAX_ROW_HEIGHT, MAX_RULE_WIDTH,
     MAX_SPARK_WIDTH, MIN_PICTURE_SIZE, MIN_ROW_HEIGHT, MIN_RULE_WIDTH,
     MIN_SPARK_WIDTH, PALETTES, _is_glob, abbreviate_pictures, bar_token,
     fill_token, glyph_token, parse_rule_lines, quote_column, rule_summary,
@@ -1103,6 +1103,20 @@ class RuleBuilder(QDialog):
             "gets both icons, side by side, in the order the rows are written.")
         self._map_all.toggled.connect(self._refresh)
         mv.addWidget(self._map_all)
+        gap_row = QHBoxLayout()
+        gap_row.addWidget(QLabel("Gap between icons"))
+        self._map_gap = _UnsetSpinBox()
+        self._map_gap.setRange(-1, MAX_MARK_GAP)
+        self._map_gap.setSpecialValueText("ordinary")
+        self._map_gap.setSuffix(" px")
+        self._map_gap.setValue(-1)
+        self._map_gap.setToolTip(
+            "Pixels between icons set side by side on the card — 0 sets "
+            "them touching. 'ordinary' is the usual 4.")
+        self._map_gap.valueChanged.connect(self._refresh)
+        gap_row.addWidget(self._map_gap)
+        gap_row.addStretch(1)
+        mv.addLayout(gap_row)
         self._add_map_row()
         self._add_map_row()
         v.addWidget(self._icon_map_box)
@@ -1689,6 +1703,8 @@ class RuleBuilder(QDialog):
             self._set_other_col(self._icon_by, src)
             _pick_data(self._icon_shape, rule.picture_shape or "")
             self._map_all.setChecked(bool(rule.map_all))
+            self._map_gap.setValue(-1 if rule.mark_gap is None
+                                   else rule.mark_gap)
             self._map.setRowCount(0)
             for value, pair in (rule.mapping or {}).items():
                 glyph = pair[0] if pair else ""
@@ -1876,6 +1892,8 @@ class RuleBuilder(QDialog):
                 shape = self._icon_shape.currentData()
                 lead += f"{shape} " if shape else ""
                 lead += "all " if self._map_all.isChecked() else ""
+                gap = self._map_gap.value()
+                lead += f"gap {gap} " if gap >= 0 else ""
                 return (f"{cols} iconmap {lead}{source}: "
                         + ", ".join(pairs))
             rev = " reverse" if self._icon_reverse.isChecked() else ""

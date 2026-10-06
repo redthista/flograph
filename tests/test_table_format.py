@@ -464,6 +464,37 @@ class TestIconMapAll:
         assert "every match" in rule_summary(rule)
 
 
+class TestMarkGap:
+    """`gap N`: the space between the marks an iconmap sets side by side."""
+
+    @pytest.mark.parametrize("line,gap", [
+        ("t iconmap all gap 0: *a*=✓", 0),
+        ("t iconmap gap 6px all: *a*=✓", 6),
+        ("t iconmap all right gap 2 src: a=✓", 2),
+        ("t iconmap: a=✓", None),
+    ])
+    def test_it_is_read_among_the_other_words(self, line, gap):
+        (rule,) = parse_rules(line)
+        assert rule.mark_gap == gap
+
+    def test_a_gap_needs_a_number_and_stays_in_range(self):
+        with pytest.raises(ValueError, match="needs a number"):
+            parse_rules("t iconmap gap: a=✓")
+        with pytest.raises(ValueError, match="wider than"):
+            parse_rules("t iconmap gap 400: a=✓")
+
+    def test_every_mark_carries_it_and_it_crosses_the_model(self):
+        from flograph.core.table_format import Decoration
+        frame = pd.DataFrame({"t": ["ab"]})
+        (rule,) = parse_rules("t iconmap all gap 0: *a*=✓, *b*=★")
+        (style,) = evaluate_column(frame["t"], [rule],
+                                   column_stats(frame["t"]), frame=frame)
+        assert [d.gap for d in style.decorations] == [0, 0]
+        back = Decoration.from_dict(style.decorations[0].to_dict())
+        assert back.gap == 0
+        assert "0px apart" in rule_summary(rule)
+
+
 class TestValueMatches:
     """The one answer the condition test and the map lookup both read."""
 

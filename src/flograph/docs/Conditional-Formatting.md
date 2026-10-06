@@ -671,8 +671,21 @@ tags    iconmap all: *fix*=🔧, *test*=🧪 green, *late*=🔥
 tags    iconmap all right: *fix*=🔧, *test*=🧪     # after the value instead
 ```
 
+Add `gap N` to set the space between the icons, in pixels on the card —
+`gap 0` sets them touching, and the ordinary spacing is 4. It is the space
+*between* icons; the one between the icons and the value stays as it is:
+
+```
+tags    iconmap all gap 0: *fix*=🔧, *test*=🧪, *late*=🔥
+tags    iconmap all gap 10: *fix*=🔧, *test*=🧪, *late*=🔥
+```
+
+On a report's web page the gap is exact; on paper it is the nearest run of
+spaces, since a printed table cannot be told a margin.
+
 Two keys that hand over the same icon and colour give it once. In the rule
-builder it is **show every matching icon** under the value table. A
+builder it is **show every matching icon** under the value table, with
+**Gap between icons** beside it. A
 [matrix](#a-matrix-rules-before-and-after-the-pivot) cell still takes one key, the first listed, because a
 cell built from several rows already has to choose.
 

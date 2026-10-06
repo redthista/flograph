@@ -1,0 +1,161 @@
+{
+ "flograph_version": "0.1.25",
+ "schema": 1,
+ "graph": {
+  "nodes": [
+   {
+    "id": "note",
+    "type": "flograph.util.note",
+    "pos": [
+     0,
+     0
+    ],
+    "code": null,
+    "label": null,
+    "params": {
+     "text": "## iconmap all\n\nBoth tables read the same **Tags** column with the same map.\n\n- **Every matching icon** says `iconmap all:` — a row tagged\n  `fix, test, late` gets 🔧 🧪 🔥.\n- **First match only** is the default — the same row gets just 🔧.\n\n- **Touching (gap 0)** / **Spread (gap 12)** add `gap N`: the pixels\n  between the icons (ordinary is 4).\n\nOpen any table's **Rules…** builder: the map page has\n**show every matching icon** and **Gap between icons** under the value\ntable.\n\nThe **Report** page embeds the left table live and plain — switch its\npreview to **Web** to check icons against the cell edges.\n",
+     "width": 520,
+     "height": 340
+    }
+   },
+   {
+    "id": "data",
+    "type": "flograph.io.table",
+    "pos": [
+     0,
+     420
+    ],
+    "code": null,
+    "label": "Tasks",
+    "params": {
+     "data": "{\"version\": 2, \"columns\": [{\"name\": \"Task\", \"type\": \"text\"}, {\"name\": \"Tags\", \"type\": \"text\"}, {\"name\": \"Owner\", \"type\": \"text\"}, {\"name\": \"Note\", \"type\": \"text\"}, {\"name\": \"Amount\", \"type\": \"number\"}], \"rows\": [[\"Build the importer\", \"fix, test, late\", \"Alice\", \"urgent: the nightly load failed twice this week\", 12345.5], [\"Ship 0.1.25\", \"fix\", \"Bob\", \"fine\", 99.0], [\"Write the handbook page\", \"docs, test\", \"Alice\", \"urgent\", 100000.25], [\"Tidy the repo\", \"chore\", \"Carol\", \"a long note with many words in it, to see how a cell wraps\", 5.0], [\"Profile the run\", \"perf, test, late\", \"Dana\", \"AVeryLongUnbrokenIdentifierThatCannotWrapAnywhere\", 2500.0]]}",
+     "width": 520,
+     "height": 260
+    }
+   },
+   {
+    "id": "all",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     640,
+     0
+    ],
+    "code": null,
+    "label": "Every matching icon",
+    "params": {
+     "format_rules": "# iconmap ALL — every key the value matches adds its icon\nTags    iconmap all: *fix*=🔧, *test*=🧪 green, *late*=🔥, *docs*=📘, *perf*=⚡ amber\n\n# icons elsewhere, for the web-report check\nOwner   = Alice => icon ✓ green\nOwner   = Bob   => icon ! amber right\nNote    contains urgent => pill red \"URGENT\"\nAmount  > 1000 => icon ▲ green\nAmount  < 100  => icon ▼ red right\n",
+     "hide": "",
+     "width": 900,
+     "height": 300,
+     "scale": 100
+    }
+   },
+   {
+    "id": "first",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     640,
+     420
+    ],
+    "code": null,
+    "label": "First match only",
+    "params": {
+     "format_rules": "# the default — the FIRST key that matches wins the cell\nTags    iconmap: *fix*=🔧, *test*=🧪 green, *late*=🔥, *docs*=📘, *perf*=⚡ amber\n",
+     "hide": "",
+     "width": 900,
+     "height": 300,
+     "scale": 100
+    }
+   },
+   {
+    "id": "gap0",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1660,
+     0
+    ],
+    "code": null,
+    "label": "Touching (gap 0)",
+    "params": {
+     "format_rules": "# gap 0 — the icons touch (the gap to the text stays)\nTags    iconmap all gap 0: *fix*=🔧, *test*=🧪 green, *late*=🔥, *docs*=📘, *perf*=⚡ amber\n",
+     "hide": "Owner, Note, Amount",
+     "width": 520,
+     "height": 300,
+     "scale": 100
+    }
+   },
+   {
+    "id": "gap12",
+    "type": "flograph.viz.show_table",
+    "pos": [
+     1660,
+     420
+    ],
+    "code": null,
+    "label": "Spread (gap 12)",
+    "params": {
+     "format_rules": "# gap 12 — 12px between icons\nTags    iconmap all gap 12: *fix*=🔧, *test*=🧪 green, *late*=🔥, *docs*=📘, *perf*=⚡ amber\n",
+     "hide": "Owner, Note, Amount",
+     "width": 520,
+     "height": 300,
+     "scale": 100
+    }
+   }
+  ],
+  "connections": [
+   {
+    "id": "c1",
+    "src": [
+     "data",
+     "table"
+    ],
+    "dst": [
+     "all",
+     "table"
+    ]
+   },
+   {
+    "id": "c2",
+    "src": [
+     "data",
+     "table"
+    ],
+    "dst": [
+     "first",
+     "table"
+    ]
+   },
+   {
+    "id": "c3",
+    "src": [
+     "data",
+     "table"
+    ],
+    "dst": [
+     "gap0",
+     "table"
+    ]
+   },
+   {
+    "id": "c4",
+    "src": [
+     "data",
+     "table"
+    ],
+    "dst": [
+     "gap12",
+     "table"
+    ]
+   }
+  ],
+  "frames": [],
+  "pages": [
+   {
+    "id": "p_report",
+    "title": "Report",
+    "kind": "report",
+    "body": "# Icons in a web report\n\nLive (`|search`):\n\n![[Every matching icon|search]]\n\nPlain (no `|live`):\n\n![[Every matching icon]]\n\nGap 0 and gap 12, live then plain:\n\n![[Touching (gap 0)|search]]\n\n![[Spread (gap 12)|search]]\n\n![[Spread (gap 12)]]\n\nLive at 50% width:\n\n![[Every matching icon|search|width=50%]]\n"
+   }
+  ]
+ }
+}

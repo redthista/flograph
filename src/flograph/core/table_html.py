@@ -1042,25 +1042,39 @@ def _decorate(text: str, style: "CellStyle",
     def span(d) -> str:
         return _decor_span(d, spark_room, row_height)
 
+    def run(marks, ordinary: str = MARK_JOIN) -> str:
+        """Marks side by side, each followed by the gap its rule asked
+        for — the space between marks, not between marks and value.
+        `ordinary` is what goes between two that asked for nothing."""
+        out = ""
+        for i, d in enumerate(marks):
+            drawn = span(d)
+            if not drawn:
+                continue
+            if out:
+                out += (ordinary if getattr(marks[i - 1], "gap", None)
+                        is None else _mark_gap(marks[i - 1], live))
+            out += drawn
+        return out
+
     # A mark and its value are held together by a no-break space: joined by
     # an ordinary one, a column squeezed narrow broke "● 243" at the space,
     # the value went under its icon, and that one cell made its row twice
     # the height of the rows around it.
-    inside = [span(d) for d in style.at("in")]
+    inside = run(style.at("in"))
     if inside:
-        middle = MARK_JOIN.join(inside)   # `only` / `in` — instead of the value
+        middle = inside                   # `only` / `in` — instead of the value
     else:
-        parts = ([span(d) for d in style.at("left")]
+        parts = ([run(style.at("left"))]
                  + ([_in_a_pill(text, style)] if text or style.pill else []))
         value = MARK_JOIN.join(p for p in parts if p)
-        right = MARK_JOIN.join(
-            p for p in (span(d) for d in style.at("right")) if p)
+        right = run(style.at("right"))
         middle = (_pinned_right(value, right, align, live)
                   if value and right
                   else value or right)
-    lines = [" ".join(span(d) for d in style.at("above")),
-             middle,
-             " ".join(span(d) for d in style.at("below"))]
+    # a line of its own may wrap between its marks, as it always could
+    lines = [run(style.at("above"), " "), middle,
+             run(style.at("below"), " ")]
     # `<br />`, never a bare `<br>`: Qt's markdown reader, which a report
     # page goes through, throws away the *whole* table a bare `<br>` sits in
     # — no error, the table is simply not on the page. The self-closing
@@ -1075,6 +1089,36 @@ RIGHT_MARK_GAP = 6
 #: Between a mark and its value, or two marks side by side: a space that
 #: does not break, in Qt's rich text and in a browser alike.
 MARK_JOIN = "&nbsp;"
+
+#: Holds two marks together with no space at all — `gap 0`. Without it a
+#: browser may break between two emoji, which Unicode lets a line do.
+WORD_JOINER = "\u2060"
+
+#: Roughly how wide a no-break space sets at a table's text size, in card
+#: pixels: what a `gap` is counted out in on paper, which cannot be told
+#: a margin.
+_NBSP_PX = 4
+
+
+def _mark_gap(d, live: bool = False) -> str:
+    """What goes after mark `d` and before the next one beside it.
+
+    The ordinary gap is one no-break space. A rule's `gap N` is N card
+    pixels: exactly, as a margin, on a browser page; on paper, where Qt's
+    rich text has no margin on a span, the nearest run of no-break spaces
+    — or a narrow one for a gap of a pixel or two. Every spelling keeps
+    the marks on one line."""
+    gap = getattr(d, "gap", None)
+    if gap is None:
+        return MARK_JOIN
+    if gap == 0:
+        return WORD_JOINER
+    if live:
+        return (f'{WORD_JOINER}<span style="display:inline-block;'
+                f'width:{gap}px"></span>{WORD_JOINER}')
+    if gap <= 2:
+        return "\u202f"                  # narrow no-break space
+    return MARK_JOIN * max(1, round(gap / _NBSP_PX))
 
 
 def _pinned_right(value: str, right: str, align: "str | None",

@@ -55,6 +55,24 @@ HEIGHT_ROLE = int(Qt.UserRole) + 4
 
 _ICON_CELL_W = 18
 _ICON_GAP = 4
+
+
+def _gap(d) -> int:
+    """The space after mark `d`, before the next mark beside it: its rule's
+    `gap` if it named one, else the ordinary one. The space between the
+    marks and the value is always the ordinary one — `gap 0` sets the
+    icons touching, not the icons on the text."""
+    gap = getattr(d, "gap", None)
+    return _ICON_GAP if gap is None else gap
+
+
+def _run_width(marks, widths) -> int:
+    """How wide a run of marks side by side is, their gaps included, and
+    the ordinary gap after the run that keeps it off the value."""
+    if not marks:
+        return 0
+    return (sum(widths[id(d)] for d in marks)
+            + sum(_gap(d) for d in marks[:-1]) + _ICON_GAP)
 #: Padding inside a lozenge, and the radius of its ends. The card can draw
 #: a real rounded rectangle; paper cannot (Qt's rich text drops
 #: border-radius), which is the one place the two surfaces differ.
@@ -391,7 +409,7 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
             return widths
         grown = {id(d) for d in flexible}
         taken = (sum(w for key, w in widths.items() if key not in grown)
-                 + _ICON_GAP * len(side))
+                 + sum(_gap(d) for d in side))
         words = (QFontMetrics(opt.font).horizontalAdvance(text) if text
                  else 0) + _TEXT_SLACK + (2 * _PILL_PAD_X if pill else 0)
         each = (band_width - taken - words) // len(flexible)
@@ -466,7 +484,7 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         widths = [min(band.width(),
                       self._chip_width(metrics, d, band.height()))
                   for d in decorations]
-        total = sum(widths) + _ICON_GAP * (len(widths) - 1)
+        total = sum(widths) + sum(_gap(d) for d in decorations[:-1])
         spare = max(0, band.width() - total)
         if align is not None and align & int(Qt.AlignLeft):
             x = band.left()
@@ -476,7 +494,7 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
             x = band.left() + spare // 2
         for d, width in zip(decorations, widths):
             self._draw_chip(painter, x, band, d, metrics, pen, width)
-            x += width + _ICON_GAP
+            x += width + _gap(d)
 
     # --------------------------------------------------------- the value
 
@@ -498,10 +516,10 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # exactly the step paint() walks below
         widths = self._side_widths(opt, band.width(), decorations, metrics,
                                    text, pill, band.height())
-        left = sum(widths[id(d)] + _ICON_GAP
-                   for d in decorations if d.where == "left")
-        right = sum(widths[id(d)] + _ICON_GAP
-                    for d in decorations if d.where == "right")
+        left = _run_width([d for d in decorations if d.where == "left"],
+                          widths)
+        right = _run_width([d for d in decorations if d.where == "right"],
+                           widths)
         x, end = band.left() + left, band.right() - right
         return QRect(x, band.top(), max(0, end - x), band.height())
 
@@ -609,15 +627,19 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         widths = self._side_widths(opt, band.width(), decorations, metrics,
                                    text, pill, band.height())
         x = band.left()
-        for d in left:
+        for i, d in enumerate(left):
             x += self._draw_chip(painter, x, band, d, metrics, pen,
-                                 widths[id(d)]) + _ICON_GAP
+                                 widths[id(d)])
+            x += _gap(d) if i < len(left) - 1 else _ICON_GAP
         end = band.right()
-        for d in reversed(right):
+        for i in range(len(right) - 1, -1, -1):
+            d = right[i]
             width = widths[id(d)]
             end -= width
             self._draw_chip(painter, end, band, d, metrics, pen, width)
-            end -= _ICON_GAP
+            # walking leftwards: the gap before this mark is the one its
+            # left-hand neighbour asked for
+            end -= _gap(right[i - 1]) if i > 0 else _ICON_GAP
 
         # what is left between the two margins belongs to the value —
         # unless something was placed `in`, which stands in for it. The
