@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import (QColor, QCursor, QFont, QFontMetricsF, QKeyEvent,
+from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QKeyEvent,
                            QMouseEvent, QPainter, QPainterPath, QPen,
                            QTransform)
 from PySide6.QtWidgets import (QApplication, QGraphicsView, QRubberBand,
@@ -140,6 +140,15 @@ class NodeGraphView(ZoomPanGraphicsView):
         self._edge_timer.setInterval(EDGE_SCROLL_TICK_MS)
         self._edge_timer.timeout.connect(self._edge_scroll_tick)
         scene.canvas_drag_changed.connect(self._set_edge_scrolling)
+        # Where the hand was in the last mouse event this view handled, and
+        # whether it has travelled a real drag from the press. The tick aims
+        # at this, never at the live cursor: on a busy flow the press handler
+        # can lag far enough that the release is still queued while the real
+        # cursor is already over the Properties dock — the button reads held,
+        # the cursor reads past the border, and the node rode out of sight.
+        self._drag_press: "QPoint | None" = None
+        self._drag_hand: "QPoint | None" = None
+        self._drag_travelled = False
 
         # the optional shape tool rail (Settings ▸ Canvas), and draw mode
         self._shape_rail = None
@@ -429,6 +438,9 @@ class NodeGraphView(ZoomPanGraphicsView):
         return self._draw_band
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.LeftButton:
+            self._drag_press = self._drag_hand = event.position().toPoint()
+            self._drag_travelled = False
         if self._fence_blocks(event):
             return
         if (self._shape_draw_kind is not None
@@ -442,6 +454,7 @@ class NodeGraphView(ZoomPanGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        self._note_drag_hand(event)
         if self._draw_origin is not None:
             self._band().setGeometry(
                 QRect(self._draw_origin, event.position().toPoint()).normalized())
@@ -481,6 +494,15 @@ class NodeGraphView(ZoomPanGraphicsView):
 
     # ------------------------------------------------------------ edge scroll
 
+    def _note_drag_hand(self, event: QMouseEvent) -> None:
+        if not event.buttons() & Qt.LeftButton or self._drag_press is None:
+            return
+        self._drag_hand = event.position().toPoint()
+        if not self._drag_travelled:
+            travel = (self._drag_hand - self._drag_press).manhattanLength()
+            self._drag_travelled = (
+                travel >= QApplication.startDragDistance())
+
     def _set_edge_scrolling(self, active: bool) -> None:
         if active:
             self._edge_timer.start()
@@ -505,7 +527,11 @@ class NodeGraphView(ZoomPanGraphicsView):
             # never also trigger the drag-a-thing-to-the-border scroll, even
             # if some stale drag state left the timer running
             return
-        self.edge_scroll_at(QCursor.pos())
+        if not self._drag_travelled or self._drag_hand is None:
+            # a press that has not become a drag yet — or one whose release
+            # is still in the queue behind a slow press handler
+            return
+        self.edge_scroll_at(self.viewport().mapToGlobal(self._drag_hand))
 
     def edge_scroll_at(self, global_pos: QPoint) -> None:
         """One edge-scroll step as if the cursor were at `global_pos`.

@@ -241,6 +241,54 @@ class TestDraggingNodesToTheEdge:
                                pos=vp.center())
 
 
+    def test_a_lagged_click_does_not_fling_the_node(self, env, qtbot,
+                                                    monkeypatch):
+        """On a busy flow the press handler can lag past a tick, with the
+        release still queued while the real cursor is already over the
+        Properties dock. The button reads held and the cursor reads past the
+        border, and the node used to ride off screen (an undoable move).
+        A press that has not travelled a drag must not edge-scroll."""
+        _graph, scene, view, a, _b = env
+        scene.snap_enabled = False
+        view.show()
+        item = scene.node_items[a.id]
+        grab = view.mapFromScene(item.mapToScene(QPointF(0, 8)))
+        qtbot.mousePress(view.viewport(), Qt.LeftButton, pos=grab)
+        try:
+            assert view._edge_timer.isActive()
+            monkeypatch.setattr(view_module, "held_mouse_buttons",
+                                lambda: Qt.LeftButton)
+            before = item.pos()
+            centre = view.mapToScene(view.viewport().rect().center())
+            for _ in range(5):
+                view._edge_scroll_tick()
+            assert item.pos() == before
+            assert view.mapToScene(view.viewport().rect().center()) == centre
+        finally:
+            qtbot.mouseRelease(view.viewport(), Qt.LeftButton, pos=grab)
+        assert scene.undo_stack.count() == 0
+
+    def test_a_real_drag_to_the_border_glides_on_the_tick(self, env, qtbot,
+                                                          monkeypatch):
+        _graph, scene, view, a, _b = env
+        scene.snap_enabled = False
+        view.show()
+        item = scene.node_items[a.id]
+        grab = view.mapFromScene(item.mapToScene(QPointF(0, 8)))
+        qtbot.mousePress(view.viewport(), Qt.LeftButton, pos=grab)
+        vp = view.viewport().rect()
+        cursor = QPoint(4, vp.center().y())
+        try:
+            qtbot.mouseMove(view.viewport(), pos=cursor)
+            monkeypatch.setattr(view_module, "held_mouse_buttons",
+                                lambda: Qt.LeftButton)
+            before = item.pos()
+            view._edge_scroll_tick()
+            assert item.pos().x() < before.x() - 5
+        finally:
+            qtbot.mouseRelease(view.viewport(), Qt.LeftButton, pos=cursor)
+        scene.undo_stack.clear()
+
 class TestDraggingAFrameToTheEdge:
     """A lone frame carrying its contents commits its own move, so it never
     went through begin_group_drag and the border glide skipped it."""
