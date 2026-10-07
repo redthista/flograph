@@ -1087,6 +1087,7 @@ class NodeItem(QGraphicsObject):
         self._table_widget = None   # SpreadsheetView (grid cards only)
         self._table_model = None    # SheetModel (grid cards only)
         self._table_ribbon = None   # SheetRibbon (grid cards only)
+        self._table_formula_bar = None   # FormulaBar (grid cards only)
         self._table_proxy: QGraphicsProxyWidget | None = None
         self._figure_view = None
         self._figure_proxy: QGraphicsProxyWidget | None = None
@@ -1714,6 +1715,13 @@ class NodeItem(QGraphicsObject):
         # It wraps rather than clips when the card is dragged narrow.
         ribbon = SheetRibbon(grid, "compact")
         layout.addWidget(ribbon)
+        # the formula bar: the cell's name and its formula as written,
+        # editable — the way to read a formula without opening the cell
+        from ..spreadsheet import FormulaBar
+        formula_bar = FormulaBar(grid)
+        formula_bar.setStyleSheet(formula_bar.styleSheet()
+                                  + " QLabel, QLineEdit { font-size: 8pt; }")
+        layout.addWidget(formula_bar)
         layout.addWidget(grid, 1)
 
         model.sheet_edited.connect(self._commit_table_data)
@@ -1723,6 +1731,7 @@ class NodeItem(QGraphicsObject):
         self._table_widget = grid
         self._table_model = model
         self._table_ribbon = ribbon
+        self._table_formula_bar = formula_bar
         self._layout_table_proxy()
 
     def _table_undo_stack(self):

@@ -4806,6 +4806,12 @@ class MainWindow(QMainWindow):
             "beside anything else.")
         menu.addSeparator()
         import_action = None
+        editor_action = None
+        if not many and card_kind(node) == "grid":
+            editor_action = menu.addAction("Open Full Editor…")
+            editor_action.setToolTip(
+                "Open this table in a window of its own, with the full "
+                "ribbon and room to work.")
         if (not many and card_kind(node) == "grid"
                 and self._table_import_source(node_id) is not None):
             import_action = menu.addAction("Import input into table")
@@ -5008,6 +5014,10 @@ class MainWindow(QMainWindow):
             self._apply_to_nodes(
                 "run nodes on their own" if wanted
                 else "let nodes run beside others", ids, exclusive_for)
+        elif editor_action is not None and chosen is editor_action:
+            item = self.scene.node_items.get(node_id)
+            if item is not None and item.table:
+                item._open_table_editor()
         elif import_action is not None and chosen is import_action:
             self._import_input_into_table(node_id)
         elif embed_image_action is not None and chosen is embed_image_action:

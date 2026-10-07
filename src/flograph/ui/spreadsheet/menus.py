@@ -173,6 +173,8 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "More")
     menu.addAction(a["find"])
     _freeze_menu(menu, a)
+    if view.host.can_open_editor():
+        menu.addAction(view.actions["open_editor"])
     _apply_section(menu, view)
     exec_menu(menu, widget, pos)
 
@@ -193,6 +195,8 @@ def row_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "More")
     menu.addAction(a["header"])
     menu.addAction(a["freeze_row"])
+    if view.host.can_open_editor():
+        menu.addAction(view.actions["open_editor"])
     _apply_section(menu, view)
     exec_menu(menu, widget, pos)
 
@@ -223,5 +227,7 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "More")
     menu.addAction(a["copy_headers"])
     menu.addAction(a["freeze_col"])
+    if view.host.can_open_editor():
+        menu.addAction(view.actions["open_editor"])
     _apply_section(menu, view)
     exec_menu(menu, widget, pos)

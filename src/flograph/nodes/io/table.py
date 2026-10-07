@@ -80,7 +80,7 @@ PARAMS = [
     {"name": "width", "type": "int", "label": "Width",
      "default": 320, "min": 220, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
-     "default": 220, "min": 160, "max": 4000, "cosmetic": True},
+     "default": 260, "min": 160, "max": 4000, "cosmetic": True},
 ]
 
 _TRUTHY = {"TRUE": True, "FALSE": False, "YES": True, "NO": False,

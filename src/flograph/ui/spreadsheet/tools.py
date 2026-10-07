@@ -123,7 +123,13 @@ class FormulaBar(QWidget):
         self.cell_label.setAlignment(Qt.AlignCenter)
         self.cell_label.setToolTip("The selected cell — column letter and "
                                    "row number, as formulas refer to it")
+        # its own dark strip, like the ribbon above it: without a background
+        # of its own the window's palette shows through (light in light mode)
+        self.setObjectName("formula_bar")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
+            "QWidget#formula_bar { background: #25272e;"
+            " border-bottom: 1px solid #14151a; }"
             "QLabel { background: #1f2026; color: #d6d8de;"
             " border: 1px solid #3a3d47; border-radius: 3px;"
             " padding: 2px 4px; font-size: 8.5pt; }"
@@ -145,7 +151,19 @@ class FormulaBar(QWidget):
         selection = view.selectionModel()
         if selection is not None:
             selection.currentChanged.connect(self.sync)
+        model = view.model()
+        if model is not None:
+            # undo, Submit, a linked run: the cell changed under the bar
+            model.dataChanged.connect(self._follow)
+            model.modelReset.connect(self._follow)
         self.sync(view.currentIndex())
+
+    def _follow(self, *_args) -> None:
+        """Re-read the cell after a change from elsewhere — unless the bar
+        is being typed into, when the typing wins until it is committed."""
+        import shiboken6
+        if shiboken6.isValid(self) and not self.edit.hasFocus():
+            self.sync()
 
     def _model(self) -> Optional[SheetModel]:
         return self._view.sheet_model()
@@ -156,7 +174,9 @@ class FormulaBar(QWidget):
 
     def show_reference(self) -> None:
         if self._reference is None:
-            self._reference = FormulaReferenceDialog(self)
+            # a real window, not a child of a card (canvas/popup_lift.py)
+            from .menus import real_window
+            self._reference = FormulaReferenceDialog(real_window(self))
         self._reference.show()
         self._reference.raise_()
         self._reference.activateWindow()

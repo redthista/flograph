@@ -441,3 +441,52 @@ class TestRightClickReachesTheMenu:
         cell = pane.visualRect(model.index(1, 0)).center()
         self._right_click(pane.viewport(), cell)
         assert len(shown) == 1
+
+
+class TestCardFormulaBar:
+    def test_the_card_has_a_formula_bar_that_follows_the_cell(
+            self, env, registry):
+        graph, stack, scene = env
+        node = _table(graph, registry, _data(rows=[["2", "=A1*3", ""]]))
+        item = scene.node_items[node.id]
+        bar = item._table_formula_bar
+        assert bar is not None
+        grid, model = item._table_widget, item._table_model
+        grid.setCurrentIndex(model.index(0, 1))
+        assert bar.cell_label.text() == "B1"
+        assert bar.edit.text() == "=A1*3"
+        # typing in the bar and committing writes the cell
+        bar.edit.setText("=A1*4")
+        bar.commit()
+        assert json.loads(node.params["data"])["rows"][0][1] == "=A1*4"
+        # an undo from elsewhere shows through
+        stack.undo()
+        assert bar.edit.text() == "=A1*3"
+
+
+def test_right_click_offers_the_full_editor_on_a_card(env, registry,
+                                                      monkeypatch):
+    from flograph.ui.spreadsheet import menus
+    shown = []
+    monkeypatch.setattr(menus, "exec_menu",
+                        lambda menu, w, p: shown.append(menu))
+    graph, stack, scene = env
+    node = _table(graph, registry)
+    grid = scene.node_items[node.id]._table_widget
+    grid.setCurrentIndex(grid.model().index(0, 0))
+    menus.cell_menu(grid, grid.viewport(), QPoint(5, 5))
+    menus.column_menu(grid, grid.horizontalHeader(), QPoint(5, 5))
+    for menu in shown:
+        assert grid.actions["open_editor"] in menu.actions()
+
+
+def test_a_bare_grid_does_not_offer_an_editor_it_has_not_got(
+        qtbot, monkeypatch):
+    from flograph.ui.spreadsheet import menus
+    shown = []
+    monkeypatch.setattr(menus, "exec_menu",
+                        lambda menu, w, p: shown.append(menu))
+    view, _model = _view(qtbot)
+    view.setCurrentIndex(view.model().index(0, 0))
+    menus.cell_menu(view, view.viewport(), QPoint(5, 5))
+    assert view.actions["open_editor"] not in shown[0].actions()
