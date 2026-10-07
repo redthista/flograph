@@ -15,6 +15,8 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 
 from flograph.core.sheet.numfmt import format_value_as, parse_typed
+
+from ..table_delegate import BAR_ROLE, DECOR_ROLE, ICON_ROLE
 from flograph.core.sheet import (COLUMN_TYPES, FormulaError, Sheet,
                                  evaluate_sheet, format_value, is_formula,
                                  normalize_date, parse_sheet,
@@ -46,6 +48,19 @@ _UNCHECKED = Qt.Unchecked
 _ALIGN_NUMBER = int(Qt.AlignRight | Qt.AlignVCenter)
 _ERROR_BRUSH = QBrush(_ERROR_TEXT)
 _NEGATIVE_BRUSH = QBrush(QColor("#f87171"))
+_FONT = int(Qt.FontRole)
+
+
+_BOLD_FONT = []   # made on first use: a QFont wants the application up
+
+
+def _bold_font():
+    if not _BOLD_FONT:
+        from PySide6.QtGui import QFont
+        font = QFont()
+        font.setBold(True)
+        _BOLD_FONT.append(font)
+    return _BOLD_FONT[0]
 _INVALID_BRUSH = QBrush(_INVALID_BG)
 
 _TRUE_WORDS = {"true", "yes", "y", "1", "t", "x", "✓", "on"}
@@ -65,9 +80,146 @@ class SheetModel(QAbstractTableModel):
     def __init__(self, sheet=None, parent=None) -> None:
         super().__init__(parent)
         self._sheet = parse_sheet(sheet) if sheet is not None else parse_sheet(None)
-        self._result = evaluate_sheet(self._sheet)
+        # conditional formatting: the rules (Show Table's language, from the
+        # node's `rules` param) and what they make of the current values
+        self._rules_text = ""
+        self._rules: list = []
+        self._cf_clear()
+        self._recalc()
         self._syncing = False
         self._read_only = False
+
+    # ------------------------------------------------ conditional formatting
+
+    def _recalc(self) -> None:
+        self._result = evaluate_sheet(self._sheet)
+        self._cf_clear()
+
+    def _cf_clear(self) -> None:
+        self._cf_frame = None
+        self._cf_columns: dict = {}
+        self._cf_rows = None
+        self._cf_cells: dict = {}
+        self._cf_memo: dict = {}
+
+    @property
+    def rules_text(self) -> str:
+        return self._rules_text
+
+    def set_rules(self, text) -> None:
+        """Conditional formatting, in the rules language Show Table uses
+        (core/table_format.py): `Units scale green`, `Total bar blue`,
+        `Status = Open => bg amber`. Rules only paint — they never change a
+        value — so this repaints and nothing else."""
+        text = str(text or "")
+        if text == self._rules_text:
+            return
+        from flograph.core.table_format import (LAYOUT_MODES, TOTAL_MODES,
+                                                parse_rules_lenient)
+        rules, _errors = parse_rules_lenient(text)
+        # layout and totals rules shape a Show Table; a grid has its own
+        # widths, sorting and no totals, so those lines are left to it
+        self._rules = [r for r in rules if r.mode not in LAYOUT_MODES
+                       and r.mode not in TOTAL_MODES]
+        self._rules_text = text
+        self._cf_clear()
+        if self._sheet.n_rows and self._sheet.n_cols:
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(self._sheet.n_rows - 1, self._sheet.n_cols - 1))
+
+    def _frame(self):
+        """The computed values as a DataFrame, numbers as numbers — what the
+        rule engine evaluates. Built on first need after a change."""
+        if self._cf_frame is not None:
+            return self._cf_frame
+        import pandas as pd
+        columns = {}
+        for c, spec in enumerate(self._sheet.columns):
+            values = [None if (v is None or v == ""
+                               or isinstance(v, FormulaError)) else v
+                      for v in (row[c] for row in self._result.values)]
+            series = pd.Series(values, dtype=object)
+            if spec.type not in ("text", "date", "bool"):
+                numeric = pd.to_numeric(series, errors="coerce")
+                if int(numeric.notna().sum()) == int(series.notna().sum()):
+                    series = numeric
+            columns[c] = series
+        frame = pd.DataFrame(columns)
+        frame.columns = self._sheet.column_names()
+        self._cf_frame = frame
+        return frame
+
+    @staticmethod
+    def _row_rule(rule) -> bool:
+        return rule.mode == "highlight" and rule.scope == "row"
+
+    def _column_styles(self, col: int) -> list:
+        found = self._cf_columns.get(col)
+        if found is not None:
+            return found
+        from flograph.core.table_format import (column_matches, column_stats,
+                                                evaluate_column)
+        frame = self._frame()
+        name = self._sheet.columns[col].name
+        series = frame.iloc[:, col]
+        stats = None
+        found = []
+        for i, rule in enumerate(self._rules):
+            if self._row_rule(rule):
+                continue
+            if rule.columns and not column_matches(rule.columns, name):
+                continue
+            if stats is None:
+                stats = column_stats(series)
+            try:
+                styles = evaluate_column(series, [rule], stats, frame=frame,
+                                         memo=self._cf_memo)
+            except Exception:
+                # this runs inside data(), mid-paint: an exception escaping
+                # here takes the process down. One rule that cannot be drawn
+                # is skipped and the rest still are (as in PandasModel).
+                continue
+            found.append((i, styles))
+        self._cf_columns[col] = found
+        return found
+
+    def _row_styles(self) -> list:
+        if self._cf_rows is not None:
+            return self._cf_rows
+        from flograph.core.table_format import evaluate_rows
+        found = []
+        frame = self._frame()
+        for i, rule in enumerate(self._rules):
+            if not self._row_rule(rule):
+                continue
+            try:
+                found.append((i, evaluate_rows(frame, [rule])))
+            except Exception:
+                continue
+        self._cf_rows = found
+        return found
+
+    def cell_style(self, row: int, col: int):
+        """The CellStyle the rules give a cell, or None. Every rule that
+        touches it, top to bottom — a later line wins, as in Show Table."""
+        if not self._rules:
+            return None
+        key = (row, col)
+        if key in self._cf_cells:
+            return self._cf_cells[key]
+        parts = []
+        for i, styles in self._column_styles(col):
+            if row < len(styles) and styles[row] is not None:
+                parts.append((i, styles[row]))
+        for i, styles in self._row_styles():
+            if row < len(styles) and styles[row] is not None:
+                parts.append((i, styles[row]))
+        style = None
+        for _i, part in sorted(parts, key=lambda t: t[0]):
+            style = part.over(style)
+        self._cf_cells[key] = style
+        return style
 
     @property
     def read_only(self) -> bool:
@@ -153,7 +305,7 @@ class SheetModel(QAbstractTableModel):
             if not in_place:
                 self.beginResetModel()
             self._sheet = parsed
-            self._result = evaluate_sheet(self._sheet)
+            self._recalc()
             if in_place:
                 self.dataChanged.emit(
                     self.index(0, 0),
@@ -236,9 +388,15 @@ class SheetModel(QAbstractTableModel):
         bool_check = col_type == "bool" and not is_formula(source)
 
         fmt = self._sheet.columns[col].format
+        style = self.cell_style(row, col) if self._rules else None
         if role == _DISPLAY:
             if bool_check:
                 return ""   # the checkbox is the display
+            if style is not None:
+                if style.hide_value:
+                    return ""     # an `only` rule: the format is the cell
+                if style.text is not None:
+                    return style.text
             if fmt is not None:
                 shown = format_value_as(value, fmt)
                 if shown is not None:
@@ -260,12 +418,16 @@ class SheetModel(QAbstractTableModel):
             invalid = self._invalid(row, col, source)
             if invalid:
                 return invalid
+            if style is not None and style.tooltip:
+                return style.tooltip
             if is_formula(source):
                 return source
             return None
         if role == _FOREGROUND:
             if isinstance(value, FormulaError):
                 return _ERROR_BRUSH
+            if style is not None and style.fg:
+                return QBrush(QColor(style.fg))
             if fmt is not None:
                 shown = format_value_as(value, fmt)
                 if shown is not None and shown[1]:
@@ -274,7 +436,23 @@ class SheetModel(QAbstractTableModel):
         if role == _BACKGROUND:
             if self._invalid(row, col, source):
                 return _INVALID_BRUSH
+            if style is not None and style.bg:
+                return QBrush(QColor(style.bg))
             return None
+        if style is not None:
+            if role == _FONT:
+                return _bold_font() if style.bold else None
+            if role == BAR_ROLE:
+                return ((style.bar, style.bar_color, style.bar_mode)
+                        if style.bar is not None else None)
+            if role == DECOR_ROLE:
+                return ((style.decorations, style.pill, style.pill_fg)
+                        if (style.decorations or style.pill) else None)
+            if role == ICON_ROLE:
+                if style.decorations:
+                    first = style.decorations[0]
+                    return (first.text, first.color)
+                return None
         if role == _ALIGNMENT:
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 return _ALIGN_NUMBER
@@ -666,7 +844,7 @@ class SheetModel(QAbstractTableModel):
         if reset:
             self.beginResetModel()
         mutate(self._sheet)
-        self._result = evaluate_sheet(self._sheet)
+        self._recalc()
         if reset:
             self.endResetModel()
         elif self._sheet.n_rows and self._sheet.n_cols:
@@ -677,7 +855,7 @@ class SheetModel(QAbstractTableModel):
             self.sheet_edited.emit(self.sheet_dict())
 
     def _after_mutation(self, reset: bool = False) -> None:
-        self._result = evaluate_sheet(self._sheet)
+        self._recalc()
         if reset:
             self.beginResetModel()
             self.endResetModel()

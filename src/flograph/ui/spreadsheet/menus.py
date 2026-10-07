@@ -117,6 +117,15 @@ def _number_menu(menu: QMenu, view) -> None:
     fill_number_format_menu(sub, view)
 
 
+def _cf_menu(menu: QMenu, view) -> None:
+    if not view.host.can_format():
+        return
+    from .cond_format import fill_menu
+    from .icons import sheet_icon
+    sub = submenu(menu, "Conditional Formatting", sheet_icon("cond_format"))
+    fill_menu(sub, view)
+
+
 def _freeze_menu(menu: QMenu, actions) -> None:
     from .icons import sheet_icon
     sub = submenu(menu, "Freeze", sheet_icon("freeze"))
@@ -163,6 +172,7 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "Column")
     _type_menu(menu, a)
     _number_menu(menu, view)
+    _cf_menu(menu, view)
     menu.addAction(a["dropdown"])
     model = view.sheet_model()
     current = view.currentIndex()
@@ -221,6 +231,7 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
     menu.addAction(a["rename"])
     _type_menu(menu, a)
     _number_menu(menu, view)
+    _cf_menu(menu, view)
     menu.addAction(a["dropdown"])
     menu.addAction(a["fit"])
     menu.addAction(a["fit_all"])

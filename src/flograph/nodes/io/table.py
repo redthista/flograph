@@ -26,6 +26,11 @@ and edits are held — the flow keeps using the table as last submitted until
 you press Submit (F9), or Discard to throw them away. Held edits are saved
 with the project and undo like any other.
 
+Conditional formatting uses Show Table's rules — colour scales, data
+bars, icon sets, highlights — from the ribbon's Conditional Formatting list
+or the Conditional formatting box in Properties (its Rules… button builds
+them). Rules paint the grid; they never change a value.
+
 Each column has a type (right-click its header): auto guesses numbers,
 while text/number/integer/date/bool make the output dtype explicit —
 values that don't fit become missing (the grid flags them red as you
@@ -56,7 +61,7 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
-    "version": "1.2",
+    "version": "1.3",
     "card": "grid",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe")],
@@ -77,6 +82,13 @@ PARAMS = [
      "options": ["live", "submit"], "default": "live", "cosmetic": True},
     {"name": "draft", "type": "text", "label": "Edits not yet submitted",
      "hidden": True, "default": "", "cosmetic": True},
+    # Conditional formatting, in Show Table's rules language and with its
+    # rule builder. Paints the grid only: never changes a value or what
+    # flows on, so editing it re-runs nothing.
+    {"name": "rules", "type": "text", "label": "Conditional formatting",
+     "default": "", "cosmetic": True, "rule_wizard": True,
+     "placeholder": "Total scale green\nUnits bar blue\n"
+                    "Status = Open => bg amber"},
     {"name": "width", "type": "int", "label": "Width",
      "default": 320, "min": 220, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",

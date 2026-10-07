@@ -359,6 +359,7 @@ class SheetRibbon(QWidget):
             "function_menu": self._fill_function_menu,
             "freeze_menu": self._fill_freeze_menu,
             "number_menu": self._fill_number_menu,
+            "cf_menu": self._fill_cf_menu,
         }
 
         def m(builder, action, label):
@@ -379,6 +380,8 @@ class SheetRibbon(QWidget):
                         ("fmt_thousands", "Thousands"),
                         ("dec_more", "More Decimals"),
                         ("dec_less", "Fewer Decimals")]),
+            ("Styles", [m("cf_menu", "cond_format", "Conditional"),
+                        ("cf_manage", "Manage Rules")]),
             ("Editing", [("fill_down", "Fill Down"),
                          ("fill_right", "Fill Right"), ("find", "Find"),
                          ("replace", "Replace")]),
@@ -478,6 +481,10 @@ class SheetRibbon(QWidget):
         from flograph.core.sheet import COLUMN_TYPES
         for col_type in COLUMN_TYPES:
             menu.addAction(self._actions[f"type_{col_type}"])
+
+    def _fill_cf_menu(self, menu) -> None:
+        from .cond_format import fill_menu
+        fill_menu(menu, self._view)
 
     def _fill_number_menu(self, menu) -> None:
         from .actions import fill_number_format_menu

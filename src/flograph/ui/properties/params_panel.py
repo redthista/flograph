@@ -1091,6 +1091,14 @@ class ParamsPanel(QWidget):
         columns = upstream_columns(self._graph, self._cache, self._node_id)
         if columns:
             return columns
+        node = self._graph.nodes.get(self._node_id)
+        if node is not None and node.spec.param("data") is not None \
+                and node.spec.param("rules") is not None:
+            # a Table: its own columns (as edited, if edits are held)
+            from flograph.core.sheet import parse_sheet
+            sheet = parse_sheet(node.params.get("draft")
+                                or node.params.get("data"))
+            return sheet.column_names()
         for conn in self._graph.connections.values():
             if conn.src_node == self._node_id and conn.src_port == "style":
                 columns = upstream_columns(

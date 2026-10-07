@@ -12,7 +12,9 @@ from datetime import datetime
 
 from PySide6.QtCore import QDate, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPainter, QPolygon
-from PySide6.QtWidgets import QDateEdit, QLineEdit, QStyledItemDelegate
+from PySide6.QtWidgets import QDateEdit, QLineEdit
+
+from ..table_delegate import ConditionalFormatDelegate
 
 CARET_W = 14
 
@@ -34,9 +36,13 @@ def caret_rect(cell: QRect) -> QRect:
                  cell.height())
 
 
-class SheetDelegate(QStyledItemDelegate):
+class SheetDelegate(ConditionalFormatDelegate):
     """Line edit everywhere; date columns get a QDateEdit when the cell is
-    empty or already holds a date (formulas keep the line edit)."""
+    empty or already holds a date (formulas keep the line edit).
+
+    Built on Show Table's ConditionalFormatDelegate, so the data bars,
+    icons and pills a conditional-formatting rule asks for are painted the
+    same way in both — and a cell without any is a plain cell."""
 
     show_formulas = False
     last_editor = None   # the editor most recently opened, for start_formula

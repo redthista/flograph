@@ -797,6 +797,8 @@ class TileItem(QGraphicsObject):
         # ordered, and is held here so a maximized page can put a second
         # view on the very same model (see fullscreen_widget)
         model = SheetModel(self._sheet_source())
+        node = self._node()
+        model.set_rules(node.params.get("rules", "") if node else "")
         workbench = SheetWorkbench(model, host=self._sheet_host())
         model.setParent(workbench)
         workbench.view.verticalHeader().setFixedWidth(28)
@@ -1350,6 +1352,9 @@ class TileItem(QGraphicsObject):
             # through _sheet_source so a linked table redraws its merge and
             # not the handful of columns the node stores.
             self._sheet_model.set_sheet(self._sheet_source())
+            node = self._node()
+            self._sheet_model.set_rules(
+                node.params.get("rules", "") if node else "")
             # an undo that replaced the sheet leaves the formula bar showing
             # the source it had before, which would be a lie about the cell
             self._sheet_view.sync()

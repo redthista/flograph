@@ -113,6 +113,34 @@ can be changed at any time without losing anything.
 
 Halves round away from zero, as in Excel: 2.5 at no decimals reads 3.
 
+## Conditional formatting
+
+The Table uses **Show Table's rule system** — the same language, the same
+**Rules…** builder, the same colour scales, data bars, icon sets and
+highlights — so a rule written for one works in the other. See
+[[Conditional Formatting]] for the full language.
+
+- **Home ▸ Conditional ▾** (or right-click a cell or column header ▸
+  Conditional Formatting) offers Excel's presets for the selected columns:
+  **Colour Scale**, **Data Bar**, **Icon Set**, and **Highlight Cells**
+  (greater than, less than, between, equal to, contains, blank…) with a
+  fill, bold, or the whole row. Each preset adds one rule line.
+- **Manage Rules…** lists every rule to add, edit, reorder and remove.
+- The rules live in the node's **Conditional formatting** box in
+  Properties, one per line — type them there directly if you prefer:
+
+```
+Units  scale red-yellow-green
+Total  bar blue
+Status = Late => row red
+Band = High => bg green, bold
+```
+
+Rules only paint the grid: values, formulas and what the Table sends on are
+untouched, and changing a rule re-runs nothing. Lower lines win where two
+rules touch the same cell. Show Table's layout rules (widths, sorting,
+totals) are left to Show Table — the grid has its own.
+
 ## Dropdown lists
 
 **Data ▸ Dropdown List…** gives a column a list of values. The current cell of

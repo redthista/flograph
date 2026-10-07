@@ -210,6 +210,16 @@ class SheetHost:
     def can_open_editor(self) -> bool:
         return False
 
+    def rules(self) -> str:
+        """The conditional-formatting rules text, or "" (none)."""
+        return ""
+
+    def can_format(self) -> bool:
+        return False
+
+    def set_rules(self, text: str) -> None:
+        pass
+
     def open_editor(self) -> None:
         pass
 
@@ -276,6 +286,24 @@ class NodeSheetHost(SheetHost):
 
     def can_open_editor(self) -> bool:
         return self._open_editor_fn is not None
+
+    def rules(self) -> str:
+        node = self._node()
+        return str(node.params.get("rules") or "") if node is not None else ""
+
+    def can_format(self) -> bool:
+        node = self._node()
+        return node is not None and node.spec.param("rules") is not None
+
+    def set_rules(self, text: str) -> None:
+        """Write the rules as one undo step. Cosmetic: nothing re-runs."""
+        stack = self._stack_fn()
+        node = self._node()
+        if stack is None or node is None or text == self.rules():
+            return
+        command = _set(self._graph, self._node_id, "rules", text)
+        command.setText("conditional formatting")
+        stack.push(command)
 
     def open_editor(self) -> None:
         if self._open_editor_fn is not None:

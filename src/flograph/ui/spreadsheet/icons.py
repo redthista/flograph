@@ -553,7 +553,53 @@ def _format(p, r, c):
     _text(p, QRectF(2, 4, 16, 12), "1.2", BLUE, 8)
 
 
+# ----------------------------------------------- conditional formatting
+
+def _cf_scale(p, r, c):
+    for i, colour in enumerate(("#a4373a", "#b0902f", "#2e7d46")):
+        p.fillRect(QRectF(3, 3 + i * 5, 14, 4.5), QColor(colour))
+    p.setPen(_pen(c, 1.0))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2.5, 2.5, 15, 15.5), 1.5, 1.5)
+
+
+def _cf_bar(p, r, c):
+    p.setPen(_pen(c, 1.0))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2.5, 2.5, 15, 15), 1.5, 1.5)
+    for i, width in enumerate((11, 6, 8.5)):
+        p.fillRect(QRectF(4, 4.5 + i * 4.3, width, 3), BLUE)
+
+
+def _cf_icons(p, r, c):
+    for i, colour in enumerate((RED, AMBER, GREEN)):
+        p.setPen(Qt.NoPen)
+        p.setBrush(colour)
+        p.drawEllipse(QPointF(5 + i * 5, 10), 2.3, 2.3)
+
+
+def _cf_highlight(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 15, 15), lit=[("cell", 1, 1)],
+          lit_color=AMBER, color=c)
+
+
+def _cf_manage(p, r, c):
+    p.setPen(_pen(c, 1.3))
+    for i in range(3):
+        y = 5 + i * 5
+        p.drawLine(QPointF(8, y), QPointF(17, y))
+    for i, colour in enumerate((RED, AMBER, GREEN)):
+        p.fillRect(QRectF(2.5, 3 + i * 5, 4, 4), colour)
+
+
+def _cond_format(p, r, c):
+    _cf_scale(p, r, c)
+
+
 GLYPHS = {
+    "cf_scale": (_cf_scale, FG), "cf_bar": (_cf_bar, FG),
+    "cf_icons": (_cf_icons, FG), "cf_highlight": (_cf_highlight, FG),
+    "cf_manage": (_cf_manage, FG), "cond_format": (_cond_format, FG),
     "fmt_currency": (_fmt_currency, FG), "fmt_percent": (_fmt_percent, FG),
     "fmt_thousands": (_fmt_thousands, FG), "dec_more": (_dec_more, FG),
     "dec_less": (_dec_less, FG), "format": (_format, FG),

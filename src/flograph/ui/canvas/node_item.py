@@ -1700,6 +1700,7 @@ class NodeItem(QGraphicsObject):
         # parent the model to the view so C++ destruction stays ordered
         model = SheetModel(self._table_source(), parent=grid)
         grid.setModel(model)
+        model.set_rules(self.node.params.get("rules", ""))
         grid.verticalHeader().setFixedWidth(28)
         theme.style_scroll_area(grid, theme.grid_stylesheet())
         grid.set_host(NodeSheetHost(
@@ -1768,6 +1769,7 @@ class NodeItem(QGraphicsObject):
         until Submit win over both: they are what the user is looking at."""
         if self._table_model is not None:
             self._table_model.set_sheet(self._table_source())
+            self._table_model.set_rules(self.node.params.get("rules", ""))
             self._table_widget.actions.refresh()
 
     def _linked_sheet(self):

@@ -474,6 +474,23 @@ class SheetActions(QObject):
                   "No format: numbers show as they are.",
                   lambda: v.apply_format(None), enabled=cols_ok)
 
+        # ---- conditional formatting (Show Table's rules)
+        def can_format() -> bool:
+            return v.host.can_format() and bool(v.target_columns())
+
+        self._add("cond_format", "Conditional Formatting", "cond_format",
+                  "Colour cells by their values — colour scales, data bars, "
+                  "icon sets, or highlight the cells that meet a test. Each "
+                  "choice adds a rule in Show Table's rules language, which "
+                  "the Conditional formatting box in Properties shows and "
+                  "edits. Rules only paint: values are never changed.",
+                  lambda: None, enabled=can_format, short="Conditional")
+        self._add("cf_manage", "Manage Rules…", "cf_manage",
+                  "Every conditional-formatting rule on this table, to add, "
+                  "edit, reorder and remove — Show Table's rule builder.",
+                  self._manage_rules,
+                  enabled=lambda: v.host.can_format(), short="Rules")
+
         # ---- view
         self._add("freeze", "Freeze Panes", "freeze",
                   "Keep the rows above and the columns left of the selected "
@@ -555,6 +572,10 @@ class SheetActions(QObject):
             return
         for col in self._view.target_columns():
             model.set_column_type(col, col_type)
+
+    def _manage_rules(self) -> None:
+        from .cond_format import manage_rules
+        manage_rules(self._view)
 
     def _filter_current(self) -> None:
         cols = self._view.target_columns()

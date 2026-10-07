@@ -91,6 +91,18 @@ class _DialogHost(SheetHost):
     def undo_stack(self):
         return self._dialog.undo_stack
 
+    def rules(self) -> str:
+        return self._inner.rules()
+
+    def can_format(self) -> bool:
+        return self._inner.can_format()
+
+    def set_rules(self, text: str) -> None:
+        # rules are the node's, not the window's draft: they go straight
+        # to the node (one undo step there) and repaint this grid too
+        self._inner.set_rules(text)
+        self._dialog.model.set_rules(self._inner.rules())
+
 
 class SheetEditorDialog(QDialog):
     def __init__(self, sheet, title: str = "Edit Table", parent=None,
@@ -125,6 +137,7 @@ class SheetEditorDialog(QDialog):
         self._reload = reload
         self.on_apply: Optional[Callable[[dict], None]] = None
         self.view.set_host(_DialogHost(self, host or SheetHost()))
+        self.model.set_rules(self.view.host.rules())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 8)
