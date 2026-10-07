@@ -272,3 +272,48 @@ def test_params_panel_text_keeps_cursor_while_typing(qtbot, env, registry):
     panel.flush_pending()
     assert graph.node(note.id).params["text"] == "start:abc"
     assert text.toPlainText() == "start:abc"
+
+
+class TestClickAwayCommits:
+    """A press anywhere outside the editor closes it and keeps the text —
+    whether or not that press happens to move focus."""
+
+    @pytest.fixture
+    def shown(self, qtbot, env, registry):
+        from flograph.ui.canvas.view import NodeGraphView
+        graph, stack, scene = env
+        view = NodeGraphView(scene)
+        qtbot.addWidget(view)
+        view.resize(900, 600)
+        view.show()
+        qtbot.waitExposed(view)
+        note = graph.add_node(registry.instantiate("flograph.util.note"))
+        item = scene.node_items[note.id]
+        view.centerOn(item)
+        item.start_note_edit()
+        item._note_editor_widget.setPlainText("# Typed on the card")
+        return graph, view, note, item
+
+    @staticmethod
+    def _press(view, scene_pos):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        point = view.mapFromScene(scene_pos)
+        QTest.mousePress(view.viewport(), Qt.LeftButton, Qt.NoModifier, point)
+        QTest.mouseRelease(view.viewport(), Qt.LeftButton, Qt.NoModifier, point)
+
+    def test_a_press_the_canvas_swallows_still_commits(self, shown):
+        # pan mode takes a press on empty canvas before the scene sees it,
+        # so focus never moves and no focus-out arrives
+        graph, view, note, item = shown
+        view.set_left_drag_mode("pan")
+        self._press(view, item.sceneBoundingRect().bottomRight()
+                    + QPointF(150, 150))
+        assert item._note_editor is None
+        assert graph.node(note.id).params["text"] == "# Typed on the card"
+
+    def test_a_press_inside_the_editor_keeps_it_open(self, shown):
+        graph, view, note, item = shown
+        self._press(view, item._note_editor.sceneBoundingRect().center())
+        assert item._note_editor is not None
+        assert graph.node(note.id).params["text"] != "# Typed on the card"

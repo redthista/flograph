@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import (
-    QEvent, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation,
+    QEvent, QObject, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation,
 )
 from PySide6.QtGui import (
     QAbstractTextDocumentLayout, QBrush, QColor, QDesktopServices, QFont,
@@ -13,6 +13,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QGraphicsItem, QGraphicsObject, QGraphicsProxyWidget,
+    QGraphicsView,
     QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QStyleOptionGraphicsItem,
     QTableView, QToolButton, QVBoxLayout, QWidget,
 )
@@ -707,6 +708,58 @@ class CardTextEditor(QPlainTextEdit):
         cursor.insertText(embed_line(label, cursor.atBlockStart()))
         self.setTextCursor(cursor)
         self.setFocus()
+
+
+class CommitOnClickAway(QObject):
+    """Close a card's in-place editor, keeping its text, when a press lands
+    anywhere outside it.
+
+    Focus-out is how the editor used to learn it was done, and focus-out
+    only comes if the click actually moves focus. Plenty of clicks don't:
+    one the canvas swallows to pan, one outside a fenced canvas tab, one
+    that only reaches Qt's scene by some route that leaves its focus item
+    alone. Each left the Note open in edit mode with the user's text
+    stranded in it — Dan: "it stays in edit mode" after clicking another
+    node, until Escape threw the edit away. The press is the thing the user
+    meant, so it is watched for directly, as `DismissedByAClickElsewhere`
+    does for a card's dropdown. It is never eaten.
+
+    Parented to the editor, so it is gone, and off the application's filter
+    list, the moment the editor is.
+    """
+
+    def __init__(self, item: "NodeItem", editor: QWidget) -> None:
+        super().__init__(editor)
+        self._item = item
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if (event.type() == QEvent.MouseButtonPress
+                and isinstance(obj, QWidget) and not self._inside(obj, event)):
+            self._item._finish_note_edit(commit=True)
+        return False
+
+    def _inside(self, obj: QWidget, event) -> bool:
+        editor = self._item._note_editor_widget
+        proxy = self._item._note_editor
+        if editor is None or proxy is None:
+            return True     # already closed — nothing to do
+        if obj is editor or editor.isAncestorOf(obj):
+            return True
+        # the editor's own context menu (spelling, Insert) and a Report
+        # card's completer: a press in those is still part of editing
+        if (QApplication.activePopupWidget() is not None
+                or obj.window().windowType() == Qt.Popup):
+            return True
+        # the view's viewport sees the press before the proxy hands it on to
+        # the editor, so a click in the editor arrives here first as a click
+        # on the canvas at the editor's place
+        view = obj.parentWidget()
+        if (isinstance(view, QGraphicsView) and obj is view.viewport()
+                and view.scene() is proxy.scene()):
+            scene_pos = view.mapToScene(event.position().toPoint())
+            return proxy.sceneBoundingRect().contains(scene_pos)
+        return False
 
 
 class PortItem(QGraphicsItem):
@@ -1429,7 +1482,8 @@ class NodeItem(QGraphicsObject):
 
     def start_note_edit(self) -> None:
         """Open an in-place markdown editor over the card (Obsidian-style).
-        Commits on focus-out or Ctrl+Enter; Escape cancels.
+        Commits on a click elsewhere, focus-out or Ctrl+Enter; Escape
+        cancels.
 
         Shared by Note and Report cards: both are markdown living in a
         "text" param, and both are quicker to edit where you are looking at
@@ -1459,6 +1513,7 @@ class NodeItem(QGraphicsObject):
             self._report_proxy.hide()   # don't render behind the editor
         self._note_editor = proxy
         self._note_editor_widget = editor
+        CommitOnClickAway(self, editor)
         if self.report_card:
             self._attach_report_completer(editor)
         editor.setFocus()
