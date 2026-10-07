@@ -124,6 +124,62 @@ def test_table_wont_remove_last_row_or_column(env, registry):
     assert len(data["columns"]) == 1
 
 
+def _table_with_rows(graph, registry, rows):
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
+    graph.set_param(node.id, "data", json.dumps({
+        "columns": ["a", "b", "c"], "rows": rows}))
+    return node
+
+
+def _select(grid, rows, cols):
+    from PySide6.QtCore import QItemSelectionModel
+    model = grid.model()
+    grid.selectionModel().clearSelection()
+    for r in rows:
+        for c in cols:
+            grid.selectionModel().select(model.index(r, c),
+                                         QItemSelectionModel.Select)
+
+
+def test_minus_row_removes_the_selected_rows_not_the_last(env, registry):
+    graph, stack, scene = env
+    node = _table_with_rows(graph, registry,
+                            [["1", "x", ""], ["2", "y", ""], ["3", "z", ""],
+                             ["4", "w", ""]])
+    item = scene.node_items[node.id]
+    _select(item._table_widget, [1], [0])
+    item._table_remove_row()
+    rows = json.loads(graph.node(node.id).params["data"])["rows"]
+    assert [r[0] for r in rows] == ["1", "3", "4"]
+
+    # rows 0 and 2 picked with ctrl-click: both go, the one between stays
+    _select(item._table_widget, [0, 2], [1])
+    item._table_remove_row()
+    rows = json.loads(graph.node(node.id).params["data"])["rows"]
+    assert [r[0] for r in rows] == ["3"]
+
+
+def test_minus_col_removes_the_selected_column(env, registry):
+    graph, stack, scene = env
+    node = _table_with_rows(graph, registry, [["1", "2", "3"]])
+    item = scene.node_items[node.id]
+    _select(item._table_widget, [0], [0])
+    item._table_remove_column()
+    columns = json.loads(graph.node(node.id).params["data"])["columns"]
+    assert [c["name"] for c in columns] == ["b", "c"]
+
+
+def test_plus_row_inserts_below_the_selection(env, registry):
+    graph, stack, scene = env
+    node = _table_with_rows(graph, registry,
+                            [["1", "", ""], ["2", "", ""], ["3", "", ""]])
+    item = scene.node_items[node.id]
+    _select(item._table_widget, [0], [0])
+    item._table_add_row()
+    rows = json.loads(graph.node(node.id).params["data"])["rows"]
+    assert [r[0] for r in rows] == ["1", "", "2", "3"]
+
+
 def test_table_resize_updates_width_and_height(env, registry):
     graph, stack, scene = env
     node = graph.add_node(registry.instantiate("flograph.io.table"))

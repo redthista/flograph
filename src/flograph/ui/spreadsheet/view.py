@@ -572,6 +572,24 @@ class SpreadsheetView(QTableView):
                            for index in indexes})
         return sections if clicked in sections else [clicked]
 
+    def _touched_sections(self, pick_row: bool) -> list[int]:
+        selection = self.selectionModel()
+        indexes = selection.selectedIndexes() if selection else []
+        if not indexes and self.currentIndex().isValid():
+            indexes = [self.currentIndex()]
+        return sorted({index.row() if pick_row else index.column()
+                       for index in indexes})
+
+    def selected_rows(self) -> list[int]:
+        """Every row the selection touches (or the current cell's row), so
+        a toolbar's delete acts on what the user picked; [] when nothing
+        is picked at all."""
+        return self._touched_sections(pick_row=True)
+
+    def selected_columns(self) -> list[int]:
+        """Every column the selection touches — see selected_rows."""
+        return self._touched_sections(pick_row=False)
+
     def rename_column(self, col: int) -> None:
         model = self.sheet_model()
         if model is None or not 0 <= col < model.columnCount() or model.read_only:

@@ -108,10 +108,12 @@ class SheetToolbar(QToolBar):
 
         self.addAction("+ Row above", lambda: model.insert_rows_at(row()))
         self.addAction("+ Row below", lambda: model.insert_rows_at(row() + 1))
-        self.addAction("− Row", lambda: model.remove_rows_at([row()]))
+        self.addAction("− Row", lambda: model.remove_rows_at(
+            view.selected_rows() or [row()]))
         self.addSeparator()
         self.addAction("+ Column", lambda: model.insert_columns_at(col() + 1))
-        self.addAction("− Column", lambda: model.remove_columns_at([col()]))
+        self.addAction("− Column", lambda: model.remove_columns_at(
+            view.selected_columns() or [col()]))
         self.addSeparator()
         self.addAction("Fill down", view.fill_down_selection)
         self.addAction("Fit columns", lambda: view.autosize_columns())

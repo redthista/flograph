@@ -1709,6 +1709,11 @@ class NodeItem(QGraphicsObject):
             "Copy the selection to the clipboard with column headers on "
             "top — plain Ctrl+C leaves them out. Copies the whole table "
             "if nothing is selected")
+        add_row.setToolTip("Insert a row below the selection (or at the end)")
+        del_row.setToolTip("Delete the selected rows (or the last row)")
+        add_col.setToolTip(
+            "Insert a column right of the selection (or at the end)")
+        del_col.setToolTip("Delete the selected columns (or the last column)")
         expand = QToolButton(text="⛶")
         expand.setToolTip("Open the full spreadsheet editor")
         # compact enough that the whole row fits a default-width card on one
@@ -1808,21 +1813,28 @@ class NodeItem(QGraphicsObject):
         scene.undo_stack.push(SetParamCommand(
             scene.graph, self.node.id, "data", new_json, merge=False))
 
+    # The card's buttons act on the selection, like the row/column header
+    # menus do; with nothing picked they fall back to the end of the grid.
+
     def _table_add_row(self) -> None:
         model = self._table_model
-        model.insert_rows_at(model.rowCount())
+        rows = self._table_widget.selected_rows()
+        model.insert_rows_at(rows[-1] + 1 if rows else model.rowCount())
 
     def _table_remove_row(self) -> None:
         model = self._table_model
-        model.remove_rows_at([model.rowCount() - 1])
+        model.remove_rows_at(self._table_widget.selected_rows()
+                             or [model.rowCount() - 1])
 
     def _table_add_column(self) -> None:
         model = self._table_model
-        model.insert_columns_at(model.columnCount())
+        cols = self._table_widget.selected_columns()
+        model.insert_columns_at(cols[-1] + 1 if cols else model.columnCount())
 
     def _table_remove_column(self) -> None:
         model = self._table_model
-        model.remove_columns_at([model.columnCount() - 1])
+        model.remove_columns_at(self._table_widget.selected_columns()
+                                or [model.columnCount() - 1])
 
     def _open_table_editor(self) -> None:
         from ..spreadsheet import SheetEditorDialog
