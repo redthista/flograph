@@ -112,3 +112,22 @@ def test_a_text_symbol_keeps_the_tables_font():
     for glyph in ("✓", "▲", "✗", "●"):
         html = _decorate("v", CellStyle(decorations=[Decoration(text=glyph)]))
         assert "font-family" not in html, glyph
+
+
+# ------------------------------------------------ a float's digits on the card
+
+def test_the_card_keeps_every_whole_digit_of_a_float():
+    from flograph.ui.inspector.pandas_model import float_text
+    assert float_text(100000.25) == "100000.25"     # was "100000"
+    assert float_text(1234567.891) == "1234567.89"  # was "1.23457e+06"
+    assert float_text(1234.5678901234) == "1234.57"  # still reads cleanly
+    assert float_text(3.14159265) == "3.14159"
+    assert float_text(5.0) == "5"
+    assert float_text(0.1 + 0.2) == "0.3"
+
+
+def test_the_model_shows_the_whole_number(qtbot):
+    from PySide6.QtCore import Qt
+    from flograph.ui.inspector.pandas_model import PandasModel
+    model = PandasModel(pd.DataFrame({"Amount": [100000.25]}))
+    assert model.data(model.index(0, 0), Qt.DisplayRole) == "100000.25"

@@ -39,6 +39,26 @@ atexit.register(shutil.rmtree, _SETTINGS_DIR, ignore_errors=True)
 # killing an xdist worker and failing whichever test it held.
 gc.disable()
 
+
+def pytest_sessionfinish(session, exitstatus):
+    """Hand Qt its leftovers while Python can still take them back.
+
+    A copy test leaves a Python-made QMimeData on the clipboard, and Qt's
+    own exit handler deletes it after the interpreter has gone — shiboken
+    then segfaults destroying the wrapper (PyErr_Fetch with no thread
+    state). Every plain `pytest` run ended in a core dump that way, after a
+    green suite; xdist workers hid it. Clearing the clipboard here, then a
+    last collection and drain, leaves nothing for exit to find."""
+    import sys
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    app = widgets.QApplication.instance() if widgets else None
+    if app is not None:
+        app.clipboard().clear()
+    gc.collect()
+    if app is not None:
+        app.processEvents()
+        app.processEvents()
+
 from flograph.core import Graph, NodeInstance, NodeRegistry, parse_spec
 
 

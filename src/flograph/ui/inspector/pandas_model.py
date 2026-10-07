@@ -32,6 +32,28 @@ _STYLE_CACHE_LIMIT = 200_000
 _UNSET = object()
 
 FLOAT_PRECISION = 6
+#: Decimals a number of FLOAT_PRECISION whole digits or more still keeps.
+FLOAT_MIN_DECIMALS = 2
+#: From here a float is too big to read digit by digit: scientific, as before.
+_FLOAT_SCIENTIFIC = 1e15
+
+
+def float_text(value: float) -> str:
+    """A float as the table shows it: about six significant figures, so a
+    column of long decimals reads cleanly — but never by dropping a digit
+    of the number itself. Rounding to six figures as a whole put
+    `100000.25` on the card as `100000` (the report beside it said
+    `100,000.25`) and a million as `1e+06`. Whole digits are all kept, and
+    at least two decimals, trailing zeros trimmed."""
+    if value != value or value in (float("inf"), float("-inf")):
+        return str(value)
+    size = abs(value)
+    if size < 1 or size >= _FLOAT_SCIENTIFIC:
+        return f"{value:.{FLOAT_PRECISION}g}"
+    whole = len(str(int(size)))
+    decimals = max(FLOAT_PRECISION - whole, FLOAT_MIN_DECIMALS)
+    text = f"{value:.{decimals}f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 # Above this row count a conditional-format style is not evaluated: the
 # per-cell pass is Python-level, and nobody heatmaps a million rows. Matches
@@ -876,7 +898,7 @@ class PandasModel(QAbstractTableModel):
             if style is not None and style.text is not None:
                 return style.text
             if isinstance(value, float):
-                return f"{value:.{FLOAT_PRECISION}g}"
+                return float_text(value)
             return str(value)
         if role == _EDIT:
             # What a copy puts on the clipboard. DisplayRole is rounded to
