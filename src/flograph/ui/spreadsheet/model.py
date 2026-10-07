@@ -340,6 +340,50 @@ class SheetModel(QAbstractTableModel):
         if changed:
             self._after_mutation()
 
+    def fill_range(self, source: tuple, target: tuple,
+                   series: bool = False) -> None:
+        """The fill handle: extend `source` (r0, c0, r1, c1) to `target`,
+        which grows it in one direction, by Excel's AutoFill rules
+        (core/sheet/fill.py). Past the last row or column the grid grows.
+        One mutation, so one undo step."""
+        if self._read_only:
+            return
+        from flograph.core.sheet.fill import fill_values
+        sr0, sc0, sr1, sc1 = source
+        tr0, tc0, tr1, tc1 = target
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.ensure_size(tr1 + 1, tc1 + 1)
+            if tr1 > sr1 or tr0 < sr0:
+                down = tr1 > sr1
+                for col in range(sc0, sc1 + 1):
+                    seed = [sheet.cell(r, col) for r in range(sr0, sr1 + 1)]
+                    if down:
+                        rows = range(sr1 + 1, tr1 + 1)
+                    else:
+                        seed.reverse()
+                        rows = range(sr0 - 1, tr0 - 1, -1)
+                    values = fill_values(seed, len(rows), along="row",
+                                         backwards=not down, series=series)
+                    for row, text in zip(rows, values):
+                        sheet.set_cell(row, col, text)
+            elif tc1 > sc1 or tc0 < sc0:
+                right = tc1 > sc1
+                for row in range(sr0, sr1 + 1):
+                    seed = [sheet.cell(row, c) for c in range(sc0, sc1 + 1)]
+                    if right:
+                        cols = range(sc1 + 1, tc1 + 1)
+                    else:
+                        seed.reverse()
+                        cols = range(sc0 - 1, tc0 - 1, -1)
+                    values = fill_values(seed, len(cols), along="col",
+                                         backwards=not right, series=series)
+                    for col, text in zip(cols, values):
+                        sheet.set_cell(row, col, text)
+
+        grows = tr1 >= self._sheet.n_rows or tc1 >= self._sheet.n_cols
+        self._structural(mutate, reset=grows)
+
     def replace_all(self, find: str, replace: str, *, match_case=False,
                     whole_cell=False, cells=None) -> int:
         """Replace text in cell sources (formulas included, as Excel does

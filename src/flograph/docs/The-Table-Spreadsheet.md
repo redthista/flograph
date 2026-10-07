@@ -48,6 +48,32 @@ column commands mean the column of the current cell (and the other way
 round), so selecting a row and inserting a column adds one column, not one per
 cell.
 
+## The fill handle
+
+The selection has a blue outline with a small square at its bottom-right
+corner. Drag the square down, up, left or right: a dashed outline shows where
+the fill goes and a tooltip shows what lands in the last cell. Let go and it
+fills, as one undo step, the way Excel does:
+
+- **formulas** copy with their references shifted (`=A1*2` → `=A2*2`, …);
+- **two or more numbers** carry on their step (1, 3 → 5, 7); a lone number
+  is copied — hold **Ctrl** as you let go to count on by 1 instead;
+- **dates** go on a day at a time, or by the step of the dates selected;
+- **text ending in a number** counts on (`Item 1` → `Item 2`, `Q08` → `Q09`);
+- **day and month names** carry on round the week or year (`Mon`, `Tue`, …);
+- anything else repeats.
+
+Drag past the last row or column and the table grows to take the fill. Near
+the edge of the grid it scrolls. **Esc** cancels a fill mid-drag.
+
+## Dragging rows and columns
+
+Select whole rows or columns (click their numbers or names), then drag one
+of the selected headers. The pointer becomes a hand, a blue line shows where
+they will land, and they move there when you let go — still selected, so you
+can drag again. Formulas keep their addresses, as after a sort. A drag that
+starts on a header that isn't selected selects a range instead, as before.
+
 ## Holding edits until Submit
 
 On a big flow, a Table near the start means every edit re-runs everything

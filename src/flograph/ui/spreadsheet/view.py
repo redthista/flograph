@@ -288,6 +288,16 @@ class SpreadsheetView(QTableView):
         self._autofit_timer.setInterval(AUTOFIT_IDLE_MS)
         self._autofit_timer.timeout.connect(self._run_autofit)
 
+        # the fill handle, and dragging rows/columns by their headers
+        from .drag import FillHandle, HeaderMove
+        self._fill = FillHandle(self)
+        self._row_move = HeaderMove(self, self.verticalHeader(), "row")
+        self._col_move = HeaderMove(self, self.horizontalHeader(), "col")
+        for bar in (self.verticalScrollBar(), self.horizontalScrollBar()):
+            bar.valueChanged.connect(self._fill.refresh)
+        header.sectionResized.connect(self._fill.refresh)
+        self.verticalHeader().sectionResized.connect(self._fill.refresh)
+
     def setModel(self, model) -> None:
         old = self.sheet_model()
         if old is not None:
@@ -313,6 +323,9 @@ class SpreadsheetView(QTableView):
             model.freeze_changed.connect(self._apply_freeze)
             self._sync_column_widths()
             self._apply_freeze()
+        if isinstance(model, SheetModel) and getattr(self, "_fill", None):
+            model.dataChanged.connect(self._fill.refresh)
+            model.modelReset.connect(self._fill.refresh)
         if self.selectionModel() is not None:
             self.selectionModel().selectionChanged.connect(
                 self._selection_moved)
@@ -702,6 +715,10 @@ class SpreadsheetView(QTableView):
         return super().event(event)
 
     def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape and self._fill.dragging:
+            self._fill.cancel()
+            event.accept()
+            return
         action = self.actions.for_key(event)
         if action is not None:
             if action.isEnabled():
@@ -874,7 +891,66 @@ class SpreadsheetView(QTableView):
         if focus is not None and focus is not self and self.isAncestorOf(focus):
             self.setFocus()
 
+    # --------------------------------------------- fill handle / drag geometry
+
+    def _row_top(self, row: int) -> int:
+        model = self.sheet_model()
+        n = model.rowCount()
+        if row < n:
+            return self.rowViewportPosition(row)
+        last = n - 1
+        return (self.rowViewportPosition(last) + self.rowHeight(last)
+                + (row - n) * self.verticalHeader().defaultSectionSize())
+
+    def _col_left(self, col: int) -> int:
+        model = self.sheet_model()
+        n = model.columnCount()
+        if col < n:
+            return self.columnViewportPosition(col)
+        last = n - 1
+        return (self.columnViewportPosition(last) + self.columnWidth(last)
+                + (col - n) * self.horizontalHeader().defaultSectionSize())
+
+    def cells_pixel_rect(self, r0: int, c0: int, r1: int, c1: int
+                         ) -> Optional[QRect]:
+        """Where cells r0..r1 × c0..c1 are on the viewport — past the end of
+        the grid too, where a fill is about to add rows."""
+        model = self.sheet_model()
+        if model is None or not model.rowCount() or not model.columnCount():
+            return None
+        top, left = self._row_top(r0), self._col_left(c0)
+        bottom = self._row_top(r1 + 1) if r1 + 1 >= model.rowCount() \
+            else self.rowViewportPosition(r1) + self.rowHeight(r1)
+        right = self._col_left(c1 + 1) if c1 + 1 >= model.columnCount() \
+            else self.columnViewportPosition(c1) + self.columnWidth(c1)
+        return QRect(left, top, max(right - left, 0), max(bottom - top, 0))
+
+    def selection_pixel_rect(self) -> Optional[QRect]:
+        rect = self._selection_rect()
+        if rect is None:
+            return None
+        return self.cells_pixel_rect(*rect)
+
+    def fill_handle_rect(self) -> Optional[QRect]:
+        """The fill handle: a small square on the selection's bottom-right
+        corner, while the grid can be edited."""
+        if not self.editable:
+            return None
+        rect = self.selection_pixel_rect()
+        if rect is None or rect.width() <= 0 or rect.height() <= 0:
+            return None
+        corner = rect.bottomRight()
+        return QRect(corner.x() - 3, corner.y() - 3, 7, 7)
+
+    def drop_line(self, line) -> None:
+        """Where dragged rows/columns will land: ("row"|"col", pixel), or
+        None to take the line away."""
+        self._fill.overlay.drop_line = line
+        self._fill.refresh()
+
     def _selection_moved(self, *_args) -> None:
+        if getattr(self, "_fill", None) is not None:
+            self._fill.refresh()
         if self._actions is not None:
             self._actions.refresh()
 
