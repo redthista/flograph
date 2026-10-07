@@ -53,7 +53,7 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
-    "version": "1.1",
+    "version": "1.2",
     "card": "grid",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe")],
@@ -183,8 +183,11 @@ def run(ctx, table=None):
                         "dates, set to missing")
             table[col] = typed
         elif spec.type == "bool":
+            # a blank cell is an unticked box on the grid, so it is FALSE
+            # here too — what the card shows and what flows on agree
             typed = series.map(
-                lambda v: v if isinstance(v, (bool, type(None)))
+                lambda v: False if v is None
+                else v if isinstance(v, bool)
                 else _TRUTHY.get(str(v).strip().upper()))
             bad = int(sum(1 for v, orig in zip(typed, series)
                           if v is None and orig is not None))

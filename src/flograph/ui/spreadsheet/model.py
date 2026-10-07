@@ -46,6 +46,9 @@ _ALIGN_NUMBER = int(Qt.AlignRight | Qt.AlignVCenter)
 _ERROR_BRUSH = QBrush(_ERROR_TEXT)
 _INVALID_BRUSH = QBrush(_INVALID_BG)
 
+_TRUE_WORDS = {"true", "yes", "y", "1", "t", "x", "✓", "on"}
+_FALSE_WORDS = {"false", "no", "n", "0", "f", "off"}
+
 _VIEW_FLAGS = Qt.ItemIsEnabled | Qt.ItemIsSelectable
 _EDIT_FLAGS = _VIEW_FLAGS | Qt.ItemIsEditable
 _CHECKABLE = Qt.ItemIsUserCheckable
@@ -227,10 +230,11 @@ class SheetModel(QAbstractTableModel):
         if role == _EDIT:
             return source
         if role == _CHECK_STATE and bool_check:
+            # a blank bool cell is an unticked box, as in Excel — and goes
+            # down the flow as FALSE (nodes/io/table.py), so what it shows
+            # and what it sends agree
             if source.strip().upper() == "TRUE":
                 return _CHECKED
-            if source.strip() == "":
-                return None
             return _UNCHECKED
         if role == _TOOLTIP:
             error = self._result.errors.get((row, col))
@@ -530,6 +534,18 @@ class SheetModel(QAbstractTableModel):
                     normalized = normalize_date(text)
                     if normalized is not None and normalized != text:
                         row[col] = normalized
+            elif col_type == "bool":
+                # yes/no, 1/0, y/n, true/false become TRUE/FALSE so they show
+                # as tick boxes; anything else stays put and flags red
+                for row in sheet.rows:
+                    text = row[col].strip()
+                    if not text or is_formula(text):
+                        continue
+                    low = text.casefold()
+                    if low in _TRUE_WORDS:
+                        row[col] = "TRUE"
+                    elif low in _FALSE_WORDS:
+                        row[col] = "FALSE"
 
         self._structural(mutate)
 
