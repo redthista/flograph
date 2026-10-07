@@ -1223,6 +1223,36 @@ class SpreadsheetView(QTableView):
         if model is not None and rows:
             model.promote_row_to_header(rows[0])
 
+    # ----------------------------------------------------- number formats
+
+    def apply_format(self, fmt) -> None:
+        """Give the selected columns a number format (None for General)."""
+        model = self.sheet_model()
+        cols = self.target_columns()
+        if model is not None and cols and self.editable:
+            model.set_column_format(cols, fmt)
+
+    def step_decimals(self, delta: int) -> None:
+        """Excel's Increase / Decrease Decimal, on the selected columns."""
+        from flograph.core.sheet.numfmt import step_decimals
+        model = self.sheet_model()
+        cols = self.target_columns()
+        if model is None or not cols or not self.editable:
+            return
+        current = self.currentIndex()
+        shown = (model.index(current.row(), current.column()).data()
+                 if current.isValid() else None)
+        model.set_column_format(
+            cols, step_decimals(model.column_format(cols[0]), delta,
+                                str(shown) if shown is not None else None))
+
+    def format_cells(self) -> None:
+        """Ctrl+1: the Format Cells dialog for the selected columns."""
+        cols = self.target_columns()
+        if cols and self.editable:
+            from .numfmt_dialog import edit_number_format
+            edit_number_format(self, cols)
+
     def edit_column_list(self) -> None:
         """Data ▸ Dropdown List… for the current column."""
         cols = self.target_columns()

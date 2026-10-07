@@ -110,6 +110,13 @@ def _type_menu(menu: QMenu, actions) -> None:
         sub.addAction(actions[f"type_{col_type}"])
 
 
+def _number_menu(menu: QMenu, view) -> None:
+    from .actions import fill_number_format_menu
+    from .icons import sheet_icon
+    sub = submenu(menu, "Number Format", sheet_icon("format"))
+    fill_number_format_menu(sub, view)
+
+
 def _freeze_menu(menu: QMenu, actions) -> None:
     from .icons import sheet_icon
     sub = submenu(menu, "Freeze", sheet_icon("freeze"))
@@ -155,6 +162,7 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
 
     heading(menu, "Column")
     _type_menu(menu, a)
+    _number_menu(menu, view)
     menu.addAction(a["dropdown"])
     model = view.sheet_model()
     current = view.currentIndex()
@@ -208,6 +216,7 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "This Column")
     menu.addAction(a["rename"])
     _type_menu(menu, a)
+    _number_menu(menu, view)
     menu.addAction(a["dropdown"])
     menu.addAction(a["fit"])
     menu.addAction(a["fit_all"])

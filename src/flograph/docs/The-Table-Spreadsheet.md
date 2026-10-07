@@ -92,6 +92,27 @@ Held edits are saved with the project and undo like any other edit. Running
 the flow while edits are held says so in the status bar. Turning Auto-apply
 back on submits whatever is waiting.
 
+## Number formats
+
+A column's format is how its values *read*, never what they are — the cell,
+its formulas and what the Table sends on keep the full value, and the
+formula bar and the cell editor show it as it is. Excel's rule, so a format
+can be changed at any time without losing anything.
+
+- **Home ▸ Number**: **Format ▾** lists General, Number, Currency, Percent,
+  Scientific and the date styles, each with a sample; the quick buttons set
+  Currency (in your computer's currency), Percent and Thousands, and show
+  more or fewer decimal places.
+- **Format Cells…** (**Ctrl+1**, or right-click ▸ Number Format): decimal
+  places, the thousands separator, the currency symbol, how negatives look
+  (`-1,234.10`, `(1,234.10)`, or either in red) and how dates are written,
+  with a live sample taken from the column.
+- A formatted column takes what its format looks like: type `£1,200` into a
+  currency column and it stores 1200, `25%` into a percent column stores
+  0.25, `(40)` stores -40.
+
+Halves round away from zero, as in Excel: 2.5 at no decimals reads 3.
+
 ## Dropdown lists
 
 **Data ▸ Dropdown List…** gives a column a list of values. The current cell of
@@ -145,6 +166,7 @@ result, for checking a sheet over.
 | Find / replace | **Ctrl+F** / **Ctrl+H** |
 | Filter this column | **Ctrl+Shift+L** |
 | Open a cell's dropdown list | **Alt+Down** |
+| Format cells (number format) | **Ctrl+1** |
 | Show formulas | **Ctrl+`** |
 
 See also [[Nodes and the Library]] and [[Keyboard Shortcuts]].

@@ -508,7 +508,55 @@ def _select_all(p, r, c):
                                             ("row", 2)], color=c)
 
 
+# ------------------------------------------------------------ number formats
+
+def _currency_symbol() -> str:
+    from PySide6.QtCore import QLocale
+    symbol = QLocale().currencySymbol(QLocale.CurrencySymbol)
+    return symbol if symbol and len(symbol) <= 2 else "$"
+
+
+def _fmt_currency(p, r, c):
+    p.setPen(_pen(c, 1.2))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2, 4, 16, 12), 2, 2)
+    _text(p, QRectF(2, 4, 16, 12), _currency_symbol(), GREEN, 10)
+
+
+def _fmt_percent(p, r, c):
+    _text(p, QRectF(0, 0, 20, 20), "%", c, 14)
+
+
+def _fmt_thousands(p, r, c):
+    _text(p, QRectF(0, 2, 20, 16), ",000", c, 8)
+
+
+def _decimals(p, c, more: bool):
+    _text(p, QRectF(0, 1, 20, 9), ".0" if more else ".00", c, 7.5)
+    _text(p, QRectF(0, 10, 20, 9), ".00" if more else ".0", BLUE, 7.5)
+    _arrow(p, QPointF(3, 13), QPointF(3, 18) if more else QPointF(3, 8),
+           DIM, 1.1, 2)
+
+
+def _dec_more(p, r, c):
+    _decimals(p, c, True)
+
+
+def _dec_less(p, r, c):
+    _decimals(p, c, False)
+
+
+def _format(p, r, c):
+    p.setPen(_pen(c, 1.2))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2, 4, 16, 12), 2, 2)
+    _text(p, QRectF(2, 4, 16, 12), "1.2", BLUE, 8)
+
+
 GLYPHS = {
+    "fmt_currency": (_fmt_currency, FG), "fmt_percent": (_fmt_percent, FG),
+    "fmt_thousands": (_fmt_thousands, FG), "dec_more": (_dec_more, FG),
+    "dec_less": (_dec_less, FG), "format": (_format, FG),
     "paste": (_paste, FG), "paste_values": (_paste_values, FG),
     "cut": (_cut, FG), "copy": (_copy, FG),
     "copy_headers": (_copy_headers, FG),

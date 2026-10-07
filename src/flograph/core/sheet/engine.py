@@ -136,6 +136,7 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
         # a dropdown list set on an input column is the user's, not the
         # input's — it survives the refresh like a width does
         col.choices, col.strict = list(mine.choices), mine.strict
+        col.format = dict(mine.format) if mine.format else None
     merged.freeze_rows, merged.freeze_cols = (stored.freeze_rows,
                                               stored.freeze_cols)
 
@@ -156,8 +157,9 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
                 cells.append(translate(template, row - template_row, 0))
             else:
                 cells.append("")
-        merged.columns.append(ColumnSpec(col.name, col.type, col.width,
-                                         list(col.choices), col.strict))
+        merged.columns.append(ColumnSpec(
+            col.name, col.type, col.width, list(col.choices), col.strict,
+            dict(col.format) if col.format else None))
         for row in range(n_rows):
             merged.rows[row].append(cells[row])
     return merged

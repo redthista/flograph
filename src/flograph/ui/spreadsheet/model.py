@@ -14,6 +14,7 @@ from typing import Optional
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 
+from flograph.core.sheet.numfmt import format_value_as, parse_typed
 from flograph.core.sheet import (COLUMN_TYPES, FormulaError, Sheet,
                                  evaluate_sheet, format_value, is_formula,
                                  normalize_date, parse_sheet,
@@ -44,6 +45,7 @@ _CHECKED = Qt.Checked
 _UNCHECKED = Qt.Unchecked
 _ALIGN_NUMBER = int(Qt.AlignRight | Qt.AlignVCenter)
 _ERROR_BRUSH = QBrush(_ERROR_TEXT)
+_NEGATIVE_BRUSH = QBrush(QColor("#f87171"))
 _INVALID_BRUSH = QBrush(_INVALID_BG)
 
 _TRUE_WORDS = {"true", "yes", "y", "1", "t", "x", "✓", "on"}
@@ -113,8 +115,17 @@ class SheetModel(QAbstractTableModel):
     def cell_error(self, row: int, col: int) -> Optional[str]:
         return self._result.errors.get((row, col))
 
+    def computed_value(self, row: int, col: int):
+        """The cell's computed value (number, text, bool, None or a
+        FormulaError) — before any number format."""
+        if 0 <= row < self._sheet.n_rows and 0 <= col < self._sheet.n_cols:
+            return self._result.values[row][col]
+        return None
+
     def value_text(self, row: int, col: int) -> str:
-        """Computed display text (what a copy to Excel should carry)."""
+        """Computed display text, unformatted (what a copy, a filter and
+        Paste Values carry — a number format is how it reads, not what it
+        is)."""
         if 0 <= row < self._sheet.n_rows and 0 <= col < self._sheet.n_cols:
             return format_value(self._result.values[row][col])
         return ""
@@ -174,6 +185,7 @@ class SheetModel(QAbstractTableModel):
                         and new.width == old.width
                         and new.choices == old.choices
                         and new.strict == old.strict
+                        and new.format == old.format
                         for new, old in zip(other.columns,
                                             self._sheet.columns)))
 
@@ -223,9 +235,14 @@ class SheetModel(QAbstractTableModel):
         col_type = self.column_type(col)
         bool_check = col_type == "bool" and not is_formula(source)
 
+        fmt = self._sheet.columns[col].format
         if role == _DISPLAY:
             if bool_check:
                 return ""   # the checkbox is the display
+            if fmt is not None:
+                shown = format_value_as(value, fmt)
+                if shown is not None:
+                    return shown[0]
             return format_value(value)
         if role == _EDIT:
             return source
@@ -246,8 +263,14 @@ class SheetModel(QAbstractTableModel):
             if is_formula(source):
                 return source
             return None
-        if role == _FOREGROUND and isinstance(value, FormulaError):
-            return _ERROR_BRUSH
+        if role == _FOREGROUND:
+            if isinstance(value, FormulaError):
+                return _ERROR_BRUSH
+            if fmt is not None:
+                shown = format_value_as(value, fmt)
+                if shown is not None and shown[1]:
+                    return _NEGATIVE_BRUSH
+            return None
         if role == _BACKGROUND:
             if self._invalid(row, col, source):
                 return _INVALID_BRUSH
@@ -272,6 +295,9 @@ class SheetModel(QAbstractTableModel):
         return False
 
     def _set_cell_text(self, row: int, col: int, text: str) -> bool:
+        # a formatted column takes what its format looks like: "£1,200",
+        # "25%" (core/sheet/numfmt.parse_typed)
+        text = parse_typed(text, self._sheet.columns[col].format)
         if self._sheet.cell(row, col) == text:
             return True
         self._sheet.set_cell(row, col, text)
@@ -288,6 +314,10 @@ class SheetModel(QAbstractTableModel):
         if not block:
             return
         row0, col0 = origin
+        formats = [c.format for c in self._sheet.columns]
+        block = [[parse_typed(text, formats[col0 + dc])
+                  if col0 + dc < len(formats) else text
+                  for dc, text in enumerate(row)] for row in block]
         self._structural(lambda sheet: self._paste_into(sheet, row0, col0, block))
 
     @staticmethod
@@ -477,6 +507,29 @@ class SheetModel(QAbstractTableModel):
             sheet.columns[col].strict = strict
 
         self._structural(mutate)
+
+    def column_format(self, col: int) -> Optional[dict]:
+        if 0 <= col < self._sheet.n_cols:
+            fmt = self._sheet.columns[col].format
+            return dict(fmt) if fmt else None
+        return None
+
+    def set_column_format(self, cols, fmt) -> None:
+        """Give columns a number format (None for General). How values read,
+        never what they are — one undo step for all the columns."""
+        if self._read_only:
+            return
+        from flograph.core.sheet.numfmt import clean
+        fmt = clean(fmt)
+        cols = [c for c in cols if 0 <= c < self._sheet.n_cols]
+        if not cols:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            for col in cols:
+                sheet.columns[col].format = dict(fmt) if fmt else None
+
+        self._structural(mutate, reset=False)
 
     def set_freeze(self, rows: int, cols: int) -> None:
         """Freeze panes: this many data rows and columns stay in view."""

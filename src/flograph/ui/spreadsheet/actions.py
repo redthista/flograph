@@ -39,6 +39,56 @@ TYPE_HELP = {
 }
 
 
+def currency_format() -> dict:
+    """Currency in the machine's own money: £ in the UK, € in France."""
+    from PySide6.QtCore import QLocale
+    symbol = QLocale().currencySymbol(QLocale.CurrencySymbol) or "$"
+    return {"kind": "currency", "symbol": symbol, "decimals": 2,
+            "thousands": True, "negative": "minus"}
+
+
+def fill_number_format_menu(menu, view) -> None:
+    """The Number Format list: each entry shows how a sample reads under it,
+    the column's current format ticked."""
+    from flograph.core.sheet.numfmt import DATE_PATTERNS, clean
+    from .menus import heading, submenu
+    model = view.sheet_model()
+    cols = view.target_columns()
+    current = clean(model.column_format(cols[0])) if model and cols else None
+    sample = 1234.5678
+
+    presets = [
+        ("General", None, "1234.5678"),
+        ("Number", {"kind": "number", "decimals": 2, "thousands": True},
+         "1,234.57"),
+        ("Currency", currency_format(), None),
+        ("Percent", {"kind": "percent", "decimals": 0}, "12%"),
+        ("Scientific", {"kind": "scientific", "decimals": 2}, "1.23E+3"),
+    ]
+    heading(menu, "Number")
+    from flograph.core.sheet.numfmt import format_value_as
+    for label, fmt, shown in presets:
+        if shown is None:
+            shown = format_value_as(sample, fmt)[0]
+        action = menu.addAction(f"{label}\t{shown}")
+        action.setCheckable(True)
+        action.setChecked(clean(fmt) == current if fmt else current is None)
+        action.triggered.connect(
+            lambda _=False, f=fmt: view.apply_format(f))
+    dates = submenu(menu, "Date")
+    for label, pattern in DATE_PATTERNS:
+        fmt = {"kind": "date", "pattern": pattern}
+        action = dates.addAction(label)
+        action.setCheckable(True)
+        action.setChecked(clean(fmt) == current)
+        action.triggered.connect(
+            lambda _=False, f=fmt: view.apply_format(f))
+    menu.addSeparator()
+    menu.addAction(view.actions["dec_more"])
+    menu.addAction(view.actions["dec_less"])
+    menu.addAction(view.actions["format_cells"])
+
+
 def tip(title: str, body: str, shortcut: str = "") -> str:
     """A command's tooltip: what it is, what it does, and its key."""
     keys = (f"<br><span style='color:#9ca3af'>Shortcut: {shortcut}</span>"
@@ -377,6 +427,52 @@ class SheetActions(QObject):
         self._add("filter_clear", "Clear All Filters", "filter_clear",
                   "Show every row again.", v.clear_filters,
                   enabled=lambda: v.filtered, short="Clear")
+
+        # ---- number formats (how values read; never what they are)
+        def cols_ok() -> bool:
+            return edit() and bool(v.target_columns())
+
+        self._add("format_cells", "Format Cells…", "format",
+                  "Choose how the column's values read — decimal places, "
+                  "thousands separators, currency, percent, red or "
+                  "bracketed negatives, how dates are written. Only the "
+                  "look changes: the values, formulas and what flows on "
+                  "stay as they are.",
+                  v.format_cells, keys=["Ctrl+1"], enabled=cols_ok,
+                  short="Format")
+        self._add("number_format", "Number Format", "format",
+                  "Pick a format for the column from the list — each shows "
+                  "how a value will read.",
+                  lambda: None, enabled=cols_ok, short="Format")
+        self._add("fmt_currency", "Currency", "fmt_currency",
+                  "Show the column as money: a currency symbol, thousands "
+                  "separators and two decimal places. Typing £1,200 into it "
+                  "stores 1200.",
+                  lambda: v.apply_format(currency_format()),
+                  enabled=cols_ok, short="Currency")
+        self._add("fmt_percent", "Percent", "fmt_percent",
+                  "Show the column as percentages: 0.25 reads 25%. Typing "
+                  "25% into it stores 0.25.",
+                  lambda: v.apply_format({"kind": "percent", "decimals": 0}),
+                  enabled=cols_ok, short="Percent")
+        self._add("fmt_thousands", "Thousands Separator", "fmt_thousands",
+                  "Show numbers with thousands separators and two decimal "
+                  "places: 1234.5 reads 1,234.50.",
+                  lambda: v.apply_format({"kind": "number", "decimals": 2,
+                                          "thousands": True}),
+                  enabled=cols_ok, short="Thousands")
+        self._add("dec_more", "Increase Decimal", "dec_more",
+                  "Show one more decimal place.",
+                  lambda: v.step_decimals(1), enabled=cols_ok,
+                  short="More Decimals")
+        self._add("dec_less", "Decrease Decimal", "dec_less",
+                  "Show one fewer decimal place. The value keeps all its "
+                  "digits — only what you see is rounded.",
+                  lambda: v.step_decimals(-1), enabled=cols_ok,
+                  short="Fewer Decimals")
+        self._add("fmt_general", "General", None,
+                  "No format: numbers show as they are.",
+                  lambda: v.apply_format(None), enabled=cols_ok)
 
         # ---- view
         self._add("freeze", "Freeze Panes", "freeze",

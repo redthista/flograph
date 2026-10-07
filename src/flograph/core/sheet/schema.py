@@ -146,6 +146,9 @@ class ColumnSpec:
     # list is a suggestion and other values are welcome.
     choices: list[str] = field(default_factory=list)
     strict: bool = False
+    # How the column's values read (core/sheet/numfmt.py) — display only;
+    # None is General. Never changes a value or what flows on.
+    format: Optional[dict] = None
 
 
 @dataclass
@@ -298,7 +301,9 @@ class Sheet:
     def copy(self) -> "Sheet":
         return Sheet(
             columns=[ColumnSpec(c.name, c.type, c.width, list(c.choices),
-                                c.strict) for c in self.columns],
+                                c.strict,
+                                dict(c.format) if c.format else None)
+                     for c in self.columns],
             rows=[list(row) for row in self.rows],
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
         )
@@ -333,9 +338,11 @@ def parse_sheet(raw) -> Sheet:
             choices = entry.get("choices")
             choices = ([str(c) for c in choices if str(c) != ""]
                        if isinstance(choices, list) else [])
+            from .numfmt import clean
             columns.append(ColumnSpec(
                 name, col_type if col_type in COLUMN_TYPES else "auto", width,
-                choices, bool(entry.get("strict")) and bool(choices)))
+                choices, bool(entry.get("strict")) and bool(choices),
+                clean(entry.get("format"))))
         else:
             columns.append(ColumnSpec(str(entry)))
 
@@ -375,6 +382,8 @@ def sheet_to_dict(sheet: Sheet) -> dict:
             entry["choices"] = list(col.choices)
             if col.strict:
                 entry["strict"] = True
+        if col.format:
+            entry["format"] = dict(col.format)
         columns.append(entry)
     out = {
         "version": 2,
