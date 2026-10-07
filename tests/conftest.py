@@ -29,6 +29,16 @@ for _format in (QSettings.NativeFormat, QSettings.IniFormat):
     QSettings.setPath(_format, QSettings.UserScope, _SETTINGS_DIR)
 atexit.register(shutil.rmtree, _SETTINGS_DIR, ignore_errors=True)
 
+# Cycles are collected in one place only: _drain_qt_after_each_test, between
+# tests. Left automatic, the collector ran wherever an allocation tipped its
+# threshold — inside a Qt-to-Python callback (a layout's itemAt, a signal
+# delivery) — and breaking a cycle there freed the Python side of a Qt
+# object Qt was still using: a dropped CodeEditor mid event-filter lookup,
+# an engine's WorkerSignals as its node's result arrived. Shiboken's
+# getOverride → subtype_dealloc, three core dumps in one afternoon, each
+# killing an xdist worker and failing whichever test it held.
+gc.disable()
+
 from flograph.core import Graph, NodeInstance, NodeRegistry, parse_spec
 
 

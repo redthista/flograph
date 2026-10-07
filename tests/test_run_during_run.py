@@ -108,6 +108,13 @@ def busy(qtbot):
     assert engine.active
     assert graph.nodes[slow.id].status is NodeStatus.RUNNING
     yield graph, engine, slow, fast, other
+    # Let the run end before the engine goes. A test that only looks at the
+    # start of it (the join announced, nothing replanned) used to return with
+    # the slow node still asleep on a worker thread; conftest's GC drain then
+    # freed the engine's Qt objects under it, and when the node woke the
+    # whole xdist worker segfaulted — blamed on whichever test came next.
+    qtbot.waitUntil(lambda: not engine.active and not engine.pending_request,
+                    timeout=15000)
 
 
 class TestJoiningARun:

@@ -97,6 +97,10 @@ class TestTimed:
         dog.start()
 
         def hog():
+            # On a busy machine (the full suite, five workers) the loop can
+            # stall unlabelled before the hog runs; counted, that stall
+            # ended the wait with longest_label == "". Only the hog's counts.
+            dog.reset()
             with perf.timed("t: hog"):
                 time.sleep(0.4)
 
