@@ -6,8 +6,11 @@ grid and they flow out as a DataFrame.
 Cells starting with = are Excel-style formulas: A1-style references
 (=A2*B2, =SUM(C1:C10), $A$1 pins), named column references ([@Price] for
 this row's value, [Price] for the whole column — =[@Price]*[@Qty],
-=SUM([Total])), the usual operators, and functions like SUM, AVERAGE,
-IF, ROUND, CONCAT. Row 1 is the first data row. Named references follow
+=SUM([Total])), the usual operators, and about a hundred of Excel's
+functions: SUM, IF and ROUND, lookups (VLOOKUP, XLOOKUP, INDEX/MATCH),
+SUMIF/COUNTIF(S), IFERROR, text (SUBSTITUTE, TEXT, TEXTJOIN) and dates
+(TODAY, EDATE, DATEDIF, NETWORKDAYS). Dates add and subtract like Excel's:
+=[@Due]+7, =[@End]-[@Start]. Row 1 is the first data row. Named references follow
 renames and don't shift when columns move — ideal for linked-input
 tables whose column layout may change.
 

@@ -48,15 +48,6 @@ _TEXT = "#d6d8de"
 _DIM = "#8b909c"
 _ACCENT = "#7c6cf6"   # theme.BUTTON_ACCENT — the active tab
 
-FUNCTION_GROUPS = (
-    ("Maths", ("SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "ROUND",
-               "ABS", "SQRT", "POWER", "MOD", "FLOOR", "CEILING")),
-    ("Logic", ("IF", "AND", "OR", "NOT")),
-    ("Text", ("CONCAT", "LEN", "UPPER", "LOWER", "TRIM", "LEFT", "RIGHT",
-              "MID")),
-)
-
-
 def _stylesheet(compact: bool) -> str:
     size = "8pt" if compact else "8.5pt"
     tab_pad = "3px 6px 4px 6px" if compact else "4px 12px 5px 12px"
@@ -497,18 +488,20 @@ class SheetRibbon(QWidget):
             menu.addAction(self._actions[name])
 
     def _fill_function_menu(self, menu) -> None:
-        from flograph.core.sheet import FUNCTION_HELP
+        """Every function, a submenu per category, each entry saying what
+        it does — hover for its arguments and an example."""
+        from flograph.core.sheet import FUNCTION_CATEGORIES, FUNCTION_HELP
         from .actions import tip
-        from .menus import heading
-        help_by_name = {entry[0]: entry for entry in FUNCTION_HELP}
-        for caption, names in FUNCTION_GROUPS:
-            heading(menu, caption)
-            for name in names:
-                entry = help_by_name.get(name)
-                if entry is None:
-                    continue
-                _n, signature, what, example = entry
-                action = menu.addAction(f"{name}    {what}")
+        from .menus import submenu
+        for category in FUNCTION_CATEGORIES:
+            entries = sorted((e for e in FUNCTION_HELP if e[4] == category),
+                             key=lambda e: e[0])
+            if not entries:
+                continue
+            sub = submenu(menu, category)
+            for name, signature, what, example, _cat in entries:
+                short = what if len(what) <= 48 else what[:46] + "…"
+                action = sub.addAction(f"{name}\t{short}")
                 action.setToolTip(tip(signature, f"{what}<br>e.g. "
                                                  f"<code>{example}</code>"))
                 action.triggered.connect(

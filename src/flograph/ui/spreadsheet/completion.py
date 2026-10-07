@@ -23,7 +23,15 @@ from PySide6.QtWidgets import QCompleter, QLineEdit
 
 from flograph.core.sheet import FUNCTION_NAMES
 
-_WORD_SUGGESTIONS = tuple(sorted([*FUNCTION_NAMES, "TRUE", "FALSE"]))
+# The functions people mean most often come first for a prefix, the rest
+# alphabetically: "=SU" should offer SUM before SUBSTITUTE.
+_COMMON = ("SUM", "IF", "AVERAGE", "COUNT", "COUNTIF", "SUMIF", "VLOOKUP",
+           "XLOOKUP", "MAX", "MIN", "ROUND", "IFERROR", "INDEX", "MATCH",
+           "TODAY", "TEXT", "DATE", "CONCAT", "LEN", "AND", "OR")
+_WORD_SUGGESTIONS = tuple(
+    [n for n in _COMMON if n in FUNCTION_NAMES]
+    + sorted(n for n in [*FUNCTION_NAMES, "TRUE", "FALSE"]
+             if n not in _COMMON))
 _BARE_WORDS = ("TRUE", "FALSE")   # complete without a "("
 _TRAILING_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
 

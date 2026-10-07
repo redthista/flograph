@@ -351,7 +351,30 @@ def call_function(name: str, args: list):
         return FormulaError(
             ERR_VALUE,
             f"{name.upper()} expects {expected} argument(s), got {len(args)}")
-    error = _first_error(args)
-    if error is not None:
-        return error
+    if name.upper() not in _LENIENT:
+        error = _first_error(args)
+        if error is not None:
+            return error
     return fn(args)
+
+
+# The rest of the library (lookups, conditional sums, dates, …) lives in
+# functions_more and is merged in here, so a formula finds every function
+# in one table. Imported last: it builds on the helpers above.
+from . import functions_more as _more  # noqa: E402
+
+_CATEGORY = {**{n: "Maths" for n in (
+    "SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "ROUND", "ABS",
+    "SQRT", "POWER", "MOD", "FLOOR", "CEILING")},
+    **{n: "Logic" for n in ("IF", "AND", "OR", "NOT")},
+    **{n: "Text" for n in ("CONCAT", "LEN", "UPPER", "LOWER", "TRIM",
+                           "LEFT", "RIGHT", "MID")}}
+FUNCTIONS.update(_more.FUNCTIONS)
+# (name, signature, what it does, example, category)
+FUNCTION_HELP = tuple((*entry, _CATEGORY.get(entry[0], "Maths"))
+                      for entry in FUNCTION_HELP) + _more.HELP
+FUNCTION_NAMES = tuple(sorted([*FUNCTIONS, "IF"]))
+_LENIENT = _more.LENIENT
+# the order the ribbon's Insert Function list and the reference group them
+FUNCTION_CATEGORIES = ("Maths", "Conditional", "Lookup", "Logic", "Text",
+                       "Date")

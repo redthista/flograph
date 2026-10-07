@@ -26,7 +26,8 @@ from typing import Optional
 
 from .functions import call_function
 from .values import (ERR_DIV0, ERR_NAME, ERR_NUM, ERR_VALUE, FormulaError,
-                     to_bool, to_number, to_text)
+                     RangeValue, as_date, date_text, to_bool, to_number,
+                     to_text)
 
 
 class FormulaSyntaxError(ValueError):
@@ -428,7 +429,11 @@ def _compare(op: str, a, b):
     if isinstance(a, bool) and isinstance(b, bool):
         x, y = a, b
     elif isinstance(a, str) and isinstance(b, str):
-        x, y = a.casefold(), b.casefold()   # Excel compares text case-blind
+        da, db = as_date(a), as_date(b)
+        if da is not None and db is not None:
+            x, y = da, db                   # 7/10/2026 = 2026-10-07
+        else:
+            x, y = a.casefold(), b.casefold()   # Excel compares text case-blind
     else:
         na, nb = to_number(a), to_number(b)
         if isinstance(na, FormulaError) or isinstance(nb, FormulaError):
@@ -450,6 +455,34 @@ def _compare(op: str, a, b):
     if op == ">":
         return x > y
     return x >= y
+
+
+def _date_arithmetic(op: str, left, right):
+    """Excel's date sums, for dates kept as text: a date plus or minus a
+    number of days is a date, and a date minus a date is the days between.
+    None when neither side is a date (the sum is ordinary arithmetic)."""
+    from datetime import timedelta
+    dl, dr = as_date(left), as_date(right)
+    if dl is None and dr is None:
+        return None
+    if dl is not None and dr is not None:
+        if op == "-":
+            return (dl - dr).total_seconds() / 86400.0
+        return FormulaError(ERR_VALUE, "two dates cannot be added")
+    if dl is not None:
+        days = to_number(right)
+        if isinstance(days, FormulaError):
+            return days
+        moment = dl + timedelta(days=days if op == "+" else -days)
+        return date_text(moment, keep_time=bool(days % 1) or bool(
+            dl.hour or dl.minute or dl.second))
+    if op == "-":
+        return FormulaError(ERR_VALUE, "a number minus a date")
+    days = to_number(left)
+    if isinstance(days, FormulaError):
+        return days
+    moment = dr + timedelta(days=days)
+    return date_text(moment, keep_time=bool(days % 1))
 
 
 def evaluate(node, get_cell, bounds: tuple[int, int]):
@@ -494,10 +527,16 @@ def evaluate(node, get_cell, bounds: tuple[int, int]):
             left = evaluate(node.left, get_cell, bounds)
             right = evaluate(node.right, get_cell, bounds)
             return _compare(node.op, left, right)
-        left = to_number(evaluate(node.left, get_cell, bounds))
+        raw_left = evaluate(node.left, get_cell, bounds)
+        raw_right = evaluate(node.right, get_cell, bounds)
+        if node.op in ("+", "-"):
+            dated = _date_arithmetic(node.op, raw_left, raw_right)
+            if dated is not None:
+                return dated
+        left = to_number(raw_left)
         if isinstance(left, FormulaError):
             return left
-        right = to_number(evaluate(node.right, get_cell, bounds))
+        right = to_number(raw_right)
         if isinstance(right, FormulaError):
             return right
         if node.op == "+":
@@ -538,8 +577,10 @@ def evaluate(node, get_cell, bounds: tuple[int, int]):
         args = []
         for arg in node.args:
             if isinstance(arg, Range):
-                args.append([get_cell(r, c)
-                             for r, c in _range_cells(arg, bounds)])
+                cells = list(_range_cells(arg, bounds))
+                width = len({c for _r, c in cells}) or 1
+                args.append(RangeValue([get_cell(r, c) for r, c in cells],
+                                       width))
             else:
                 args.append(evaluate(arg, get_cell, bounds))
         try:

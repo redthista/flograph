@@ -137,6 +137,30 @@ hides rows in the grid** — the Table still sends every row on. To filter what
 flows on, put a **Filter Rows** node after it. Sorting does reorder the table
 itself (Undo puts it back).
 
+## Functions
+
+About a hundred of Excel's functions, grouped on the ribbon's **Formulas ▸
+Insert Function** list and in the **Function Reference**, each with what it
+does and an example:
+
+| Group | Functions |
+| --- | --- |
+| Maths | SUM, AVERAGE, MIN, MAX, COUNT, ROUND, ROUNDUP/ROUNDDOWN, INT, PRODUCT, SUMPRODUCT, MEDIAN, STDEV, LARGE/SMALL, RANK, LOG, … |
+| Conditional | SUMIF(S), COUNTIF(S), AVERAGEIF(S), MAXIFS, MINIFS, COUNTBLANK |
+| Lookup | VLOOKUP, XLOOKUP, HLOOKUP, INDEX, MATCH, CHOOSE |
+| Logic | IF, IFS, SWITCH, IFERROR, IFNA, AND/OR/NOT/XOR, ISBLANK, ISNUMBER, ISERROR, … |
+| Text | CONCAT, TEXTJOIN, SUBSTITUTE, FIND, SEARCH, REPLACE, TEXT, VALUE, PROPER, LEFT/MID/RIGHT, … |
+| Date | TODAY, NOW, DATE, YEAR/MONTH/DAY, WEEKDAY, WEEKNUM, EDATE, EOMONTH, DAYS, DATEDIF, NETWORKDAYS |
+
+Criteria work as in Excel: `5`, `"North"`, `">100"`, `"<>done"`, `"N*"`
+(`*` and `?` are wildcards), `">=2026-01-01"`. As in Excel, VLOOKUP's
+fourth argument defaults to an approximate match — put `FALSE` there for an
+exact one, or use XLOOKUP, which is exact by default.
+
+Dates are kept as text (`2026-10-07`) and do sums like Excel's: `=[@Due]+7`
+is a week later, `=[@End]-[@Start]` the days between, and two dates compare
+as dates whichever way they are written.
+
 ## Formulas and moving things
 
 Inserting or deleting rows and columns keeps formulas pointing at the same

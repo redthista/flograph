@@ -112,3 +112,58 @@ def format_value(value) -> str:
         return value.code
     text = to_text(value)
     return text if isinstance(text, str) else str(text)
+
+
+class RangeValue(list):
+    """A range argument: its cells row by row, and how many columns wide it
+    is — so a function like VLOOKUP or INDEX can read rows and columns.
+    Everything else sees the flat list it always did."""
+
+    __slots__ = ("cols",)
+
+    def __init__(self, values=(), cols: int = 1) -> None:
+        super().__init__(values)
+        self.cols = max(int(cols), 1)
+
+    @property
+    def rows(self) -> int:
+        return len(self) // self.cols if self.cols else 0
+
+    def at(self, row: int, col: int):
+        return self[row * self.cols + col]
+
+    def row(self, row: int) -> list:
+        return self[row * self.cols:(row + 1) * self.cols]
+
+    def column(self, col: int) -> list:
+        return self[col::self.cols]
+
+
+def as_date(value):
+    """A text value that reads as a date, as a datetime; else None. Numbers
+    are never dates here — the grid keeps dates as text (2026-10-07), and a
+    number that happened to look like one would be a surprise."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not 6 <= len(text) <= 40 or not any(ch.isdigit() for ch in text):
+        return None
+    from datetime import datetime
+    from .schema import normalize_date
+    iso = normalize_date(text)
+    if iso is None:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(iso, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def date_text(moment, keep_time: bool = False) -> str:
+    """A datetime as the grid writes dates: 2026-10-07, with the time only
+    when there is one to keep."""
+    if keep_time and (moment.hour or moment.minute or moment.second):
+        return moment.strftime("%Y-%m-%d %H:%M:%S")
+    return moment.strftime("%Y-%m-%d")

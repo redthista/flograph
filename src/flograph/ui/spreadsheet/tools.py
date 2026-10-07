@@ -34,11 +34,20 @@ from .view import SpreadsheetView
 def reference_html() -> str:
     """The fx button's help page: references, operators, and the function
     table generated from core's FUNCTION_HELP."""
-    rows = "".join(
-        f"<tr><td><b>{html.escape(signature)}</b></td>"
-        f"<td>{html.escape(description)}</td>"
-        f"<td><code>{html.escape(example)}</code></td></tr>"
-        for _name, signature, description, example in FUNCTION_HELP)
+    from flograph.core.sheet import FUNCTION_CATEGORIES
+    rows = ""
+    for category in FUNCTION_CATEGORIES:
+        entries = sorted((e for e in FUNCTION_HELP if e[4] == category),
+                         key=lambda e: e[0])
+        if not entries:
+            continue
+        rows += (f"<tr><td colspan='3'><br><b>{html.escape(category)}</b>"
+                 f"</td></tr>")
+        rows += "".join(
+            f"<tr><td><b>{html.escape(signature)}</b></td>"
+            f"<td>{html.escape(description)}</td>"
+            f"<td><code>{html.escape(example)}</code></td></tr>"
+            for _name, signature, description, example, _cat in entries)
     return f"""
 <h3>Formulas</h3>
 <p>Start a cell with <code>=</code> to enter a formula. Reference cells
