@@ -399,3 +399,45 @@ class TestGridFeatures:
         view.paste_values()
         assert model.cell_source(1, 1) == "4"
         QApplication.clipboard().clear()
+
+
+class TestRightClickReachesTheMenu:
+    """Sent as real events, not by calling the builders — the cell menu was
+    once wired to a signal a scroll area's viewport never emits."""
+
+    def _right_click(self, widget, pos):
+        from PySide6.QtCore import QCoreApplication
+        from PySide6.QtGui import QContextMenuEvent
+        event = QContextMenuEvent(QContextMenuEvent.Mouse, pos,
+                                  widget.mapToGlobal(pos))
+        QCoreApplication.sendEvent(widget, event)
+
+    def test_cell_row_and_header(self, qtbot, monkeypatch):
+        from flograph.ui.spreadsheet import menus
+        shown = []
+        monkeypatch.setattr(menus, "exec_menu",
+                            lambda menu, w, p: shown.append(menu))
+        view, model = _view(qtbot)
+        view.show()
+        qtbot.waitExposed(view)
+        cell = view.visualRect(model.index(2, 1)).center()
+        self._right_click(view.viewport(), cell)
+        assert len(shown) == 1
+        assert view.currentIndex().row() == 2      # the click moved there
+        self._right_click(view.verticalHeader().viewport(), QPoint(5, 5))
+        self._right_click(view.horizontalHeader().viewport(), QPoint(5, 5))
+        assert len(shown) == 3
+
+    def test_frozen_pane_cell(self, qtbot, monkeypatch):
+        from flograph.ui.spreadsheet import menus
+        shown = []
+        monkeypatch.setattr(menus, "exec_menu",
+                            lambda menu, w, p: shown.append(menu))
+        view, model = _view(qtbot)
+        view.show()
+        qtbot.waitExposed(view)
+        view.freeze_first_column()
+        pane = view.frozen_panes.panes()["cols"]
+        cell = pane.visualRect(model.index(1, 0)).center()
+        self._right_click(pane.viewport(), cell)
+        assert len(shown) == 1

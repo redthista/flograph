@@ -258,8 +258,6 @@ class SpreadsheetView(QTableView):
         self._presort_rows: Optional[list[list[str]]] = None
         self._sorting = False
 
-        self.viewport().setContextMenuPolicy(Qt.CustomContextMenu)
-        self.viewport().customContextMenuRequested.connect(self._cell_menu)
         self._actions = None
         self._host = None
         self._show_formulas = False
@@ -817,6 +815,14 @@ class SpreadsheetView(QTableView):
             self.select_rows([row])
         from .menus import row_menu
         row_menu(self, header, pos)
+
+    def contextMenuEvent(self, event) -> None:
+        """A right-click on a cell. Not the viewport's customContextMenu
+        signal: a scroll area routes its viewport's context-menu event to
+        itself, so that signal never fires. The position arrives in viewport
+        coordinates, which is what the menu wants."""
+        event.accept()
+        self._cell_menu(event.pos())
 
     def _cell_menu(self, pos) -> None:
         from .. import menu_guard

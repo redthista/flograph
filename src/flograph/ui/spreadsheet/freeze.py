@@ -97,8 +97,6 @@ class _Pane(QTableView):
             self._row_menu)
         self.verticalHeader().sectionClicked.connect(
             lambda row: main.select_rows([row]))
-        self.viewport().setContextMenuPolicy(Qt.CustomContextMenu)
-        self.viewport().customContextMenuRequested.connect(self._cell_menu)
 
     # The pane never takes the keyboard: the grid keeps it, and routes an
     # edit of a frozen cell back here.
@@ -162,6 +160,11 @@ class _Pane(QTableView):
             self._main.select_rows([row])
         from .menus import row_menu
         row_menu(self._main, self.verticalHeader(), pos)
+
+    def contextMenuEvent(self, event) -> None:
+        # see SpreadsheetView.contextMenuEvent for why not the signal
+        event.accept()
+        self._cell_menu(event.pos())
 
     def _cell_menu(self, pos) -> None:
         if not self._guarded():
