@@ -2654,7 +2654,16 @@ def style_payload(params: dict) -> dict:
     # about it is the payload it always was (AA6).
     if not params.get("row_index", True):
         payload["index"] = False
+    # Likewise written only when it says something other than the default
+    missing = MISSING_CHOICES.get(str(params.get("missing") or ""))
+    if missing is not None:
+        payload["missing"] = missing
     return payload
+
+
+#: Show Table's Missing values dropdown -> the text a missing cell shows.
+#: "NaN" is left out on purpose: it is what a card shows when nothing is said.
+MISSING_CHOICES = {"blank": "", "—": "—"}
 
 
 #: Show Table's dropdown wording -> the rule words. The dropdowns speak
@@ -2724,6 +2733,13 @@ def merge_styles(base: Any, extra: Any) -> dict:
     # away, and neither can bring it back
     if not (index_shown(base) and index_shown(extra)):
         merged["index"] = False
+    # the card's own word on missing values wins over the style it was
+    # handed, the way a later rule wins over an earlier one
+    missing = missing_text(extra)
+    if missing is None:
+        missing = missing_text(base)
+    if missing is not None:
+        merged["missing"] = missing
     return merged
 
 
@@ -2747,6 +2763,16 @@ def index_shown(style_obj: Any) -> bool:
     """Does the style leave the row index on show? It does unless it says
     otherwise — the index is the table's own, not something a rule adds."""
     return not (isinstance(style_obj, dict) and style_obj.get("index") is False)
+
+
+def missing_text(style_obj: Any) -> Optional[str]:
+    """What the style says a missing cell shows — "" for blank — or None
+    when it says nothing and the card's own "NaN" stands."""
+    if isinstance(style_obj, dict):
+        text = style_obj.get("missing")
+        if isinstance(text, str):
+            return text
+    return None
 
 
 def rules_from_style(style_obj: Any) -> list[Rule]:

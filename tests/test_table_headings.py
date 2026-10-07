@@ -324,7 +324,8 @@ class TestMatrix:
                     if r["mode"] == "heading"]
 
     def test_the_version_was_bumped(self, registry):
-        assert registry.get("flograph.viz.show_table").version == "1.9"
+        version = registry.get("flograph.viz.show_table").version
+        assert tuple(map(int, version.split("."))) >= (1, 9)
 
 
 def model_for_style(built):

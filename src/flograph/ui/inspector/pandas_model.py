@@ -112,8 +112,10 @@ _MISSING_FONT = _italic()
 
 def _is_missing(value: Any) -> bool:
     try:
+        # pd.NA is the blank of the nullable dtypes (Float64, Int64, string)
+        # a matrix's cells come out as; missed here, it showed as "<NA>"
         return value is None or (isinstance(value, float) and math.isnan(value)) \
-            or value is pd.NaT
+            or value is pd.NaT or value is pd.NA
     except Exception:
         return False
 
@@ -123,8 +125,11 @@ class PandasModel(QAbstractTableModel):
     headingsChanged = Signal()
 
     def __init__(self, df: pd.DataFrame, parent=None, rules=None,
-                 hidden=None, shown=None, grand=None) -> None:
+                 hidden=None, shown=None, grand=None,
+                 missing: str = "NaN") -> None:
         super().__init__(parent)
+        #: what a missing cell says — Show Table's Missing values
+        self._missing = missing
         # A spark can add a column (drawn in one the table lacks) and put
         # the columns it reads out of view. Worked out before anything else
         # here, because every projection below has to see the new column —
@@ -894,7 +899,7 @@ class PandasModel(QAbstractTableModel):
                 # still answers, so copy, export and sort are untouched.
                 return ""
             if _is_missing(value):
-                return "NaN"
+                return self._missing
             if style is not None and style.text is not None:
                 return style.text
             if isinstance(value, float):
@@ -1164,13 +1169,14 @@ def styled_model(df: pd.DataFrame, style: Any, parent=None) -> PandasModel:
     A bad payload gives the plain table: this is the render path, where a
     raise would blank the view."""
     from flograph.core.table_format import (
-        hidden_columns, rules_from_style, shown_columns)
+        hidden_columns, missing_text, rules_from_style, shown_columns)
     try:
         rules = rules_from_style(style)
         hidden = hidden_columns(style)
         shown = shown_columns(style)
+        missing = missing_text(style)
     except Exception:
-        rules, hidden, shown = [], [], []
+        rules, hidden, shown, missing = [], [], [], None
     # Totals in output wrote the total rows into the table; the card lays
     # them out itself — pinned, styled, and out of every sort and scale —
     # so it takes back the rows they were written into.
@@ -1178,6 +1184,7 @@ def styled_model(df: pd.DataFrame, style: Any, parent=None) -> PandasModel:
     grand = style.get("grand") if isinstance(style, dict) else None
     model = PandasModel(df, parent=parent, rules=rules, hidden=hidden,
                         shown=shown,
-                        grand=grand if isinstance(grand, dict) else None)
+                        grand=grand if isinstance(grand, dict) else None,
+                        missing="NaN" if missing is None else missing)
     model.style_payload = style        # for keeps_table
     return model

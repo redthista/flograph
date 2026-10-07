@@ -365,7 +365,9 @@ class TestNode:
         assert total.values["a"] == pytest.approx(2.5)
 
     def test_the_version_was_bumped(self, registry):
-        assert registry.get("flograph.viz.show_table").version >= "1.8"
+        # compared as numbers: as text, "1.10" sorts before "1.8"
+        version = registry.get("flograph.viz.show_table").version
+        assert tuple(map(int, version.split("."))) >= (1, 8)
 
 
 class TestPaper:

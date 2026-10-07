@@ -214,11 +214,17 @@ on a dashboard. Tick **Show row index** for a table whose index means
 something (dates, names), or to click a row's number to pick it. Like the
 column lists it is a view: the table leaving the `table` port keeps its
 index.
+
+**Missing values.** A cell with no value shows a grey *NaN* — a matrix
+has one wherever a row and a column never meet. Set **Missing values** to
+*blank* to leave those cells empty, or *—* for a dash. The table leaving
+the `table` port still holds them as missing, and a report page leaves
+them blank whichever you pick.
 """
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.9",
+    "version": "1.10",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object",
@@ -306,6 +312,10 @@ PARAMS = [
     # means something (dates, names) ticks it.
     {"name": "row_index", "type": "bool", "label": "Show row index",
      "default": False},
+    # A view, like the column lists: the cell stays missing in the table
+    # leaving the node — only what the card draws there changes.
+    {"name": "missing", "type": "choice", "label": "Missing values",
+     "options": ["NaN", "blank", "—"], "default": "NaN"},
     {"name": "width", "type": "int", "label": "Width",
      "default": 420, "min": 260, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
@@ -330,6 +340,7 @@ def run(ctx, table, style=None):
                          "sort": ctx.params.get("sort", ""),
                          "sort_dir": ctx.params.get("sort_dir", ""),
                          "row_index": ctx.params.get("row_index", True),
+                         "missing": ctx.params.get("missing", "NaN"),
                          "mode": ctx.params.get("mode", "table"),
                          "group_by": ctx.params.get("group_by", ""),
                          "groups_start": ctx.params.get("groups_start", ""),

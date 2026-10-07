@@ -813,6 +813,13 @@ folded year of a mean matrix is the mean of that year's rows, not the mean
 of its four quarters. Set **Column headings** to *flat* for the joined
 names instead.
 
+**Empty cells.** Where a row and a column never meet — no Latency figure
+for Q2 — the cell has no value and shows a grey *NaN*. Set **Missing
+values** to *blank* to leave it empty, or *—* for a dash. It works on any
+Show Table, not only a matrix, and changes only what the card draws: the
+table leaving the node still holds the cell as missing, and a report page
+leaves it blank whichever you pick.
+
 ## Sharing one look across tables
 
 The rules a Show Table applies come out on its **style** output, and a Show

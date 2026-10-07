@@ -38,7 +38,7 @@ from typing import Any
 
 from .table_format import (
     Rule, _column_list, _condition_mask, _is_glob, _is_missing,
-    column_matches, hidden_columns, index_shown, rule_summary,
+    column_matches, hidden_columns, index_shown, missing_text, rule_summary,
     rules_from_style, shown_columns, value_matches)
 
 AGGREGATIONS = ("sum", "mean", "median", "min", "max", "count",
@@ -559,6 +559,8 @@ def build_matrix(table, rows, columns, values=(), agg="sum",
     }
     if not index_shown(style):
         payload["index"] = False
+    if missing_text(style) is not None:
+        payload["missing"] = missing_text(style)
     if totals:
         grand = _grand_totals(table, columns, values, agg, value_keys,
                               name_of)

@@ -250,3 +250,44 @@ class TestShowTableAsAMatrix:
             engine.run_all()
         frame = engine.cache.outputs_for(shown.id)["table"]
         assert list(frame.columns) == list(KPI.columns)
+
+
+class TestMissingValues:
+    """Show Table's Missing values: where a row and a column never meet."""
+
+    #: Latency has no Q2, so the matrix has a hole
+    GAPPY = KPI.iloc[:3]
+
+    def shown(self, missing, frame=None):
+        from PySide6.QtCore import Qt
+        from flograph.ui.inspector.pandas_model import styled_model
+        params = {} if missing is None else {"missing": missing}
+        built = build_matrix(self.GAPPY if frame is None else frame,
+                             ["metric"], ["quarter"], ["value"],
+                             style=style_payload(params))
+        model = styled_model(built.frame, built.style)
+        col = list(built.frame.columns).index("Q2")
+        row = list(built.frame["metric"]).index("Latency")
+        return model.data(model.index(row, col), Qt.DisplayRole)
+
+    def test_the_default_says_nan_never_the_raw_na(self, qapp):
+        assert self.shown(None) == "NaN"
+
+    def test_nullable_numbers_say_nan_too(self, qapp):
+        frame = self.GAPPY.astype({"value": "Float64"})
+        assert self.shown(None, frame) == "NaN"
+
+    @pytest.mark.parametrize("choice, text", [("blank", ""), ("—", "—"),
+                                              ("NaN", "NaN")])
+    def test_the_choice_reaches_the_card(self, qapp, choice, text):
+        assert self.shown(choice) == text
+
+    def test_the_default_leaves_the_payload_as_it_was(self):
+        assert "missing" not in style_payload({"missing": "NaN"})
+
+    def test_the_cards_own_choice_wins_over_a_wired_style(self):
+        from flograph.core.table_format import merge_styles, missing_text
+        wired = style_payload({"missing": "—"})
+        assert missing_text(merge_styles(wired, style_payload({}))) == "—"
+        assert missing_text(merge_styles(
+            wired, style_payload({"missing": "blank"}))) == ""
