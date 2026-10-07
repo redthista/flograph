@@ -11,6 +11,18 @@ IF, ROUND, CONCAT. Row 1 is the first data row. Named references follow
 renames and don't shift when columns move — ideal for linked-input
 tables whose column layout may change.
 
+The ribbon along the top of the grid holds every command, grouped like
+Excel's: Home (clipboard, rows and columns, fill, find), Data (sort, filter,
+column type, dropdown lists), View (freeze panes, fit columns) and Formulas.
+Right-click any cell, row number or column header for the same commands
+where you are. Hover a button for what it does and its shortcut.
+
+Submit: on a big flow, every edit re-running what follows is a lot of
+waiting. Turn off Auto-apply on the ribbon (or set Apply edits to submit)
+and edits are held — the flow keeps using the table as last submitted until
+you press Submit (F9), or Discard to throw them away. Held edits are saved
+with the project and undo like any other.
+
 Each column has a type (right-click its header): auto guesses numbers,
 while text/number/integer/date/bool make the output dtype explicit —
 values that don't fit become missing (the grid flags them red as you
@@ -41,7 +53,7 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
-    "version": "1.0",
+    "version": "1.1",
     "card": "grid",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe")],
@@ -55,6 +67,13 @@ PARAMS = [
                      {"name": "B", "type": "auto"}],
          "rows": [["", ""], ["", ""]],
      })},
+    # live: every edit goes straight into the flow. submit: edits wait in
+    # `draft` (cosmetic, so it marks nothing out of date and starts no run)
+    # until Submit — see ui/spreadsheet/binding.py.
+    {"name": "apply", "type": "choice", "label": "Apply edits",
+     "options": ["live", "submit"], "default": "live", "cosmetic": True},
+    {"name": "draft", "type": "text", "label": "Edits not yet submitted",
+     "hidden": True, "default": "", "cosmetic": True},
     {"name": "width", "type": "int", "label": "Width",
      "default": 320, "min": 220, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",

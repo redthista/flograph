@@ -1431,6 +1431,18 @@ class MainWindow(QMainWindow):
         self.params_panel.flush_pending()
         for window in list(self._node_windows.values()):
             window.flush_pending()
+        # A Table holding edits until Submit runs on what was last
+        # submitted — on purpose, but it should not look like the edits
+        # were lost, so say so.
+        from .spreadsheet.binding import has_draft
+        held = [n.label for n in self.graph.nodes.values()
+                if card_kind(n) == "grid" and has_draft(n)]
+        if held:
+            names = ", ".join(f"‘{name}’" for name in held[:3])
+            self.show_status(
+                f"{names} {'has' if len(held) == 1 else 'have'} edits not "
+                "submitted — this run uses the table as last submitted. "
+                "Press Submit (F9) on the table to send them on.", 8000)
 
     def _on_memory_pressure(self, message: str) -> None:
         """Said once, when the project becomes the reason memory is tight.
@@ -1736,6 +1748,7 @@ class MainWindow(QMainWindow):
         self.scene.button_fired.connect(self._on_button_fired)
         self.scene.page_link_clicked.connect(self._follow_page_link)
         self.scene.slicer_changed.connect(self._on_slicer_changed)
+        self.scene.sheet_submitted.connect(self._on_dashboard_sheet_edited)
         self.scene.control_changed.connect(self._on_control_changed)
         self.scene.view_changed.connect(self._on_view_changed)
         self.scene.view_error.connect(self._on_view_error)
@@ -3872,8 +3885,9 @@ class MainWindow(QMainWindow):
             f"{node.label if node is not None else 'View'}: {message}", 8000)
 
     def _on_dashboard_sheet_edited(self, node_id: str) -> None:
-        """A cell changed in a Table tile: re-run it and everything it feeds,
-        so the charts and KPIs on the page follow the number that was just
+        """A cell changed in a Table tile, or a Table's held edits were
+        submitted (from its card, tile or editor): re-run it and everything
+        it feeds, so the charts and KPIs follow the number that was just
         typed. Same deal as a Slicer — the SetParamCommand already dirtied
         the subgraph, and request_run means typing across a row is one run
         of the finished row rather than a queue of obsolete ones."""

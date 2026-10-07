@@ -558,7 +558,8 @@ class TileItem(QGraphicsObject):
         kind = self._kind()
         if kind == "sheet" and self._sheet_model is not None:
             from ..spreadsheet import SheetWorkbench
-            workbench = SheetWorkbench(self._sheet_model)
+            workbench = SheetWorkbench(self._sheet_model,
+                                       host=self._sheet_host())
             workbench.view.verticalHeader().setFixedWidth(28)
             return workbench
         if kind == "table" and self._table_view is not None:
@@ -796,7 +797,7 @@ class TileItem(QGraphicsObject):
         # ordered, and is held here so a maximized page can put a second
         # view on the very same model (see fullscreen_widget)
         model = SheetModel(self._sheet_source())
-        workbench = SheetWorkbench(model)
+        workbench = SheetWorkbench(model, host=self._sheet_host())
         model.setParent(workbench)
         workbench.view.verticalHeader().setFixedWidth(28)
         model.sheet_edited.connect(self._commit_sheet_data)
@@ -921,15 +922,31 @@ class TileItem(QGraphicsObject):
             self._image.set_playing(False)
 
     def _sheet_source(self) -> object:
-        """What the grid should show: the merged result of a linked run
-        (upstream columns refreshed, the user's own carried over) when there
-        is one, otherwise the node's stored cells."""
-        from flograph.engine.introspect import merged_linked_sheet
+        """What the grid should show: edits held until Submit when there are
+        any, else the merged result of a linked run (upstream columns
+        refreshed, the user's own carried over), else the stored cells."""
+        from ..spreadsheet.binding import shown_sheet
         node = self._node()
         if node is None:
             return None
-        merged = merged_linked_sheet(self._graph, self._engine.cache, node.id)
-        return merged if merged is not None else node.params.get("data")
+        return shown_sheet(self._graph, self._engine.cache, node.id)
+
+    def _sheet_host(self):
+        """The Submit / auto-apply / undo plumbing the ribbon talks to."""
+        from ..spreadsheet.binding import NodeSheetHost
+        node_id = self.tile.node_id
+
+        def stack():
+            scene = self.scene()
+            return getattr(scene, "undo_stack", None)
+
+        def submitted():
+            scene = self.scene()
+            if scene is not None:
+                scene.sheet_edited.emit(node_id)
+
+        return NodeSheetHost(self._graph, stack, node_id,
+                             on_submitted=submitted)
 
     def _commit_sheet_data(self, data: dict) -> None:
         """One undo step per edit, then re-run so the visuals beside the
@@ -941,14 +958,11 @@ class TileItem(QGraphicsObject):
         node = self._node()
         if scene is None or node is None:
             return
-        new_json = json.dumps(data)
-        if new_json == node.params.get("data"):
-            return
-        from ..commands import SetParamCommand
-        # merge=False: one Ctrl+Z undoes one cell edit, not the session
-        scene.undo_stack.push(SetParamCommand(
-            self._graph, node.id, "data", new_json, merge=False))
-        scene.sheet_edited.emit(node.id)
+        from ..spreadsheet.binding import commit_edit
+        # one Ctrl+Z undoes one cell edit, not the session; held until
+        # Submit when the node says so, and then nothing re-runs yet
+        if commit_edit(self._graph, scene.undo_stack, node.id, data):
+            scene.sheet_edited.emit(node.id)
 
     def _dialog_parent_widget(self) -> Optional[QWidget]:
         scene = self.scene()

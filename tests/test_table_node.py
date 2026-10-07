@@ -204,16 +204,18 @@ def test_table_card_keeps_its_grid_inside_the_frame_when_short(env, registry):
     assert item.body_height >= 160
 
 
-def test_table_toolbar_wraps_rather_than_clipping(env, registry):
+def test_table_ribbon_wraps_rather_than_clipping(env, registry):
+    """The card's compact ribbon wraps its icon row when the card is dragged
+    narrow, rather than clipping buttons off the edge."""
     from flograph.ui.flow_layout import FlowLayout
     graph, _stack, scene = env
     node = graph.add_node(registry.instantiate("flograph.io.table"))
     item = scene.node_items[node.id]
-    toolbar = item._table_expand.parent()
-    layout = toolbar.layout()
+    ribbon = item._table_ribbon
+    page = ribbon._stacks["compact"].widget(0)
+    layout = page.layout()
     assert isinstance(layout, FlowLayout)
     assert layout.hasHeightForWidth()
-    # narrow enough that the seven buttons cannot share one row
     assert layout.heightForWidth(120) > layout.heightForWidth(1000)
 
 

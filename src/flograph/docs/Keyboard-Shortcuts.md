@@ -56,6 +56,24 @@ on the text, not the graph.
 | Reveal flow pins | hold **Q** |
 | Add selected node to favorites | **Ctrl+Shift+F** |
 
+## Table spreadsheet
+
+While a Table's grid has the keyboard. The full list is on
+[[The Table Spreadsheet]].
+
+| Action | Binding |
+| --- | --- |
+| Submit held edits | **F9** |
+| Fill down / right | **Ctrl+D** / **Ctrl+R** |
+| Paste values only | **Ctrl+Shift+V** |
+| Select whole rows / columns | **Shift+Space** / **Ctrl+Space** |
+| Insert / delete rows | **Ctrl++** / **Ctrl+-** |
+| Move rows or columns | **Alt+Shift+arrows** |
+| Find / replace | **Ctrl+F** / **Ctrl+H** |
+| Filter the column | **Ctrl+Shift+L** |
+| Open a cell's dropdown list | **Alt+Down** |
+| Show formulas | **Ctrl+`** |
+
 ## Windows
 
 | Action | Binding |

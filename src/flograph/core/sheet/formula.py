@@ -660,3 +660,92 @@ def translate(src: str, drow: int, dcol: int) -> str:
         else:
             out.append(token.text)
     return "=" + "".join(out)
+
+
+# ------------------------------------------------- structural ref shifting
+
+def shift_for_structure(src: str, axis: str, at: int, count: int) -> str:
+    """Rewrite A1 references after rows or columns were inserted or
+    deleted, the way Excel keeps a formula pointing at the same cells.
+
+    ``axis`` is "row" or "col". A positive ``count`` inserted that many at
+    index ``at``: every reference at or past it moves along, "$" pins
+    included — a pin fixes a reference against copying, not against the
+    sheet changing shape under it. A negative ``count`` deleted
+    ``-count`` starting at ``at``: references past the gap move back, a
+    lone reference into the gap becomes #REF!, and a range loses the
+    deleted part of itself (#REF! only when all of it went).
+
+    Column-name references ([Price], [@Price]) need nothing: they name the
+    column, not its position. Non-formulas and unparseable formulas come
+    back unchanged."""
+    if (count == 0 or not isinstance(src, str) or not src.startswith("=")
+            or src == "="):
+        return src
+    try:
+        tokens = tokenize(src[1:])
+        _Parser(list(tokens)).parse()
+    except FormulaSyntaxError:
+        return src
+    by_row = axis == "row"
+    gone_end = at - count   # first index past a deletion
+
+    def position(token: Token) -> int:
+        return token.row if by_row else token.col
+
+    def moved(token: Token, index: int) -> str:
+        row, col = (index, token.col) if by_row else (token.row, index)
+        return ref_text(row, col, token.row_abs, token.col_abs)
+
+    def single(token: Token) -> Optional[int]:
+        index = position(token)
+        if count > 0:
+            return index + count if index >= at else index
+        if index < at:
+            return index
+        if index >= gone_end:
+            return index + count
+        return None   # the cell it named was deleted
+
+    out: list[str] = []
+    changed = False
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        is_range = (token.kind == "ref" and i + 2 < len(tokens)
+                    and tokens[i + 1].kind == "colon"
+                    and tokens[i + 2].kind == "ref")
+        if is_range:
+            first, last = token, tokens[i + 2]
+            lo, hi = sorted((position(first), position(last)))
+            if count > 0:
+                new_lo = lo + count if lo >= at else lo
+                new_hi = hi + count if hi >= at else hi
+            else:
+                new_lo = lo if lo < at else (
+                    lo + count if lo >= gone_end else at)
+                new_hi = hi if hi < at else (
+                    hi + count if hi >= gone_end else at - 1)
+            if new_hi < new_lo:
+                out.append("#REF!")
+            else:
+                start_tok, end_tok = ((first, last)
+                                      if position(first) <= position(last)
+                                      else (last, first))
+                out.append(moved(start_tok, new_lo) + ":"
+                           + moved(end_tok, new_hi))
+            changed = changed or (new_lo, new_hi) != (lo, hi)
+            i += 3
+            continue
+        if token.kind == "ref":
+            index = single(token)
+            if index is None:
+                out.append("#REF!")
+                changed = True
+            else:
+                out.append(moved(token, index))
+                changed = changed or index != position(token)
+        else:
+            out.append(token.text)
+        i += 1
+    return "=" + "".join(out) if changed else src

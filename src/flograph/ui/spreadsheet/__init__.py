@@ -7,7 +7,8 @@ from .completion import FormulaCompleter
 from .delegates import SheetDelegate
 from .dialog import SheetEditorDialog
 from .model import SheetModel
-from .tools import (FormulaBar, FormulaReferenceDialog, SheetToolbar,
+from .ribbon import SheetRibbon
+from .tools import (FormulaBar, FormulaReferenceDialog,
                     SheetWorkbench, reference_html)
 from .view import (AUTOSIZE_SETTING, DATE_FORMATS_SETTING, SpreadsheetView,
                    autosize_default_enabled, date_formats_setting,
@@ -16,7 +17,7 @@ from .view import (AUTOSIZE_SETTING, DATE_FORMATS_SETTING, SpreadsheetView,
 __all__ = [
     "AUTOSIZE_SETTING", "DATE_FORMATS_SETTING", "FormulaBar",
     "FormulaCompleter", "FormulaReferenceDialog",
-    "MIME_CELLS", "SheetDelegate", "SheetToolbar", "SheetWorkbench",
+    "MIME_CELLS", "SheetDelegate", "SheetRibbon", "SheetWorkbench",
     "SheetEditorDialog", "SheetModel", "SpreadsheetView", "reference_html",
     "autosize_default_enabled", "block_to_html", "block_to_tsv",
     "date_formats_setting", "decode_cells", "encode_cells",

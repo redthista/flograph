@@ -5,6 +5,7 @@
   - [[Keyboard Shortcuts]]
 - **Building flows**
   - [[Nodes and the Library]]
+  - [[The Table Spreadsheet]]
   - [[Flow Variables]]
 - **Building nodes**
   - [[Writing a Node]]

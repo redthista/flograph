@@ -1086,8 +1086,7 @@ class NodeItem(QGraphicsObject):
         self._note_link_press: QPointF | None = None  # link hit on press
         self._table_widget = None   # SpreadsheetView (grid cards only)
         self._table_model = None    # SheetModel (grid cards only)
-        self._table_buttons: tuple = ()
-        self._table_expand = None
+        self._table_ribbon = None   # SheetRibbon (grid cards only)
         self._table_proxy: QGraphicsProxyWidget | None = None
         self._figure_view = None
         self._figure_proxy: QGraphicsProxyWidget | None = None
@@ -1686,84 +1685,81 @@ class NodeItem(QGraphicsObject):
             self._table_proxy.setGeometry(self._table_proxy_rect())
 
     def _build_table_widget(self) -> None:
-        from ..flow_layout import FlowLayout
-        from ..spreadsheet import SheetModel, SpreadsheetView
+        from ..spreadsheet import SheetModel, SheetRibbon, SpreadsheetView
+        from ..spreadsheet.binding import NodeSheetHost
 
         host = QWidget()
         layout = QVBoxLayout(host)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(3)
-
-        toolbar = QWidget()
-        # a flow layout, not a row: the buttons wrap onto another line when
-        # the card is dragged narrow rather than clipping off its edge
-        trow = FlowLayout(toolbar, spacing=2)
-        add_row = QToolButton(text="+Row")
-        del_row = QToolButton(text="-Row")
-        add_col = QToolButton(text="+Col")
-        del_col = QToolButton(text="-Col")
-        fit = QToolButton(text="Fit")
-        fit.setToolTip("Auto-size columns to their content")
-        copy_headers = QToolButton(text="Copy")
-        copy_headers.setToolTip(
-            "Copy the selection to the clipboard with column headers on "
-            "top — plain Ctrl+C leaves them out. Copies the whole table "
-            "if nothing is selected")
-        add_row.setToolTip("Insert a row below the selection (or at the end)")
-        del_row.setToolTip("Delete the selected rows (or the last row)")
-        add_col.setToolTip(
-            "Insert a column right of the selection (or at the end)")
-        del_col.setToolTip("Delete the selected columns (or the last column)")
-        expand = QToolButton(text="⛶")
-        expand.setToolTip("Open the full spreadsheet editor")
-        # compact enough that the whole row fits a default-width card on one
-        # line — it only wraps once the card is genuinely narrow
-        toolbar.setStyleSheet("QToolButton { font-size: 8pt; padding: 1px 3px; }")
-        for button in (add_row, del_row, add_col, del_col, fit, copy_headers,
-                       expand):
-            button.setAutoRaise(True)
-            trow.addWidget(button)
-        layout.addWidget(toolbar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         grid = SpreadsheetView()
         # a canvas full of these fits its columns on first paint, not at load
         grid.set_defer_autosize(True)
         # parent the model to the view so C++ destruction stays ordered
-        model = SheetModel(self.node.params.get("data"), parent=grid)
+        model = SheetModel(self._table_source(), parent=grid)
         grid.setModel(model)
         grid.verticalHeader().setFixedWidth(28)
         theme.style_scroll_area(grid, theme.grid_stylesheet())
-        layout.addWidget(grid)
+        grid.set_host(NodeSheetHost(
+            lambda: (self.scene().graph if self.scene() is not None
+                     else None),
+            self._table_undo_stack, self.node.id,
+            on_submitted=self._table_submitted,
+            linked_fn=self._table_input_connected,
+            open_editor_fn=self._open_table_editor))
 
-        add_row.clicked.connect(self._table_add_row)
-        del_row.clicked.connect(self._table_remove_row)
-        add_col.clicked.connect(self._table_add_column)
-        del_col.clicked.connect(self._table_remove_column)
-        fit.clicked.connect(lambda: grid.autosize_columns())
-        copy_headers.clicked.connect(grid.copy_selection_with_headers)
-        expand.clicked.connect(self._open_table_editor)
+        # The ribbon, compact: a line of icon buttons per tab, each with a
+        # tooltip saying what it does — the card's pixels belong to the grid.
+        # It wraps rather than clips when the card is dragged narrow.
+        ribbon = SheetRibbon(grid, "compact")
+        layout.addWidget(ribbon)
+        layout.addWidget(grid, 1)
+
         model.sheet_edited.connect(self._commit_table_data)
 
         proxy = self._card_proxy(host)
         self._table_proxy = proxy
         self._table_widget = grid
         self._table_model = model
-        self._table_buttons = (add_row, del_row, add_col, del_col)
-        self._table_expand = expand
+        self._table_ribbon = ribbon
         self._layout_table_proxy()
+
+    def _table_undo_stack(self):
+        scene = self.scene()
+        return getattr(scene, "undo_stack", None)
+
+    def _table_source(self):
+        """What the grid shows: edits held until Submit when there are any,
+        else a linked table's merge with its input, else the stored cells."""
+        scene = self.scene()
+        if scene is None:
+            return self.node.params.get("draft") or self.node.params.get("data")
+        from ..spreadsheet.binding import shown_sheet
+        return shown_sheet(scene.graph, getattr(scene, "output_cache", None),
+                           self.node.id)
+
+    def _table_submitted(self) -> None:
+        """New data is in the flow: run it and what follows, like an edit to
+        a dashboard Table does."""
+        scene = self.scene()
+        signal = getattr(scene, "sheet_submitted", None)
+        if signal is not None:
+            signal.emit(self.node.id)
 
     def _sync_table_widget(self) -> None:
         """Pull externally-changed data (undo/redo, a Properties edit, a
-        resize writing width/height) into the grid; SheetModel skips the
-        reset when nothing changed.
+        resize writing width/height, Submit, Discard) into the grid;
+        SheetModel skips the reset when nothing changed.
 
         While linked, the card shows the *merge* of the stored sheet with
         the cached upstream frame — so this re-derives that merge rather
         than reading the stored sheet, which holds only the user's own
-        columns and would blank the grid until the next run."""
+        columns and would blank the grid until the next run. Edits held
+        until Submit win over both: they are what the user is looking at."""
         if self._table_model is not None:
-            self._table_model.set_sheet(
-                self._linked_sheet() or self.node.params.get("data"))
+            self._table_model.set_sheet(self._table_source())
+            self._table_widget.actions.refresh()
 
     def _linked_sheet(self):
         """The merged sheet a linked table should be showing, or None when
@@ -1795,46 +1791,45 @@ class NodeItem(QGraphicsObject):
     def show_linked_sheet(self, sheet_dict: dict) -> None:
         """Display the merged result of a linked run (input columns
         refreshed, user columns carried over) — editable; the first edit
-        commits this merged state to the node."""
-        if self._table_model is not None and sheet_dict:
+        commits this merged state to the node. Not while edits are held
+        until Submit: the grid is showing those."""
+        from ..spreadsheet.binding import has_draft
+        if (self._table_model is not None and sheet_dict
+                and not has_draft(self.node)):
             self._table_model.set_sheet(sheet_dict)
 
     def _commit_table_data(self, data: dict) -> None:
-        import json
         scene = self.scene()
         if scene is None:
             return
-        from ..commands import SetParamCommand
-        new_json = json.dumps(data)
-        if new_json == self.node.params.get("data"):
-            return
-        # merge=False: every cell edit/paste/structural op is its own undo
-        # step — one Ctrl+Z reverts one edit, not the whole session
-        scene.undo_stack.push(SetParamCommand(
-            scene.graph, self.node.id, "data", new_json, merge=False))
+        from ..spreadsheet.binding import commit_edit
+        # every cell edit/paste/structural op is its own undo step — one
+        # Ctrl+Z reverts one edit, not the whole session. Held until Submit
+        # when the node says so (see spreadsheet/binding.py).
+        commit_edit(scene.graph, scene.undo_stack, self.node.id, data)
 
-    # The card's buttons act on the selection, like the row/column header
-    # menus do; with nothing picked they fall back to the end of the grid.
+    # The card's old buttons, kept as the view's commands: they act on the
+    # selection, and with nothing picked on the end of the grid.
 
     def _table_add_row(self) -> None:
-        model = self._table_model
-        rows = self._table_widget.selected_rows()
-        model.insert_rows_at(rows[-1] + 1 if rows else model.rowCount())
+        self._table_widget.insert_rows(below=True)
 
     def _table_remove_row(self) -> None:
-        model = self._table_model
-        model.remove_rows_at(self._table_widget.selected_rows()
-                             or [model.rowCount() - 1])
+        grid, model = self._table_widget, self._table_model
+        if grid.selected_rows():
+            grid.delete_rows()
+        else:
+            model.remove_rows_at([model.rowCount() - 1])
 
     def _table_add_column(self) -> None:
-        model = self._table_model
-        cols = self._table_widget.selected_columns()
-        model.insert_columns_at(cols[-1] + 1 if cols else model.columnCount())
+        self._table_widget.insert_columns(right=True)
 
     def _table_remove_column(self) -> None:
-        model = self._table_model
-        model.remove_columns_at(self._table_widget.selected_columns()
-                                or [model.columnCount() - 1])
+        grid, model = self._table_widget, self._table_model
+        if grid.selected_columns():
+            grid.delete_columns()
+        else:
+            model.remove_columns_at([model.columnCount() - 1])
 
     def _open_table_editor(self) -> None:
         from ..spreadsheet import SheetEditorDialog
@@ -1843,9 +1838,15 @@ class NodeItem(QGraphicsObject):
         if proxy is not None:
             proxy.setEnabled(False)   # no concurrent card edits underneath
         try:
+            from ..spreadsheet.menus import real_window
             dialog = SheetEditorDialog(
-                self.node.params.get("data"),
-                title=f"Edit Table — {self.node.label}")
+                self._table_source(),
+                title=f"Edit Table — {self.node.label}",
+                parent=(real_window(self._table_widget)
+                        if self._table_widget is not None else None),
+                host=self._table_widget.host
+                if self._table_widget is not None else None,
+                reload=self._table_source)
             dialog.on_apply = self._commit_table_data
             if dialog.exec():
                 self._commit_table_data(dialog.sheet_dict())

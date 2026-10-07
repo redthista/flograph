@@ -1,5 +1,5 @@
-"""The chrome that turns a bare grid into a spreadsheet: the toolbar, the
-formula bar, and the function reference behind the fx button.
+"""The chrome that turns a bare grid into a spreadsheet: the ribbon (see
+ribbon.py), the formula bar, and the function reference behind fx.
 
 These started out inside the pop-out editor, which was the only place a
 Table could be worked on properly. Dashboard pages are used for data entry,
@@ -17,8 +17,9 @@ import html
 from typing import Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit,
-                               QTextBrowser, QToolBar, QToolButton, QVBoxLayout,
+                               QTextBrowser, QToolButton, QVBoxLayout,
                                QWidget)
 
 from flograph.core.sheet import FUNCTION_HELP, cell_name
@@ -82,52 +83,6 @@ class FormulaReferenceDialog(QDialog):
         layout.addWidget(browser)
 
 
-class SheetToolbar(QToolBar):
-    """Row/column/sort/fill actions for a SpreadsheetView.
-
-    A QToolBar rather than a row of buttons because it collapses what does
-    not fit into an overflow menu on its own — the same toolbar has to work
-    across a 560px dashboard tile and a maximized 4K page.
-    """
-
-    def __init__(self, view: SpreadsheetView, parent=None) -> None:
-        super().__init__(parent)
-        self.setMovable(False)
-        self.setFloatable(False)
-        self._view = view
-
-        model = view.sheet_model()
-
-        def row() -> int:
-            index = view.currentIndex()
-            return index.row() if index.isValid() else 0
-
-        def col() -> int:
-            index = view.currentIndex()
-            return index.column() if index.isValid() else 0
-
-        self.addAction("+ Row above", lambda: model.insert_rows_at(row()))
-        self.addAction("+ Row below", lambda: model.insert_rows_at(row() + 1))
-        self.addAction("− Row", lambda: model.remove_rows_at(
-            view.selected_rows() or [row()]))
-        self.addSeparator()
-        self.addAction("+ Column", lambda: model.insert_columns_at(col() + 1))
-        self.addAction("− Column", lambda: model.remove_columns_at(
-            view.selected_columns() or [col()]))
-        self.addSeparator()
-        self.addAction("Fill down", view.fill_down_selection)
-        self.addAction("Fit columns", lambda: view.autosize_columns())
-        self.addAction("Sort ↑", lambda: model.sort_by(col(), True))
-        self.addAction("Sort ↓", lambda: model.sort_by(col(), False))
-        self.addSeparator()
-        copy_headers = self.addAction("Copy w/ Headers",
-                                      view.copy_selection_with_headers)
-        copy_headers.setToolTip(
-            "Copy the selection to the clipboard with column headers on "
-            "top — plain Ctrl+C leaves them out. Copies the whole table "
-            "if nothing is selected")
-
-
 class FormulaBar(QWidget):
     """Cell reference, the raw source of the current cell, and fx.
 
@@ -142,17 +97,31 @@ class FormulaBar(QWidget):
         self._reference: Optional[QDialog] = None
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
+        row.setContentsMargins(4, 2, 4, 2)
+        row.setSpacing(4)
 
-        fx = QToolButton(text="fx")
+        from .icons import sheet_icon
+        fx = QToolButton()
+        fx.setIcon(sheet_icon("fx"))
+        fx.setIconSize(QSize(18, 18))
         fx.setAutoRaise(True)
-        fx.setToolTip("Show available formulas and examples")
+        fx.setToolTip("Every function the formulas know, with examples")
         fx.clicked.connect(self.show_reference)
 
+        # Excel's name box: which cell the bar is showing
         self.cell_label = QLabel("A1")
-        self.cell_label.setMinimumWidth(40)
+        self.cell_label.setMinimumWidth(52)
         self.cell_label.setAlignment(Qt.AlignCenter)
+        self.cell_label.setToolTip("The selected cell — column letter and "
+                                   "row number, as formulas refer to it")
+        self.setStyleSheet(
+            "QLabel { background: #1f2026; color: #d6d8de;"
+            " border: 1px solid #3a3d47; border-radius: 3px;"
+            " padding: 2px 4px; font-size: 8.5pt; }"
+            "QLineEdit { background: #1f2026; color: #e5e7eb;"
+            " border: 1px solid #3a3d47; border-radius: 3px;"
+            " padding: 2px 4px; }"
+            "QLineEdit:focus { border-color: #60a5fa; }")
 
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(
@@ -208,7 +177,7 @@ class FormulaBar(QWidget):
 
 
 class SheetWorkbench(QWidget):
-    """Toolbar + formula bar + grid over a model someone else owns.
+    """Ribbon + formula bar + grid over a model someone else owns.
 
     The unit that gets embedded wherever a Table is edited in earnest: the
     pop-out editor, a dashboard tile, and a maximized dashboard page. The
@@ -218,11 +187,12 @@ class SheetWorkbench(QWidget):
     """
 
     def __init__(self, model: SheetModel, parent=None,
-                 styled: bool = True) -> None:
+                 styled: bool = True, host=None,
+                 ribbon_size: str = "auto") -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(0)
 
         self.view = SpreadsheetView(self)
         self.view.setModel(model)
@@ -230,7 +200,10 @@ class SheetWorkbench(QWidget):
             # through style_scroll_area, never setStyleSheet -- a stylesheet
             # applied directly costs the grid its scroll-blitting
             theme.style_scroll_area(self.view, theme.grid_stylesheet())
-        self.toolbar = SheetToolbar(self.view, self)
+        if host is not None:
+            self.view.set_host(host)
+        from .ribbon import SheetRibbon
+        self.toolbar = self.ribbon = SheetRibbon(self.view, ribbon_size, self)
         self.formula_bar = FormulaBar(self.view, self)
 
         layout.addWidget(self.toolbar)
@@ -242,5 +215,7 @@ class SheetWorkbench(QWidget):
 
     def sync(self) -> None:
         """Re-read the current cell — after an external change replaced the
-        sheet (undo, a run refreshing a linked table)."""
+        sheet (undo, a run refreshing a linked table) — and the ribbon's
+        Submit state with it."""
         self.formula_bar.sync()
+        self.view.actions.refresh()

@@ -1,22 +1,33 @@
 """SpreadsheetView: Excel-style grid interaction, shared by the canvas
-card and the pop-out editor.
+card, the pop-out editor and a dashboard tile.
 
-Keyboard: Enter commits and moves down, Tab moves right, typing replaces,
-F2 edits in place, Delete clears, Ctrl+D fills down, Ctrl+C/X/V work on
-rectangular selections (TSV + HTML + an internal format that keeps
-formulas and shifts their relative references on paste). Header context
-menus insert/delete/rename/retype/sort; double-click a column header to
-rename it.
+Mouse first: click a column header or row number to select it, drag across
+headers to select several, right-click anything for the commands that apply
+there, and use a column's ▾ button to sort or filter it. Every command is
+one QAction in ``actions.SheetActions`` — the ribbon, the right-click menus
+and the keyboard all trigger the same objects, so a command reads, behaves
+and is explained the same wherever it is found.
+
+Keyboard (Excel's keys): Enter commits and moves down, Tab moves right,
+typing replaces, F2 edits in place, Delete clears, Ctrl+D / Ctrl+R fill
+down / right, Ctrl+C/X/V work on rectangular selections (TSV + HTML + an
+internal format that keeps formulas and shifts their relative references on
+paste), Ctrl+Shift+V pastes values only, Shift+Space / Ctrl+Space select
+rows / columns, Ctrl++ / Ctrl+- insert / delete them, Alt+Shift+arrows move
+them, Ctrl+arrows jump to the edge of the data, Ctrl+F / Ctrl+H find and
+replace, Ctrl+Shift+L filters, Alt+Down opens a cell's dropdown list, F9
+submits held edits.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import (QEvent, QItemSelectionModel, QMimeData, QSettings,
-                            Qt, QTimer)
-from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import (QEvent, QItemSelection, QItemSelectionModel,
+                            QMimeData, QPoint, QRect, QSettings, Qt, QTimer,
+                            Signal)
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractItemDelegate, QAbstractItemView,
-                               QApplication, QInputDialog, QMenu, QTableView,
+                               QApplication, QTableView,
                                QToolTip)
 
 from flograph.core.sheet import COLUMN_TYPES, set_extra_date_formats, translate
@@ -66,19 +77,161 @@ def _apply_date_formats(text: str) -> None:
 _apply_date_formats(date_formats_setting())
 
 
+def _sheet_header_class():
+    """SheetHeader, built on first use: data_table is the older module and
+    must not depend on this package loading."""
+    global _SheetHeader
+    if _SheetHeader is not None:
+        return _SheetHeader
+    from ..data_table import TooltipHeader
+
+    class SheetHeader(TooltipHeader):
+        """The column header, with a ▾ button on every column — Excel's
+        filter button, always there, so sorting and filtering a column is
+        one click on the column itself. The button lights blue while the
+        column is filtered. A click anywhere else on a header selects the
+        column, as a spreadsheet's does."""
+
+        menu_button_clicked = Signal(int)
+        BUTTON_W = 15
+        # The height of the band holding the names. Taller than that while
+        # rows are frozen — the panes cover the rest (see freeze.py).
+        band_height = None
+
+        def __init__(self, view) -> None:
+            super().__init__(Qt.Horizontal, view)
+            self._view = view
+            self._hover = -1
+            self.setMouseTracking(True)
+            # Excel's table headers: the name at the left, the ▾ at the right
+            self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        def button_rect(self, section: int) -> QRect:
+            x = self.sectionViewportPosition(section)
+            w = self.sectionSize(section)
+            bw = min(self.BUTTON_W, max(w - 4, 0))
+            band = self.band_height or self.height()
+            return QRect(x + w - bw - 2, 3, bw, band - 6)
+
+        def _button_at(self, pos) -> int:
+            if not getattr(self._view, "show_column_buttons", True):
+                return -1
+            section = self.logicalIndexAt(pos)
+            if section >= 0 and self.button_rect(section).contains(pos):
+                return section
+            return -1
+
+        def paintSection(self, painter, rect, section) -> None:
+            super().paintSection(painter, rect, section)
+            if not getattr(self._view, "show_column_buttons", True):
+                return
+            button = self.button_rect(section)
+            if button.width() < 8:
+                return
+            painter.save()
+            # a name long enough to reach the button stops short of it,
+            # rather than running underneath
+            from .. import theme
+            under = button.adjusted(-3, -1, 0, 1).intersected(
+                rect.adjusted(1, 1, -1, -1))
+            painter.fillRect(under, theme.NODE_HEADER)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            filtered = self._view.is_column_filtered(section)
+            if filtered or self._hover == section:
+                fill = QColor("#60a5fa") if filtered else QColor("#4b4f5c")
+                fill.setAlpha(90 if filtered else 160)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(fill)
+                painter.drawRoundedRect(button, 3, 3)
+            pen = QPen(QColor("#93c5fd") if filtered else QColor("#9ca3af"),
+                       1.4)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            cx, cy = button.center().x(), button.center().y()
+            if filtered:   # a small funnel: this column is filtered
+                painter.drawLine(QPoint(cx - 4, cy - 3), QPoint(cx + 4, cy - 3))
+                painter.drawLine(QPoint(cx - 4, cy - 3), QPoint(cx - 1, cy + 1))
+                painter.drawLine(QPoint(cx + 4, cy - 3), QPoint(cx + 1, cy + 1))
+                painter.drawLine(QPoint(cx, cy + 1), QPoint(cx, cy + 4))
+            else:
+                painter.drawLine(QPoint(cx - 3, cy - 1), QPoint(cx, cy + 2))
+                painter.drawLine(QPoint(cx, cy + 2), QPoint(cx + 3, cy - 1))
+            painter.restore()
+
+        def sectionSizeFromContents(self, section):
+            size = super().sectionSizeFromContents(section)
+            if getattr(self._view, "show_column_buttons", True):
+                size.setWidth(size.width() + self.BUTTON_W + 2)
+            return size
+
+        def mousePressEvent(self, event) -> None:
+            if event.button() == Qt.LeftButton:
+                section = self._button_at(event.position().toPoint())
+                if section >= 0:
+                    event.accept()
+                    self.menu_button_clicked.emit(section)
+                    return
+            super().mousePressEvent(event)
+
+        def mouseMoveEvent(self, event) -> None:
+            hover = self._button_at(event.position().toPoint())
+            if hover != self._hover:
+                self._hover = hover
+                self.viewport().update()
+            super().mouseMoveEvent(event)
+
+        def leaveEvent(self, event) -> None:
+            if self._hover != -1:
+                self._hover = -1
+                self.viewport().update()
+            super().leaveEvent(event)
+
+        def viewportEvent(self, event) -> bool:
+            if (event.type() == QEvent.ToolTip
+                    and self._button_at(event.pos()) >= 0):
+                from ..data_table import show_tooltip
+                show_tooltip(event.globalPos(),
+                             "Sort and filter this column", self)
+                return True
+            return super().viewportEvent(event)
+
+    _SheetHeader = SheetHeader
+    return SheetHeader
+
+
+_SheetHeader = None
+
+
 class SpreadsheetView(QTableView):
+    # the filter changed — overlays and the ribbon redraw
+    filter_changed = Signal()
+
+    # Class-level defaults: Qt calls back into overrides (updateGeometries,
+    # resizeEvent) while the constructor is still installing the header,
+    # before __init__ has set these.
+    _frozen = None
+    _actions = None
+    _host = None
+    _show_formulas = False
+    _filters: dict = {}
+    _filtered_rows: frozenset = frozenset()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         # Replaced before anything attaches to it, and set up the way
         # QTableView sets up its own. On a Table card or tile its tooltips
         # then land by the pointer rather than at the top of the page
-        # (AA3) — see data_table.tooltip_host. Imported here: data_table
-        # is the older module and must not depend on this package loading.
-        from ..data_table import TooltipHeader
-        header = TooltipHeader(Qt.Horizontal, self)
+        # (AA3) — see data_table.tooltip_host.
+        self.show_column_buttons = True
+        self._filters: dict[int, set] = {}
+        self._filtered_rows: set[int] = set()
+        header = _sheet_header_class()(self)
         header.setSectionsClickable(True)
         header.setHighlightSections(True)
         self.setHorizontalHeader(header)
+        header.menu_button_clicked.connect(self.open_column_filter)
+        self.verticalHeader().setSectionsClickable(True)
+        self.verticalHeader().setHighlightSections(True)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.setEditTriggers(QAbstractItemView.DoubleClicked
@@ -97,15 +250,20 @@ class SpreadsheetView(QTableView):
         # of a multi-column selection, fit the whole selection
         header.sectionHandleDoubleClicked.connect(self._autosize_from_handle)
 
-        # click a header to sort it (asc -> desc -> clear); the cycler's
-        # own timer keeps a sort click apart from a rename double-click
-        from ..table_sort import HeaderSortCycler
+        # A header click selects the column, as in a spreadsheet — the
+        # column is then what Delete, Move and Insert act on. Sorting lives
+        # on the column's ▾ button, the ribbon and the right-click menu.
+        # (Read-only tables elsewhere still sort on a header click; there
+        # is nothing to select a column *for* in those.)
         self._presort_rows: Optional[list[list[str]]] = None
         self._sorting = False
-        self._sort_cycler = HeaderSortCycler(
-            header, can_sort=lambda: (self.sheet_model() is not None
-                                      and not self.sheet_model().read_only))
-        self._sort_cycler.sortRequested.connect(self._header_sort)
+
+        self.viewport().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.viewport().customContextMenuRequested.connect(self._cell_menu)
+        self._actions = None
+        self._host = None
+        self._show_formulas = False
+        self._frozen = None   # freeze.FrozenPanes, made on first freeze
 
         rows = self.verticalHeader()
         rows.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -139,14 +297,29 @@ class SpreadsheetView(QTableView):
             old.dataChanged.disconnect(self._maybe_autofit)
             old.modelReset.disconnect(self._forget_sort)
             old.sheet_edited.disconnect(self._forget_sort)
+        if old is not None:
+            old.modelReset.disconnect(self._after_reset)
+            old.dataChanged.disconnect(self._reapply_filter)
+            old.freeze_changed.disconnect(self._apply_freeze)
         super().setModel(model)
+        self._filters = {}
+        self._filtered_rows = set()
         self._forget_sort()
         if isinstance(model, SheetModel):
             model.modelReset.connect(self._sync_column_widths)
             model.dataChanged.connect(self._maybe_autofit)
             model.modelReset.connect(self._forget_sort)
             model.sheet_edited.connect(self._forget_sort)
+            model.modelReset.connect(self._after_reset)
+            model.dataChanged.connect(self._reapply_filter)
+            model.freeze_changed.connect(self._apply_freeze)
             self._sync_column_widths()
+            self._apply_freeze()
+        if self.selectionModel() is not None:
+            self.selectionModel().selectionChanged.connect(
+                self._selection_moved)
+            self.selectionModel().currentChanged.connect(
+                self._selection_moved)
 
     def sheet_model(self) -> Optional[SheetModel]:
         model = self.model()
@@ -180,12 +353,18 @@ class SpreadsheetView(QTableView):
         if self._sorting:
             return
         self._presort_rows = None
-        self._sort_cycler.reset()
 
     def clear_sort(self) -> None:
         """Menu entry point: restore the pre-sort row order."""
         self._header_sort(0, "clear")
-        self._sort_cycler.reset()
+
+    def sort_column(self, col: int, ascending: bool) -> None:
+        self._header_sort(col, "asc" if ascending else "desc")
+
+    def sort_current(self, ascending: bool) -> None:
+        cols = self.target_columns()
+        if cols:
+            self.sort_column(cols[0], ascending)
 
     @property
     def has_active_sort(self) -> bool:
@@ -383,15 +562,24 @@ class SpreadsheetView(QTableView):
         if model is None:
             return
         cols = list(cols) if cols is not None else range(model.columnCount())
+        frozen = self._frozen if (self._frozen is not None
+                                  and self._frozen.cols) else None
+        widths = {}
         self._applying_widths = True
         try:
             for col in cols:
-                self.resizeColumnToContents(col)
+                if frozen is not None and col < frozen.cols:
+                    # hidden here, shown in its pane: measured there
+                    widths[col] = frozen.fit_column(col)
+                else:
+                    self.resizeColumnToContents(col)
+                    widths[col] = self.columnWidth(col)
         finally:
             self._applying_widths = False
+        if frozen is not None:
+            frozen.relayout()
         if persist:
-            model.set_column_widths(
-                {col: self.columnWidth(col) for col in cols})
+            model.set_column_widths(widths)
 
     def _autosize_from_handle(self, section: int) -> None:
         cols = self._selected_sections(section, pick_row=False)
@@ -484,8 +672,11 @@ class SpreadsheetView(QTableView):
             return True
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace, Qt.Key_F2):
             return True
-        return (event.key() == Qt.Key_D
-                and event.modifiers() & Qt.ControlModifier)
+        mods = event.modifiers()
+        if (event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right)
+                and mods & Qt.ControlModifier):
+            return True
+        return self.actions.for_key(event) is not None
 
     def viewportEvent(self, event) -> bool:
         """A cell's tooltip — its formula, or what is wrong with its value —
@@ -513,6 +704,12 @@ class SpreadsheetView(QTableView):
         return super().event(event)
 
     def keyPressEvent(self, event) -> None:
+        action = self.actions.for_key(event)
+        if action is not None:
+            if action.isEnabled():
+                action.trigger()
+            event.accept()
+            return
         if event.matches(QKeySequence.Copy):
             self.copy_selection()
             event.accept()
@@ -523,10 +720,6 @@ class SpreadsheetView(QTableView):
             return
         if event.matches(QKeySequence.Paste):
             self.paste_clipboard()
-            event.accept()
-            return
-        if event.key() == Qt.Key_D and event.modifiers() & Qt.ControlModifier:
-            self.fill_down_selection()
             event.accept()
             return
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
@@ -549,6 +742,15 @@ class SpreadsheetView(QTableView):
             return
         if event.key() == Qt.Key_F2:
             self.edit_current()
+            event.accept()
+            return
+        arrows = {Qt.Key_Up: (-1, 0), Qt.Key_Down: (1, 0),
+                  Qt.Key_Left: (0, -1), Qt.Key_Right: (0, 1)}
+        mods = event.modifiers() & ~Qt.KeypadModifier
+        if (event.key() in arrows and mods & Qt.ControlModifier
+                and not mods & (Qt.AltModifier | Qt.MetaModifier)):
+            self.jump(*arrows[event.key()],
+                      extend=bool(mods & Qt.ShiftModifier))
             event.accept()
             return
         super().keyPressEvent(event)
@@ -590,81 +792,640 @@ class SpreadsheetView(QTableView):
         """Every column the selection touches — see selected_rows."""
         return self._touched_sections(pick_row=False)
 
-    def rename_column(self, col: int) -> None:
-        model = self.sheet_model()
-        if model is None or not 0 <= col < model.columnCount() or model.read_only:
-            return
-        current = model.sheet.columns[col].name
-        name, ok = QInputDialog.getText(
-            None, "Rename column", "Column name", text=current)
-        if ok and name and name != current:
-            model.rename_column(col, name)
-
     def _column_menu(self, pos) -> None:
         from .. import menu_guard
         if menu_guard.settling():
             return   # leftovers of a menu that just closed — see menu_guard
-        model = self.sheet_model()
-        col = self.horizontalHeader().logicalIndexAt(pos)
-        if model is None or col < 0:
+        header = self.horizontalHeader()
+        col = header.logicalIndexAt(pos)
+        if self.sheet_model() is None or col < 0:
             return
-        cols = self._selected_sections(col, pick_row=False)
-        menu = QMenu(self)
-        if getattr(model, "read_only", False):
-            # linked mode: layout tweaks only, the data belongs upstream
-            menu.addAction("Resize to content",
-                           lambda: self.autosize_columns(cols))
-            menu.addAction("Resize all columns to content",
-                           lambda: self.autosize_columns())
-            menu.exec(self.horizontalHeader().mapToGlobal(pos))
-            return
-        menu.addAction("Rename…", lambda: self.rename_column(col))
-        type_menu = menu.addMenu("Type")
-        current_type = model.column_type(col)
-        for col_type in COLUMN_TYPES:
-            action = type_menu.addAction(col_type)
-            action.setCheckable(True)
-            action.setChecked(col_type == current_type)
-            action.triggered.connect(
-                lambda _=False, t=col_type: model.set_column_type(col, t))
-        menu.addSeparator()
-        menu.addAction("Insert column left",
-                       lambda: model.insert_columns_at(col))
-        menu.addAction("Insert column right",
-                       lambda: model.insert_columns_at(col + 1))
-        label = "Delete columns" if len(cols) > 1 else "Delete column"
-        menu.addAction(label, lambda: model.remove_columns_at(cols))
-        menu.addSeparator()
-        fit_label = ("Resize columns to content" if len(cols) > 1
-                     else "Resize to content")
-        menu.addAction(fit_label, lambda: self.autosize_columns(cols))
-        menu.addAction("Resize all columns to content",
-                       lambda: self.autosize_columns())
-        menu.addSeparator()
-        menu.addAction("Sort ascending",
-                       lambda: self._header_sort(col, "asc"))
-        menu.addAction("Sort descending",
-                       lambda: self._header_sort(col, "desc"))
-        clear = menu.addAction("Clear sort", self.clear_sort)
-        clear.setEnabled(self.has_active_sort)
-        menu.exec(self.horizontalHeader().mapToGlobal(pos))
+        if col not in self.selected_columns() or not self.whole_columns_selected():
+            self.select_columns([col])
+        from .menus import column_menu
+        column_menu(self, header, pos)
 
     def _row_menu(self, pos) -> None:
         from .. import menu_guard
         if menu_guard.settling():
             return   # leftovers of a menu that just closed — see menu_guard
-        model = self.sheet_model()
-        row = self.verticalHeader().logicalIndexAt(pos)
-        if model is None or row < 0 or model.read_only:
+        header = self.verticalHeader()
+        row = header.logicalIndexAt(pos)
+        if self.sheet_model() is None or row < 0:
             return
-        rows = self._selected_sections(row, pick_row=True)
-        menu = QMenu(self)
-        menu.addAction("Insert row above", lambda: model.insert_rows_at(row))
-        menu.addAction("Insert row below",
-                       lambda: model.insert_rows_at(row + 1))
-        label = "Delete rows" if len(rows) > 1 else "Delete row"
-        menu.addAction(label, lambda: model.remove_rows_at(rows))
-        menu.addSeparator()
-        menu.addAction("Promote to header",
-                       lambda: model.promote_row_to_header(row))
-        menu.exec(self.verticalHeader().mapToGlobal(pos))
+        if row not in self.selected_rows() or not self.whole_rows_selected():
+            self.select_rows([row])
+        from .menus import row_menu
+        row_menu(self, header, pos)
+
+    def _cell_menu(self, pos) -> None:
+        from .. import menu_guard
+        if menu_guard.settling():
+            return   # leftovers of a menu that just closed — see menu_guard
+        index = self.indexAt(pos)
+        if self.sheet_model() is None:
+            return
+        if index.isValid() and not self.selectionModel().isSelected(index):
+            # right-clicking outside the selection moves it there, as in
+            # Excel; inside it, the menu acts on the whole selection
+            self.setCurrentIndex(index)
+        from .menus import cell_menu
+        cell_menu(self, self.viewport(), pos)
+
+    # ------------------------------------------------------ commands/host
+
+    @property
+    def actions(self):
+        """Every command this grid offers, as QActions — see actions.py."""
+        if self._actions is None:
+            from .actions import SheetActions
+            self._actions = SheetActions(self)
+        return self._actions
+
+    def set_host(self, host) -> None:
+        """Who owns the grid: answers Submit/Discard and live/held, and can
+        open the full editor. See binding.SheetHost."""
+        self._host = host
+        self.actions.refresh()
+
+    @property
+    def host(self):
+        from .binding import SheetHost
+        return self._host if self._host is not None else SheetHost()
+
+    @property
+    def editable(self) -> bool:
+        model = self.sheet_model()
+        return model is not None and not model.read_only
+
+    def commit_open_editor(self) -> None:
+        """Commit a cell still being typed into, before a command reads the
+        table (Submit, switching to auto-apply). Qt only commits an editor
+        when it loses focus, and a click on the ribbon does not take it."""
+        if self.state() != QAbstractItemView.EditingState:
+            return
+        focus = QApplication.focusWidget()
+        if focus is not None and focus is not self and self.isAncestorOf(focus):
+            self.setFocus()
+
+    def _selection_moved(self, *_args) -> None:
+        if self._actions is not None:
+            self._actions.refresh()
+
+    # --------------------------------------------------------- selection
+
+    def select_rows(self, rows) -> None:
+        model = self.sheet_model()
+        if model is None or not rows or not model.columnCount():
+            return
+        selection = QItemSelection()
+        last = model.columnCount() - 1
+        for row in rows:
+            selection.select(model.index(row, 0), model.index(row, last))
+        current = self.currentIndex()
+        col = current.column() if current.isValid() else 0
+        self.selectionModel().setCurrentIndex(
+            model.index(rows[0], col), QItemSelectionModel.NoUpdate)
+        self.selectionModel().select(selection,
+                                     QItemSelectionModel.ClearAndSelect)
+
+    def select_columns(self, cols) -> None:
+        model = self.sheet_model()
+        if model is None or not cols or not model.rowCount():
+            return
+        selection = QItemSelection()
+        last = model.rowCount() - 1
+        for col in cols:
+            selection.select(model.index(0, col), model.index(last, col))
+        current = self.currentIndex()
+        row = current.row() if current.isValid() else 0
+        self.selectionModel().setCurrentIndex(
+            model.index(row, cols[0]), QItemSelectionModel.NoUpdate)
+        self.selectionModel().select(selection,
+                                     QItemSelectionModel.ClearAndSelect)
+
+    def target_rows(self) -> list[int]:
+        """The rows a row command acts on: every row the selection touches —
+        except when whole columns are selected, which touch every row but
+        mean "this column"; then just the current cell's row."""
+        if self.whole_columns_selected() and not self.whole_rows_selected():
+            current = self.currentIndex()
+            return [current.row()] if current.isValid() else []
+        return [r for r in self.selected_rows() if not self.row_filtered(r)]
+
+    def target_columns(self) -> list[int]:
+        """The columns a column command acts on — see target_rows."""
+        if self.whole_rows_selected() and not self.whole_columns_selected():
+            current = self.currentIndex()
+            return [current.column()] if current.isValid() else []
+        return self.selected_columns()
+
+    def select_selection_rows(self) -> None:
+        """Shift+Space: widen the selection to whole rows."""
+        self.select_rows(self.selected_rows())
+
+    def select_selection_columns(self) -> None:
+        """Ctrl+Space: widen the selection to whole columns."""
+        self.select_columns(self.selected_columns())
+
+    def whole_rows_selected(self) -> bool:
+        selection = self.selectionModel()
+        rows = self.selected_rows()
+        return bool(selection is not None and rows) and all(
+            selection.isRowSelected(r) for r in rows)
+
+    def whole_columns_selected(self) -> bool:
+        selection = self.selectionModel()
+        cols = self.selected_columns()
+        return bool(selection is not None and cols) and all(
+            selection.isColumnSelected(c) for c in cols)
+
+    # ------------------------------------------------- rows and columns
+
+    def insert_rows(self, below: bool = False) -> None:
+        """Insert as many rows as are selected, above (or below) them —
+        Excel's rule, so selecting three rows and inserting adds three."""
+        model = self.sheet_model()
+        if model is None or not self.editable:
+            return
+        rows = self.target_rows()
+        if not rows:
+            at, count = model.rowCount(), 1
+        else:
+            count = len(rows)
+            at = rows[-1] + 1 if below else rows[0]
+        model.insert_rows_at(at, count)
+        self.select_rows(list(range(at, at + count)))
+
+    def insert_columns(self, right: bool = False) -> None:
+        model = self.sheet_model()
+        if model is None or not self.editable:
+            return
+        cols = self.target_columns()
+        if not cols:
+            at, count = model.columnCount(), 1
+        else:
+            count = len(cols)
+            at = cols[-1] + 1 if right else cols[0]
+        model.insert_columns_at(at, count)
+        self.select_columns(list(range(at, at + count)))
+
+    def delete_rows(self) -> None:
+        model = self.sheet_model()
+        rows = self.target_rows()
+        if model is None or not rows or not self.editable:
+            return
+        model.remove_rows_at(rows)
+        self.select_rows([min(rows[0], model.rowCount() - 1)])
+
+    def delete_columns(self) -> None:
+        model = self.sheet_model()
+        cols = self.target_columns()
+        if model is None or not cols or not self.editable:
+            return
+        model.remove_columns_at(cols)
+        self.select_columns([min(cols[0], model.columnCount() - 1)])
+
+    def insert_smart(self) -> None:
+        """Ctrl++: columns when whole columns are selected, else rows."""
+        if self.whole_columns_selected() and not self.whole_rows_selected():
+            self.insert_columns()
+        else:
+            self.insert_rows()
+
+    def delete_smart(self) -> None:
+        """Ctrl+-: columns when whole columns are selected, else rows."""
+        if self.whole_columns_selected() and not self.whole_rows_selected():
+            self.delete_columns()
+        else:
+            self.delete_rows()
+
+    def move_rows(self, delta: int) -> None:
+        """Move the selected rows up (-1) or down (+1) one place, keeping
+        them selected so the move can be repeated."""
+        model = self.sheet_model()
+        rows = self.target_rows()
+        if model is None or not rows or not self.editable:
+            return
+        start = rows[0] + delta
+        if start < 0 or start + len(rows) > model.rowCount():
+            return
+        cols = self.target_columns()
+        whole = self.whole_rows_selected()
+        model.move_rows(rows, start)
+        moved = list(range(start, start + len(rows)))
+        if whole:
+            self.select_rows(moved)
+        else:
+            self._select_block(moved[0], cols[0], moved[-1], cols[-1])
+
+    def move_columns(self, delta: int) -> None:
+        model = self.sheet_model()
+        cols = self.target_columns()
+        if model is None or not cols or not self.editable:
+            return
+        start = cols[0] + delta
+        if start < 0 or start + len(cols) > model.columnCount():
+            return
+        rows = self.target_rows()
+        whole = self.whole_columns_selected()
+        model.move_columns(cols, start)
+        moved = list(range(start, start + len(cols)))
+        if whole:
+            self.select_columns(moved)
+        else:
+            self._select_block(rows[0], moved[0], rows[-1], moved[-1])
+
+    def _select_block(self, r0: int, c0: int, r1: int, c1: int) -> None:
+        model = self.sheet_model()
+        if model is None:
+            return
+        self.selectionModel().setCurrentIndex(
+            model.index(r0, c0), QItemSelectionModel.NoUpdate)
+        self.selectionModel().select(
+            QItemSelection(model.index(r0, c0), model.index(r1, c1)),
+            QItemSelectionModel.ClearAndSelect)
+
+    # ------------------------------------------------------------ editing
+
+    def fill_right_selection(self) -> None:
+        """Ctrl+R: fill the selection from its left column; with one column
+        selected, fill from the column to its left (like Excel)."""
+        model = self.sheet_model()
+        rect = self._selection_rect()
+        if model is None or rect is None:
+            return
+        row0, col0, row1, col1 = rect
+        rows = [r for r in range(row0, row1 + 1) if not self.row_filtered(r)]
+        if col1 > col0:
+            model.fill_right(col0, col1, rows)
+        elif col0 > 0:
+            model.fill_right(col0 - 1, col0, rows)
+
+    def paste_values(self) -> None:
+        """Ctrl+Shift+V: paste what the copied cells *show*, not their
+        formulas — Excel's Paste Values."""
+        model = self.sheet_model()
+        mime = QApplication.clipboard().mimeData()
+        if model is None or mime is None or not mime.hasText():
+            return
+        block = parse_paste_text(mime.text())
+        if not block:
+            return
+        rect = self._selection_rect()
+        row0, col0 = (rect[0], rect[1]) if rect else (0, 0)
+        model.set_cells((row0, col0), block)
+
+    def jump(self, drow: int, dcol: int, extend: bool = False) -> None:
+        """Ctrl+arrow: to the edge of the run of filled cells, or to the
+        next filled cell past a gap, or to the grid's edge — Excel's rule.
+        With Shift, the selection stretches to where it lands."""
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if model is None or not current.isValid():
+            return
+        row, col = current.row(), current.column()
+        n_rows, n_cols = model.rowCount(), model.columnCount()
+
+        def filled(r, c):
+            return bool(model.cell_source(r, c).strip())
+
+        def inside(r, c):
+            return 0 <= r < n_rows and 0 <= c < n_cols
+
+        r, c = row + drow, col + dcol
+        if not inside(r, c):
+            return
+        if filled(row, col) and filled(r, c):
+            while inside(r + drow, c + dcol) and filled(r + drow, c + dcol):
+                r, c = r + drow, c + dcol
+        else:
+            while inside(r + drow, c + dcol) and not filled(r, c):
+                r, c = r + drow, c + dcol
+        target = model.index(r, c)
+        if extend:
+            rect = self._selection_rect() or (row, col, row, col)
+            self.selectionModel().setCurrentIndex(
+                target, QItemSelectionModel.NoUpdate)
+            self.selectionModel().select(
+                QItemSelection(model.index(min(rect[0], r), min(rect[1], c)),
+                               model.index(max(rect[2], r), max(rect[3], c))),
+                QItemSelectionModel.ClearAndSelect)
+        else:
+            self.setCurrentIndex(target)
+            self.selectionModel().select(
+                target, QItemSelectionModel.ClearAndSelect)
+        self.scrollTo(target)
+
+    def rename_current_column(self) -> None:
+        cols = self.target_columns()
+        if cols:
+            self.rename_column(cols[0])
+
+    def rename_column(self, col: int) -> None:
+        model = self.sheet_model()
+        if model is None or not 0 <= col < model.columnCount() or model.read_only:
+            return
+        current = model.sheet.columns[col].name
+        from .menus import ask_text
+        name = ask_text(self, "Rename column",
+                        "New name for this column. Formulas that use "
+                        f"[{current}] or [@{current}] follow the new name.",
+                        current)
+        if name and name != current:
+            model.rename_column(col, name)
+
+    def promote_current_row(self) -> None:
+        model = self.sheet_model()
+        rows = self.target_rows()
+        if model is not None and rows:
+            model.promote_row_to_header(rows[0])
+
+    def edit_column_list(self) -> None:
+        """Data ▸ Dropdown List… for the current column."""
+        cols = self.target_columns()
+        if cols:
+            from .dropdown import edit_dropdown_list
+            edit_dropdown_list(self, cols[0])
+
+    def open_cell_dropdown(self) -> None:
+        """Alt+Down, or a click on the ▾: the column's list, to pick from."""
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if model is None or not current.isValid() or not self.editable:
+            return
+        if model.column_choices(current.column())[0]:
+            from .dropdown import open_choice_list
+            open_choice_list(self, current)
+
+    def mousePressEvent(self, event) -> None:
+        """A click on the ▾ of a dropdown cell opens its list."""
+        index = self.indexAt(event.position().toPoint())
+        model = self.sheet_model()
+        if (event.button() == Qt.LeftButton and index.isValid()
+                and index == self.currentIndex() and model is not None
+                and model.column_choices(index.column())[0]):
+            from .delegates import caret_rect
+            if caret_rect(self.visualRect(index)).contains(
+                    event.position().toPoint()):
+                event.accept()
+                self.open_cell_dropdown()
+                return
+        super().mousePressEvent(event)
+
+    def start_formula(self, text: str) -> None:
+        """Open the current cell's editor with `text` typed in — Insert
+        Function's "=SUM(" — and the cursor after it."""
+        current = self.currentIndex()
+        if not current.isValid() or not self.editable:
+            return
+        from .delegates import SheetDelegate
+        SheetDelegate.last_editor = None
+        if not self.edit(current, QAbstractItemView.EditKeyPressed, None):
+            return
+        editor = SheetDelegate.last_editor
+        import shiboken6
+        if editor is not None and shiboken6.isValid(editor):
+            editor.setText(text)
+            editor.setFocus()
+
+    def find_replace(self, replace: bool = False) -> None:
+        from .find import open_find
+        open_find(self, replace)
+
+    def find_next(self, text: str, *, match_case: bool = False,
+                  whole_cell: bool = False, backwards: bool = False) -> bool:
+        """Move to the next cell whose formula or shown value holds `text`,
+        wrapping at the end. False when no cell matches."""
+        model = self.sheet_model()
+        if model is None or not text:
+            return False
+        n_rows, n_cols = model.rowCount(), model.columnCount()
+        total = n_rows * n_cols
+        if not total:
+            return False
+        current = self.currentIndex()
+        start = (current.row() * n_cols + current.column()
+                 if current.isValid() else -1)
+        needle = text if match_case else text.casefold()
+
+        def hit(r, c) -> bool:
+            for hay in (model.cell_source(r, c), model.value_text(r, c)):
+                hay = hay if match_case else hay.casefold()
+                if (hay == needle) if whole_cell else (needle in hay):
+                    return True
+            return False
+
+        step = -1 if backwards else 1
+        for i in range(1, total + 1):
+            flat = (start + step * i) % total
+            r, c = divmod(flat, n_cols)
+            if self.row_filtered(r):
+                continue
+            if hit(r, c):
+                index = model.index(r, c)
+                self.setCurrentIndex(index)
+                self.selectionModel().select(
+                    index, QItemSelectionModel.ClearAndSelect)
+                self.scrollTo(index)
+                return True
+        return False
+
+    # ------------------------------------------------------ show formulas
+
+    @property
+    def show_formulas(self) -> bool:
+        return self._show_formulas
+
+    def set_show_formulas(self, flag: bool) -> None:
+        """Ctrl+`: show every cell's formula instead of its value — for
+        checking a sheet over, as in Excel. A view setting, never saved."""
+        self._show_formulas = bool(flag)
+        delegate = self.itemDelegate()
+        if hasattr(delegate, "show_formulas"):
+            delegate.show_formulas = self._show_formulas
+        self.viewport().update()
+        if self._frozen is not None:
+            self._frozen.repaint_panes()
+        self.actions.refresh()
+
+    # ------------------------------------------------------------ filters
+
+    def is_column_filtered(self, col: int) -> bool:
+        return col in self._filters
+
+    @property
+    def filtered(self) -> bool:
+        return bool(self._filters)
+
+    def column_filter(self, col: int) -> Optional[set]:
+        return self._filters.get(col)
+
+    def set_column_filter(self, col: int, allowed: Optional[set]) -> None:
+        """Show only rows whose value in `col` is in `allowed` (as shown);
+        None shows every row again. A view of the table, not an edit: the
+        rows are hidden here, and the Table still sends every one of them
+        down the flow."""
+        if allowed is None:
+            self._filters.pop(col, None)
+        else:
+            self._filters[col] = set(allowed)
+        self._reapply_filter()
+
+    def clear_filters(self) -> None:
+        if self._filters:
+            self._filters = {}
+            self._reapply_filter()
+
+    def filter_by_current_value(self) -> None:
+        """Keep only the rows whose value in this column matches the current
+        cell's — the quickest filter there is."""
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if model is None or not current.isValid():
+            return
+        self.set_column_filter(
+            current.column(),
+            {model.value_text(current.row(), current.column())})
+
+    def row_filtered(self, row: int) -> bool:
+        """Is this row hidden by a filter? (Not the same as isRowHidden: a
+        frozen row is hidden in the grid because a pane shows it.)"""
+        return row in self._filtered_rows
+
+    def _reapply_filter(self, *_args) -> None:
+        model = self.sheet_model()
+        if model is None:
+            return
+        if not self._filters and not self._filtered_rows:
+            return
+        self._filters = {c: v for c, v in self._filters.items()
+                         if c < model.columnCount()}
+        self._filtered_rows = {
+            row for row in range(model.rowCount())
+            if any(model.value_text(row, col) not in allowed
+                   for col, allowed in self._filters.items())}
+        frozen_rows = self._frozen.rows if self._frozen is not None else 0
+        for row in range(model.rowCount()):
+            hide = row in self._filtered_rows or row < frozen_rows
+            if self.isRowHidden(row) != hide:
+                self.setRowHidden(row, hide)
+        self.horizontalHeader().viewport().update()
+        if self._frozen is not None:
+            self._frozen.sync_rows()
+        self.filter_changed.emit()
+        if self._actions is not None:
+            self._actions.refresh()
+
+    def open_column_filter(self, col: int) -> None:
+        """The ▾ on a column header: sort, and pick the values to show."""
+        from .filter import open_filter_popup
+        open_filter_popup(self, col)
+
+    def visible_row_count(self) -> int:
+        model = self.sheet_model()
+        if model is None:
+            return 0
+        return model.rowCount() - len(self._filtered_rows)
+
+    # ------------------------------------------------------------- freeze
+
+    def freeze_panes(self) -> None:
+        """Freeze the rows above and the columns left of the current cell —
+        Excel's Freeze Panes."""
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if model is None:
+            return
+        row = current.row() if current.isValid() else 0
+        col = current.column() if current.isValid() else 0
+        model.set_freeze(row, col)
+
+    def freeze_top_row(self) -> None:
+        model = self.sheet_model()
+        if model is not None:
+            model.set_freeze(1, 0)
+
+    def freeze_first_column(self) -> None:
+        model = self.sheet_model()
+        if model is not None:
+            model.set_freeze(0, 1)
+
+    def unfreeze(self) -> None:
+        model = self.sheet_model()
+        if model is not None:
+            model.set_freeze(0, 0)
+
+    def _apply_freeze(self) -> None:
+        model = self.sheet_model()
+        rows, cols = model.freeze if model is not None else (0, 0)
+        if (rows or cols) and self._frozen is None:
+            from .freeze import FrozenPanes
+            self._frozen = FrozenPanes(self)
+        if self._frozen is not None:
+            self._frozen.set_counts(rows, cols)
+        if self._actions is not None:
+            self._actions.refresh()
+
+    def _after_reset(self) -> None:
+        self._reapply_filter()
+        self._apply_freeze()
+
+    @property
+    def frozen_panes(self):
+        return self._frozen
+
+    def edit(self, index, trigger=None, event=None):
+        """A cell under a frozen pane is edited in the pane — an editor
+        opened here would sit behind it, out of sight."""
+        if trigger is None:
+            return super().edit(index)
+        if self._frozen is not None:
+            pane = self._frozen.pane_for(index)
+            if pane is not None:
+                return pane.edit(index, trigger, event)
+        return super().edit(index, trigger, event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._frozen is not None:
+            self._frozen.relayout()
+
+    def updateGeometries(self) -> None:
+        super().updateGeometries()
+        if self._frozen is not None:
+            self._frozen.relayout()
+
+    def moveCursor(self, action, modifiers):
+        """With panes frozen, the arrow keys still walk the whole grid —
+        Qt's own would skip the frozen rows, which are hidden here."""
+        if self._frozen is None or not self._frozen.active:
+            return super().moveCursor(action, modifiers)
+        steps = {QAbstractItemView.MoveUp: (-1, 0),
+                 QAbstractItemView.MoveDown: (1, 0),
+                 QAbstractItemView.MoveLeft: (0, -1),
+                 QAbstractItemView.MoveRight: (0, 1),
+                 QAbstractItemView.MoveNext: (0, 1),
+                 QAbstractItemView.MovePrevious: (0, -1)}
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if action not in steps or model is None or not current.isValid():
+            return super().moveCursor(action, modifiers)
+        drow, dcol = steps[action]
+        row, col = current.row(), current.column()
+        while True:
+            row, col = row + drow, col + dcol
+            if not (0 <= row < model.rowCount()
+                    and 0 <= col < model.columnCount()):
+                return current
+            if not self.row_filtered(row):
+                return model.index(row, col)
+
+    def scrollTo(self, index, hint=QAbstractItemView.EnsureVisible) -> None:
+        """Frozen cells are always in view; scroll for the rest so a cell
+        never ends up hidden in under a frozen pane."""
+        if self._frozen is not None and self._frozen.active:
+            index = self._frozen.scroll_target(index)
+            if index is None:
+                return
+        super().scrollTo(index, hint)

@@ -55,6 +55,7 @@ class SheetModel(QAbstractTableModel):
     """Display shows computed values; Edit round-trips raw cell sources."""
 
     sheet_edited = Signal(dict)   # the new sheet dict, after a user mutation
+    freeze_changed = Signal()     # freeze panes moved (by the user or a sync)
 
     def __init__(self, sheet=None, parent=None) -> None:
         super().__init__(parent)
@@ -90,6 +91,17 @@ class SheetModel(QAbstractTableModel):
             return self._sheet.columns[col].type
         return "auto"
 
+    def column_choices(self, col: int) -> tuple[list[str], bool]:
+        """A column's dropdown list and whether it is strict."""
+        if 0 <= col < self._sheet.n_cols:
+            spec = self._sheet.columns[col]
+            return list(spec.choices), spec.strict
+        return [], False
+
+    def _invalid(self, row: int, col: int, source: str) -> Optional[str]:
+        spec = self._sheet.columns[col]
+        return validate_cell(source, spec.type, spec.choices, spec.strict)
+
     def cell_source(self, row: int, col: int) -> str:
         if 0 <= row < self._sheet.n_rows and 0 <= col < self._sheet.n_cols:
             return self._sheet.cell(row, col)
@@ -119,6 +131,8 @@ class SheetModel(QAbstractTableModel):
         parsed = parse_sheet(sheet)
         if sheet_to_dict(parsed) == sheet_to_dict(self._sheet):
             return
+        froze = ((parsed.freeze_rows, parsed.freeze_cols)
+                 != (self._sheet.freeze_rows, self._sheet.freeze_cols))
         in_place = self._same_layout(parsed)
         self._syncing = True
         try:
@@ -135,6 +149,8 @@ class SheetModel(QAbstractTableModel):
                 self.endResetModel()
         finally:
             self._syncing = False
+        if froze:
+            self.freeze_changed.emit()
 
     def _same_layout(self, other: Sheet) -> bool:
         """Can `other` replace the current sheet without a model reset?
@@ -149,9 +165,14 @@ class SheetModel(QAbstractTableModel):
                 or other.n_cols != self._sheet.n_cols
                 or not other.n_rows or not other.n_cols):
             return False
-        return all(new.name == old.name and new.type == old.type
-                   and new.width == old.width
-                   for new, old in zip(other.columns, self._sheet.columns))
+        return (other.freeze_rows == self._sheet.freeze_rows
+                and other.freeze_cols == self._sheet.freeze_cols
+                and all(new.name == old.name and new.type == old.type
+                        and new.width == old.width
+                        and new.choices == old.choices
+                        and new.strict == old.strict
+                        for new, old in zip(other.columns,
+                                            self._sheet.columns)))
 
     # ------------------------------------------------------ Qt model API
 
@@ -215,7 +236,7 @@ class SheetModel(QAbstractTableModel):
             error = self._result.errors.get((row, col))
             if error:
                 return error
-            invalid = validate_cell(source, col_type)
+            invalid = self._invalid(row, col, source)
             if invalid:
                 return invalid
             if is_formula(source):
@@ -224,7 +245,7 @@ class SheetModel(QAbstractTableModel):
         if role == _FOREGROUND and isinstance(value, FormulaError):
             return _ERROR_BRUSH
         if role == _BACKGROUND:
-            if validate_cell(source, col_type):
+            if self._invalid(row, col, source):
                 return _INVALID_BRUSH
             return None
         if role == _ALIGNMENT:
@@ -303,6 +324,52 @@ class SheetModel(QAbstractTableModel):
         if changed:
             self._after_mutation()
 
+    def fill_right(self, col0: int, col1: int, rows) -> None:
+        """Ctrl+R: fill each selected row rightwards from its left cell,
+        shifting relative references per column."""
+        if self._read_only or col1 <= col0:
+            return
+        changed = False
+        for row in rows:
+            left = self._sheet.cell(row, col0)
+            for col in range(col0 + 1, col1 + 1):
+                text = translate(left, 0, col - col0)
+                if self._sheet.cell(row, col) != text:
+                    self._sheet.set_cell(row, col, text)
+                    changed = True
+        if changed:
+            self._after_mutation()
+
+    def replace_all(self, find: str, replace: str, *, match_case=False,
+                    whole_cell=False, cells=None) -> int:
+        """Replace text in cell sources (formulas included, as Excel does
+        when looking in formulas). One undo step; returns how many cells
+        changed. `cells` limits it to those (row, col) pairs."""
+        if self._read_only or not find:
+            return 0
+        import re
+        flags = 0 if match_case else re.IGNORECASE
+        pattern = re.compile(
+            ("^" + re.escape(find) + "$") if whole_cell else re.escape(find),
+            flags)
+        targets = (list(cells) if cells is not None else
+                   [(r, c) for r in range(self._sheet.n_rows)
+                    for c in range(self._sheet.n_cols)])
+        changes = {}
+        for r, c in targets:
+            if not (0 <= r < self._sheet.n_rows and 0 <= c < self._sheet.n_cols):
+                continue
+            old = self._sheet.cell(r, c)
+            new = pattern.sub(lambda _m: replace, old)
+            if new != old:
+                changes[(r, c)] = new
+        if changes:
+            def mutate(sheet: Sheet) -> None:
+                for (r, c), text in changes.items():
+                    sheet.set_cell(r, c, text)
+            self._structural(mutate, reset=False)
+        return len(changes)
+
     # ---------------------------------------------------- structural ops
 
     def insert_rows_at(self, at: int, count: int = 1) -> None:
@@ -337,6 +404,50 @@ class SheetModel(QAbstractTableModel):
         if not indices or len(set(indices)) >= self._sheet.n_cols:
             return   # never remove the last column
         self._structural(lambda sheet: sheet.remove_columns(indices))
+
+    def move_rows(self, indices, to: int) -> None:
+        """Move rows as a block to start at `to` (formulas keep their
+        addresses, as after a sort)."""
+        if self._read_only:
+            return
+        self._structural(lambda sheet: sheet.move_rows(indices, to))
+
+    def move_columns(self, indices, to: int) -> None:
+        if self._read_only:
+            return
+        self._structural(lambda sheet: sheet.move_columns(indices, to))
+
+    def set_column_choices(self, col: int, choices, strict: bool) -> None:
+        """Give a column a dropdown list (empty to remove it)."""
+        if self._read_only or not 0 <= col < self._sheet.n_cols:
+            return
+        choices = [str(c).strip() for c in choices if str(c).strip()]
+        strict = bool(strict) and bool(choices)
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.columns[col].choices = choices
+            sheet.columns[col].strict = strict
+
+        self._structural(mutate)
+
+    def set_freeze(self, rows: int, cols: int) -> None:
+        """Freeze panes: this many data rows and columns stay in view."""
+        if self._read_only:
+            return
+        rows = max(0, min(int(rows), self._sheet.n_rows - 1))
+        cols = max(0, min(int(cols), self._sheet.n_cols - 1))
+        if (rows, cols) == (self._sheet.freeze_rows, self._sheet.freeze_cols):
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.freeze_rows, sheet.freeze_cols = rows, cols
+
+        self._structural(mutate, reset=False)
+        self.freeze_changed.emit()
+
+    @property
+    def freeze(self) -> tuple[int, int]:
+        return self._sheet.freeze_rows, self._sheet.freeze_cols
 
     def rename_column(self, col: int, name: str) -> None:
         if self._read_only:
@@ -435,12 +546,20 @@ class SheetModel(QAbstractTableModel):
 
     # ----------------------------------------------------------- plumbing
 
-    def _structural(self, mutate) -> None:
+    def _structural(self, mutate, reset: bool = True) -> None:
+        """Apply `mutate` as one edit. `reset=False` for a change that keeps
+        the grid's shape (replace, freeze), so the view keeps its place."""
         before = sheet_to_dict(self._sheet)
-        self.beginResetModel()
+        if reset:
+            self.beginResetModel()
         mutate(self._sheet)
         self._result = evaluate_sheet(self._sheet)
-        self.endResetModel()
+        if reset:
+            self.endResetModel()
+        elif self._sheet.n_rows and self._sheet.n_cols:
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(self._sheet.n_rows - 1, self._sheet.n_cols - 1))
         if sheet_to_dict(self._sheet) != before and not self._syncing:
             self.sheet_edited.emit(self.sheet_dict())
 

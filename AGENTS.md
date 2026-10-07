@@ -131,6 +131,16 @@ may also come from its own optional input ports, resolved by
 shows one number and the flow carries another.
 Relevant skills: `.opencode/skills/new-node/` and `.opencode/skills/flograph/`.
 
+**The Table grid's commands live once**, as QActions in
+`ui/spreadsheet/actions.py`: the ribbon (`ribbon.py`), the right-click menus
+(`menus.py`) and the keys (`SpreadsheetView.keyPressEvent` → `for_key`) all
+trigger the same objects — add a command there, never as a one-off button.
+Edits held until Submit live in the Table's cosmetic `draft` param
+(`spreadsheet/binding.py`), so they undo, save and show on every view of
+the node without marking anything out of date; every host commits through
+`binding.commit_edit`. A popup or menu from a grid goes through
+`menus.new_menu`/`real_window` so it is a window, not embedded in a card.
+
 **Pages come in kinds.** `Page.kind` is `"dashboard"` (tiles on a canvas)
 or `"report"` (markdown in `Page.body`). One dataclass, because title,
 colour, order, duplication and undo are identical; the window switches on

@@ -344,7 +344,13 @@ def grid_stylesheet() -> str:
             f" font-size: {points:g}pt; }}"
             f"QHeaderView::section {{ background: {NODE_HEADER.name()};"
             f" color: {NODE_SUBTEXT.name()};"
-            f" border: 1px solid {NODE_BORDER.name()}; padding: 2px; }}")
+            f" border: 1px solid {NODE_BORDER.name()}; padding: 2px; }}"
+            # the corner above the row numbers, and a header's empty stretch
+            # past its last section: without these the app palette shows
+            # through, which is a light square in light mode
+            f"QTableCornerButton::section {{ background: {NODE_HEADER.name()};"
+            f" border: 1px solid {NODE_BORDER.name()}; }}"
+            f"QHeaderView {{ background: {NODE_BODY.name()}; }}")
 
 
 def style_scroll_area(area, stylesheet: str, background: QColor = None) -> None:

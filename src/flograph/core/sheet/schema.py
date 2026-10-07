@@ -141,12 +141,21 @@ class ColumnSpec:
     name: str
     type: str = "auto"
     width: Optional[int] = None   # editor column width in px; None = default
+    # A dropdown list: the cell editor offers these values. ``strict``
+    # flags anything else red, like Excel's data validation "Stop"; off, the
+    # list is a suggestion and other values are welcome.
+    choices: list[str] = field(default_factory=list)
+    strict: bool = False
 
 
 @dataclass
 class Sheet:
     columns: list[ColumnSpec] = field(default_factory=list)
     rows: list[list[str]] = field(default_factory=list)
+    # Freeze panes: this many data rows / columns stay put while the rest
+    # scrolls. View state, but it belongs to the table, so it is saved.
+    freeze_rows: int = 0
+    freeze_cols: int = 0
 
     @property
     def n_rows(self) -> int:
@@ -167,25 +176,44 @@ class Sheet:
 
     # ------------------------------------------------------ structural ops
 
+    def _shift_formulas(self, axis: str, at: int, count: int) -> None:
+        """Keep A1 references on the same cells after rows/columns moved
+        (see formula.shift_for_structure)."""
+        from .formula import shift_for_structure
+        for row in self.rows:
+            for c, text in enumerate(row):
+                if is_formula(text):
+                    row[c] = shift_for_structure(text, axis, at, count)
+
     def insert_rows(self, at: int, count: int = 1) -> None:
         at = max(0, min(at, self.n_rows))
+        inside = at < self.n_rows   # an append moves no existing cell
         for _ in range(count):
             self.rows.insert(at, ["" for _ in self.columns])
+        if inside:
+            self._shift_formulas("row", at, count)
 
     def insert_column(self, at: int, name: Optional[str] = None,
                       col_type: str = "auto") -> str:
         at = max(0, min(at, self.n_cols))
+        inside = at < self.n_cols
         if not name:
             name = next_column_name(self.column_names())
         self.columns.insert(at, ColumnSpec(str(name), col_type))
         for row in self.rows:
             row.insert(at, "")
+        if inside:
+            self._shift_formulas("col", at, 1)
         return name
 
     def remove_rows(self, indices) -> None:
+        # highest first, one at a time, so each shift is against the sheet
+        # as it stands after the deletions below it
         for i in sorted(set(indices), reverse=True):
             if 0 <= i < len(self.rows):
                 del self.rows[i]
+                self._shift_formulas("row", i, -1)
+        self.freeze_rows = min(self.freeze_rows, max(self.n_rows - 1, 0))
 
     def remove_columns(self, indices) -> None:
         for i in sorted(set(indices), reverse=True):
@@ -193,6 +221,34 @@ class Sheet:
                 del self.columns[i]
                 for row in self.rows:
                     del row[i]
+                self._shift_formulas("col", i, -1)
+        self.freeze_cols = min(self.freeze_cols, max(self.n_cols - 1, 0))
+
+    def move_rows(self, indices, to: int) -> None:
+        """Move rows as a block (in their order) so they start at ``to`` in
+        the sheet that results. Formulas keep their addresses, like a sort:
+        moving data is not inserting and deleting it."""
+        picked = sorted({i for i in indices if 0 <= i < self.n_rows})
+        if not picked:
+            return
+        chosen = set(picked)
+        block = [self.rows[i] for i in picked]
+        rest = [row for i, row in enumerate(self.rows) if i not in chosen]
+        to = max(0, min(to, len(rest)))
+        self.rows = rest[:to] + block + rest[to:]
+
+    def move_columns(self, indices, to: int) -> None:
+        """Move columns as a block to start at ``to`` — header, type, width
+        and cells together. Column-name references follow by themselves."""
+        picked = sorted({i for i in indices if 0 <= i < self.n_cols})
+        if not picked:
+            return
+        chosen = set(picked)
+        keep = [i for i in range(self.n_cols) if i not in chosen]
+        to = max(0, min(to, len(keep)))
+        order = keep[:to] + picked + keep[to:]
+        self.columns = [self.columns[i] for i in order]
+        self.rows = [[row[i] for i in order] for row in self.rows]
 
     def rename_column(self, index: int, name: str) -> None:
         self.columns[index].name = str(name)
@@ -241,8 +297,10 @@ class Sheet:
 
     def copy(self) -> "Sheet":
         return Sheet(
-            columns=[ColumnSpec(c.name, c.type, c.width) for c in self.columns],
+            columns=[ColumnSpec(c.name, c.type, c.width, list(c.choices),
+                                c.strict) for c in self.columns],
             rows=[list(row) for row in self.rows],
+            freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
         )
 
 
@@ -272,8 +330,12 @@ def parse_sheet(raw) -> Sheet:
             col_type = entry.get("type")
             width = entry.get("width")
             width = int(width) if isinstance(width, (int, float)) and width > 0 else None
+            choices = entry.get("choices")
+            choices = ([str(c) for c in choices if str(c) != ""]
+                       if isinstance(choices, list) else [])
             columns.append(ColumnSpec(
-                name, col_type if col_type in COLUMN_TYPES else "auto", width))
+                name, col_type if col_type in COLUMN_TYPES else "auto", width,
+                choices, bool(entry.get("strict")) and bool(choices)))
         else:
             columns.append(ColumnSpec(str(entry)))
 
@@ -289,7 +351,18 @@ def parse_sheet(raw) -> Sheet:
         rows.append(fixed)
     if not rows:
         rows = [["" for _ in columns]]
-    return Sheet(columns, rows)
+    freeze = parsed.get("freeze")
+    freeze = freeze if isinstance(freeze, dict) else {}
+
+    def _count(key: str, limit: int) -> int:
+        value = freeze.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0, min(int(value), limit))
+        return 0
+
+    return Sheet(columns, rows,
+                 freeze_rows=_count("rows", max(len(rows) - 1, 0)),
+                 freeze_cols=_count("cols", max(len(columns) - 1, 0)))
 
 
 def sheet_to_dict(sheet: Sheet) -> dict:
@@ -298,22 +371,36 @@ def sheet_to_dict(sheet: Sheet) -> dict:
         entry = {"name": col.name, "type": col.type}
         if col.width:
             entry["width"] = int(col.width)
+        if col.choices:
+            entry["choices"] = list(col.choices)
+            if col.strict:
+                entry["strict"] = True
         columns.append(entry)
-    return {
+    out = {
         "version": 2,
         "columns": columns,
         "rows": [list(row) for row in sheet.rows],
     }
+    # written only when set, so a sheet nobody froze saves as it always did
+    if sheet.freeze_rows or sheet.freeze_cols:
+        out["freeze"] = {"rows": sheet.freeze_rows, "cols": sheet.freeze_cols}
+    return out
 
 
 def sheet_to_json(sheet: Sheet) -> str:
     return json.dumps(sheet_to_dict(sheet))
 
 
-def validate_cell(text, col_type: str) -> Optional[str]:
-    """Why a literal cell doesn't fit its column type, or None when it does.
-    Blank cells and formulas always pass (formulas are checked at eval)."""
+def validate_cell(text, col_type: str, choices=(),
+                  strict: bool = False) -> Optional[str]:
+    """Why a literal cell doesn't fit its column, or None when it does.
+    Blank cells and formulas always pass (formulas are checked at eval).
+    A strict dropdown list turns away anything not on it."""
     text = ("" if text is None else str(text)).strip()
+    if text and not is_formula(text) and strict and choices:
+        if text.casefold() not in {str(c).strip().casefold()
+                                   for c in choices}:
+            return f"{text!r} is not on this column's list"
     if not text or is_formula(text) or col_type in ("auto", "text"):
         return None
     if col_type == "number":

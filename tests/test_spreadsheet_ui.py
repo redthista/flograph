@@ -784,24 +784,23 @@ class TestHeaderClickSort:
     def _rows(self, model):
         return [list(r) for r in model.sheet.rows]
 
-    def test_header_click_cycle_sorts_then_restores(self, qtbot):
+    def test_header_click_selects_the_column_not_sorts(self, qtbot):
+        """A spreadsheet's header click selects the column (what Delete,
+        Move and Insert then act on); sorting is on the ▾, the ribbon and
+        the menus."""
         view, model = self._view(
             qtbot, columns=["A", "B"],
             rows=[["10", "x"], ["2", "y"], ["30", "z"]])
-        edits = []
-        model.sheet_edited.connect(lambda d: edits.append(d))
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
         header = view.horizontalHeader()
-
-        with qtbot.waitSignal(view._sort_cycler.sortRequested):
-            header.sectionClicked.emit(0)
-        assert [r[0] for r in self._rows(model)] == ["2", "10", "30"]
-        with qtbot.waitSignal(view._sort_cycler.sortRequested):
-            header.sectionClicked.emit(0)
-        assert [r[0] for r in self._rows(model)] == ["30", "10", "2"]
-        with qtbot.waitSignal(view._sort_cycler.sortRequested):
-            header.sectionClicked.emit(0)                # clear
+        view.resize(400, 300)
+        view.show()
+        x = header.sectionViewportPosition(0) + 10
+        QTest.mouseClick(header.viewport(), Qt.LeftButton, pos=QPoint(x, 5))
+        assert view.whole_columns_selected()
+        assert view.selected_columns() == [0]
         assert [r[0] for r in self._rows(model)] == ["10", "2", "30"]
-        assert len(edits) == 3          # every step is its own undo commit
 
     def test_date_column_sorts_chronologically_not_lexically(self, qtbot):
         view, model = self._view(

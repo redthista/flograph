@@ -126,10 +126,18 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
     formula fills down with shifted references; literals leave new rows
     blank. When rows shrink, extra cells drop off."""
     merged = base.copy()
-    stored_width = {c.name: c.width for c in stored.columns if c.width}
+    stored_by_name = {c.name: c for c in stored.columns}
     for col in merged.columns:
-        if col.width is None and col.name in stored_width:
-            col.width = stored_width[col.name]
+        mine = stored_by_name.get(col.name)
+        if mine is None:
+            continue
+        if col.width is None and mine.width:
+            col.width = mine.width
+        # a dropdown list set on an input column is the user's, not the
+        # input's — it survives the refresh like a width does
+        col.choices, col.strict = list(mine.choices), mine.strict
+    merged.freeze_rows, merged.freeze_cols = (stored.freeze_rows,
+                                              stored.freeze_cols)
 
     base_names = {c.name for c in merged.columns}
     n_rows = merged.n_rows
@@ -148,7 +156,8 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
                 cells.append(translate(template, row - template_row, 0))
             else:
                 cells.append("")
-        merged.columns.append(ColumnSpec(col.name, col.type, col.width))
+        merged.columns.append(ColumnSpec(col.name, col.type, col.width,
+                                         list(col.choices), col.strict))
         for row in range(n_rows):
             merged.rows[row].append(cells[row])
     return merged

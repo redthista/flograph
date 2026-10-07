@@ -775,9 +775,7 @@ class TestEditableTableTile:
         add_page(window)
         node, item = self.add_table(window)
         before = item._sheet_model.rowCount()
-        action = next(a for a in item._sheet_view.toolbar.actions()
-                      if a.text() == "+ Row below")
-        action.trigger()
+        item._sheet_view.view.actions["row_below"].trigger()
 
         assert item._sheet_model.rowCount() == before + 1
         import json
@@ -788,9 +786,12 @@ class TestEditableTableTile:
         the same chrome as the pop-out rather than five buttons."""
         add_page(window)
         _node, item = self.add_table(window)
-        labels = {a.text() for a in item._sheet_view.toolbar.actions()}
-        assert {"+ Row above", "+ Row below", "+ Column", "Fill down",
-                "Sort ↑", "Copy w/ Headers"} <= labels
+        from flograph.ui.spreadsheet import SheetRibbon
+        assert isinstance(item._sheet_view.ribbon, SheetRibbon)
+        names = set(item._sheet_view.view.actions.names())
+        assert {"row_above", "row_below", "col_right", "fill_down",
+                "sort_asc", "copy_headers", "freeze", "filter",
+                "dropdown", "submit"} <= names
         assert item._sheet_view.formula_bar is not None
 
     def test_the_formula_bar_shows_the_source_not_the_value(self, window):
@@ -903,9 +904,9 @@ class TestEditableTableTile:
         assert overlay is not None
         assert overlay.content.model() is item._sheet_model
         assert not item.isVisible()          # the scene copy stands down
-        # and the toolbar came with it
-        assert any(a.text() == "Fill down"
-                   for a in overlay.content.toolbar.actions())
+        # and the ribbon came with it
+        assert overlay.content.ribbon is not None
+        assert overlay.content.view.actions["fill_down"] is not None
 
         page.scene.exit_fullscreen()
         assert page.view.fullscreen_overlay is None
@@ -931,11 +932,14 @@ class TestEditableTableTile:
         rect = overlay.geometry()
         image = page.view.grab().toImage()   # the page, overlay on top of it
         want = theme.NODE_BODY.name()
-        # the title-bar strip, and the empty stretch of the toolbar row
+        # the title-bar strip, and the empty stretch of the ribbon's tab row
+        # (the ribbon paints its own darker strip — anything but the canvas)
         assert image.pixelColor(rect.x() + rect.width() // 2,
                                 rect.y() + 12).name() == want
+        from flograph.ui.spreadsheet import ribbon
         assert image.pixelColor(rect.x() + rect.width() - 30,
-                                rect.y() + 42).name() == want
+                                rect.y() + 42).name() in (
+            want, ribbon._BG, ribbon._TAB_BG)
 
     def test_the_overlay_dying_with_its_page_is_not_a_crash(self, window):
         """Reported against rc11: deleting a page while a tile was maximized

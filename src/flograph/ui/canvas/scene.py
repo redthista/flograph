@@ -173,6 +173,7 @@ class NodeGraphScene(QGraphicsScene, ContentFittedSceneRect):
     page_link_clicked = Signal(str)     # page_id from a Page Links button, or
                                         # a Note's `page:` link text
     slicer_changed = Signal(str)        # node_id — a Slicer's selection changed
+    sheet_submitted = Signal(str)       # node_id — a Table's held edits went in
     control_changed = Signal(str)       # node_id — an input control was moved
     view_changed = Signal(str)          # node_id — an interactive web view
                                         # wrote one of its own params

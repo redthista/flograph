@@ -49,7 +49,8 @@ CSV/Excel/Parquet/JSON/SQLite and **Write Text**, and **Save Report** writes
 a report page to HTML or PDF whenever the flow runs. **Read … (Folder)** reads a
 directory as one stacked table; **Read PDF** turns documents into a table,
 one row per page. **Table** is a real spreadsheet you edit on the canvas,
-with formulas.
+with formulas, an Excel-style ribbon, dropdown lists, freeze panes and edits
+held until you Submit — see [[The Table Spreadsheet]].
 
 **Connect** — SQL Query and SQL Write (any database SQLAlchemy reaches),
 DuckDB SQL, HTTP Request and REST Paginate, and the **Dataiku** trio:
