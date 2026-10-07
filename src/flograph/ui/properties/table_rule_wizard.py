@@ -279,6 +279,12 @@ def _place(box) -> str:
     return f" {token}" if token else ""
 
 
+def _size_words(box) -> list:
+    """`["24px"]` for an icon size box that names one, else `[]`."""
+    size = box.value()
+    return [f"{size}px"] if size >= MIN_PICTURE_SIZE else []
+
+
 def _glyph_text(edit) -> str:
     """What an icon box holds, as a rule writes it.
 
@@ -1007,6 +1013,8 @@ class RuleBuilder(QDialog):
         f.addRow("Pill text", self._hl_badge)
         f.addRow("Icon", self._hl_icon)
         f.addRow("Icon colour", self._hl_icon_color)
+        self._hl_icon_size = self._icon_size_spin()
+        f.addRow("Icon size", self._hl_icon_size)
         f.addRow("Place", self._hl_place)
         # Text colour: the one thing a highlight could always do (`fg`) and
         # the dialog had no control for.
@@ -1051,6 +1059,8 @@ class RuleBuilder(QDialog):
         head.addRow("", self._icon_pill)
         self._icon_place = self._place_combo()
         head.addRow("Place", self._icon_place)
+        self._icon_size = self._icon_size_spin()
+        head.addRow("Icon size", self._icon_size)
         self._icon_shape = _combo(_PICTURE_SHAPES)
         self._icon_shape.setToolTip(
             "For pictures pasted into the map: the shape they are cut to. "
@@ -1291,6 +1301,21 @@ class RuleBuilder(QDialog):
             "narrow."))
         page.findChild(QLabel).setWordWrap(True)
         self._stack.addWidget(page)
+
+    def _icon_size_spin(self) -> QSpinBox:
+        """How tall an icon is drawn, in pixels; one step below the least
+        is "text size" — the size a glyph has when nobody named one."""
+        box = _UnsetSpinBox()
+        box.setRange(MIN_PICTURE_SIZE - 1, MAX_PICTURE_SIZE)
+        box.setSpecialValueText("text size")
+        box.setValue(MIN_PICTURE_SIZE - 1)
+        box.setSuffix(" px")
+        box.setToolTip(
+            "How tall the icon is drawn — a character, an emoji or a pasted "
+            "picture. A row grows to fit a big icon by itself, so there is "
+            "no Row height to set for it.")
+        box.valueChanged.connect(self._refresh)
+        return box
 
     def _height_spin(self, unset: "str | None" = None) -> QSpinBox:
         """A row height in pixels. With `unset`, one step below the least
@@ -1687,16 +1712,22 @@ class RuleBuilder(QDialog):
             _pick_data(self._hl_place,
                        "" if rule.glyph_where in (None, "left")
                        else rule.glyph_where)
+            self._hl_icon_size.setValue(rule.picture_size
+                                        or MIN_PICTURE_SIZE - 1)
         elif rule.mode == "icons":
             _pick_data(self._icon_style, "set")
             _pick_data(self._iconset, rule.icon_set or "traffic")
             self._icon_reverse.setChecked(bool(rule.reverse))
             self._set_other_col(self._icon_by, rule.source)
             self._load_icon_place(rule)
+            self._icon_size.setValue(rule.picture_size
+                                     or MIN_PICTURE_SIZE - 1)
             self._sync_icon_style()
         elif rule.mode == "icon_map":
             _pick_data(self._icon_style, "map")
             self._load_icon_place(rule)
+            self._icon_size.setValue(rule.picture_size
+                                     or MIN_PICTURE_SIZE - 1)
             # `source` is the deciding column; show it as "(this column)"
             # only when it is the single column the icon is drawn in.
             src = rule.source if rule.source not in rule.columns else None
@@ -1848,7 +1879,8 @@ class RuleBuilder(QDialog):
                     + ([colour] if colour and colour != "(none)" else [])
                     # a pill has already spent the place on itself
                     + ([place] if place and not self._hl_pill.isChecked()
-                       else [])))
+                       else [])
+                    + _size_words(self._hl_icon_size)))
             ink = self._hl_fg.value()
             if ink and ink != "(none)":
                 parts.append(f"fg {ink}")
@@ -1894,12 +1926,14 @@ class RuleBuilder(QDialog):
                 lead += "all " if self._map_all.isChecked() else ""
                 gap = self._map_gap.value()
                 lead += f"gap {gap} " if gap >= 0 else ""
+                lead += "".join(w + " " for w in _size_words(self._icon_size))
                 return (f"{cols} iconmap {lead}{source}: "
                         + ", ".join(pairs))
             rev = " reverse" if self._icon_reverse.isChecked() else ""
             by = f" by {quote_column(decider)}" if decider else ""
             # before the `by` clause, or the column name would swallow them
-            trail = _pill(self._icon_pill) + _place(self._icon_place)
+            trail = (_pill(self._icon_pill) + _place(self._icon_place)
+                     + "".join(" " + w for w in _size_words(self._icon_size)))
             return (f"{cols} icons {self._iconset.currentData()}{rev}{trail}"
                     f"{by}{_only(self._icon_only)}")
         if kind == K_PICTURE:

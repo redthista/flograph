@@ -67,6 +67,8 @@ table[cellspacing="2"] > thead > tr > td, table[cellspacing="2"] > tbody > tr > 
   padding: 1px 6px;
 }
 img { display: block; margin: 1.5em auto; }
+/* an icon in a table cell stays on its value's line */
+td img, th img { display: inline; margin: 0; }
 /* the web layout: sidebar, top bar, tabs, sections that fold */
 :root {
   --fg-nav-line: #e5e7eb; --fg-nav-hover: #eff6ff; --fg-nav-bg: #ffffff;
@@ -110,6 +112,8 @@ table[cellspacing="2"] > thead > tr > td, table[cellspacing="2"] > tbody > tr > 
   padding: 1px 6px;
 }
 img { display: block; margin: 2em auto; }
+/* an icon in a table cell stays on its value's line */
+td img, th img { display: inline; margin: 0; }
 /* the web layout: warm bars, sections as margin notes, small-caps tabs */
 :root {
   --fg-nav-bg: #fafaf9; --fg-nav-ink: #292524; --fg-nav-muted: #78716c;

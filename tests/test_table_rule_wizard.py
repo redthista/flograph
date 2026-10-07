@@ -779,3 +779,47 @@ class TestEmptyingAnAutoBox:
         b = build()
         self._clear(qtbot, b._layout_width)
         assert b._layout_width.value() == b._layout_width.minimum()
+
+
+def test_a_highlight_icon_takes_a_size(build):
+    b = build()
+    b._kind.setCurrentIndex(K_HIGHLIGHT)
+    _select(b, "status")
+    b._op.setCurrentIndex(b._op.findData("="))
+    b._val1.setText("breach")
+    b._hl_icon.setText("✓")
+    b._hl_icon_size.setValue(24)
+    rule = _valid(b.line())
+    assert (rule.glyph, rule.picture_size) == ("✓", 24)
+    assert build(rule)._hl_icon_size.value() == 24
+
+
+def test_an_icon_map_takes_a_size(build):
+    b = build()
+    b._kind.setCurrentIndex(K_ICONS)
+    b._icon_style.setCurrentIndex(1)
+    _select(b, "units")
+    _pick_other(b._icon_by, "sla")
+    b._map.item(0, 0).setText("*a*")
+    b._map.cellWidget(0, 1).setText("✓")
+    b._icon_size.setValue(20)
+    assert b.line() == "units iconmap 20px sla: *a*=✓"
+    assert build(_valid(b.line()))._icon_size.value() == 20
+
+
+def test_an_icon_set_takes_a_size():
+    rule = parse_rules("score icons traffic right 24px")[0]
+    assert (rule.icon_set, rule.glyph_where, rule.picture_size) == (
+        "traffic", "right", 24)
+
+
+def test_an_icon_set_round_trips_its_size(build):
+    rule = parse_rules("score icons traffic 24px")[0]
+    b = build(rule)
+    assert b._icon_size.value() == 24
+    assert b.line() == "score icons traffic 24px"
+
+
+def test_no_size_writes_none(build):
+    rule = parse_rules("score icons traffic")[0]
+    assert build(rule).line() == "score icons traffic"

@@ -676,6 +676,11 @@ class DataTableView(QTableView):
         from .table_delegate import BAR_ROLE, DECOR_ROLE
         header = self.horizontalHeader()
         metrics = QFontMetrics(self.font())
+        from .emoji_font import with_emoji
+        from .table_delegate import mark_gap
+        chip = getattr(self.itemDelegate(), "_chip_width", None)
+        glyph_font = with_emoji(self.font())
+        glyph_metrics = QFontMetrics(glyph_font)
         rows = min(model.rowCount(), FIT_SAMPLE_ROWS)
         # a `width` rule is an instruction, not a hint: it is set as asked
         # and the content is not consulted, which is the whole point of
@@ -706,6 +711,7 @@ class DataTableView(QTableView):
                     # and a lozenge costs only its padding
                     marks, pill, _ink = decor
                     beside = 0
+                    inside = 0
                     for d in marks:
                         spark = getattr(d, "spark", None)
                         if spark is not None:
@@ -717,7 +723,8 @@ class DataTableView(QTableView):
                             else:
                                 spark_width = max(spark_width, spark.width
                                                   or SPARK_ALONE_WIDTH)
-                        elif getattr(d, "image", None):
+                            continue
+                        if getattr(d, "image", None):
                             # as wide as its shape makes it, at the height
                             # it is drawn
                             from flograph.core.images import picture_aspect
@@ -728,12 +735,23 @@ class DataTableView(QTableView):
                             tall = d.size or max(PICTURE_LINE_HEIGHT,
                                                  (asked or 0) - 4)
                             wide = round(tall * picture_aspect(d.image))
-                            if d.where in ("left", "right"):
-                                beside += wide + 6
-                            else:
-                                spark_width = max(spark_width, wide + 10)
                         elif d.where in ("left", "right", "in"):
-                            beside += 24
+                            # measured as the delegate draws it — a sized
+                            # glyph at its own size, an emoji wider than ✓
+                            wide = (chip(glyph_metrics, d, None, glyph_font)
+                                    if chip is not None else 18)
+                        else:
+                            continue
+                        # every mark in a run is paid for, and the gap after
+                        # it: `iconmap all` sets several side by side, and a
+                        # column sized for the widest one cut the rest off
+                        step = wide + mark_gap(d)
+                        if d.where in ("left", "right"):
+                            beside += step
+                        elif d.where == "in":
+                            inside += step
+                    if inside:
+                        spark_width = max(spark_width, inside + 10)
                     icon_pad = max(icon_pad,
                                    beside + (14 if pill else 0))
             if bar_only:

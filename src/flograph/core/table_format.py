@@ -541,7 +541,9 @@ class Decoration:
     spark: Optional["_spark.Spark"] = None
     #: A picture drawn in the decoration's place instead of text — an image
     #: `data:` address, pasted into a rule or read from a column. `size` is
-    #: its height in card pixels; None fits it to the line it sits on.
+    #: its height in card pixels; None fits it to the line it sits on. A
+    #: glyph takes a `size` too — its font's pixel size — and None sets it
+    #: at the table's own text size.
     image: Optional[str] = None
     size: Optional[int] = None
     #: The colour of a tile behind the picture, and the shape both are cut
@@ -1908,7 +1910,11 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
                     hide_value=only)
     if keyword in ("icons", "icon"):
         arg, source, only = _split_modifiers(arg)
+        # a size may sit either side of the place: `right 24px`, `24px right`
+        arg, size = _split_size(lineno, arg)
         arg, place = _split_place(arg)
+        if size is None:
+            arg, size = _split_size(lineno, arg)
         arg, pill = _split_pill(arg)
         reverse = False
         low = arg.lower()
@@ -1921,7 +1927,7 @@ def _parse_token_line(lineno: int, line: str) -> Rule:
                              f"(traffic, arrows, check)")
         return Rule("icons", columns, icon_set=key, reverse=reverse,
                     source=source, hide_value=only, glyph_where=place,
-                    as_pill=pill)
+                    as_pill=pill, picture_size=size)
     if keyword == "width":
         if arg.lower() in ("auto", "fit", ""):
             # an explicit "back to normal", for undoing a wider pattern rule
@@ -2482,8 +2488,9 @@ def _summary(rule: Rule) -> str:
                 f"highlight the {where}") + tall
     if rule.mode == "icons":
         rev = ", reversed" if rule.reverse else ""
+        size = f", {rule.picture_size}px" if rule.picture_size else ""
         return (f"{cols}  ·  icons ({rule.icon_set or 'traffic'}{rev})"
-                f"{potted}{by}{place}{only}")
+                f"{potted}{by}{place}{size}{only}")
     if rule.mode == "icon_map":
         whence = f"“{rule.source}”" if rule.source else "its own value"
         every = ", every match" if rule.map_all else ""
@@ -2970,6 +2977,10 @@ def _mark(text, *, color=None, pill=None, where="left", size=None,
     A picture brings its own colours, so the colour the rule gave the mark
     (a lozenge's, or else the ink's) becomes the tile behind it, cut to a
     rounded square unless a shape was named.
+
+    `size` is a height in card pixels for a glyph too: an icon sized in
+    its own rule, which makes its row taller with it — no `height` line
+    needed to give a big glyph room.
     """
     uri = _images.picture_uri(text)
     if uri is not None:
@@ -2978,7 +2989,7 @@ def _mark(text, *, color=None, pill=None, where="left", size=None,
                           shape=shape or ("rounded" if tile else None),
                           gap=gap)
     return Decoration(text=text, color=color, pill=pill, where=where,
-                      gap=gap)
+                      size=size, gap=gap)
 
 
 def _picture_place(rule) -> str:
@@ -3171,10 +3182,12 @@ def evaluate_column(series, rules, stats: ColumnStats, frame=None,
                 # in a lozenge the tier colour is the ground, not the ink
                 deco = (Decoration(text=glyph, pill=color,
                                    color=readable_fg(color),
-                                   where=_place(rule))
+                                   where=_place(rule),
+                                   size=rule.picture_size)
                         if rule.as_pill else
                         Decoration(text=glyph, color=color,
-                                   where=_place(rule)))
+                                   where=_place(rule),
+                                   size=rule.picture_size))
                 contrib[i] = CellStyle(decorations=[deco])
 
         elif rule.mode in ("icon_map", "color_map"):

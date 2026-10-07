@@ -525,6 +525,23 @@ For a single flag rather than a whole map, a highlight can place an icon:
 An icon goes in a cell, so it cannot be combined with `row` — name the
 columns on the left instead.
 
+### Icon size
+
+Add a size in pixels to any icon rule — a glyph, an emoji or a pasted
+picture — and it is drawn that tall. A row grows to fit a big icon on its
+own, so there is no `height` line to add:
+
+```
+owner  = Alice => icon ✓ green 24px
+amount > 1000  => icon ▲ green right 20px
+tags   iconmap all 26px: *fix*=🔧, *test*=🧪, *late*=🔥
+score  icons traffic 22px
+```
+
+Left out, a glyph is set at the table's text size. The size is card
+pixels; a report prints it at the same size. In the rule builder it is
+**Icon size**, on the Icons page and beside a highlight's icon.
+
 ## Colouring by category, with nothing named
 
 A `colormap` has to be written out, so it can only colour values somebody

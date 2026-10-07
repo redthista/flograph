@@ -301,6 +301,13 @@ table[style*="border-style:none"] .fg-chart { width: 100% !important; }
 .fg-db.fg-under > i { width: auto; }
 /* marks pinned to the cell's right edge, beside the value */
 .fg-pr > span + span { flex: none; white-space: nowrap; }
+/* a column with a `width` rule: held to it (core/table_html._fixed_box) */
+.fg-fixed { overflow: hidden; overflow-wrap: anywhere; white-space: normal; }
+/* a cell's icons sit on its line, whatever a theme does to a picture: two
+   starter themes block-centre every img, which put each one on a line of
+   its own (more specific than a bare img, so it wins in any order) */
+.flograph-table td img, .flograph-table th img {
+  display: inline; margin: 0; max-width: none; }
 .fg-sortable thead th { cursor: pointer; user-select: none; }
 .fg-sortable thead th[data-fg-sort="asc"]::after { content: " \\25B2"; font-size: .75em; }
 .fg-sortable thead th[data-fg-sort="desc"]::after { content: " \\25BC"; font-size: .75em; }

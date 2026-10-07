@@ -241,6 +241,12 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
         # Qt's rich text takes a column's width off the first row that
         # states one, and the header is that row
         fixed = f' width="{entry.width}"' if entry and entry.width else ""
+        if live and entry and entry.width:
+            # a browser takes `width=` as a floor; the column is held to it
+            # by its header and by every cell's box (_fixed_box)
+            inner = _fixed_width(entry.width)
+            fixed = (f' style="width:{inner}px;min-width:{inner}px;'
+                     f'max-width:{inner}px"')
         label = entry.label if entry and entry.label else str(column)
         if not (entry and entry.label) and column in faces:
             label = tb.face_header(tree, arrangement, column) or label
@@ -251,7 +257,9 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                    if arrangement is not None else 0)
         head_rows[covered].append(
             (index, f"<th{align}{fixed}{spanned(covered)}>"
-                    f"{_escape(label)}</th>"))
+                    + (_fixed_box(_escape(label), entry.width)
+                       if live and entry and entry.width
+                       else _escape(label)) + "</th>"))
     for span in (arrangement.spans if arrangement is not None else ()):
         wide = span.end - span.start
         cols = f' colspan="{wide}"' if wide > 1 else ""
@@ -315,7 +323,8 @@ def frame_to_html(frame, rules=(), hidden=(), shown=(),
                              align=entry.align if entry else None,
                              value_width=value_widths.get(column),
                              spark_room=rooms.get(column),
-                             pad=pad, row_height=asked, live=live))
+                             pad=pad, row_height=asked, live=live,
+                             fixed=entry.width if entry else None))
         out.append("</tr>")
     out.append("</tbody></table>")
     if bands:
@@ -350,7 +359,8 @@ def _data_cells(row, columns, arrays, styles, numeric, track, stacked,
                            align=entry.align if entry else None,
                            value_width=value_widths.get(column),
                            spark_room=rooms.get(column),
-                           pad=pad, row_height=asked, live=live))
+                           pad=pad, row_height=asked, live=live,
+                           fixed=entry.width if entry else None))
     return cells
 
 
@@ -420,7 +430,8 @@ def _special_tr(special, plan, columns, specials, numeric, layout_rules,
         cells.append(_cell(None, dataclasses.replace(style, text=text or " ")
                            if style is not None else None,
                            numeric[column] and name in special.values,
-                           align=entry.align if entry else None, live=live))
+                           align=entry.align if entry else None, live=live,
+                           fixed=entry.width if entry else None))
     cells.append("</tr>")
     return "".join(cells)
 
@@ -599,9 +610,9 @@ def _row_padding(asked: int, row, columns, styles, font_pt) -> float:
             if (getattr(d, "spark", None) is not None
                     and d.where not in ("above", "below")):
                 middle = max(middle, asked - ROW_SPARK_INSET)
-            elif (getattr(d, "image", None)
+            elif ((getattr(d, "image", None) or getattr(d, "size", None))
                     and d.where not in ("above", "below")):
-                middle = max(middle, _picture_height(d, asked))
+                middle = max(middle, _mark_height(d, asked))
         stacked = 0.0
         for place in ("above", "below"):
             marks = style.at(place)
@@ -609,8 +620,10 @@ def _row_padding(asked: int, row, columns, styles, font_pt) -> float:
                 continue
             sparks = [d.spark for d in marks
                       if getattr(d, "spark", None) is not None]
-            pictures = [_picture_height(d) for d in marks
-                        if getattr(d, "image", None)]
+            pictures = [_mark_height(d) for d in marks
+                        if getattr(d, "image", None)
+                        or (getattr(d, "size", None)
+                            and getattr(d, "spark", None) is None)]
             stacked += max([sparkline.PAPER_LINE_HEIGHT * (2 if s.tall else 1)
                             for s in sparks] + pictures + [line])
         tallest = max(tallest, middle + stacked)
@@ -754,11 +767,12 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
           spark_room: "dict | None" = None,
           pad: "float | None" = None,
           row_height: "int | None" = None,
-          live: bool = False) -> str:
+          live: bool = False, fixed: "int | None" = None) -> str:
     """One `<td>`: the value, plus whatever the rules said about it.
     `pad` is the top and bottom padding that makes its row as tall as a
     `height` asked; `row_height` is that height, which a spark grows into.
-    `live` writes it for a browser (see frame_to_html)."""
+    `live` writes it for a browser (see frame_to_html); `fixed` is the
+    column's `width` rule, which a browser is held to (see _fixed_box)."""
     text = _cell_text(value, style, spark_room, row_height,
                       align or ("right" if numeric else None), live)
     if style is not None and style.bar is not None and live:
@@ -799,7 +813,33 @@ def _cell(value, style: "CellStyle | None", numeric: bool,
         placement = ' align="center"'
     else:
         placement = ' align="right"' if numeric else ""
+    if live and fixed:
+        text = _fixed_box(text, fixed)
     return f"<td{placement}{attrs}>{text}</td>"
+
+
+#: A live cell's side padding (LIVE_CSS `padding: 3px 9px`), which a
+#: `width` rule — the whole column on the card — includes.
+LIVE_CELL_PAD_X = 9
+
+
+def _fixed_width(width: int) -> int:
+    """The content width a live column of `width` card pixels gets."""
+    return max(8, int(width) - 2 * LIVE_CELL_PAD_X)
+
+
+def _fixed_box(html: str, width: int) -> str:
+    """A live cell's content held to its column's `width` rule.
+
+    A browser reads `width` on a header cell as a hint: the column took
+    whatever its widest content asked, or whatever spare room a 100% table
+    handed it, and the rule only ever made a column *wider*. A box that
+    is never wider than the rule caps what the content asks; long text
+    wraps inside it, and a run too wide to wrap is cut at its edge rather
+    than spilling into the next column (`.fg-fixed` in LIVE_CSS).
+    """
+    return (f'<div class="fg-fixed" style="max-width:{_fixed_width(width)}'
+            f'px">{html}</div>')
 
 
 def _bar(text: str, style: CellStyle, numeric: bool,
@@ -958,6 +998,19 @@ def _spark_img(d, room: "dict | None" = None,
 PICTURE_HEIGHT = 13
 
 
+def _glyph_pt(d) -> float:
+    """A sized glyph's text size on paper: its card pixels, as points."""
+    return round(d.size * 0.75, 1)
+
+
+def _mark_height(d, row_height: "int | None" = None) -> float:
+    """How tall a mark on the value's line stands: a picture's height, or
+    a sized glyph's line — so `icon ✓ 24px` grows its row by itself."""
+    if getattr(d, "image", None):
+        return _picture_height(d, row_height)
+    return round(_glyph_pt(d) * 1.6, 1)
+
+
 def _picture_height(d, row_height: "int | None" = None) -> float:
     """How tall a picture decoration prints: the size its rule named (card
     pixels, as points), else a line — grown with a `height` on the value's
@@ -1007,11 +1060,39 @@ def _decor_span(d, spark_room: "dict | None" = None,
     css = []
     if d.color:
         css.append(f"color:{d.color}")
+    if d.size:
+        # a glyph sized in its rule: card pixels, as points like a picture
+        css.append(f"font-size:{_glyph_pt(d):g}pt")
     if d.pill:
         css.append(f"background-color:{d.pill}")
         css.append(f"padding:{_PILL_PAD}")
+    if is_emoji(d.text):
+        css.append(f"font-family:{EMOJI_FONTS}")
     attrs = f' style="{";".join(css)}"' if css else ""
     return f"<span{attrs}>{_escape(d.text)}</span>"
+
+
+#: The fonts an emoji mark is set in, named outright. Qt WebEngine — the
+#: app's Web preview — draws an emoji only when its span names a font that
+#: has it: under the page's plain `sans-serif`, Qt's `'sans-serif'` on a
+#: plain table's spans or a theme's own fonts it left a blank where 🔧 was
+#: (a probe, not a guess: the same page in Chrome drew every one). Last,
+#: the generic face, for a text symbol in the same mark.
+EMOJI_FONTS = ("'Twemoji','Noto Color Emoji','Apple Color Emoji',"
+               "'Segoe UI Emoji',sans-serif")
+
+#: Emoji drawn as pictures by default below U+1F000 (Unicode's
+#: Emoji_Presentation in the BMP). ✓ ✗ ▲ ● are text and stay in the
+#: table's own font.
+_BMP_EMOJI = frozenset(
+    "⌚⌛⏩⏪⏫⏬⏰⏳⏸⏹⏺☔☕♈♉♊♋♌♍♎♏♐♑♒♓♿⚓⚡⚪⚫⚽⚾⛄⛅⛎⛔⛪⛲⛳⛵⛺⛽"
+    "✅✊✋✨❌❎❓❔❕❗➕➖➗➰➿⬛⬜⭐⭕")
+
+
+def is_emoji(text) -> bool:
+    """Whether `text` holds an emoji — a picture character, not a symbol."""
+    return any(ord(c) >= 0x1F000 or c == "\ufe0f" or c in _BMP_EMOJI
+               for c in str(text or ""))
 
 
 def _in_a_pill(text: str, style: "CellStyle") -> str:
@@ -1061,14 +1142,20 @@ def _decorate(text: str, style: "CellStyle",
     # an ordinary one, a column squeezed narrow broke "● 243" at the space,
     # the value went under its icon, and that one cell made its row twice
     # the height of the rows around it.
-    inside = run(style.at("in"))
+    inside = _held(run(style.at("in")), live)
     if inside:
         middle = inside                   # `only` / `in` — instead of the value
     else:
-        parts = ([run(style.at("left"))]
-                 + ([_in_a_pill(text, style)] if text or style.pill else []))
-        value = MARK_JOIN.join(p for p in parts if p)
-        right = run(style.at("right"))
+        left = run(style.at("left"))
+        shown = _in_a_pill(text, style) if text or style.pill else ""
+        if left and shown:
+            # the join goes inside the held run, so nothing can break
+            # between the last mark and the value either
+            value = (_held(left + MARK_JOIN, live) + shown if live
+                     else left + MARK_JOIN + shown)
+        else:
+            value = _held(left, live) or shown
+        right = _held(run(style.at("right")), live)
         middle = (_pinned_right(value, right, align, live)
                   if value and right
                   else value or right)
@@ -1081,6 +1168,18 @@ def _decorate(text: str, style: "CellStyle",
     # spellings survive and break the line all the same (a probe, not a
     # guess: `<br>` 0 tables, `<br/>` and `<br />` 1).
     return "<br />".join(line for line in lines if line)
+
+
+def _held(marks: str, live: bool) -> str:
+    """A run of marks a browser must not break: one `white-space:nowrap`
+    span. A no-break space between two pictures was not enough — on a
+    standards-mode page Chromium broke at it anyway, so a column took the
+    width of one icon, stacked the rest and spilled the value out of the
+    cell. Qt's rich text keeps the no-break spaces, so paper is as it was.
+    """
+    if not live or not marks:
+        return marks
+    return f'<span style="white-space:nowrap">{marks}</span>'
 
 
 #: Between the value and the marks pinned to the right of its cell.

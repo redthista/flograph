@@ -22,13 +22,14 @@ where before it needed none.
 """
 from __future__ import annotations
 
+import math
 from collections import OrderedDict
 
 from PySide6.QtCore import (
     QBuffer, QByteArray, QIODevice, QPointF, QRect, QRectF, QSize, Qt,
 )
 from PySide6.QtGui import (
-    QColor, QFontMetrics, QImageReader, QPainter, QPainterPath, QPalette,
+    QColor, QFont, QFontMetrics, QImageReader, QPainter, QPainterPath, QPalette,
     QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
@@ -64,6 +65,10 @@ def _gap(d) -> int:
     icons touching, not the icons on the text."""
     gap = getattr(d, "gap", None)
     return _ICON_GAP if gap is None else gap
+
+
+#: For a view sizing a column to the marks this draws.
+mark_gap = _gap
 
 
 def _run_width(marks, widths) -> int:
@@ -112,6 +117,34 @@ def _spark(d):
 
 def _picture(d):
     return getattr(d, "image", None)
+
+
+def _sized_glyph(d) -> bool:
+    """A typed mark (✓, 🔥, a pill's label) its rule gave a size."""
+    return (bool(getattr(d, "size", None)) and not _picture(d)
+            and _spark(d) is None)
+
+
+def _glyph_font(font: QFont, d) -> QFont:
+    """`font` at the pixel size a sized glyph asked for, else `font`."""
+    if not _sized_glyph(d):
+        return font
+    out = QFont(font)
+    out.setPixelSize(max(1, int(d.size)))
+    return out
+
+
+def _mark_px(d) -> int:
+    """How tall a sized mark stands, padding included: a picture is its
+    size; a glyph is its font's line, a little over its pixel size."""
+    if _sized_glyph(d):
+        return int(math.ceil(d.size * _GLYPH_LINE)) + 2 * _PICTURE_PAD_Y
+    return d.size + 2 * _PICTURE_PAD_Y
+
+
+#: A font's line height over its pixel size — roughly, across the UI and
+#: emoji faces, enough that a sized glyph's row never clips it.
+_GLYPH_LINE = 1.25
 
 
 #: Kept clear above and below a picture, so a logo as tall as its row does
@@ -242,8 +275,8 @@ def _units(decorations) -> int:
 def _line_px(decorations, line_h: int) -> int:
     """How tall a stacked line of decorations is, in pixels: a line of text
     (two for a tall spark), or a sized picture's height if that is more."""
-    sized = [d.size + 2 * _PICTURE_PAD_Y for d in decorations
-             if _picture(d) and d.size]
+    sized = [_mark_px(d) for d in decorations
+             if (_picture(d) or _sized_glyph(d)) and d.size]
     return max([line_h * _units(decorations)] + sized)
 
 
@@ -257,8 +290,8 @@ def _grown_px(decorations, line_h: int) -> int:
             continue
         if _spark(d) is not None and _spark(d).tall:
             extra = max(extra, line_h)
-        elif _picture(d) and d.size:
-            extra = max(extra, d.size + 2 * _PICTURE_PAD_Y - line_h)
+        elif (_picture(d) or _sized_glyph(d)) and d.size:
+            extra = max(extra, _mark_px(d) - line_h)
     return extra
 
 
@@ -373,15 +406,21 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
 
     # ------------------------------------------------------------ chips
 
-    def _chip_width(self, metrics, d, height: "int | None" = None) -> int:
+    def _chip_width(self, metrics, d, height: "int | None" = None,
+                    font: "QFont | None" = None) -> int:
         """How much room one decoration needs beside the value. `height` is
-        the band it sits in, which a picture is drawn to fit."""
+        the band it sits in, which a picture is drawn to fit; `font` is the
+        one glyphs are drawn in, which a sized glyph is measured at."""
         if _spark(d) is not None:
             return _spark(d).width or _SPARK_BESIDE_W
         if _picture(d):
             from flograph.core.images import picture_aspect
             tall = _picture_height(d, height or metrics.height())
             return max(1, round(tall * picture_aspect(_picture(d))))
+        if _sized_glyph(d):
+            metrics = QFontMetrics(_glyph_font(
+                font if font is not None else with_emoji(QApplication.font()),
+                d))
         advance = metrics.horizontalAdvance(str(d.text))
         if d.pill:
             return advance + 2 * _PILL_PAD_X
@@ -401,7 +440,8 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         a stub at one end of an empty cell.
         """
         side = [d for d in decorations if d.where in ("left", "right")]
-        widths = {id(d): self._chip_width(metrics, d, band_height)
+        widths = {id(d): self._chip_width(metrics, d, band_height,
+                                          with_emoji(opt.font))
                   for d in side}
         flexible = [d for d in side
                     if _spark(d) is not None and not _spark(d).width]
@@ -421,7 +461,8 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
     def _draw_chip(self, painter, x, band, d, metrics, pen,
                    width: "int | None" = None) -> int:
         """One decoration at `x` within `band`. Returns the width used."""
-        width = width or self._chip_width(metrics, d, band.height())
+        width = width or self._chip_width(metrics, d, band.height(),
+                                          painter.font())
         if _spark(d) is not None:
             paint_spark(painter, QRect(x, band.top(), width, band.height()),
                         _spark(d))
@@ -444,7 +485,9 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
                           getattr(d, "shape", None), ratio)
             return width
         if d.pill:
-            height = min(band.height(), metrics.height() + 2 * _PILL_PAD_Y)
+            label = (QFontMetrics(_glyph_font(painter.font(), d))
+                     if _sized_glyph(d) else metrics)
+            height = min(band.height(), label.height() + 2 * _PILL_PAD_Y)
             top = band.top() + (band.height() - height) // 2
             painter.save()
             painter.setRenderHint(QPainter.Antialiasing, True)
@@ -456,8 +499,14 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # a lozenge brings its own ground, so its ink is safe whatever the
         # cell is filled with; a bare glyph is the one that has to defer
         painter.setPen(QColor(d.color) if d.color else pen)
+        sized = _sized_glyph(d)
+        if sized:
+            painter.save()
+            painter.setFont(_glyph_font(painter.font(), d))
         painter.drawText(QRect(x, band.top(), width, band.height()),
                          Qt.AlignVCenter | Qt.AlignHCenter, str(d.text))
+        if sized:
+            painter.restore()
         return width
 
     def _draw_line(self, painter, band, decorations, metrics, pen,
@@ -482,7 +531,8 @@ class ConditionalFormatDelegate(QStyledItemDelegate):
         # no wider than the band: a picture in place of the value is drawn
         # to the row's height, and a narrow column shrinks it to fit instead
         widths = [min(band.width(),
-                      self._chip_width(metrics, d, band.height()))
+                      self._chip_width(metrics, d, band.height(),
+                                       painter.font()))
                   for d in decorations]
         total = sum(widths) + sum(_gap(d) for d in decorations[:-1])
         spare = max(0, band.width() - total)

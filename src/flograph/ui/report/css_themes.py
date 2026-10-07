@@ -42,6 +42,12 @@ table[cellspacing="2"] td p { margin: 0 !important; max-width: none !important; 
 .flograph-table, table[cellspacing="2"] { line-height: 1.3; }
 /* a chart drawn as a picture sits in a paragraph: no reading width for it */
 p:has(> img) { max-width: none !important; }
+/* ...and so does an icon in a table cell, which a theme's framing of a
+   chart picture (padding, a border, a shadow) squeezed to nothing */
+.flograph-table td img, .flograph-table th img,
+table[cellspacing="2"] td img, table[cellspacing="2"] th img {
+  display: inline; margin: 0; padding: 0; border: 0; box-shadow: none;
+  max-width: none; }
 """
 
 
