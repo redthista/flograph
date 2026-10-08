@@ -182,6 +182,14 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
             dict(col.validation) if col.validation else None))
         for row in range(n_rows):
             merged.rows[row].append(cells[row])
+
+    # notes stay on their column (by name) and row, as long as both remain
+    by_name = {c.name: i for i, c in enumerate(merged.columns)}
+    for (r, c), text in stored.notes.items():
+        if c < stored.n_cols and r < n_rows:
+            col = by_name.get(stored.columns[c].name)
+            if col is not None:
+                merged.notes[(r, col)] = text
     return merged
 
 

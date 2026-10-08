@@ -20,11 +20,13 @@ from .values import FormulaError
 
 KINDS = (("formulas", "Formulas"), ("constants", "Constants"),
          ("blanks", "Blanks"), ("errors", "Errors"),
-         ("problems", "Problem cells"), ("region", "Current region"),
+         ("problems", "Problem cells"), ("notes", "Notes"),
+         ("region", "Current region"),
          ("last", "Last cell"))
 TYPES = ("numbers", "text", "logicals", "errors")
 _NOUN = {"formulas": "formula", "constants": "value", "blanks": "blank cell",
-         "errors": "error", "problems": "problem cell"}
+         "errors": "error", "problems": "problem cell",
+         "notes": "note"}
 
 Rect = tuple[int, int, int, int]
 _CELL = re.compile(r"^\$?([A-Za-z]{1,3})\$?(\d+)$")
@@ -52,10 +54,11 @@ def special_cells(n_rows: int, n_cols: int,
                   types: Iterable[str] = TYPES,
                   within: Optional[Iterable[tuple[int, int]]] = None,
                   skip_row: Callable[[int], bool] = lambda _r: False,
-                  problem: Callable[[int, int], bool] = lambda _r, _c: False
+                  problem: Callable[[int, int], bool] = lambda _r, _c: False,
+                  noted: Callable[[int, int], bool] = lambda _r, _c: False
                   ) -> list[tuple[int, int]]:
     """The cells of one Go To Special `kind` (formulas, constants, blanks,
-    errors, problems) among `within` — every cell when None — in reading
+    errors, problems, notes) among `within` — every cell when None — in reading
     order. Rows `skip_row` says are hidden are passed over."""
     wanted = set(types)
     if within is None:
@@ -71,6 +74,8 @@ def special_cells(n_rows: int, n_cols: int,
             hit = not text.strip()
         elif kind == "problems":
             hit = problem(r, c)
+        elif kind == "notes":
+            hit = noted(r, c)
         elif kind == "errors":
             hit = isinstance(value(r, c), FormulaError)
         elif kind == "formulas":

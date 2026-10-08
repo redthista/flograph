@@ -9,6 +9,7 @@ dialog records local undo steps).
 """
 from __future__ import annotations
 
+import html
 from typing import Optional
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
@@ -17,7 +18,7 @@ from PySide6.QtGui import QBrush, QColor
 from flograph.core.sheet.numfmt import format_value_as, parse_typed
 from flograph.core.sheet import validation as _validation
 
-from ..table_delegate import BAR_ROLE, DECOR_ROLE, ICON_ROLE
+from ..table_delegate import BAR_ROLE, DECOR_ROLE, ICON_ROLE, NOTE_ROLE
 from flograph.core.sheet import (COLUMN_TYPES, FormulaError, Sheet,
                                  SheetEvaluator, format_value, is_formula,
                                  normalize_date, parse_sheet,
@@ -458,6 +459,8 @@ class SheetModel(QAbstractTableModel):
         row, col = index.row(), index.column()
         if not (0 <= row < self._sheet.n_rows and 0 <= col < self._sheet.n_cols):
             return None
+        if role == NOTE_ROLE:
+            return self._sheet.notes.get((row, col))
         source = self._sheet.cell(row, col)
         value = self._result.values[row][col]
         col_type = self.column_type(col)
@@ -488,17 +491,15 @@ class SheetModel(QAbstractTableModel):
                 return _CHECKED
             return _UNCHECKED
         if role == _TOOLTIP:
-            error = self._result.errors.get((row, col))
-            if error:
-                return error
-            invalid = self._invalid(row, col, source)
-            if invalid:
-                return invalid
-            if style is not None and style.tooltip:
-                return style.tooltip
-            if is_formula(source):
-                return source
-            return None
+            note = self._sheet.notes.get((row, col))
+            tip = self._cell_tip(row, col, source, style)
+            if note:
+                # the note first, as Excel's box shows it; what the cell
+                # would say anyway under a line
+                body = html.escape(note).replace("\n", "<br>")
+                return (f"<b>Note</b><br>{body}"
+                        + (f"<hr>{html.escape(tip)}" if tip else ""))
+            return tip
         if role == _FOREGROUND:
             if isinstance(value, FormulaError):
                 return _ERROR_BRUSH
@@ -533,6 +534,19 @@ class SheetModel(QAbstractTableModel):
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 return _ALIGN_NUMBER
             return None
+        return None
+
+    def _cell_tip(self, row: int, col: int, source: str, style):
+        error = self._result.errors.get((row, col))
+        if error:
+            return error
+        invalid = self._invalid(row, col, source)
+        if invalid:
+            return invalid
+        if style is not None and style.tooltip:
+            return style.tooltip
+        if is_formula(source):
+            return source
         return None
 
     def setData(self, index, value, role=Qt.EditRole) -> bool:
@@ -615,6 +629,34 @@ class SheetModel(QAbstractTableModel):
             for r, c in cells:
                 value = translate(text, r - anchor[0], c - anchor[1])
                 sheet.set_cell(r, c, parse_typed(value, formats[c]))
+        self._structural(mutate, reset=False)
+
+    # ------------------------------------------------------------ notes
+
+    def note(self, row: int, col: int) -> str:
+        return self._sheet.note(row, col)
+
+    def note_cells(self) -> list[tuple[int, int]]:
+        return sorted(self._sheet.notes)
+
+    def set_note(self, row: int, col: int, text: str) -> None:
+        """Write, change or (blank text) take off a cell's note — one undo
+        step. A note never changes the value or what flows on."""
+        if self._read_only:
+            return
+        if (text or "").strip() == self._sheet.note(row, col):
+            return
+        self._structural(lambda sheet: sheet.set_note(row, col, text),
+                         reset=False)
+
+    def delete_notes(self, cells) -> None:
+        cells = [cell for cell in cells if cell in self._sheet.notes]
+        if self._read_only or not cells:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            for cell in cells:
+                sheet.notes.pop(cell, None)
         self._structural(mutate, reset=False)
 
     def clear_cells(self, cells) -> None:

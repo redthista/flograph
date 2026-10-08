@@ -374,6 +374,39 @@ def _select_errors(p, r, c):
 def _select_problems(p, r, c):
     _pick(p, c, AMBER, "?", AMBER)
 
+
+def _note_mark(p, r, c, badge=None):
+    """A cell with Excel's red note corner, and an optional badge."""
+    cell = QRectF(2.5, 4.5, 15, 11)
+    p.setPen(_pen(c, 1.1))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(cell, 1.5, 1.5)
+    p.setPen(Qt.NoPen)
+    p.setBrush(RED)
+    path = QPainterPath()
+    path.moveTo(12, 4.5)
+    path.lineTo(17.5, 4.5)
+    path.lineTo(17.5, 10)
+    path.closeSubpath()
+    p.drawPath(path)
+    p.setPen(_pen(DIM, 1.1))
+    p.drawLine(QPointF(5, 8.5), QPointF(10.5, 8.5))
+    p.drawLine(QPointF(5, 11.5), QPointF(13, 11.5))
+
+
+def _note(p, r, c):
+    _note_mark(p, r, c)
+
+
+def _note_delete(p, r, c):
+    _note_mark(p, r, c)
+    _badge(p, _BADGE, "x", RED)
+
+
+def _note_next(p, r, c):
+    _note_mark(p, r, c)
+    _arrow(p, QPointF(9, 18), QPointF(17.5, 18), c, 1.3, 2.2)
+
 # ------------------------------------------------------- sort and filter
 
 def _sort(p, c, ascending: bool):
@@ -719,6 +752,8 @@ GLYPHS = {
     "paste": (_paste, FG), "paste_values": (_paste_values, FG),
     "paste_special": (_paste_special, FG),
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
+    "note": (_note, FG), "note_delete": (_note_delete, FG),
+    "note_next": (_note_next, FG), "select_notes": (_note, FG),
     "select_formulas": (_select_formulas, FG),
     "select_constants": (_select_constants, FG),
     "select_blanks": (_select_blanks, FG),

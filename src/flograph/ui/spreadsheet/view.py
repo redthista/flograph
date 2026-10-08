@@ -1597,7 +1597,8 @@ class SpreadsheetView(QTableView):
             n_rows, n_cols, model.cell_source, model.computed_value, kind,
             types if types is not None else pick.TYPES,
             within=self._special_scope(), skip_row=self.row_filtered,
-            problem=lambda r, c: model.cell_problem(r, c) is not None)
+            problem=lambda r, c: model.cell_problem(r, c) is not None,
+            noted=lambda r, c: bool(model.note(r, c)))
         if cells:
             self.select_cells(cells, pick.found_text(kind, len(cells)))
         else:
@@ -1684,6 +1685,57 @@ class SpreadsheetView(QTableView):
         place = cells.index(target) + 1
         self.cell_note(index, f"<b>Problem {place} of {len(cells)}</b><br>"
                               f"{model.cell_problem(*target)}", 6000)
+
+    def edit_note(self) -> None:
+        """Right-click ▸ New Note… / Edit Note… (Shift+F2): the current
+        cell's note."""
+        current = self.currentIndex()
+        if current.isValid() and self.editable:
+            from .note_dialog import edit_note
+            edit_note(self, current.row(), current.column())
+
+    def note_targets(self) -> list[tuple[int, int]]:
+        """The selected cells (or the current one) that carry a note."""
+        model = self.sheet_model()
+        if model is None:
+            return []
+        selection = self.selectionModel()
+        indexes = selection.selectedIndexes() if selection else []
+        if not indexes and self.currentIndex().isValid():
+            indexes = [self.currentIndex()]
+        noted = set(model.note_cells())
+        return sorted({(i.row(), i.column()) for i in indexes} & noted)
+
+    def delete_notes(self) -> None:
+        """Delete Note: off every selected cell that has one."""
+        model = self.sheet_model()
+        if model is not None and self.editable:
+            model.delete_notes(self.note_targets())
+
+    def next_note(self) -> None:
+        """Next Note: on to the next cell with a note, showing it."""
+        model = self.sheet_model()
+        if model is None:
+            return
+        cells = [cell for cell in model.note_cells()
+                 if not self.row_filtered(cell[0])]
+        if not cells:
+            self.say("No notes yet — right-click a cell ▸ New Note… to add "
+                     "one.")
+            return
+        current = self.currentIndex()
+        here = ((current.row(), current.column()) if current.isValid()
+                else (-1, -1))
+        after = [cell for cell in cells if cell > here]
+        target = after[0] if after else cells[0]
+        index = model.index(*target)
+        self.setCurrentIndex(index)
+        self.scrollTo(index)
+        import html as _html
+        body = _html.escape(model.note(*target)).replace("\n", "<br>")
+        place = cells.index(target) + 1
+        self.cell_note(index, f"<b>Note {place} of {len(cells)}</b><br>"
+                              f"{body}", 6000)
 
     def edit_column_list(self) -> None:
         """Data ▸ Dropdown List… for the current column."""

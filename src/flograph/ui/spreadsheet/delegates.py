@@ -14,7 +14,7 @@ from PySide6.QtCore import QDate, QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPainter, QPolygon
 from PySide6.QtWidgets import QDateEdit, QLineEdit
 
-from ..table_delegate import ConditionalFormatDelegate
+from ..table_delegate import NOTE_ROLE, ConditionalFormatDelegate
 
 CARET_W = 14
 
@@ -64,6 +64,17 @@ class SheetDelegate(ConditionalFormatDelegate):
 
     def paint(self, painter, option, index) -> None:
         super().paint(painter, option, index)
+        if index.data(NOTE_ROLE):
+            # Excel's note mark: a small red corner, top right
+            r = option.rect
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#ef4444"))
+            painter.drawPolygon(QPolygon([
+                QPoint(r.right() - 6, r.top()), QPoint(r.right() + 1, r.top()),
+                QPoint(r.right() + 1, r.top() + 7)]))
+            painter.restore()
         model = index.model()
         choices = getattr(model, "column_choices", None)
         view = self.parent()

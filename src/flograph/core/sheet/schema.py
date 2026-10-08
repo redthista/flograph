@@ -192,6 +192,10 @@ class Sheet:
     # Excel's Total Row: a row of totals under the grid. Display only — it
     # is never part of the table the node sends on.
     show_totals: bool = False
+    # Notes — Excel's red corner and hover box: (row, col) -> text. Each
+    # follows its cell through sorts, moves, inserts and deletes; none is
+    # part of what the node sends on.
+    notes: dict = field(default_factory=dict)
 
     @property
     def n_rows(self) -> int:
@@ -209,6 +213,44 @@ class Sheet:
 
     def set_cell(self, row: int, col: int, text) -> None:
         self.rows[row][col] = "" if text is None else str(text)
+
+    # --------------------------------------------------------------- notes
+
+    def note(self, row: int, col: int) -> str:
+        return self.notes.get((row, col), "")
+
+    def set_note(self, row: int, col: int, text) -> None:
+        """Write a cell's note; blank text takes it off."""
+        text = "" if text is None else str(text).strip()
+        if text and 0 <= row < self.n_rows and 0 <= col < self.n_cols:
+            self.notes[(row, col)] = text
+        else:
+            self.notes.pop((row, col), None)
+
+    def _remap_notes(self, where) -> None:
+        """Move every note to `where(row, col)`; None drops it."""
+        if not self.notes:
+            return
+        moved = {}
+        for (r, c), text in self.notes.items():
+            spot = where(r, c)
+            if spot is not None:
+                moved[spot] = text
+        self.notes = moved
+
+    def _notes_follow_rows(self, before: list) -> None:
+        """After the row lists were reordered (a sort, a move), send each
+        note to wherever its row went — rows are the same list objects."""
+        if not self.notes:
+            return
+        place = {id(row): i for i, row in enumerate(self.rows)}
+
+        def where(r, c):
+            if r >= len(before):
+                return None
+            new = place.get(id(before[r]))
+            return None if new is None else (new, c)
+        self._remap_notes(where)
 
     # ------------------------------------------------------ structural ops
 
@@ -228,6 +270,7 @@ class Sheet:
             self.rows.insert(at, ["" for _ in self.columns])
         if inside:
             self._shift_formulas("row", at, count)
+            self._remap_notes(lambda r, c: (r + count if r >= at else r, c))
 
     def insert_column(self, at: int, name: Optional[str] = None,
                       col_type: str = "auto") -> str:
@@ -240,6 +283,7 @@ class Sheet:
             row.insert(at, "")
         if inside:
             self._shift_formulas("col", at, 1)
+            self._remap_notes(lambda r, c: (r, c + 1 if c >= at else c))
         return name
 
     def remove_rows(self, indices) -> None:
@@ -249,6 +293,8 @@ class Sheet:
             if 0 <= i < len(self.rows):
                 del self.rows[i]
                 self._shift_formulas("row", i, -1)
+                self._remap_notes(lambda r, c, i=i: None if r == i else (
+                    r - 1 if r > i else r, c))
         self.freeze_rows = min(self.freeze_rows, max(self.n_rows - 1, 0))
 
     def remove_columns(self, indices) -> None:
@@ -258,6 +304,8 @@ class Sheet:
                 for row in self.rows:
                     del row[i]
                 self._shift_formulas("col", i, -1)
+                self._remap_notes(lambda r, c, i=i: None if c == i else (
+                    r, c - 1 if c > i else c))
         self.freeze_cols = min(self.freeze_cols, max(self.n_cols - 1, 0))
 
     def move_rows(self, indices, to: int) -> None:
@@ -271,7 +319,9 @@ class Sheet:
         block = [self.rows[i] for i in picked]
         rest = [row for i, row in enumerate(self.rows) if i not in chosen]
         to = max(0, min(to, len(rest)))
+        before = self.rows
         self.rows = rest[:to] + block + rest[to:]
+        self._notes_follow_rows(before)
 
     def move_columns(self, indices, to: int) -> None:
         """Move columns as a block to start at ``to`` — header, type, width
@@ -285,6 +335,9 @@ class Sheet:
         order = keep[:to] + picked + keep[to:]
         self.columns = [self.columns[i] for i in order]
         self.rows = [[row[i] for i in order] for row in self.rows]
+        new_col = {old: new for new, old in enumerate(order)}
+        self._remap_notes(lambda r, c: (r, new_col[c]) if c in new_col
+                          else None)
 
     def rename_column(self, index: int, name: str) -> None:
         self.columns[index].name = str(name)
@@ -304,8 +357,23 @@ class Sheet:
 
     def set_rows(self, rows: list[list[str]]) -> None:
         """Replace every row wholesale — used to undo a sort back to a
-        stored order. Caller guarantees the shape matches."""
+        stored order. Caller guarantees the shape matches. Notes follow
+        their rows by content — the stored rows are copies, not the same
+        lists."""
+        old = self.rows
         self.rows = [list(row) for row in rows]
+        if not self.notes:
+            return
+        waiting: dict[tuple, list[int]] = {}
+        for j, row in enumerate(self.rows):
+            waiting.setdefault(tuple(row), []).append(j)
+        new_of = {}
+        for i, row in enumerate(old):
+            spots = waiting.get(tuple(row))
+            if spots:
+                new_of[i] = spots.pop(0)
+        self._remap_notes(lambda r, c: (new_of[r], c) if r in new_of
+                          else None)
 
     def sort_by(self, col: int, ascending: bool = True) -> None:
         """Reorder rows by a column, aware of the column's type.
@@ -329,7 +397,9 @@ class Sheet:
             # whichever way round the list gets reversed.
             return (present != ascending, rank, number, text)
 
+        before = list(self.rows)
         self.rows.sort(key=key, reverse=not ascending)
+        self._notes_follow_rows(before)
 
     def sort_by_list(self, col: int, ascending: bool = True) -> None:
         """Reorder rows by where each value sits in the column's dropdown
@@ -351,7 +421,9 @@ class Sheet:
                 return (1, 0, text.casefold())
             return (0, place if ascending else -place, "")
 
+        before = list(self.rows)
         self.rows.sort(key=key)
+        self._notes_follow_rows(before)
 
     def sort_levels(self, levels) -> None:
         """Sort by several columns at once — Excel's Sort dialog.
@@ -382,7 +454,7 @@ class Sheet:
                      for c in self.columns],
             rows=[list(row) for row in self.rows],
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
-            show_totals=self.show_totals,
+            show_totals=self.show_totals, notes=dict(self.notes),
         )
 
 
@@ -454,10 +526,22 @@ def parse_sheet(raw) -> Sheet:
             return max(0, min(int(value), limit))
         return 0
 
+    notes = {}
+    notes_raw = parsed.get("notes")
+    for entry in notes_raw if isinstance(notes_raw, list) else ():
+        if (isinstance(entry, (list, tuple)) and len(entry) == 3
+                and all(isinstance(v, int) and not isinstance(v, bool)
+                        for v in entry[:2])
+                and 0 <= entry[0] < len(rows)
+                and 0 <= entry[1] < len(columns)):
+            text = str(entry[2] or "").strip()
+            if text:
+                notes[(entry[0], entry[1])] = text
+
     return Sheet(columns, rows,
                  freeze_rows=_count("rows", max(len(rows) - 1, 0)),
                  freeze_cols=_count("cols", max(len(columns) - 1, 0)),
-                 show_totals=bool(parsed.get("totals")))
+                 show_totals=bool(parsed.get("totals")), notes=notes)
 
 
 def sheet_to_dict(sheet: Sheet) -> dict:
@@ -487,6 +571,9 @@ def sheet_to_dict(sheet: Sheet) -> dict:
         out["freeze"] = {"rows": sheet.freeze_rows, "cols": sheet.freeze_cols}
     if sheet.show_totals:
         out["totals"] = True
+    if sheet.notes:
+        out["notes"] = [[r, c, text]
+                        for (r, c), text in sorted(sheet.notes.items())]
     return out
 
 

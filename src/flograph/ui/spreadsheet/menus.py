@@ -149,7 +149,8 @@ def fill_select_menu(menu, view) -> None:
     for name in ("find", "replace", "goto", "goto_special"):
         menu.addAction(a[name])
     heading(menu, "Select")
-    for kind in ("formulas", "constants", "blanks", "errors", "problems"):
+    for kind in ("formulas", "constants", "blanks", "errors", "problems",
+                 "notes"):
         menu.addAction(a[f"select_{kind}"])
 
 
@@ -176,8 +177,20 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     pick = submenu(menu, "Select", sheet_icon("goto_special"))
     for name in ("goto", "goto_special", "select_formulas",
                  "select_constants", "select_blanks", "select_errors",
-                 "select_problems"):
+                 "select_problems", "select_notes"):
         pick.addAction(a[name])
+
+    heading(menu, "Note")
+    current = view.currentIndex()
+    model = view.sheet_model()
+    has_note = bool(model is not None and current.isValid()
+                    and model.note(current.row(), current.column()))
+    a["note_edit"].setText("Edit Note…" if has_note else "New Note…")
+    menu.addAction(a["note_edit"])
+    if view.note_targets():
+        menu.addAction(a["note_delete"])
+    if model is not None and model.note_cells():
+        menu.addAction(a["note_next"])
 
     heading(menu, "Sort & Filter")
     menu.addAction(a["sort_asc"])

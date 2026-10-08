@@ -428,6 +428,16 @@ class SheetRibbon(QWidget):
             ("Check", [("validation", "Validation"),
                        ("next_problem", "Next Problem")]),
         ]
+        # Excel keeps notes on Review; a tab of their own also keeps the
+        # Data tab narrow enough for the full editor's labelled layout
+        review = [
+            ("Notes", [("note_edit", "New Note"),
+                       ("note_delete", "Delete Note"),
+                       ("note_next", "Next Note")]),
+            ("Check", [("next_problem", "Next Problem"),
+                       ("select_problems", "Problem Cells"),
+                       ("select_notes", "Cells with Notes")]),
+        ]
         view = [
             ("Freeze", [m("freeze_menu", "freeze", "Freeze"),
                         ("freeze_row", "Top Row"),
@@ -446,7 +456,8 @@ class SheetRibbon(QWidget):
         ]
         return [("Home", "Home", home),
                 ("Rows && Columns", "Rows", rows_cols),
-                ("Data", "Data", data), ("View", "View", view),
+                ("Data", "Data", data), ("Review", "Review", review),
+                ("View", "View", view),
                 ("Formulas", "fx", formulas)]
 
     def _build_page(self, groups, compact: bool) -> QWidget:

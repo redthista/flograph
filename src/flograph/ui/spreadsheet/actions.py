@@ -437,11 +437,30 @@ class SheetActions(QObject):
                  "#REF!."),
                 ("problems", "Problem Cells",
                  "Select every cell shown red — a value its column's type, "
-                 "dropdown list or validation rule doesn't allow.")):
+                 "dropdown list or validation rule doesn't allow."),
+                ("notes", "Notes",
+                 "Select every cell with a note (the red corner).")):
             self._add(f"select_{kind}", f"Select {label}", f"select_{kind}",
                       body + " Looks inside the selection when it is more "
                       "than one cell.",
                       lambda k=kind: v.select_special(k), short=label)
+        self._add("note_edit", "New Note…", "note",
+                  "Write a note on the current cell — for whoever reads the "
+                  "table next. A red corner marks it; hover to read it. It "
+                  "never changes the value or what flows on.",
+                  v.edit_note, keys=["Shift+F2"], enabled=edit,
+                  short="Note")
+        self._add("note_delete", "Delete Note", "note_delete",
+                  "Take the note off the selected cells.",
+                  v.delete_notes,
+                  enabled=lambda: edit() and bool(v.note_targets()),
+                  short="Delete")
+        self._add("note_next", "Next Note", "note_next",
+                  "Go to the next cell with a note and show it.",
+                  v.next_note,
+                  enabled=lambda: bool(v.sheet_model()
+                                       and v.sheet_model().note_cells()),
+                  short="Next")
         self._add("find", "Find…", "find",
                   "Find a value or a piece of a formula. Enter goes to the "
                   "next match.",

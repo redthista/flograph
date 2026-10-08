@@ -26,6 +26,7 @@ _KIND_HELP = {
     "errors": "Cells showing an error such as #DIV/0!, #REF! or #N/A.",
     "problems": "Cells shown red: a value the column's type, dropdown list "
                 "or validation rule doesn't allow.",
+    "notes": "Cells with a note — the red corner.",
     "region": "The block of data around the current cell, up to the "
               "first empty row and column on each side.",
     "last": "The last row and column that hold anything.",

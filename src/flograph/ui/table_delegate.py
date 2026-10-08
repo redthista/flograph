@@ -53,6 +53,8 @@ DECOR_ROLE = int(Qt.UserRole) + 3
 #: -> the height this cell's row should be, in pixels, or None — a `height`
 #: line for every row, or a highlight's `height` for the rows it picks
 HEIGHT_ROLE = int(Qt.UserRole) + 4
+#: -> the cell's note text, or None — the Table grid's red corner mark
+NOTE_ROLE = int(Qt.UserRole) + 5
 
 _ICON_CELL_W = 18
 _ICON_GAP = 4
