@@ -39,6 +39,17 @@ def set_extra_date_formats(formats) -> None:
     global _extra_date_formats
     _extra_date_formats = tuple(
         str(f).strip() for f in formats if str(f).strip())
+    # what reads as a date has changed: forget what was worked out
+    _date_cache.clear()
+    from .values import clear_date_cache
+    clear_date_cache()
+
+
+# text -> its ISO date (or None). Reading a date tries up to two dozen
+# strptime patterns, and a big sheet asks about the same few texts over
+# and over, every recalculation. Cleared when the formats change.
+_date_cache: dict = {}
+_DATE_CACHE_MAX = 50_000
 
 
 def extra_date_formats() -> tuple[str, ...]:
@@ -53,6 +64,18 @@ def normalize_date(text) -> Optional[str]:
     text = ("" if text is None else str(text)).strip()
     if not text:
         return None
+    try:
+        return _date_cache[text]
+    except KeyError:
+        pass
+    result = _normalize_date(text)
+    if len(_date_cache) >= _DATE_CACHE_MAX:
+        _date_cache.clear()
+    _date_cache[text] = result
+    return result
+
+
+def _normalize_date(text: str) -> Optional[str]:
     for fmt in (*_extra_date_formats, *_DATE_FORMATS):
         try:
             parsed = datetime.strptime(text, fmt)

@@ -266,6 +266,15 @@ sorting, keeps formulas on their addresses.
 **Show Formulas** (**Ctrl+`**) shows every cell's formula instead of its
 result, for checking a sheet over.
 
+### Big tables
+
+A typed edit only works out again the formulas that depend on that cell, so
+a table of tens of thousands of rows stays quick to type into. A column of
+`SUMIF([Region], [@Region], [Total])`, `COUNTIF` or `VLOOKUP`/`XLOOKUP`/
+`MATCH` with an exact match is worked out in a few passes over the column,
+not one per row — 20,000 rows of SUMIF take under a second, where they took
+fourteen.
+
 ## Keys
 
 | Action | Key |

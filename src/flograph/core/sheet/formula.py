@@ -407,6 +407,36 @@ def parse_formula(src: str):
     return _Parser(tokens).parse()
 
 
+# formula text -> its AST, or the syntax error's message. A table's column
+# of formulas is one text repeated down every row (=[@Units]*[@Price]), so
+# a recalculation parses each text once. ASTs are never changed after
+# parsing — binding and evaluating build new nodes or only read — so one
+# can be shared by every cell that holds the text.
+_parsed: dict = {}
+
+
+def parse_formula_cached(src: str):
+    hit = _parsed.get(src)
+    if hit is None:
+        try:
+            hit = parse_formula(src)
+        except FormulaSyntaxError as exc:
+            hit = _SyntaxProblem(str(exc))
+        if len(_parsed) >= 20_000:
+            _parsed.clear()
+        _parsed[src] = hit
+    if isinstance(hit, _SyntaxProblem):
+        raise FormulaSyntaxError(hit.message)
+    return hit
+
+
+class _SyntaxProblem:
+    __slots__ = ("message",)
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+
 # -------------------------------------------------------------- evaluator
 
 def _range_cells(rng: Range, bounds: tuple[int, int]):
@@ -577,6 +607,11 @@ def evaluate(node, get_cell, bounds: tuple[int, int]):
         args = []
         for arg in node.args:
             if isinstance(arg, Range):
+                # a sheet hands out one shared value per range (engine.py)
+                shared = getattr(get_cell, "range_value", None)
+                if shared is not None:
+                    args.append(shared(arg))
+                    continue
                 cells = list(_range_cells(arg, bounds))
                 width = len({c for _r, c in cells}) or 1
                 args.append(RangeValue([get_cell(r, c) for r, c in cells],
@@ -588,6 +623,48 @@ def evaluate(node, get_cell, bounds: tuple[int, int]):
         except Exception as exc:   # a function bug must not kill the app
             return FormulaError(ERR_VALUE, str(exc))
     return FormulaError(ERR_VALUE, f"cannot evaluate {type(node).__name__}")
+
+
+def clamp_range(rng: "Range", bounds: tuple[int, int]):
+    """A range as (r1, c1, r2, c2) inside the grid, or None if none of it
+    is."""
+    n_rows, n_cols = bounds
+    r1, r2 = sorted((rng.start.row, rng.end.row))
+    c1, c2 = sorted((rng.start.col, rng.end.col))
+    r1, r2 = max(r1, 0), min(r2, n_rows - 1)
+    c1, c2 = max(c1, 0), min(c2, n_cols - 1)
+    if r1 > r2 or c1 > c2:
+        return None
+    return (r1, c1, r2, c2)
+
+
+def refs_and_ranges(node, bounds: tuple[int, int]):
+    """The single cells an AST reads, and its ranges (clamped, as
+    :func:`clamp_range` gives them) — kept whole, so a whole-column range
+    is one thing to depend on rather than a thousand cells."""
+    cells: set[tuple[int, int]] = set()
+    ranges: set[tuple[int, int, int, int]] = set()
+    n_rows, n_cols = bounds
+
+    def walk(item) -> None:
+        if isinstance(item, Ref):
+            if 0 <= item.row < n_rows and 0 <= item.col < n_cols:
+                cells.add((item.row, item.col))
+        elif isinstance(item, Range):
+            box = clamp_range(item, bounds)
+            if box is not None:
+                ranges.add(box)
+        elif isinstance(item, Call):
+            for arg in item.args:
+                walk(arg)
+        elif isinstance(item, Bin):
+            walk(item.left)
+            walk(item.right)
+        elif isinstance(item, Un):
+            walk(item.operand)
+
+    walk(node)
+    return cells, ranges
 
 
 def refs_of(node, bounds: tuple[int, int]) -> set[tuple[int, int]]:

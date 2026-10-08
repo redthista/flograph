@@ -172,6 +172,128 @@ def _maybe_number(text):
     return number if math.isfinite(number) else None
 
 
+# ------------------------------------------------- indexes of a shared range
+#
+# While a sheet is evaluated, every formula reading the same range is handed
+# the same RangeValue, with a `memo` dict (engine.py). A column of
+# SUMIF([Region], [@Region], [Total]) then asks the same range the same few
+# questions thousands of times; the answers are kept there. Each fast path
+# gives exactly what the plain scan would: the index keys are built from
+# the same rules the predicate (or _same) applies.
+
+def _plain_text_key(value):
+    """How a plain-text criterion's `equals` sees a cell: its shown text,
+    case-blind; None for a cell no plain text can match."""
+    if isinstance(value, bool) or value is None:
+        return None
+    shown = format_number(float(value)) if _is_number(value) else str(value)
+    return shown.casefold()
+
+
+def _number_key(value):
+    """How a numeric criterion sees a cell: its number, numeric text too."""
+    if _is_number(value):
+        return float(value)
+    if isinstance(value, str):
+        return _maybe_number(value)
+    return None
+
+
+def _criterion_index(rng, crit):
+    """The positions in a shared range that match a criterion through an
+    index, or None when the criterion needs the plain scan (an operator, a
+    wildcard, a date or number written as text, TRUE/FALSE)."""
+    memo = getattr(rng, "memo", None)
+    if memo is None:
+        return None
+    if _is_number(crit):
+        target, kind, key_of = float(crit), "num", _number_key
+    elif isinstance(crit, str):
+        text = crit
+        if (not text or text[0] in "<>=" or "*" in text or "?" in text
+                or _maybe_number(text) is not None
+                or as_date(text) is not None
+                or text.upper() in ("TRUE", "FALSE")):
+            return None
+        target, kind, key_of = text.casefold(), "text", _plain_text_key
+    else:
+        return None
+    index = memo.get(kind)
+    if index is None:
+        index = {}
+        for i, cell in enumerate(rng):
+            key = key_of(cell)
+            if key is not None:
+                index.setdefault(key, []).append(i)
+        memo[kind] = index
+    return index.get(target, [])
+
+
+def _hits(rng, crit, test) -> list[int]:
+    """Positions of `rng` whose cell passes `test` (built from `crit`), in
+    order — from an index or a remembered answer when the range is shared
+    by the whole sheet, else by looking at every cell."""
+    found = _criterion_index(rng, crit)
+    if found is not None:
+        return found
+    memo = getattr(rng, "memo", None)
+    key = ("crit", type(crit).__name__, crit)
+    if memo is not None:
+        try:
+            return memo[key]
+        except (KeyError, TypeError):
+            pass
+    found = [i for i, cell in enumerate(rng) if test(cell)]
+    if memo is not None:
+        try:
+            memo[key] = found
+        except TypeError:
+            pass
+    return found
+
+
+def _remembered(ranges, key, compute):
+    """`compute()` once per `key` for one sheet pass — when every range it
+    reads is shared by the sheet (so the same ranges and criteria give the
+    same answer). A column of SUMIF over four regions then adds four sums,
+    not one per row. Otherwise it is simply computed."""
+    memo = getattr(ranges[0], "memo", None)
+    if memo is None or any(getattr(r, "memo", None) is None
+                           for r in ranges[1:]):
+        return compute()
+    full = (key, tuple(id(r) for r in ranges))
+    try:
+        return memo[full]
+    except KeyError:
+        pass
+    except TypeError:            # an unhashable criterion
+        return compute()
+    answer = memo[full] = compute()
+    return answer
+
+
+def _crit_key(crit):
+    return (type(crit).__name__, crit)
+
+
+def _same_key(value):
+    """A key equal for exactly the values _same calls equal (blank and
+    empty text together, numbers by value, text case-blind, dates as
+    dates); None for a value that is never anything's match."""
+    if value is None or value == "":
+        return ("blank",)
+    if isinstance(value, bool):
+        return ("bool", value)
+    if _is_number(value):
+        return ("num", float(value))
+    if isinstance(value, str):
+        moment = as_date(value)
+        if moment is not None:
+            return ("date", moment)
+        return ("text", value.casefold())
+    return None
+
+
 def _pairs(args, start: int):
     """(range, predicate) pairs from criteria arguments laid out as range,
     criterion, range, criterion…"""
@@ -181,33 +303,49 @@ def _pairs(args, start: int):
         return FormulaError(ERR_VALUE, "criteria come in pairs: "
                                        "range, criterion")
     for i in range(0, len(rest), 2):
-        rng = _as_list(rest[i])
-        test = _criterion(_scalar(rest[i + 1]))
+        rng = rest[i] if isinstance(rest[i], list) else [rest[i]]
+        crit = _scalar(rest[i + 1])
+        test = _criterion(crit)
         if test is None:
             return rest[i + 1]
-        pairs.append((rng, test))
+        pairs.append((rng, test, crit))
     return pairs
 
 
 def _matching(pairs, length: int) -> list[int]:
-    for rng, _test in pairs:
+    for rng, _test, _crit in pairs:
         if len(rng) != length:
             raise ValueError("the ranges must be the same size")
-    return [i for i in range(length)
-            if all(test(rng[i]) for rng, test in pairs)]
+    hits = None
+    for rng, test, crit in pairs:
+        found = _hits(rng, crit, test)
+        if hits is None:
+            hits = list(found)
+        else:
+            keep = set(found)
+            hits = [i for i in hits if i in keep]
+    return hits if hits is not None else list(range(length))
 
 
 # ------------------------------------------------------ conditional sums
 
 def _fn_sumif(args):
-    rng = _as_list(args[0])
-    test = _criterion(_scalar(args[1]))
+    rng = args[0] if isinstance(args[0], list) else [args[0]]
+    crit = _scalar(args[1])
+    test = _criterion(crit)
     if test is None:
         return args[1]
-    values = _as_list(args[2]) if len(args) > 2 else rng
+    source = args[2] if len(args) > 2 else rng
+    if isinstance(source, list) and not isinstance(crit, FormulaError):
+        return _remembered([rng, source], ("sumif", _crit_key(crit)),
+                           lambda: _sumif(rng, crit, test, _as_list(source)))
+    return _sumif(rng, crit, test, _as_list(source))
+
+
+def _sumif(rng, crit, test, values):
     total = 0.0
-    for i, cell in enumerate(rng):
-        if i < len(values) and test(cell):
+    for i in _hits(rng, crit, test):
+        if i < len(values):
             value = values[i]
             if isinstance(value, FormulaError):
                 return value
@@ -216,9 +354,19 @@ def _fn_sumif(args):
     return total
 
 
-def _conditional(args, combine, first_values: bool):
+def _conditional(args, combine, first_values: bool, name=None):
     """SUMIFS / AVERAGEIFS / MAXIFS / MINIFS (values first, then pairs) and
     COUNTIFS (pairs only)."""
+    if name is not None:
+        start = 1 if first_values else 0
+        ranges = ([args[0]] if first_values else []) + list(args[start::2])
+        crits = tuple(_crit_key(_scalar(c)) if not isinstance(
+            _scalar(c), FormulaError) else ("err", id(c))
+            for c in args[start + 1::2])
+        if all(isinstance(r, list) for r in ranges):
+            return _remembered(ranges, (name, crits),
+                               lambda: _conditional(args, combine,
+                                                    first_values))
     values = _as_list(args[0]) if first_values else None
     pairs = _pairs(args, 1 if first_values else 0)
     if isinstance(pairs, FormulaError):
@@ -238,19 +386,21 @@ def _conditional(args, combine, first_values: bool):
 
 
 def _fn_sumifs(args):
-    return _conditional(args, lambda xs: float(sum(xs)), True)
+    return _conditional(args, lambda xs: float(sum(xs)), True, "sumifs")
 
 
 def _fn_countif(args):
-    rng = _as_list(args[0])
-    test = _criterion(_scalar(args[1]))
+    rng = args[0] if isinstance(args[0], list) else [args[0]]
+    crit = _scalar(args[1])
+    test = _criterion(crit)
     if test is None:
         return args[1]
-    return float(sum(1 for cell in rng if test(cell)))
+    return float(len(_hits(rng, crit, test)))
 
 
 def _fn_countifs(args):
-    return _conditional(args, lambda hits: float(len(hits)), False)
+    return _conditional(args, lambda hits: float(len(hits)), False,
+                        "countifs")
 
 
 def _average(xs):
@@ -259,26 +409,37 @@ def _average(xs):
 
 
 def _fn_averageif(args):
-    rng = _as_list(args[0])
-    test = _criterion(_scalar(args[1]))
+    rng = args[0] if isinstance(args[0], list) else [args[0]]
+    crit = _scalar(args[1])
+    test = _criterion(crit)
     if test is None:
         return args[1]
-    values = _as_list(args[2]) if len(args) > 2 else rng
-    picked = [float(values[i]) for i, cell in enumerate(rng)
-              if i < len(values) and test(cell) and _is_number(values[i])]
-    return _average(picked)
+    source = args[2] if len(args) > 2 else rng
+
+    def compute():
+        values = _as_list(source)
+        picked = [float(values[i]) for i in _hits(rng, crit, test)
+                  if i < len(values) and _is_number(values[i])]
+        return _average(picked)
+
+    if isinstance(source, list):
+        return _remembered([rng, source], ("averageif", _crit_key(crit)),
+                           compute)
+    return compute()
 
 
 def _fn_averageifs(args):
-    return _conditional(args, _average, True)
+    return _conditional(args, _average, True, "averageifs")
 
 
 def _fn_maxifs(args):
-    return _conditional(args, lambda xs: max(xs) if xs else 0.0, True)
+    return _conditional(args, lambda xs: max(xs) if xs else 0.0, True,
+                        "maxifs")
 
 
 def _fn_minifs(args):
-    return _conditional(args, lambda xs: min(xs) if xs else 0.0, True)
+    return _conditional(args, lambda xs: min(xs) if xs else 0.0, True,
+                        "minifs")
 
 
 def _fn_countblank(args):
@@ -311,13 +472,32 @@ def _approximate(keys: list, target, descending: bool = False):
     return found
 
 
-def _find(keys: list, target, mode: int = 0, reverse: bool = False):
+def _find(keys: list, target, mode: int = 0, reverse: bool = False,
+          shared=None, part=None):
     """Index of `target` in `keys`. mode 0 exact (wildcards in text), 2
-    wildcard, -1 exact-or-next-smaller, 1 exact-or-next-larger."""
+    wildcard, -1 exact-or-next-smaller, 1 exact-or-next-larger.
+
+    `shared` is the range `keys` came from when the sheet shares it, and
+    `part` which slice of it they are (its first column, say): an exact
+    match then looks the target up in an index of them instead of
+    scanning."""
     order = range(len(keys) - 1, -1, -1) if reverse else range(len(keys))
     if mode in (0, 2):
         pattern = (_wildcard(target) if isinstance(target, str)
                    and any(ch in target for ch in "*?") else None)
+        memo = getattr(shared, "memo", None)
+        want = _same_key(target) if pattern is None else None
+        if memo is not None and want is not None:
+            name = ("find", part, reverse)
+            index = memo.get(name)
+            if index is None:
+                index = {}
+                for i in order:
+                    key = _same_key(keys[i])
+                    if key is not None:
+                        index.setdefault(key, i)    # the first one met
+                memo[name] = index
+            return index.get(want)
         for i in order:
             key = keys[i]
             if pattern is not None:
@@ -360,7 +540,7 @@ def _fn_vlookup(args):
         return approximate
     keys = table.column(0)
     row = (_approximate(keys, target) if approximate
-           else _find(keys, target, 0))
+           else _find(keys, target, 0, shared=table, part="col0"))
     if row is None:
         return _na(f"{to_text(target)} is not in the first column")
     return table.at(row, col - 1)
@@ -382,7 +562,7 @@ def _fn_hlookup(args):
         return approximate
     keys = table.row(0)
     col = (_approximate(keys, target) if approximate
-           else _find(keys, target, 0))
+           else _find(keys, target, 0, shared=table, part="row0"))
     if col is None:
         return _na(f"{to_text(target)} is not in the first row")
     return table.at(row - 1, col)
@@ -395,11 +575,13 @@ def _fn_xlookup(args):
     keys = _as_list(args[1])
     results = _table(args[2])
     missing = _arg(args, 3, None)
+    shared = args[1] if isinstance(args[1], list) else None
     mode = to_number(_scalar(_arg(args, 4, 0)))
     search = to_number(_scalar(_arg(args, 5, 1)))
     if isinstance(mode, FormulaError) or isinstance(search, FormulaError):
         return FormulaError(ERR_VALUE, "match and search modes are numbers")
-    index = _find(keys, target, int(mode), reverse=int(search) < 0)
+    index = _find(keys, target, int(mode), reverse=int(search) < 0,
+                  shared=shared, part="all")
     if index is None:
         if len(args) > 3:
             return _scalar(missing)
@@ -421,7 +603,8 @@ def _fn_match(args):
         return kind
     kind = int(kind)
     if kind == 0:
-        index = _find(keys, target, 0)
+        index = _find(keys, target, 0, shared=args[1] if isinstance(
+            args[1], list) else None, part="all")
     else:
         index = _approximate(keys, target, descending=kind < 0)
     if index is None:

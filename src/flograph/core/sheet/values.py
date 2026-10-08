@@ -119,11 +119,15 @@ class RangeValue(list):
     is — so a function like VLOOKUP or INDEX can read rows and columns.
     Everything else sees the flat list it always did."""
 
-    __slots__ = ("cols",)
+    # `memo` is a dict while one evaluation shares this range between many
+    # formulas (core/sheet/engine.py): SUMIF, COUNTIF and the lookups keep
+    # their indexes of it there. None for a range made for one call.
+    __slots__ = ("cols", "memo")
 
     def __init__(self, values=(), cols: int = 1) -> None:
         super().__init__(values)
         self.cols = max(int(cols), 1)
+        self.memo = None
 
     @property
     def rows(self) -> int:
@@ -139,12 +143,31 @@ class RangeValue(list):
         return self[col::self.cols]
 
 
+_as_date_cache: dict = {}
+
+
+def clear_date_cache() -> None:
+    _as_date_cache.clear()
+
+
 def as_date(value):
     """A text value that reads as a date, as a datetime; else None. Numbers
     are never dates here — the grid keeps dates as text (2026-10-07), and a
     number that happened to look like one would be a surprise."""
     if not isinstance(value, str):
         return None
+    try:
+        return _as_date_cache[value]
+    except KeyError:
+        pass
+    result = _as_date(value)
+    if len(_as_date_cache) >= 50_000:
+        _as_date_cache.clear()
+    _as_date_cache[value] = result      # a datetime never changes
+    return result
+
+
+def _as_date(value: str):
     text = value.strip()
     if not 6 <= len(text) <= 40 or not any(ch.isdigit() for ch in text):
         return None

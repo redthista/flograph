@@ -1,19 +1,35 @@
-"""Whole-sheet evaluation: dependency-ordered formula recalculation.
+"""Sheet evaluation: dependency-ordered formula recalculation.
 
-The whole sheet is recalculated on every call — no incremental dirty
-tracking. At the scale this node targets (a few thousand cells) a full
-pass is milliseconds, and it keeps the engine stateless.
+:func:`evaluate_sheet` works out a whole sheet from scratch, keeping
+nothing — what the node's run() uses. :class:`SheetEvaluator` keeps what it
+worked out (each formula and what it reads), so after an edit only the
+formulas downstream of the changed cells are re-evaluated — what the grid
+uses, so typing into a big table stays quick. A randomised test holds the
+two to the same answers. What keeps a pass itself quick:
+
+- each distinct formula text is parsed once (a column's formula is one
+  text repeated down every row) — formula.parse_formula_cached;
+- a range is one node in the dependency graph, depending on the formula
+  cells inside it, so a column of ``SUMIF([Region], [@Region], [Total])``
+  costs n edges rather than n²;
+- a range's values are gathered once per pass and shared by every formula
+  that reads it (safe: the graph puts every formula inside a range before
+  anything that reads the range), and that shared value carries the
+  indexes SUMIF/COUNTIF and the exact lookups build — so a column of them
+  is a few scans, not one per row.
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections import deque
 from dataclasses import dataclass, field
 
 from .formula import (FormulaSyntaxError, bind_column_refs, cell_name,
-                      evaluate, parse_formula, refs_of, translate)
+                      evaluate, parse_formula_cached, refs_and_ranges,
+                      translate)
 from .schema import ColumnSpec, Sheet, is_formula
 from .values import (ERR_CYCLE, ERR_REF, ERR_SYNTAX, FormulaError,
-                     format_number)
+                     RangeValue, format_number)
 
 
 @dataclass
@@ -169,64 +185,258 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
     return merged
 
 
-def evaluate_sheet(sheet: Sheet) -> EvalResult:
-    n_rows, n_cols = sheet.n_rows, sheet.n_cols
-    bounds = (n_rows, n_cols)
+class _Cells:
+    """``get_cell`` for one pass, and the shared value of each range."""
 
-    column_names = sheet.column_names()
-    asts: dict[tuple[int, int], object] = {}
-    values: list[list] = [[None] * n_cols for _ in range(n_rows)]
-    for r in range(n_rows):
-        for c in range(n_cols):
-            text = sheet.rows[r][c]
-            if is_formula(text):
-                try:
-                    # [@name]/[name] refs resolve per cell, against this row
-                    asts[(r, c)] = bind_column_refs(
-                        parse_formula(text), r, column_names, n_rows)
-                except FormulaSyntaxError as exc:
-                    values[r][c] = FormulaError(ERR_SYNTAX, str(exc))
-            else:
-                values[r][c] = literal_value(text, sheet.columns[c].type)
+    __slots__ = ("values", "n_rows", "n_cols", "_ranges")
 
-    # ordering edges only matter between formula cells; references to
-    # literal (or parse-error) cells read values that are already final
-    dependents: dict[tuple[int, int], list] = {key: [] for key in asts}
-    indegree: dict[tuple[int, int], int] = {key: 0 for key in asts}
-    for key, ast in asts.items():
-        for ref in refs_of(ast, bounds):
-            if ref in asts and ref != key:
-                dependents[ref].append(key)
-                indegree[key] += 1
-            elif ref == key:
-                indegree[key] += 1   # self-reference: an immediate cycle
+    def __init__(self, values, n_rows: int, n_cols: int) -> None:
+        self.values = values
+        self.n_rows, self.n_cols = n_rows, n_cols
+        self._ranges: dict = {}
 
-    def get_cell(row: int, col: int):
-        if not (0 <= row < n_rows and 0 <= col < n_cols):
+    def __call__(self, row: int, col: int):
+        if not (0 <= row < self.n_rows and 0 <= col < self.n_cols):
             return FormulaError(
                 ERR_REF, f"{cell_name(row, col)} is outside the table")
-        return values[row][col]
+        return self.values[row][col]
 
-    queue = deque(key for key in asts if indegree[key] == 0)
-    done = set()
-    while queue:
-        key = queue.popleft()
-        done.add(key)
-        values[key[0]][key[1]] = evaluate(asts[key], get_cell, bounds)
-        for dependent in dependents[key]:
-            indegree[dependent] -= 1
-            if indegree[dependent] == 0:
-                queue.append(dependent)
-    for key in asts:
-        if key not in done:
+    def range_value(self, rng) -> RangeValue:
+        from .formula import clamp_range
+        box = clamp_range(rng, (self.n_rows, self.n_cols))
+        shared = self._ranges.get(box)
+        if shared is None:
+            if box is None:
+                shared = RangeValue([], 1)
+            else:
+                r1, c1, r2, c2 = box
+                values = self.values
+                shared = RangeValue([values[r][c] for r in range(r1, r2 + 1)
+                                     for c in range(c1, c2 + 1)],
+                                    c2 - c1 + 1)
+            shared.memo = {}
+            self._ranges[box] = shared
+        return shared
+
+
+def evaluate_sheet(sheet: Sheet) -> EvalResult:
+    """Every value of the sheet, from scratch."""
+    return SheetEvaluator(sheet).result
+
+
+def _error_text(value: FormulaError) -> str:
+    return f"{value.code} — {value.detail}" if value.detail else value.code
+
+
+class SheetEvaluator:
+    """A sheet's values, kept up to date as cells change.
+
+    Built, it evaluates the whole sheet. :meth:`update` then takes the
+    cells that have changed since and re-evaluates only the formulas that
+    read them — directly, through a range, or through other formulas —
+    so typing into one cell of a big table costs what depends on that
+    cell, not the whole table. Anything that changes the sheet's shape,
+    column names or types goes back to a full pass, as does a change too
+    big to be worth tracing.
+    """
+
+    def __init__(self, sheet: Sheet) -> None:
+        self.full(sheet)
+
+    # ------------------------------------------------------------ state
+
+    def _signature(self, sheet: Sheet):
+        return (sheet.n_rows, sheet.n_cols,
+                tuple((c.name, c.type) for c in sheet.columns))
+
+    def _compile(self, sheet: Sheet, r: int, c: int) -> None:
+        """Read cell (r, c) afresh: its literal value, or its formula and
+        what that formula reads (registered so a change can find it)."""
+        text = sheet.rows[r][c]
+        key = (r, c)
+        self._forget(key)
+        if is_formula(text):
+            try:
+                ast = bind_column_refs(parse_formula_cached(text), r,
+                                       self._names, self._n_rows)
+            except FormulaSyntaxError as exc:
+                self.values[r][c] = FormulaError(ERR_SYNTAX, str(exc))
+                return
+            self.asts[key] = ast
+            cells, ranges = refs_and_ranges(ast, self._bounds)
+            self._reads[key] = (cells, ranges)
+            for ref in cells:
+                self._cell_readers.setdefault(ref, set()).add(key)
+            for box in ranges:
+                self._box_readers.setdefault(box, set()).add(key)
+        else:
+            self.values[r][c] = literal_value(text, sheet.columns[c].type)
+
+    def _forget(self, key) -> None:
+        self.asts.pop(key, None)
+        reads = self._reads.pop(key, None)
+        if reads is None:
+            return
+        cells, ranges = reads
+        for ref in cells:
+            readers = self._cell_readers.get(ref)
+            if readers is not None:
+                readers.discard(key)
+                if not readers:
+                    del self._cell_readers[ref]
+        for box in ranges:
+            readers = self._box_readers.get(box)
+            if readers is not None:
+                readers.discard(key)
+                if not readers:
+                    del self._box_readers[box]
+
+    def full(self, sheet: Sheet) -> EvalResult:
+        n_rows, n_cols = sheet.n_rows, sheet.n_cols
+        self._n_rows, self._bounds = n_rows, (n_rows, n_cols)
+        self._names = sheet.column_names()
+        self._sig = self._signature(sheet)
+        self.values: list[list] = [[None] * n_cols for _ in range(n_rows)]
+        self.asts: dict = {}
+        self._reads: dict = {}
+        self._cell_readers: dict = {}
+        self._box_readers: dict = {}
+        self._stuck: set = set()     # formula cells left in a cycle
+        for r in range(n_rows):
+            for c in range(n_cols):
+                self._compile(sheet, r, c)
+        self._run(list(self.asts))
+        self.errors = {}
+        for r in range(n_rows):
+            for c in range(n_cols):
+                value = self.values[r][c]
+                if isinstance(value, FormulaError):
+                    self.errors[(r, c)] = _error_text(value)
+        self.result = EvalResult(self.values, self.errors)
+        return self.result
+
+    # ------------------------------------------------------- evaluating
+
+    def _run(self, keys: list) -> None:
+        """Evaluate the formula cells `keys`, in dependency order among
+        themselves (the cells they read outside `keys` are final). A range
+        is a node of its own ("range", box): it waits for the formula
+        cells of `keys` inside it, and what reads it waits for it — so a
+        column of SUMIF([Region], …) is n edges, not n². What is left when
+        nothing more can go is a cycle.
+
+        A cell outside `keys` that an earlier pass left stuck in a cycle
+        is never final: whatever reads it (directly or through a range)
+        stays stuck too, as it would in a pass over the whole sheet."""
+        asts = self.asts
+        wanted = set(keys)
+        # (a stuck cell since typed over with a value is no longer stuck)
+        stuck_outside = {key for key in self._stuck - wanted if key in asts}
+        rows_by_col: dict[int, list[int]] = {}
+        for r, c in sorted(wanted):
+            rows_by_col.setdefault(c, []).append(r)
+        dependents: dict = {key: [] for key in wanted}
+        indegree: dict = {key: 0 for key in wanted}
+
+        def range_node(box):
+            node = ("range", box)
+            if node not in indegree:
+                dependents[node] = []
+                indegree[node] = 0
+                r1, c1, r2, c2 = box
+                for c in range(c1, c2 + 1):
+                    rows = rows_by_col.get(c)
+                    if not rows:
+                        continue
+                    for r in rows[bisect_left(rows, r1):
+                                  bisect_right(rows, r2)]:
+                        dependents[(r, c)].append(node)
+                        indegree[node] += 1
+                if any(r1 <= r <= r2 and c1 <= c <= c2
+                       for r, c in stuck_outside):
+                    indegree[node] += 1      # waits for good
+            return node
+
+        for key in wanted:
+            cells, ranges = self._reads[key]
+            for ref in cells:
+                if ref == key:
+                    indegree[key] += 1   # self-reference: an immediate cycle
+                elif ref in wanted:
+                    dependents[ref].append(key)
+                    indegree[key] += 1
+                elif ref in stuck_outside:
+                    indegree[key] += 1   # reads a cycle: waits for good
+            for box in ranges:
+                node = range_node(box)
+                dependents[node].append(key)
+                indegree[key] += 1
+
+        values = self.values
+        get_cell = _Cells(values, *self._bounds)
+        queue = deque(key for key, count in indegree.items() if count == 0)
+        done = set()
+        while queue:
+            key = queue.popleft()
+            if key[0] != "range":
+                done.add(key)
+                values[key[0]][key[1]] = evaluate(asts[key], get_cell,
+                                                  self._bounds)
+            for dependent in dependents[key]:
+                indegree[dependent] -= 1
+                if indegree[dependent] == 0:
+                    queue.append(dependent)
+        left = wanted - done
+        for key in left:
             values[key[0]][key[1]] = FormulaError(
                 ERR_CYCLE, "circular reference")
+        self._stuck = stuck_outside | left
 
-    errors = {}
-    for r in range(n_rows):
-        for c in range(n_cols):
-            value = values[r][c]
+    # ---------------------------------------------------------- updates
+
+    def _readers_of(self, cell) -> set:
+        """The formulas that read `cell`: by name, or through a range."""
+        found = set(self._cell_readers.get(cell, ()))
+        r, c = cell
+        for box, readers in self._box_readers.items():
+            r1, c1, r2, c2 = box
+            if r1 <= r <= r2 and c1 <= c <= c2:
+                found |= readers
+        return found
+
+    def update(self, sheet: Sheet, cells) -> EvalResult:
+        """Bring the values up to date after `cells` — (row, col) pairs —
+        changed in `sheet`. Falls back to a full pass when the sheet's
+        shape, names or types changed, or the change is too big to trace
+        cheaply."""
+        cells = {(int(r), int(c)) for r, c in cells}
+        n_rows, n_cols = self._bounds
+        if (self._signature(sheet) != self._sig
+                or len(cells) > max(64, (n_rows * n_cols) // 20)
+                or any(not (0 <= r < n_rows and 0 <= c < n_cols)
+                       for r, c in cells)):
+            return self.full(sheet)
+        for r, c in cells:
+            self._compile(sheet, r, c)
+        # everything downstream of the changed cells
+        dirty: set = set()
+        frontier = list(cells)
+        seen = set(cells)
+        while frontier:
+            cell = frontier.pop()
+            if cell in self.asts:
+                dirty.add(cell)
+            for reader in self._readers_of(cell):
+                if reader not in seen:
+                    seen.add(reader)
+                    frontier.append(reader)
+        self._run(list(dirty))
+        for cell in seen:
+            r, c = cell
+            value = self.values[r][c]
             if isinstance(value, FormulaError):
-                errors[(r, c)] = (f"{value.code} — {value.detail}"
-                                  if value.detail else value.code)
-    return EvalResult(values, errors)
+                self.errors[cell] = _error_text(value)
+            else:
+                self.errors.pop(cell, None)
+        self.result = EvalResult(self.values, self.errors)
+        return self.result

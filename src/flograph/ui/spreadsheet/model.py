@@ -19,7 +19,7 @@ from flograph.core.sheet import validation as _validation
 
 from ..table_delegate import BAR_ROLE, DECOR_ROLE, ICON_ROLE
 from flograph.core.sheet import (COLUMN_TYPES, FormulaError, Sheet,
-                                 evaluate_sheet, format_value, is_formula,
+                                 SheetEvaluator, format_value, is_formula,
                                  normalize_date, parse_sheet,
                                  rename_column_in_formulas, sheet_to_dict,
                                  translate, validate_cell)
@@ -95,8 +95,17 @@ class SheetModel(QAbstractTableModel):
 
     # ------------------------------------------------ conditional formatting
 
-    def _recalc(self) -> None:
-        self._result = evaluate_sheet(self._sheet)
+    def _recalc(self, changed=None) -> None:
+        """Bring the values up to date. With `changed` — the (row, col)
+        cells that are all that changed — only what reads them is
+        re-evaluated (core/sheet/engine.SheetEvaluator); the evaluator
+        itself falls back to a full pass when the change is structural."""
+        evaluator = getattr(self, "_evaluator", None)
+        if changed is not None and evaluator is not None:
+            self._result = evaluator.update(self._sheet, changed)
+        else:
+            self._evaluator = SheetEvaluator(self._sheet)
+            self._result = self._evaluator.result
         self._cf_clear()
 
     def _cf_clear(self) -> None:
@@ -348,12 +357,13 @@ class SheetModel(QAbstractTableModel):
         froze = ((parsed.freeze_rows, parsed.freeze_cols)
                  != (self._sheet.freeze_rows, self._sheet.freeze_cols))
         in_place = self._same_layout(parsed)
+        changed = self._changed_cells(parsed) if in_place else None
         self._syncing = True
         try:
             if not in_place:
                 self.beginResetModel()
             self._sheet = parsed
-            self._recalc()
+            self._recalc(changed)
             if in_place:
                 self.dataChanged.emit(
                     self.index(0, 0),
@@ -366,6 +376,20 @@ class SheetModel(QAbstractTableModel):
         if froze:
             self.freeze_changed.emit()
         self.totals_changed.emit()
+
+    def _changed_cells(self, other: Sheet) -> Optional[list]:
+        """The cells whose text differs between the grid's sheet and
+        `other` (same shape), or None when the columns themselves differ —
+        names, types — so only a full recalculation will do."""
+        if [(c.name, c.type) for c in other.columns] != [
+                (c.name, c.type) for c in self._sheet.columns]:
+            return None
+        changed = []
+        for r, (new, old) in enumerate(zip(other.rows, self._sheet.rows)):
+            if new != old:
+                changed.extend((r, c) for c, (a, b) in enumerate(zip(new, old))
+                               if a != b)
+        return changed
 
     def _same_layout(self, other: Sheet) -> bool:
         """Can `other` replace the current sheet without a model reset?
@@ -544,7 +568,7 @@ class SheetModel(QAbstractTableModel):
         if self._sheet.cell(row, col) == text:
             return True
         self._sheet.set_cell(row, col, text)
-        self._after_mutation()
+        self._after_mutation(changed=[(row, col)])
         return True
 
     # -------------------------------------------------------- cell edits
@@ -1010,8 +1034,8 @@ class SheetModel(QAbstractTableModel):
         if sheet_to_dict(self._sheet) != before and not self._syncing:
             self.sheet_edited.emit(self.sheet_dict())
 
-    def _after_mutation(self, reset: bool = False) -> None:
-        self._recalc()
+    def _after_mutation(self, reset: bool = False, changed=None) -> None:
+        self._recalc(None if reset else changed)
         if reset:
             self.beginResetModel()
             self.endResetModel()
