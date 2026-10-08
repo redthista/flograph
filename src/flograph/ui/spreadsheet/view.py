@@ -1294,6 +1294,69 @@ class SpreadsheetView(QTableView):
         row0, col0 = (rect[0], rect[1]) if rect else (0, 0)
         model.set_cells((row0, col0), block)
 
+    def clipboard_cells(self):
+        """What is on the clipboard as cells: (values, sources, origin).
+        `values` is what the copied cells showed; `sources` and `origin`
+        are the raw cells and where they came from when they were copied in
+        this app (None otherwise). None when there is nothing to paste."""
+        mime = QApplication.clipboard().mimeData()
+        if mime is None:
+            return None
+        values = parse_paste_text(mime.text()) if mime.hasText() else []
+        sources = origin = None
+        if mime.hasFormat(MIME_CELLS):
+            decoded = decode_cells(mime.data(MIME_CELLS).data())
+            if decoded is not None:
+                origin, sources = decoded
+                if not values:
+                    values = sources
+        if not values:
+            return None
+        return values, sources, origin
+
+    def can_paste(self) -> bool:
+        """Something pasteable is on the clipboard — a cheap look at its
+        formats, for enabling buttons."""
+        mime = QApplication.clipboard().mimeData()
+        return mime is not None and (mime.hasText()
+                                     or mime.hasFormat(MIME_CELLS))
+
+    def paste_special(self, what: str = "all", op: str = "none",
+                      skip_blanks: bool = False,
+                      transpose: bool = False) -> bool:
+        """Paste with Paste Special's choices (see core.sheet.paste) as one
+        undo step. False when there was nothing to paste."""
+        from flograph.core.sheet.paste import special_block
+        model = self.sheet_model()
+        cells = self.clipboard_cells()
+        if model is None or cells is None or not self.editable:
+            return False
+        values, sources, origin = cells
+        rect = self._selection_rect()
+        row0, col0 = (rect[0], rect[1]) if rect else (0, 0)
+        fill_to = ((rect[2] - row0 + 1, rect[3] - col0 + 1)
+                   if rect else None)
+        block = special_block(
+            values=values, sources=sources, origin=origin, at=(row0, col0),
+            target=lambda r, c: (model.cell_source(r, c),
+                                 model.computed_value(r, c)),
+            what=what, op=op, skip_blanks=skip_blanks, transpose=transpose,
+            fill_to=fill_to)
+        if not block:
+            return False
+        model.set_cells((row0, col0), block)
+        return True
+
+    def paste_transposed(self) -> None:
+        """Paste with the copied rows turned into columns."""
+        self.paste_special(transpose=True)
+
+    def open_paste_special(self) -> None:
+        """Home ▸ Paste Special… (Ctrl+Alt+V): the dialog."""
+        if self.editable:
+            from .paste_dialog import paste_special
+            paste_special(self)
+
     def jump(self, drow: int, dcol: int, extend: bool = False) -> None:
         """Ctrl+arrow: to the edge of the run of filled cells, or to the
         next filled cell past a gap, or to the grid's edge — Excel's rule.

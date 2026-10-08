@@ -381,6 +381,7 @@ class SheetRibbon(QWidget):
             ("Clipboard", [("paste", "Paste"), ("cut", "Cut"),
                            ("copy", "Copy"),
                            ("paste_values", "Paste Values"),
+                           ("paste_special", "Paste Special"),
                            ("copy_headers", "Copy + Headers")]),
             ("Undo", [("undo", "Undo"), ("redo", "Redo")]),
             ("Cells", [m("insert_menu", "row_above", "Insert"),

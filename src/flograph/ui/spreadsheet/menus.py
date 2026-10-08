@@ -147,7 +147,8 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     a.refresh()
     menu = new_menu(widget)
     heading(menu, "Clipboard")
-    for name in ("cut", "copy", "paste", "paste_values", "copy_headers"):
+    for name in ("cut", "copy", "paste", "paste_values", "paste_special",
+                 "paste_transpose", "copy_headers"):
         menu.addAction(a[name])
 
     heading(menu, "Cells")

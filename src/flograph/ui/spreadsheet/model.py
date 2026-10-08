@@ -575,15 +575,16 @@ class SheetModel(QAbstractTableModel):
 
     def set_cells(self, origin: tuple[int, int], block: list[list[str]]) -> None:
         """Write a rectangular block of raw sources at origin, growing the
-        grid as needed. One mutation -> one undo step for the host."""
+        grid as needed. A None in the block leaves that cell alone (Paste
+        Special's Skip Blanks). One mutation -> one undo step for the host."""
         if self._read_only:
             return
-        if not block:
+        if not block or all(text is None for row in block for text in row):
             return
         row0, col0 = origin
         formats = [c.format for c in self._sheet.columns]
         block = [[parse_typed(text, formats[col0 + dc])
-                  if col0 + dc < len(formats) else text
+                  if text is not None and col0 + dc < len(formats) else text
                   for dc, text in enumerate(row)] for row in block]
         self._structural(lambda sheet: self._paste_into(sheet, row0, col0, block))
 
@@ -594,7 +595,8 @@ class SheetModel(QAbstractTableModel):
                           col0 + max(len(r) for r in block))
         for dr, row in enumerate(block):
             for dc, text in enumerate(row):
-                sheet.set_cell(row0 + dr, col0 + dc, text)
+                if text is not None:
+                    sheet.set_cell(row0 + dr, col0 + dc, text)
 
     def clear_cells(self, cells) -> None:
         if self._read_only:

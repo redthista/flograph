@@ -227,6 +227,19 @@ class SheetActions(QObject):
                   "change.",
                   v.paste_values, keys=["Ctrl+Shift+V"], enabled=edit,
                   short="Values")
+        self._add("paste_special", "Paste Special…", "paste_special",
+                  "Paste with choices: values or formulas, add, subtract, "
+                  "multiply or divide into the numbers already there, skip "
+                  "the copy's empty cells, or turn rows into columns.",
+                  v.open_paste_special, keys=["Ctrl+Alt+V"],
+                  enabled=lambda: edit() and v.can_paste(),
+                  short="Special")
+        self._add("paste_transpose", "Paste Transposed", "paste_transpose",
+                  "Paste with the copied rows turned into columns and the "
+                  "columns into rows.",
+                  v.paste_transposed,
+                  enabled=lambda: edit() and v.can_paste(),
+                  short="Transpose")
         self._add("copy_headers", "Copy with Headers", "copy_headers",
                   "Copy the selection with the column names on top, for "
                   "pasting into another spreadsheet. With nothing selected, "

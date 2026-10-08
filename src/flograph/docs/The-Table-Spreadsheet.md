@@ -11,7 +11,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 | Tab | What is on it |
 | --- | --- |
-| **Home** | Paste, cut, copy, *Paste Values*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find, Replace |
+| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List**; **Validation** and **Next Problem** |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
@@ -255,6 +255,29 @@ Dates are kept as text (`2026-10-07`) and do sums like Excel's: `=[@Due]+7`
 is a week later, `=[@End]-[@Start]` the days between, and two dates compare
 as dates whichever way they are written.
 
+## Paste Special
+
+**Home ▸ Paste Special…** (**Ctrl+Alt+V**, or right-click a cell) pastes
+with choices, as Excel's dialog does:
+
+- **Paste** — *Formulas and values* brings formulas along, adjusted to
+  where they land (what plain Paste does); *Values only* brings what the
+  copied cells showed. A copy from outside the app is only values.
+- **Operation** — *Add*, *Subtract*, *Multiply* or *Divide* the copied
+  numbers into the numbers already in the cells. To raise every price by
+  10%: type `1.1` in a spare cell, copy it, select the prices, Multiply.
+  One copied cell works across the whole selection. Text is left alone; a
+  formula stays live (`=B2*C2` becomes `=(B2*C2)*1.1`); Add and Subtract
+  move a date on by that many days; an empty cell counts as 0 for Add and
+  Subtract and stays empty for Multiply and Divide.
+- **Skip blanks** — where a copied cell is empty, keep what is under it.
+- **Transpose** — the copied rows land as columns. **Paste Transposed** on
+  the right-click menu does just this in one click.
+
+A sentence says what the choices will do and a preview shows the first
+cells as they will be, the changed ones highlighted (hover one for what it
+was). The paste is one undo step.
+
 ## Formulas and moving things
 
 Inserting or deleting rows and columns keeps formulas pointing at the same
@@ -285,6 +308,7 @@ fourteen.
 | Clear the selected cells | **Del** |
 | Fill down / right | **Ctrl+D** / **Ctrl+R** |
 | Paste values only | **Ctrl+Shift+V** |
+| Paste Special | **Ctrl+Alt+V** |
 | Copy with headers | **Ctrl+Shift+C** |
 | Select whole rows / columns | **Shift+Space** / **Ctrl+Space** |
 | Insert / delete rows (columns when whole columns are selected) | **Ctrl++** / **Ctrl+-** |

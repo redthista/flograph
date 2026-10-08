@@ -138,6 +138,40 @@ def _paste_values(p, r, c):
     _text(p, QRectF(8, 9.5, 10.5, 8.5), "12", BLUE, 6.5)
 
 
+def _clipboard(p, c):
+    p.setPen(_pen(c))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(3.5, 4, 11, 13.5), 1.5, 1.5)
+    p.setBrush(c)
+    p.drawRoundedRect(QRectF(6.5, 2.5, 5, 3), 1, 1)
+
+
+def _paste_special(p, r, c):
+    """The clipboard with a badge holding the four sums."""
+    _clipboard(p, c)
+    p.setBrush(QColor("#2a2c33"))
+    p.setPen(_pen(VIOLET, 1.2))
+    p.drawRoundedRect(QRectF(8, 8.5, 10.5, 10), 1, 1)
+    _text(p, QRectF(8, 8.2, 10.5, 5.6), "+\u2212", VIOLET, 5.5)
+    _text(p, QRectF(8, 13, 10.5, 5.6), "\u00d7\u00f7", VIOLET, 5.5)
+
+
+def _paste_transpose(p, r, c):
+    """The clipboard with a row bending round into a column."""
+    _clipboard(p, c)
+    p.setBrush(QColor("#2a2c33"))
+    p.setPen(_pen(BLUE, 1.2))
+    p.drawRoundedRect(QRectF(8, 8.5, 10.5, 10), 1, 1)
+    p.setBrush(BLUE)
+    p.setPen(Qt.NoPen)
+    p.drawRect(QRectF(9.5, 10, 6.5, 2))          # the row ...
+    p.setBrush(Qt.NoBrush)
+    _arrow(p, QPointF(16.6, 12.6), QPointF(16.6, 17.2), BLUE, 1.2, 2.2)
+    p.setBrush(BLUE)
+    p.setPen(Qt.NoPen)
+    p.drawRect(QRectF(9.5, 12.5, 2, 5))          # ... and the column
+
+
 def _cut(p, r, c):
     p.setPen(_pen(c, 1.4))
     p.setBrush(Qt.NoBrush)
@@ -638,6 +672,8 @@ GLYPHS = {
     "fmt_thousands": (_fmt_thousands, FG), "dec_more": (_dec_more, FG),
     "dec_less": (_dec_less, FG), "format": (_format, FG),
     "paste": (_paste, FG), "paste_values": (_paste_values, FG),
+    "paste_special": (_paste_special, FG),
+    "paste_transpose": (_paste_transpose, FG),
     "cut": (_cut, FG), "copy": (_copy, FG),
     "copy_headers": (_copy_headers, FG),
     "undo": (_undo, FG), "redo": (_redo, FG),

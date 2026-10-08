@@ -210,6 +210,7 @@ class TestCommands:
         (Qt.Key_Up, Qt.AltModifier | Qt.ShiftModifier, "row_up"),
         (Qt.Key_F, Qt.ControlModifier, "find"),
         (Qt.Key_V, Qt.ControlModifier | Qt.ShiftModifier, "paste_values"),
+        (Qt.Key_V, Qt.ControlModifier | Qt.AltModifier, "paste_special"),
     ])
     def test_keys_reach_their_action(self, qtbot, key, mods, name):
         view, _model = _view(qtbot)
