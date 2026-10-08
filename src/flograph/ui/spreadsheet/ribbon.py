@@ -234,6 +234,17 @@ def _separator() -> QFrame:
     return line
 
 
+class _LooseStack(QStackedWidget):
+    """A stack that asks for no width of its own. The full-size pages are
+    wide, and a stack holding them would otherwise set the ribbon's — and
+    so the window's — minimum width to theirs: the window could then never
+    be made narrow enough for the ribbon to switch to its compact size."""
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        return QSize(0, hint.height())
+
+
 class SheetRibbon(QWidget):
     """The ribbon for one SpreadsheetView."""
 
@@ -268,7 +279,7 @@ class SheetRibbon(QWidget):
         tabs.setSpacing(0)
         self._tab_group = QButtonGroup(self)
         self._tab_group.setExclusive(True)
-        self._stacks = {"full": QStackedWidget(), "compact": QStackedWidget()}
+        self._stacks = {"full": _LooseStack(), "compact": QStackedWidget()}
         self._tab_buttons: list[QToolButton] = []
         self._tab_titles: list[tuple[str, str]] = []
         for index, (title, short, groups) in enumerate(self._pages()):
@@ -360,6 +371,7 @@ class SheetRibbon(QWidget):
             "freeze_menu": self._fill_freeze_menu,
             "number_menu": self._fill_number_menu,
             "cf_menu": self._fill_cf_menu,
+            "total_menu": self._fill_total_menu,
         }
 
         def m(builder, action, label):
@@ -380,8 +392,6 @@ class SheetRibbon(QWidget):
                         ("fmt_thousands", "Thousands"),
                         ("dec_more", "More Decimals"),
                         ("dec_less", "Fewer Decimals")]),
-            ("Styles", [m("cf_menu", "cond_format", "Conditional"),
-                        ("cf_manage", "Manage Rules")]),
             ("Editing", [("fill_down", "Fill Down"),
                          ("fill_right", "Fill Right"), ("find", "Find"),
                          ("replace", "Replace")]),
@@ -404,6 +414,10 @@ class SheetRibbon(QWidget):
                                ("sort_asc", "Sort A → Z"),
                                ("sort_desc", "Sort Z → A"),
                                ("filter_clear", "Clear Filters")]),
+            ("Styles", [m("cf_menu", "cond_format", "Conditional"),
+                        ("cf_manage", "Manage Rules")]),
+            ("Totals", [("totals_row", "Total Row"),
+                        m("total_menu", "total_menu", "Total")]),
             ("Column", [m("type_menu", "col_type", "Type"),
                         ("dropdown", "Dropdown List"),
                         ("rename", "Rename")]),
@@ -482,6 +496,10 @@ class SheetRibbon(QWidget):
         for col_type in COLUMN_TYPES:
             menu.addAction(self._actions[f"type_{col_type}"])
 
+    def _fill_total_menu(self, menu) -> None:
+        from .totals import fill_total_menu
+        fill_total_menu(menu, self._view, self._view.target_columns())
+
     def _fill_cf_menu(self, menu) -> None:
         from .cond_format import fill_menu
         fill_menu(menu, self._view)
@@ -538,7 +556,18 @@ class SheetRibbon(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._size != "auto":
+        self._choose_size()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # the pages' widths are only right once styled, which is after the
+        # first resize: look again when the ribbon is actually on screen
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._choose_size)
+
+    def _choose_size(self) -> None:
+        import shiboken6
+        if self._size != "auto" or not shiboken6.isValid(self):
             return
         wanted = "full" if self.width() >= self._full_width() else "compact"
         if wanted != self._active:

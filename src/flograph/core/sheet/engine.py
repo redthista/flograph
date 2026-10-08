@@ -137,8 +137,10 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
         # input's — it survives the refresh like a width does
         col.choices, col.strict = list(mine.choices), mine.strict
         col.format = dict(mine.format) if mine.format else None
+        col.total = mine.total
     merged.freeze_rows, merged.freeze_cols = (stored.freeze_rows,
                                               stored.freeze_cols)
+    merged.show_totals = stored.show_totals
 
     base_names = {c.name for c in merged.columns}
     n_rows = merged.n_rows
@@ -159,7 +161,7 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
                 cells.append("")
         merged.columns.append(ColumnSpec(
             col.name, col.type, col.width, list(col.choices), col.strict,
-            dict(col.format) if col.format else None))
+            dict(col.format) if col.format else None, col.total))
         for row in range(n_rows):
             merged.rows[row].append(cells[row])
     return merged

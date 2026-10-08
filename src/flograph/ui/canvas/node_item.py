@@ -1724,6 +1724,7 @@ class NodeItem(QGraphicsObject):
                                   + " QLabel, QLineEdit { font-size: 8pt; }")
         layout.addWidget(formula_bar)
         layout.addWidget(grid, 1)
+        layout.addWidget(grid.totals_bar())
 
         model.sheet_edited.connect(self._commit_table_data)
 

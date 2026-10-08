@@ -150,6 +150,7 @@ class SheetEditorDialog(QDialog):
         layout.addWidget(self._toolbar)
         layout.addWidget(self._formula_bar)
         layout.addWidget(self.view, 1)
+        layout.addWidget(self.view.totals_bar(self))
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel
                                    | QDialogButtonBox.Apply)

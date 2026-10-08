@@ -587,6 +587,25 @@ class SpreadsheetView(QTableView):
                     widths[col] = self.columnWidth(col)
         finally:
             self._applying_widths = False
+        if model.show_totals:
+            # a total is often the widest thing in its column (a sum is
+            # bigger than any one value): fit it too, in the bold it is
+            # drawn in, or it is cut off under the grid
+            from PySide6.QtGui import QFont, QFontMetrics
+            font = QFont(self.font())
+            font.setBold(True)
+            metrics = QFontMetrics(font)
+            for col in cols:
+                text = model.total_text(col)
+                need = metrics.horizontalAdvance(text) + 14 if text else 0
+                if need > widths.get(col, 0):
+                    widths[col] = need
+                    if frozen is not None and col < frozen.cols:
+                        pane = frozen.panes().get("cols")
+                        if pane is not None:
+                            pane.setColumnWidth(col, need)
+                    else:
+                        self.setColumnWidth(col, need)
         if frozen is not None:
             frozen.relayout()
         if persist:
@@ -941,6 +960,18 @@ class SpreadsheetView(QTableView):
             return None
         corner = rect.bottomRight()
         return QRect(corner.x() - 3, corner.y() - 3, 7, 7)
+
+    def totals_bar(self, parent=None):
+        """The Total Row for this grid, for a host to lay out directly
+        under it (totals.py). Shows itself while the sheet's Total Row is
+        on."""
+        from .totals import TotalsBar
+        return TotalsBar(self, parent)
+
+    def toggle_totals(self, on: bool) -> None:
+        model = self.sheet_model()
+        if model is not None and self.editable:
+            model.set_show_totals(on)
 
     def drop_line(self, line) -> None:
         """Where dragged rows/columns will land: ("row"|"col", pixel), or

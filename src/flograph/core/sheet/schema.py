@@ -149,6 +149,9 @@ class ColumnSpec:
     # How the column's values read (core/sheet/numfmt.py) — display only;
     # None is General. Never changes a value or what flows on.
     format: Optional[dict] = None
+    # What the Total Row shows under this column (core/table_totals
+    # AGGREGATIONS: "sum", "average", "count", …), or None for nothing.
+    total: Optional[str] = None
 
 
 @dataclass
@@ -159,6 +162,9 @@ class Sheet:
     # scrolls. View state, but it belongs to the table, so it is saved.
     freeze_rows: int = 0
     freeze_cols: int = 0
+    # Excel's Total Row: a row of totals under the grid. Display only — it
+    # is never part of the table the node sends on.
+    show_totals: bool = False
 
     @property
     def n_rows(self) -> int:
@@ -302,11 +308,21 @@ class Sheet:
         return Sheet(
             columns=[ColumnSpec(c.name, c.type, c.width, list(c.choices),
                                 c.strict,
-                                dict(c.format) if c.format else None)
+                                dict(c.format) if c.format else None,
+                                c.total)
                      for c in self.columns],
             rows=[list(row) for row in self.rows],
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
+            show_totals=self.show_totals,
         )
+
+
+def _total_word(word) -> Optional[str]:
+    """A stored Total Row choice, made safe (core/table_totals's names)."""
+    if not word:
+        return None
+    from flograph.core.table_totals import canonical_agg
+    return canonical_agg(word)
 
 
 def parse_sheet(raw) -> Sheet:
@@ -342,7 +358,7 @@ def parse_sheet(raw) -> Sheet:
             columns.append(ColumnSpec(
                 name, col_type if col_type in COLUMN_TYPES else "auto", width,
                 choices, bool(entry.get("strict")) and bool(choices),
-                clean(entry.get("format"))))
+                clean(entry.get("format")), _total_word(entry.get("total"))))
         else:
             columns.append(ColumnSpec(str(entry)))
 
@@ -369,7 +385,8 @@ def parse_sheet(raw) -> Sheet:
 
     return Sheet(columns, rows,
                  freeze_rows=_count("rows", max(len(rows) - 1, 0)),
-                 freeze_cols=_count("cols", max(len(columns) - 1, 0)))
+                 freeze_cols=_count("cols", max(len(columns) - 1, 0)),
+                 show_totals=bool(parsed.get("totals")))
 
 
 def sheet_to_dict(sheet: Sheet) -> dict:
@@ -384,6 +401,8 @@ def sheet_to_dict(sheet: Sheet) -> dict:
                 entry["strict"] = True
         if col.format:
             entry["format"] = dict(col.format)
+        if col.total:
+            entry["total"] = col.total
         columns.append(entry)
     out = {
         "version": 2,
@@ -393,6 +412,8 @@ def sheet_to_dict(sheet: Sheet) -> dict:
     # written only when set, so a sheet nobody froze saves as it always did
     if sheet.freeze_rows or sheet.freeze_cols:
         out["freeze"] = {"rows": sheet.freeze_rows, "cols": sheet.freeze_cols}
+    if sheet.show_totals:
+        out["totals"] = True
     return out
 
 

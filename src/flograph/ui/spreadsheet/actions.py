@@ -474,6 +474,22 @@ class SheetActions(QObject):
                   "No format: numbers show as they are.",
                   lambda: v.apply_format(None), enabled=cols_ok)
 
+        # ---- the Total Row
+        self._add("totals_row", "Total Row", "totals",
+                  "A row of totals under the grid — Sum, Average, Count and "
+                  "more, chosen per column (click a total to change it). "
+                  "With a filter on, only the rows it shows are counted. "
+                  "Display only: the table the node sends on has no total "
+                  "row.",
+                  v.toggle_totals, keys=["Ctrl+Shift+T"],
+                  checked=lambda: bool(model() and model().show_totals),
+                  enabled=edit, short="Total Row")
+        self._add("total_menu", "Total", "totals",
+                  "What the Total Row shows under the selected columns.",
+                  lambda: None,
+                  enabled=lambda: edit() and bool(v.target_columns()),
+                  short="Total")
+
         # ---- conditional formatting (Show Table's rules)
         def can_format() -> bool:
             return v.host.can_format() and bool(v.target_columns())

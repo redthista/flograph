@@ -238,6 +238,8 @@ class SheetWorkbench(QWidget):
         layout.addWidget(self.toolbar)
         layout.addWidget(self.formula_bar)
         layout.addWidget(self.view, 1)
+        self.totals = self.view.totals_bar(self)
+        layout.addWidget(self.totals)
 
     def model(self) -> Optional[SheetModel]:
         return self.view.sheet_model()

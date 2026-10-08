@@ -596,7 +596,14 @@ def _cond_format(p, r, c):
     _cf_scale(p, r, c)
 
 
+def _totals(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 15, 15), lit=[("row", 2)], lit_color=BLUE,
+          color=c)
+    _text(p, QRectF(2.5, 12.5, 15, 5), "Σ", QColor("#f3f4f6"), 5.5)
+
+
 GLYPHS = {
+    "totals": (_totals, FG),
     "cf_scale": (_cf_scale, FG), "cf_bar": (_cf_bar, FG),
     "cf_icons": (_cf_icons, FG), "cf_highlight": (_cf_highlight, FG),
     "cf_manage": (_cf_manage, FG), "cond_format": (_cond_format, FG),

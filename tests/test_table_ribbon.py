@@ -490,3 +490,19 @@ def test_a_bare_grid_does_not_offer_an_editor_it_has_not_got(
     view.setCurrentIndex(view.model().index(0, 0))
     menus.cell_menu(view, view.viewport(), QPoint(5, 5))
     assert view.actions["open_editor"] not in shown[0].actions()
+
+
+def test_an_auto_ribbon_lets_the_window_narrow_and_goes_compact(qtbot):
+    """The full ribbon is wide; if its pages set the window's minimum width
+    the window could never get narrow enough to switch, and the labels
+    were squeezed to 'Fi…wn' instead."""
+    bench = SheetWorkbench(SheetModel(_data()))
+    qtbot.addWidget(bench)
+    bench.resize(560, 400)
+    bench.show()
+    qtbot.waitExposed(bench)
+    ribbon = bench.ribbon
+    assert ribbon._stacks["full"].minimumSizeHint().width() == 0
+    ribbon._choose_size()
+    assert bench.width() == 560
+    assert ribbon.active_size == "compact"

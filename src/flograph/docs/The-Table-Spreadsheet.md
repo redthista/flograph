@@ -13,7 +13,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
-| **Data** | Filter, Sort A → Z / Z → A, Clear Filters; the column's **Type** ▾ and its **Dropdown List** |
+| **Data** | Filter, Sort A → Z / Z → A, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List** |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
 | **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
 
@@ -113,6 +113,22 @@ can be changed at any time without losing anything.
 
 Halves round away from zero, as in Excel: 2.5 at no decimals reads 3.
 
+## The Total Row
+
+**Data ▸ Total Row** (**Ctrl+Shift+T**) puts a row of totals under the grid,
+as Excel's tables have. Each column chooses its own — **None, Sum, Average,
+Median, Min, Max, Range, Count, Rows, Distinct, Std, Variance, First, Last,
+Mode** — from **Data ▸ Total ▾**, the column header's right-click menu, or
+by clicking the total itself. Turned on for the first time, the last
+number column gets a Sum.
+
+- With a filter on, a total counts only the rows the filter shows (Excel's
+  SUBTOTAL), and its tooltip says so.
+- A total in the column's units (a sum or average of money) is shown in the
+  column's number format; a count is just a count.
+- It is a view: the table the node sends on has no total row, and Show
+  Table's own totals are unaffected.
+
 ## Conditional formatting
 
 The Table uses **Show Table's rule system** — the same language, the same
@@ -120,7 +136,7 @@ The Table uses **Show Table's rule system** — the same language, the same
 highlights — so a rule written for one works in the other. See
 [[Conditional Formatting]] for the full language.
 
-- **Home ▸ Conditional ▾** (or right-click a cell or column header ▸
+- **Data ▸ Conditional ▾** (or right-click a cell or column header ▸
   Conditional Formatting) offers Excel's presets for the selected columns:
   **Colour Scale**, **Data Bar**, **Icon Set**, and **Highlight Cells**
   (greater than, less than, between, equal to, contains, blank…) with a
@@ -219,6 +235,7 @@ result, for checking a sheet over.
 | Filter this column | **Ctrl+Shift+L** |
 | Open a cell's dropdown list | **Alt+Down** |
 | Format cells (number format) | **Ctrl+1** |
+| Total Row on / off | **Ctrl+Shift+T** |
 | Show formulas | **Ctrl+`** |
 
 See also [[Nodes and the Library]] and [[Keyboard Shortcuts]].

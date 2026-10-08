@@ -233,6 +233,11 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
     _number_menu(menu, view)
     _cf_menu(menu, view)
     menu.addAction(a["dropdown"])
+    total = submenu(menu, "Total")
+    from .totals import fill_total_menu
+    fill_total_menu(total, view, view.target_columns())
+    total.addSeparator()
+    total.addAction(a["totals_row"])
     menu.addAction(a["fit"])
     menu.addAction(a["fit_all"])
     heading(menu, "More")

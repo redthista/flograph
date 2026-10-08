@@ -76,6 +76,7 @@ class SheetModel(QAbstractTableModel):
 
     sheet_edited = Signal(dict)   # the new sheet dict, after a user mutation
     freeze_changed = Signal()     # freeze panes moved (by the user or a sync)
+    totals_changed = Signal()     # the Total Row was turned on/off or changed
 
     def __init__(self, sheet=None, parent=None) -> None:
         super().__init__(parent)
@@ -317,6 +318,7 @@ class SheetModel(QAbstractTableModel):
             self._syncing = False
         if froze:
             self.freeze_changed.emit()
+        self.totals_changed.emit()
 
     def _same_layout(self, other: Sheet) -> bool:
         """Can `other` replace the current sheet without a model reset?
@@ -331,13 +333,15 @@ class SheetModel(QAbstractTableModel):
                 or other.n_cols != self._sheet.n_cols
                 or not other.n_rows or not other.n_cols):
             return False
-        return (other.freeze_rows == self._sheet.freeze_rows
+        return (other.show_totals == self._sheet.show_totals
+                and other.freeze_rows == self._sheet.freeze_rows
                 and other.freeze_cols == self._sheet.freeze_cols
                 and all(new.name == old.name and new.type == old.type
                         and new.width == old.width
                         and new.choices == old.choices
                         and new.strict == old.strict
                         and new.format == old.format
+                        and new.total == old.total
                         for new, old in zip(other.columns,
                                             self._sheet.columns)))
 
@@ -708,6 +712,91 @@ class SheetModel(QAbstractTableModel):
                 sheet.columns[col].format = dict(fmt) if fmt else None
 
         self._structural(mutate, reset=False)
+
+    # ------------------------------------------------------------ Total Row
+
+    @property
+    def show_totals(self) -> bool:
+        return self._sheet.show_totals
+
+    def column_total(self, col: int) -> Optional[str]:
+        if 0 <= col < self._sheet.n_cols:
+            return self._sheet.columns[col].total
+        return None
+
+    def set_show_totals(self, flag: bool) -> None:
+        """Excel's Total Row, on or off. Turned on for the first time, the
+        last number column gets a Sum, as Excel gives it — a row of blanks
+        would look like it did nothing."""
+        flag = bool(flag)
+        if self._read_only or flag == self._sheet.show_totals:
+            return
+        start = None
+        if flag and not any(c.total for c in self._sheet.columns):
+            frame = self._frame()
+            for col in range(self._sheet.n_cols - 1, -1, -1):
+                from pandas.api.types import is_numeric_dtype
+                if is_numeric_dtype(frame.iloc[:, col].dtype) and \
+                        frame.iloc[:, col].notna().any():
+                    start = col
+                    break
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.show_totals = flag
+            if start is not None:
+                sheet.columns[start].total = "sum"
+
+        self._structural(mutate, reset=False)
+        self.totals_changed.emit()
+
+    def set_column_total(self, cols, how: Optional[str]) -> None:
+        """What the Total Row shows under these columns (None: nothing).
+        Showing a total turns the row on."""
+        if self._read_only:
+            return
+        from flograph.core.table_totals import canonical_agg
+        how = canonical_agg(how) if how else None
+        cols = [c for c in cols if 0 <= c < self._sheet.n_cols]
+        if not cols:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            for col in cols:
+                sheet.columns[col].total = how
+            if how:
+                sheet.show_totals = True
+
+        self._structural(mutate, reset=False)
+        self.totals_changed.emit()
+
+    def total_value(self, col: int, rows=None):
+        """The total under a column, over `rows` (the ones a filter left
+        showing; all of them when None), or None."""
+        how = self.column_total(col)
+        if not how:
+            return None
+        from flograph.core.table_totals import aggregate
+        series = self._frame().iloc[:, col]
+        if rows is not None:
+            series = series.iloc[list(rows)]
+        return aggregate(series, how)
+
+    def total_text(self, col: int, rows=None) -> str:
+        """The total as the Total Row shows it: in the column's number
+        format when the total is in the column's units (a sum of money is
+        money; a count of it is not)."""
+        from flograph.core.table_totals import UNIT_AGGS
+        value = self.total_value(col, rows)
+        if value is None:
+            return ""
+        fmt = self._sheet.columns[col].format
+        if fmt is not None and self.column_total(col) in UNIT_AGGS:
+            shown = format_value_as(value, fmt)
+            if shown is not None:
+                return shown[0]
+        if isinstance(value, float):
+            return format_value(round(value, 10))
+        return format_value(value)
 
     def set_freeze(self, rows: int, cols: int) -> None:
         """Freeze panes: this many data rows and columns stay in view."""
