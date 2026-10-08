@@ -422,6 +422,8 @@ class SheetRibbon(QWidget):
             ("Column", [m("type_menu", "col_type", "Type"),
                         ("dropdown", "Dropdown List"),
                         ("rename", "Rename")]),
+            ("Check", [("validation", "Validation"),
+                       ("next_problem", "Next Problem")]),
         ]
         view = [
             ("Freeze", [m("freeze_menu", "freeze", "Freeze"),

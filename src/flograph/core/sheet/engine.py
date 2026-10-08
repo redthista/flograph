@@ -138,6 +138,7 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
         col.choices, col.strict = list(mine.choices), mine.strict
         col.format = dict(mine.format) if mine.format else None
         col.total = mine.total
+        col.validation = dict(mine.validation) if mine.validation else None
     merged.freeze_rows, merged.freeze_cols = (stored.freeze_rows,
                                               stored.freeze_cols)
     merged.show_totals = stored.show_totals
@@ -161,7 +162,8 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
                 cells.append("")
         merged.columns.append(ColumnSpec(
             col.name, col.type, col.width, list(col.choices), col.strict,
-            dict(col.format) if col.format else None, col.total))
+            dict(col.format) if col.format else None, col.total,
+            dict(col.validation) if col.validation else None))
         for row in range(n_rows):
             merged.rows[row].append(cells[row])
     return merged

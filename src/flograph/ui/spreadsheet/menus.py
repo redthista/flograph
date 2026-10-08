@@ -177,6 +177,7 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     _number_menu(menu, view)
     _cf_menu(menu, view)
     menu.addAction(a["dropdown"])
+    menu.addAction(a["validation"])
     model = view.sheet_model()
     current = view.currentIndex()
     if (model is not None and current.isValid()
@@ -185,6 +186,9 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
 
     heading(menu, "More")
     menu.addAction(a["find"])
+    if model is not None and current.isValid() and model.cell_problem(
+            current.row(), current.column()):
+        menu.addAction(a["next_problem"])
     _freeze_menu(menu, a)
     if view.host.can_open_editor():
         menu.addAction(view.actions["open_editor"])
@@ -237,6 +241,7 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
     _number_menu(menu, view)
     _cf_menu(menu, view)
     menu.addAction(a["dropdown"])
+    menu.addAction(a["validation"])
     total = submenu(menu, "Total")
     from .totals import fill_total_menu
     fill_total_menu(total, view, view.target_columns())

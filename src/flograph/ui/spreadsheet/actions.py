@@ -354,6 +354,22 @@ class SheetActions(QObject):
                   v.edit_column_list,
                   enabled=lambda: edit() and bool(v.target_columns()),
                   short="Dropdown")
+        self._add("validation", "Data Validation…", "validation",
+                  "Limit what a column will take: whole numbers 1 to 100, "
+                  "a date after today, text of at most 10 characters, or "
+                  "never blank. A value that breaks the rule turns red — "
+                  "or a typed one can be turned away.",
+                  v.edit_validation,
+                  enabled=lambda: edit() and bool(v.target_columns()),
+                  short="Validation")
+        self._add("next_problem", "Next Problem", "next_problem",
+                  "Go to the next cell that is red or shows an error, with "
+                  "what is wrong beside it — a broken rule, a value that "
+                  "doesn't fit its column, a formula error.",
+                  v.next_problem,
+                  enabled=lambda: v.model() is not None
+                  and v.model().rowCount() > 0,
+                  short="Problems")
         self._add("open_dropdown", "Open Cell's List", None,
                   "Open the dropdown of a cell in a column with a list.",
                   v.open_cell_dropdown, keys=["Alt+Down"], enabled=edit)

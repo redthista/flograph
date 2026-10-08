@@ -311,6 +311,7 @@ class SpreadsheetView(QTableView):
             old.modelReset.disconnect(self._after_reset)
             old.dataChanged.disconnect(self._reapply_filter)
             old.freeze_changed.disconnect(self._apply_freeze)
+            old.edit_refused.disconnect(self._edit_refused)
         super().setModel(model)
         self._filters = {}
         self._filtered_rows = set()
@@ -323,6 +324,7 @@ class SpreadsheetView(QTableView):
             model.modelReset.connect(self._after_reset)
             model.dataChanged.connect(self._reapply_filter)
             model.freeze_changed.connect(self._apply_freeze)
+            model.edit_refused.connect(self._edit_refused)
             self._sync_column_widths()
             self._apply_freeze()
         if isinstance(model, SheetModel) and getattr(self, "_fill", None):
@@ -333,6 +335,7 @@ class SpreadsheetView(QTableView):
                 self._selection_moved)
             self.selectionModel().currentChanged.connect(
                 self._selection_moved)
+            self.selectionModel().currentChanged.connect(self._show_hint)
 
     def sheet_model(self) -> Optional[SheetModel]:
         model = self.model()
@@ -1300,6 +1303,86 @@ class SpreadsheetView(QTableView):
         if cols and self.editable:
             from .numfmt_dialog import edit_number_format
             edit_number_format(self, cols)
+
+    # ---------------------------------------------------- data validation
+
+    def edit_validation(self) -> None:
+        """Data ▸ Validation…: what the selected columns will take."""
+        cols = self.target_columns()
+        if cols and self.editable:
+            from .validation_dialog import edit_validation
+            edit_validation(self, cols)
+
+    def cell_note(self, index, text: str, msecs: int = 4000) -> None:
+        """A note beside a cell — Excel's yellow box. A tooltip, because a
+        tooltip is a real window and so works on a canvas card too."""
+        from PySide6.QtWidgets import QToolTip
+        rect = self.visualRect(index)
+        if not text or not rect.isValid():
+            return
+        where = self.viewport().mapToGlobal(rect.bottomRight())
+        QToolTip.showText(where, text, self.viewport(), rect, msecs)
+
+    def _show_hint(self, current, _previous=None) -> None:
+        model = self.sheet_model()
+        if model is None or not current.isValid() or not self.hasFocus():
+            return
+        rule = model.column_validation(current.column())
+        if rule and rule.get("hint"):
+            name = model.sheet.columns[current.column()].name
+            self.cell_note(current, f"<b>{name}</b><br>{rule['hint']}")
+
+    def _edit_refused(self, row: int, col: int, text: str, why: str) -> None:
+        """A Stop rule turned a typed value away: back into the cell with
+        the text still there to fix, and the reason beside it."""
+        model = self.sheet_model()
+        if model is None:
+            return
+        index = model.index(row, col)
+
+        def again() -> None:
+            if self.model() is not model:
+                return
+            self.setCurrentIndex(index)
+            self.edit(index)
+            from PySide6.QtWidgets import QApplication, QLineEdit
+            editor = QApplication.focusWidget()
+            if isinstance(editor, QLineEdit):
+                editor.setText(text)
+                editor.selectAll()
+            self.cell_note(index, f"<b>Not kept</b><br>{why}<br>"
+                                  "<span style='color:#9ca3af'>Fix it, or "
+                                  "Esc to leave the cell as it was.</span>",
+                           6000)
+
+        QTimer.singleShot(0, again)
+
+    def next_problem(self) -> None:
+        """Data ▸ Next Problem: on to the next cell that is red or shows an
+        error — a broken rule, a value that doesn't fit its type or list,
+        a formula error — with what is wrong beside it."""
+        model = self.sheet_model()
+        if model is None:
+            return
+        cells = [(r, c) for r, c in model.problem_cells()
+                 if not self.row_filtered(r)]
+        if not cells:
+            from PySide6.QtWidgets import QToolTip
+            QToolTip.showText(
+                self.viewport().mapToGlobal(self.viewport().rect().center()),
+                "No problems — every cell fits its column.", self.viewport())
+            return
+        current = self.currentIndex()
+        here = ((current.row(), current.column()) if current.isValid()
+                else (-1, -1))
+        after = [cell for cell in cells if cell > here]
+        target = after[0] if after else cells[0]
+        index = model.index(*target)
+        self.setCurrentIndex(index)
+        self.scrollTo(index)
+        place = cells.index(target) + 1
+        self.cell_note(index, f"<b>Problem {place} of {len(cells)}</b><br>"
+                              f"{model.cell_problem(*target)}", 6000)
 
     def edit_column_list(self) -> None:
         """Data ▸ Dropdown List… for the current column."""

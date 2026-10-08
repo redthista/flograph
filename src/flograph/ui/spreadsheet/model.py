@@ -15,6 +15,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 
 from flograph.core.sheet.numfmt import format_value_as, parse_typed
+from flograph.core.sheet import validation as _validation
 
 from ..table_delegate import BAR_ROLE, DECOR_ROLE, ICON_ROLE
 from flograph.core.sheet import (COLUMN_TYPES, FormulaError, Sheet,
@@ -77,6 +78,8 @@ class SheetModel(QAbstractTableModel):
     sheet_edited = Signal(dict)   # the new sheet dict, after a user mutation
     freeze_changed = Signal()     # freeze panes moved (by the user or a sync)
     totals_changed = Signal()     # the Total Row was turned on/off or changed
+    # a typed value a column's Stop rule turned away: row, col, text, why
+    edit_refused = Signal(int, int, str, str)
 
     def __init__(self, sheet=None, parent=None) -> None:
         super().__init__(parent)
@@ -258,7 +261,51 @@ class SheetModel(QAbstractTableModel):
 
     def _invalid(self, row: int, col: int, source: str) -> Optional[str]:
         spec = self._sheet.columns[col]
-        return validate_cell(source, spec.type, spec.choices, spec.strict)
+        problem = validate_cell(source, spec.type, spec.choices, spec.strict)
+        if problem or not spec.validation:
+            return problem
+        return _validation.check(source, spec.validation,
+                                 self._row_has_data(row))
+
+    def _row_has_data(self, row: int) -> bool:
+        return any(text.strip() for text in self._sheet.rows[row])
+
+    def cell_problem(self, row: int, col: int) -> Optional[str]:
+        """What is wrong with a cell — a formula error, a value that doesn't
+        fit its column's type or list, or a broken validation rule."""
+        if not (0 <= row < self._sheet.n_rows
+                and 0 <= col < self._sheet.n_cols):
+            return None
+        return (self._result.errors.get((row, col))
+                or self._invalid(row, col, self._sheet.cell(row, col)))
+
+    def problem_cells(self) -> list[tuple[int, int]]:
+        """Every cell with a problem, row by row."""
+        return [(r, c) for r in range(self._sheet.n_rows)
+                for c in range(self._sheet.n_cols)
+                if self.cell_problem(r, c)]
+
+    def column_validation(self, col: int) -> Optional[dict]:
+        if 0 <= col < self._sheet.n_cols:
+            rule = self._sheet.columns[col].validation
+            return dict(rule) if rule else None
+        return None
+
+    def set_column_validation(self, cols, rule) -> None:
+        """Give columns a validation rule (None to remove it), one undo
+        step. Values are untouched; only what is flagged changes."""
+        if self._read_only:
+            return
+        rule = _validation.clean(rule)
+        cols = [c for c in cols if 0 <= c < self._sheet.n_cols]
+        if not cols:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            for col in cols:
+                sheet.columns[col].validation = dict(rule) if rule else None
+
+        self._structural(mutate)
 
     def cell_source(self, row: int, col: int) -> str:
         if 0 <= row < self._sheet.n_rows and 0 <= col < self._sheet.n_cols:
@@ -342,6 +389,7 @@ class SheetModel(QAbstractTableModel):
                         and new.strict == old.strict
                         and new.format == old.format
                         and new.total == old.total
+                        and new.validation == old.validation
                         for new, old in zip(other.columns,
                                             self._sheet.columns)))
 
@@ -473,7 +521,20 @@ class SheetModel(QAbstractTableModel):
             checked = Qt.CheckState(value) == Qt.Checked
             return self._set_cell_text(row, col, "TRUE" if checked else "FALSE")
         if role == Qt.EditRole:
-            return self._set_cell_text(row, col, "" if value is None else str(value))
+            text = "" if value is None else str(value)
+            rule = self._sheet.columns[col].validation
+            if rule and rule.get("stop"):
+                # Excel's Stop alert: a typed value that breaks the rule is
+                # turned away (the view puts the editor back to try again)
+                typed = parse_typed(text, self._sheet.columns[col].format)
+                row_has_data = typed.strip() != "" or any(
+                    t.strip() for i, t in enumerate(self._sheet.rows[row])
+                    if i != col)
+                why = _validation.check(typed, rule, row_has_data)
+                if why:
+                    self.edit_refused.emit(row, col, text, why)
+                    return False
+            return self._set_cell_text(row, col, text)
         return False
 
     def _set_cell_text(self, row: int, col: int, text: str) -> bool:

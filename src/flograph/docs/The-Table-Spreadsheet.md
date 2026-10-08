@@ -13,7 +13,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
-| **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List** |
+| **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List**; **Validation** and **Next Problem** |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
 | **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
 
@@ -164,6 +164,35 @@ that column shows a ▾: click it, or press **Alt+Down**, to pick from the list.
 Typing still works. **Fill From Column** starts the list from the values
 already there. Tick **Only allow values on the list** and anything else turns
 red, like a word in a number column.
+
+## Data validation
+
+**Data ▸ Validation…** (or right-click a cell or a column header) says what a
+column will take, as Excel's Data Validation does:
+
+| Allow | For example |
+|---|---|
+| **Whole number** | between 1 and 100 |
+| **Decimal number** | greater than 0 |
+| **Date** | on or after `today`, between `today-7` and `today+7`, before 2027-01-01 |
+| **Text length** | at most 10 characters, exactly 6 |
+| **Any value** | no limit — for *Required* on its own, or just a hint |
+
+- **Required** — a row with anything in it must fill this cell. Wholly
+  empty rows are left alone.
+- **Hint when selected** shows beside a cell of the column when you select
+  it.
+- **Error message** replaces the generated explanation.
+- **When a value breaks the rule**: *Flag it red* keeps the value (it still
+  flows on) and its tooltip says what is wrong; *Turn it away* sends a
+  typed value back into the cell to fix, with the reason beside it — **Esc**
+  leaves the cell as it was. Paste and fill are never turned away, as in
+  Excel; what they bring in is flagged.
+
+The foot of the dialog says the rule in words and how many cells already
+break it. **Data ▸ Next Problem** steps through every red cell and formula
+error, saying what is wrong with each. The rule only checks typed values,
+never a formula's result — that is what conditional formatting is for.
 
 ## Freeze panes
 

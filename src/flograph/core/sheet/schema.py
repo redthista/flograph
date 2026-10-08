@@ -152,6 +152,10 @@ class ColumnSpec:
     # What the Total Row shows under this column (core/table_totals
     # AGGREGATIONS: "sum", "average", "count", …), or None for nothing.
     total: Optional[str] = None
+    # Data validation (core/sheet/validation.py): limits a typed value must
+    # keep, whether it may be blank, a hint and an error text. Flags or
+    # turns away; never changes a value or what flows on.
+    validation: Optional[dict] = None
 
 
 @dataclass
@@ -350,7 +354,8 @@ class Sheet:
             columns=[ColumnSpec(c.name, c.type, c.width, list(c.choices),
                                 c.strict,
                                 dict(c.format) if c.format else None,
-                                c.total)
+                                c.total,
+                                dict(c.validation) if c.validation else None)
                      for c in self.columns],
             rows=[list(row) for row in self.rows],
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
@@ -396,10 +401,12 @@ def parse_sheet(raw) -> Sheet:
             choices = ([str(c) for c in choices if str(c) != ""]
                        if isinstance(choices, list) else [])
             from .numfmt import clean
+            from .validation import clean as clean_rule
             columns.append(ColumnSpec(
                 name, col_type if col_type in COLUMN_TYPES else "auto", width,
                 choices, bool(entry.get("strict")) and bool(choices),
-                clean(entry.get("format")), _total_word(entry.get("total"))))
+                clean(entry.get("format")), _total_word(entry.get("total")),
+                clean_rule(entry.get("validation"))))
         else:
             columns.append(ColumnSpec(str(entry)))
 
@@ -444,6 +451,8 @@ def sheet_to_dict(sheet: Sheet) -> dict:
             entry["format"] = dict(col.format)
         if col.total:
             entry["total"] = col.total
+        if col.validation:
+            entry["validation"] = dict(col.validation)
         columns.append(entry)
     out = {
         "version": 2,

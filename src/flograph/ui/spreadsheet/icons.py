@@ -326,6 +326,24 @@ def _sort_custom(p, r, c):
     _arrow(p, QPointF(18, 16.5), QPointF(18, 3), AMBER, 1.3, 2.4)
 
 
+def _validation(p, r, c):
+    p.setPen(_pen(c, 1.0))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2.5, 4.5, 15, 11), 1.5, 1.5)
+    p.setPen(_pen(GREEN, 1.8))
+    path = QPainterPath()
+    path.moveTo(6, 10.2)
+    path.lineTo(8.8, 13)
+    path.lineTo(14.5, 7)
+    p.drawPath(path)
+
+
+def _next_problem(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 12, 12), rows=2, cols=2,
+          lit=[("cell", 1, 1)], lit_color=RED, color=c)
+    _arrow(p, QPointF(12, 17.5), QPointF(18, 17.5), c, 1.3, 2.2)
+
+
 def _funnel_path() -> QPainterPath:
     path = QPainterPath()
     path.moveTo(2.5, 3.5)
@@ -638,6 +656,7 @@ GLYPHS = {
     "find": (_find, FG), "replace": (_replace, FG),
     "sort_asc": (_sort_asc, FG), "sort_desc": (_sort_desc, FG),
     "sort_custom": (_sort_custom, FG),
+    "validation": (_validation, FG), "next_problem": (_next_problem, FG),
     "filter": (_filter, FG), "filter_clear": (_filter_clear, FG),
     "col_type": (_col_type, FG), "dropdown": (_dropdown, FG),
     "rename": (_rename, FG), "fit": (_fit, FG),
