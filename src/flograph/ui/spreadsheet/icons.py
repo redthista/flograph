@@ -329,6 +329,51 @@ def _replace(p, r, c):
     _arrow(p, QPointF(17.5, 12), QPointF(13, 12), DIM, 1.2, 2.2)
 
 
+
+def _goto(p, r, c):
+    """An arrow landing in a lit cell."""
+    _grid(p, QRectF(6.5, 6.5, 11, 11), rows=2, cols=2,
+          lit=[("cell", 1, 1)], color=c)
+    _arrow(p, QPointF(2, 2), QPointF(10.5, 10.5), BLUE, 1.4, 2.6)
+
+
+def _goto_special(p, r, c):
+    """Scattered lit cells — a pick of one kind."""
+    _grid(p, QRectF(2.5, 2.5, 15, 15), rows=3, cols=3,
+          lit=[("cell", 0, 1), ("cell", 1, 2), ("cell", 2, 0)],
+          lit_color=VIOLET, color=c)
+
+
+def _pick(p, c, lit_color, mark, mark_color):
+    _grid(p, QRectF(2.5, 2.5, 12, 12), rows=2, cols=2,
+          lit=[("cell", 0, 1), ("cell", 1, 0)], lit_color=lit_color,
+          color=c)
+    _text(p, QRectF(9.5, 9.5, 10, 10), mark, mark_color, 7)
+
+
+def _select_formulas(p, r, c):
+    _pick(p, c, BLUE, "fx", BLUE)
+
+
+def _select_constants(p, r, c):
+    _pick(p, c, GREEN, "12", GREEN)
+
+
+def _select_blanks(p, r, c):
+    p.setPen(QPen(c, 1.1, Qt.DashLine))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2.5, 2.5, 15, 15), 1.5, 1.5)
+    p.drawLine(QPointF(10, 2.5), QPointF(10, 17.5))
+    p.drawLine(QPointF(2.5, 10), QPointF(17.5, 10))
+
+
+def _select_errors(p, r, c):
+    _pick(p, c, RED, "!", RED)
+
+
+def _select_problems(p, r, c):
+    _pick(p, c, AMBER, "?", AMBER)
+
 # ------------------------------------------------------- sort and filter
 
 def _sort(p, c, ascending: bool):
@@ -673,6 +718,12 @@ GLYPHS = {
     "dec_less": (_dec_less, FG), "format": (_format, FG),
     "paste": (_paste, FG), "paste_values": (_paste_values, FG),
     "paste_special": (_paste_special, FG),
+    "goto": (_goto, FG), "goto_special": (_goto_special, FG),
+    "select_formulas": (_select_formulas, FG),
+    "select_constants": (_select_constants, FG),
+    "select_blanks": (_select_blanks, FG),
+    "select_errors": (_select_errors, FG),
+    "select_problems": (_select_problems, FG),
     "paste_transpose": (_paste_transpose, FG),
     "cut": (_cut, FG), "copy": (_copy, FG),
     "copy_headers": (_copy_headers, FG),

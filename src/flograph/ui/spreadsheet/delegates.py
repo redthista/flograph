@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QDate, QPoint, QRect, Qt
+from PySide6.QtCore import QDate, QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPainter, QPolygon
 from PySide6.QtWidgets import QDateEdit, QLineEdit
 
@@ -46,6 +46,13 @@ class SheetDelegate(ConditionalFormatDelegate):
 
     show_formulas = False
     last_editor = None   # the editor most recently opened, for start_formula
+    ctrl_enter = False   # the editor was closed with Ctrl+Enter (fill all)
+
+    def eventFilter(self, editor, event):
+        if event.type() == QEvent.KeyPress and event.key() in (
+                Qt.Key_Return, Qt.Key_Enter):
+            self.ctrl_enter = bool(event.modifiers() & Qt.ControlModifier)
+        return super().eventFilter(editor, event)
 
     def initStyleOption(self, option, index) -> None:
         super().initStyleOption(option, index)

@@ -414,6 +414,34 @@ class SheetActions(QObject):
                   "formulas column by column.",
                   v.fill_right_selection, keys=["Ctrl+R"], enabled=picked,
                   short="Right")
+        self._add("goto", "Go To…", "goto",
+                  "Jump to a cell or a range: type B4, B2:D10, a column's "
+                  "name, B:D for whole columns or 3:5 for whole rows.",
+                  v.go_to, keys=["Ctrl+G"])
+        self._add("goto_special", "Go To Special…", "goto_special",
+                  "Select every cell of a kind — formulas, values you "
+                  "typed, blanks, errors, problem cells — in the selection, "
+                  "or in the whole table when one cell is selected.",
+                  v.go_to_special, short="Special")
+        for kind, label, body in (
+                ("formulas", "Formulas",
+                 "Select every cell that holds a formula — to check them "
+                 "over, or to see what is worked out and what is typed."),
+                ("constants", "Constants",
+                 "Select every cell with a value typed in (not a formula)."),
+                ("blanks", "Blanks",
+                 "Select every empty cell. Then type a value and press "
+                 "Ctrl+Enter to fill them all at once."),
+                ("errors", "Errors",
+                 "Select every cell showing an error such as #DIV/0! or "
+                 "#REF!."),
+                ("problems", "Problem Cells",
+                 "Select every cell shown red — a value its column's type, "
+                 "dropdown list or validation rule doesn't allow.")):
+            self._add(f"select_{kind}", f"Select {label}", f"select_{kind}",
+                      body + " Looks inside the selection when it is more "
+                      "than one cell.",
+                      lambda k=kind: v.select_special(k), short=label)
         self._add("find", "Find…", "find",
                   "Find a value or a piece of a formula. Enter goes to the "
                   "next match.",

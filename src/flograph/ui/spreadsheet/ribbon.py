@@ -369,6 +369,7 @@ class SheetRibbon(QWidget):
             "type_menu": self._fill_type_menu,
             "function_menu": self._fill_function_menu,
             "freeze_menu": self._fill_freeze_menu,
+            "select_menu": self._fill_select_menu,
             "number_menu": self._fill_number_menu,
             "cf_menu": self._fill_cf_menu,
             "total_menu": self._fill_total_menu,
@@ -394,7 +395,8 @@ class SheetRibbon(QWidget):
                         ("dec_more", "More Decimals"),
                         ("dec_less", "Fewer Decimals")]),
             ("Editing", [("fill_down", "Fill Down"),
-                         ("fill_right", "Fill Right"), ("find", "Find"),
+                         ("fill_right", "Fill Right"),
+                         m("select_menu", "find", "Find && Select"),
                          ("replace", "Replace")]),
         ]
         rows_cols = [
@@ -511,6 +513,10 @@ class SheetRibbon(QWidget):
     def _fill_number_menu(self, menu) -> None:
         from .actions import fill_number_format_menu
         fill_number_format_menu(menu, self._view)
+
+    def _fill_select_menu(self, menu) -> None:
+        from .menus import fill_select_menu
+        fill_select_menu(menu, self._view)
 
     def _fill_freeze_menu(self, menu) -> None:
         for name in ("freeze", "freeze_row", "freeze_col", "unfreeze"):

@@ -809,7 +809,48 @@ class SpreadsheetView(QTableView):
             return
         super().keyPressEvent(event)
 
+    def commitData(self, editor) -> None:
+        # Ctrl+Enter commits without moving down; with several cells
+        # selected, what was typed goes into all of them as one edit
+        # (Excel's way to fill the blanks that Go To Special picked)
+        delegate = self.itemDelegate()
+        if getattr(delegate, "ctrl_enter", False):
+            delegate.ctrl_enter = False
+            self._stay_after_edit = True
+            cells = self._fill_targets()
+            text = self._editor_text(editor) if cells else None
+            if text is not None:
+                current = self.currentIndex()
+                self.sheet_model().fill_cells(
+                    cells, text, (current.row(), current.column()))
+                return
+        super().commitData(editor)
+
+    def _fill_targets(self) -> list:
+        """The selected cells a Ctrl+Enter fills — none unless more than
+        one, and never a row a filter hides."""
+        selection = self.selectionModel()
+        if selection is None or self.sheet_model() is None:
+            return []
+        cells = [(i.row(), i.column()) for i in selection.selectedIndexes()
+                 if not self.row_filtered(i.row())]
+        return cells if len(cells) > 1 else []
+
+    @staticmethod
+    def _editor_text(editor):
+        from PySide6.QtWidgets import QDateEdit, QLineEdit
+        if isinstance(editor, QDateEdit):
+            return editor.date().toString("yyyy-MM-dd")
+        if isinstance(editor, QLineEdit):
+            return editor.text()
+        return None
+
     def closeEditor(self, editor, hint) -> None:
+        if getattr(self, "_stay_after_edit", False):
+            # Ctrl+Enter keeps the selection and the current cell, as Excel
+            self._stay_after_edit = False
+            super().closeEditor(editor, QAbstractItemDelegate.NoHint)
+            return
         # Enter in a cell editor: commit, then move down like Excel
         if hint == QAbstractItemDelegate.SubmitModelCache:
             super().closeEditor(editor, QAbstractItemDelegate.NoHint)
@@ -1460,6 +1501,118 @@ class SpreadsheetView(QTableView):
         if cols and self.editable:
             from .validation_dialog import edit_validation
             edit_validation(self, cols)
+
+    # ----------------------------------------------------- find & select
+
+    def select_cells(self, cells, note: str = "") -> None:
+        """Select exactly these cells — joined into runs down each column,
+        so thousands select at once — make the first one current, scroll to
+        it and say `note` beside it."""
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        model = self.sheet_model()
+        selection = self.selectionModel()
+        cells = sorted(set(cells))
+        if model is None or selection is None or not cells:
+            return
+        by_col: dict[int, list[int]] = {}
+        for r, c in cells:
+            by_col.setdefault(c, []).append(r)
+        chosen = QItemSelection()
+        for c, rows in by_col.items():
+            start = prev = rows[0]
+            for r in rows[1:] + [None]:
+                if r is not None and r == prev + 1:
+                    prev = r
+                    continue
+                chosen.select(model.index(start, c), model.index(prev, c))
+                if r is not None:
+                    start = prev = r
+        first = model.index(*cells[0])
+        selection.setCurrentIndex(first, QItemSelectionModel.NoUpdate)
+        selection.select(chosen, QItemSelectionModel.ClearAndSelect)
+        self.scrollTo(first)
+        if note:
+            self.say(note)
+
+    def select_rect(self, rect) -> None:
+        """Select (row0, col0, row1, col1), its top-left cell current."""
+        r0, c0, r1, c1 = rect
+        self.select_cells([(r, c) for r in range(r0, r1 + 1)
+                           for c in range(c0, c1 + 1)
+                           if not self.row_filtered(r) or r == r0])
+
+    def say(self, text: str) -> None:
+        """A note by the current cell, or at the grid's corner when that
+        cell is out of sight."""
+        from PySide6.QtWidgets import QToolTip
+        index = self.currentIndex()
+        rect = self.visualRect(index) if index.isValid() else None
+        if rect is not None and rect.isValid() \
+                and self.viewport().rect().intersects(rect):
+            self.cell_note(index, text)
+            return
+        where = self.viewport().mapToGlobal(self.viewport().rect().topLeft())
+        QToolTip.showText(where, text, self.viewport(), msecShowTime=4000)
+
+    def _special_scope(self):
+        """Go To Special looks inside the selection when it is more than one
+        cell, else at the whole sheet — Excel's rule."""
+        selection = self.selectionModel()
+        indexes = selection.selectedIndexes() if selection else []
+        if len(indexes) > 1:
+            return [(i.row(), i.column()) for i in indexes]
+        return None
+
+    def select_special(self, kind: str, types=None) -> int:
+        """Home ▸ Find & Select: select every cell of one kind (see
+        core.sheet.select). Returns how many were selected."""
+        from flograph.core.sheet import select as pick
+        model = self.sheet_model()
+        if model is None:
+            return 0
+        n_rows, n_cols = model.rowCount(), model.columnCount()
+
+        def filled(r, c):
+            return bool(model.cell_source(r, c).strip())
+
+        current = self.currentIndex()
+        if kind == "region":
+            if not current.isValid():
+                return 0
+            rect = pick.current_region(n_rows, n_cols, filled,
+                                       current.row(), current.column())
+            self.select_rect(rect)
+            r0, c0, r1, c1 = rect
+            self.say(f"{r1 - r0 + 1} × {c1 - c0 + 1} cells selected — the "
+                     "block of data around this cell.")
+            return (r1 - r0 + 1) * (c1 - c0 + 1)
+        if kind == "last":
+            spot = pick.last_cell(n_rows, n_cols, filled)
+            if spot is None:
+                self.say("The table is empty.")
+                return 0
+            self.select_cells([spot], "The last row and column with data.")
+            return 1
+        cells = pick.special_cells(
+            n_rows, n_cols, model.cell_source, model.computed_value, kind,
+            types if types is not None else pick.TYPES,
+            within=self._special_scope(), skip_row=self.row_filtered,
+            problem=lambda r, c: model.cell_problem(r, c) is not None)
+        if cells:
+            self.select_cells(cells, pick.found_text(kind, len(cells)))
+        else:
+            self.say(pick.found_text(kind, 0))
+        return len(cells)
+
+    def go_to(self) -> None:
+        """Home ▸ Find & Select ▸ Go To… (Ctrl+G)."""
+        from .goto_dialog import go_to
+        go_to(self)
+
+    def go_to_special(self) -> None:
+        """Home ▸ Find & Select ▸ Go To Special…"""
+        from .goto_dialog import go_to_special
+        go_to_special(self)
 
     def cell_note(self, index, text: str, msecs: int = 4000) -> None:
         """A note beside a cell — Excel's yellow box. A tooltip, because a

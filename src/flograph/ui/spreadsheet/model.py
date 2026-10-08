@@ -598,6 +598,25 @@ class SheetModel(QAbstractTableModel):
                 if text is not None:
                     sheet.set_cell(row0 + dr, col0 + dc, text)
 
+    def fill_cells(self, cells, text: str, anchor: tuple[int, int]) -> None:
+        """Ctrl+Enter: `text`, typed at `anchor`, into every one of `cells`
+        as one edit — a formula's relative references shift for each cell,
+        as they would if it were copied there. Like paste, a value that
+        breaks a Stop rule is flagged, not refused."""
+        if self._read_only:
+            return
+        cells = [(r, c) for r, c in cells
+                 if 0 <= r < self._sheet.n_rows and 0 <= c < self._sheet.n_cols]
+        if not cells:
+            return
+        formats = [c.format for c in self._sheet.columns]
+
+        def mutate(sheet: Sheet) -> None:
+            for r, c in cells:
+                value = translate(text, r - anchor[0], c - anchor[1])
+                sheet.set_cell(r, c, parse_typed(value, formats[c]))
+        self._structural(mutate, reset=False)
+
     def clear_cells(self, cells) -> None:
         if self._read_only:
             return

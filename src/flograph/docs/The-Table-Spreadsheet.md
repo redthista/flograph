@@ -11,7 +11,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 | Tab | What is on it |
 | --- | --- |
-| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find, Replace |
+| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find & Select ▾, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List**; **Validation** and **Next Problem** |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
@@ -47,6 +47,31 @@ three rows and **Insert Rows Above** adds three. With whole rows selected,
 column commands mean the column of the current cell (and the other way
 round), so selecting a row and inserting a column adds one column, not one per
 cell.
+
+### Find & Select
+
+**Home ▸ Find & Select ▾** (or right-click a cell ▸ **Select**) picks cells
+for you:
+
+- **Go To…** (**Ctrl+G**) jumps to what you type — `B4`, a range `B2:D10`,
+  whole columns `B:D`, whole rows `3:5`, a row number, or a column's name —
+  or to a column picked from the list.
+- **Go To Special…** selects every cell of one kind: formulas, constants
+  (values typed in), blanks, errors, problem cells (the red ones), the
+  *current region* (the block of data around the current cell) or the last
+  cell with data. Formulas and constants can be narrowed to numbers, text,
+  TRUE/FALSE or errors.
+- **Select Formulas / Constants / Blanks / Errors / Problem Cells** do the
+  same in one click.
+
+With more than one cell selected these look only inside the selection;
+with one, at the whole table. Rows a filter hides are left out. A note by
+the cell says how many were found.
+
+**Ctrl+Enter** puts what you have typed into *every* selected cell, as one
+undo step, and stays where it is. Together with **Select Blanks** it fills
+the gaps in a column in two steps: select the blanks, type `0` (or `n/a`,
+or `=B2*2` — a formula shifts for each cell), press Ctrl+Enter.
 
 ## The fill handle
 
@@ -315,6 +340,8 @@ fourteen.
 | Move rows up/down, columns left/right | **Alt+Shift+arrows** |
 | Jump to the edge of the data (Shift: select to it) | **Ctrl+arrows** |
 | Find / replace | **Ctrl+F** / **Ctrl+H** |
+| Go To | **Ctrl+G** |
+| Type into every selected cell | **Ctrl+Enter** |
 | Filter this column | **Ctrl+Shift+L** |
 | Open a cell's dropdown list | **Alt+Down** |
 | Format cells (number format) | **Ctrl+1** |

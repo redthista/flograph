@@ -142,6 +142,17 @@ def _apply_section(menu: QMenu, view) -> None:
         menu.addAction(view.actions["discard"])
 
 
+def fill_select_menu(menu, view) -> None:
+    """Find & Select: find, replace, go to, and Excel's quick picks."""
+    a = view.actions
+    a.refresh()
+    for name in ("find", "replace", "goto", "goto_special"):
+        menu.addAction(a[name])
+    heading(menu, "Select")
+    for kind in ("formulas", "constants", "blanks", "errors", "problems"):
+        menu.addAction(a[f"select_{kind}"])
+
+
 def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     a = view.actions
     a.refresh()
@@ -162,6 +173,11 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     menu.addAction(a["clear"])
     menu.addAction(a["fill_down"])
     menu.addAction(a["fill_right"])
+    pick = submenu(menu, "Select", sheet_icon("goto_special"))
+    for name in ("goto", "goto_special", "select_formulas",
+                 "select_constants", "select_blanks", "select_errors",
+                 "select_problems"):
+        pick.addAction(a[name])
 
     heading(menu, "Sort & Filter")
     menu.addAction(a["sort_asc"])
