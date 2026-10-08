@@ -225,6 +225,10 @@ class FrozenPanes:
         for kind in ("cols", "rows", "corner"):
             if kind in wanted and kind not in self._panes:
                 self._panes[kind] = _Pane(main, kind)
+                fill = getattr(main, "_fill", None)
+                if fill is not None:
+                    # the fill handle can be on a frozen cell
+                    fill.watch(self._panes[kind].viewport())
             elif kind not in wanted and kind in self._panes:
                 pane = self._panes.pop(kind)
                 pane.hide()
@@ -403,6 +407,9 @@ class FrozenPanes:
             h_edge.hide()
         self._follow_v(main.verticalScrollBar().value())
         self._follow_h(main.horizontalScrollBar().value())
+        fill = getattr(main, "_fill", None)
+        if fill is not None:
+            fill.refresh()           # the outline draws over the panes
 
     def _follow_v(self, value: int) -> None:
         pane = self._panes.get("cols")
@@ -412,6 +419,9 @@ class FrozenPanes:
             pane.verticalScrollBar().setRange(
                 0, max(value, pane.verticalScrollBar().maximum()))
             pane.verticalScrollBar().setValue(value)
+        fill = getattr(self._main, "_fill", None)
+        if fill is not None:
+            fill.refresh()
 
     def _follow_h(self, value: int) -> None:
         pane = self._panes.get("rows")

@@ -64,13 +64,15 @@ fills, as one undo step, the way Excel does:
 - anything else repeats.
 
 Drag past the last row or column and the table grows to take the fill. Near
-the edge of the grid it scrolls. **Esc** cancels a fill mid-drag.
+the edge of the grid it scrolls. **Esc** cancels a fill mid-drag. With panes
+frozen, the outline and the handle work on the frozen cells too: fill down
+from a frozen column, or across out of it into the rest of the table.
 
 ## Dragging rows and columns
 
 Select whole rows or columns (click their numbers or names), then drag one
-of the selected headers. The pointer becomes a hand, a blue line shows where
-they will land, and they move there when you let go — still selected, so you
+of the selected headers. The pointer becomes a hand, a blue line — through
+the header strip, with a marker at its end — shows where they will land, and they move there when you let go — still selected, so you
 can drag again. Formulas keep their addresses, as after a sort. A drag that
 starts on a header that isn't selected selects a range instead, as before.
 

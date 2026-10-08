@@ -15,16 +15,20 @@ picked up, a line shows where they will land, and they move there on
 release. A drag that starts on a header that is *not* selected still selects
 a range, as it always has.
 
-Both draw on one transparent overlay laid over the grid, and both listen
-through event filters on the grid's own widgets — never on the application.
+Both draw on one transparent overlay laid over the whole grid widget —
+headers and frozen panes included, so the outline and the handle run across
+frozen cells and the drop line crosses the header strip — and both listen
+through event filters on the grid's own widgets (its viewport and each
+frozen pane's), never on the application. Positions are grid coordinates:
+the view widget's own (SpreadsheetView.cells_grid_rect).
 """
 from __future__ import annotations
 
 import math
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QRegion
 from PySide6.QtWidgets import QApplication, QToolTip, QWidget
 
 _OUTLINE = QColor("#60a5fa")
@@ -34,43 +38,70 @@ _EDGE = 18           # how close to the grid's edge a drag starts scrolling
 
 
 class _Overlay(QWidget):
-    """Draws over the grid's cells; lets every click through."""
+    """Draws over the whole grid — cells, frozen panes and headers — and
+    lets every click through."""
 
     def __init__(self, view) -> None:
-        super().__init__(view.viewport())
+        super().__init__(view)
         self._view = view
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.fill_target: Optional[tuple] = None
-        self.drop_line: Optional[tuple] = None   # ("row"|"col", pixel)
+        # ("row"|"col", pixel in grid coordinates, the header it crosses)
+        self.drop_line: Optional[tuple] = None
 
     def paintEvent(self, _event) -> None:
         view = self._view
+        if view.sheet_model() is None:
+            return
         painter = QPainter(self)
-        rect = view.selection_pixel_rect()
+        cells = view.cells_area()
+        if self.drop_line is not None:
+            self._paint_drop_line(painter, cells)
+        painter.setClipRect(cells)
+        rect = view.selection_grid_rect()
         if rect is not None and view.editable:
             painter.setPen(QPen(_OUTLINE, 2))
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
-            handle = view.fill_handle_rect()
+            handle = view.fill_handle_grid_rect()
             if handle is not None:
+                painter.setClipping(False)     # it may overhang the edge
                 painter.setPen(QPen(QColor("#1b1c20"), 1))
                 painter.setBrush(_OUTLINE)
                 painter.drawRect(handle)
+                painter.setClipRect(cells)
         if self.fill_target is not None:
-            target = view.cells_pixel_rect(*self.fill_target)
+            target = view.cells_grid_rect(*self.fill_target)
             if target is not None:
                 pen = QPen(QColor("#93c5fd"), 1.5, Qt.DashLine)
                 painter.setPen(pen)
                 painter.setBrush(Qt.NoBrush)
                 painter.drawRect(target.adjusted(0, 0, -1, -1))
-        if self.drop_line is not None:
-            kind, at = self.drop_line
-            painter.setPen(QPen(_OUTLINE, 3))
-            if kind == "col":
-                painter.drawLine(at, 0, at, self.height())
-            else:
-                painter.drawLine(0, at, self.width(), at)
+
+    def _paint_drop_line(self, painter: QPainter, cells: QRect) -> None:
+        """The line where dragged rows or columns will land: through the
+        header strip as well as the cells, with a marker in the header."""
+        kind, at, header = self.drop_line
+        strip = QRect(header.viewport().mapTo(self._view, QPoint(0, 0)),
+                      header.viewport().size())
+        painter.save()
+        painter.setClipRegion(QRegion(cells).united(QRegion(strip)))
+        painter.setPen(QPen(_OUTLINE, 3))
+        if kind == "col":
+            painter.drawLine(at, strip.top(), at, cells.bottom())
+            tip = QPointF(at, strip.top() + 7)
+            marker = QPolygonF([tip + QPointF(-5, -6), tip + QPointF(5, -6),
+                                tip])
+        else:
+            painter.drawLine(strip.left(), at, cells.right(), at)
+            tip = QPointF(strip.left() + 7, at)
+            marker = QPolygonF([tip + QPointF(-6, -5), tip + QPointF(-6, 5),
+                                tip])
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(_OUTLINE)
+        painter.drawPolygon(marker)
+        painter.restore()
 
 
 class FillHandle(QObject):
@@ -82,14 +113,26 @@ class FillHandle(QObject):
         self.overlay = _Overlay(view)
         self._source: Optional[tuple] = None
         self._last_pos: Optional[QPoint] = None
+        self._grabbed = None        # the viewport the handle was taken on
         self._scroll = QTimer(self)
         self._scroll.setInterval(40)
         self._scroll.timeout.connect(self._auto_scroll)
-        viewport = view.viewport()
+        self._watched: list = []
+        self.watch(view.viewport())
+        view.installEventFilter(self)       # to follow the grid's size
+        self.overlay.resize(view.size())
+        self.overlay.show()
+
+    def watch(self, viewport) -> None:
+        """Take the handle's clicks on `viewport` too — a frozen pane's."""
+        if viewport in self._watched:
+            return
+        self._watched.append(viewport)
         viewport.setMouseTracking(True)
         viewport.installEventFilter(self)
-        self.overlay.resize(viewport.size())
-        self.overlay.show()
+        viewport.destroyed.connect(
+            lambda _=None, v=viewport: self._watched.remove(v)
+            if v in self._watched else None)
 
     @property
     def dragging(self) -> bool:
@@ -97,29 +140,34 @@ class FillHandle(QObject):
 
     def refresh(self) -> None:
         overlay = self.overlay
-        viewport = self._view.viewport()
-        if overlay.size() != viewport.size():
-            overlay.resize(viewport.size())
+        if overlay.size() != self._view.size():
+            overlay.resize(self._view.size())
         overlay.raise_()
         overlay.update()
+
+    def _grid_pos(self, watched, event) -> QPoint:
+        return watched.mapTo(self._view, event.position().toPoint())
 
     # ------------------------------------------------------------- events
 
     def eventFilter(self, watched, event) -> bool:
         kind = event.type()
-        if kind == QEvent.Resize:
-            self.overlay.resize(watched.size())
+        if watched is self._view:
+            if kind in (QEvent.Resize, QEvent.LayoutRequest):
+                self.refresh()
             return False
         if kind == QEvent.MouseButtonPress:
+            pos = self._grid_pos(watched, event)
             if (event.button() == Qt.LeftButton and self._view.editable
-                    and self._on_handle(event.position().toPoint())):
+                    and self._on_handle(pos)):
                 self._source = self._view._selection_rect()
-                self._last_pos = event.position().toPoint()
-                self._view.viewport().setCursor(Qt.CrossCursor)
+                self._last_pos = pos
+                self._grabbed = watched
+                watched.setCursor(Qt.CrossCursor)
                 return True
             return False
         if kind == QEvent.MouseMove:
-            pos = event.position().toPoint()
+            pos = self._grid_pos(watched, event)
             if self.dragging:
                 self._last_pos = pos
                 self._update_target(pos)
@@ -127,11 +175,10 @@ class FillHandle(QObject):
                 return True
             if not event.buttons():
                 on = self._view.editable and self._on_handle(pos)
-                viewport = self._view.viewport()
                 if on:
-                    viewport.setCursor(Qt.CrossCursor)
-                elif viewport.cursor().shape() == Qt.CrossCursor:
-                    viewport.unsetCursor()
+                    watched.setCursor(Qt.CrossCursor)
+                elif watched.cursor().shape() == Qt.CrossCursor:
+                    watched.unsetCursor()
             return False
         if kind == QEvent.MouseButtonRelease and self.dragging:
             series = bool(event.modifiers() & Qt.ControlModifier)
@@ -140,18 +187,37 @@ class FillHandle(QObject):
         return False
 
     def _on_handle(self, pos: QPoint) -> bool:
-        handle = self._view.fill_handle_rect()
+        handle = self._view.fill_handle_grid_rect()
         return handle is not None and handle.adjusted(
             -_GRAB, -_GRAB, _GRAB, _GRAB).contains(pos)
 
     # -------------------------------------------------------------- drag
 
-    def _cell_at(self, pos: QPoint) -> tuple[int, int]:
-        """The row and column under `pos` — and past the end of the grid,
-        the rows and columns a fill there would add."""
+    def _cell_at(self, grid_pos: QPoint) -> tuple[int, int]:
+        """The row and column under `grid_pos` — over a frozen pane too, and
+        past the end of the grid, the rows and columns a fill there would
+        add."""
         view = self._view
         model = view.sheet_model()
         n_rows, n_cols = model.rowCount(), model.columnCount()
+        origin = view._viewport_origin()
+        pos = grid_pos - origin
+        frozen_row = frozen_col = -1
+        if pos.y() < 0 and view._frozen_rows():
+            pane = view._frozen_pane("rows") or view._frozen_pane("corner")
+            frozen_row = pane.rowAt(
+                (grid_pos - view._viewport_origin(pane)).y())
+        if pos.x() < 0 and view._frozen_cols():
+            pane = view._frozen_pane("cols") or view._frozen_pane("corner")
+            frozen_col = pane.columnAt(
+                (grid_pos - view._viewport_origin(pane)).x())
+        row, col = self._main_cell_at(pos, n_rows, n_cols)
+        return (frozen_row if frozen_row >= 0 else row,
+                frozen_col if frozen_col >= 0 else col)
+
+    def _main_cell_at(self, pos: QPoint, n_rows: int, n_cols: int
+                      ) -> tuple[int, int]:
+        view = self._view
         row = view.rowAt(pos.y())
         if row < 0:
             if pos.y() < 0:
@@ -194,9 +260,8 @@ class FillHandle(QObject):
         text = self._preview(target)
         if text is not None:
             from ..data_table import show_tooltip
-            viewport = self._view.viewport()
-            show_tooltip(viewport.mapToGlobal(pos + QPoint(14, 10)),
-                         text or "(blank)", viewport)
+            show_tooltip(self._view.mapToGlobal(pos + QPoint(14, 10)),
+                         text or "(blank)", self._view.viewport())
 
     def _preview(self, target: tuple) -> Optional[str]:
         """What the last cell of the fill will hold — Excel's tooltip."""
@@ -223,8 +288,9 @@ class FillHandle(QObject):
                                  backwards=not right, series=series)
         return values[-1] if values else None
 
-    def _check_scroll(self, pos: QPoint) -> None:
+    def _check_scroll(self, grid_pos: QPoint) -> None:
         viewport = self._view.viewport()
+        pos = grid_pos - self._view._viewport_origin()
         near = (pos.y() > viewport.height() - _EDGE or pos.y() < _EDGE
                 or pos.x() > viewport.width() - _EDGE or pos.x() < _EDGE)
         if near and not self._scroll.isActive():
@@ -236,7 +302,8 @@ class FillHandle(QObject):
         if not self.dragging or self._last_pos is None:
             self._scroll.stop()
             return
-        view, pos = self._view, self._last_pos
+        view = self._view
+        pos = self._last_pos - view._viewport_origin()
         viewport = view.viewport()
         vbar, hbar = view.verticalScrollBar(), view.horizontalScrollBar()
         step_v = max(vbar.singleStep(), 8)
@@ -249,7 +316,7 @@ class FillHandle(QObject):
             hbar.setValue(hbar.value() + step_h)
         elif pos.x() < _EDGE:
             hbar.setValue(hbar.value() - step_h)
-        self._update_target(pos)
+        self._update_target(self._last_pos)
 
     def _finish(self, series: bool) -> None:
         self._scroll.stop()
@@ -259,7 +326,7 @@ class FillHandle(QObject):
         source = self._source
         self._source = None
         self.overlay.fill_target = None
-        view.viewport().unsetCursor()
+        self._release_cursor()
         if target is not None and source is not None:
             model = view.sheet_model()
             model.fill_range(source, target, series=series)
@@ -273,8 +340,15 @@ class FillHandle(QObject):
             self._scroll.stop()
             self.overlay.fill_target = None
             QToolTip.hideText()
-            self._view.viewport().unsetCursor()
+            self._release_cursor()
             self.refresh()
+
+    def _release_cursor(self) -> None:
+        grabbed = getattr(self, "_grabbed", None)
+        self._grabbed = None
+        for widget in (grabbed, self._view.viewport()):
+            if widget is not None:
+                widget.unsetCursor()
 
 
 class HeaderMove(QObject):
@@ -385,7 +459,9 @@ class HeaderMove(QObject):
                 last)
         else:
             at = header.sectionViewportPosition(gap)
-        view.drop_line((self._kind, at))
+        origin = header.viewport().mapTo(view, QPoint(0, 0))
+        at += origin.y() if self._kind == "row" else origin.x()
+        view.drop_line((self._kind, at, header))
 
     def _move(self, picked: list[int], gap: int) -> None:
         view = self._view

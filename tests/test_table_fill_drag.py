@@ -189,3 +189,104 @@ class TestHeaderMove:
                QPoint(5, view.rowViewportPosition(2) + 5))
         assert [r[0] for r in model.sheet.rows] == ["a", "b", "c"]
         assert view._row_move._press is None
+
+
+class TestFrozenPanes:
+    """With panes frozen, the frozen cells live in panes beside the grid's
+    viewport. The outline, the handle and the fill reach them anyway."""
+
+    def _frozen(self, qtbot, rows=1, cols=1):
+        view, model = _view(qtbot, [["1", "a", "x"], ["2", "b", "y"]]
+                            + [["", "", ""]] * 6, n_cols=3)
+        model.set_freeze(rows, cols)
+        qtbot.wait(20)
+        return view, model
+
+    def _in_pane(self, view, row, col):
+        """A cell's centre on the widget that shows it."""
+        index = view.model().index(row, col)
+        pane = view._frozen.pane_for(index)
+        table = pane or view
+        return table.viewport(), table.visualRect(index).center()
+
+    def test_handle_on_a_frozen_cell_fills_down_into_the_grid(self, qtbot):
+        view, model = self._frozen(qtbot, rows=0, cols=1)
+        view._select_block(0, 0, 1, 0)
+        handle = view.fill_handle_grid_rect()
+        assert handle is not None
+        pane = view._frozen.panes()["cols"]
+        on_pane = pane.viewport().mapFrom(view, handle.center())
+        _mouse(pane.viewport(), QEvent.MouseButtonPress, on_pane)
+        assert view._fill.dragging
+        target = pane.viewport().mapFrom(
+            view, view.cells_grid_rect(4, 0, 4, 0).center())
+        _mouse(pane.viewport(), QEvent.MouseMove, target,
+               buttons=Qt.LeftButton)
+        assert view._fill.overlay.fill_target == (0, 0, 4, 0)
+        _mouse(pane.viewport(), QEvent.MouseButtonRelease, target,
+               buttons=Qt.NoButton)
+        assert [r[0] for r in model.sheet.rows[:5]] == ["1", "2", "3", "4",
+                                                         "5"]
+
+    def test_fill_right_out_of_a_frozen_column(self, qtbot):
+        view, model = self._frozen(qtbot, rows=0, cols=1)
+        model.set_cells((0, 0), [["Mon"]])
+        view._select_block(0, 0, 0, 0)
+        pane = view._frozen.panes()["cols"]
+        press = pane.viewport().mapFrom(
+            view, view.fill_handle_grid_rect().center())
+        _mouse(pane.viewport(), QEvent.MouseButtonPress, press)
+        target = view.visualRect(model.index(0, 2)).center()
+        _mouse(view.viewport(), QEvent.MouseMove, target,
+               buttons=Qt.LeftButton)
+        # moves go to the widget that took the press (Qt's grab)
+        on_pane = pane.viewport().mapFromGlobal(
+            view.viewport().mapToGlobal(target))
+        _mouse(pane.viewport(), QEvent.MouseMove, on_pane,
+               buttons=Qt.LeftButton)
+        _mouse(pane.viewport(), QEvent.MouseButtonRelease, on_pane,
+               buttons=Qt.NoButton)
+        assert model.sheet.rows[0] == ["Mon", "Tue", "Wed"]
+
+    def test_outline_spans_frozen_and_scrolling_cells(self, qtbot):
+        view, _model = self._frozen(qtbot, rows=1, cols=1)
+        view._select_block(0, 0, 2, 1)
+        rect = view.selection_grid_rect()
+        corner = view._frozen.panes()["corner"]
+        corner_origin = corner.viewport().mapTo(view, QPoint(0, 0))
+        assert rect.topLeft() == corner_origin
+        origin = view._viewport_origin()
+        right = origin.x() + view.columnViewportPosition(1) + view.columnWidth(1)
+        bottom = origin.y() + view.rowViewportPosition(2) + view.rowHeight(2)
+        assert (rect.right() + 1, rect.bottom() + 1) == (right, bottom)
+
+    def test_the_overlay_is_drawn_above_the_panes(self, qtbot):
+        view, _model = self._frozen(qtbot, rows=1, cols=1)
+        view._select_block(0, 0, 0, 0)
+        overlay = view._fill.overlay
+        assert overlay.parent() is view
+        siblings = [w for w in view.children() if hasattr(w, "isVisible")]
+        assert siblings.index(overlay) > max(
+            siblings.index(p) for p in view._frozen.panes().values())
+        image = view.grab().toImage()
+        handle = view.fill_handle_grid_rect().center()
+        assert image.pixelColor(handle).name() == "#60a5fa"
+
+
+class TestDropLine:
+    def test_the_line_crosses_the_header_strip(self, qtbot):
+        view, _model = _view(qtbot, [["1", "2", "3"]], n_cols=3)
+        view.select_columns([0])
+        header = view.horizontalHeader().viewport()
+        start = QPoint(view.columnViewportPosition(0) + 5, 5)
+        end = QPoint(view.columnViewportPosition(2) + 4, 5)
+        _mouse(header, QEvent.MouseButtonPress, start)
+        _mouse(header, QEvent.MouseMove, end, buttons=Qt.LeftButton)
+        kind, at, crossed = view._fill.overlay.drop_line
+        assert kind == "col" and crossed is view.horizontalHeader()
+        assert at == header.mapTo(view, QPoint(
+            view.columnViewportPosition(2), 0)).x()
+        image = view.grab().toImage()
+        in_header = header.mapTo(view, QPoint(0, header.height() // 2))
+        assert image.pixelColor(at, in_header.y()).name() == "#60a5fa"
+        _mouse(header, QEvent.MouseButtonRelease, end, buttons=Qt.NoButton)

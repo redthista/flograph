@@ -950,36 +950,121 @@ class SpreadsheetView(QTableView):
         return (self.columnViewportPosition(last) + self.columnWidth(last)
                 + (col - n) * self.horizontalHeader().defaultSectionSize())
 
-    def cells_pixel_rect(self, r0: int, c0: int, r1: int, c1: int
-                         ) -> Optional[QRect]:
-        """Where cells r0..r1 × c0..c1 are on the viewport — past the end of
-        the grid too, where a fill is about to add rows."""
+    # Grid coordinates are the view widget's own: they take in the frozen
+    # panes, which sit beside the viewport rather than inside it, so one
+    # outline (and one fill handle) can run across frozen and scrolling
+    # cells alike.
+
+    def _viewport_origin(self, table=None) -> QPoint:
+        table = table or self
+        return table.viewport().mapTo(self, QPoint(0, 0))
+
+    def _frozen_pane(self, kind: str):
+        frozen = self._frozen
+        if frozen is None or not frozen.active:
+            return None
+        return frozen.panes().get(kind)
+
+    def _grid_x(self, col: int, end: bool = False) -> int:
+        """The left (or, with `end`, right) edge of a column in grid
+        coordinates — past the last column too, where a fill adds some."""
+        n = self.sheet_model().columnCount()
+        frozen = self._frozen
+        if frozen is not None and col < frozen.cols and col < n:
+            pane = (self._frozen_pane("cols")
+                    or self._frozen_pane("corner"))
+            if pane is not None:
+                x = pane.columnViewportPosition(col)
+                if end:
+                    x += pane.columnWidth(col)
+                return x + self._viewport_origin(pane).x()
+        origin = self._viewport_origin().x()
+        x = (self.columnViewportPosition(col) + self.columnWidth(col)
+             if end and col < n else self._col_left(col + 1 if end else col))
+        # a scrolling column passed under the frozen ones stops at their edge
+        return max(x + origin, origin) if self._frozen_cols() else x + origin
+
+    def _grid_y(self, row: int, end: bool = False) -> int:
+        n = self.sheet_model().rowCount()
+        frozen = self._frozen
+        if frozen is not None and row < frozen.rows and row < n:
+            pane = (self._frozen_pane("rows")
+                    or self._frozen_pane("corner"))
+            if pane is not None:
+                y = pane.rowViewportPosition(row)
+                if end:
+                    y += pane.rowHeight(row)
+                return y + self._viewport_origin(pane).y()
+        origin = self._viewport_origin().y()
+        y = (self.rowViewportPosition(row) + self.rowHeight(row)
+             if end and row < n else self._row_top(row + 1 if end else row))
+        return max(y + origin, origin) if self._frozen_rows() else y + origin
+
+    def _frozen_cols(self) -> int:
+        return self._frozen.cols if self._frozen is not None else 0
+
+    def _frozen_rows(self) -> int:
+        return self._frozen.rows if self._frozen is not None else 0
+
+    def cells_grid_rect(self, r0: int, c0: int, r1: int, c1: int
+                        ) -> Optional[QRect]:
+        """Where cells r0..r1 × c0..c1 are, in grid coordinates — frozen
+        panes and past the end of the grid included."""
         model = self.sheet_model()
         if model is None or not model.rowCount() or not model.columnCount():
             return None
-        top, left = self._row_top(r0), self._col_left(c0)
-        bottom = self._row_top(r1 + 1) if r1 + 1 >= model.rowCount() \
-            else self.rowViewportPosition(r1) + self.rowHeight(r1)
-        right = self._col_left(c1 + 1) if c1 + 1 >= model.columnCount() \
-            else self.columnViewportPosition(c1) + self.columnWidth(c1)
+        left, right = self._grid_x(c0), self._grid_x(c1, end=True)
+        top, bottom = self._grid_y(r0), self._grid_y(r1, end=True)
         return QRect(left, top, max(right - left, 0), max(bottom - top, 0))
 
-    def selection_pixel_rect(self) -> Optional[QRect]:
+    def cells_area(self) -> QRect:
+        """The part of the grid that shows cells — the viewport and the
+        frozen panes beside it — in grid coordinates."""
+        area = self.viewport().geometry()
+        for pane in (self._frozen.panes().values()
+                     if self._frozen is not None and self._frozen.active
+                     else ()):
+            if pane.isVisible():
+                area = area.united(QRect(self._viewport_origin(pane),
+                                         pane.viewport().size()))
+        return area
+
+    def selection_grid_rect(self) -> Optional[QRect]:
         rect = self._selection_rect()
         if rect is None:
             return None
-        return self.cells_pixel_rect(*rect)
+        return self.cells_grid_rect(*rect)
 
-    def fill_handle_rect(self) -> Optional[QRect]:
+    def fill_handle_grid_rect(self) -> Optional[QRect]:
         """The fill handle: a small square on the selection's bottom-right
-        corner, while the grid can be edited."""
+        corner, while the grid can be edited — in a frozen pane too."""
         if not self.editable:
             return None
-        rect = self.selection_pixel_rect()
+        rect = self.selection_grid_rect()
         if rect is None or rect.width() <= 0 or rect.height() <= 0:
             return None
         corner = rect.bottomRight()
+        if not self.cells_area().adjusted(-1, -1, 1, 1).contains(corner):
+            return None      # scrolled out of sight: nothing to grab
         return QRect(corner.x() - 3, corner.y() - 3, 7, 7)
+
+    # the same three on the viewport's own coordinates
+
+    def cells_pixel_rect(self, r0: int, c0: int, r1: int, c1: int
+                         ) -> Optional[QRect]:
+        rect = self.cells_grid_rect(r0, c0, r1, c1)
+        return None if rect is None else rect.translated(
+            -self._viewport_origin())
+
+    def selection_pixel_rect(self) -> Optional[QRect]:
+        rect = self.selection_grid_rect()
+        return None if rect is None else rect.translated(
+            -self._viewport_origin())
+
+    def fill_handle_rect(self) -> Optional[QRect]:
+        rect = self.fill_handle_grid_rect()
+        return None if rect is None else rect.translated(
+            -self._viewport_origin())
 
     def totals_bar(self, parent=None):
         """The Total Row for this grid, for a host to lay out directly
@@ -994,8 +1079,8 @@ class SpreadsheetView(QTableView):
             model.set_show_totals(on)
 
     def drop_line(self, line) -> None:
-        """Where dragged rows/columns will land: ("row"|"col", pixel), or
-        None to take the line away."""
+        """Where dragged rows/columns will land: ("row"|"col", pixel in grid
+        coordinates, the header it crosses), or None to take it away."""
         self._fill.overlay.drop_line = line
         self._fill.refresh()
 
