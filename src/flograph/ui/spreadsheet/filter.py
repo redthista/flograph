@@ -73,6 +73,12 @@ class FilterPopup(DismissedByAClickElsewhere, QFrame):
             button.clicked.connect(
                 lambda _=False, a=ascending: self._sort(a))
             sorts.addWidget(button)
+        more = QPushButton(sheet_icon("sort_custom"), "")
+        more.setToolTip("Custom Sort… — sort by several columns at once, "
+                        "or by the dropdown list's order.")
+        more.setEnabled(view.editable)
+        more.clicked.connect(self._custom_sort)
+        sorts.addWidget(more)
         layout.addLayout(sorts)
 
         layout.addWidget(QLabel(f"Show rows where {name} is:"))
@@ -156,6 +162,10 @@ class FilterPopup(DismissedByAClickElsewhere, QFrame):
     def _sort(self, ascending: bool) -> None:
         self.hide()
         self._view.sort_column(self._col, ascending)
+
+    def _custom_sort(self) -> None:
+        self.hide()
+        self._view.custom_sort()
 
     def _clear(self) -> None:
         self.hide()

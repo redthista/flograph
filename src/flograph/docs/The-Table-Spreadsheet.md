@@ -13,7 +13,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
-| **Data** | Filter, Sort A → Z / Z → A, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List** |
+| **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List** |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
 | **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
 
@@ -180,6 +180,25 @@ each, and a search box). A filtered column's ▾ turns blue. **Filtering only
 hides rows in the grid** — the Table still sends every row on. To filter what
 flows on, put a **Filter Rows** node after it. Sorting does reorder the table
 itself (Undo puts it back).
+
+### Sorting by several columns
+
+**Data ▸ Custom Sort…** (also on a cell's and a column header's right-click
+menu, and the ⇅ in the ▾ box) opens Excel's Sort dialog. Each line is a
+*level*: **Sort by** Region, **then by** Total, **then by** Ordered. Rows
+are put in order by the first level; where rows tie on it, the next level
+decides, and so on down.
+
+- The **Order** list speaks the column's type: *Smallest to Largest* for a
+  number, *Oldest to Newest* for a date, *A to Z* for text.
+- A column with a **dropdown list** can also sort in the list's own order —
+  North, South, East, West rather than alphabetical (Excel's custom list).
+  Values not on the list come after the listed ones.
+- **Add Level** puts a new line under the selected one, **Copy Level**
+  duplicates it, the arrows move it up (it then counts for more) or down.
+- Blank cells always go last, whichever way round.
+- The dialog remembers its levels for the next time it opens on that grid,
+  and the whole sort is one undo step — **Undo Sort** works too.
 
 ## Functions
 

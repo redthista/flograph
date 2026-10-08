@@ -408,6 +408,14 @@ class SheetActions(QObject):
                   lambda: v.sort_current(False),
                   enabled=lambda: edit() and bool(v.target_columns()),
                   short="Z → A")
+        self._add("sort_custom", "Custom Sort…", "sort_custom",
+                  "Sort by several columns at once — Region A → Z, then "
+                  "Total largest first — or by a dropdown list's own "
+                  "order. Each level breaks the ties of the one above.",
+                  v.custom_sort,
+                  enabled=lambda: edit() and v.model() is not None
+                  and v.model().columnCount() > 0,
+                  short="Custom")
         self._add("sort_clear", "Undo Sort", None,
                   "Put the rows back in the order they had before you "
                   "started sorting.",

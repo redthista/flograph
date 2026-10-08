@@ -413,6 +413,7 @@ class SheetRibbon(QWidget):
             ("Sort & Filter", [("filter", "Filter"),
                                ("sort_asc", "Sort A → Z"),
                                ("sort_desc", "Sort Z → A"),
+                               ("sort_custom", "Custom Sort"),
                                ("filter_clear", "Clear Filters")]),
             ("Styles", [m("cf_menu", "cond_format", "Conditional"),
                         ("cf_manage", "Manage Rules")]),

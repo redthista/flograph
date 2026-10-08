@@ -889,6 +889,12 @@ class SheetModel(QAbstractTableModel):
             return
         self._structural(lambda sheet: sheet.sort_by(col, ascending))
 
+    def sort_levels(self, levels) -> None:
+        """Several sort levels as one undo step (the Sort dialog)."""
+        if self._read_only:
+            return
+        self._structural(lambda sheet: sheet.sort_levels(levels))
+
     def sort(self, column: int, order=Qt.AscendingOrder) -> None:
         """Header-click entry point (Qt calls it 'sort'). Routes through
         the same undoable structural path as the context menu."""

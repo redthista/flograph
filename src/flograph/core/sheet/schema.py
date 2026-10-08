@@ -304,6 +304,47 @@ class Sheet:
 
         self.rows.sort(key=key, reverse=not ascending)
 
+    def sort_by_list(self, col: int, ascending: bool = True) -> None:
+        """Reorder rows by where each value sits in the column's dropdown
+        list (Excel's custom-list sort): North, South, East, West rather
+        than alphabetical. Values not on the list follow the listed ones,
+        then blanks — in either direction."""
+        if not 0 <= col < self.n_cols:
+            return
+        order: dict[str, int] = {}
+        for i, choice in enumerate(self.columns[col].choices):
+            order.setdefault(choice.casefold(), i)
+
+        def key(row: list[str]):
+            text = row[col].strip()
+            if text == "":
+                return (2, 0, "")
+            place = order.get(text.casefold())
+            if place is None:
+                return (1, 0, text.casefold())
+            return (0, place if ascending else -place, "")
+
+        self.rows.sort(key=key)
+
+    def sort_levels(self, levels) -> None:
+        """Sort by several columns at once — Excel's Sort dialog.
+
+        ``levels`` is ``[(col, ascending, by_list), ...]``, the most
+        important first: rows are ordered by the first level, rows that tie
+        on it by the second, and so on. Python's sort is stable, so sorting
+        by the last level first and the first level last gives exactly
+        that. ``by_list`` sorts by the column's dropdown order (see
+        :meth:`sort_by_list`) when it has one.
+        """
+        valid = [(int(col), bool(asc), bool(by_list))
+                 for col, asc, by_list in levels
+                 if 0 <= int(col) < self.n_cols]
+        for col, ascending, by_list in reversed(valid):
+            if by_list and self.columns[col].choices:
+                self.sort_by_list(col, ascending)
+            else:
+                self.sort_by(col, ascending)
+
     def copy(self) -> "Sheet":
         return Sheet(
             columns=[ColumnSpec(c.name, c.type, c.width, list(c.choices),

@@ -165,6 +165,9 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "Sort & Filter")
     menu.addAction(a["sort_asc"])
     menu.addAction(a["sort_desc"])
+    menu.addAction(a["sort_custom"])
+    if view.has_active_sort:
+        menu.addAction(a["sort_clear"])
     menu.addAction(a["filter_value"])
     if view.filtered:
         menu.addAction(a["filter_clear"])
@@ -218,6 +221,7 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "Sort & Filter")
     menu.addAction(a["sort_asc"])
     menu.addAction(a["sort_desc"])
+    menu.addAction(a["sort_custom"])
     if view.has_active_sort:
         menu.addAction(a["sort_clear"])
     menu.addAction(a["filter"])

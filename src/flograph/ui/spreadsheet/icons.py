@@ -317,6 +317,15 @@ def _sort_desc(p, r, c):
     _sort(p, c, False)
 
 
+def _sort_custom(p, r, c):
+    p.setPen(_pen(c, 1.5))
+    for i, w in enumerate((9, 6, 9, 6)):
+        y = 3.5 + i * 4.3
+        p.drawLine(QPointF(2.5, y), QPointF(2.5 + w, y))
+    _arrow(p, QPointF(14, 3), QPointF(14, 16.5), BLUE, 1.3, 2.4)
+    _arrow(p, QPointF(18, 16.5), QPointF(18, 3), AMBER, 1.3, 2.4)
+
+
 def _funnel_path() -> QPainterPath:
     path = QPainterPath()
     path.moveTo(2.5, 3.5)
@@ -628,6 +637,7 @@ GLYPHS = {
     "fill_right": (_fill_right, FG),
     "find": (_find, FG), "replace": (_replace, FG),
     "sort_asc": (_sort_asc, FG), "sort_desc": (_sort_desc, FG),
+    "sort_custom": (_sort_custom, FG),
     "filter": (_filter, FG), "filter_clear": (_filter_clear, FG),
     "col_type": (_col_type, FG), "dropdown": (_dropdown, FG),
     "rename": (_rename, FG), "fit": (_fit, FG),

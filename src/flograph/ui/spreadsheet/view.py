@@ -256,6 +256,8 @@ class SpreadsheetView(QTableView):
         # (Read-only tables elsewhere still sort on a header click; there
         # is nothing to select a column *for* in those.)
         self._presort_rows: Optional[list[list[str]]] = None
+        # the Sort dialog's last levels, by column name, for next time
+        self.sort_levels_used: list[tuple[str, bool, bool]] = []
         self._sorting = False
 
         self._actions = None
@@ -338,10 +340,11 @@ class SpreadsheetView(QTableView):
 
     # ------------------------------------------------------- header sort
 
-    def _header_sort(self, col: int, mode: str) -> None:
+    def _header_sort(self, col: int, mode: str, levels=None) -> None:
         """A header click resolved to a sort. asc/desc reorder the rows
-        (one undo step each); clear restores the order captured before the
-        first sort of this run."""
+        (one undo step each), "levels" sorts by several columns at once;
+        clear restores the order captured before the first sort of this
+        run."""
         model = self.sheet_model()
         if model is None or model.read_only:
             return
@@ -354,9 +357,23 @@ class SpreadsheetView(QTableView):
             else:
                 if self._presort_rows is None:
                     self._presort_rows = [list(r) for r in model.sheet.rows]
-                model.sort_by(col, mode == "asc")
+                if mode == "levels":
+                    model.sort_levels(levels)
+                else:
+                    model.sort_by(col, mode == "asc")
         finally:
             self._sorting = False
+
+    def sort_with_levels(self, levels) -> None:
+        """Sort by several columns: ``[(col, ascending, by_list), ...]``,
+        the most important first."""
+        if levels:
+            self._header_sort(0, "levels", levels)
+
+    def custom_sort(self) -> None:
+        """Data ▸ Custom Sort…: the Sort dialog."""
+        from .sort_dialog import custom_sort
+        custom_sort(self)
 
     def _forget_sort(self, *_) -> None:
         """Drop the saved pre-sort order and the header indicator — any
