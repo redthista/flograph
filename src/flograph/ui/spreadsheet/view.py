@@ -805,6 +805,10 @@ class SpreadsheetView(QTableView):
             self._fill.cancel()
             event.accept()
             return
+        if event.key() == Qt.Key_Escape and self.painting:
+            self.stop_painter()
+            event.accept()
+            return
         action = self.actions.for_key(event)
         if action is not None:
             if action.isEnabled():
@@ -1759,6 +1763,72 @@ class SpreadsheetView(QTableView):
 
     # ------------------------------------------------------ cell formats
 
+    # ---------------------------------------------------- format painter
+
+    @property
+    def painting(self) -> bool:
+        return getattr(self, "_painter", None) is not None
+
+    def start_painter(self, sticky: bool = False) -> None:
+        """Format Painter: pick up the selected cells' look; the next cells
+        clicked or dragged over get it. `sticky` (a double-click on the
+        button) keeps the brush until Esc or the button again."""
+        model = self.sheet_model()
+        rect = self._selection_rect()
+        if model is None or rect is None or not self.editable:
+            return
+        r0, c0, r1, c1 = rect
+        block = [[model.cell_format(r, c) or None for c in range(c0, c1 + 1)]
+                 for r in range(r0, r1 + 1)]
+        self._painter = {"block": block, "sticky": sticky}
+        from .icons import sheet_icon
+        from PySide6.QtGui import QCursor
+        brush = sheet_icon("format_painter").pixmap(20, 20)
+        cursor = QCursor(brush, 3, 17)
+        self.viewport().setCursor(cursor)
+        if self._frozen is not None:
+            for pane in self._frozen.panes().values():
+                pane.viewport().setCursor(cursor)
+        self.say("Click or drag over the cells to paint"
+                 + (" — Esc when you're done." if sticky else "."))
+        if self._actions is not None:
+            self._actions.refresh()
+
+    def stop_painter(self) -> None:
+        self._painter = None
+        self.viewport().unsetCursor()
+        if self._frozen is not None:
+            for pane in self._frozen.panes().values():
+                pane.viewport().unsetCursor()
+        if self._actions is not None:
+            self._actions.refresh()
+
+    def painter_landed(self) -> None:
+        """The mouse let go over the grid: paint the selection with the
+        picked-up look, the source's pattern repeated across it."""
+        painter = getattr(self, "_painter", None)
+        model = self.sheet_model()
+        if painter is None or model is None:
+            return
+        selection = self.selectionModel()
+        cells = {(i.row(), i.column())
+                 for i in (selection.selectedIndexes() if selection else [])}
+        if not cells and self.currentIndex().isValid():
+            cells = {(self.currentIndex().row(), self.currentIndex().column())}
+        if cells:
+            block = painter["block"]
+            h, w = len(block), len(block[0])
+            r0 = min(r for r, _c in cells)
+            c0 = min(c for _r, c in cells)
+            r1 = max(r for r, _c in cells)
+            c1 = max(c for _r, c in cells)
+            out = [[block[(r - r0) % h][(c - c0) % w] if (r, c) in cells
+                    else False for c in range(c0, c1 + 1)]
+                   for r in range(r0, r1 + 1)]
+            model.paste_formats((r0, c0), out)
+        if not painter["sticky"]:
+            self.stop_painter()
+
     def format_targets(self) -> list[tuple[int, int]]:
         """The cells a Font/Alignment command acts on: the selection, or
         the current cell."""
@@ -2009,6 +2079,11 @@ class SpreadsheetView(QTableView):
         if model.column_choices(current.column())[0]:
             from .dropdown import open_choice_list
             open_choice_list(self, current)
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton:
+            self.painter_landed()
 
     def mousePressEvent(self, event) -> None:
         """A click on the ▾ of a dropdown cell opens its list."""

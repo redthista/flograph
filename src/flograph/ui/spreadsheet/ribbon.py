@@ -150,6 +150,16 @@ class RibbonButton(QToolButton):
         else:
             self._action.trigger()
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        # a command with a double-click meaning of its own (the Format
+        # Painter's "keep painting") gets it instead of a second click
+        double = getattr(self._action, "double_clicked", None)
+        if double is not None and event.button() == Qt.LeftButton:
+            event.accept()
+            double()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def _open_menu(self) -> None:
         from .menus import exec_menu, new_menu
         built = new_menu(self)
@@ -386,7 +396,8 @@ class SheetRibbon(QWidget):
                            ("copy", "Copy"),
                            ("paste_values", "Paste Values"),
                            ("paste_special", "Paste Special"),
-                           ("copy_headers", "Copy + Headers")]),
+                           ("copy_headers", "Copy + Headers"),
+                           ("format_painter", "Format Painter")]),
             ("Undo", [("undo", "Undo"), ("redo", "Redo")]),
             ("Cells", [m("insert_menu", "row_above", "Insert"),
                        m("delete_menu", "row_delete", "Delete"),

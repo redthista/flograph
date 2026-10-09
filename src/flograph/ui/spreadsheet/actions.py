@@ -308,6 +308,15 @@ class SheetActions(QObject):
                       v.sheet_model().cell_format(*cell)
                       for cell in v.format_targets()) if v.sheet_model()
                   else False, short="Clear")
+        painter = self._add(
+            "format_painter", "Format Painter", "format_painter",
+            "Copy a look — bold, colours, alignment — to other cells: "
+            "select the cells that have it, click this, then click or drag "
+            "over the cells to paint. Double-click to paint several places; "
+            "Esc to stop.",
+            lambda on: v.start_painter() if on else v.stop_painter(),
+            checked=lambda: v.painting, enabled=edit, short="Painter")
+        painter.double_clicked = lambda: v.start_painter(sticky=True)
         self._add("copy_headers", "Copy with Headers", "copy_headers",
                   "Copy the selection with the column names on top, for "
                   "pasting into another spreadsheet. With nothing selected, "

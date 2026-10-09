@@ -843,7 +843,8 @@ class SheetModel(QAbstractTableModel):
         def mutate(sheet: Sheet) -> None:
             for dr, line in enumerate(block):
                 for dc, fmt in enumerate(line):
-                    sheet.set_cell_format(row0 + dr, col0 + dc, fmt)
+                    if fmt is not False:          # False: leave this cell
+                        sheet.set_cell_format(row0 + dr, col0 + dc, fmt)
         self._structural(mutate, reset=False)
 
     # ------------------------------------------------------------ notes

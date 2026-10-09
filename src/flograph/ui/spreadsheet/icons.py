@@ -536,6 +536,24 @@ def _fill_series(p, r, c):
     _arrow(p, QPointF(15, 3.5), QPointF(15, 17), BLUE, 1.4, 2.6)
 
 
+def _format_painter(p, r, c):
+    """A paint roller: the head, the bent handle, a yellow streak."""
+    p.setPen(_pen(c, 1.3))
+    p.setBrush(QColor("#fde68a"))
+    p.drawRoundedRect(QRectF(3, 2.5, 12, 5), 1.5, 1.5)
+    p.setBrush(Qt.NoBrush)
+    path = QPainterPath()
+    path.moveTo(15, 5)
+    path.lineTo(17, 5)
+    path.lineTo(17, 10)
+    path.lineTo(9.5, 10)
+    path.lineTo(9.5, 12.5)
+    p.drawPath(path)
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawRoundedRect(QRectF(8, 12.5, 3, 5.5), 1, 1)
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -915,6 +933,7 @@ GLYPHS = {
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
     "dedupe": (_dedupe, FG), "split": (_split, FG),
     "fill_series": (_fill_series, FG),
+    "format_painter": (_format_painter, FG),
     "group": (_group, FG), "ungroup": (_ungroup, FG),
     "hide_detail": (_hide_detail, FG), "show_detail": (_show_detail, FG),
     "collapse_all": (_collapse_all, FG), "expand_all": (_expand_all, FG),

@@ -11,7 +11,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 | Tab | What is on it |
 | --- | --- |
-| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, alignment, Clear Formats); Fill Down, Fill ▾ (Right, Series…), Find & Select ▾, Replace |
+| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*, *Format Painter*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, alignment, Clear Formats); Fill Down, Fill ▾ (Right, Series…), Find & Select ▾, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
@@ -172,6 +172,15 @@ the current cell has that look, and clicking it again takes it off. The
 colour lists have **No Fill** / **Automatic** and **More Colours…**;
 clicking the button itself (from a menu or a shortcut) repeats the last
 colour. **Clear Formats** puts a cell back to plain, its value untouched.
+
+**Format Painter** (Home ▸ Clipboard, or right-click) copies a look
+from one place to another: select the cells that have it, click Format
+Painter — the pointer turns into a roller — then click a cell or drag over
+a range. A two-cell source (bold, then yellow) paints its pattern over and
+over down a longer range. Double-click Format Painter to paint several
+places in a row; **Esc** or the button again stops. Only the look moves —
+values stay, and a column's number format, which belongs to the whole
+column, is left alone. One undo step per paint.
 
 A fill without a font colour of its own gets text that reads on it. A
 conditional-formatting rule paints over a cell's own format, and a number

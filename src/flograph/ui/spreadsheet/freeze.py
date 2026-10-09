@@ -98,6 +98,11 @@ class _Pane(QTableView):
         self.verticalHeader().sectionClicked.connect(
             lambda row: main.select_rows([row]))
 
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton:
+            self._main.painter_landed()     # the Format Painter's brush
+
     # The pane never takes the keyboard: the grid keeps it, and routes an
     # edit of a frozen cell back here.
     def mousePressEvent(self, event) -> None:
