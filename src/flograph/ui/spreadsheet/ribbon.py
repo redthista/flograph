@@ -369,6 +369,8 @@ class SheetRibbon(QWidget):
             "type_menu": self._fill_type_menu,
             "function_menu": self._fill_function_menu,
             "freeze_menu": self._fill_freeze_menu,
+            "fill_menu": self._fill_fill_menu,
+            "ink_menu": self._fill_ink_menu,
             "select_menu": self._fill_select_menu,
             "number_menu": self._fill_number_menu,
             "cf_menu": self._fill_cf_menu,
@@ -388,12 +390,18 @@ class SheetRibbon(QWidget):
             ("Cells", [m("insert_menu", "row_above", "Insert"),
                        m("delete_menu", "row_delete", "Delete"),
                        ("clear", "Clear")]),
+            ("Font", [("row", [("fmt_b", ""), ("fmt_i", ""),
+                               ("fmt_u", "")]),
+                      ("row", [m("fill_menu", "fill_color", ""),
+                               m("ink_menu", "font_color", "")]),
+                      ("row", [("align_left", ""), ("align_center", ""),
+                               ("align_right", ""),
+                               ("clear_formats", "")])]),
             ("Number", [m("number_menu", "number_format", "Format"),
-                        ("fmt_currency", "Currency"),
-                        ("fmt_percent", "Percent"),
-                        ("fmt_thousands", "Thousands"),
-                        ("dec_more", "More Decimals"),
-                        ("dec_less", "Fewer Decimals")]),
+                        ("row", [("fmt_currency", ""),
+                                 ("fmt_percent", ""),
+                                 ("fmt_thousands", "")]),
+                        ("row", [("dec_more", ""), ("dec_less", "")])]),
             ("Editing", [("fill_down", "Fill Down"),
                          ("fill_right", "Fill Right"),
                          m("select_menu", "find", "Find && Select"),
@@ -474,7 +482,8 @@ class SheetRibbon(QWidget):
                     layout.addWidget(sep)
                 first = False
                 for entry in entries:
-                    layout.addWidget(self._button(entry, "icon"))
+                    for one in (entry[1] if entry[0] == "row" else [entry]):
+                        layout.addWidget(self._button(one, "icon"))
             return page
         layout = QHBoxLayout(page)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -484,7 +493,9 @@ class SheetRibbon(QWidget):
                 layout.addWidget(_separator())
             group = _Group(caption)
             for position, entry in enumerate(entries):
-                if position == 0:
+                if entry[0] == "row":
+                    group.add_small(self._icon_row(entry[1]))
+                elif position == 0:
                     group.add_large(self._button(entry, "large"))
                 else:
                     group.add_small(self._button(entry, "small"))
@@ -492,6 +503,18 @@ class SheetRibbon(QWidget):
             layout.addWidget(group)
         layout.addStretch(1)
         return page
+
+    def _icon_row(self, entries) -> QWidget:
+        """Icon-only buttons side by side in one small slot — Excel's
+        B I U strip."""
+        strip = QWidget()
+        row = QHBoxLayout(strip)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        for entry in entries:
+            row.addWidget(self._button(entry, "icon"))
+        row.addStretch(1)
+        return strip
 
     def _button(self, entry, size: str) -> RibbonButton:
         name, label = entry[0], entry[1]
@@ -529,6 +552,14 @@ class SheetRibbon(QWidget):
     def _fill_select_menu(self, menu) -> None:
         from .menus import fill_select_menu
         fill_select_menu(menu, self._view)
+
+    def _fill_fill_menu(self, menu) -> None:
+        from .actions import fill_color_menu
+        fill_color_menu(menu, self._view, ink=False)
+
+    def _fill_ink_menu(self, menu) -> None:
+        from .actions import fill_color_menu
+        fill_color_menu(menu, self._view, ink=True)
 
     def _fill_freeze_menu(self, menu) -> None:
         for name in ("freeze", "freeze_row", "freeze_col", "unfreeze"):

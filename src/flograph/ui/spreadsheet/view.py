@@ -308,6 +308,7 @@ class SpreadsheetView(QTableView):
             old.modelReset.disconnect(self._forget_sort)
             old.sheet_edited.disconnect(self._forget_sort)
         if old is not None:
+            old.modelAboutToBeReset.disconnect(self._before_reset)
             old.modelReset.disconnect(self._after_reset)
             old.dataChanged.disconnect(self._reapply_filter)
             old.freeze_changed.disconnect(self._apply_freeze)
@@ -321,6 +322,7 @@ class SpreadsheetView(QTableView):
             model.dataChanged.connect(self._maybe_autofit)
             model.modelReset.connect(self._forget_sort)
             model.sheet_edited.connect(self._forget_sort)
+            model.modelAboutToBeReset.connect(self._before_reset)
             model.modelReset.connect(self._after_reset)
             model.dataChanged.connect(self._reapply_filter)
             model.freeze_changed.connect(self._apply_freeze)
@@ -479,10 +481,13 @@ class SpreadsheetView(QTableView):
                   for r in range(row0, row1 + 1)]
         sources = [[model.cell_source(r, c) for c in range(col0, col1 + 1)]
                    for r in range(row0, row1 + 1)]
+        styles = [[model.cell_format(r, c) or None
+                   for c in range(col0, col1 + 1)]
+                  for r in range(row0, row1 + 1)]
         mime = QMimeData()
         mime.setText(block_to_tsv(values))
         mime.setHtml(block_to_html(values))
-        mime.setData(MIME_CELLS, encode_cells((row0, col0), sources))
+        mime.setData(MIME_CELLS, encode_cells((row0, col0), sources, styles))
         QApplication.clipboard().setMimeData(mime)
 
     def copy_selection_with_headers(self) -> None:
@@ -540,6 +545,10 @@ class SpreadsheetView(QTableView):
             decoded = decode_cells(mime.data(MIME_CELLS).data())
             if decoded is not None:
                 origin, cells = decoded
+                # an in-app paste brings the copied cells' formats, a plain
+                # cell's "none" too, as Excel's does
+                styles = self.clipboard_styles() or [[None] * len(row)
+                                                     for row in cells]
                 if (len(cells) == 1 and len(cells[0]) == 1 and rect
                         and (rect[2] > row0 or rect[3] > col0)):
                     # one copied cell over a bigger selection: replicate,
@@ -548,11 +557,13 @@ class SpreadsheetView(QTableView):
                                         c - origin[1])
                               for c in range(col0, rect[3] + 1)]
                              for r in range(row0, rect[2] + 1)]
+                    styles = [[styles[0][0]] * len(block[0])
+                              for _ in block]
                 else:
                     block = [[translate(text, row0 - origin[0],
                                         col0 - origin[1]) for text in row]
                              for row in cells]
-                model.set_cells((row0, col0), block)
+                model.set_cells((row0, col0), block, cell_formats=styles)
                 return
 
         block = parse_paste_text(mime.text())
@@ -1355,6 +1366,14 @@ class SpreadsheetView(QTableView):
             return None
         return values, sources, origin
 
+    def clipboard_styles(self):
+        """The formats of cells copied in this app, or None."""
+        from .clipboard import decode_styles
+        mime = QApplication.clipboard().mimeData()
+        if mime is None or not mime.hasFormat(MIME_CELLS):
+            return None
+        return decode_styles(mime.data(MIME_CELLS).data())
+
     def can_paste(self) -> bool:
         """Something pasteable is on the clipboard — a cheap look at its
         formats, for enabling buttons."""
@@ -1367,7 +1386,7 @@ class SpreadsheetView(QTableView):
                       transpose: bool = False) -> bool:
         """Paste with Paste Special's choices (see core.sheet.paste) as one
         undo step. False when there was nothing to paste."""
-        from flograph.core.sheet.paste import special_block
+        from flograph.core.sheet.paste import arrange_block, special_block
         model = self.sheet_model()
         cells = self.clipboard_cells()
         if model is None or cells is None or not self.editable:
@@ -1377,6 +1396,15 @@ class SpreadsheetView(QTableView):
         row0, col0 = (rect[0], rect[1]) if rect else (0, 0)
         fill_to = ((rect[2] - row0 + 1, rect[3] - col0 + 1)
                    if rect else None)
+        styles = self.clipboard_styles()
+        if styles is None and sources is not None:
+            styles = [[None] * len(row) for row in sources]
+        if what == "formats":
+            if styles is None:
+                return False
+            model.paste_formats((row0, col0), arrange_block(
+                styles, transpose=transpose, fill_to=fill_to))
+            return True
         block = special_block(
             values=values, sources=sources, origin=origin, at=(row0, col0),
             target=lambda r, c: (model.cell_source(r, c),
@@ -1385,7 +1413,14 @@ class SpreadsheetView(QTableView):
             fill_to=fill_to)
         if not block:
             return False
-        model.set_cells((row0, col0), block)
+        formats = None
+        if what == "all" and op == "none" and styles is not None:
+            formats = arrange_block(styles, transpose=transpose,
+                                    fill_to=fill_to)
+            formats = [[False if text is None else fmt
+                        for text, fmt in zip(line, fmts)]
+                       for line, fmts in zip(block, formats)]
+        model.set_cells((row0, col0), block, cell_formats=formats)
         return True
 
     def paste_transposed(self) -> None:
@@ -1685,6 +1720,57 @@ class SpreadsheetView(QTableView):
         place = cells.index(target) + 1
         self.cell_note(index, f"<b>Problem {place} of {len(cells)}</b><br>"
                               f"{model.cell_problem(*target)}", 6000)
+
+    # ------------------------------------------------------ cell formats
+
+    def format_targets(self) -> list[tuple[int, int]]:
+        """The cells a Font/Alignment command acts on: the selection, or
+        the current cell."""
+        selection = self.selectionModel()
+        indexes = selection.selectedIndexes() if selection else []
+        if not indexes and self.currentIndex().isValid():
+            indexes = [self.currentIndex()]
+        return sorted({(i.row(), i.column()) for i in indexes})
+
+    def current_format(self) -> dict:
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if model is None or not current.isValid():
+            return {}
+        return model.cell_format(current.row(), current.column())
+
+    def format_selection(self, **changes) -> None:
+        """Bold, a fill, centred … on every selected cell, one undo step."""
+        model = self.sheet_model()
+        if model is not None and self.editable:
+            model.format_cells(self.format_targets(), **changes)
+
+    def set_fill(self, color) -> None:
+        if color:
+            self.last_fill = color
+        self.format_selection(fill=color)
+
+    def set_ink(self, color) -> None:
+        if color:
+            self.last_ink = color
+        self.format_selection(color=color)
+
+    def set_align(self, side, on: bool = True) -> None:
+        self.format_selection(align=side if on else None)
+
+    def clear_cell_formats(self) -> None:
+        """Clear Formats: back to a plain cell — the value stays."""
+        model = self.sheet_model()
+        if model is not None and self.editable:
+            model.clear_formats(self.format_targets())
+
+    def pick_color(self, title: str, start: str):
+        """More Colours…: the system colour picker; None when cancelled."""
+        from PySide6.QtWidgets import QColorDialog
+        from .menus import real_window
+        color = QColorDialog.getColor(QColor(start), real_window(self),
+                                      title)
+        return color.name() if color.isValid() else None
 
     def duplicate_rows(self, cols) -> list[int]:
         """Rows shown that repeat an earlier shown row on `cols`."""
@@ -2015,7 +2101,45 @@ class SpreadsheetView(QTableView):
         if self._actions is not None:
             self._actions.refresh()
 
+    def _before_reset(self) -> None:
+        """Remember where the user is: a reset (a paste, a sort, an insert,
+        an undo) otherwise drops the current cell and the selection, and
+        the next paste or command would land at A1."""
+        current = self.currentIndex()
+        selection = self.selectionModel()
+        self._kept_place = (
+            (current.row(), current.column()) if current.isValid() else None,
+            [(r.top(), r.left(), r.bottom(), r.right())
+             for r in selection.selection()] if selection else [])
+
+    def _restore_place(self) -> None:
+        kept = getattr(self, "_kept_place", None)
+        self._kept_place = None
+        model = self.sheet_model()
+        selection = self.selectionModel()
+        if not kept or model is None or selection is None:
+            return
+        rows, cols = model.rowCount(), model.columnCount()
+        if not rows or not cols:
+            return
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        current, ranges = kept
+        chosen = QItemSelection()
+        for top, left, bottom, right in ranges:
+            if top >= rows or left >= cols:
+                continue
+            chosen.select(model.index(top, left),
+                          model.index(min(bottom, rows - 1),
+                                      min(right, cols - 1)))
+        if current is not None:
+            index = model.index(min(current[0], rows - 1),
+                                min(current[1], cols - 1))
+            selection.setCurrentIndex(index, QItemSelectionModel.NoUpdate)
+        if not chosen.isEmpty():
+            selection.select(chosen, QItemSelectionModel.ClearAndSelect)
+
     def _after_reset(self) -> None:
+        self._restore_place()
         self._reapply_filter()
         self._apply_freeze()
 

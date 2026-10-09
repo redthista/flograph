@@ -185,11 +185,12 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
 
     # notes stay on their column (by name) and row, as long as both remain
     by_name = {c.name: i for i, c in enumerate(merged.columns)}
-    for (r, c), text in stored.notes.items():
-        if c < stored.n_cols and r < n_rows:
-            col = by_name.get(stored.columns[c].name)
-            if col is not None:
-                merged.notes[(r, col)] = text
+    for attr in ("notes", "styles"):
+        for (r, c), value in getattr(stored, attr).items():
+            if c < stored.n_cols and r < n_rows:
+                col = by_name.get(stored.columns[c].name)
+                if col is not None:
+                    getattr(merged, attr)[(r, col)] = value
     return merged
 
 

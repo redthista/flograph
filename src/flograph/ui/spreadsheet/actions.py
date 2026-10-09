@@ -47,6 +47,35 @@ def currency_format() -> dict:
             "thousands": True, "negative": "minus"}
 
 
+def fill_color_menu(menu, view, ink: bool) -> None:
+    """Swatches for Fill Colour (ink=False) or Font Colour (ink=True)."""
+    from PySide6.QtGui import QColor, QIcon, QPixmap
+    from flograph.core.sheet.cellfmt import FILLS, INKS
+    apply = view.set_ink if ink else view.set_fill
+    none = menu.addAction("Automatic" if ink else "No Fill")
+    none.setToolTip("Take the colour off: the cell's usual "
+                    + ("text colour." if ink else "background."))
+    none.triggered.connect(lambda: apply(None))
+    menu.addSeparator()
+    for name, hex_color in (INKS if ink else FILLS):
+        pix = QPixmap(14, 14)
+        pix.fill(QColor(hex_color))
+        action = menu.addAction(QIcon(pix), name)
+        action.setToolTip(hex_color)
+        action.triggered.connect(lambda _=False, h=hex_color: apply(h))
+    menu.addSeparator()
+    more = menu.addAction("More Colours…")
+    start = view.current_format().get("color" if ink else "fill",
+                                      "#fde68a")
+
+    def pick():
+        chosen = view.pick_color("Font Colour" if ink else "Fill Colour",
+                                 start)
+        if chosen:
+            apply(chosen)
+    more.triggered.connect(pick)
+
+
 def fill_number_format_menu(menu, view) -> None:
     """The Number Format list: each entry shows how a sample reads under it,
     the column's current format ticked."""
@@ -240,6 +269,45 @@ class SheetActions(QObject):
                   v.paste_transposed,
                   enabled=lambda: edit() and v.can_paste(),
                   short="Transpose")
+        # ---- font and alignment (a cell's own look; display only)
+        def own(key):
+            return lambda: bool(v.current_format().get(key))
+
+        for flag, label, key, body in (
+                ("b", "Bold", "Ctrl+B", "Make the selected cells bold."),
+                ("i", "Italic", "Ctrl+I", "Make the selected cells italic."),
+                ("u", "Underline", "Ctrl+U",
+                 "Underline the selected cells.")):
+            self._add(f"fmt_{flag}", label, f"fmt_{flag}",
+                      body + " Again to take it off. Only the look changes.",
+                      lambda on, f=flag: v.format_selection(**{f: on}),
+                      keys=[key], checked=own(flag), enabled=edit)
+        for side, label in (("left", "Align Left"), ("center", "Center"),
+                            ("right", "Align Right")):
+            self._add(f"align_{side}", label, f"align_{side}",
+                      f"{label} the selected cells' text. Again to go back "
+                      "to the usual: numbers right, text left.",
+                      lambda on, s=side: v.set_align(s, on),
+                      checked=lambda s=side: v.current_format().get(
+                          "align") == s, enabled=edit)
+        self._add("fill_color", "Fill Colour", "fill_color",
+                  "Colour the selected cells' background. Pick a colour, "
+                  "No Fill to take it off, or More Colours….",
+                  lambda: v.set_fill(getattr(v, "last_fill", "#fde68a")),
+                  enabled=edit, short="Fill")
+        self._add("font_color", "Font Colour", "font_color",
+                  "Colour the selected cells' text. Pick a colour, "
+                  "Automatic to take it off, or More Colours….",
+                  lambda: v.set_ink(getattr(v, "last_ink", "#ef4444")),
+                  enabled=edit, short="Colour")
+        self._add("clear_formats", "Clear Formats", "clear_formats",
+                  "Take bold, colours and alignment off the selected cells. "
+                  "The values stay.",
+                  v.clear_cell_formats,
+                  enabled=lambda: edit() and any(
+                      v.sheet_model().cell_format(*cell)
+                      for cell in v.format_targets()) if v.sheet_model()
+                  else False, short="Clear")
         self._add("copy_headers", "Copy with Headers", "copy_headers",
                   "Copy the selection with the column names on top, for "
                   "pasting into another spreadsheet. With nothing selected, "
@@ -788,6 +856,9 @@ class SheetActions(QObject):
                 action.blockSignals(True)
                 action.setChecked(want)
                 action.blockSignals(False)
+                # toggled stays quiet (it would run the command); changed
+                # lets a ribbon button show the new state
+                action.changed.emit()
         self.changed_hook()
 
     def _on_stack(self, _index: int) -> None:

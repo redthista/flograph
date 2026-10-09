@@ -11,7 +11,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 | Tab | What is on it |
 | --- | --- |
-| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find & Select ▾, Replace |
+| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, alignment, Clear Formats); Fill Down, Fill Right, Find & Select ▾, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
@@ -119,6 +119,28 @@ set **Apply edits** to *submit* in Properties) and edits are *held*:
 Held edits are saved with the project and undo like any other edit. Running
 the flow while edits are held says so in the status bar. Turning Auto-apply
 back on submits whatever is waiting.
+
+## Bold, colours and alignment
+
+Select cells and use **Home ▸ Font** — **B** / *I* / U (**Ctrl+B**,
+**Ctrl+I**, **Ctrl+U**), **Fill Colour ▾**, **Font Colour ▾** and the three
+alignment buttons — or right-click ▸ **Format**. Each button lights up when
+the current cell has that look, and clicking it again takes it off. The
+colour lists have **No Fill** / **Automatic** and **More Colours…**;
+clicking the button itself (from a menu or a shortcut) repeats the last
+colour. **Clear Formats** puts a cell back to plain, its value untouched.
+
+A fill without a font colour of its own gets text that reads on it. A
+conditional-formatting rule paints over a cell's own format, and a number
+format's red negatives still show red, as in Excel.
+
+Formats belong to the cell: they follow it through sorts, moves, inserts
+and deletes, save with the table, and undo like any edit. **Copy** and
+**Paste** inside the grid bring them along (a plain cell pasted over a
+bold one makes it plain); **Paste Values** and text from outside leave a
+cell's format as it was, and **Paste Special ▸ Formats only** pastes just
+the look. Like everything on this page, formats are for reading — they
+never change a value or what the Table sends on.
 
 ## Number formats
 
@@ -390,6 +412,7 @@ fourteen.
 | Jump to the edge of the data (Shift: select to it) | **Ctrl+arrows** |
 | Find / replace | **Ctrl+F** / **Ctrl+H** |
 | Go To | **Ctrl+G** |
+| Bold / italic / underline | **Ctrl+B** / **Ctrl+I** / **Ctrl+U** |
 | New or edit a note | **Shift+F2** |
 | Type into every selected cell | **Ctrl+Enter** |
 | Filter this column | **Ctrl+Shift+L** |

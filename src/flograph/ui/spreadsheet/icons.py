@@ -395,6 +395,85 @@ def _split(p, r, c):
     p.drawRoundedRect(QRectF(10.5, 12.5, 7, 5.5), 1, 1)
 
 
+def _letter(p, c, text, *, bold=False, italic=False, underline=False):
+    font = QFont()
+    font.setPixelSize(14)
+    font.setBold(bold)
+    font.setItalic(italic)
+    font.setUnderline(underline)
+    font.setFamily("serif" if italic else font.family())
+    p.setFont(font)
+    p.setPen(c)
+    p.drawText(QRectF(1, 0, 18, 18), Qt.AlignCenter, text)
+
+
+def _fmt_b(p, r, c):
+    _letter(p, c, "B", bold=True)
+
+
+def _fmt_i(p, r, c):
+    _letter(p, c, "I", italic=True)
+
+
+def _fmt_u(p, r, c):
+    _letter(p, c, "U", underline=True)
+
+
+def _align(p, c, side):
+    p.setPen(_pen(c, 1.5))
+    for y, width in ((4.5, 14), (8.5, 9), (12.5, 14), (16.5, 9)):
+        if side == "left":
+            x0 = 3
+        elif side == "right":
+            x0 = 17 - width
+        else:
+            x0 = 10 - width / 2
+        p.drawLine(QPointF(x0, y), QPointF(x0 + width, y))
+
+
+def _align_left(p, r, c):
+    _align(p, c, "left")
+
+
+def _align_center(p, r, c):
+    _align(p, c, "center")
+
+
+def _align_right(p, r, c):
+    _align(p, c, "right")
+
+
+def _fill_color(p, r, c):
+    """A paint bucket over a yellow bar."""
+    path = QPainterPath()
+    path.moveTo(4, 8)
+    path.lineTo(9, 3)
+    path.lineTo(14.5, 8.5)
+    path.lineTo(9.5, 13.5)
+    path.closeSubpath()
+    p.setPen(_pen(c, 1.2))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(path)
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawEllipse(QPointF(16, 11), 1.4, 1.8)
+    p.setBrush(QColor("#fde68a"))
+    p.drawRect(QRectF(2.5, 15.5, 15, 3))
+
+
+def _font_color(p, r, c):
+    """An A over a red bar."""
+    _letter(p, c, "A", bold=True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(RED)
+    p.drawRect(QRectF(2.5, 16, 15, 2.5))
+
+
+def _clear_formats(p, r, c):
+    _letter(p, c, "A")
+    _badge(p, _BADGE, "x", RED)
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -773,6 +852,10 @@ GLYPHS = {
     "paste_special": (_paste_special, FG),
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
     "dedupe": (_dedupe, FG), "split": (_split, FG),
+    "fmt_b": (_fmt_b, FG), "fmt_i": (_fmt_i, FG), "fmt_u": (_fmt_u, FG),
+    "align_left": (_align_left, FG), "align_center": (_align_center, FG),
+    "align_right": (_align_right, FG), "fill_color": (_fill_color, FG),
+    "font_color": (_font_color, FG), "clear_formats": (_clear_formats, FG),
     "note": (_note, FG), "note_delete": (_note_delete, FG),
     "note_next": (_note_next, FG), "select_notes": (_note, FG),
     "select_formulas": (_select_formulas, FG),

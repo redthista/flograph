@@ -63,6 +63,38 @@ def _bold_font():
         font.setBold(True)
         _BOLD_FONT.append(font)
     return _BOLD_FONT[0]
+
+
+_FONTS: dict = {}     # (bold, italic, underline) -> QFont, made on first use
+_BRUSHES: dict = {}   # "#rrggbb" -> QBrush
+
+
+def _font(bold: bool, italic: bool, underline: bool):
+    """A font setting only these three, so the view's own size and family
+    still apply (Qt resolves a role's font against the view's)."""
+    key = (bold, italic, underline)
+    if key not in _FONTS:
+        from PySide6.QtGui import QFont
+        font = QFont()
+        if bold:
+            font.setBold(True)
+        if italic:
+            font.setItalic(True)
+        if underline:
+            font.setUnderline(True)
+        _FONTS[key] = font
+    return _FONTS[key]
+
+
+def _brush(hex_color: str) -> QBrush:
+    if hex_color not in _BRUSHES:
+        _BRUSHES[hex_color] = QBrush(QColor(hex_color))
+    return _BRUSHES[hex_color]
+
+
+_ALIGN = {"left": int(Qt.AlignLeft | Qt.AlignVCenter),
+          "center": int(Qt.AlignHCenter | Qt.AlignVCenter),
+          "right": int(Qt.AlignRight | Qt.AlignVCenter)}
 _INVALID_BRUSH = QBrush(_INVALID_BG)
 
 _TRUE_WORDS = {"true", "yes", "y", "1", "t", "x", "✓", "on"}
@@ -509,16 +541,41 @@ class SheetModel(QAbstractTableModel):
                 shown = format_value_as(value, fmt)
                 if shown is not None and shown[1]:
                     return _NEGATIVE_BRUSH
+            own = self._sheet.styles.get((row, col))
+            if own and "color" in own:
+                return _brush(own["color"])
+            if (own and "fill" in own and not (style is not None
+                                                and style.bg)
+                    and not self._invalid(row, col, source)):
+                # a fill without a chosen text colour: text that reads on
+                # it (the theme's light text vanishes on a pale fill)
+                from flograph.core.table_format import readable_fg
+                return _brush(readable_fg(own["fill"]))
             return None
         if role == _BACKGROUND:
             if self._invalid(row, col, source):
                 return _INVALID_BRUSH
             if style is not None and style.bg:
                 return QBrush(QColor(style.bg))
+            own = self._sheet.styles.get((row, col))
+            if own and "fill" in own:
+                return _brush(own["fill"])
             return None
+        if role == _FONT:
+            # the cell's own bold/italic/underline, with a conditional
+            # rule's bold on top
+            own = self._sheet.styles.get((row, col)) or {}
+            bold = bool(own.get("b")) or bool(style is not None
+                                              and style.bold)
+            italic, underline = bool(own.get("i")), bool(own.get("u"))
+            if bold or italic or underline:
+                return _font(bold, italic, underline)
+            return None
+        if role == _ALIGNMENT:
+            own = self._sheet.styles.get((row, col))
+            if own and "align" in own:
+                return _ALIGN[own["align"]]
         if style is not None:
-            if role == _FONT:
-                return _bold_font() if style.bold else None
             if role == BAR_ROLE:
                 return ((style.bar, style.bar_color, style.bar_mode)
                         if style.bar is not None else None)
@@ -587,10 +644,13 @@ class SheetModel(QAbstractTableModel):
 
     # -------------------------------------------------------- cell edits
 
-    def set_cells(self, origin: tuple[int, int], block: list[list[str]]) -> None:
+    def set_cells(self, origin: tuple[int, int], block: list[list[str]],
+                  cell_formats=None) -> None:
         """Write a rectangular block of raw sources at origin, growing the
         grid as needed. A None in the block leaves that cell alone (Paste
-        Special's Skip Blanks). One mutation -> one undo step for the host."""
+        Special's Skip Blanks). `cell_formats`, when given, is a matching block
+        of cell formats laid down in the same edit: a dict sets one, None
+        clears it, False leaves it. One mutation -> one undo step."""
         if self._read_only:
             return
         if not block or all(text is None for row in block for text in row):
@@ -600,17 +660,22 @@ class SheetModel(QAbstractTableModel):
         block = [[parse_typed(text, formats[col0 + dc])
                   if text is not None and col0 + dc < len(formats) else text
                   for dc, text in enumerate(row)] for row in block]
-        self._structural(lambda sheet: self._paste_into(sheet, row0, col0, block))
+        self._structural(lambda sheet: self._paste_into(
+            sheet, row0, col0, block, cell_formats))
 
     @staticmethod
     def _paste_into(sheet: Sheet, row0: int, col0: int,
-                    block: list[list[str]]) -> None:
+                    block: list[list[str]], cell_formats=None) -> None:
         sheet.ensure_size(row0 + len(block),
                           col0 + max(len(r) for r in block))
         for dr, row in enumerate(block):
             for dc, text in enumerate(row):
                 if text is not None:
                     sheet.set_cell(row0 + dr, col0 + dc, text)
+        for dr, row in enumerate(cell_formats or ()):
+            for dc, fmt in enumerate(row):
+                if fmt is not False:
+                    sheet.set_cell_format(row0 + dr, col0 + dc, fmt)
 
     def fill_cells(self, cells, text: str, anchor: tuple[int, int]) -> None:
         """Ctrl+Enter: `text`, typed at `anchor`, into every one of `cells`
@@ -668,6 +733,53 @@ class SheetModel(QAbstractTableModel):
                     sheet.set_cell(r, first + i,
                                    row[i] if i < len(row) else "")
         self._structural(mutate)
+
+    # ----------------------------------------------------- cell formats
+
+    def cell_format(self, row: int, col: int) -> dict:
+        return dict(self._sheet.styles.get((row, col)) or {})
+
+    def format_cells(self, cells, **changes) -> None:
+        """Lay `changes` (b/i/u True or False, fill/color a hex or None,
+        align a side or None) over each cell's own format — one undo
+        step. Display only."""
+        from flograph.core.sheet.cellfmt import merged
+        if self._read_only:
+            return
+        cells = [(r, c) for r, c in cells
+                 if 0 <= r < self._sheet.n_rows and 0 <= c < self._sheet.n_cols]
+        new = {cell: merged(self._sheet.styles.get(cell), changes)
+               for cell in cells}
+        if all(new[cell] == self._sheet.styles.get(cell) for cell in cells):
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            for cell, fmt in new.items():
+                sheet.set_cell_format(*cell, fmt)
+        self._structural(mutate, reset=False)
+
+    def clear_formats(self, cells) -> None:
+        cells = [cell for cell in cells if cell in self._sheet.styles]
+        if self._read_only or not cells:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            for cell in cells:
+                sheet.styles.pop(cell, None)
+        self._structural(mutate, reset=False)
+
+    def paste_formats(self, origin: tuple[int, int], block) -> None:
+        """Lay a copied block of formats (None for a plain cell) at
+        `origin` — Excel's paste carrying formats along. One undo step."""
+        if self._read_only or not block:
+            return
+        row0, col0 = origin
+
+        def mutate(sheet: Sheet) -> None:
+            for dr, line in enumerate(block):
+                for dc, fmt in enumerate(line):
+                    sheet.set_cell_format(row0 + dr, col0 + dc, fmt)
+        self._structural(mutate, reset=False)
 
     # ------------------------------------------------------------ notes
 

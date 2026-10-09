@@ -66,6 +66,10 @@ class PasteSpecialDialog(QDialog):
                                "change.")
         what.addWidget(self.all)
         what.addWidget(self.values)
+        self.formats = QRadioButton("Formats only")
+        self.formats.setToolTip("Only the copied cells' look — bold, "
+                                "colours, alignment. The values stay.")
+        what.addWidget(self.formats)
         self.from_outside = QLabel("Copied from outside the app, so there "
                                    "are only values.")
         self.from_outside.setWordWrap(True)
@@ -75,6 +79,7 @@ class PasteSpecialDialog(QDialog):
         if self._sources is None:
             self.values.setChecked(True)
             self.all.setEnabled(False)
+            self.formats.setEnabled(False)
         else:
             self.all.setChecked(True)
             self.from_outside.hide()
@@ -141,7 +146,8 @@ class PasteSpecialDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
 
-        for box in (self.all, self.values, self.skip, self.transpose):
+        for box in (self.all, self.values, self.formats, self.skip,
+                    self.transpose):
             box.toggled.connect(self._refresh)
         self.ops.idToggled.connect(self._refresh)
         self._refresh()
@@ -152,12 +158,22 @@ class PasteSpecialDialog(QDialog):
     def chosen(self) -> dict:
         op = next(key for key, button in self._op_buttons.items()
                   if button.isChecked())
-        return {"what": "all" if self.all.isChecked() else "values",
+        what = ("all" if self.all.isChecked() else
+                "formats" if self.formats.isChecked() else "values")
+        return {"what": what,
                 "op": op, "skip_blanks": self.skip.isChecked(),
                 "transpose": self.transpose.isChecked()}
 
     def block(self) -> list:
         model = self._model
+        choice = self.chosen()
+        if choice["what"] == "formats":
+            # only the look changes: every value stays as it is
+            shape = special_block(
+                values=self._values, at=self._at, fill_to=self._fill_to,
+                target=lambda r, c: ("", None),
+                transpose=choice["transpose"])
+            return [[None] * len(row) for row in shape]
         return special_block(
             values=self._values, sources=self._sources, origin=self._origin,
             at=self._at, fill_to=self._fill_to,
@@ -171,6 +187,10 @@ class PasteSpecialDialog(QDialog):
                                   if key == choice["op"]))
         self.all.setEnabled(self._sources is not None
                             and choice["op"] == "none")
+        self.formats.setEnabled(self._sources is not None
+                                and choice["op"] == "none")
+        for button in self._op_buttons.values():
+            button.setEnabled(choice["what"] != "formats")
         self.summary.setText(describe(
             choice["what"], choice["op"], choice["skip_blanks"],
             choice["transpose"], self._sources is not None))

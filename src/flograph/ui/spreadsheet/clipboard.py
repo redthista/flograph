@@ -50,11 +50,30 @@ def parse_paste_text(text: str) -> list[list[str]]:
     return [row + [""] * (width - len(row)) for row in rows]
 
 
-def encode_cells(origin: tuple[int, int], rows: list[list[str]]) -> bytes:
+def encode_cells(origin: tuple[int, int], rows: list[list[str]],
+                 styles=None) -> bytes:
     """Internal clipboard format: raw cell sources (formulas intact) plus
-    the copy origin, so paste can shift relative references by the move."""
-    return json.dumps({"origin": list(origin),
-                       "cells": [list(row) for row in rows]}).encode("utf-8")
+    the copy origin, so paste can shift relative references by the move,
+    and the cells' own formats when any has one."""
+    data = {"origin": list(origin), "cells": [list(row) for row in rows]}
+    if styles and any(fmt for row in styles for fmt in row):
+        data["styles"] = [list(row) for row in styles]
+    return json.dumps(data).encode("utf-8")
+
+
+def decode_styles(payload: bytes) -> Optional[list[list[Optional[dict]]]]:
+    """The copied cells' formats (None for a plain cell), or None when
+    the copy carried none."""
+    from flograph.core.sheet.cellfmt import clean
+    try:
+        data = json.loads(bytes(payload).decode("utf-8"))
+        styles = data.get("styles")
+        if not isinstance(styles, list):
+            return None
+        return [[clean(fmt) for fmt in row] for row in styles
+                if isinstance(row, list)]
+    except Exception:
+        return None
 
 
 def decode_cells(payload: bytes) -> Optional[tuple[tuple[int, int],

@@ -29,7 +29,7 @@ from .formula import translate
 from .schema import is_formula
 from .values import as_date, format_number
 
-WHAT = ("all", "values")
+WHAT = ("all", "values", "formats")
 OPS = ("none", "add", "subtract", "multiply", "divide")
 _SYMBOL = {"add": "+", "subtract": "-", "multiply": "*", "divide": "/"}
 
@@ -156,10 +156,29 @@ def special_block(*, values: list[list[str]], at: tuple[int, int],
     return block
 
 
+def arrange_block(block: list[list], *, transpose: bool = False,
+                  fill_to: Optional[tuple[int, int]] = None) -> list[list]:
+    """A copied block laid out as Paste Special lays the cells: turned
+    when transposed, and one copied cell spread over the selection."""
+    if not block:
+        return []
+    if len(block) == 1 and len(block[0]) == 1 and fill_to is not None:
+        return [[block[0][0]] * max(1, fill_to[1])
+                for _ in range(max(1, fill_to[0]))]
+    if transpose:
+        width = max(len(row) for row in block)
+        return [[row[j] if j < len(row) else None for row in block]
+                for j in range(width)]
+    return [list(row) for row in block]
+
+
 def describe(what: str, op: str, skip_blanks: bool, transpose: bool,
              from_app: bool) -> str:
     """One plain sentence saying what the choices will do."""
-    if op == "none":
+    if what == "formats":
+        parts = ["Pastes only the copied cells' formats — bold, colours, "
+                 "alignment — and leaves the values as they are"]
+    elif op == "none":
         if what == "all" and from_app:
             parts = ["Pastes the copied cells with their formulas, which "
                      "adjust to where they land"]

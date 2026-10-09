@@ -196,6 +196,10 @@ class Sheet:
     # follows its cell through sorts, moves, inserts and deletes; none is
     # part of what the node sends on.
     notes: dict = field(default_factory=dict)
+    # Each cell's own look (core/sheet/cellfmt.py): (row, col) -> {"b":
+    # True, "fill": "#fde68a", …}. Follows its cell like a note; display
+    # only.
+    styles: dict = field(default_factory=dict)
 
     @property
     def n_rows(self) -> int:
@@ -228,20 +232,34 @@ class Sheet:
             self.notes.pop((row, col), None)
 
     def _remap_notes(self, where) -> None:
-        """Move every note to `where(row, col)`; None drops it."""
-        if not self.notes:
-            return
-        moved = {}
-        for (r, c), text in self.notes.items():
-            spot = where(r, c)
-            if spot is not None:
-                moved[spot] = text
-        self.notes = moved
+        """Move every note and cell format to `where(row, col)`; None
+        drops it."""
+        for attr in ("notes", "styles"):
+            extras = getattr(self, attr)
+            if not extras:
+                continue
+            moved = {}
+            for (r, c), value in extras.items():
+                spot = where(r, c)
+                if spot is not None:
+                    moved[spot] = value
+            setattr(self, attr, moved)
+
+    def cell_format(self, row: int, col: int) -> Optional[dict]:
+        return self.styles.get((row, col))
+
+    def set_cell_format(self, row: int, col: int, fmt) -> None:
+        from .cellfmt import clean
+        fmt = clean(fmt)
+        if fmt and 0 <= row < self.n_rows and 0 <= col < self.n_cols:
+            self.styles[(row, col)] = fmt
+        else:
+            self.styles.pop((row, col), None)
 
     def _notes_follow_rows(self, before: list) -> None:
         """After the row lists were reordered (a sort, a move), send each
         note to wherever its row went — rows are the same list objects."""
-        if not self.notes:
+        if not (self.notes or self.styles):
             return
         place = {id(row): i for i, row in enumerate(self.rows)}
 
@@ -362,7 +380,7 @@ class Sheet:
         lists."""
         old = self.rows
         self.rows = [list(row) for row in rows]
-        if not self.notes:
+        if not (self.notes or self.styles):
             return
         waiting: dict[tuple, list[int]] = {}
         for j, row in enumerate(self.rows):
@@ -455,6 +473,7 @@ class Sheet:
             rows=[list(row) for row in self.rows],
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
             show_totals=self.show_totals, notes=dict(self.notes),
+            styles={k: dict(v) for k, v in self.styles.items()},
         )
 
 
@@ -538,10 +557,24 @@ def parse_sheet(raw) -> Sheet:
             if text:
                 notes[(entry[0], entry[1])] = text
 
+    from .cellfmt import clean as clean_format
+    styles = {}
+    styles_raw = parsed.get("styles")
+    for entry in styles_raw if isinstance(styles_raw, list) else ():
+        if (isinstance(entry, (list, tuple)) and len(entry) == 3
+                and all(isinstance(v, int) and not isinstance(v, bool)
+                        for v in entry[:2])
+                and 0 <= entry[0] < len(rows)
+                and 0 <= entry[1] < len(columns)):
+            fmt = clean_format(entry[2])
+            if fmt:
+                styles[(entry[0], entry[1])] = fmt
+
     return Sheet(columns, rows,
                  freeze_rows=_count("rows", max(len(rows) - 1, 0)),
                  freeze_cols=_count("cols", max(len(columns) - 1, 0)),
-                 show_totals=bool(parsed.get("totals")), notes=notes)
+                 show_totals=bool(parsed.get("totals")), notes=notes,
+                 styles=styles)
 
 
 def sheet_to_dict(sheet: Sheet) -> dict:
@@ -574,6 +607,9 @@ def sheet_to_dict(sheet: Sheet) -> dict:
     if sheet.notes:
         out["notes"] = [[r, c, text]
                         for (r, c), text in sorted(sheet.notes.items())]
+    if sheet.styles:
+        out["styles"] = [[r, c, dict(fmt)]
+                         for (r, c), fmt in sorted(sheet.styles.items())]
     return out
 
 

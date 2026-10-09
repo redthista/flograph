@@ -180,6 +180,18 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
                  "select_problems", "select_notes"):
         pick.addAction(a[name])
 
+    font = submenu(menu, "Format", sheet_icon("fmt_b"))
+    for name in ("fmt_b", "fmt_i", "fmt_u"):
+        font.addAction(a[name])
+    from .actions import fill_color_menu
+    fill_color_menu(submenu(font, "Fill Colour", sheet_icon("fill_color")),
+                    view, ink=False)
+    fill_color_menu(submenu(font, "Font Colour", sheet_icon("font_color")),
+                    view, ink=True)
+    for name in ("align_left", "align_center", "align_right",
+                 "clear_formats"):
+        font.addAction(a[name])
+
     heading(menu, "Note")
     current = view.currentIndex()
     model = view.sheet_model()
