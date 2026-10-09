@@ -375,6 +375,14 @@ def _select_problems(p, r, c):
     _pick(p, c, AMBER, "?", AMBER)
 
 
+def _dedupe(p, r, c):
+    """Two matching rows, the second struck through."""
+    _grid(p, QRectF(2.5, 2.5, 15, 15), rows=3, cols=1,
+          lit=[("row", 0), ("row", 2)], color=c)
+    p.setPen(_pen(RED, 1.5))
+    p.drawLine(QPointF(4, 14.5), QPointF(16, 14.5))
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -752,6 +760,7 @@ GLYPHS = {
     "paste": (_paste, FG), "paste_values": (_paste_values, FG),
     "paste_special": (_paste_special, FG),
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
+    "dedupe": (_dedupe, FG),
     "note": (_note, FG), "note_delete": (_note_delete, FG),
     "note_next": (_note_next, FG), "select_notes": (_note, FG),
     "select_formulas": (_select_formulas, FG),

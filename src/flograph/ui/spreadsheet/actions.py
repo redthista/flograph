@@ -508,6 +508,14 @@ class SheetActions(QObject):
                   "this cell.",
                   v.filter_by_current_value,
                   enabled=lambda: v.currentIndex().isValid())
+        self._add("dedupe", "Remove Duplicates…", "dedupe",
+                  "Remove rows that repeat an earlier row on the columns "
+                  "you tick — the first of each set stays. Shows how many "
+                  "will go first, and can just select them instead.",
+                  v.remove_duplicates,
+                  enabled=lambda: edit() and bool(v.sheet_model())
+                  and v.sheet_model().rowCount() > 1,
+                  short="Duplicates")
         self._add("filter_clear", "Clear All Filters", "filter_clear",
                   "Show every row again.", v.clear_filters,
                   enabled=lambda: v.filtered, short="Clear")

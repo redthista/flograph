@@ -13,7 +13,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find & Select ▾, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
-| **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾ and its **Dropdown List**; **Validation** and **Next Problem** |
+| **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
 | **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
@@ -271,6 +271,19 @@ decides, and so on down.
 - Blank cells always go last, whichever way round.
 - The dialog remembers its levels for the next time it opens on that grid,
   and the whole sort is one undo step — **Undo Sort** works too.
+
+### Removing duplicates
+
+**Data ▸ Remove Duplicates…** (or right-click ▸ Remove Duplicates…) takes
+out rows that repeat an earlier one. Tick the columns that make two rows
+"the same" — all of them, or just *Region* and *Item* — and the dialog says
+how many rows will go and which. The first row of each set stays.
+
+Rows are compared by what their cells show, ignoring case and spaces at
+either end: `North` and `north ` match, and so do `2` and `2.0`. With a
+filter on, only the rows shown are compared and removed. **Select Them**
+selects the duplicates instead, to look at before anything goes. Removing
+is one undo step; formulas and notes adjust as for any deleted row.
 
 ## Functions
 

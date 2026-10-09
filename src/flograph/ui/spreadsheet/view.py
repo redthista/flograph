@@ -1686,6 +1686,52 @@ class SpreadsheetView(QTableView):
         self.cell_note(index, f"<b>Problem {place} of {len(cells)}</b><br>"
                               f"{model.cell_problem(*target)}", 6000)
 
+    def duplicate_rows(self, cols) -> list[int]:
+        """Rows shown that repeat an earlier shown row on `cols`."""
+        from flograph.core.sheet.dedupe import duplicate_rows
+        model = self.sheet_model()
+        if model is None:
+            return []
+        shown = [r for r in range(model.rowCount())
+                 if not self.row_filtered(r)]
+        return duplicate_rows(model.rowCount(), cols, model.value_text,
+                              rows=shown)
+
+    def remove_duplicates(self) -> None:
+        """Data ▸ Remove Duplicates…: the dialog."""
+        if self.editable:
+            from .dedupe_dialog import remove_duplicates
+            remove_duplicates(self)
+
+    def drop_duplicates(self, cols) -> int:
+        """Remove the duplicate rows on `cols` as one undo step and say
+        how many went."""
+        from flograph.core.sheet.dedupe import summary
+        model = self.sheet_model()
+        if model is None:
+            return 0
+        dupes = self.duplicate_rows(cols)
+        shown = sum(1 for r in range(model.rowCount())
+                    if not self.row_filtered(r))
+        if dupes:
+            model.remove_rows_at(dupes)
+        self.say(summary(len(dupes), shown - len(dupes)))
+        return len(dupes)
+
+    def select_duplicates(self, cols) -> int:
+        """Select the duplicate rows on `cols`, to look at first."""
+        model = self.sheet_model()
+        dupes = self.duplicate_rows(cols)
+        if model is None or not dupes:
+            self.say("No duplicates.")
+            return 0
+        self.select_cells([(r, c) for r in dupes
+                           for c in range(model.columnCount())],
+                          f"{len(dupes)} duplicate "
+                          f"{'row' if len(dupes) == 1 else 'rows'} selected "
+                          "— the first of each set is not.")
+        return len(dupes)
+
     def edit_note(self) -> None:
         """Right-click ▸ New Note… / Edit Note… (Shift+F2): the current
         cell's note."""
