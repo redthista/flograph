@@ -112,7 +112,7 @@ class FormulaBar(QWidget):
         from .icons import sheet_icon
         fx = QToolButton()
         fx.setIcon(sheet_icon("fx"))
-        fx.setIconSize(QSize(18, 18))
+        fx.setIconSize(QSize(20, 20))
         fx.setAutoRaise(True)
         fx.setToolTip("Every function the formulas know, with examples")
         fx.clicked.connect(self.show_reference)

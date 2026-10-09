@@ -153,7 +153,9 @@ class TestView:
     def test_errors_and_problems(self, view):
         view.select_special("errors")
         assert _selected(view) == [(1, 2)]
-        view.setCurrentIndex(view.model().index(0, 0))
+        # one cell selected again (not a bare setCurrentIndex, whose effect
+        # on the selection depends on the app's modifier-key state)
+        _select(view, 0, 0, 0, 0)
         view.select_special("problems")
         assert (1, 1) in _selected(view)          # "abc" in a number column
 

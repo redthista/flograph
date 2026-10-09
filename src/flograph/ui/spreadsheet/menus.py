@@ -52,7 +52,9 @@ def menu_stylesheet() -> str:
     for a dark ground (canvas/popup_lift does the same for card lists)."""
     from .. import theme
     return (f"QMenu {{ background: {theme.NODE_BODY.name()};"
-            f" color: #e5e7eb; border: 1px solid #3c3f49; padding: 4px 0; }}"
+            f" color: #e5e7eb; border: 1px solid #3c3f49; padding: 4px 0;"
+            # 20 px: the glyphs' own grid — at the usual 16 they blur
+            " icon-size: 20px; }"
             "QMenu::item { padding: 4px 28px 4px 10px; }"
             "QMenu::item:selected { background: #3b4a7a; }"
             "QMenu::item:disabled { color: #6b7080; }"

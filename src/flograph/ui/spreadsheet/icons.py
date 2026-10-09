@@ -13,8 +13,8 @@ from __future__ import annotations
 from functools import lru_cache
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QColor, QFont, QIcon, QPainter, QPainterPath, QPen,
-                           QPixmap)
+from PySide6.QtGui import (QColor, QFont, QIcon, QIconEngine, QPainter,
+                           QPainterPath, QPen, QPixmap)
 
 FG = QColor("#c8cbd2")
 DIM = QColor("#8b909c")
@@ -896,25 +896,79 @@ GLYPHS = {
 }
 
 
+class _GlyphEngine(QIconEngine):
+    """Draws a glyph afresh at exactly the size and pixel ratio asked for.
+
+    The glyphs are vectors drawn in a 20-point box, and the ribbon shows
+    them at 16 and 24 px: a pixmap made at 20 and resampled to either size
+    smears every one-pixel line — the icons looked fuzzy. Drawing the
+    vectors at the target size keeps them sharp, and a cache per size
+    keeps it cheap."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self._name = name
+        self._cache: dict = {}
+
+    def _render(self, width: int, height: int, scale: float, mode):
+        disabled = mode == QIcon.Disabled
+        key = (width, height, round(scale, 3), disabled)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        painter_fn, color = GLYPHS[self._name]
+        pixmap = QPixmap(max(1, round(width * scale)),
+                         max(1, round(height * scale)))
+        pixmap.fill(Qt.transparent)
+        pixmap.setDevicePixelRatio(scale)
+        p = QPainter(pixmap)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        if disabled:
+            # a greyed-out command should look greyed out, not merely
+            # refuse the click
+            p.setOpacity(0.38)
+        # the glyphs sit on a 20-point grid (lines on half points): drawn
+        # at a whole multiple of 20 device pixels they land on pixels and
+        # stay sharp, so a 24 px slot gets the 20 px glyph centred rather
+        # than a blurred 1.2x one; below 20 there is no whole multiple and
+        # the glyph is scaled down as well as it can be
+        device = min(width, height) * scale
+        whole = int(device // _PT)
+        drawn = whole * _PT if whole >= 1 else device
+        offset_x = round((width * scale - drawn) / 2) / scale
+        offset_y = round((height * scale - drawn) / 2) / scale
+        p.translate(offset_x, offset_y)
+        p.scale(drawn / scale / _PT, drawn / scale / _PT)
+        painter_fn(p, QRectF(0, 0, _PT, _PT), color)
+        p.end()
+        self._cache[key] = pixmap
+        return pixmap
+
+    def scaledPixmap(self, size, mode, state, scale):
+        return self._render(size.width(), size.height(), scale, mode)
+
+    def pixmap(self, size, mode, state):
+        return self._render(size.width(), size.height(), 1.0, mode)
+
+    def paint(self, painter, rect, mode, state):
+        device = painter.device()
+        scale = device.devicePixelRatioF() if device is not None else 1.0
+        painter.drawPixmap(rect, self._render(rect.width(), rect.height(),
+                                              scale, mode))
+
+    def actualSize(self, size, mode, state):
+        return size
+
+    def clone(self):
+        return _GlyphEngine(self._name)
+
+
 @lru_cache(maxsize=None)
 def sheet_icon(name: str) -> QIcon:
-    """The glyph called `name` as a device-pixel-ratio-aware icon, with a
-    dimmed rendering for the disabled state (a greyed-out command should
-    look greyed out, not merely refuse the click)."""
-    painter_fn, color = GLYPHS[name]
-    icon = QIcon()
-    for mode, tint in ((QIcon.Normal, None), (QIcon.Disabled, 0.38)):
-        for ratio in (1, 2, 3):
-            pixels = int(_PT * ratio)
-            pixmap = QPixmap(pixels, pixels)
-            pixmap.fill(Qt.transparent)
-            pixmap.setDevicePixelRatio(ratio)
-            p = QPainter(pixmap)
-            p.setRenderHint(QPainter.Antialiasing, True)
-            p.setRenderHint(QPainter.TextAntialiasing, True)
-            if tint is not None:
-                p.setOpacity(tint)
-            painter_fn(p, QRectF(0, 0, _PT, _PT), color)
-            p.end()
-            icon.addPixmap(pixmap, mode)
-    return icon
+    """The glyph called `name` as an icon drawn sharp at whatever size and
+    device pixel ratio it is shown at (see _GlyphEngine), with a dimmed
+    rendering for the disabled state."""
+    if name not in GLYPHS:
+        raise KeyError(name)
+    return QIcon(_GlyphEngine(name))

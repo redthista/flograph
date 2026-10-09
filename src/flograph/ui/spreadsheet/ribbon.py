@@ -114,10 +114,10 @@ class RibbonButton(QToolButton):
             self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         elif size == "small":
             self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.setIconSize(QSize(16, 16))
+            self.setIconSize(QSize(20, 20))
         else:
             self.setToolButtonStyle(Qt.ToolButtonIconOnly)
-            self.setIconSize(QSize(16, 16))
+            self.setIconSize(QSize(20, 20))
         self.setCheckable(action.isCheckable() and menu is None)
         action.changed.connect(self._sync)
         action.toggled.connect(self._toggled)
@@ -313,7 +313,7 @@ class SheetRibbon(QWidget):
         self._submit = RibbonButton(actions["submit"], "small",
                                     label="Submit")
         self._submit.setObjectName("ribbon_submit")
-        self._submit.setIconSize(QSize(14, 14))
+        self._submit.setIconSize(QSize(20, 20))
         tabs.addWidget(self._auto)
         if not compact:
             tabs.addWidget(self._submit)
