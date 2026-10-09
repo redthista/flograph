@@ -1697,6 +1697,12 @@ class SpreadsheetView(QTableView):
         return duplicate_rows(model.rowCount(), cols, model.value_text,
                               rows=shown)
 
+    def text_to_columns(self) -> None:
+        """Data ▸ Text to Columns…: split the current column."""
+        if self.editable and self.currentIndex().isValid():
+            from .split_dialog import text_to_columns
+            text_to_columns(self)
+
     def remove_duplicates(self) -> None:
         """Data ▸ Remove Duplicates…: the dialog."""
         if self.editable:

@@ -631,6 +631,44 @@ class SheetModel(QAbstractTableModel):
                 sheet.set_cell(r, c, parse_typed(value, formats[c]))
         self._structural(mutate, reset=False)
 
+    def split_column(self, col: int, parts: list[list[str]],
+                     names: list[str], keep: bool) -> None:
+        """Text to Columns as one undo step: `parts` (a row of parts per
+        row) land in new columns right of `col`, named `names`. Unless
+        `keep`, the first part replaces the column itself, which then
+        holds plain text (auto type, no format, list or rule)."""
+        if self._read_only or not parts or not names:
+            return
+        if not 0 <= col < self._sheet.n_cols:
+            return
+        width = len(names)
+
+        def mutate(sheet: Sheet) -> None:
+            first = col + 1 if keep else col
+            extra = width if keep else width - 1
+            for i in range(extra):
+                sheet.insert_column(col + 1 + i, names[i + (0 if keep
+                                                            else 1)])
+            if not keep:
+                spec = sheet.columns[col]
+                old = spec.name
+                if names[0] != old:
+                    # formulas follow the column, as on a rename
+                    sheet.rename_column(col, names[0])
+                    for row in sheet.rows:
+                        for c, text in enumerate(row):
+                            if is_formula(text):
+                                row[c] = rename_column_in_formulas(
+                                    text, old, names[0])
+                spec.type = "auto"
+                spec.format = spec.validation = None
+                spec.choices, spec.strict = [], False
+            for r, row in enumerate(parts[:sheet.n_rows]):
+                for i in range(width):
+                    sheet.set_cell(r, first + i,
+                                   row[i] if i < len(row) else "")
+        self._structural(mutate)
+
     # ------------------------------------------------------------ notes
 
     def note(self, row: int, col: int) -> str:

@@ -13,7 +13,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; Fill Down, Fill Right, Find & Select ▾, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
-| **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List** and **Remove Duplicates**; **Validation** and **Next Problem** |
+| **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
 | **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
@@ -271,6 +271,26 @@ decides, and so on down.
 - Blank cells always go last, whichever way round.
 - The dialog remembers its levels for the next time it opens on that grid,
   and the whole sort is one undo step — **Undo Sort** works too.
+
+### Splitting a column
+
+**Data ▸ Text to Columns…** (or right-click ▸ Text to Columns…) splits the
+current column into several, Excel's wizard in one dialog:
+
+- **At a character** — comma, semicolon, tab, space, or your own under
+  *Other* (a `|`, or ` - `). *Treat repeated separators as one* reads
+  `Ann  Lee` as two parts, not three; *Keep "quoted, text" together* keeps
+  `"Smith, Jr"` in one piece. The dialog picks the separator most rows
+  contain to start with.
+- **At fixed positions** — *Break after characters* `2, 6` turns
+  `GB-LON-0042` into `GB`, `-LON`, `-0042`.
+
+The new columns go to the right of the original. Unless *Keep the original
+column* is ticked, the first part replaces it (the column becomes plain
+text — its type, format, list and rule are cleared). *Names* takes the new
+columns' names, separated by commas; the preview shows the first rows as
+they will land. One undo step; formulas and notes move along with the
+columns, and a formula's `[@Name]` follows a renamed column.
 
 ### Removing duplicates
 

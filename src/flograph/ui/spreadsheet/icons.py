@@ -383,6 +383,18 @@ def _dedupe(p, r, c):
     p.drawLine(QPointF(4, 14.5), QPointF(16, 14.5))
 
 
+def _split(p, r, c):
+    """One cell of text, an arrow, two cells."""
+    p.setPen(_pen(c, 1.1))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2.5, 2.5, 15, 5.5), 1, 1)
+    _text(p, QRectF(2.5, 2.3, 15, 5.5), "a,b", c, 5)
+    _arrow(p, QPointF(10, 8.5), QPointF(10, 12), BLUE, 1.2, 1.8)
+    p.setPen(_pen(BLUE, 1.1))
+    p.drawRoundedRect(QRectF(2.5, 12.5, 7, 5.5), 1, 1)
+    p.drawRoundedRect(QRectF(10.5, 12.5, 7, 5.5), 1, 1)
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -760,7 +772,7 @@ GLYPHS = {
     "paste": (_paste, FG), "paste_values": (_paste_values, FG),
     "paste_special": (_paste_special, FG),
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
-    "dedupe": (_dedupe, FG),
+    "dedupe": (_dedupe, FG), "split": (_split, FG),
     "note": (_note, FG), "note_delete": (_note_delete, FG),
     "note_next": (_note_next, FG), "select_notes": (_note, FG),
     "select_formulas": (_select_formulas, FG),

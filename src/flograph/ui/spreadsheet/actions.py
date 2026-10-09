@@ -508,6 +508,13 @@ class SheetActions(QObject):
                   "this cell.",
                   v.filter_by_current_value,
                   enabled=lambda: v.currentIndex().isValid())
+        self._add("split", "Text to Columns…", "split",
+                  "Split the current column into several — at a comma, a "
+                  "space or any character, or at fixed positions. A "
+                  "preview shows the first rows before anything changes.",
+                  v.text_to_columns,
+                  enabled=lambda: edit() and v.currentIndex().isValid(),
+                  short="Split")
         self._add("dedupe", "Remove Duplicates…", "dedupe",
                   "Remove rows that repeat an earlier row on the columns "
                   "you tick — the first of each set stays. Shows how many "

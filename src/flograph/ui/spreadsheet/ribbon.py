@@ -424,7 +424,7 @@ class SheetRibbon(QWidget):
                         m("total_menu", "total_menu", "Total")]),
             ("Column", [m("type_menu", "col_type", "Type"),
                         ("dropdown", "Dropdown List"),
-                        ("rename", "Rename"),
+                        ("split", "Text to Columns"),
                         ("dedupe", "Remove Duplicates")]),
             ("Check", [("validation", "Validation"),
                        ("next_problem", "Next Problem")]),
