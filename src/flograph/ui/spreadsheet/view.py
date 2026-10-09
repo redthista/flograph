@@ -215,6 +215,7 @@ class SpreadsheetView(QTableView):
     _show_formulas = False
     _filters: dict = {}
     _filtered_rows: frozenset = frozenset()
+    _folded_rows: frozenset = frozenset()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -230,6 +231,8 @@ class SpreadsheetView(QTableView):
         header.setHighlightSections(True)
         self.setHorizontalHeader(header)
         header.menu_button_clicked.connect(self.open_column_filter)
+        from .outline_header import OutlineHeader
+        self.setVerticalHeader(OutlineHeader(self))
         self.verticalHeader().setSectionsClickable(True)
         self.verticalHeader().setHighlightSections(True)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -310,6 +313,8 @@ class SpreadsheetView(QTableView):
         if old is not None:
             old.modelAboutToBeReset.disconnect(self._before_reset)
             old.modelReset.disconnect(self._after_reset)
+            old.outline_changed.disconnect(self._apply_outline)
+            old.dataChanged.disconnect(self._apply_outline)
             old.dataChanged.disconnect(self._reapply_filter)
             old.freeze_changed.disconnect(self._apply_freeze)
             old.edit_refused.disconnect(self._edit_refused)
@@ -324,10 +329,14 @@ class SpreadsheetView(QTableView):
             model.sheet_edited.connect(self._forget_sort)
             model.modelAboutToBeReset.connect(self._before_reset)
             model.modelReset.connect(self._after_reset)
+            model.outline_changed.connect(self._apply_outline)
+            model.dataChanged.connect(self._apply_outline)
             model.dataChanged.connect(self._reapply_filter)
             model.freeze_changed.connect(self._apply_freeze)
             model.edit_refused.connect(self._edit_refused)
             self._sync_column_widths()
+            self._folded_rows = frozenset()
+            self._apply_outline()
             self._apply_freeze()
         if isinstance(model, SheetModel) and getattr(self, "_fill", None):
             model.dataChanged.connect(self._fill.refresh)
@@ -1772,6 +1781,88 @@ class SpreadsheetView(QTableView):
                                       title)
         return color.name() if color.isValid() else None
 
+    # ----------------------------------------------------- grouped rows
+
+    def group_selected_rows(self) -> None:
+        """Rows & Columns ▸ Group: the selected rows become a group."""
+        model = self.sheet_model()
+        rows = self.target_rows()
+        if model is None or not rows or not self.editable:
+            return
+        why = model.group_rows(min(rows), max(rows))
+        if why:
+            self.say(why)
+        else:
+            n = max(rows) - min(rows) + 1
+            self.say(f"Grouped {n} row{'s' if n != 1 else ''} — click − in "
+                     "the margin to fold them away.")
+
+    def ungroup_selected_rows(self) -> None:
+        """Rows & Columns ▸ Ungroup: one level off the selected rows."""
+        model = self.sheet_model()
+        rows = self.target_rows()
+        if model is None or not rows or not self.editable:
+            return
+        if not model.ungroup_rows(min(rows), max(rows)):
+            self.say("Those rows aren't in a group.")
+
+    def _detail_group(self):
+        from flograph.core.sheet.outline import innermost_at
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if model is None or not current.isValid():
+            return None
+        return innermost_at(model.groups, current.row(), model.rowCount())
+
+    def set_detail(self, show: bool) -> None:
+        """Hide Detail / Show Detail: fold or unfold the group the current
+        row is in (or whose button it is on)."""
+        model = self.sheet_model()
+        if model is None:
+            return
+        if show:
+            # unfold the deepest folded group whose button is here
+            from flograph.core.sheet.outline import button_row, level_of
+            row = self.currentIndex().row()
+            folded = [g for g in model.groups if g.collapsed
+                      and button_row(g, model.rowCount()) == row]
+            if folded:
+                model.set_folded([max(folded, key=lambda g: level_of(
+                    model.groups, g))], False)
+                return
+        group = self._detail_group()
+        if group is not None:
+            model.set_folded([group], not show)
+
+    def toggle_group(self, group) -> None:
+        model = self.sheet_model()
+        if model is not None:
+            model.set_folded([group], not group.collapsed)
+
+    def fold_all(self, folded: bool) -> None:
+        """Collapse All / Expand All."""
+        model = self.sheet_model()
+        if model is not None:
+            model.set_folded(model.groups, folded)
+
+    def fold_level(self, level: int) -> None:
+        """The 1 2 3 buttons: show the outline down to `level` — every
+        group deeper than it folded, the rest open."""
+        from flograph.core.sheet.outline import level_of
+        model = self.sheet_model()
+        if model is None:
+            return
+        groups = model.groups
+        model.set_folded([g for g in groups if level_of(groups, g) >= level],
+                         True)
+        model.set_folded([g for g in groups if level_of(groups, g) < level],
+                         False)
+
+    def clear_outline(self) -> None:
+        model = self.sheet_model()
+        if model is not None and self.editable:
+            model.clear_outline()
+
     def duplicate_rows(self, cols) -> list[int]:
         """Rows shown that repeat an earlier shown row on `cols`."""
         from flograph.core.sheet.dedupe import duplicate_rows
@@ -2023,9 +2114,36 @@ class SpreadsheetView(QTableView):
             {model.value_text(current.row(), current.column())})
 
     def row_filtered(self, row: int) -> bool:
-        """Is this row hidden by a filter? (Not the same as isRowHidden: a
-        frozen row is hidden in the grid because a pane shows it.)"""
-        return row in self._filtered_rows
+        """Is this row out of sight — hidden by a filter, or inside a
+        folded group? Commands that leave hidden rows alone ask this. (Not
+        the same as isRowHidden: a frozen row is hidden in the grid because
+        a pane shows it.)"""
+        return row in self._filtered_rows or row in self._folded_rows
+
+    def _apply_outline(self, *_args) -> None:
+        """Hide the rows of folded groups and size the outline gutter."""
+        from flograph.core.sheet.outline import hidden_rows
+        model = self.sheet_model()
+        if model is None:
+            return
+        folded = hidden_rows(model.groups)
+        header = self.verticalHeader()
+        if hasattr(header, "outline_changed"):
+            header.outline_changed()
+        if folded == self._folded_rows:
+            return
+        self._folded_rows = frozenset(folded)
+        current = self.currentIndex()
+        if current.isValid() and current.row() in folded:
+            # the current cell was folded away: onto the group's button row
+            from flograph.core.sheet.outline import button_row, innermost_at
+            group = max((g for g in model.groups if g.collapsed
+                         and g.covers(current.row())),
+                        key=lambda g: g.end - g.start)
+            row = button_row(group, model.rowCount())
+            if 0 <= row < model.rowCount():
+                self.setCurrentIndex(model.index(row, current.column()))
+        self._sync_hidden_rows()
 
     def _reapply_filter(self, *_args) -> None:
         model = self.sheet_model()
@@ -2039,9 +2157,17 @@ class SpreadsheetView(QTableView):
             row for row in range(model.rowCount())
             if any(model.value_text(row, col) not in allowed
                    for col, allowed in self._filters.items())}
+        self._sync_hidden_rows()
+
+    def _sync_hidden_rows(self) -> None:
+        """Show and hide rows for the filter, the folded groups and the
+        frozen panes together."""
+        model = self.sheet_model()
+        if model is None:
+            return
         frozen_rows = self._frozen.rows if self._frozen is not None else 0
         for row in range(model.rowCount()):
-            hide = row in self._filtered_rows or row < frozen_rows
+            hide = self.row_filtered(row) or row < frozen_rows
             if self.isRowHidden(row) != hide:
                 self.setRowHidden(row, hide)
         self.horizontalHeader().viewport().update()
@@ -2060,7 +2186,8 @@ class SpreadsheetView(QTableView):
         model = self.sheet_model()
         if model is None:
             return 0
-        return model.rowCount() - len(self._filtered_rows)
+        return sum(1 for row in range(model.rowCount())
+                   if not self.row_filtered(row))
 
     # ------------------------------------------------------------- freeze
 
@@ -2141,6 +2268,8 @@ class SpreadsheetView(QTableView):
     def _after_reset(self) -> None:
         self._restore_place()
         self._reapply_filter()
+        self._folded_rows = frozenset()
+        self._apply_outline()
         self._apply_freeze()
 
     @property

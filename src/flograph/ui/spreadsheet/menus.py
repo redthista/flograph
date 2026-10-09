@@ -194,6 +194,12 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
                  "clear_formats"):
         font.addAction(a[name])
 
+    if view.sheet_model() is not None and view.sheet_model().groups:
+        outline = submenu(menu, "Outline", sheet_icon("group"))
+        for name in ("group", "ungroup", "hide_detail", "show_detail",
+                     "collapse_all", "expand_all"):
+            outline.addAction(a[name])
+
     heading(menu, "Note")
     current = view.currentIndex()
     model = view.sheet_model()
@@ -255,6 +261,13 @@ def row_menu(view, widget: QWidget, pos: QPoint) -> None:
     heading(menu, "Clipboard")
     for name in ("cut", "copy", "paste"):
         menu.addAction(a[name])
+    heading(menu, "Outline")
+    menu.addAction(a["group"])
+    model = view.sheet_model()
+    if model is not None and model.groups:
+        for name in ("ungroup", "hide_detail", "show_detail",
+                     "clear_outline"):
+            menu.addAction(a[name])
     heading(menu, "More")
     menu.addAction(a["header"])
     menu.addAction(a["freeze_row"])

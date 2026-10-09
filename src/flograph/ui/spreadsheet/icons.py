@@ -13,8 +13,8 @@ from __future__ import annotations
 from functools import lru_cache
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (QColor, QFont, QIcon, QIconEngine, QPainter,
-                           QPainterPath, QPen, QPixmap)
+from PySide6.QtGui import (QColor, QFont, QIcon, QPainter, QPainterPath, QPen,
+                           QPixmap)
 
 FG = QColor("#c8cbd2")
 DIM = QColor("#8b909c")
@@ -474,6 +474,58 @@ def _clear_formats(p, r, c):
     _badge(p, _BADGE, "x", RED)
 
 
+def _outline(p, c, sign, *, lines=True, color=None):
+    """Rows with an outline bracket and a −/+ box."""
+    if lines:
+        p.setPen(_pen(DIM, 1.2))
+        for y in (4.5, 8.5, 12.5):
+            p.drawLine(QPointF(9, y), QPointF(17.5, y))
+    p.setPen(_pen(color or BLUE, 1.2))
+    p.drawLine(QPointF(4.5, 3.5), QPointF(4.5, 12))
+    p.drawLine(QPointF(4.5, 3.5), QPointF(6.5, 3.5))
+    box = QRectF(1.5, 13, 6, 5.5)
+    p.setBrush(QColor("#2a2c33"))
+    p.drawRect(box)
+    p.drawLine(QPointF(3, 15.75), QPointF(6, 15.75))
+    if sign == "+":
+        p.drawLine(QPointF(4.5, 14.25), QPointF(4.5, 17.25))
+
+
+def _group(p, r, c):
+    _outline(p, c, "-")
+    _badge(p, _BADGE, "+", GREEN)
+
+
+def _ungroup(p, r, c):
+    _outline(p, c, "-")
+    _badge(p, _BADGE, "-", RED)
+
+
+def _hide_detail(p, r, c):
+    _outline(p, c, "-")
+
+
+def _show_detail(p, r, c):
+    _outline(p, c, "+")
+
+
+def _collapse_all(p, r, c):
+    _outline(p, c, "+", lines=False)
+    p.setPen(_pen(DIM, 1.2))
+    p.drawLine(QPointF(9, 15.75), QPointF(17.5, 15.75))
+
+
+def _expand_all(p, r, c):
+    _outline(p, c, "-")
+    p.setPen(_pen(DIM, 1.2))
+    p.drawLine(QPointF(9, 16.5), QPointF(17.5, 16.5))
+
+
+def _clear_outline(p, r, c):
+    _outline(p, c, "-", color=DIM)
+    _badge(p, _BADGE, "x", RED)
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -852,6 +904,10 @@ GLYPHS = {
     "paste_special": (_paste_special, FG),
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
     "dedupe": (_dedupe, FG), "split": (_split, FG),
+    "group": (_group, FG), "ungroup": (_ungroup, FG),
+    "hide_detail": (_hide_detail, FG), "show_detail": (_show_detail, FG),
+    "collapse_all": (_collapse_all, FG), "expand_all": (_expand_all, FG),
+    "clear_outline": (_clear_outline, FG),
     "fmt_b": (_fmt_b, FG), "fmt_i": (_fmt_i, FG), "fmt_u": (_fmt_u, FG),
     "align_left": (_align_left, FG), "align_center": (_align_center, FG),
     "align_right": (_align_right, FG), "fill_color": (_fill_color, FG),
@@ -896,79 +952,56 @@ GLYPHS = {
 }
 
 
-class _GlyphEngine(QIconEngine):
-    """Draws a glyph afresh at exactly the size and pixel ratio asked for.
+#: logical sizes the grid shows its icons at (menus and small buttons 20,
+#: large buttons 24, the odd 16) and the screen scales they are drawn for
+_SIZES = (16, 20, 24)
+_RATIOS = (1.0, 1.25, 1.5, 2.0)
 
-    The glyphs are vectors drawn in a 20-point box, and the ribbon shows
-    them at 16 and 24 px: a pixmap made at 20 and resampled to either size
-    smears every one-pixel line — the icons looked fuzzy. Drawing the
-    vectors at the target size keeps them sharp, and a cache per size
-    keeps it cheap."""
 
-    def __init__(self, name: str) -> None:
-        super().__init__()
-        self._name = name
-        self._cache: dict = {}
+def _render(name: str, size: int, ratio: float, disabled: bool) -> QPixmap:
+    """The glyph drawn as vectors straight onto a pixmap of `size` logical
+    pixels at `ratio`.
 
-    def _render(self, width: int, height: int, scale: float, mode):
-        disabled = mode == QIcon.Disabled
-        key = (width, height, round(scale, 3), disabled)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
-        painter_fn, color = GLYPHS[self._name]
-        pixmap = QPixmap(max(1, round(width * scale)),
-                         max(1, round(height * scale)))
-        pixmap.fill(Qt.transparent)
-        pixmap.setDevicePixelRatio(scale)
-        p = QPainter(pixmap)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        p.setRenderHint(QPainter.TextAntialiasing, True)
-        if disabled:
-            # a greyed-out command should look greyed out, not merely
-            # refuse the click
-            p.setOpacity(0.38)
-        # the glyphs sit on a 20-point grid (lines on half points): drawn
-        # at a whole multiple of 20 device pixels they land on pixels and
-        # stay sharp, so a 24 px slot gets the 20 px glyph centred rather
-        # than a blurred 1.2x one; below 20 there is no whole multiple and
-        # the glyph is scaled down as well as it can be
-        device = min(width, height) * scale
-        whole = int(device // _PT)
-        drawn = whole * _PT if whole >= 1 else device
-        offset_x = round((width * scale - drawn) / 2) / scale
-        offset_y = round((height * scale - drawn) / 2) / scale
-        p.translate(offset_x, offset_y)
-        p.scale(drawn / scale / _PT, drawn / scale / _PT)
-        painter_fn(p, QRectF(0, 0, _PT, _PT), color)
-        p.end()
-        self._cache[key] = pixmap
-        return pixmap
-
-    def scaledPixmap(self, size, mode, state, scale):
-        return self._render(size.width(), size.height(), scale, mode)
-
-    def pixmap(self, size, mode, state):
-        return self._render(size.width(), size.height(), 1.0, mode)
-
-    def paint(self, painter, rect, mode, state):
-        device = painter.device()
-        scale = device.devicePixelRatioF() if device is not None else 1.0
-        painter.drawPixmap(rect, self._render(rect.width(), rect.height(),
-                                              scale, mode))
-
-    def actualSize(self, size, mode, state):
-        return size
-
-    def clone(self):
-        return _GlyphEngine(self._name)
+    The glyphs sit on a 20-point grid (lines on half points): drawn at a
+    whole multiple of 20 device pixels they land on pixels and stay sharp,
+    so a 24 px slot gets the 20 px glyph centred rather than a blurred 1.2x
+    one; below 20 there is no whole multiple and the glyph is scaled down
+    as well as it can be."""
+    painter_fn, color = GLYPHS[name]
+    device = max(1, round(size * ratio))
+    pixmap = QPixmap(device, device)
+    pixmap.fill(Qt.transparent)
+    pixmap.setDevicePixelRatio(ratio)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setRenderHint(QPainter.TextAntialiasing, True)
+    if disabled:
+        # a greyed-out command should look greyed out, not merely refuse
+        # the click
+        p.setOpacity(0.38)
+    whole = int(device // _PT)
+    drawn = whole * _PT if whole >= 1 else device
+    offset = round((device - drawn) / 2) / ratio
+    p.translate(offset, offset)
+    p.scale(drawn / ratio / _PT, drawn / ratio / _PT)
+    painter_fn(p, QRectF(0, 0, _PT, _PT), color)
+    p.end()
+    return pixmap
 
 
 @lru_cache(maxsize=None)
 def sheet_icon(name: str) -> QIcon:
-    """The glyph called `name` as an icon drawn sharp at whatever size and
-    device pixel ratio it is shown at (see _GlyphEngine), with a dimmed
-    rendering for the disabled state."""
+    """The glyph called `name` as an icon holding a pixmap drawn at every
+    size and screen scale it is shown at, so Qt picks an exact one and never
+    resamples (a 20 px drawing shrunk to 16 or stretched to 24 smeared every
+    line). Plain pixmaps, not a Python QIconEngine: Qt clones an icon's
+    engine when a copy is changed, and a clone made in Python is freed
+    under it."""
     if name not in GLYPHS:
         raise KeyError(name)
-    return QIcon(_GlyphEngine(name))
+    icon = QIcon()
+    for mode, disabled in ((QIcon.Normal, False), (QIcon.Disabled, True)):
+        for size in _SIZES:
+            for ratio in _RATIOS:
+                icon.addPixmap(_render(name, size, ratio, disabled), mode)
+    return icon

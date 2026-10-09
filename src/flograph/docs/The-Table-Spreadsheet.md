@@ -12,7 +12,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | Tab | What is on it |
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, alignment, Clear Formats); Fill Down, Fill Right, Find & Select ▾, Replace |
-| **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename |
+| **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
@@ -93,6 +93,30 @@ Drag past the last row or column and the table grows to take the fill. Near
 the edge of the grid it scrolls. **Esc** cancels a fill mid-drag. With panes
 frozen, the outline and the handle work on the frozen cells too: fill down
 from a frozen column, or across out of it into the rest of the table.
+
+## Grouped rows
+
+Select some rows and click **Rows & Columns ▸ Group** (or right-click a row
+number ▸ Group Rows) to group them — the detail rows under a summary, the
+way Excel's outline works. A margin opens left of the row numbers with a
+bracket down the group and a **−** on the row just after it (just before,
+for a group at the very end). Click the − — or anywhere on the bracket — to
+fold the rows away; the button turns to **+** to bring them back. Groups go
+inside groups, up to seven deep, each in its own column of the margin;
+they can't partly overlap.
+
+**Hide Detail** / **Show Detail** (right-click) fold or unfold the group
+the current row is in; **Collapse All** / **Expand All** do every group;
+**Ungroup** takes the selected rows out of one level; **Clear Outline**
+removes every group, leaving the rows.
+
+Groups are saved with the table and grow or shrink as rows are inserted
+or deleted inside them. Folding is a way of looking, like a filter: it is
+not an edit, so it re-runs nothing and leaves nothing on the undo list,
+and a table opens with its groups unfolded. Rows folded away are treated
+like rows a filter hides — Remove Duplicates, Go To Special, Ctrl+Enter
+and the Total Row leave them out — and, like filtered rows, they still go
+down the flow.
 
 ## Dragging rows and columns
 

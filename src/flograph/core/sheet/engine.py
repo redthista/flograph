@@ -158,6 +158,11 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
     merged.freeze_rows, merged.freeze_cols = (stored.freeze_rows,
                                               stored.freeze_cols)
     merged.show_totals = stored.show_totals
+    if stored.groups:
+        from .outline import clamp
+        merged.groups = clamp(
+            [type(g)(g.start, g.end, g.collapsed) for g in stored.groups],
+            merged.n_rows)
 
     base_names = {c.name for c in merged.columns}
     n_rows = merged.n_rows

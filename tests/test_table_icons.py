@@ -39,3 +39,16 @@ def test_disabled_is_dimmer(qapp):
         return sum(image.pixelColor(x, y).alpha()
                    for x in range(20) for y in range(20))
     assert ink(disabled) < ink(normal) * 0.5
+
+
+def test_a_changed_copy_does_not_crash(qapp):
+    """Qt clones an icon's engine when a copy of it is changed; a
+    Python-made engine clone was freed under Qt (a segfault)."""
+    import gc
+
+    from PySide6.QtGui import QIcon, QPixmap
+    for _ in range(50):
+        icon = QIcon(sheet_icon("cut"))
+        icon.addPixmap(QPixmap(8, 8))
+        gc.collect()
+        assert not icon.pixmap(QSize(20, 20)).isNull()

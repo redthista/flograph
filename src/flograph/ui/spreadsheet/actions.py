@@ -583,6 +583,41 @@ class SheetActions(QObject):
                   v.text_to_columns,
                   enabled=lambda: edit() and v.currentIndex().isValid(),
                   short="Split")
+        def has_groups() -> bool:
+            model = v.sheet_model()
+            return bool(model is not None and model.groups)
+
+        self._add("group", "Group Rows", "group",
+                  "Group the selected rows so they can be folded away under "
+                  "a − button in the margin — detail rows under a summary. "
+                  "Groups can sit inside groups.",
+                  v.group_selected_rows,
+                  enabled=lambda: edit() and bool(v.target_rows()),
+                  short="Group")
+        self._add("ungroup", "Ungroup Rows", "ungroup",
+                  "Take the selected rows out of their group (one level at "
+                  "a time).",
+                  v.ungroup_selected_rows,
+                  enabled=lambda: edit() and has_groups(), short="Ungroup")
+        self._add("hide_detail", "Hide Detail", "hide_detail",
+                  "Fold away the group the current row is in.",
+                  lambda: v.set_detail(False), enabled=has_groups,
+                  short="Hide")
+        self._add("show_detail", "Show Detail", "show_detail",
+                  "Unfold the group whose + is on the current row.",
+                  lambda: v.set_detail(True), enabled=has_groups,
+                  short="Show")
+        self._add("collapse_all", "Collapse All", "collapse_all",
+                  "Fold every group, leaving the summary rows.",
+                  lambda: v.fold_all(True), enabled=has_groups,
+                  short="Collapse")
+        self._add("expand_all", "Expand All", "expand_all",
+                  "Unfold every group.", lambda: v.fold_all(False),
+                  enabled=has_groups, short="Expand")
+        self._add("clear_outline", "Clear Outline", "clear_outline",
+                  "Remove every group. The rows themselves stay.",
+                  v.clear_outline, enabled=lambda: edit() and has_groups(),
+                  short="Clear")
         self._add("dedupe", "Remove Duplicates…", "dedupe",
                   "Remove rows that repeat an earlier row on the columns "
                   "you tick — the first of each set stays. Shows how many "

@@ -419,6 +419,9 @@ class SheetRibbon(QWidget):
                          ("col_move_right", "Move Right"),
                          ("select_col", "Select Columns")]),
             ("Names", [("header", "Row → Names"), ("rename", "Rename")]),
+            ("Outline", [("group", "Group"), ("ungroup", "Ungroup"),
+                         ("collapse_all", "Collapse All"),
+                         ("expand_all", "Expand All")]),
         ]
         data = [
             ("Sort & Filter", [("filter", "Filter"),

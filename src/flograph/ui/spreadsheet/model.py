@@ -113,6 +113,8 @@ class SheetModel(QAbstractTableModel):
     totals_changed = Signal()     # the Total Row was turned on/off or changed
     # a typed value a column's Stop rule turned away: row, col, text, why
     edit_refused = Signal(int, int, str, str)
+    # a group was folded or unfolded: view state, not an edit
+    outline_changed = Signal()
 
     def __init__(self, sheet=None, parent=None) -> None:
         super().__init__(parent)
@@ -387,6 +389,12 @@ class SheetModel(QAbstractTableModel):
         parsed = parse_sheet(sheet)
         if sheet_to_dict(parsed) == sheet_to_dict(self._sheet):
             return
+        # folds are view state: a group over the same rows stays folded
+        # through an undo or a linked refresh
+        folded = {(g.start, g.end) for g in self._sheet.groups
+                  if g.collapsed}
+        for group in parsed.groups:
+            group.collapsed = (group.start, group.end) in folded
         froze = ((parsed.freeze_rows, parsed.freeze_cols)
                  != (self._sheet.freeze_rows, self._sheet.freeze_cols))
         in_place = self._same_layout(parsed)
@@ -733,6 +741,63 @@ class SheetModel(QAbstractTableModel):
                     sheet.set_cell(r, first + i,
                                    row[i] if i < len(row) else "")
         self._structural(mutate)
+
+    # ---------------------------------------------------- grouped rows
+
+    @property
+    def groups(self) -> list:
+        return self._sheet.groups
+
+    def group_rows(self, start: int, end: int):
+        """Data ▸ Group: rows start..end become a group, one undo step.
+        Returns why not, or None."""
+        from flograph.core.sheet.outline import add_group
+        if self._read_only:
+            return "The table is read-only."
+        added = add_group(self._sheet.groups, start, end,
+                          self._sheet.n_rows)
+        if isinstance(added, str):
+            return added
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.groups = added
+        self._structural(mutate, reset=False)
+        self.outline_changed.emit()
+        return None
+
+    def ungroup_rows(self, start: int, end: int) -> bool:
+        from flograph.core.sheet.outline import remove_group
+        if self._read_only:
+            return False
+        kept = remove_group(self._sheet.groups, start, end)
+        if len(kept) == len(self._sheet.groups):
+            return False
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.groups = kept
+        self._structural(mutate, reset=False)
+        self.outline_changed.emit()
+        return True
+
+    def clear_outline(self) -> None:
+        if self._read_only or not self._sheet.groups:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.groups = []
+        self._structural(mutate, reset=False)
+        self.outline_changed.emit()
+
+    def set_folded(self, groups, folded: bool) -> None:
+        """Fold or unfold groups. View state — not an edit: nothing goes
+        out of date and nothing lands on the undo stack."""
+        changed = False
+        for group in groups:
+            if group.collapsed != folded:
+                group.collapsed = folded
+                changed = True
+        if changed:
+            self.outline_changed.emit()
 
     # ----------------------------------------------------- cell formats
 

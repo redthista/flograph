@@ -384,7 +384,10 @@ class HeaderMove(QObject):
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             section = self._header.logicalIndexAt(self._pos(event))
             picked = self._selected()
+            in_gutter = self._pos(event).x() < getattr(
+                self._header, "gutter_width", lambda: 0)()
             if (view.editable and section >= 0 and section in picked
+                    and not in_gutter
                     and not self._on_button(self._pos(event))
                     and not event.modifiers() & (Qt.ShiftModifier
                                                  | Qt.ControlModifier)):

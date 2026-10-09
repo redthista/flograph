@@ -200,6 +200,9 @@ class Sheet:
     # True, "fill": "#fde68a", …}. Follows its cell like a note; display
     # only.
     styles: dict = field(default_factory=dict)
+    # Grouped rows (core/sheet/outline.py): Excel's outline. The groups
+    # are saved; whether each is folded is view state and is not.
+    groups: list = field(default_factory=list)
 
     @property
     def n_rows(self) -> int:
@@ -289,6 +292,9 @@ class Sheet:
         if inside:
             self._shift_formulas("row", at, count)
             self._remap_notes(lambda r, c: (r + count if r >= at else r, c))
+            if self.groups:
+                from .outline import after_insert
+                self.groups = after_insert(self.groups, at, count)
 
     def insert_column(self, at: int, name: Optional[str] = None,
                       col_type: str = "auto") -> str:
@@ -313,7 +319,13 @@ class Sheet:
                 self._shift_formulas("row", i, -1)
                 self._remap_notes(lambda r, c, i=i: None if r == i else (
                     r - 1 if r > i else r, c))
+                if self.groups:
+                    from .outline import after_remove
+                    self.groups = after_remove(self.groups, i)
         self.freeze_rows = min(self.freeze_rows, max(self.n_rows - 1, 0))
+        if self.groups:
+            from .outline import clamp
+            self.groups = clamp(self.groups, self.n_rows)
 
     def remove_columns(self, indices) -> None:
         for i in sorted(set(indices), reverse=True):
@@ -474,6 +486,8 @@ class Sheet:
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
             show_totals=self.show_totals, notes=dict(self.notes),
             styles={k: dict(v) for k, v in self.styles.items()},
+            groups=[type(g)(g.start, g.end, g.collapsed)
+                    for g in self.groups],
         )
 
 
@@ -483,6 +497,11 @@ def _total_word(word) -> Optional[str]:
         return None
     from flograph.core.table_totals import canonical_agg
     return canonical_agg(word)
+
+
+def _parse_groups(raw, n_rows: int) -> list:
+    from .outline import parse
+    return parse(raw, n_rows)
 
 
 def parse_sheet(raw) -> Sheet:
@@ -574,7 +593,8 @@ def parse_sheet(raw) -> Sheet:
                  freeze_rows=_count("rows", max(len(rows) - 1, 0)),
                  freeze_cols=_count("cols", max(len(columns) - 1, 0)),
                  show_totals=bool(parsed.get("totals")), notes=notes,
-                 styles=styles)
+                 styles=styles,
+                 groups=_parse_groups(parsed.get("groups"), len(rows)))
 
 
 def sheet_to_dict(sheet: Sheet) -> dict:
@@ -610,6 +630,10 @@ def sheet_to_dict(sheet: Sheet) -> dict:
     if sheet.styles:
         out["styles"] = [[r, c, dict(fmt)]
                          for (r, c), fmt in sorted(sheet.styles.items())]
+    if sheet.groups:
+        # the ranges only: folding is view state, like a filter
+        from .outline import to_list
+        out["groups"] = to_list(sheet.groups)
     return out
 
 
