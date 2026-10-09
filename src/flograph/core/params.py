@@ -54,6 +54,38 @@ def _insert_columns_mode(raw: Any, name: str, where: str) -> str:
         f"(valid: True, {valid})")
 
 
+def _without(value: Any, paths) -> Any:
+    """A JSON value (text or parsed) with the given dotted paths removed;
+    `*` steps into every item of a list. None when it isn't JSON."""
+    import json
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    else:
+        value = json.loads(json.dumps(value))     # a deep copy
+    if not isinstance(value, dict):
+        return None
+
+    def drop(node, parts):
+        if not parts:
+            return
+        head, rest = parts[0], parts[1:]
+        if head == "*" and isinstance(node, list):
+            for item in node:
+                drop(item, rest)
+        elif isinstance(node, dict) and head in node:
+            if rest:
+                drop(node[head], rest)
+            else:
+                del node[head]
+
+    for path in paths:
+        drop(value, path.split("."))
+    return value
+
+
 @dataclass
 class ParamSpec:
     name: str
@@ -104,6 +136,12 @@ class ParamSpec:
     # things like how a list of charts is arranged — re-running a heavy
     # node because someone asked for two columns would be absurd.
     cosmetic: bool = False
+    # A JSON param that is partly presentation: these paths inside it
+    # ("freeze", "columns.*.width") cannot change what run() produces, so
+    # an edit that changes only them leaves the node clean, like a
+    # cosmetic param. The Table's data holds its sheet *and* how the sheet
+    # looks; freezing a pane or hiding a column should not re-run a flow.
+    presentation: tuple = ()
     # text only: offer a "build a rule…" button beside the box that opens
     # the conditional-formatting wizard and appends the line it builds.
     rule_wizard: bool = False
@@ -177,6 +215,7 @@ class ParamSpec:
             insert_columns=_insert_columns_mode(
                 d.get("insert_columns"), name, where),
             cosmetic=cosmetic,
+            presentation=tuple(str(p) for p in d.get("presentation") or ()),
             rule_wizard=bool(d.get("rule_wizard", False)),
             wizard=str(d.get("wizard") or
                        ("table" if d.get("rule_wizard") else "")),
@@ -184,6 +223,14 @@ class ParamSpec:
             section=str(d.get("section") or "").strip(),
             folded=bool(d.get("folded", False)),
         )
+
+    def only_presentation_changed(self, old: Any, new: Any) -> bool:
+        """Do `old` and `new` differ only in the `presentation` paths?"""
+        if not self.presentation or old == new:
+            return bool(self.presentation) and old == new
+        a = _without(old, self.presentation)
+        b = _without(new, self.presentation)
+        return a is not None and a == b
 
     def visible_for(self, values: dict[str, Any]) -> bool:
         """Should this param have a row, given the node's current params?

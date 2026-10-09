@@ -179,6 +179,9 @@ class ColumnSpec:
     # keep, whether it may be blank, a hint and an error text. Flags or
     # turns away; never changes a value or what flows on.
     validation: Optional[dict] = None
+    # Hidden by the user (right-click ▸ Hide): still there, still sent on,
+    # just out of sight in the grid.
+    hidden: bool = False
 
 
 @dataclass
@@ -203,6 +206,9 @@ class Sheet:
     # Grouped rows (core/sheet/outline.py): Excel's outline. The groups
     # are saved; whether each is folded is view state and is not.
     groups: list = field(default_factory=list)
+    # Rows hidden by the user (right-click ▸ Hide). Like a hidden column,
+    # only out of sight: the rows still go down the flow.
+    hidden_rows: set = field(default_factory=set)
 
     @property
     def n_rows(self) -> int:
@@ -234,9 +240,17 @@ class Sheet:
         else:
             self.notes.pop((row, col), None)
 
-    def _remap_notes(self, where) -> None:
+    def _remap_notes(self, where, rows_move: bool = True) -> None:
         """Move every note and cell format to `where(row, col)`; None
-        drops it."""
+        drops it. A change that moves rows (`rows_move`) carries the hidden
+        rows along too."""
+        if rows_move and self.hidden_rows:
+            moved_rows = set()
+            for r in self.hidden_rows:
+                spot = where(r, -1)
+                if spot is not None:
+                    moved_rows.add(spot[0])
+            self.hidden_rows = moved_rows
         for attr in ("notes", "styles"):
             extras = getattr(self, attr)
             if not extras:
@@ -262,7 +276,7 @@ class Sheet:
     def _notes_follow_rows(self, before: list) -> None:
         """After the row lists were reordered (a sort, a move), send each
         note to wherever its row went — rows are the same list objects."""
-        if not (self.notes or self.styles):
+        if not (self.notes or self.styles or self.hidden_rows):
             return
         place = {id(row): i for i, row in enumerate(self.rows)}
 
@@ -307,7 +321,8 @@ class Sheet:
             row.insert(at, "")
         if inside:
             self._shift_formulas("col", at, 1)
-            self._remap_notes(lambda r, c: (r, c + 1 if c >= at else c))
+            self._remap_notes(lambda r, c: (r, c + 1 if c >= at else c),
+                              rows_move=False)
         return name
 
     def remove_rows(self, indices) -> None:
@@ -335,7 +350,7 @@ class Sheet:
                     del row[i]
                 self._shift_formulas("col", i, -1)
                 self._remap_notes(lambda r, c, i=i: None if c == i else (
-                    r, c - 1 if c > i else c))
+                    r, c - 1 if c > i else c), rows_move=False)
         self.freeze_cols = min(self.freeze_cols, max(self.n_cols - 1, 0))
 
     def move_rows(self, indices, to: int) -> None:
@@ -367,7 +382,7 @@ class Sheet:
         self.rows = [[row[i] for i in order] for row in self.rows]
         new_col = {old: new for new, old in enumerate(order)}
         self._remap_notes(lambda r, c: (r, new_col[c]) if c in new_col
-                          else None)
+                          else None, rows_move=False)
 
     def rename_column(self, index: int, name: str) -> None:
         self.columns[index].name = str(name)
@@ -392,7 +407,7 @@ class Sheet:
         lists."""
         old = self.rows
         self.rows = [list(row) for row in rows]
-        if not (self.notes or self.styles):
+        if not (self.notes or self.styles or self.hidden_rows):
             return
         waiting: dict[tuple, list[int]] = {}
         for j, row in enumerate(self.rows):
@@ -480,7 +495,8 @@ class Sheet:
                                 c.strict,
                                 dict(c.format) if c.format else None,
                                 c.total,
-                                dict(c.validation) if c.validation else None)
+                                dict(c.validation) if c.validation else None,
+                                c.hidden)
                      for c in self.columns],
             rows=[list(row) for row in self.rows],
             freeze_rows=self.freeze_rows, freeze_cols=self.freeze_cols,
@@ -488,6 +504,7 @@ class Sheet:
             styles={k: dict(v) for k, v in self.styles.items()},
             groups=[type(g)(g.start, g.end, g.collapsed)
                     for g in self.groups],
+            hidden_rows=set(self.hidden_rows),
         )
 
 
@@ -497,6 +514,12 @@ def _total_word(word) -> Optional[str]:
         return None
     from flograph.core.table_totals import canonical_agg
     return canonical_agg(word)
+
+
+def _parse_hidden_rows(raw, n_rows: int) -> set:
+    rows = {r for r in raw if isinstance(r, int) and not isinstance(r, bool)
+            and 0 <= r < n_rows} if isinstance(raw, list) else set()
+    return rows if len(rows) < n_rows else set()    # one row stays in sight
 
 
 def _parse_groups(raw, n_rows: int) -> list:
@@ -539,7 +562,8 @@ def parse_sheet(raw) -> Sheet:
                 name, col_type if col_type in COLUMN_TYPES else "auto", width,
                 choices, bool(entry.get("strict")) and bool(choices),
                 clean(entry.get("format")), _total_word(entry.get("total")),
-                clean_rule(entry.get("validation"))))
+                clean_rule(entry.get("validation")),
+                entry.get("hidden") is True))
         else:
             columns.append(ColumnSpec(str(entry)))
 
@@ -594,7 +618,9 @@ def parse_sheet(raw) -> Sheet:
                  freeze_cols=_count("cols", max(len(columns) - 1, 0)),
                  show_totals=bool(parsed.get("totals")), notes=notes,
                  styles=styles,
-                 groups=_parse_groups(parsed.get("groups"), len(rows)))
+                 groups=_parse_groups(parsed.get("groups"), len(rows)),
+                 hidden_rows=_parse_hidden_rows(parsed.get("hidden_rows"),
+                                                len(rows)))
 
 
 def sheet_to_dict(sheet: Sheet) -> dict:
@@ -613,6 +639,8 @@ def sheet_to_dict(sheet: Sheet) -> dict:
             entry["total"] = col.total
         if col.validation:
             entry["validation"] = dict(col.validation)
+        if col.hidden:
+            entry["hidden"] = True
         columns.append(entry)
     out = {
         "version": 2,
@@ -630,6 +658,8 @@ def sheet_to_dict(sheet: Sheet) -> dict:
     if sheet.styles:
         out["styles"] = [[r, c, dict(fmt)]
                          for (r, c), fmt in sorted(sheet.styles.items())]
+    if sheet.hidden_rows:
+        out["hidden_rows"] = sorted(sheet.hidden_rows)
     if sheet.groups:
         # the ranges only: folding is view state, like a filter
         from .outline import to_list

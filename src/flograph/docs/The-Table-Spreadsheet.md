@@ -15,7 +15,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
-| **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor |
+| **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor; **Hide** ▾ (rows, columns, unhide) and Unhide All |
 | **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
 
 Hover any button for what it does, in a sentence, and its shortcut. Under the ribbon is the **formula bar**: the selected cell's name and what it holds as written (`=[@Units]*[@Price]`, not its result) — type there to edit it, or click **fx** for every function. **Open Full Editor…** is also on the right-click menu of the node and of every cell, row number and column header. On a
@@ -93,6 +93,34 @@ Drag past the last row or column and the table grows to take the fill. Near
 the edge of the grid it scrolls. **Esc** cancels a fill mid-drag. With panes
 frozen, the outline and the handle work on the frozen cells too: fill down
 from a frozen column, or across out of it into the rest of the table.
+
+## Hiding rows and columns
+
+Right-click a row number ▸ **Hide Rows** (**Ctrl+9**), or a column header ▸
+**Hide Columns** (**Ctrl+0**), to put them out of sight; **View ▸ Hide ▾**
+has the same. They are still in the table and still go down the flow — a
+helper column you don't need to look at, a row of notes. A short blue
+double bar on the header marks where they are, and the row numbers or
+column letters skip them.
+
+To bring them back, select the rows or columns either side (or just one
+next to them) and **Unhide Rows** (**Ctrl+Shift+9**) / **Unhide Columns**
+(**Ctrl+Shift+0**) — or **double-click the blue mark** on the header edge,
+or **View ▸ Unhide All**. At least one row and one column always stay in
+sight.
+
+Hidden rows and columns are saved with the table. Like rows a filter
+hides, hidden rows are left alone by Remove Duplicates, Go To Special,
+Ctrl+Enter and the Total Row.
+
+### Changing how a table looks re-runs nothing
+
+Hiding a column, freezing a pane, widening a column, a note, a cell's
+colour, a number format, a dropdown list, a group — none of these change
+what the Table sends on, so none of them mark the flow out of date or
+start a run, and with **Auto-apply** off they go straight in rather than
+waiting for Submit. Only the values, the column names and the column
+types do that.
 
 ## Grouped rows
 
@@ -464,6 +492,8 @@ fourteen.
 | Jump to the edge of the data (Shift: select to it) | **Ctrl+arrows** |
 | Find / replace | **Ctrl+F** / **Ctrl+H** |
 | Go To | **Ctrl+G** |
+| Hide rows / columns | **Ctrl+9** / **Ctrl+0** |
+| Unhide rows / columns | **Ctrl+Shift+9** / **Ctrl+Shift+0** |
 | Bold / italic / underline | **Ctrl+B** / **Ctrl+I** / **Ctrl+U** |
 | New or edit a note | **Shift+F2** |
 | Type into every selected cell | **Ctrl+Enter** |

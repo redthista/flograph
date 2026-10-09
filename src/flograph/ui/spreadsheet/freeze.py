@@ -327,14 +327,16 @@ class FrozenPanes:
         header = main.horizontalHeader()
         for col in range(n_cols):
             frozen_col = col < self.cols
-            if frozen_col != header.isSectionHidden(col):
-                main.setColumnHidden(col, frozen_col)
-                if not frozen_col:
+            user_hidden = main.column_user_hidden(col)
+            want = frozen_col or user_hidden
+            if want != header.isSectionHidden(col):
+                main.setColumnHidden(col, want)
+                if not want:
                     main.setColumnWidth(col, widths[col])
             for kind, pane in self._panes.items():
                 show = frozen_col if kind in ("cols", "corner") else \
                     not frozen_col
-                pane.setColumnHidden(col, not show)
+                pane.setColumnHidden(col, not show or user_hidden)
         self.relayout()
 
     # ------------------------------------------------------------ layout

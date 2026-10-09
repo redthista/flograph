@@ -742,6 +742,68 @@ class SheetModel(QAbstractTableModel):
                                    row[i] if i < len(row) else "")
         self._structural(mutate)
 
+    # ------------------------------------------------- hidden rows, cols
+
+    @property
+    def hidden_rows(self) -> set:
+        return self._sheet.hidden_rows
+
+    def column_hidden(self, col: int) -> bool:
+        return (0 <= col < self._sheet.n_cols
+                and self._sheet.columns[col].hidden)
+
+    def hide_rows(self, rows) -> bool:
+        """Hide rows, one undo step; refuses to hide every row."""
+        rows = {r for r in rows if 0 <= r < self._sheet.n_rows}
+        new = self._sheet.hidden_rows | rows
+        if self._read_only or not rows or new == self._sheet.hidden_rows \
+                or len(new) >= self._sheet.n_rows:
+            return False
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.hidden_rows = set(new)
+        self._structural(mutate, reset=False)
+        return True
+
+    def unhide_rows(self, rows=None) -> bool:
+        """Show hidden rows again — these, or every one."""
+        gone = (set(self._sheet.hidden_rows) if rows is None
+                else self._sheet.hidden_rows & set(rows))
+        if self._read_only or not gone:
+            return False
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.hidden_rows = sheet.hidden_rows - gone
+        self._structural(mutate, reset=False)
+        return True
+
+    def hide_columns(self, cols) -> bool:
+        cols = {c for c in cols if 0 <= c < self._sheet.n_cols
+                and not self._sheet.columns[c].hidden}
+        shown = sum(1 for c in self._sheet.columns if not c.hidden)
+        if self._read_only or not cols or len(cols) >= shown:
+            return False
+
+        def mutate(sheet: Sheet) -> None:
+            for c in cols:
+                sheet.columns[c].hidden = True
+        self._structural(mutate, reset=False)
+        return True
+
+    def unhide_columns(self, cols=None) -> bool:
+        cols = [c for c in (range(self._sheet.n_cols) if cols is None
+                            else cols)
+                if 0 <= c < self._sheet.n_cols
+                and self._sheet.columns[c].hidden]
+        if self._read_only or not cols:
+            return False
+
+        def mutate(sheet: Sheet) -> None:
+            for c in cols:
+                sheet.columns[c].hidden = False
+        self._structural(mutate, reset=False)
+        return True
+
     # ---------------------------------------------------- grouped rows
 
     @property

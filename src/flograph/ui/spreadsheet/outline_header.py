@@ -62,6 +62,22 @@ class OutlineHeader(QHeaderView):
 
     def paintSection(self, painter: QPainter, rect: QRect,
                      logical: int) -> None:
+        self._paint_section(painter, rect, logical)
+        model = self.model()
+        hidden = getattr(model, "hidden_rows", None)
+        if hidden:
+            count = model.rowCount()
+            before = logical > 0 and (logical - 1) in hidden
+            after = (logical + 1 < count and (logical + 1) in hidden
+                     and all(r in hidden for r in range(logical + 1, count)))
+            if before or after:
+                from .view import paint_hidden_mark
+                paint_hidden_mark(painter,
+                                  rect.adjusted(self._gutter, 0, 0, 0),
+                                  before, after, vertical=True)
+
+    def _paint_section(self, painter: QPainter, rect: QRect,
+                       logical: int) -> None:
         if not self._gutter:
             super().paintSection(painter, rect, logical)
             return

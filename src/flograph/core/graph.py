@@ -614,6 +614,9 @@ class Graph:
             # correct — dirtying would re-run the node (and everything
             # downstream) to produce exactly what it already produced
             return
+        if spec.presentation and spec.only_presentation_changed(previous,
+                                                                 value):
+            return      # only how it looks changed (a Table's frozen pane)
         self.mark_dirty(node_id)
 
     def set_code(self, node_id: str, source: str) -> list[Connection]:

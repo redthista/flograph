@@ -259,6 +259,9 @@ def row_menu(view, widget: QWidget, pos: QPoint) -> None:
     menu.addAction(a["row_up"])
     menu.addAction(a["row_down"])
     menu.addAction(a["clear"])
+    menu.addAction(a["row_hide"])
+    if view.hidden_count()[0]:
+        menu.addAction(a["row_unhide"])
     heading(menu, "Clipboard")
     for name in ("cut", "copy", "paste"):
         menu.addAction(a[name])
@@ -295,8 +298,10 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
         menu.addAction(a["filter_clear"])
     heading(menu, "Columns")
     for name in ("col_left", "col_right", "col_delete",
-                 "col_move_left", "col_move_right"):
+                 "col_move_left", "col_move_right", "col_hide"):
         menu.addAction(a[name])
+    if view.hidden_count()[1]:
+        menu.addAction(a["col_unhide"])
     heading(menu, "This Column")
     menu.addAction(a["rename"])
     _type_menu(menu, a)

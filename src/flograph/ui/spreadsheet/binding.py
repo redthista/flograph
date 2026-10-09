@@ -106,8 +106,17 @@ def commit_edit(graph, stack, node_id: str, data: dict) -> bool:
     if node is None:
         return False
     new_json = json.dumps(data)
+    spec = node.spec.param("data")
+    look_only = (spec is not None and spec.presentation
+                 and spec.only_presentation_changed(
+                     node.params.get("data"), new_json))
     if apply_mode(node) == SUBMIT:
         if new_json == draft_of(node):
+            return False
+        if look_only and not has_draft(node):
+            # a frozen pane, a note, a hidden column: nothing to submit,
+            # since nothing the flow sees changed — in it goes, no run
+            stack.push(_set(graph, node_id, "data", new_json))
             return False
         if _same_sheet(data, node.params.get("data")):
             # typed back to what was submitted: nothing is pending any more
@@ -119,7 +128,7 @@ def commit_edit(graph, stack, node_id: str, data: dict) -> bool:
     if new_json == node.params.get("data"):
         return False
     stack.push(_set(graph, node_id, "data", new_json))
-    return True
+    return not look_only      # only how it looks: nothing to re-run
 
 
 def submit(graph, stack, node_id: str) -> bool:

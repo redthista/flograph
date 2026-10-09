@@ -600,6 +600,41 @@ class SheetActions(QObject):
                   v.text_to_columns,
                   enabled=lambda: edit() and v.currentIndex().isValid(),
                   short="Split")
+        def any_hidden() -> bool:
+            return any(v.hidden_count())
+
+        self._add("row_hide", "Hide Rows", "row_hide",
+                  "Put the selected rows out of sight. They stay in the "
+                  "table and still go down the flow; a mark on the row "
+                  "numbers shows where they are.",
+                  v.hide_selected_rows, keys=["Ctrl+9"],
+                  enabled=lambda: edit() and bool(v.target_rows()),
+                  short="Hide Rows")
+        self._add("row_unhide", "Unhide Rows", "row_unhide",
+                  "Show the hidden rows within the selection or right "
+                  "beside it — select the rows either side of them.",
+                  v.unhide_selected_rows, keys=["Ctrl+Shift+9"],
+                  enabled=lambda: edit() and v.hidden_count()[0] > 0,
+                  short="Unhide Rows")
+        self._add("col_hide", "Hide Columns", "col_hide",
+                  "Put the selected columns out of sight. They stay in the "
+                  "table and still flow on; a mark on the column headers "
+                  "shows where they are.",
+                  v.hide_selected_columns, keys=["Ctrl+0"],
+                  enabled=lambda: edit() and bool(v.target_columns()),
+                  short="Hide Columns")
+        self._add("col_unhide", "Unhide Columns", "col_unhide",
+                  "Show the hidden columns within the selection or right "
+                  "beside it. Double-clicking the mark on the header does "
+                  "it too.",
+                  v.unhide_selected_columns, keys=["Ctrl+Shift+0"],
+                  enabled=lambda: edit() and v.hidden_count()[1] > 0,
+                  short="Unhide Columns")
+        self._add("unhide_all", "Unhide All", "unhide_all",
+                  "Show every hidden row and column.",
+                  v.unhide_all, enabled=lambda: edit() and any_hidden(),
+                  short="Unhide All")
+
         def has_groups() -> bool:
             model = v.sheet_model()
             return bool(model is not None and model.groups)

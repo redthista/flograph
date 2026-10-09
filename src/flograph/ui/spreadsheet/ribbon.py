@@ -379,6 +379,7 @@ class SheetRibbon(QWidget):
             "type_menu": self._fill_type_menu,
             "function_menu": self._fill_function_menu,
             "freeze_menu": self._fill_freeze_menu,
+            "hide_menu": self._fill_hide_menu,
             "fill_menu_more": self._fill_fill_more_menu,
             "fill_menu": self._fill_fill_menu,
             "ink_menu": self._fill_ink_menu,
@@ -469,6 +470,8 @@ class SheetRibbon(QWidget):
                         ("unfreeze", "Unfreeze")]),
             ("Size", [("fit", "Fit Width"), ("fit_all", "Fit All")]),
             ("Show", [("show_formulas", "Formulas")]),
+            ("Hide", [m("hide_menu", "col_hide", "Hide"),
+                      ("unhide_all", "Unhide All")]),
         ]
         if self._view.host.can_open_editor():
             view.append(("Window", [("open_editor", "Full Editor")]))
@@ -578,6 +581,11 @@ class SheetRibbon(QWidget):
 
     def _fill_fill_more_menu(self, menu) -> None:
         for name in ("fill_down", "fill_right", "fill_series"):
+            menu.addAction(self._actions[name])
+
+    def _fill_hide_menu(self, menu) -> None:
+        for name in ("row_hide", "col_hide", "row_unhide", "col_unhide",
+                     "unhide_all"):
             menu.addAction(self._actions[name])
 
     def _fill_freeze_menu(self, menu) -> None:

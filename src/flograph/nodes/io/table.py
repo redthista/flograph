@@ -61,7 +61,7 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
-    "version": "1.3",
+    "version": "1.4",
     "card": "grid",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe")],
@@ -69,6 +69,13 @@ NODE = {
 PARAMS = [
     {"name": "data", "type": "text", "label": "Table data (JSON)",
      "hidden": True,
+     # how the sheet looks, not what it holds: changing only these re-runs
+     # nothing (core/params.ParamSpec.presentation)
+     "presentation": ["freeze", "totals", "notes", "styles", "groups",
+                      "hidden_rows", "columns.*.width", "columns.*.format",
+                      "columns.*.total", "columns.*.choices",
+                      "columns.*.strict", "columns.*.validation",
+                      "columns.*.hidden"],
      "default": json.dumps({
          "version": 2,
          "columns": [{"name": "A", "type": "auto"},

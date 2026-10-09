@@ -77,6 +77,31 @@ def _apply_date_formats(text: str) -> None:
 _apply_date_formats(date_formats_setting())
 
 
+def paint_hidden_mark(painter, rect, before: bool, after: bool,
+                      vertical: bool) -> None:
+    """Excel's mark where rows or columns are hidden: a short blue double
+    bar on the header edge they sit behind (double-click it to unhide)."""
+    painter.save()
+    painter.setPen(QPen(QColor("#60a5fa"), 1))
+    if vertical:          # a row header: bars along the top/bottom edge
+        x0, x1 = rect.left() + 4, rect.right() - 4
+        if before:
+            painter.drawLine(x0, rect.top(), x1, rect.top())
+            painter.drawLine(x0, rect.top() + 2, x1, rect.top() + 2)
+        if after:
+            painter.drawLine(x0, rect.bottom(), x1, rect.bottom())
+            painter.drawLine(x0, rect.bottom() - 2, x1, rect.bottom() - 2)
+    else:                 # a column header: bars down the left/right edge
+        y0, y1 = rect.top() + 4, rect.bottom() - 4
+        if before:
+            painter.drawLine(rect.left(), y0, rect.left(), y1)
+            painter.drawLine(rect.left() + 2, y0, rect.left() + 2, y1)
+        if after:
+            painter.drawLine(rect.right(), y0, rect.right(), y1)
+            painter.drawLine(rect.right() - 2, y0, rect.right() - 2, y1)
+    painter.restore()
+
+
 def _sheet_header_class():
     """SheetHeader, built on first use: data_table is the older module and
     must not depend on this package loading."""
@@ -123,6 +148,16 @@ def _sheet_header_class():
 
         def paintSection(self, painter, rect, section) -> None:
             super().paintSection(painter, rect, section)
+            hidden = getattr(self._view, "column_user_hidden", None)
+            if hidden is not None:
+                count = self.count()
+                before = section > 0 and hidden(section - 1)
+                after = (section + 1 < count and hidden(section + 1)
+                         and all(hidden(c) for c in range(section + 1,
+                                                          count)))
+                if before or after:
+                    paint_hidden_mark(painter, rect, before, after,
+                                      vertical=False)
             if not getattr(self._view, "show_column_buttons", True):
                 return
             button = self.button_rect(section)
@@ -252,6 +287,7 @@ class SpreadsheetView(QTableView):
         # double-click a column border: Qt fits that column; when it's part
         # of a multi-column selection, fit the whole selection
         header.sectionHandleDoubleClicked.connect(self._autosize_from_handle)
+        # (the row header's handle: unhide rows hidden just below)
 
         # A header click selects the column, as in a spreadsheet — the
         # column is then what Delete, Move and Insert act on. Sorting lives
@@ -269,6 +305,8 @@ class SpreadsheetView(QTableView):
         self._frozen = None   # freeze.FrozenPanes, made on first freeze
 
         rows = self.verticalHeader()
+        rows.sectionHandleDoubleClicked.connect(
+            self._row_handle_double_clicked)
         rows.setContextMenuPolicy(Qt.CustomContextMenu)
         rows.customContextMenuRequested.connect(self._row_menu)
 
@@ -315,6 +353,7 @@ class SpreadsheetView(QTableView):
             old.modelReset.disconnect(self._after_reset)
             old.outline_changed.disconnect(self._apply_outline)
             old.dataChanged.disconnect(self._apply_outline)
+            old.dataChanged.disconnect(self._apply_hidden)
             old.dataChanged.disconnect(self._reapply_filter)
             old.freeze_changed.disconnect(self._apply_freeze)
             old.edit_refused.disconnect(self._edit_refused)
@@ -331,6 +370,7 @@ class SpreadsheetView(QTableView):
             model.modelReset.connect(self._after_reset)
             model.outline_changed.connect(self._apply_outline)
             model.dataChanged.connect(self._apply_outline)
+            model.dataChanged.connect(self._apply_hidden)
             model.dataChanged.connect(self._reapply_filter)
             model.freeze_changed.connect(self._apply_freeze)
             model.edit_refused.connect(self._edit_refused)
@@ -338,6 +378,8 @@ class SpreadsheetView(QTableView):
             self._folded_rows = frozenset()
             self._apply_outline()
             self._apply_freeze()
+            self._shown_hidden_rows = frozenset()
+            self._apply_hidden()
         if isinstance(model, SheetModel) and getattr(self, "_fill", None):
             model.dataChanged.connect(self._fill.refresh)
             model.modelReset.connect(self._fill.refresh)
@@ -678,7 +720,35 @@ class SpreadsheetView(QTableView):
         if persist:
             model.set_column_widths(widths)
 
+    def _hidden_run_after(self, section: int, rows: bool) -> list[int]:
+        """The user-hidden rows/columns right after `section` — what a
+        double-click on the header edge between them unhides."""
+        model = self.sheet_model()
+        if model is None:
+            return []
+        count = model.rowCount() if rows else model.columnCount()
+        hidden = (model.hidden_rows if rows else
+                  {c for c in range(count) if model.column_hidden(c)})
+        out = []
+        i = section + 1
+        while i < count and i in hidden:
+            out.append(i)
+            i += 1
+        return out
+
+    def _row_handle_double_clicked(self, section: int) -> None:
+        run = self._hidden_run_after(section, rows=True)
+        model = self.sheet_model()
+        if run and model is not None and self.editable:
+            model.unhide_rows(run)
+
     def _autosize_from_handle(self, section: int) -> None:
+        run = self._hidden_run_after(section, rows=False)
+        model = self.sheet_model()
+        if run and model is not None and self.editable:
+            # the edge where columns are hidden: bring them back, as Excel
+            model.unhide_columns(run)
+            return
         cols = self._selected_sections(section, pick_row=False)
         if len(cols) > 1:
             self.autosize_columns(cols)
@@ -2220,7 +2290,117 @@ class SpreadsheetView(QTableView):
         folded group? Commands that leave hidden rows alone ask this. (Not
         the same as isRowHidden: a frozen row is hidden in the grid because
         a pane shows it.)"""
-        return row in self._filtered_rows or row in self._folded_rows
+        return (row in self._filtered_rows or row in self._folded_rows
+                or row in self._user_hidden_rows())
+
+    def _user_hidden_rows(self):
+        model = self.sheet_model()
+        return model.hidden_rows if model is not None else ()
+
+    def column_user_hidden(self, col: int) -> bool:
+        model = self.sheet_model()
+        return model is not None and model.column_hidden(col)
+
+    def _apply_hidden(self, *_args) -> None:
+        """Show the rows and columns the user hid as hidden — and the
+        rest as shown — alongside the filter, folds and frozen panes."""
+        model = self.sheet_model()
+        if model is None:
+            return
+        rows = frozenset(model.hidden_rows)
+        if rows != getattr(self, "_shown_hidden_rows", frozenset()):
+            self._shown_hidden_rows = rows
+            current = self.currentIndex()
+            if current.isValid() and current.row() in rows:
+                spare = next((r for r in range(model.rowCount())
+                              if not self.row_filtered(r)), None)
+                if spare is not None:
+                    self.setCurrentIndex(model.index(spare, current.column()))
+            self._sync_hidden_rows()
+        frozen = self._frozen.cols if self._frozen is not None else 0
+        header = self.horizontalHeader()
+        changed = False
+        for col in range(model.columnCount()):
+            want = model.column_hidden(col) or col < frozen
+            if header.isSectionHidden(col) != want:
+                self.setColumnHidden(col, want)
+                changed = True
+        if changed and self._frozen is not None:
+            self._frozen.sync_rows()
+        self.horizontalHeader().viewport().update()
+        self.verticalHeader().viewport().update()
+
+    def hide_selected_rows(self) -> None:
+        """Hide Rows (Ctrl+9): out of sight, still in the table."""
+        model = self.sheet_model()
+        rows = self.target_rows()
+        if model is not None and rows and self.editable \
+                and not model.hide_rows(rows):
+            self.say("At least one row has to stay in sight.")
+
+    def hide_selected_columns(self) -> None:
+        """Hide Columns (Ctrl+0): out of sight, still sent on."""
+        model = self.sheet_model()
+        cols = self.target_columns()
+        if model is not None and cols and self.editable \
+                and not model.hide_columns(cols):
+            self.say("At least one column has to stay in sight.")
+
+    def _around(self, picked, hidden, count):
+        """The hidden ones inside the span of `picked`, or right beside
+        it — so selecting the rows either side (or just one next to them)
+        brings them back, as Excel does."""
+        if not picked:
+            return []
+        lo, hi = min(picked), max(picked)
+        out = [i for i in range(lo, hi + 1) if i in hidden]
+        i = lo - 1
+        while i >= 0 and i in hidden:
+            out.append(i)
+            i -= 1
+        i = hi + 1
+        while i < count and i in hidden:
+            out.append(i)
+            i += 1
+        return sorted(out)
+
+    def unhide_selected_rows(self) -> None:
+        """Unhide Rows (Ctrl+Shift+9): the hidden rows within or beside
+        the selection."""
+        model = self.sheet_model()
+        if model is None or not self.editable:
+            return
+        rows = self._around(self.selected_rows(), model.hidden_rows,
+                            model.rowCount())
+        if not model.unhide_rows(rows):
+            self.say("No hidden rows there — select the rows either side "
+                     "of them, or use Unhide All.")
+
+    def unhide_selected_columns(self) -> None:
+        model = self.sheet_model()
+        if model is None or not self.editable:
+            return
+        hidden = {c for c in range(model.columnCount())
+                  if model.column_hidden(c)}
+        cols = self._around(self.selected_columns(), hidden,
+                            model.columnCount())
+        if not model.unhide_columns(cols):
+            self.say("No hidden columns there — select the columns either "
+                     "side of them, or use Unhide All.")
+
+    def unhide_all(self) -> None:
+        model = self.sheet_model()
+        if model is not None and self.editable:
+            model.unhide_rows()
+            model.unhide_columns()
+
+    def hidden_count(self) -> tuple[int, int]:
+        model = self.sheet_model()
+        if model is None:
+            return 0, 0
+        return (len(model.hidden_rows),
+                sum(1 for c in range(model.columnCount())
+                    if model.column_hidden(c)))
 
     def _apply_outline(self, *_args) -> None:
         """Hide the rows of folded groups and size the outline gutter."""
@@ -2373,6 +2553,8 @@ class SpreadsheetView(QTableView):
         self._folded_rows = frozenset()
         self._apply_outline()
         self._apply_freeze()
+        self._shown_hidden_rows = frozenset()
+        self._apply_hidden()
 
     @property
     def frozen_panes(self):

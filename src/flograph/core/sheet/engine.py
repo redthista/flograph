@@ -155,9 +155,12 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
         col.format = dict(mine.format) if mine.format else None
         col.total = mine.total
         col.validation = dict(mine.validation) if mine.validation else None
+        col.hidden = mine.hidden
     merged.freeze_rows, merged.freeze_cols = (stored.freeze_rows,
                                               stored.freeze_cols)
     merged.show_totals = stored.show_totals
+    merged.hidden_rows = {r for r in stored.hidden_rows
+                          if r < merged.n_rows}
     if stored.groups:
         from .outline import clamp
         merged.groups = clamp(
@@ -184,7 +187,7 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
         merged.columns.append(ColumnSpec(
             col.name, col.type, col.width, list(col.choices), col.strict,
             dict(col.format) if col.format else None, col.total,
-            dict(col.validation) if col.validation else None))
+            dict(col.validation) if col.validation else None, col.hidden))
         for row in range(n_rows):
             merged.rows[row].append(cells[row])
 

@@ -554,6 +554,51 @@ def _format_painter(p, r, c):
     p.drawRoundedRect(QRectF(8, 12.5, 3, 5.5), 1, 1)
 
 
+def _eye(p, centre: QPointF, color: QColor, slashed: bool) -> None:
+    """A small eye, struck through when something is put out of sight."""
+    p.setPen(_pen(color, 1.2))
+    p.setBrush(QColor("#2a2c33"))
+    path = QPainterPath()
+    path.moveTo(centre + QPointF(-4.5, 0))
+    path.quadTo(centre + QPointF(0, -4.2), centre + QPointF(4.5, 0))
+    path.quadTo(centre + QPointF(0, 4.2), centre + QPointF(-4.5, 0))
+    p.drawPath(path)
+    p.setBrush(color)
+    p.drawEllipse(centre, 1.3, 1.3)
+    if slashed:
+        p.setPen(_pen(RED, 1.4))
+        p.drawLine(centre + QPointF(-4, 3.5), centre + QPointF(4, -3.5))
+
+
+def _row_hide(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 12, 12), rows=3, cols=2,
+          lit=[("row", 1)], lit_color=DIM, color=c)
+    _eye(p, QPointF(14.5, 15), c, True)
+
+
+def _row_unhide(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 12, 12), rows=3, cols=2,
+          lit=[("row", 1)], color=c)
+    _eye(p, QPointF(14.5, 15), BLUE, False)
+
+
+def _col_hide(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 12, 12), rows=2, cols=3,
+          lit=[("col", 1)], lit_color=DIM, color=c)
+    _eye(p, QPointF(14.5, 15), c, True)
+
+
+def _col_unhide(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 12, 12), rows=2, cols=3,
+          lit=[("col", 1)], color=c)
+    _eye(p, QPointF(14.5, 15), BLUE, False)
+
+
+def _unhide_all(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 12, 12), rows=3, cols=3, color=c)
+    _eye(p, QPointF(14.5, 15), BLUE, False)
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -934,6 +979,9 @@ GLYPHS = {
     "dedupe": (_dedupe, FG), "split": (_split, FG),
     "fill_series": (_fill_series, FG),
     "format_painter": (_format_painter, FG),
+    "row_hide": (_row_hide, FG), "row_unhide": (_row_unhide, FG),
+    "col_hide": (_col_hide, FG), "col_unhide": (_col_unhide, FG),
+    "unhide_all": (_unhide_all, FG),
     "group": (_group, FG), "ungroup": (_ungroup, FG),
     "hide_detail": (_hide_detail, FG), "show_detail": (_show_detail, FG),
     "collapse_all": (_collapse_all, FG), "expand_all": (_expand_all, FG),
