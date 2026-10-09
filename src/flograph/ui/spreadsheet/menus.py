@@ -184,7 +184,7 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
         pick.addAction(a[name])
 
     font = submenu(menu, "Format", sheet_icon("fmt_b"))
-    for name in ("fmt_b", "fmt_i", "fmt_u"):
+    for name in ("fmt_b", "fmt_i", "fmt_u", "fmt_wrap"):
         font.addAction(a[name])
     from .actions import fill_color_menu
     fill_color_menu(submenu(font, "Fill Colour", sheet_icon("fill_color")),
@@ -262,6 +262,8 @@ def row_menu(view, widget: QWidget, pos: QPoint) -> None:
     menu.addAction(a["row_hide"])
     if view.hidden_count()[0]:
         menu.addAction(a["row_unhide"])
+    menu.addAction(a["row_height"])
+    menu.addAction(a["row_autofit"])
     heading(menu, "Clipboard")
     for name in ("cut", "copy", "paste"):
         menu.addAction(a[name])

@@ -115,6 +115,8 @@ class SheetModel(QAbstractTableModel):
     edit_refused = Signal(int, int, str, str)
     # a group was folded or unfolded: view state, not an edit
     outline_changed = Signal()
+    # rows were made taller or shorter by hand
+    row_heights_changed = Signal()
 
     def __init__(self, sheet=None, parent=None) -> None:
         super().__init__(parent)
@@ -1309,6 +1311,42 @@ class SheetModel(QAbstractTableModel):
                 changed = True
         if changed and not self._syncing:
             self.sheet_edited.emit(self.sheet_dict())
+
+    def wraps(self, row: int, col: int) -> bool:
+        fmt = self._sheet.styles.get((row, col))
+        return bool(fmt and fmt.get("wrap"))
+
+    def wrapped_rows(self) -> set:
+        return {r for (r, _c), fmt in self._sheet.styles.items()
+                if fmt.get("wrap")}
+
+    @property
+    def row_heights(self) -> dict:
+        return self._sheet.row_heights
+
+    def set_row_heights(self, heights: dict) -> None:
+        """Rows made taller or shorter by hand (px), or None to let a row
+        go back to its usual (or fitted) height. Like a column width: how
+        it looks, so nothing is recalculated."""
+        from flograph.core.sheet.schema import ROW_HEIGHT_RANGE
+        if self._read_only:
+            return
+        lo, hi = ROW_HEIGHT_RANGE
+        changed = False
+        for row, height in heights.items():
+            if not 0 <= row < self._sheet.n_rows:
+                continue
+            if height is None:
+                if self._sheet.row_heights.pop(row, None) is not None:
+                    changed = True
+                continue
+            height = max(lo, min(hi, int(height)))
+            if self._sheet.row_heights.get(row) != height:
+                self._sheet.row_heights[row] = height
+                changed = True
+        if changed and not self._syncing:
+            self.sheet_edited.emit(self.sheet_dict())
+            self.row_heights_changed.emit()
 
     def sort_by(self, col: int, ascending: bool = True) -> None:
         if self._read_only:

@@ -209,6 +209,10 @@ class Sheet:
     # Rows hidden by the user (right-click ▸ Hide). Like a hidden column,
     # only out of sight: the rows still go down the flow.
     hidden_rows: set = field(default_factory=set)
+    # Rows the user made taller or shorter (drag the row border, Row
+    # Height…): row -> pixels. Others are the usual height, or tall enough
+    # for their wrapped text.
+    row_heights: dict = field(default_factory=dict)
 
     @property
     def n_rows(self) -> int:
@@ -251,6 +255,13 @@ class Sheet:
                 if spot is not None:
                     moved_rows.add(spot[0])
             self.hidden_rows = moved_rows
+        if rows_move and self.row_heights:
+            heights = {}
+            for r, h in self.row_heights.items():
+                spot = where(r, -1)
+                if spot is not None:
+                    heights[spot[0]] = h
+            self.row_heights = heights
         for attr in ("notes", "styles"):
             extras = getattr(self, attr)
             if not extras:
@@ -276,7 +287,8 @@ class Sheet:
     def _notes_follow_rows(self, before: list) -> None:
         """After the row lists were reordered (a sort, a move), send each
         note to wherever its row went — rows are the same list objects."""
-        if not (self.notes or self.styles or self.hidden_rows):
+        if not (self.notes or self.styles or self.hidden_rows
+                or self.row_heights):
             return
         place = {id(row): i for i, row in enumerate(self.rows)}
 
@@ -407,7 +419,8 @@ class Sheet:
         lists."""
         old = self.rows
         self.rows = [list(row) for row in rows]
-        if not (self.notes or self.styles or self.hidden_rows):
+        if not (self.notes or self.styles or self.hidden_rows
+                or self.row_heights):
             return
         waiting: dict[tuple, list[int]] = {}
         for j, row in enumerate(self.rows):
@@ -505,6 +518,7 @@ class Sheet:
             groups=[type(g)(g.start, g.end, g.collapsed)
                     for g in self.groups],
             hidden_rows=set(self.hidden_rows),
+            row_heights=dict(self.row_heights),
         )
 
 
@@ -520,6 +534,20 @@ def _parse_hidden_rows(raw, n_rows: int) -> set:
     rows = {r for r in raw if isinstance(r, int) and not isinstance(r, bool)
             and 0 <= r < n_rows} if isinstance(raw, list) else set()
     return rows if len(rows) < n_rows else set()    # one row stays in sight
+
+
+ROW_HEIGHT_RANGE = (8, 600)
+
+
+def _parse_row_heights(raw, n_rows: int) -> dict:
+    lo, hi = ROW_HEIGHT_RANGE
+    out = {}
+    for entry in raw if isinstance(raw, list) else ():
+        if (isinstance(entry, (list, tuple)) and len(entry) == 2
+                and all(isinstance(v, int) and not isinstance(v, bool)
+                        for v in entry) and 0 <= entry[0] < n_rows):
+            out[entry[0]] = max(lo, min(hi, entry[1]))
+    return out
 
 
 def _parse_groups(raw, n_rows: int) -> list:
@@ -620,6 +648,8 @@ def parse_sheet(raw) -> Sheet:
                  styles=styles,
                  groups=_parse_groups(parsed.get("groups"), len(rows)),
                  hidden_rows=_parse_hidden_rows(parsed.get("hidden_rows"),
+                                                len(rows)),
+                 row_heights=_parse_row_heights(parsed.get("row_heights"),
                                                 len(rows)))
 
 
@@ -660,6 +690,9 @@ def sheet_to_dict(sheet: Sheet) -> dict:
                          for (r, c), fmt in sorted(sheet.styles.items())]
     if sheet.hidden_rows:
         out["hidden_rows"] = sorted(sheet.hidden_rows)
+    if sheet.row_heights:
+        out["row_heights"] = [[r, int(h)] for r, h in
+                              sorted(sheet.row_heights.items())]
     if sheet.groups:
         # the ranges only: folding is view state, like a filter
         from .outline import to_list

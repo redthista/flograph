@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-FLAGS = ("b", "i", "u")
+FLAGS = ("b", "i", "u", "wrap")      # wrap: long text runs onto more lines
 ALIGNS = ("left", "center", "right")
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 

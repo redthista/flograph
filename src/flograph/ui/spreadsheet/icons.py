@@ -599,6 +599,40 @@ def _unhide_all(p, r, c):
     _eye(p, QPointF(14.5, 15), BLUE, False)
 
 
+def _fmt_wrap(p, r, c):
+    """Text running to the edge and turning back onto the next line."""
+    p.setPen(_pen(c, 1.4))
+    p.drawLine(QPointF(3, 5), QPointF(17, 5))
+    path = QPainterPath()
+    path.moveTo(3, 10)
+    path.lineTo(14, 10)
+    path.quadTo(17.5, 10, 17.5, 12.5)
+    path.quadTo(17.5, 15, 14, 15)
+    path.lineTo(10, 15)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(_pen(BLUE, 1.4))
+    p.drawPath(path)
+    _arrow(p, QPointF(12, 15), QPointF(9.5, 15), BLUE, 1.4, 2.4)
+    p.setPen(_pen(c, 1.4))
+    p.drawLine(QPointF(3, 15), QPointF(6, 15))
+
+
+def _row_height(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 10, 15), rows=3, cols=1,
+          lit=[("row", 1)], color=c)
+    _arrow(p, QPointF(16, 10), QPointF(16, 3), BLUE, 1.3, 2.2)
+    _arrow(p, QPointF(16, 10), QPointF(16, 17), BLUE, 1.3, 2.2)
+
+
+def _row_autofit(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 10, 15), rows=3, cols=1, color=c)
+    p.setPen(_pen(BLUE, 1.3))
+    p.drawLine(QPointF(14, 3), QPointF(18, 3))
+    p.drawLine(QPointF(14, 17), QPointF(18, 17))
+    _arrow(p, QPointF(16, 6), QPointF(16, 3.5), BLUE, 1.3, 2)
+    _arrow(p, QPointF(16, 14), QPointF(16, 16.5), BLUE, 1.3, 2)
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -982,6 +1016,8 @@ GLYPHS = {
     "row_hide": (_row_hide, FG), "row_unhide": (_row_unhide, FG),
     "col_hide": (_col_hide, FG), "col_unhide": (_col_unhide, FG),
     "unhide_all": (_unhide_all, FG),
+    "fmt_wrap": (_fmt_wrap, FG), "row_height": (_row_height, FG),
+    "row_autofit": (_row_autofit, FG),
     "group": (_group, FG), "ungroup": (_ungroup, FG),
     "hide_detail": (_hide_detail, FG), "show_detail": (_show_detail, FG),
     "collapse_all": (_collapse_all, FG), "expand_all": (_expand_all, FG),

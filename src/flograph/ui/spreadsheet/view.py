@@ -323,6 +323,25 @@ class SpreadsheetView(QTableView):
         self._width_commit_timer.setInterval(300)
         self._width_commit_timer.timeout.connect(self._persist_pending_widths)
         header.sectionResized.connect(self._on_section_resized)
+        # row heights: a drag persists like a width; wrapped rows re-fit
+        # when the columns they wrap in change width
+        self._applying_heights = False
+        self._pending_heights: dict[int, int] = {}
+        self._sized_rows: set = set()
+        self._height_commit_timer = QTimer(self)
+        self._height_commit_timer.setSingleShot(True)
+        self._height_commit_timer.setInterval(300)
+        self._height_commit_timer.timeout.connect(
+            self._persist_pending_heights)
+        self.verticalHeader().sectionResized.connect(self._on_row_resized)
+        self._refit_timer = QTimer(self)
+        self._refit_timer.setSingleShot(True)
+        self._refit_timer.setInterval(60)
+        self._refit_timer.timeout.connect(self.apply_row_heights)
+        header.sectionResized.connect(
+            lambda *_a: self._refit_timer.start()
+            if self.sheet_model() is not None
+            and self.sheet_model().wrapped_rows() else None)
 
         # See _maybe_autofit: the automatic fit coalesces instead of running
         # once per edited cell.
@@ -354,6 +373,8 @@ class SpreadsheetView(QTableView):
             old.outline_changed.disconnect(self._apply_outline)
             old.dataChanged.disconnect(self._apply_outline)
             old.dataChanged.disconnect(self._apply_hidden)
+            old.dataChanged.disconnect(self._refit_soon)
+            old.row_heights_changed.disconnect(self.apply_row_heights)
             old.dataChanged.disconnect(self._reapply_filter)
             old.freeze_changed.disconnect(self._apply_freeze)
             old.edit_refused.disconnect(self._edit_refused)
@@ -371,6 +392,8 @@ class SpreadsheetView(QTableView):
             model.outline_changed.connect(self._apply_outline)
             model.dataChanged.connect(self._apply_outline)
             model.dataChanged.connect(self._apply_hidden)
+            model.dataChanged.connect(self._refit_soon)
+            model.row_heights_changed.connect(self.apply_row_heights)
             model.dataChanged.connect(self._reapply_filter)
             model.freeze_changed.connect(self._apply_freeze)
             model.edit_refused.connect(self._edit_refused)
@@ -380,6 +403,8 @@ class SpreadsheetView(QTableView):
             self._apply_freeze()
             self._shown_hidden_rows = frozenset()
             self._apply_hidden()
+            self._sized_rows = set()
+            self.apply_row_heights()
         if isinstance(model, SheetModel) and getattr(self, "_fill", None):
             model.dataChanged.connect(self._fill.refresh)
             model.modelReset.connect(self._fill.refresh)
@@ -674,6 +699,33 @@ class SpreadsheetView(QTableView):
 
     # ------------------------------------------------- column widths / fit
 
+    def sizeHintForColumn(self, col: int) -> int:
+        """Fit-to-contents leaves wrapped text alone: a wrapped cell is
+        meant to run onto more lines, not to stretch its column (Excel's
+        AutoFit does the same). A column holding any is as wide as its
+        saved width (or the usual), its name, or its unwrapped cells need —
+        so turning Wrap Text on in a column the fit had stretched brings it
+        back in and the text wraps."""
+        model = self.sheet_model()
+        if model is None or not any(c == col for _r, c in
+                                    model.sheet.styles if model.wraps(_r, c)):
+            return super().sizeHintForColumn(col)
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        delegate = self.itemDelegate()
+        option = QStyleOptionViewItem()
+        option.initFrom(self)
+        widest = 0
+        for row in range(min(model.rowCount(), 1000)):
+            if model.wraps(row, col) or self.isRowHidden(row):
+                continue
+            widest = max(widest, delegate.sizeHint(
+                option, model.index(row, col)).width())
+        header = self.horizontalHeader()
+        spec = model.sheet.columns[col]
+        base = int(spec.width) if spec.width else header.defaultSectionSize()
+        return max(widest + 2 * self.showGrid(), base,
+                   header.sectionSizeHint(col))
+
     def autosize_columns(self, cols=None, persist: bool = True) -> None:
         """Fit columns to their content and header text (all by default).
         persist=False (the automatic mode) resizes without writing the new
@@ -739,8 +791,14 @@ class SpreadsheetView(QTableView):
     def _row_handle_double_clicked(self, section: int) -> None:
         run = self._hidden_run_after(section, rows=True)
         model = self.sheet_model()
-        if run and model is not None and self.editable:
+        if model is None or not self.editable:
+            return
+        if run:
             model.unhide_rows(run)
+            return
+        # Excel: double-click a row border to fit the row (and the rest of
+        # the selection with it)
+        self.autofit_rows(self._selected_sections(section, pick_row=True))
 
     def _autosize_from_handle(self, section: int) -> None:
         run = self._hidden_run_after(section, rows=False)
@@ -824,6 +882,113 @@ class SpreadsheetView(QTableView):
             return
         self._pending_widths[col] = new
         self._width_commit_timer.start()
+
+    def _on_row_resized(self, row: int, _old: int, new: int) -> None:
+        if new <= 0:
+            # a row hidden here (a frozen one shows in a pane instead, a
+            # filtered or folded one is out of sight): not a height
+            return
+        if self._frozen is not None:
+            for pane in self._frozen.panes().values():
+                if pane.rowHeight(row) != new:
+                    pane.setRowHeight(row, new)
+        if self._applying_heights or new <= 0 or self.sheet_model() is None:
+            return
+        self._pending_heights[row] = new
+        self._height_commit_timer.start()
+
+    def _persist_pending_heights(self) -> None:
+        model = self.sheet_model()
+        pending, self._pending_heights = self._pending_heights, {}
+        if model is not None and pending:
+            model.set_row_heights(pending)
+
+    def apply_row_heights(self, *_args) -> None:
+        """Each row at its height: set by hand, else tall enough for its
+        wrapped text, else the usual. Only rows that need it are touched,
+        so a big table pays nothing for this."""
+        model = self.sheet_model()
+        if model is None:
+            return
+        manual = model.row_heights
+        wrapped = model.wrapped_rows()
+        default = self.verticalHeader().defaultSectionSize()
+        rows = (self._sized_rows | set(manual) | wrapped)
+        self._applying_heights = True
+        try:
+            for row in sorted(rows):
+                if row >= model.rowCount():
+                    continue
+                if row in manual:
+                    height = manual[row]
+                elif row in wrapped:
+                    height = max(default, self._wrapped_height(row))
+                else:
+                    height = default
+                if self.rowHeight(row) != height:
+                    self.setRowHeight(row, height)
+                if self._frozen is not None:
+                    for pane in self._frozen.panes().values():
+                        if pane.rowHeight(row) != height:
+                            pane.setRowHeight(row, height)
+        finally:
+            self._applying_heights = False
+        self._sized_rows = {r for r in rows if r < model.rowCount()
+                            and (r in manual or r in wrapped)}
+
+    def _wrapped_height(self, row: int) -> int:
+        """How tall a row's wrapped cells need it to be: each one's text
+        laid out across its column's width, in its own font. (Qt's size
+        hint for a row measures without the column's width, so it never
+        wraps.)"""
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QFontMetrics
+        model = self.sheet_model()
+        tallest = 0
+        for col in range(model.columnCount()):
+            if not model.wraps(row, col) or self.isColumnHidden(col):
+                continue
+            index = model.index(row, col)
+            text = str(index.data(Qt.DisplayRole) or "")
+            if not text:
+                continue
+            font = self.font()
+            role_font = index.data(Qt.FontRole)
+            if role_font is not None:
+                font = role_font.resolve(font)
+            width = max(8, self.columnWidth(col) - 8)
+            box = QFontMetrics(font).boundingRect(
+                QRect(0, 0, width, 100_000), int(Qt.TextWordWrap), text)
+            tallest = max(tallest, box.height() + 6)
+        return tallest
+
+    def set_row_height_dialog(self) -> None:
+        """Row Height…: a height in pixels for the selected rows."""
+        from PySide6.QtWidgets import QInputDialog
+        from flograph.core.sheet.schema import ROW_HEIGHT_RANGE
+        from .menus import real_window
+        model = self.sheet_model()
+        rows = self.target_rows()
+        if model is None or not rows or not self.editable:
+            return
+        lo, hi = ROW_HEIGHT_RANGE
+        height, ok = QInputDialog.getInt(
+            real_window(self), "Row Height",
+            f"Height of {len(rows)} row{'s' if len(rows) != 1 else ''}, in "
+            f"pixels (usual: {self.verticalHeader().defaultSectionSize()}):",
+            self.rowHeight(rows[0]), lo, hi)
+        if ok:
+            model.set_row_heights({r: height for r in rows})
+
+    def autofit_rows(self, rows=None) -> None:
+        """AutoFit Row Height: forget the heights set by hand, so the rows
+        go back to the usual height — or tall enough for wrapped text."""
+        model = self.sheet_model()
+        rows = self.target_rows() if rows is None else rows
+        if model is None or not rows or not self.editable:
+            return
+        model.set_row_heights({r: None for r in rows})
+        self.apply_row_heights()
 
     def _persist_pending_widths(self) -> None:
         model = self.sheet_model()
@@ -2330,6 +2495,14 @@ class SpreadsheetView(QTableView):
         self.horizontalHeader().viewport().update()
         self.verticalHeader().viewport().update()
 
+    def _refit_soon(self, *_args) -> None:
+        """An edit can change what a wrapped row needs, or turn wrapping on
+        or off: re-fit once things settle."""
+        model = self.sheet_model()
+        if model is not None and (model.wrapped_rows() or self._sized_rows
+                                  or model.row_heights):
+            self._refit_timer.start()
+
     def hide_selected_rows(self) -> None:
         """Hide Rows (Ctrl+9): out of sight, still in the table."""
         model = self.sheet_model()
@@ -2507,6 +2680,7 @@ class SpreadsheetView(QTableView):
             self._frozen = FrozenPanes(self)
         if self._frozen is not None:
             self._frozen.set_counts(rows, cols)
+            self.apply_row_heights()     # the panes take the same heights
         if self._actions is not None:
             self._actions.refresh()
 
@@ -2555,6 +2729,8 @@ class SpreadsheetView(QTableView):
         self._apply_freeze()
         self._shown_hidden_rows = frozenset()
         self._apply_hidden()
+        self._sized_rows = set()
+        self.apply_row_heights()
 
     @property
     def frozen_panes(self):

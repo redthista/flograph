@@ -56,6 +56,14 @@ class SheetDelegate(ConditionalFormatDelegate):
 
     def initStyleOption(self, option, index) -> None:
         super().initStyleOption(option, index)
+        wraps = getattr(index.model(), "wraps", None)
+        if wraps is not None and wraps(index.row(), index.column()):
+            # Wrap Text: long text runs onto more lines, from the top
+            from PySide6.QtWidgets import QStyleOptionViewItem
+            option.features |= QStyleOptionViewItem.WrapText
+            option.displayAlignment = (
+                option.displayAlignment & Qt.AlignHorizontal_Mask) \
+                | Qt.AlignTop
         if self.show_formulas:
             source = str(index.data(Qt.EditRole) or "")
             if source.startswith("=") and source != "=":

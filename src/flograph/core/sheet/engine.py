@@ -161,6 +161,8 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
     merged.show_totals = stored.show_totals
     merged.hidden_rows = {r for r in stored.hidden_rows
                           if r < merged.n_rows}
+    merged.row_heights = {r: h for r, h in stored.row_heights.items()
+                          if r < merged.n_rows}
     if stored.groups:
         from .outline import clamp
         merged.groups = clamp(

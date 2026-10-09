@@ -72,7 +72,8 @@ PARAMS = [
      # how the sheet looks, not what it holds: changing only these re-runs
      # nothing (core/params.ParamSpec.presentation)
      "presentation": ["freeze", "totals", "notes", "styles", "groups",
-                      "hidden_rows", "columns.*.width", "columns.*.format",
+                      "hidden_rows", "row_heights", "columns.*.width",
+                      "columns.*.format",
                       "columns.*.total", "columns.*.choices",
                       "columns.*.strict", "columns.*.validation",
                       "columns.*.hidden"],

@@ -11,11 +11,11 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 | Tab | What is on it |
 | --- | --- |
-| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*, *Format Painter*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, alignment, Clear Formats); Fill Down, Fill ▾ (Right, Series…), Find & Select ▾, Replace |
+| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*, *Format Painter*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, Wrap Text, alignment, Clear Formats); Fill Down, Fill ▾ (Right, Series…), Find & Select ▾, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
-| **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Show Formulas, the full editor; **Hide** ▾ (rows, columns, unhide) and Unhide All |
+| **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Row Height, Fit Rows, Show Formulas, the full editor; **Hide** ▾ (rows, columns, unhide) and Unhide All |
 | **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
 
 Hover any button for what it does, in a sentence, and its shortcut. Under the ribbon is the **formula bar**: the selected cell's name and what it holds as written (`=[@Units]*[@Price]`, not its result) — type there to edit it, or click **fx** for every function. **Open Full Editor…** is also on the right-click menu of the node and of every cell, row number and column header. On a
@@ -93,6 +93,23 @@ Drag past the last row or column and the table grows to take the fill. Near
 the edge of the grid it scrolls. **Esc** cancels a fill mid-drag. With panes
 frozen, the outline and the handle work on the frozen cells too: fill down
 from a frozen column, or across out of it into the rest of the table.
+
+## Wrap text and row height
+
+**Home ▸ Font ▸ Wrap Text** (or right-click ▸ Format ▸ Wrap Text) lets long
+text in the selected cells run onto more lines, and the row grows to fit —
+a note column stays a sensible width instead of stretching across the
+screen. Wrapping keeps the column's width; drag the column wider or
+narrower and the row follows. Fitting columns to their content leaves a
+wrapped column at its own width.
+
+Drag the border under a row number to make a row taller or shorter, or
+right-click the row number ▸ **Row Height…** for a height in pixels.
+**AutoFit Row Height** — or a double-click on that border — puts the row
+back to its usual height, or tall enough for its wrapped text. Heights are
+saved with the table and follow their rows through sorts and inserts; a
+frozen pane shows the same heights. Like everything about how the table
+looks, none of this re-runs the flow.
 
 ## Hiding rows and columns
 

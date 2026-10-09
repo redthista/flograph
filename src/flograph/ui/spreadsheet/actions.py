@@ -282,6 +282,11 @@ class SheetActions(QObject):
                       body + " Again to take it off. Only the look changes.",
                       lambda on, f=flag: v.format_selection(**{f: on}),
                       keys=[key], checked=own(flag), enabled=edit)
+        self._add("fmt_wrap", "Wrap Text", "fmt_wrap",
+                  "Let long text in the selected cells run onto more lines; "
+                  "the row grows to fit. Again to keep it on one line.",
+                  lambda on: v.format_selection(wrap=on),
+                  checked=own("wrap"), enabled=edit, short="Wrap")
         for side, label in (("left", "Align Left"), ("center", "Center"),
                             ("right", "Align Right")):
             self._add(f"align_{side}", label, f"align_{side}",
@@ -600,6 +605,20 @@ class SheetActions(QObject):
                   v.text_to_columns,
                   enabled=lambda: edit() and v.currentIndex().isValid(),
                   short="Split")
+        self._add("row_height", "Row Height…", "row_height",
+                  "Set the selected rows' height in pixels. Dragging the "
+                  "border under a row number does it too.",
+                  v.set_row_height_dialog,
+                  enabled=lambda: edit() and bool(v.target_rows()),
+                  short="Row Height")
+        self._add("row_autofit", "AutoFit Row Height", "row_autofit",
+                  "Put the selected rows back to their usual height — or "
+                  "tall enough for wrapped text. Double-clicking the border "
+                  "under a row number does it too.",
+                  v.autofit_rows,
+                  enabled=lambda: edit() and bool(v.target_rows()),
+                  short="Fit Rows")
+
         def any_hidden() -> bool:
             return any(v.hidden_count())
 
