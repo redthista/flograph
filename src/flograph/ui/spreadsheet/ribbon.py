@@ -369,6 +369,7 @@ class SheetRibbon(QWidget):
             "type_menu": self._fill_type_menu,
             "function_menu": self._fill_function_menu,
             "freeze_menu": self._fill_freeze_menu,
+            "fill_menu_more": self._fill_fill_more_menu,
             "fill_menu": self._fill_fill_menu,
             "ink_menu": self._fill_ink_menu,
             "select_menu": self._fill_select_menu,
@@ -403,7 +404,7 @@ class SheetRibbon(QWidget):
                                  ("fmt_thousands", "")]),
                         ("row", [("dec_more", ""), ("dec_less", "")])]),
             ("Editing", [("fill_down", "Fill Down"),
-                         ("fill_right", "Fill Right"),
+                         m("fill_menu_more", "fill_right", "Fill"),
                          m("select_menu", "find", "Find && Select"),
                          ("replace", "Replace")]),
         ]
@@ -563,6 +564,10 @@ class SheetRibbon(QWidget):
     def _fill_ink_menu(self, menu) -> None:
         from .actions import fill_color_menu
         fill_color_menu(menu, self._view, ink=True)
+
+    def _fill_fill_more_menu(self, menu) -> None:
+        for name in ("fill_down", "fill_right", "fill_series"):
+            menu.addAction(self._actions[name])
 
     def _fill_freeze_menu(self, menu) -> None:
         for name in ("freeze", "freeze_row", "freeze_col", "unfreeze"):

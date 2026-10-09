@@ -11,7 +11,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 | Tab | What is on it |
 | --- | --- |
-| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, alignment, Clear Formats); Fill Down, Fill Right, Find & Select ▾, Replace |
+| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, alignment, Clear Formats); Fill Down, Fill ▾ (Right, Series…), Find & Select ▾, Replace |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
@@ -117,6 +117,25 @@ and a table opens with its groups unfolded. Rows folded away are treated
 like rows a filter hides — Remove Duplicates, Go To Special, Ctrl+Enter
 and the Total Row leave them out — and, like filtered rows, they still go
 down the flow.
+
+### Fill Series
+
+**Home ▸ Fill ▾ ▸ Series…** (or right-click ▸ Fill Series…) is Excel's
+Series dialog. Select the cells to fill — the first one holds the start —
+and choose:
+
+- **Linear** — add the step: 1, 3, 5, 7 …
+- **Growth** — multiply by the step: 2, 4, 8, 16 …
+- **Date** — move on by the step in **days**, **weekdays** (Saturday and
+  Sunday skipped), **months** or **years**. A month on from 31 January is
+  28 February, then 31 March — month-ends stay month-ends.
+- **AutoFill** — the fill handle's rules: Mon → Tue, Item 1 → Item 2.
+
+A **stop value** ends the series early; with only one cell selected it
+says how far to go, and the table grows to fit. **Series in** fills down
+each column or across each row of the selection, each from its own first
+cell. The dialog guesses the type from the first cell and shows the values
+before anything changes; one undo step.
 
 ## Dragging rows and columns
 

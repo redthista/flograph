@@ -176,6 +176,7 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
     menu.addAction(a["clear"])
     menu.addAction(a["fill_down"])
     menu.addAction(a["fill_right"])
+    menu.addAction(a["fill_series"])
     pick = submenu(menu, "Select", sheet_icon("goto_special"))
     for name in ("goto", "goto_special", "select_formulas",
                  "select_constants", "select_blanks", "select_errors",

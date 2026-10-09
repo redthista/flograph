@@ -529,6 +529,14 @@ class SheetActions(QObject):
                   enabled=lambda: bool(v.sheet_model()
                                        and v.sheet_model().note_cells()),
                   short="Next")
+        self._add("fill_series", "Fill Series…", "fill_series",
+                  "Fill the selection with a series from its first cell — "
+                  "1, 2, 3 …, 2, 4, 8 …, a date each month or each weekday "
+                  "— with a step and an optional stop value. With one cell "
+                  "selected, fills on to the stop value.",
+                  v.fill_series,
+                  enabled=lambda: edit() and v.currentIndex().isValid(),
+                  short="Series")
         self._add("find", "Find…", "find",
                   "Find a value or a piece of a formula. Enter goes to the "
                   "next match.",

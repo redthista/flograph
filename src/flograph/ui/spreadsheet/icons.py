@@ -526,6 +526,16 @@ def _clear_outline(p, r, c):
     _badge(p, _BADGE, "x", RED)
 
 
+def _fill_series(p, r, c):
+    """A column counting 1, 2, 3 with a downward arrow."""
+    p.setPen(_pen(c, 1.1))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(QRectF(2.5, 2.5, 9, 15), 1.5, 1.5)
+    for i, digit in enumerate("123"):
+        _text(p, QRectF(2.5, 2.5 + i * 5, 9, 5), digit, c, 5)
+    _arrow(p, QPointF(15, 3.5), QPointF(15, 17), BLUE, 1.4, 2.6)
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -904,6 +914,7 @@ GLYPHS = {
     "paste_special": (_paste_special, FG),
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
     "dedupe": (_dedupe, FG), "split": (_split, FG),
+    "fill_series": (_fill_series, FG),
     "group": (_group, FG), "ungroup": (_ungroup, FG),
     "hide_detail": (_hide_detail, FG), "show_detail": (_show_detail, FG),
     "collapse_all": (_collapse_all, FG), "expand_all": (_expand_all, FG),

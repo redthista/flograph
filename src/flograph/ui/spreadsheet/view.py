@@ -584,6 +584,33 @@ class SpreadsheetView(QTableView):
                      for _ in range(rect[2] - row0 + 1)]
         model.set_cells((row0, col0), block)
 
+    def fill_series(self) -> None:
+        """Home ▸ Fill ▸ Series…: the Series dialog."""
+        if self.editable and self._selection_rect() is not None:
+            from .series_dialog import fill_series
+            fill_series(self)
+
+    def write_series(self, plan, down: bool) -> None:
+        """Write a Fill Series plan — [(first cell, values after it)] — as
+        one edit, growing the table when a series runs past its end."""
+        model = self.sheet_model()
+        if model is None or not plan:
+            return
+        r0 = min(origin[0] for origin, _v in plan)
+        c0 = min(origin[1] for origin, _v in plan)
+        if down:
+            r1 = max(origin[0] + len(v) for origin, v in plan)
+            c1 = max(origin[1] for origin, _v in plan)
+        else:
+            r1 = max(origin[0] for origin, _v in plan)
+            c1 = max(origin[1] + len(v) for origin, v in plan)
+        block = [[None] * (c1 - c0 + 1) for _ in range(r1 - r0 + 1)]
+        for (row, col), values in plan:
+            for k, value in enumerate(values, start=1):
+                r, c = (row + k, col) if down else (row, col + k)
+                block[r - r0][c - c0] = value
+        model.set_cells((r0, c0), block)
+
     def fill_down_selection(self) -> None:
         """Ctrl+D: fill the selection from its top row; with a single row
         selected, fill from the row above (like Excel)."""
