@@ -213,6 +213,10 @@ class Sheet:
     # Height…): row -> pixels. Others are the usual height, or tall enough
     # for their wrapped text.
     row_heights: dict = field(default_factory=dict)
+    # Defined names (core/sheet/names.py): name -> absolute reference, so
+    # a formula can say =SUM(Sales). Unlike the look of the sheet, a name
+    # changes what formulas work out.
+    names: dict = field(default_factory=dict)
 
     @property
     def n_rows(self) -> int:
@@ -309,6 +313,9 @@ class Sheet:
             for c, text in enumerate(row):
                 if is_formula(text):
                     row[c] = shift_for_structure(text, axis, at, count)
+        if self.names:
+            from .names import shift_names
+            self.names = shift_names(self.names, axis, at, count)
 
     def insert_rows(self, at: int, count: int = 1) -> None:
         at = max(0, min(at, self.n_rows))
@@ -519,6 +526,7 @@ class Sheet:
                     for g in self.groups],
             hidden_rows=set(self.hidden_rows),
             row_heights=dict(self.row_heights),
+            names=dict(self.names),
         )
 
 
@@ -548,6 +556,11 @@ def _parse_row_heights(raw, n_rows: int) -> dict:
                         for v in entry) and 0 <= entry[0] < n_rows):
             out[entry[0]] = max(lo, min(hi, entry[1]))
     return out
+
+
+def _parse_names(raw) -> dict:
+    from .names import clean
+    return clean(raw)
 
 
 def _parse_groups(raw, n_rows: int) -> list:
@@ -650,7 +663,8 @@ def parse_sheet(raw) -> Sheet:
                  hidden_rows=_parse_hidden_rows(parsed.get("hidden_rows"),
                                                 len(rows)),
                  row_heights=_parse_row_heights(parsed.get("row_heights"),
-                                                len(rows)))
+                                                len(rows)),
+                 names=_parse_names(parsed.get("names")))
 
 
 def sheet_to_dict(sheet: Sheet) -> dict:
@@ -690,6 +704,9 @@ def sheet_to_dict(sheet: Sheet) -> dict:
                          for (r, c), fmt in sorted(sheet.styles.items())]
     if sheet.hidden_rows:
         out["hidden_rows"] = sorted(sheet.hidden_rows)
+    if sheet.names:
+        out["names"] = dict(sorted(sheet.names.items(),
+                                   key=lambda kv: kv[0].casefold()))
     if sheet.row_heights:
         out["row_heights"] = [[r, int(h)] for r, h in
                               sorted(sheet.row_heights.items())]

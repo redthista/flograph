@@ -633,6 +633,34 @@ def _row_autofit(p, r, c):
     _arrow(p, QPointF(16, 14), QPointF(16, 16.5), BLUE, 1.3, 2)
 
 
+def _tag(p, c, color):
+    """A luggage tag — a name tied to something."""
+    path = QPainterPath()
+    path.moveTo(2.5, 7)
+    path.lineTo(7, 2.5)
+    path.lineTo(15.5, 2.5)
+    path.lineTo(15.5, 11.5)
+    path.lineTo(7, 11.5)
+    path.closeSubpath()
+    p.setPen(_pen(color, 1.2))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(path)
+    p.drawEllipse(QPointF(6.5, 7), 1.2, 1.2)
+    _text(p, QRectF(8, 3, 7.5, 8), "ab", color, 5.5)
+
+
+def _define_name(p, r, c):
+    _tag(p, c, c)
+    _badge(p, _BADGE, "+", GREEN)
+
+
+def _name_manager(p, r, c):
+    _tag(p, c, c)
+    p.setPen(_pen(BLUE, 1.3))
+    for y in (14.5, 17.5):
+        p.drawLine(QPointF(4, y), QPointF(16, y))
+
+
 def _note_mark(p, r, c, badge=None):
     """A cell with Excel's red note corner, and an optional badge."""
     cell = QRectF(2.5, 4.5, 15, 11)
@@ -1012,6 +1040,7 @@ GLYPHS = {
     "goto": (_goto, FG), "goto_special": (_goto_special, FG),
     "dedupe": (_dedupe, FG), "split": (_split, FG),
     "fill_series": (_fill_series, FG),
+    "define_name": (_define_name, FG), "name_manager": (_name_manager, FG),
     "format_painter": (_format_painter, FG),
     "row_hide": (_row_hide, FG), "row_unhide": (_row_unhide, FG),
     "col_hide": (_col_hide, FG), "col_unhide": (_col_unhide, FG),

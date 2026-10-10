@@ -388,7 +388,8 @@ class _Parser:
             if name == "FALSE":
                 return Bool(False)
             raise FormulaSyntaxError(
-                f"{token.text!r} needs parentheses to be a function call")
+                f"{token.text!r} isn't a defined name — a function needs "
+                f"parentheses, like {token.text.upper()}( )")
         if token.kind == "lp":
             node = self.compare()
             closing = self.take()

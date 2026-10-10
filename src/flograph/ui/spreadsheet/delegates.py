@@ -215,7 +215,8 @@ class SheetDelegate(ConditionalFormatDelegate):
         editor.row = index.row()
         if hasattr(model, "sheet"):
             from .completion import FormulaCompleter
-            FormulaCompleter(editor, lambda m=model: m.sheet.column_names())
+            FormulaCompleter(editor, lambda m=model: m.sheet.column_names(),
+                             lambda m=model: sorted(m.names))
         SheetDelegate.last_editor = editor
         return editor
 

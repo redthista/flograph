@@ -757,6 +757,65 @@ class SheetModel(QAbstractTableModel):
                                    row[i] if i < len(row) else "")
         self._structural(mutate)
 
+    # ------------------------------------------------------ defined names
+
+    @property
+    def names(self) -> dict:
+        return self._sheet.names
+
+    def define_name(self, name: str, target: str,
+                    replacing=None) -> None:
+        """Add or change a name (one undo step). `replacing` is the name
+        being changed, which may be renamed."""
+        if self._read_only:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            names = dict(sheet.names)
+            if replacing:
+                names.pop(replacing, None)
+            names[name] = target
+            sheet.names = names
+            if replacing and replacing != name:
+                # formulas follow a renamed name, as they follow a column
+                from flograph.core.sheet.names import rename_in_formula
+                for row in sheet.rows:
+                    for c, text in enumerate(row):
+                        if is_formula(text):
+                            row[c] = rename_in_formula(text, replacing, name)
+        self._structural(mutate, reset=False)
+
+    def delete_name(self, name: str) -> None:
+        if self._read_only or name not in self._sheet.names:
+            return
+
+        def mutate(sheet: Sheet) -> None:
+            sheet.names = {k: v for k, v in sheet.names.items()
+                           if k != name}
+        self._structural(mutate, reset=False)
+
+    def name_box(self, name: str):
+        """(row0, col0, row1, col1) a name covers, or None."""
+        from flograph.core.sheet.names import target_box
+        target = next((t for n, t in self._sheet.names.items()
+                       if n.casefold() == name.casefold()), None)
+        return target_box(target) if target else None
+
+    def name_value_text(self, name: str) -> str:
+        """What a name holds now, for the Name Manager."""
+        box = self.name_box(name)
+        if box is None:
+            return "#REF!"
+        r0, c0, r1, c1 = box
+        if (r0, c0) == (r1, c1):
+            return self.value_text(r0, c0)
+        shown = [self.value_text(r, c) for r in range(r0, min(r1 + 1,
+                                                              r0 + 4))
+                 for c in range(c0, min(c1 + 1, c0 + 4))]
+        cells = (r1 - r0 + 1) * (c1 - c0 + 1)
+        return "{" + ", ".join(shown[:4]) + (", …" if cells > 4 else "") \
+            + f"}}  ({cells} cells)"
+
     # ------------------------------------------------- hidden rows, cols
 
     @property

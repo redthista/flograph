@@ -1948,6 +1948,15 @@ class SpreadsheetView(QTableView):
         from .goto_dialog import go_to
         go_to(self)
 
+    def define_name(self) -> None:
+        """Formulas ▸ Define Name: a name for the selected cells."""
+        from .names_dialog import name_manager
+        name_manager(self, new=True)
+
+    def manage_names(self) -> None:
+        from .names_dialog import name_manager
+        name_manager(self)
+
     def go_to_special(self) -> None:
         """Home ▸ Find & Select ▸ Go To Special…"""
         from .goto_dialog import go_to_special

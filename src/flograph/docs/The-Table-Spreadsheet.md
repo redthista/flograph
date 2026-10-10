@@ -16,7 +16,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Row Height, Fit Rows, Show Formulas, the full editor; **Hide** ▾ (rows, columns, unhide) and Unhide All |
-| **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference |
+| **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference; **Names** (Define Name, Name Manager) |
 
 Hover any button for what it does, in a sentence, and its shortcut. Under the ribbon is the **formula bar**: the selected cell's name and what it holds as written (`=[@Units]*[@Price]`, not its result) — type there to edit it, or click **fx** for every function. **Open Full Editor…** is also on the right-click menu of the node and of every cell, row number and column header. On a
 canvas card the ribbon is one line of icons to leave the grid room; in the
@@ -477,6 +477,28 @@ with choices, as Excel's dialog does:
 A sentence says what the choices will do and a preview shows the first
 cells as they will be, the changed ones highlighted (hover one for what it
 was). The paste is one undo step.
+
+## Named ranges
+
+A name stands for a cell or a range, so a formula can say `=SUM(Sales)`
+instead of `=SUM(B2:B40)`, or `=[@Price]*(1+TaxRate)` instead of pinning
+`$F$1`. Select the cells and type a name into the **Name Box** — the
+address box left of the formula bar — then press Enter; or use **Formulas
+▸ Define Name**. A name is letters and `_`, with digits only at the end
+(`Sales`, `Tax_rate`, `Week52`), and can't be a cell address or a
+function's name.
+
+The Name Box's ▾ lists every name: pick one to select its cells, or type
+a name or an address (`B4`, `B2:D10`) to go there. When the selected cells
+are exactly a named range — or a named cell — the Name Box shows the name
+instead of the address. **Go To** (Ctrl+G)
+knows the names too, and typing in a formula offers them alongside the
+functions. **Formulas ▸ Name Manager** shows each name, the cells it
+stands for and what they hold now; change, rename or delete one there.
+
+A name moves with its cells when rows or columns are inserted or deleted;
+if its cells are deleted it shows `#REF!`. Renaming a name rewrites the
+formulas that use it. Names are saved with the table.
 
 ## Formulas and moving things
 

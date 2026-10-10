@@ -496,6 +496,15 @@ class SheetActions(QObject):
                   "formulas column by column.",
                   v.fill_right_selection, keys=["Ctrl+R"], enabled=picked,
                   short="Right")
+        self._add("define_name", "Define Name…", "define_name",
+                  "Give the selected cells a name, so formulas can say "
+                  "=SUM(Sales) instead of =SUM(B2:B40). Typing a new name "
+                  "in the box left of the formula bar does it too.",
+                  v.define_name, enabled=edit, short="Define Name")
+        self._add("name_manager", "Name Manager…", "name_manager",
+                  "Every defined name: what it refers to and holds now — "
+                  "add, change or delete them.",
+                  v.manage_names, enabled=edit, short="Name Manager")
         self._add("goto", "Go To…", "goto",
                   "Jump to a cell or a range: type B4, B2:D10, a column's "
                   "name, B:D for whole columns or 3:5 for whole rows.",

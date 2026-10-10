@@ -159,6 +159,7 @@ def merge_linked_sheet(base: Sheet, stored: Sheet) -> Sheet:
     merged.freeze_rows, merged.freeze_cols = (stored.freeze_rows,
                                               stored.freeze_cols)
     merged.show_totals = stored.show_totals
+    merged.names = dict(stored.names)
     merged.hidden_rows = {r for r in stored.hidden_rows
                           if r < merged.n_rows}
     merged.row_heights = {r: h for r, h in stored.row_heights.items()
@@ -266,7 +267,8 @@ class SheetEvaluator:
 
     def _signature(self, sheet: Sheet):
         return (sheet.n_rows, sheet.n_cols,
-                tuple((c.name, c.type) for c in sheet.columns))
+                tuple((c.name, c.type) for c in sheet.columns),
+                tuple(sorted(sheet.names.items())))
 
     def _compile(self, sheet: Sheet, r: int, c: int) -> None:
         """Read cell (r, c) afresh: its literal value, or its formula and
@@ -274,6 +276,9 @@ class SheetEvaluator:
         text = sheet.rows[r][c]
         key = (r, c)
         self._forget(key)
+        if is_formula(text) and self._defined:
+            from .names import expand_names
+            text = expand_names(text, self._defined)
         if is_formula(text):
             try:
                 ast = bind_column_refs(parse_formula_cached(text), r,
@@ -314,6 +319,7 @@ class SheetEvaluator:
         n_rows, n_cols = sheet.n_rows, sheet.n_cols
         self._n_rows, self._bounds = n_rows, (n_rows, n_cols)
         self._names = sheet.column_names()
+        self._defined = dict(sheet.names)
         self._sig = self._signature(sheet)
         self.values: list[list] = [[None] * n_cols for _ in range(n_rows)]
         self.asts: dict = {}

@@ -46,7 +46,8 @@ class GoToDialog(QDialog):
         intro.setWordWrap(True)
         layout.addWidget(intro)
         self.columns = QListWidget()
-        self.columns.addItems(model.sheet.column_names())
+        self.columns.addItems(sorted(model.names, key=str.casefold)
+                              + model.sheet.column_names())
         self.columns.setMaximumHeight(160)
         layout.addWidget(self.columns)
         row = QHBoxLayout()
@@ -82,6 +83,10 @@ class GoToDialog(QDialog):
 
     def target(self):
         model = self._model
+        named = model.name_box(self.ref.text().strip()) \
+            if self.ref.text().strip() else None
+        if named is not None:
+            return named
         return pick.parse_reference(self.ref.text(),
                                     model.sheet.column_names(),
                                     model.rowCount(), model.columnCount())

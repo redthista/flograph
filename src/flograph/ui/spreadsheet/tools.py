@@ -118,12 +118,11 @@ class FormulaBar(QWidget):
         fx.setToolTip("Every function the formulas know, with examples")
         fx.clicked.connect(self.show_reference)
 
-        # Excel's name box: which cell the bar is showing
-        self.cell_label = QLabel("A1")
-        self.cell_label.setMinimumWidth(52)
-        self.cell_label.setAlignment(Qt.AlignCenter)
-        self.cell_label.setToolTip("The selected cell — column letter and "
-                                   "row number, as formulas refer to it")
+        # Excel's Name Box: which cell the bar is showing — and the names
+        from .names_dialog import NameBox
+        self.cell_label = NameBox()
+        self.cell_label.setText("A1")
+        self.cell_label.entered.connect(self._name_box_entered)
         # its own dark strip, like the ribbon above it: without a background
         # of its own the window's palette shows through (light in light mode)
         self.setObjectName("formula_bar")
@@ -137,7 +136,11 @@ class FormulaBar(QWidget):
             "QLineEdit { background: #1f2026; color: #e5e7eb;"
             " border: 1px solid #3a3d47; border-radius: 3px;"
             " padding: 2px 4px; }"
-            "QLineEdit:focus { border-color: #60a5fa; }")
+            "QLineEdit:focus { border-color: #60a5fa; }"
+            "QComboBox { background: #1f2026; color: #d6d8de;"
+            " border: 1px solid #3a3d47; border-radius: 3px;"
+            " padding: 1px 4px; font-size: 8.5pt; min-width: 64px; }"
+            "QComboBox QLineEdit { border: none; padding: 0; }")
 
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(
@@ -146,7 +149,7 @@ class FormulaBar(QWidget):
         self.edit.setToolTip("The cell's value or formula. A line break in "
                              "the cell shows as ↵; Alt+Enter types one.")
         self.edit.installEventFilter(self)
-        FormulaCompleter(self.edit, self._column_names)
+        FormulaCompleter(self.edit, self._column_names, self._defined)
 
         row.addWidget(fx)
         row.addWidget(self.cell_label)
@@ -155,11 +158,16 @@ class FormulaBar(QWidget):
         selection = view.selectionModel()
         if selection is not None:
             selection.currentChanged.connect(self.sync)
+            # the Name Box names a selection that is exactly a named range
+            selection.selectionChanged.connect(self._show_where)
         model = view.model()
         if model is not None:
             # undo, Submit, a linked run: the cell changed under the bar
             model.dataChanged.connect(self._follow)
             model.modelReset.connect(self._follow)
+            model.dataChanged.connect(self._refresh_names)
+            model.modelReset.connect(self._refresh_names)
+            self._refresh_names()
         self.sync(view.currentIndex())
 
     def eventFilter(self, obj, event) -> bool:
@@ -170,6 +178,65 @@ class FormulaBar(QWidget):
             return True
         return super().eventFilter(obj, event)
 
+    def _show_where(self, *_args) -> None:
+        """The Name Box: the name of the selected cells when they are
+        exactly a named range (as Excel's does), else the current cell's
+        address."""
+        import shiboken6
+        if not shiboken6.isValid(self) or self.cell_label.lineEdit().hasFocus():
+            return
+        model = self._model()
+        current = self._view.currentIndex()
+        if model is None or not current.isValid():
+            return
+        rect = self._view._selection_rect()
+        for name in sorted(model.names, key=str.casefold):
+            if model.name_box(name) == rect:
+                self.cell_label.setText(name)
+                return
+        self.cell_label.setText(cell_name(current.row(), current.column()))
+
+    def _refresh_names(self, *_args) -> None:
+        import shiboken6
+        model = self._model()
+        if shiboken6.isValid(self) and model is not None:
+            names = sorted(model.names)
+            if names != getattr(self, "_shown_names", None):
+                self._shown_names = names
+                self.cell_label.set_names(names)
+                self._show_where()
+
+    def _name_box_entered(self, text: str) -> None:
+        """A name or an address typed (or picked) in the Name Box: go
+        there — or, a new name, name the selected cells with it."""
+        from flograph.core.sheet import FUNCTION_NAMES
+        from flograph.core.sheet import names as nm
+        from flograph.core.sheet.select import parse_reference
+        from .names_dialog import selection_target
+        view, model = self._view, self._model()
+        text = text.strip()
+        if model is None or not text:
+            return
+        box = model.name_box(text)
+        if box is None:
+            found = parse_reference(text, [], model.rowCount(),
+                                    model.columnCount())
+            box = None if isinstance(found, str) else found
+        if box is not None:
+            view.select_rect(box)
+            view.setFocus()
+            return
+        why = nm.check_name(text, model.names, FUNCTION_NAMES)
+        target = nm.parse_target(selection_target(view))
+        if why or target.startswith("!") or not view.editable:
+            view.say(why or "Select the cells to name first.")
+            self.sync()
+            return
+        model.define_name(text, target)
+        view.say(f"{text} now stands for {nm.plain(target)} — use it in a "
+                 f"formula: =SUM({text})")
+        view.setFocus()
+
     def _follow(self, *_args) -> None:
         """Re-read the cell after a change from elsewhere — unless the bar
         is being typed into, when the typing wins until it is committed."""
@@ -179,6 +246,10 @@ class FormulaBar(QWidget):
 
     def _model(self) -> Optional[SheetModel]:
         return self._view.sheet_model()
+
+    def _defined(self):
+        model = self._model()
+        return sorted(model.names) if model is not None else []
 
     def _column_names(self):
         model = self._model()
@@ -203,7 +274,7 @@ class FormulaBar(QWidget):
             self.cell_label.setText("")
             self.edit.clear()
             return
-        self.cell_label.setText(cell_name(current.row(), current.column()))
+        self._show_where()
         # one line: a line break in the cell shows as ↵
         self.edit.setText(model.cell_source(current.row(), current.column())
                           .replace("\n", _BREAK))

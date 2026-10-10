@@ -482,6 +482,8 @@ class SheetRibbon(QWidget):
             ("Functions", [m("function_menu", "insert_function",
                              "Insert Function"),
                            ("reference", "Reference")]),
+            ("Names", [("define_name", "Define Name"),
+                       ("name_manager", "Name Manager")]),
             ("Check", [("show_formulas", "Show Formulas")]),
         ]
         return [("Home", "Home", home),

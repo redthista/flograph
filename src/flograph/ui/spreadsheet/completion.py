@@ -38,10 +38,12 @@ _TRAILING_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
 
 class FormulaCompleter(QObject):
     def __init__(self, edit: QLineEdit,
-                 columns: Callable[[], list[str]]) -> None:
+                 columns: Callable[[], list[str]],
+                 names: Callable[[], list[str]] = lambda: []) -> None:
         super().__init__(edit)
         self._edit = edit
         self._columns = columns
+        self._names = names        # defined names: offered bare, first
         self._mode = "function"
         self._replace_from = 0
 
@@ -99,7 +101,9 @@ class FormulaCompleter(QObject):
                 return
             self._mode = "function"
             self._replace_from = pos - len(prefix)
-            items = list(_WORD_SUGGESTIONS)
+            defined = list(self._names())
+            self._defined = {n.upper() for n in defined}
+            items = defined + list(_WORD_SUGGESTIONS)
 
         self._completer.setModel(QStringListModel(items, self._completer))
         self._completer.setCompletionPrefix(prefix)
@@ -116,7 +120,8 @@ class FormulaCompleter(QObject):
             typed = text[self._replace_from:pos]
             at = "@" if typed.startswith("[@") else ""
             replacement = f"[{at}{name}]"
-        elif name.upper() in _BARE_WORDS:
+        elif (name.upper() in _BARE_WORDS
+              or name.upper() in getattr(self, "_defined", ())):
             replacement = name
         else:
             replacement = f"{name}("
