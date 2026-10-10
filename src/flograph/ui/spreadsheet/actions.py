@@ -882,6 +882,40 @@ class SheetActions(QObject):
                   "pick one from the list.",
                   lambda: None, enabled=edit, short="Function")
 
+        # ---- formula auditing
+        def formula_here() -> bool:
+            model = v.sheet_model()
+            current = v.currentIndex()
+            return (model is not None and current.isValid()
+                    and model.evaluator is not None)
+
+        self._add("trace_precedents", "Trace Precedents", "trace_precedents",
+                  "Arrows into the selected cell from every cell its "
+                  "formula reads, and a box round each range. Press again "
+                  "to go a level further back.",
+                  v.trace_precedents, enabled=formula_here,
+                  short="Precedents")
+        self._add("trace_dependents", "Trace Dependents", "trace_dependents",
+                  "Arrows from the selected cell to every formula that "
+                  "reads it. Press again to go a level further on.",
+                  v.trace_dependents, enabled=formula_here,
+                  short="Dependents")
+        self._add("remove_arrows", "Remove Arrows", "remove_arrows",
+                  "Clear the tracing arrows. Editing the table clears "
+                  "them too.",
+                  v.remove_arrows, enabled=lambda: v.has_arrows,
+                  short="Remove Arrows")
+        self._add("select_precedents", "Select Precedents",
+                  "select_precedents",
+                  "Select the cells the current cell's formula reads.",
+                  v.select_precedents, keys=["Ctrl+["], enabled=formula_here,
+                  short="Select Precedents")
+        self._add("select_dependents", "Select Dependents",
+                  "select_dependents",
+                  "Select the formulas that read the current cell.",
+                  v.select_dependents, keys=["Ctrl+]"], enabled=formula_here,
+                  short="Select Dependents")
+
         # ---- AutoSum: Σ and its list
         from flograph.core.sheet.autosum import FUNCTIONS
         for func, label in FUNCTIONS:

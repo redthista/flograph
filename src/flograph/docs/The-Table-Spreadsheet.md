@@ -17,7 +17,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Row Height, Fit Rows, Show Formulas, the full editor; **Hide** ▾ (rows, columns, unhide) and Unhide All |
-| **Formulas** | **AutoSum** ▾, Insert Function ▾ (grouped Maths / Logic / Text), the function reference; **Names** (Define Name, Name Manager) |
+| **Formulas** | **AutoSum** ▾, Insert Function ▾ (grouped Maths / Logic / Text), the function reference; **Names** (Define Name, Name Manager); **Formula Auditing** (Trace Precedents, Trace Dependents, Remove Arrows, Show Formulas) |
 
 Hover any button for what it does, in a sentence, and its shortcut. Under the ribbon is the **formula bar**: the selected cell's name and what it holds as written (`=[@Units]*[@Price]`, not its result) — type there to edit it, or click **fx** for every function. **Open Full Editor…** is also on the right-click menu of the node and of every cell, row number and column header. On a
 canvas card the ribbon is one line of icons to leave the grid room; in the
@@ -481,6 +481,24 @@ total for you:
 
 The Σ ▾ list has **Average**, **Count Numbers**, **Max** and **Min** too.
 
+## Formula auditing: where a number comes from
+
+Select a formula and press **Formulas ▸ Trace Precedents**: a blue arrow
+runs into it from every cell it reads, and every range it reads gets a
+box with an arrow from its edge — so `=D4*B5` shows where both numbers
+come from. Press it again to go a level further back: the formulas among
+those cells get their arrows too, until only plain values are left.
+
+**Trace Dependents** goes the other way: arrows from the selected cell to
+every formula that reads it, then — pressed again — to what reads those.
+Select a price and press it a few times to see everything a change to it
+would move.
+
+**Remove Arrows** clears them; editing the table does too, as in Excel.
+**Ctrl+[** selects the cells the current formula reads, **Ctrl+]** the
+formulas that read the current cell. All of these are on the right-click
+menu under **Formula Auditing**.
+
 ## Pinning a reference: F4
 
 While typing a formula, **F4** cycles the reference at the cursor
@@ -639,6 +657,7 @@ fourteen.
 | Show formulas | **Ctrl+`** |
 | Recommended chart of the selected columns | **Alt+F1** |
 | AutoSum | **Alt+=** |
+| Select what a formula reads / what reads the cell | **Ctrl+[** / **Ctrl+]** |
 | Pin a reference (`B2` → `$B$2` → `B$2` → `$B2`) | **F4**, while typing a formula |
 
 See also [[Nodes and the Library]] and [[Keyboard Shortcuts]].

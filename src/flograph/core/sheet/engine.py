@@ -417,6 +417,21 @@ class SheetEvaluator:
                 ERR_CYCLE, "circular reference")
         self._stuck = stuck_outside | left
 
+    # ---------------------------------------------------------- auditing
+
+    def is_formula(self, cell) -> bool:
+        return tuple(cell) in self.asts
+
+    def precedents(self, cell) -> tuple[list, list]:
+        """What the formula in `cell` reads: (cells, ranges), ranges as
+        (r1, c1, r2, c2) kept whole. Empty for a cell with no formula."""
+        cells, ranges = self._reads.get(tuple(cell), ((), ()))
+        return sorted(cells), sorted(ranges)
+
+    def dependents(self, cell) -> list:
+        """The formulas that read `cell`, by name or through a range."""
+        return sorted(self._readers_of(tuple(cell)))
+
     # ---------------------------------------------------------- updates
 
     def _readers_of(self, cell) -> set:

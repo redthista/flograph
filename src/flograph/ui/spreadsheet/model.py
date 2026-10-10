@@ -299,6 +299,12 @@ class SheetModel(QAbstractTableModel):
     def sheet(self) -> Sheet:
         return self._sheet
 
+    @property
+    def evaluator(self):
+        """The formula evaluator: what each formula reads and what reads
+        each cell — formula auditing asks it."""
+        return getattr(self, "_evaluator", None)
+
     def sheet_dict(self) -> dict:
         return sheet_to_dict(self._sheet)
 

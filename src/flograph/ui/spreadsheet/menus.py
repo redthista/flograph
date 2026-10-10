@@ -196,6 +196,11 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
                  "select_problems", "select_notes"):
         pick.addAction(a[name])
     _chart_menu(menu, view)
+    audit = submenu(menu, "Formula Auditing",
+                    sheet_icon("trace_precedents"))
+    for name in ("trace_precedents", "trace_dependents", "remove_arrows",
+                 "select_precedents", "select_dependents"):
+        audit.addAction(a[name])
 
     font = submenu(menu, "Format", sheet_icon("fmt_b"))
     for name in ("fmt_b", "fmt_i", "fmt_u", "fmt_wrap"):

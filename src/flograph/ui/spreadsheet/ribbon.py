@@ -497,7 +497,11 @@ class SheetRibbon(QWidget):
                            ("reference", "Reference")]),
             ("Names", [("define_name", "Define Name"),
                        ("name_manager", "Name Manager")]),
-            ("Check", [("show_formulas", "Show Formulas")]),
+            # Excel's Formula Auditing group
+            ("Formula Auditing", [("trace_precedents", "Trace Precedents"),
+                                  ("trace_dependents", "Trace Dependents"),
+                                  ("remove_arrows", "Remove Arrows"),
+                                  ("show_formulas", "Show Formulas")]),
         ]
         tabs = [("Home", "Home", home)]
         if self._view.host.offers_charts():

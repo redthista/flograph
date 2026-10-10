@@ -367,6 +367,8 @@ class SpreadsheetView(QTableView):
             old.dataChanged.disconnect(self._maybe_autofit)
             old.modelReset.disconnect(self._forget_sort)
             old.sheet_edited.disconnect(self._forget_sort)
+            old.modelReset.disconnect(self.remove_arrows)
+            old.sheet_edited.disconnect(self.remove_arrows)
         if old is not None:
             old.modelAboutToBeReset.disconnect(self._before_reset)
             old.modelReset.disconnect(self._after_reset)
@@ -387,6 +389,9 @@ class SpreadsheetView(QTableView):
             model.dataChanged.connect(self._maybe_autofit)
             model.modelReset.connect(self._forget_sort)
             model.sheet_edited.connect(self._forget_sort)
+            # Excel's way: an edit takes the auditing arrows away
+            model.modelReset.connect(self.remove_arrows)
+            model.sheet_edited.connect(self.remove_arrows)
             model.modelAboutToBeReset.connect(self._before_reset)
             model.modelReset.connect(self._after_reset)
             model.outline_changed.connect(self._apply_outline)
@@ -833,6 +838,98 @@ class SpreadsheetView(QTableView):
             # part-way through a paint invites recursion
             QTimer.singleShot(0, lambda: self.autosize_columns(persist=False))
         super().paintEvent(event)
+        if getattr(self, "_trace", None):
+            from .trace_paint import paint_trace
+            paint_trace(self, self._trace)
+
+    # --------------------------------------------------- formula auditing
+
+    def _audit_start(self):
+        """(model, current cell) for an auditing command, or None."""
+        model = self.sheet_model()
+        current = self.currentIndex()
+        if model is None or not current.isValid() \
+                or getattr(model, "evaluator", None) is None:
+            return None
+        return model, (current.row(), current.column())
+
+    def trace_precedents(self) -> None:
+        """Formulas ▸ Trace Precedents: arrows into the current cell from
+        the cells its formula reads; again, a level further back."""
+        from flograph.core.sheet import cell_name
+        from flograph.core.sheet.trace import Trace
+        start = self._audit_start()
+        if start is None:
+            return
+        model, cell = start
+        if not hasattr(self, "_trace"):
+            self._trace = Trace()
+        if not model.evaluator.is_formula(cell) and \
+                cell not in self._trace._back:
+            self.say(f"{cell_name(*cell)} holds no formula, so it reads no "
+                     "other cells. Trace Dependents shows what reads it.")
+            return
+        if not self._trace.precedents(model.evaluator, cell):
+            self.say("No more precedents to trace — every cell the arrows "
+                     "start from is a value, not a formula.")
+        self.viewport().update()
+
+    def trace_dependents(self) -> None:
+        """Formulas ▸ Trace Dependents: arrows from the current cell to
+        the formulas that read it; again, a level further on."""
+        from flograph.core.sheet import cell_name
+        from flograph.core.sheet.trace import Trace
+        start = self._audit_start()
+        if start is None:
+            return
+        model, cell = start
+        if not hasattr(self, "_trace"):
+            self._trace = Trace()
+        fresh = cell not in self._trace._forward
+        if not self._trace.dependents(model.evaluator, cell):
+            self.say(f"No formula reads {cell_name(*cell)}." if fresh
+                     else "No more dependents to trace.")
+        self.viewport().update()
+
+    def remove_arrows(self, *_args) -> None:
+        trace = getattr(self, "_trace", None)
+        if trace:
+            trace.clear()
+            self.viewport().update()
+
+    @property
+    def has_arrows(self) -> bool:
+        return bool(getattr(self, "_trace", None))
+
+    def select_precedents(self) -> None:
+        """Ctrl+[: select the cells the current formula reads."""
+        from flograph.core.sheet import cell_name
+        start = self._audit_start()
+        if start is None:
+            return
+        model, cell = start
+        cells, ranges = model.evaluator.precedents(cell)
+        picked = set(cells)
+        for r1, c1, r2, c2 in ranges:
+            picked |= {(r, c) for r in range(r1, r2 + 1)
+                       for c in range(c1, c2 + 1)}
+        if not picked:
+            self.say(f"{cell_name(*cell)} reads no other cells.")
+            return
+        self.select_cells(sorted(picked))
+
+    def select_dependents(self) -> None:
+        """Ctrl+]: select the formulas that read the current cell."""
+        from flograph.core.sheet import cell_name
+        start = self._audit_start()
+        if start is None:
+            return
+        model, cell = start
+        readers = model.evaluator.dependents(cell)
+        if not readers:
+            self.say(f"No formula reads {cell_name(*cell)}.")
+            return
+        self.select_cells(readers)
 
     def _sync_column_widths(self) -> None:
         """On load/reset: apply the widths stored with the node, or re-fit

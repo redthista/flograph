@@ -857,6 +857,54 @@ def _autosum(p, r, c):
     _text(p, QRectF(0, -1, 20, 20), "Σ", BLUE, 19, bold=True)
 
 
+def _trace_cells(p, c, sources, target, colour=None):
+    """Little cells joined by arrows: `sources` → `target` (or the other
+    way round), Excel's auditing arrows."""
+    colour = colour or BLUE
+    p.setPen(_pen(c, 1.1))
+    p.setBrush(Qt.NoBrush)
+    for x, y in [*sources, target]:
+        p.drawRoundedRect(QRectF(x - 2.5, y - 2, 5, 4), 0.8, 0.8)
+    return colour
+
+
+def _trace_precedents(p, r, c):
+    """Two cells with arrows into a third."""
+    sources, target = [(4, 4.5), (4, 15.5)], (16, 10)
+    _trace_cells(p, c, sources, target)
+    for x, y in sources:
+        _arrow(p, QPointF(x + 2.5, y), QPointF(target[0] - 3, target[1]),
+               BLUE, 1.2, 2.2)
+
+
+def _trace_dependents(p, r, c):
+    """One cell with arrows out to two."""
+    source, targets = (4, 10), [(16, 4.5), (16, 15.5)]
+    _trace_cells(p, c, targets, source)
+    for x, y in targets:
+        _arrow(p, QPointF(source[0] + 2.5, source[1]), QPointF(x - 3, y),
+               BLUE, 1.2, 2.2)
+
+
+def _remove_arrows(p, r, c):
+    _arrow(p, QPointF(3, 15), QPointF(15, 4), BLUE, 1.3, 2.4)
+    p.setPen(_pen(RED, 1.7))
+    p.drawLine(QPointF(11, 12), QPointF(17.5, 18.5))
+    p.drawLine(QPointF(17.5, 12), QPointF(11, 18.5))
+
+
+def _select_precedents(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 15, 15), lit=[("cell", 0, 0), ("cell", 1, 0)],
+          color=c)
+    _arrow(p, QPointF(8, 14.5), QPointF(15, 14.5), BLUE, 1.1, 1.8)
+
+
+def _select_dependents(p, r, c):
+    _grid(p, QRectF(2.5, 2.5, 15, 15), lit=[("cell", 0, 2), ("cell", 1, 2)],
+          color=c)
+    _arrow(p, QPointF(5, 14.5), QPointF(12, 14.5), BLUE, 1.1, 1.8)
+
+
 def _show_formulas(p, r, c):
     p.setPen(_pen(c, 1.2))
     p.setBrush(Qt.NoBrush)
@@ -1200,6 +1248,11 @@ GLYPHS = {
     "freeze_col": (_freeze_col, FG), "unfreeze": (_unfreeze, FG),
     "fx": (_fx, FG), "show_formulas": (_show_formulas, FG),
     "autosum": (_autosum, FG),
+    "trace_precedents": (_trace_precedents, FG),
+    "trace_dependents": (_trace_dependents, FG),
+    "remove_arrows": (_remove_arrows, FG),
+    "select_precedents": (_select_precedents, FG),
+    "select_dependents": (_select_dependents, FG),
     "reference": (_reference, FG),
     "submit": (_submit, GREEN), "discard": (_discard, RED),
     "auto": (_auto, AMBER), "expand": (_expand, FG),
