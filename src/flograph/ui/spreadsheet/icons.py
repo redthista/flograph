@@ -852,6 +852,11 @@ def _fx(p, r, c):
     _text(p, QRectF(0, 0, 20, 20), "fx", c, 12, bold=True, italic=True)
 
 
+def _autosum(p, r, c):
+    """Σ, Excel's AutoSum."""
+    _text(p, QRectF(0, -1, 20, 20), "Σ", BLUE, 19, bold=True)
+
+
 def _show_formulas(p, r, c):
     p.setPen(_pen(c, 1.2))
     p.setBrush(Qt.NoBrush)
@@ -1185,6 +1190,7 @@ GLYPHS = {
     "freeze": (_freeze, FG), "freeze_row": (_freeze_row, FG),
     "freeze_col": (_freeze_col, FG), "unfreeze": (_unfreeze, FG),
     "fx": (_fx, FG), "show_formulas": (_show_formulas, FG),
+    "autosum": (_autosum, FG),
     "reference": (_reference, FG),
     "submit": (_submit, GREEN), "discard": (_discard, RED),
     "auto": (_auto, AMBER), "expand": (_expand, FG),

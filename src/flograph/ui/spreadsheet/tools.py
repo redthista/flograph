@@ -16,7 +16,7 @@ from __future__ import annotations
 import html
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit,
                                QTextBrowser, QToolButton, QVBoxLayout,
                                QWidget)
@@ -93,6 +93,27 @@ class FormulaReferenceDialog(QDialog):
         layout.addWidget(browser)
 
 
+def summary_figures() -> list[str]:
+    """The figures the selection summary shows — a choice of the user's,
+    kept across sessions, Excel's three by default."""
+    from PySide6.QtCore import QSettings
+    from flograph.core.sheet.summary import DEFAULT_FIGURES, FIGURES
+    stored = QSettings("flograph", "flograph").value(
+        "spreadsheet/summary_figures")
+    if stored is None:
+        return list(DEFAULT_FIGURES)
+    if isinstance(stored, str):
+        stored = [stored] if stored else []
+    known = {k for k, _label in FIGURES}
+    return [k for k in stored if k in known]
+
+
+def set_summary_figures(figures) -> None:
+    from PySide6.QtCore import QSettings
+    QSettings("flograph", "flograph").setValue(
+        "spreadsheet/summary_figures", list(figures))
+
+
 class FormulaBar(QWidget):
     """Cell reference, the raw source of the current cell, and fx.
 
@@ -140,7 +161,9 @@ class FormulaBar(QWidget):
             "QComboBox { background: #1f2026; color: #d6d8de;"
             " border: 1px solid #3a3d47; border-radius: 3px;"
             " padding: 1px 4px; font-size: 8.5pt; min-width: 64px; }"
-            "QComboBox QLineEdit { border: none; padding: 0; }")
+            "QComboBox QLineEdit { border: none; padding: 0; }"
+            "QLabel#sheet_summary { background: transparent; border: none;"
+            " color: #aeb2bc; padding: 0 2px; }")
 
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(
@@ -151,15 +174,31 @@ class FormulaBar(QWidget):
         self.edit.installEventFilter(self)
         FormulaCompleter(self.edit, self._column_names, self._defined)
 
+        # Excel's status bar: Average, Count and Sum of the selection
+        self.summary = QLabel()
+        self.summary.setObjectName("sheet_summary")
+        self.summary.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.summary.customContextMenuRequested.connect(self._summary_menu)
+        self.summary.setToolTip(
+            "Of the selected cells: Count is the filled ones, the rest "
+            "read the numbers only. Right-click to choose what shows.")
+        self.summary.hide()
+        self._summary_timer = QTimer(self)
+        self._summary_timer.setSingleShot(True)
+        self._summary_timer.setInterval(0)
+        self._summary_timer.timeout.connect(self._show_summary)
+
         row.addWidget(fx)
         row.addWidget(self.cell_label)
         row.addWidget(self.edit, 1)
+        row.addWidget(self.summary)
 
         selection = view.selectionModel()
         if selection is not None:
             selection.currentChanged.connect(self.sync)
             # the Name Box names a selection that is exactly a named range
             selection.selectionChanged.connect(self._show_where)
+            selection.selectionChanged.connect(self._summary_timer.start)
         model = view.model()
         if model is not None:
             # undo, Submit, a linked run: the cell changed under the bar
@@ -167,16 +206,52 @@ class FormulaBar(QWidget):
             model.modelReset.connect(self._follow)
             model.dataChanged.connect(self._refresh_names)
             model.modelReset.connect(self._refresh_names)
+            model.dataChanged.connect(self._summary_timer.start)
+            model.modelReset.connect(self._summary_timer.start)
             self._refresh_names()
         self.sync(view.currentIndex())
 
     def eventFilter(self, obj, event) -> bool:
+        if (obj is self.edit and event.type() == QEvent.KeyPress
+                and event.key() == Qt.Key_F4):
+            from .delegates import cycle_reference
+            cycle_reference(self.edit)        # F4: B2 → $B$2 → B$2 → $B2
+            return True
         if (obj is self.edit and event.type() == QEvent.KeyPress
                 and event.key() in (Qt.Key_Return, Qt.Key_Enter)
                 and event.modifiers() & Qt.AltModifier):
             self.edit.insert(_BREAK)          # Alt+Enter: a line break
             return True
         return super().eventFilter(obj, event)
+
+    def _show_summary(self) -> None:
+        import shiboken6
+        if not shiboken6.isValid(self) or not shiboken6.isValid(self._view):
+            return
+        text = self._view.selection_summary_text(summary_figures())
+        self.summary.setText(text)
+        self.summary.setVisible(bool(text))
+
+    def _summary_menu(self, pos) -> None:
+        """Excel's Customize Status Bar: tick the figures to show."""
+        from flograph.core.sheet.summary import FIGURES
+        from .menus import new_menu
+        menu = new_menu(self.summary)
+        shown = set(summary_figures())
+        for key, label in FIGURES:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(key in shown)
+            action.toggled.connect(
+                lambda on, k=key: self._toggle_figure(k, on))
+        menu.exec(self.summary.mapToGlobal(pos))
+
+    def _toggle_figure(self, key: str, on: bool) -> None:
+        figures = [k for k in summary_figures() if k != key]
+        if on:
+            figures.append(key)
+        set_summary_figures(figures)
+        self._show_summary()
 
     def _show_where(self, *_args) -> None:
         """The Name Box: the name of the selected cells when they are

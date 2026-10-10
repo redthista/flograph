@@ -1974,6 +1974,82 @@ class SpreadsheetView(QTableView):
                         [model.computed_value(r, col) for r in rows]))
         return out
 
+    def selection_summary_text(self, figures) -> str:
+        """Excel's status bar for the selection: "Average: 4  Count: 3
+        Sum: 12", or "" for a single cell. Rows out of sight and hidden
+        columns are left out, as Excel leaves out filtered rows. Numbers
+        read in the number format of the first column holding one."""
+        from flograph.core.sheet.numfmt import format_value_as
+        from flograph.core.sheet.summary import (_plain, is_number,
+                                                 summarise, summary_text)
+        model = self.sheet_model()
+        selection = self.selectionModel()
+        if model is None or selection is None:
+            return ""
+        cells = set()
+        for span in selection.selection():
+            cols = [c for c in range(span.left(), span.right() + 1)
+                    if not self.isColumnHidden(c)]
+            for r in range(span.top(), span.bottom() + 1):
+                if not (self.row_filtered(r) or self.isRowHidden(r)):
+                    cells.update((r, c) for c in cols)
+        if len(cells) < 2:
+            return ""
+        values = {cell: model.computed_value(*cell) for cell in cells}
+        summary = summarise(values.values())
+        numeric = sorted(c for c, v in values.items() if is_number(v))
+        fmt = (model.sheet.columns[numeric[0][1]].format
+               if numeric else None)
+
+        def write(value: float) -> str:
+            shown = format_value_as(value, fmt) if fmt else None
+            return shown[0] if shown else _plain(value)
+        return summary_text(summary, figures, write)
+
+    def autosum(self, func: str = "SUM") -> None:
+        """Σ AutoSum (Alt+=): one cell gets a proposed =SUM( ) of the
+        numbers above or to its left, open for editing; a selected range
+        gets its totals written below (or, one row tall, to its right)."""
+        from flograph.core.sheet.autosum import propose, totals
+        from flograph.core.sheet.summary import is_number
+        model = self.sheet_model()
+        if model is None or not self.editable:
+            return
+        self.commit_open_editor()
+        box = self._selection_rect()
+        if box is None:
+            return
+
+        def number(r: int, c: int) -> bool:
+            return is_number(model.computed_value(r, c))
+
+        def empty(r: int, c: int) -> bool:
+            return not str(model.cell_source(r, c) or "").strip()
+
+        r0, c0, r1, c1 = box
+        if (r0, c0) == (r1, c1):
+            pick = propose(func, r0, c0, number)
+            self.start_formula(pick.text, pick.span)
+            return
+        result = totals(func, box, model.rowCount(), model.columnCount(),
+                        number, empty)
+        if isinstance(result, str):
+            self.say(result)
+            return
+        rows = {r for r, _c in result.cells}
+        cols = {c for _r, c in result.cells}
+        top, left = min(rows), min(cols)
+        block = [[result.cells.get((r, c))
+                  for c in range(left, max(cols) + 1)]
+                 for r in range(top, max(rows) + 1)]
+        model.set_cells((top, left), block)
+        self.setCurrentIndex(model.index(top, left))
+        self.select_cells(sorted(result.cells))
+        if result.grows:
+            self.say("Added a row at the bottom for the totals — it flows "
+                     "on with the data. Data ▸ Total Row shows totals "
+                     "that don't.")
+
     def insert_chart(self, kind: str = "auto") -> None:
         """Insert ▸ Chart: a chart node drawing the selected columns, wired
         to this table and placed beside it."""
@@ -2402,9 +2478,10 @@ class SpreadsheetView(QTableView):
                 return
         super().mousePressEvent(event)
 
-    def start_formula(self, text: str) -> None:
+    def start_formula(self, text: str, span=None) -> None:
         """Open the current cell's editor with `text` typed in — Insert
-        Function's "=SUM(" — and the cursor after it."""
+        Function's "=SUM(" — and the cursor after it, or with `span`
+        (start, end) selected: AutoSum's guessed range, for replacing."""
         current = self.currentIndex()
         if not current.isValid() or not self.editable:
             return
@@ -2416,6 +2493,8 @@ class SpreadsheetView(QTableView):
         import shiboken6
         if editor is not None and shiboken6.isValid(editor):
             editor.setText(text)
+            if span is not None and hasattr(editor, "setSelection"):
+                editor.setSelection(span[0], span[1] - span[0])
             editor.setFocus()
 
     def find_replace(self, replace: bool = False) -> None:

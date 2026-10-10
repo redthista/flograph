@@ -59,6 +59,7 @@ class CellEdit(QPlainTextEdit):
         self.setTabChangesFocus(True)
         self.document().setDocumentMargin(2)
         self.min_height = 0
+        self.min_width = 0
         self._quiet = False
         # set by the delegate: the grid and row this editor is in, so a line
         # added with Alt+Enter grows the row itself — outline and all —
@@ -87,8 +88,33 @@ class CellEdit(QPlainTextEdit):
                 grid, "editing_row_needs"):
             grid.editing_row_needs(self.row, need)
         height = max(self.min_height, need)
-        if height != self.height():
-            self.resize(self.width(), height)
+        width = self.wanted_width()
+        if height != self.height() or width != self.width():
+            self.resize(width, height)
+        if width >= self.needed_width():
+            # it all fits now: no part of it scrolled out of sight
+            self.horizontalScrollBar().setValue(0)
+
+    def needed_width(self) -> int:
+        metrics = QFontMetrics(self.font())
+        longest = max((metrics.horizontalAdvance(line)
+                       for line in self.toPlainText().split("\n")),
+                      default=0)
+        return (longest + 2 * int(self.document().documentMargin())
+                + metrics.averageCharWidth() + 4)
+
+    def wanted_width(self) -> int:
+        """A one-line editor grows rightwards over the cells beside it as
+        its text gets longer — Excel's way — up to the grid's edge; never
+        narrower than its cell. A wrapping one keeps its cell's width."""
+        if not self.min_width or \
+                self.lineWrapMode() != QPlainTextEdit.NoWrap:
+            return self.width()
+        room = self.min_width
+        parent = self.parentWidget()
+        if parent is not None:
+            room = max(room, parent.width() - self.x())
+        return max(self.min_width, min(self.needed_width(), room))
 
     # -- the QLineEdit slice
     def text(self) -> str:
@@ -113,8 +139,43 @@ class CellEdit(QPlainTextEdit):
     def insert(self, text: str) -> None:
         self.insertPlainText(text)
 
+    def selectionStart(self) -> int:
+        cursor = self.textCursor()
+        return cursor.selectionStart() if cursor.hasSelection() else -1
+
+    def selectionEnd(self) -> int:
+        return self.textCursor().selectionEnd()
+
+    def setSelection(self, start: int, length: int) -> None:
+        cursor = self.textCursor()
+        size = len(self.toPlainText())
+        cursor.setPosition(max(0, min(start, size)))
+        cursor.setPosition(max(0, min(start + length, size)),
+                           cursor.MoveMode.KeepAnchor)
+        self.setTextCursor(cursor)
+
     def setFrame(self, _on: bool) -> None:
         pass
+
+
+def cycle_reference(edit) -> bool:
+    """F4 in a formula: pin the reference at the cursor, Excel's cycle.
+    ``edit`` is a QLineEdit or a CellEdit — they share the calls used."""
+    from flograph.core.sheet.absref import cycle
+    start = edit.selectionStart()
+    if start >= 0 and edit.selectionEnd() > start:
+        result = cycle(edit.text(), start, edit.selectionEnd())
+    else:
+        result = cycle(edit.text(), edit.cursorPosition())
+    if result is None:
+        return False
+    text, lo, hi = result
+    edit.setText(text)
+    if hi > lo:
+        edit.setSelection(lo, hi - lo)
+    else:
+        edit.setCursorPosition(hi)
+    return True
 
 
 class SheetDelegate(ConditionalFormatDelegate):
@@ -130,6 +191,10 @@ class SheetDelegate(ConditionalFormatDelegate):
     ctrl_enter = False   # the editor was closed with Ctrl+Enter (fill all)
 
     def eventFilter(self, editor, event):
+        if (event.type() == QEvent.KeyPress and event.key() == Qt.Key_F4
+                and isinstance(editor, CellEdit)):
+            cycle_reference(editor)      # F4: B2 → $B$2 → B$2 → $B2
+            return True
         if event.type() == QEvent.KeyPress and event.key() in (
                 Qt.Key_Return, Qt.Key_Enter):
             if isinstance(editor, CellEdit):
@@ -224,6 +289,7 @@ class SheetDelegate(ConditionalFormatDelegate):
         super().updateEditorGeometry(editor, option, index)
         if isinstance(editor, CellEdit):
             editor.min_height = option.rect.height()
+            editor.min_width = option.rect.width()
             editor.grow()
 
     def setEditorData(self, editor, index):

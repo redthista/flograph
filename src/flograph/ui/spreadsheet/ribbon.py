@@ -384,6 +384,7 @@ class SheetRibbon(QWidget):
             "fill_menu": self._fill_fill_menu,
             "ink_menu": self._fill_ink_menu,
             "select_menu": self._fill_select_menu,
+            "autosum_menu": self._fill_autosum_menu,
             "number_menu": self._fill_number_menu,
             "cf_menu": self._fill_cf_menu,
             "total_menu": self._fill_total_menu,
@@ -416,10 +417,12 @@ class SheetRibbon(QWidget):
                                  ("fmt_percent", ""),
                                  ("fmt_thousands", "")]),
                         ("row", [("dec_more", ""), ("dec_less", "")])]),
-            ("Editing", [("fill_down", "Fill Down"),
+            ("Editing", [m("autosum_menu", "autosum", "AutoSum"),
+                         ("fill_down", "Fill Down"),
                          m("fill_menu_more", "fill_right", "Fill"),
-                         m("select_menu", "find", "Find && Select"),
-                         ("replace", "Replace")]),
+                         # Replace lives in Find & Select ▾, as in Excel —
+                         # its own button made way for AutoSum
+                         m("select_menu", "find", "Find && Select")]),
         ]
         # Excel's Insert tab: a chart node wired to the table — only where
         # the grid has a node and a library behind it
@@ -487,7 +490,8 @@ class SheetRibbon(QWidget):
         if self._view.host.can_open_editor():
             view.append(("Window", [("open_editor", "Full Editor")]))
         formulas = [
-            ("Functions", [m("function_menu", "insert_function",
+            ("Functions", [m("autosum_menu", "autosum", "AutoSum"),
+                           m("function_menu", "insert_function",
                              "Insert Function"),
                            ("reference", "Reference")]),
             ("Names", [("define_name", "Define Name"),
@@ -594,6 +598,12 @@ class SheetRibbon(QWidget):
     def _fill_ink_menu(self, menu) -> None:
         from .actions import fill_color_menu
         fill_color_menu(menu, self._view, ink=True)
+
+    def _fill_autosum_menu(self, menu) -> None:
+        from flograph.core.sheet.autosum import FUNCTIONS
+        for func, _label in FUNCTIONS:
+            menu.addAction(self._actions[
+                "autosum" if func == "SUM" else f"autosum_{func.lower()}"])
 
     def _fill_fill_more_menu(self, menu) -> None:
         for name in ("fill_down", "fill_right", "fill_series"):

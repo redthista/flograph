@@ -11,13 +11,13 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 
 | Tab | What is on it |
 | --- | --- |
-| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*, *Format Painter*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, Wrap Text, alignment, Clear Formats); Fill Down, Fill ▾ (Right, Series…), Find & Select ▾, Replace |
+| **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*, *Format Painter*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, Wrap Text, alignment, Clear Formats); **AutoSum** ▾ (Sum, Average, Count Numbers, Max, Min), Fill Down, Fill ▾ (Right, Series…), Find & Select ▾ (Find, Replace, Go To, …) |
 | **Insert** | **Charts**: Recommended, Column, Line, Area, Pie, Scatter, Histogram — a chart node wired to the table (on a canvas card, a dashboard tile and the full editor) |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
 | **View** | Freeze ▾ (panes, top row, first column, unfreeze), fit column widths, Row Height, Fit Rows, Show Formulas, the full editor; **Hide** ▾ (rows, columns, unhide) and Unhide All |
-| **Formulas** | Insert Function ▾ (grouped Maths / Logic / Text), the function reference; **Names** (Define Name, Name Manager) |
+| **Formulas** | **AutoSum** ▾, Insert Function ▾ (grouped Maths / Logic / Text), the function reference; **Names** (Define Name, Name Manager) |
 
 Hover any button for what it does, in a sentence, and its shortcut. Under the ribbon is the **formula bar**: the selected cell's name and what it holds as written (`=[@Units]*[@Price]`, not its result) — type there to edit it, or click **fx** for every function. **Open Full Editor…** is also on the right-click menu of the node and of every cell, row number and column header. On a
 canvas card the ribbon is one line of icons to leave the grid room; in the
@@ -456,6 +456,40 @@ Dates are kept as text (`2026-10-07`) and do sums like Excel's: `=[@Due]+7`
 is a week later, `=[@End]-[@Start]` the days between, and two dates compare
 as dates whichever way they are written.
 
+## Totals at a glance: the summary and AutoSum
+
+Select two or more cells and the right end of the formula bar shows their
+**Average**, **Count** and **Sum**, as Excel's status bar does — no
+formula needed. Count is every filled cell; the others read the numbers
+only, so a label in the selection doesn't spoil them. Rows that are
+filtered, folded or hidden are left out. Right-click it to choose what
+shows: Average, Count, Numerical Count, Min, Max, Sum.
+
+**AutoSum** (**Alt+=**, the Σ on **Home** and **Formulas**) writes the
+total for you:
+
+* **One cell selected** — the editor opens on `=SUM(B2:B9)`, the range
+  being the numbers straight above the cell (or, with none above, to its
+  left). The range is selected: press Enter to accept, or drag across
+  other cells to change it.
+* **A range selected** — a total goes under each column of numbers at
+  once: in the selection's empty last row if it has one, else in the
+  first empty row below. With no empty row, one is added at the bottom —
+  it flows on with the data, so for totals that don't, use
+  **Data ▸ Total Row**. A selection one row tall is totalled to its
+  right.
+
+The Σ ▾ list has **Average**, **Count Numbers**, **Max** and **Min** too.
+
+## Pinning a reference: F4
+
+While typing a formula, **F4** cycles the reference at the cursor
+through `B2` → `$B$2` → `B$2` → `$B2` → `B2`. A `$` keeps that part fixed
+when the formula is filled or copied: `$B$2` always means B2, `B$2` keeps
+the row, `$B2` the column. A range (`B2:B9`) changes as one; with text
+selected, every reference in it changes together. Works in the cell and
+in the formula bar.
+
 ## Paste Special
 
 **Home ▸ Paste Special…** (**Ctrl+Alt+V**, or right-click a cell) pastes
@@ -575,5 +609,7 @@ fourteen.
 | Total Row on / off | **Ctrl+Shift+T** |
 | Show formulas | **Ctrl+`** |
 | Recommended chart of the selected columns | **Alt+F1** |
+| AutoSum | **Alt+=** |
+| Pin a reference (`B2` → `$B$2` → `B$2` → `$B2`) | **F4**, while typing a formula |
 
 See also [[Nodes and the Library]] and [[Keyboard Shortcuts]].

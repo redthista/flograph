@@ -868,6 +868,22 @@ class SheetActions(QObject):
                   "pick one from the list.",
                   lambda: None, enabled=edit, short="Function")
 
+        # ---- AutoSum: Σ and its list
+        from flograph.core.sheet.autosum import FUNCTIONS
+        for func, label in FUNCTIONS:
+            name = "autosum" if func == "SUM" else f"autosum_{func.lower()}"
+            self._add(name, "AutoSum" if func == "SUM" else label,
+                      "autosum" if func == "SUM" else None,
+                      f"{label} of the numbers above, or to the left. With "
+                      f"one cell selected, the editor opens on "
+                      f"={func}( ) with the range guessed — Enter accepts, "
+                      f"or drag to change it. With a range selected, a "
+                      f"{label.lower()} goes under each column of numbers "
+                      f"(or right of a single row).",
+                      lambda f=func: v.autosum(f),
+                      keys=["Alt+="] if func == "SUM" else (),
+                      enabled=edit, short=label if func != "SUM" else "AutoSum")
+
         # ---- applying edits
         self._add("submit", "Submit", "submit",
                   "Send your edits into the flow and update what depends "
