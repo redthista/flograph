@@ -232,6 +232,83 @@ class SheetHost:
     def open_editor(self) -> None:
         pass
 
+    def offers_charts(self) -> bool:
+        """Does this grid have an Insert ▸ Chart at all? Asked when the
+        ribbon is built, which for a canvas card is before it is on a
+        canvas — so it can't wait for the library to be reachable."""
+        return False
+
+    def can_chart(self) -> bool:
+        """Can Insert Chart add a chart node right now? Only with a node
+        behind the grid and a library to make one from."""
+        return False
+
+    def insert_chart(self, pick) -> str:
+        """Add the chart `pick` (a core.sheet.chart.ChartPick) wired to the
+        table; returns what to tell the user, or "" when nothing was added."""
+        return ""
+
+
+def _box(node) -> tuple:
+    """A node's place on the canvas as (x, y, w, h). A card says its size
+    in its width/height params; anything else is about a plain node's."""
+    params = node.params
+    w = params.get("width") if isinstance(params.get("width"), (int, float)) \
+        else 0
+    h = params.get("height") if isinstance(params.get("height"), (int, float)) \
+        else 0
+    return (float(node.pos[0]), float(node.pos[1]),
+            float(w or 200), float(h or 120))
+
+
+def insert_chart(graph, stack, registry, table_id: str, pick,
+                 tile_place=None):
+    """Add a chart node drawing `pick`, wired from the Table `table_id`,
+    beside it on the canvas — and, given ``tile_place`` (page id, the
+    Table tile's rect, the page's other tile rects), as a tile beside the
+    Table's tile on that dashboard page. One undo step. Returns the new
+    node, or None when the chart node isn't in the library."""
+    from flograph.core import Tile
+    from flograph.core.sheet.chart import CHART_NODE, place_beside
+    from ..commands import AddNodeCommand, AddTileCommand, ConnectCommand
+    import uuid
+
+    table = graph.nodes.get(table_id)
+    spec = registry.maybe_get(CHART_NODE) if registry is not None else None
+    if table is None or spec is None or stack is None:
+        return None
+    node = registry.instantiate(CHART_NODE)
+    node.canvas = getattr(table, "canvas", "")
+    for name, value in pick.params.items():
+        if node.spec.param(name) is not None:
+            node.params[name] = value
+    title = pick.params.get("title") or ""
+    if title:
+        node.label_override = title
+    neighbours = [_box(n) for n in graph.nodes.values()
+                  if n.id != table_id
+                  and getattr(n, "canvas", "") == node.canvas]
+    _x, _y, w, h = _box(node)
+    node.pos = place_beside(_box(table), (w, h), neighbours)
+    in_port = spec.inputs[0].name
+    stack.beginMacro(f"insert chart{': ' + title if title else ''}")
+    try:
+        stack.push(AddNodeCommand(graph, node))
+        stack.push(ConnectCommand(graph, table_id, table.spec.outputs[0].name,
+                                  node.id, in_port))
+        if tile_place is not None:
+            from ..dashboard.tile_item import (default_tile_port,
+                                               default_tile_size)
+            page_id, rect, others = tile_place
+            size = default_tile_size(node)
+            x, y = place_beside(tuple(rect), size, list(others), gap=16.0)
+            stack.push(AddTileCommand(graph, page_id, Tile(
+                id=uuid.uuid4().hex, node_id=node.id,
+                port=default_tile_port(node), rect=(x, y, *size))))
+    finally:
+        stack.endMacro()
+    return node
+
 
 class NodeSheetHost(SheetHost):
     """A SheetHost over a Table node in a graph. ``on_submitted`` is how the
@@ -241,7 +318,10 @@ class NodeSheetHost(SheetHost):
     its grid before it has a scene to find the graph through."""
 
     def __init__(self, graph, stack_fn, node_id: str, on_submitted=None,
-                 linked_fn=None, open_editor_fn=None) -> None:
+                 linked_fn=None, open_editor_fn=None, registry_fn=None,
+                 tile_fn=None) -> None:
+        self._registry_fn = registry_fn
+        self._tile_fn = tile_fn
         self._graph_ref = graph
         self._stack_fn = stack_fn
         self._node_id = node_id
@@ -317,3 +397,34 @@ class NodeSheetHost(SheetHost):
     def open_editor(self) -> None:
         if self._open_editor_fn is not None:
             self._open_editor_fn()
+
+    def _registry(self):
+        return self._registry_fn() if self._registry_fn is not None else None
+
+    def offers_charts(self) -> bool:
+        return self._registry_fn is not None
+
+    def can_chart(self) -> bool:
+        from flograph.core.sheet.chart import CHART_NODE
+        registry = self._registry()
+        return (self._node() is not None and registry is not None
+                and registry.maybe_get(CHART_NODE) is not None)
+
+    def insert_chart(self, pick) -> str:
+        if not self.can_chart():
+            return ""
+        node = insert_chart(self._graph, self._stack_fn(), self._registry(),
+                            self._node_id, pick,
+                            self._tile_fn() if self._tile_fn else None)
+        if node is None:
+            return ""
+        where = ("beside the table, on this page and on the canvas"
+                 if self._tile_fn is not None
+                 else "beside the table on the canvas")
+        text = f"Added a {pick.kind} chart {where}."
+        if has_draft(self._node()):
+            text += (" It draws the table as last submitted — Submit to "
+                     "chart your latest edits.")
+        if self._on_submitted is not None:
+            self._on_submitted()           # run it, so it draws now
+        return text

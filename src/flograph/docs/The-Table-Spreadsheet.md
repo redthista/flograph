@@ -12,6 +12,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | Tab | What is on it |
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*, *Format Painter*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, Wrap Text, alignment, Clear Formats); Fill Down, Fill ▾ (Right, Series…), Find & Select ▾, Replace |
+| **Insert** | **Charts**: Recommended, Column, Line, Area, Pie, Scatter, Histogram — a chart node wired to the table (on a canvas card, a dashboard tile and the full editor) |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
@@ -478,6 +479,30 @@ A sentence says what the choices will do and a preview shows the first
 cells as they will be, the changed ones highlighted (hover one for what it
 was). The paste is one undo step.
 
+## Charts from a selection
+
+Select the columns to chart — a column of labels or dates and one or more
+columns of numbers — and pick a chart from the **Insert** tab, or
+right-click ▸ **Insert Chart**. **Recommended** (**Alt+F1**) chooses for
+you: a column chart of numbers by label, a line over dates, a scatter of
+two number columns, a histogram of one.
+
+The chart is a **Show Plotly** node, added beside the table on the canvas
+and wired to it, with the columns already picked; on a dashboard it also
+gets a tile beside the table's tile. It runs straight away. One undo step
+takes it all back.
+
+It charts whole **columns**, not just the selected cells: every row of
+those columns, rows added later included, so the chart follows the table
+as it grows. Labels that repeat are added up — one bar per region, not
+one per row — and a total row of your own would be charted like any other
+row, so leave it out of the data or filter it off downstream. Hidden
+columns are left out. Change the chart afterwards in the node's
+Properties: kind, columns, colours and everything else Show Plotly has.
+
+A Table with edits held for **Submit** charts the table as last
+submitted; submit to chart your latest edits.
+
 ## Named ranges
 
 A name stands for a cell or a range, so a formula can say `=SUM(Sales)`
@@ -549,5 +574,6 @@ fourteen.
 | Format cells (number format) | **Ctrl+1** |
 | Total Row on / off | **Ctrl+Shift+T** |
 | Show formulas | **Ctrl+`** |
+| Recommended chart of the selected columns | **Alt+F1** |
 
 See also [[Nodes and the Library]] and [[Keyboard Shortcuts]].

@@ -44,6 +44,9 @@ class DashboardScene(QGraphicsScene, ContentFittedSceneRect):
         self.engine = engine
         self.undo_stack = undo_stack
         self.page_id = page_id
+        # the node library, for a Table tile's Insert Chart; the window
+        # hands it over (None leaves the command off)
+        self.registry = None
         self.tile_items: dict[str, TileItem] = {}
         # tiles whose refresh was put off while this page was out of sight;
         # ui.catch_up fills them, and while it does defer_tile lets it through

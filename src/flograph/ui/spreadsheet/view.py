@@ -1957,6 +1957,36 @@ class SpreadsheetView(QTableView):
         from .names_dialog import name_manager
         name_manager(self)
 
+    def chart_columns(self) -> list:
+        """(name, type, values) for each selected column on show, left to
+        right — what Insert Chart charts. Every row counts, not just the
+        selected ones: the chart is wired to the whole table."""
+        model = self.sheet_model()
+        if model is None:
+            return []
+        rows = range(model.rowCount())
+        out = []
+        for col in self.selected_columns():
+            if self.isColumnHidden(col):
+                continue
+            spec = model.sheet.columns[col]
+            out.append((spec.name, spec.type,
+                        [model.computed_value(r, col) for r in rows]))
+        return out
+
+    def insert_chart(self, kind: str = "auto") -> None:
+        """Insert ▸ Chart: a chart node drawing the selected columns, wired
+        to this table and placed beside it."""
+        from flograph.core.sheet.chart import pick_chart
+        self.commit_open_editor()
+        pick = pick_chart(self.chart_columns(), kind)
+        if isinstance(pick, str):
+            self.say(pick)
+            return
+        said = self.host.insert_chart(pick)
+        if said:
+            self.say(" ".join(filter(None, (said, pick.note))))
+
     def go_to_special(self) -> None:
         """Home ▸ Find & Select ▸ Go To Special…"""
         from .goto_dialog import go_to_special

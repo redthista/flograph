@@ -706,6 +706,44 @@ class SheetActions(QObject):
                   enabled=lambda: edit() and bool(v.sheet_model())
                   and v.sheet_model().rowCount() > 1,
                   short="Duplicates")
+        # ---- charts: a chart node wired to this table, beside it
+        def chartable() -> bool:
+            return bool(v.selected_columns()) and v.host.can_chart()
+
+        chart_help = {
+            "auto": ("Recommended Chart", "Recommended",
+                     "The chart that suits the selected columns: a column "
+                     "chart of numbers by label, a line over dates, a "
+                     "scatter of two number columns, a histogram of one."),
+            "bar": ("Column Chart", "Column",
+                    "One bar per label, for each selected column of "
+                    "numbers. Labels that repeat are added up."),
+            "line": ("Line Chart", "Line",
+                     "The selected numbers as lines across the labels or "
+                     "dates — for a trend."),
+            "area": ("Area Chart", "Area",
+                     "A line chart filled down to the axis — for how a "
+                     "total builds up."),
+            "pie": ("Pie Chart", "Pie",
+                    "One slice per label, sized by the first selected "
+                    "column of numbers."),
+            "scatter": ("Scatter Chart", "Scatter",
+                        "The first selected column of numbers against the "
+                        "others, a point per row; a text column colours "
+                        "the points."),
+            "histogram": ("Histogram", "Histogram",
+                          "How the first selected column of numbers is "
+                          "spread: how many rows fall in each range."),
+        }
+        for kind, (text, short, body) in chart_help.items():
+            name = "chart" if kind == "auto" else f"chart_{kind}"
+            self._add(name, text, f"chart_{kind}",
+                      body + " The chart is a node wired to this table and "
+                      "placed beside it; it reads every row of those "
+                      "columns, so it follows the table as it changes.",
+                      lambda k=kind: v.insert_chart(k),
+                      keys=["Alt+F1"] if kind == "auto" else (),
+                      enabled=chartable, short=short)
         self._add("filter_clear", "Clear All Filters", "filter_clear",
                   "Show every row again.", v.clear_filters,
                   enabled=lambda: v.filtered, short="Clear")

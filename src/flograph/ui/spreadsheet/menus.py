@@ -104,6 +104,18 @@ def ask_text(widget: QWidget, title: str, label: str, text: str = ""
 
 # ------------------------------------------------------------- the menus
 
+def _chart_menu(menu: QMenu, view) -> None:
+    """Insert Chart, offered only where a chart node can be added."""
+    if not view.host.offers_charts():
+        return
+    from flograph.core.sheet.chart import KINDS
+    from .icons import sheet_icon
+    sub = submenu(menu, "Insert Chart", sheet_icon("chart_auto"))
+    for kind, _label in KINDS:
+        sub.addAction(view.actions["chart" if kind == "auto"
+                                   else f"chart_{kind}"])
+
+
 def _type_menu(menu: QMenu, actions) -> None:
     from flograph.core.sheet import COLUMN_TYPES
     from .icons import sheet_icon
@@ -182,6 +194,7 @@ def cell_menu(view, widget: QWidget, pos: QPoint) -> None:
                  "select_constants", "select_blanks", "select_errors",
                  "select_problems", "select_notes"):
         pick.addAction(a[name])
+    _chart_menu(menu, view)
 
     font = submenu(menu, "Format", sheet_icon("fmt_b"))
     for name in ("fmt_b", "fmt_i", "fmt_u", "fmt_wrap"):
@@ -304,6 +317,7 @@ def column_menu(view, widget: QWidget, pos: QPoint) -> None:
         menu.addAction(a[name])
     if view.hidden_count()[1]:
         menu.addAction(a["col_unhide"])
+    _chart_menu(menu, view)
     heading(menu, "This Column")
     menu.addAction(a["rename"])
     _type_menu(menu, a)

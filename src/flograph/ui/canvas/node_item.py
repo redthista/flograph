@@ -1709,7 +1709,8 @@ class NodeItem(QGraphicsObject):
             self._table_undo_stack, self.node.id,
             on_submitted=self._table_submitted,
             linked_fn=self._table_input_connected,
-            open_editor_fn=self._open_table_editor))
+            open_editor_fn=self._open_table_editor,
+            registry_fn=lambda: getattr(self.scene(), "registry", None)))
 
         # The ribbon, compact: a line of icon buttons per tab, each with a
         # tooltip saying what it does — the card's pixels belong to the grid.

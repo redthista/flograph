@@ -10,6 +10,7 @@ submitted). Read the way the nodes are read.
 """
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -1027,8 +1028,104 @@ def _totals(p, r, c):
     _text(p, QRectF(2.5, 12.5, 15, 5), "Σ", QColor("#f3f4f6"), 5.5)
 
 
+def _axes(p, c):
+    """A chart's two axes, the frame every chart glyph stands in."""
+    p.setPen(_pen(c, 1.2))
+    p.drawLine(QPointF(2.5, 2.5), QPointF(2.5, 17.5))
+    p.drawLine(QPointF(2.5, 17.5), QPointF(17.5, 17.5))
+
+
+def _bars(p, heights, x0=5.0, width=3.0, step=4.0):
+    p.setPen(Qt.NoPen)
+    p.setBrush(BLUE)
+    for i, h in enumerate(heights):
+        p.drawRect(QRectF(x0 + i * step, 16.5 - h, width, h))
+
+
+def _chart_bar(p, r, c):
+    """Column chart: bars standing on the axis."""
+    _axes(p, c)
+    _bars(p, (6, 11, 8))
+
+
+def _chart_auto(p, r, c):
+    """Recommended: a column chart with a star — the one that suits."""
+    _axes(p, c)
+    _bars(p, (5, 9, 7))
+    p.setPen(Qt.NoPen)
+    p.setBrush(AMBER)
+    star = QPainterPath()
+    for i in range(10):
+        radius = 3.6 if i % 2 == 0 else 1.5
+        angle = -math.pi / 2 + i * math.pi / 5
+        point = QPointF(15 + radius * math.cos(angle),
+                        5 + radius * math.sin(angle))
+        if i == 0:
+            star.moveTo(point)
+        else:
+            star.lineTo(point)
+    star.closeSubpath()
+    p.drawPath(star)
+
+
+_LINE = (QPointF(4, 14), QPointF(8, 9), QPointF(11.5, 11.5),
+         QPointF(16.5, 5))
+
+
+def _chart_line(p, r, c):
+    _axes(p, c)
+    p.setPen(_pen(BLUE, 1.6))
+    p.setBrush(Qt.NoBrush)
+    p.drawPolyline(_LINE)
+
+
+def _chart_area(p, r, c):
+    _axes(p, c)
+    shape = QPainterPath(QPointF(4, 16.5))
+    for point in _LINE:
+        shape.lineTo(point)
+    shape.lineTo(QPointF(16.5, 16.5))
+    shape.closeSubpath()
+    p.setPen(Qt.NoPen)
+    p.setBrush(_fill(BLUE, 150))
+    p.drawPath(shape)
+    p.setPen(_pen(BLUE, 1.4))
+    p.drawPolyline(_LINE)
+
+
+def _chart_pie(p, r, c):
+    box = QRectF(2.5, 2.5, 15, 15)
+    p.setPen(_pen(c, 1.1))
+    p.setBrush(_fill(c, 40))
+    p.drawEllipse(box)
+    p.setPen(Qt.NoPen)
+    p.setBrush(BLUE)
+    p.drawPie(box, 90 * 16, -130 * 16)
+    p.setBrush(AMBER)
+    p.drawPie(box, -40 * 16, -75 * 16)
+
+
+def _chart_scatter(p, r, c):
+    _axes(p, c)
+    p.setPen(Qt.NoPen)
+    p.setBrush(BLUE)
+    for x, y in ((5.5, 13.5), (8, 10.5), (10, 12), (12, 7.5), (14.5, 8.5),
+                 (15.5, 4.5)):
+        p.drawEllipse(QPointF(x, y), 1.3, 1.3)
+
+
+def _chart_hist(p, r, c):
+    """Histogram: bars touching, highest in the middle."""
+    _axes(p, c)
+    _bars(p, (3, 7, 11, 8, 4), x0=4.0, width=2.6, step=2.6)
+
+
 GLYPHS = {
     "totals": (_totals, FG),
+    "chart_auto": (_chart_auto, FG), "chart_bar": (_chart_bar, FG),
+    "chart_line": (_chart_line, FG), "chart_area": (_chart_area, FG),
+    "chart_pie": (_chart_pie, FG), "chart_scatter": (_chart_scatter, FG),
+    "chart_histogram": (_chart_hist, FG),
     "cf_scale": (_cf_scale, FG), "cf_bar": (_cf_bar, FG),
     "cf_icons": (_cf_icons, FG), "cf_highlight": (_cf_highlight, FG),
     "cf_manage": (_cf_manage, FG), "cond_format": (_cond_format, FG),

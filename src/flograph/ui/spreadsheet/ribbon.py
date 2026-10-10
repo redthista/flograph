@@ -421,6 +421,14 @@ class SheetRibbon(QWidget):
                          m("select_menu", "find", "Find && Select"),
                          ("replace", "Replace")]),
         ]
+        # Excel's Insert tab: a chart node wired to the table — only where
+        # the grid has a node and a library behind it
+        insert = [
+            ("Charts", [("chart", "Recommended"), ("chart_bar", "Column"),
+                        ("chart_line", "Line"), ("chart_area", "Area"),
+                        ("chart_pie", "Pie"), ("chart_scatter", "Scatter"),
+                        ("chart_histogram", "Histogram")]),
+        ]
         rows_cols = [
             ("Rows", [("row_above", "Insert Above"),
                       ("row_below", "Insert Below"), ("row_delete", "Delete"),
@@ -486,7 +494,10 @@ class SheetRibbon(QWidget):
                        ("name_manager", "Name Manager")]),
             ("Check", [("show_formulas", "Show Formulas")]),
         ]
-        return [("Home", "Home", home),
+        tabs = [("Home", "Home", home)]
+        if self._view.host.offers_charts():
+            tabs.append(("Insert", "Insert", insert))
+        return tabs + [
                 ("Rows && Columns", "Rows", rows_cols),
                 ("Data", "Data", data), ("Review", "Review", review),
                 ("View", "View", view),

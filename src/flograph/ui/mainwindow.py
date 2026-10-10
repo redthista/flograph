@@ -2256,6 +2256,7 @@ class MainWindow(QMainWindow):
         widget.scene.view_changed.connect(self._on_view_changed)
         widget.scene.view_error.connect(self._on_view_error)
         widget.scene.sheet_edited.connect(self._on_dashboard_sheet_edited)
+        widget.scene.registry = self.registry
         widget.view.tile_dropped.connect(
             lambda node_id, pos, page_id=page.id:
             self._on_tile_dropped(page_id, node_id, pos))

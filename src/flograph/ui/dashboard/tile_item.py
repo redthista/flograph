@@ -947,8 +947,20 @@ class TileItem(QGraphicsObject):
             if scene is not None:
                 scene.sheet_edited.emit(node_id)
 
+        def registry():
+            return getattr(self.scene(), "registry", None)
+
+        def tile_place():
+            # Insert Chart puts the chart's tile beside this one
+            page_id = getattr(self.scene(), "page_id", None)
+            page = self._graph.pages.get(page_id)
+            others = [t.rect for t in (page.tiles.values() if page else ())
+                      if t.id != self.tile.id]
+            return page_id, self.tile.rect, others
+
         return NodeSheetHost(self._graph, stack, node_id,
-                             on_submitted=submitted)
+                             on_submitted=submitted, registry_fn=registry,
+                             tile_fn=tile_place)
 
     def _commit_sheet_data(self, data: dict) -> None:
         """One undo step per edit, then re-run so the visuals beside the
