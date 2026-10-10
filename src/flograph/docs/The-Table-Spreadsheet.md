@@ -103,6 +103,13 @@ screen. Wrapping keeps the column's width; drag the column wider or
 narrower and the row follows. Fitting columns to their content leaves a
 wrapped column at its own width.
 
+**Alt+Enter** while typing in a cell starts a new line inside it, as in
+Excel; Enter still finishes the cell. The editor grows down over the cells
+below as you add lines, and a cell given a line break turns Wrap Text on
+so both lines show. The formula bar shows a line break as **↵**, and
+Alt+Enter there types one. Text pasted from Excel with a line break inside
+a cell stays in that one cell.
+
 Drag the border under a row number to make a row taller or shorter, or
 right-click the row number ▸ **Row Height…** for a height in pixels.
 **AutoFit Row Height** — or a double-click on that border — puts the row
@@ -512,6 +519,7 @@ fourteen.
 | Hide rows / columns | **Ctrl+9** / **Ctrl+0** |
 | Unhide rows / columns | **Ctrl+Shift+9** / **Ctrl+Shift+0** |
 | Bold / italic / underline | **Ctrl+B** / **Ctrl+I** / **Ctrl+U** |
+| New line inside a cell | **Alt+Enter** |
 | New or edit a note | **Shift+F2** |
 | Type into every selected cell | **Ctrl+Enter** |
 | Filter this column | **Ctrl+Shift+L** |

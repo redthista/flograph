@@ -86,6 +86,15 @@ def _font(bold: bool, italic: bool, underline: bool):
     return _FONTS[key]
 
 
+def _wrap_if_lines(sheet: Sheet, row: int, col: int, text: str) -> None:
+    """A cell given a line break (Alt+Enter, a paste) wraps, as Excel turns
+    Wrap Text on for it — or its second line would be cut off."""
+    if "\n" in text and not is_formula(text):
+        fmt = sheet.styles.get((row, col)) or {}
+        if not fmt.get("wrap"):
+            sheet.set_cell_format(row, col, {**fmt, "wrap": True})
+
+
 def _brush(hex_color: str) -> QBrush:
     if hex_color not in _BRUSHES:
         _BRUSHES[hex_color] = QBrush(QColor(hex_color))
@@ -649,6 +658,7 @@ class SheetModel(QAbstractTableModel):
         if self._sheet.cell(row, col) == text:
             return True
         self._sheet.set_cell(row, col, text)
+        _wrap_if_lines(self._sheet, row, col, text)
         self._after_mutation(changed=[(row, col)])
         return True
 
@@ -682,6 +692,8 @@ class SheetModel(QAbstractTableModel):
             for dc, text in enumerate(row):
                 if text is not None:
                     sheet.set_cell(row0 + dr, col0 + dc, text)
+                    if not cell_formats:
+                        _wrap_if_lines(sheet, row0 + dr, col0 + dc, text)
         for dr, row in enumerate(cell_formats or ()):
             for dc, fmt in enumerate(row):
                 if fmt is not False:
@@ -704,6 +716,7 @@ class SheetModel(QAbstractTableModel):
             for r, c in cells:
                 value = translate(text, r - anchor[0], c - anchor[1])
                 sheet.set_cell(r, c, parse_typed(value, formats[c]))
+                _wrap_if_lines(sheet, r, c, value)
         self._structural(mutate, reset=False)
 
     def split_column(self, col: int, parts: list[list[str]],

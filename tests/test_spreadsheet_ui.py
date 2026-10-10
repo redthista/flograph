@@ -638,7 +638,8 @@ class TestSheetEditorDialog:
 
     def test_enter_while_editing_commits_cell_not_ok_button(self, qtbot):
         from PySide6.QtTest import QTest
-        from PySide6.QtWidgets import QLineEdit
+
+        from flograph.ui.spreadsheet.delegates import CellEdit
 
         dialog = SheetEditorDialog(sheet_to_json(make_model().sheet), title="t")
         qtbot.addWidget(dialog)
@@ -646,7 +647,7 @@ class TestSheetEditorDialog:
         index = dialog.model.index(0, 0)
         dialog.view.setCurrentIndex(index)
         dialog.view.edit(index)
-        editor = dialog.view.findChild(QLineEdit)
+        editor = dialog.view.findChild(CellEdit)
         assert editor is not None
         QTest.keyClicks(editor, "42")
         QTest.keyClick(editor, Qt.Key_Return)

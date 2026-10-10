@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QDate, QEvent, QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QPolygon
-from PySide6.QtWidgets import QDateEdit, QLineEdit
+from PySide6.QtCore import QDate, QEvent, QPoint, QRect, Qt, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPolygon
+from PySide6.QtWidgets import (QAbstractItemDelegate, QDateEdit, QFrame,
+                               QLineEdit, QPlainTextEdit)
 
 from ..table_delegate import NOTE_ROLE, ConditionalFormatDelegate
 
@@ -36,6 +37,86 @@ def caret_rect(cell: QRect) -> QRect:
                  cell.height())
 
 
+class CellEdit(QPlainTextEdit):
+    """The cell editor: several lines when asked (Alt+Enter), else one.
+
+    A QPlainTextEdit, so a cell can hold a line break, wearing the slice of
+    QLineEdit's API the grid's formula completer, Insert Function and the
+    retry after a refused value use — text(), setText(), cursorPosition(),
+    setCursorPosition(), insert() and a textEdited signal that only fires
+    for typing. It grows downwards over the cells below as lines are added,
+    the way Excel's editor does."""
+
+    textEdited = Signal(str)
+
+    def __init__(self, parent=None, wrap: bool = False) -> None:
+        super().__init__(parent)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth if wrap
+                             else QPlainTextEdit.NoWrap)
+        self.setTabChangesFocus(True)
+        self.document().setDocumentMargin(2)
+        self.min_height = 0
+        self._quiet = False
+        # set by the delegate: the grid and row this editor is in, so a line
+        # added with Alt+Enter grows the row itself — outline and all —
+        # rather than the editor spilling over the cells below
+        self.grid = None
+        self.row = -1
+        self.textChanged.connect(self._changed)
+
+    def _changed(self) -> None:
+        if not self._quiet:
+            self.textEdited.emit(self.toPlainText())
+        self.grow()
+
+    def needed_height(self) -> int:
+        lines = max(1, int(self.document().size().height()))
+        return (lines * QFontMetrics(self.font()).lineSpacing()
+                + 2 * int(self.document().documentMargin()) + 2)
+
+    def grow(self) -> None:
+        """As tall as its lines: the row grows to hold them (the grid
+        then gives the editor the taller cell), or, outside a grid, the
+        editor grows by itself."""
+        need = self.needed_height()
+        grid = self.grid
+        if grid is not None and self.row >= 0 and hasattr(
+                grid, "editing_row_needs"):
+            grid.editing_row_needs(self.row, need)
+        height = max(self.min_height, need)
+        if height != self.height():
+            self.resize(self.width(), height)
+
+    # -- the QLineEdit slice
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        self._quiet = True
+        try:
+            self.setPlainText(text)
+        finally:
+            self._quiet = False
+        self.moveCursor(self.textCursor().MoveOperation.End)
+
+    def cursorPosition(self) -> int:
+        return self.textCursor().position()
+
+    def setCursorPosition(self, pos: int) -> None:
+        cursor = self.textCursor()
+        cursor.setPosition(max(0, min(pos, len(self.toPlainText()))))
+        self.setTextCursor(cursor)
+
+    def insert(self, text: str) -> None:
+        self.insertPlainText(text)
+
+    def setFrame(self, _on: bool) -> None:
+        pass
+
+
 class SheetDelegate(ConditionalFormatDelegate):
     """Line edit everywhere; date columns get a QDateEdit when the cell is
     empty or already holds a date (formulas keep the line edit).
@@ -51,6 +132,17 @@ class SheetDelegate(ConditionalFormatDelegate):
     def eventFilter(self, editor, event):
         if event.type() == QEvent.KeyPress and event.key() in (
                 Qt.Key_Return, Qt.Key_Enter):
+            if isinstance(editor, CellEdit):
+                if event.modifiers() & Qt.AltModifier:
+                    editor.insertPlainText("\n")   # Alt+Enter: a new line
+                    return True
+                # Enter commits, as in a one-line editor (Qt leaves Enter
+                # to a QPlainTextEdit, which would start a new line)
+                self.ctrl_enter = bool(event.modifiers() & Qt.ControlModifier)
+                self.commitData.emit(editor)
+                self.closeEditor.emit(editor,
+                                      QAbstractItemDelegate.SubmitModelCache)
+                return True
             self.ctrl_enter = bool(event.modifiers() & Qt.ControlModifier)
         return super().eventFilter(editor, event)
 
@@ -115,15 +207,31 @@ class SheetDelegate(ConditionalFormatDelegate):
                 editor.setCalendarPopup(True)
                 editor.setDisplayFormat("yyyy-MM-dd")
                 return editor
-        editor = QLineEdit(parent)
-        editor.setFrame(False)
+        wraps = getattr(model, "wraps", None)
+        editor = CellEdit(parent, wrap=bool(
+            wraps and wraps(index.row(), index.column())))
+        view = self.parent()
+        editor.grid = getattr(view, "_main", view)    # a pane edits for it
+        editor.row = index.row()
         if hasattr(model, "sheet"):
             from .completion import FormulaCompleter
             FormulaCompleter(editor, lambda m=model: m.sheet.column_names())
         SheetDelegate.last_editor = editor
         return editor
 
+    def updateEditorGeometry(self, editor, option, index) -> None:
+        super().updateEditorGeometry(editor, option, index)
+        if isinstance(editor, CellEdit):
+            editor.min_height = option.rect.height()
+            editor.grow()
+
     def setEditorData(self, editor, index):
+        if isinstance(editor, CellEdit):
+            editor.setText(str(index.data(Qt.EditRole) or ""))
+            # as Qt does for a line edit: a key typed to start editing
+            # replaces the value, F2 then an arrow key moves within it
+            editor.selectAll()
+            return
         if isinstance(editor, QDateEdit):
             source = str(index.data(Qt.EditRole) or "").strip()
             parsed = _parse_date(source) if source else None
@@ -133,6 +241,9 @@ class SheetDelegate(ConditionalFormatDelegate):
         super().setEditorData(editor, index)
 
     def setModelData(self, editor, model, index):
+        if isinstance(editor, CellEdit):
+            model.setData(index, editor.text(), Qt.EditRole)
+            return
         if isinstance(editor, QDateEdit):
             model.setData(index, editor.date().toString("yyyy-MM-dd"),
                           Qt.EditRole)

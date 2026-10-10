@@ -5,11 +5,12 @@ import json
 
 import pytest
 from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
-from PySide6.QtWidgets import QDialogButtonBox, QLineEdit
+from PySide6.QtWidgets import QDialogButtonBox
 
 from flograph.core.sheet import select as pick
 from flograph.core.sheet.values import FormulaError
 from flograph.ui.spreadsheet import SheetModel, SpreadsheetView
+from flograph.ui.spreadsheet.delegates import CellEdit
 from flograph.ui.spreadsheet.goto_dialog import GoToDialog, GoToSpecialDialog
 
 GRID = [["1", "=A1*2", "", "x"],
@@ -134,7 +135,7 @@ def _open_editor(view, qtbot):
     view.edit(index)
     qtbot.wait(20)
     editor = view.indexWidget(index)
-    assert isinstance(editor, QLineEdit)
+    assert isinstance(editor, CellEdit)
     return editor
 
 

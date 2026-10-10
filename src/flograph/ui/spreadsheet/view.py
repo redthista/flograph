@@ -34,7 +34,7 @@ from flograph.core.sheet import COLUMN_TYPES, set_extra_date_formats, translate
 
 from .clipboard import (MIME_CELLS, block_to_html, block_to_tsv, decode_cells,
                         encode_cells, parse_paste_text)
-from .delegates import SheetDelegate
+from .delegates import CellEdit, SheetDelegate
 from .model import SheetModel
 
 _ORG = "flograph"
@@ -962,6 +962,33 @@ class SpreadsheetView(QTableView):
             tallest = max(tallest, box.height() + 6)
         return tallest
 
+    def editing_row_needs(self, row: int, height: int) -> None:
+        """An open editor's lines need this much: grow the row to it while
+        typing (shrinking back as lines go, never below the row's own
+        height). Not saved — the row settles when the editor closes."""
+        model = self.sheet_model()
+        if model is None or not 0 <= row < model.rowCount():
+            return
+        base = getattr(self, "_editing_base", None)
+        if base is None or base[0] != row:
+            base = (row, self.rowHeight(row))
+            self._editing_base = base
+        target = max(base[1], height)
+        if self.rowHeight(row) != target:
+            self._applying_heights = True
+            try:
+                self.setRowHeight(row, target)
+            finally:
+                self._applying_heights = False
+            self._sized_rows.add(row)
+
+    def _editor_closed(self) -> None:
+        """Settle a row an editor grew: fitted to what was kept, or back
+        to what it was."""
+        if getattr(self, "_editing_base", None) is not None:
+            self._editing_base = None
+            self.apply_row_heights()
+
     def set_row_height_dialog(self) -> None:
         """Row Height…: a height in pixels for the selected rows."""
         from PySide6.QtWidgets import QInputDialog
@@ -1127,11 +1154,12 @@ class SpreadsheetView(QTableView):
         from PySide6.QtWidgets import QDateEdit, QLineEdit
         if isinstance(editor, QDateEdit):
             return editor.date().toString("yyyy-MM-dd")
-        if isinstance(editor, QLineEdit):
+        if isinstance(editor, (QLineEdit, CellEdit)):
             return editor.text()
         return None
 
     def closeEditor(self, editor, hint) -> None:
+        QTimer.singleShot(0, self, self._editor_closed)
         if getattr(self, "_stay_after_edit", False):
             # Ctrl+Enter keeps the selection and the current cell, as Excel
             self._stay_after_edit = False
@@ -1959,7 +1987,7 @@ class SpreadsheetView(QTableView):
             self.edit(index)
             from PySide6.QtWidgets import QApplication, QLineEdit
             editor = QApplication.focusWidget()
-            if isinstance(editor, QLineEdit):
+            if isinstance(editor, (QLineEdit, CellEdit)):
                 editor.setText(text)
                 editor.selectAll()
             self.cell_note(index, f"<b>Not kept</b><br>{why}<br>"

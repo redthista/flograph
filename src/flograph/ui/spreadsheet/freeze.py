@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QModelIndex, QPoint, Qt
+from PySide6.QtCore import QModelIndex, QPoint, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemDelegate, QAbstractItemView,
                                QFrame, QHeaderView, QTableView)
@@ -127,6 +127,7 @@ class _Pane(QTableView):
         self._main.wheelEvent(event)
 
     def closeEditor(self, editor, hint) -> None:
+        QTimer.singleShot(0, self._main, self._main._editor_closed)
         if hint == QAbstractItemDelegate.SubmitModelCache:
             super().closeEditor(editor, QAbstractItemDelegate.NoHint)
             self._main.setFocus()

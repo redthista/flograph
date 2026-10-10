@@ -16,8 +16,7 @@ from __future__ import annotations
 import html
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit,
                                QTextBrowser, QToolButton, QVBoxLayout,
                                QWidget)
@@ -29,6 +28,8 @@ from .. import theme
 from .completion import FormulaCompleter
 from .model import SheetModel
 from .view import SpreadsheetView
+
+_BREAK = "\u21b5"    # how the one-line formula bar shows a line break
 
 
 def reference_html() -> str:
@@ -142,6 +143,9 @@ class FormulaBar(QWidget):
         self.edit.setPlaceholderText(
             "value or =formula — click fx for the function list")
         self.edit.editingFinished.connect(self.commit)
+        self.edit.setToolTip("The cell's value or formula. A line break in "
+                             "the cell shows as ↵; Alt+Enter types one.")
+        self.edit.installEventFilter(self)
         FormulaCompleter(self.edit, self._column_names)
 
         row.addWidget(fx)
@@ -157,6 +161,14 @@ class FormulaBar(QWidget):
             model.dataChanged.connect(self._follow)
             model.modelReset.connect(self._follow)
         self.sync(view.currentIndex())
+
+    def eventFilter(self, obj, event) -> bool:
+        if (obj is self.edit and event.type() == QEvent.KeyPress
+                and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+                and event.modifiers() & Qt.AltModifier):
+            self.edit.insert(_BREAK)          # Alt+Enter: a line break
+            return True
+        return super().eventFilter(obj, event)
 
     def _follow(self, *_args) -> None:
         """Re-read the cell after a change from elsewhere — unless the bar
@@ -192,14 +204,16 @@ class FormulaBar(QWidget):
             self.edit.clear()
             return
         self.cell_label.setText(cell_name(current.row(), current.column()))
-        self.edit.setText(model.cell_source(current.row(), current.column()))
+        # one line: a line break in the cell shows as ↵
+        self.edit.setText(model.cell_source(current.row(), current.column())
+                          .replace("\n", _BREAK))
 
     def commit(self) -> None:
         current = self._view.currentIndex()
         model = self._model()
         if model is None or not current.isValid():
             return
-        text = self.edit.text()
+        text = self.edit.text().replace(_BREAK, "\n")
         if text != model.cell_source(current.row(), current.column()):
             model.setData(current, text, Qt.EditRole)
         self._view.setFocus()
