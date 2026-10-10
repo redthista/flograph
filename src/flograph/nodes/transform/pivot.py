@@ -32,7 +32,7 @@ downstream to put it back, since the pivot is what invented the columns.
 NODE = {
     "label": "Pivot",
     "category": "Transform",
-    "version": "1.2",
+    "version": "1.3",
     "inputs": [("table", "dataframe")],
     "outputs": [("pivoted", "dataframe")],
 }

@@ -224,7 +224,7 @@ them blank whichever you pick.
 NODE = {
     "label": "Show Table",
     "category": "Viz",
-    "version": "1.10",
+    "version": "1.11",
     "card": "table_viewer",
     "inputs": [("table", "dataframe"),
                ("style", "object",

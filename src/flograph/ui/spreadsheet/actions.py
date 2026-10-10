@@ -706,6 +706,20 @@ class SheetActions(QObject):
                   enabled=lambda: edit() and bool(v.sheet_model())
                   and v.sheet_model().rowCount() > 1,
                   short="Duplicates")
+        # ---- PivotTable: a Show Table pivoting this table, beside it
+        self._add("pivot", "PivotTable…", "pivot",
+                  "Summarise the table: one line for each Region (and a "
+                  "column for each Month), with the numbers summed, "
+                  "averaged or counted where they meet, and a grand total. "
+                  "Pick where each selected column goes and see a preview "
+                  "first. It is a Show Table wired to this table, so it "
+                  "keeps up as the table changes.",
+                  v.insert_pivot,
+                  enabled=lambda: v.host.can_pivot()
+                  and bool(v.sheet_model())
+                  and v.sheet_model().rowCount() > 0,
+                  short="PivotTable")
+
         # ---- charts: a chart node wired to this table, beside it
         def chartable() -> bool:
             return bool(v.selected_columns()) and v.host.can_chart()

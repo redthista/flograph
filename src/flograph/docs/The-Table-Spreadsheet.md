@@ -12,7 +12,7 @@ Along the top of the grid is a ribbon, laid out like Excel's:
 | Tab | What is on it |
 | --- | --- |
 | **Home** | Paste, cut, copy, *Paste Values*, *Paste Special*, *Copy + Headers*, *Format Painter*; Undo/Redo; Insert ▾ / Delete ▾ / Clear; **Font** (bold, italic, underline, fill and font colour, Wrap Text, alignment, Clear Formats); **AutoSum** ▾ (Sum, Average, Count Numbers, Max, Min), Fill Down, Fill ▾ (Right, Series…), Find & Select ▾ (Find, Replace, Go To, …) |
-| **Insert** | **Charts**: Recommended, Column, Line, Area, Pie, Scatter, Histogram — a chart node wired to the table (on a canvas card, a dashboard tile and the full editor) |
+| **Insert** | **PivotTable…**; **Charts**: Recommended, Column, Line, Area, Pie, Scatter, Histogram — a chart node wired to the table (on a canvas card, a dashboard tile and the full editor) |
 | **Rows & Columns** | Insert above/below/left/right, Delete, Move up/down/left/right, select whole rows or columns, use a row as the column names, rename; **Outline** (Group, Ungroup, Collapse All, Expand All) |
 | **Data** | Filter, Sort A → Z / Z → A, Custom Sort…, Clear Filters; Conditional formatting and its rules; the Total Row; the column's **Type** ▾, its **Dropdown List**, **Text to Columns** and **Remove Duplicates**; **Validation** and **Next Problem** |
 | **Review** | **New Note**, Delete Note, Next Note; Next Problem, select the problem cells or the cells with notes |
@@ -512,6 +512,35 @@ with choices, as Excel's dialog does:
 A sentence says what the choices will do and a preview shows the first
 cells as they will be, the changed ones highlighted (hover one for what it
 was). The paste is one undo step.
+
+## PivotTable
+
+Select the columns to summarise — say Region, Month and Sales — and pick
+**Insert ▸ PivotTable…** (or right-click ▸ PivotTable…). With a single
+cell selected, every column is offered. A dialog says where each column
+goes, already guessed:
+
+* **Rows** run down the side — one line for each different value;
+* **Columns** run across the top — one column for each value;
+* **Values** are the numbers combined where they meet, by **Summarise
+  values by**: Sum, Average, Count, Min, Max or Median;
+* **Leave out** keeps a column out of it.
+
+A sentence says what you'll get and a **preview** shows it, with the
+grand total row, before anything is added. **Insert PivotTable** adds a
+**Show Table** beside the table on the canvas, wired to it — on a
+dashboard, as a tile beside the table's too. Show Table *is* flograph's
+PivotTable:
+
+* with **Columns** chosen it opens in **matrix** mode — Region down the
+  side, a column per Month, Sales in the cells;
+* with only **Rows**, in **grouped** mode, folded: one line per Region
+  with its subtotal, and clicking one unfolds the rows behind it.
+
+Change it afterwards in the Show Table's Properties (Show as, Rows,
+Columns, Values, Aggregation, Total row) — and colour it with
+conditional formatting like any Show Table. A matrix passes the pivoted
+table on to whatever is wired after it; a grouped one passes the rows.
 
 ## Charts from a selection
 

@@ -248,6 +248,14 @@ class SheetHost:
         table; returns what to tell the user, or "" when nothing was added."""
         return ""
 
+    def can_pivot(self) -> bool:
+        """Can Insert PivotTable add a Show Table here right now?"""
+        return False
+
+    def insert_pivot(self, pick) -> str:
+        """Add the PivotTable `pick` (a core.sheet.pivot.PivotPick)."""
+        return ""
+
 
 def _box(node) -> tuple:
     """A node's place on the canvas as (x, y, w, h). A card says its size
@@ -261,28 +269,31 @@ def _box(node) -> tuple:
             float(w or 200), float(h or 120))
 
 
-def insert_chart(graph, stack, registry, table_id: str, pick,
-                 tile_place=None):
-    """Add a chart node drawing `pick`, wired from the Table `table_id`,
+def insert_view(graph, stack, registry, table_id: str, pick,
+                tile_place=None):
+    """Add the node `pick` names (a chart, a PivotTable's Show Table — its
+    ``node_type``, a chart when it names none), wired from the Table
+    `table_id`,
     beside it on the canvas — and, given ``tile_place`` (page id, the
     Table tile's rect, the page's other tile rects), as a tile beside the
     Table's tile on that dashboard page. One undo step. Returns the new
-    node, or None when the chart node isn't in the library."""
+    node, or None when that node isn't in the library."""
     from flograph.core import Tile
     from flograph.core.sheet.chart import CHART_NODE, place_beside
     from ..commands import AddNodeCommand, AddTileCommand, ConnectCommand
     import uuid
 
     table = graph.nodes.get(table_id)
-    spec = registry.maybe_get(CHART_NODE) if registry is not None else None
+    node_type = getattr(pick, "node_type", CHART_NODE)
+    spec = registry.maybe_get(node_type) if registry is not None else None
     if table is None or spec is None or stack is None:
         return None
-    node = registry.instantiate(CHART_NODE)
+    node = registry.instantiate(node_type)
     node.canvas = getattr(table, "canvas", "")
     for name, value in pick.params.items():
         if node.spec.param(name) is not None:
             node.params[name] = value
-    title = pick.params.get("title") or ""
+    title = getattr(pick, "title", "") or pick.params.get("title") or ""
     if title:
         node.label_override = title
     neighbours = [_box(n) for n in graph.nodes.values()
@@ -291,7 +302,8 @@ def insert_chart(graph, stack, registry, table_id: str, pick,
     _x, _y, w, h = _box(node)
     node.pos = place_beside(_box(table), (w, h), neighbours)
     in_port = spec.inputs[0].name
-    stack.beginMacro(f"insert chart{': ' + title if title else ''}")
+    noun = "chart" if node_type == CHART_NODE else pick.kind
+    stack.beginMacro(f"insert {noun}{': ' + title if title else ''}")
     try:
         stack.push(AddNodeCommand(graph, node))
         stack.push(ConnectCommand(graph, table_id, table.spec.outputs[0].name,
@@ -308,6 +320,9 @@ def insert_chart(graph, stack, registry, table_id: str, pick,
     finally:
         stack.endMacro()
     return node
+
+
+insert_chart = insert_view
 
 
 class NodeSheetHost(SheetHost):
@@ -404,27 +419,42 @@ class NodeSheetHost(SheetHost):
     def offers_charts(self) -> bool:
         return self._registry_fn is not None
 
-    def can_chart(self) -> bool:
-        from flograph.core.sheet.chart import CHART_NODE
+    def _can_add(self, node_type: str) -> bool:
         registry = self._registry()
         return (self._node() is not None and registry is not None
-                and registry.maybe_get(CHART_NODE) is not None)
+                and registry.maybe_get(node_type) is not None)
+
+    def can_chart(self) -> bool:
+        from flograph.core.sheet.chart import CHART_NODE
+        return self._can_add(CHART_NODE)
+
+    def can_pivot(self) -> bool:
+        from flograph.core.sheet.pivot import PIVOT_NODE
+        return self._can_add(PIVOT_NODE)
 
     def insert_chart(self, pick) -> str:
         if not self.can_chart():
             return ""
-        node = insert_chart(self._graph, self._stack_fn(), self._registry(),
-                            self._node_id, pick,
-                            self._tile_fn() if self._tile_fn else None)
+        return self._insert(pick, f"a {pick.kind} chart", "chart")
+
+    def insert_pivot(self, pick) -> str:
+        if not self.can_pivot():
+            return ""
+        return self._insert(pick, "a PivotTable", "show")
+
+    def _insert(self, pick, what: str, verb: str) -> str:
+        node = insert_view(self._graph, self._stack_fn(), self._registry(),
+                           self._node_id, pick,
+                           self._tile_fn() if self._tile_fn else None)
         if node is None:
             return ""
         where = ("beside the table, on this page and on the canvas"
                  if self._tile_fn is not None
                  else "beside the table on the canvas")
-        text = f"Added a {pick.kind} chart {where}."
+        text = f"Added {what} {where}."
         if has_draft(self._node()):
-            text += (" It draws the table as last submitted — Submit to "
-                     "chart your latest edits.")
+            text += (" It reads the table as last submitted — Submit to "
+                     f"{verb} your latest edits.")
         if self._on_submitted is not None:
             self._on_submitted()           # run it, so it draws now
         return text

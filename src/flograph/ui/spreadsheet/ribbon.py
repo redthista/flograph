@@ -427,6 +427,7 @@ class SheetRibbon(QWidget):
         # Excel's Insert tab: a chart node wired to the table — only where
         # the grid has a node and a library behind it
         insert = [
+            ("Tables", [("pivot", "PivotTable")]),
             ("Charts", [("chart", "Recommended"), ("chart_bar", "Column"),
                         ("chart_line", "Line"), ("chart_area", "Area"),
                         ("chart_pie", "Pie"), ("chart_scatter", "Scatter"),

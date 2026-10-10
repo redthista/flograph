@@ -50,6 +50,23 @@ TOTALS = ("off", "rows + columns", "rows only", "columns only")
 #: display names the Pivot node offers for pandas aggfuncs under other names
 _AGG_FUNCS = {"distinct count": "nunique"}
 
+
+def heading_text(value) -> str:
+    """A pivot key as a column heading. A date is written as a date:
+    pandas hands the pivot a Timestamp, whose own str() is
+    "2026-01-01 00:00:00" — a column per month should read 2026-01-01.
+    A time of day other than midnight keeps its hours and minutes."""
+    if hasattr(value, "isoformat") and hasattr(value, "hour"):
+        try:
+            if (value.hour, value.minute, value.second,
+                    getattr(value, "microsecond", 0)) == (0, 0, 0, 0):
+                return value.strftime("%Y-%m-%d")
+            if value.second == 0:
+                return value.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, AttributeError):
+            pass
+    return str(value)
+
 #: modes measured against the spread of values — pooled across a matrix
 _MEASURED = ("color_scale", "data_bar", "icons")
 #: rules that shape the table rather than paint a cell
@@ -74,8 +91,9 @@ def flat_names(columns) -> list[str]:
     while cols.nlevels > 1 and cols.get_level_values(0).nunique() == 1:
         cols = cols.droplevel(0)
     if cols.nlevels > 1:
-        return ["_".join(str(part) for part in col) for col in cols]
-    return [str(c) for c in cols]
+        return ["_".join(heading_text(part) for part in col)
+                for col in cols]
+    return [heading_text(c) for c in cols]
 
 
 def _unique_names(names) -> list[str]:
@@ -155,7 +173,8 @@ def pivot(table, index, columns, values=None, agg="sum",
         # with one, the whole tuple after it is the pivot's values.
         ivo = tup[0] if multi else values[0]
         disp = str(ivo)
-        parts = [str(p) for p in tup[1:]] if len(tup) > 1 else [str(tup[0])]
+        parts = ([heading_text(p) for p in tup[1:]] if len(tup) > 1
+                 else [heading_text(tup[0])])
         across = separator.join(parts)
         if not multi or headers == "values only":
             name = across
@@ -613,7 +632,7 @@ def _heading_rules(table, pivoted, rows, columns, values, agg, value_keys,
     labels: dict = {}                 # cell's own label -> [cell names]
     prefixes: dict = {}               # heading path -> original key prefix
     for vk in value_keys:
-        kept = [str(p) for p in vk[drop:]]
+        kept = [heading_text(p) for p in vk[drop:]]
         path = tuple(kept[:-1])
         leaf_of.setdefault(path, []).append(name_of[vk])
         labels.setdefault(kept[-1], []).append(name_of[vk])

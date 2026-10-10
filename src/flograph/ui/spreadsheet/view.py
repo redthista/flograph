@@ -2050,6 +2050,29 @@ class SpreadsheetView(QTableView):
                      "on with the data. Data ▸ Total Row shows totals "
                      "that don't.")
 
+    def pivot_columns(self) -> list:
+        """The columns a PivotTable is offered: the selected ones, or —
+        with a single cell selected — every column on show, as Excel
+        takes the whole table around the cell."""
+        box = self._selection_rect()
+        if box is not None and box[0] == box[2] and box[1] == box[3]:
+            model = self.sheet_model()
+            if model is None:
+                return []
+            rows = range(model.rowCount())
+            return [(spec.name, spec.type,
+                     [model.computed_value(r, c) for r in rows])
+                    for c, spec in enumerate(model.sheet.columns)
+                    if not self.isColumnHidden(c)]
+        return self.chart_columns()
+
+    def insert_pivot(self) -> None:
+        """Insert ▸ PivotTable…: a Show Table pivoting this table, set up
+        from the selection in a dialog that previews it first."""
+        from .pivot_dialog import insert_pivot
+        self.commit_open_editor()
+        insert_pivot(self)
+
     def insert_chart(self, kind: str = "auto") -> None:
         """Insert ▸ Chart: a chart node drawing the selected columns, wired
         to this table and placed beside it."""

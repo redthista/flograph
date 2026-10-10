@@ -114,6 +114,7 @@ def _chart_menu(menu: QMenu, view) -> None:
     for kind, _label in KINDS:
         sub.addAction(view.actions["chart" if kind == "auto"
                                    else f"chart_{kind}"])
+    menu.addAction(view.actions["pivot"])
 
 
 def _type_menu(menu: QMenu, actions) -> None:

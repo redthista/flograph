@@ -1119,6 +1119,15 @@ def _chart_scatter(p, r, c):
         p.drawEllipse(QPointF(x, y), 1.3, 1.3)
 
 
+def _pivot(p, r, c):
+    """A PivotTable: a header row and a label column lit, the cells where
+    they meet, and a bold total row along the bottom."""
+    _grid(p, QRectF(2.5, 2.5, 15, 15), lit=[("row", 0), ("col", 0)],
+          lit_color=BLUE, color=c)
+    p.setPen(_pen(AMBER, 1.6))
+    p.drawLine(QPointF(3, 17), QPointF(17, 17))
+
+
 def _chart_hist(p, r, c):
     """Histogram: bars touching, highest in the middle."""
     _axes(p, c)
@@ -1130,7 +1139,7 @@ GLYPHS = {
     "chart_auto": (_chart_auto, FG), "chart_bar": (_chart_bar, FG),
     "chart_line": (_chart_line, FG), "chart_area": (_chart_area, FG),
     "chart_pie": (_chart_pie, FG), "chart_scatter": (_chart_scatter, FG),
-    "chart_histogram": (_chart_hist, FG),
+    "chart_histogram": (_chart_hist, FG), "pivot": (_pivot, FG),
     "cf_scale": (_cf_scale, FG), "cf_bar": (_cf_bar, FG),
     "cf_icons": (_cf_icons, FG), "cf_highlight": (_cf_highlight, FG),
     "cf_manage": (_cf_manage, FG), "cond_format": (_cond_format, FG),
