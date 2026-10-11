@@ -803,6 +803,38 @@ class TestHeaderClickSort:
         assert view.selected_columns() == [0]
         assert [r[0] for r in self._rows(model)] == ["10", "2", "30"]
 
+    def test_column_edge_resizes_rather_than_opening_the_menu(self, qtbot):
+        """The ▾ sits by a column's right edge; a press on the edge itself
+        is Qt's resize grip, never the button or a column move — even when
+        the column is selected."""
+        view, model = self._view(qtbot, columns=["A", "B"],
+                                 rows=[["1", "2"]])
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
+        header = view.horizontalHeader()
+        view.resize(400, 300)
+        view.show()
+        opened = []
+        header.menu_button_clicked.connect(opened.append)
+        view.select_columns([0])
+        width = header.sectionSize(0)
+        edge = header.sectionViewportPosition(0) + width - 1
+        button = header.button_rect(0)
+        assert not header.on_grip(QPoint(button.right(), 5))
+        assert header.on_grip(QPoint(edge, 5))
+        assert header._button_at(QPoint(edge, 5)) == -1
+        QTest.mousePress(header.viewport(), Qt.LeftButton, pos=QPoint(edge, 5))
+        QTest.mouseMove(header.viewport(), QPoint(edge + 40, 5))
+        QTest.mouseRelease(header.viewport(), Qt.LeftButton,
+                           pos=QPoint(edge + 40, 5))
+        assert opened == []
+        assert header.sectionSize(0) > width
+        assert [list(r) for r in model.sheet.rows] == [["1", "2"]]
+        # the button itself still opens the menu
+        QTest.mouseClick(header.viewport(), Qt.LeftButton,
+                         pos=header.button_rect(1).center())
+        assert opened == [1]
+
     def test_date_column_sorts_chronologically_not_lexically(self, qtbot):
         view, model = self._view(
             qtbot, columns=["When"], types=["date"],

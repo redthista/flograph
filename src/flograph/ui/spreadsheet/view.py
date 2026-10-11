@@ -27,7 +27,7 @@ from PySide6.QtCore import (QEvent, QItemSelection, QItemSelectionModel,
                             Signal)
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractItemDelegate, QAbstractItemView,
-                               QApplication, QTableView,
+                               QApplication, QStyle, QTableView,
                                QToolTip)
 
 from flograph.core.sheet import COLUMN_TYPES, set_extra_date_formats, translate
@@ -131,15 +131,27 @@ def _sheet_header_class():
             # Excel's table headers: the name at the left, the ▾ at the right
             self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
+        def _grip(self) -> int:
+            return self.style().pixelMetric(QStyle.PM_HeaderGripMargin,
+                                            None, self)
+
+        def on_grip(self, pos) -> bool:
+            from .drag import on_resize_grip
+            return on_resize_grip(self, pos)
+
         def button_rect(self, section: int) -> QRect:
+            # kept clear of the resize grip at the column's right edge
             x = self.sectionViewportPosition(section)
             w = self.sectionSize(section)
-            bw = min(self.BUTTON_W, max(w - 4, 0))
+            gap = self._grip() + 2
+            bw = min(self.BUTTON_W, max(w - gap - 2, 0))
             band = self.band_height or self.height()
-            return QRect(x + w - bw - 2, 3, bw, band - 6)
+            return QRect(x + w - bw - gap, 3, bw, band - 6)
 
         def _button_at(self, pos) -> int:
             if not getattr(self._view, "show_column_buttons", True):
+                return -1
+            if self.on_grip(pos):
                 return -1
             section = self.logicalIndexAt(pos)
             if section >= 0 and self.button_rect(section).contains(pos):
@@ -196,7 +208,7 @@ def _sheet_header_class():
         def sectionSizeFromContents(self, section):
             size = super().sectionSizeFromContents(section)
             if getattr(self._view, "show_column_buttons", True):
-                size.setWidth(size.width() + self.BUTTON_W + 2)
+                size.setWidth(size.width() + self.BUTTON_W + self._grip() + 2)
             return size
 
         def mousePressEvent(self, event) -> None:

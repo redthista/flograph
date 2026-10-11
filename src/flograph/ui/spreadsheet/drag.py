@@ -29,7 +29,8 @@ from typing import Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QRegion
-from PySide6.QtWidgets import QApplication, QToolTip, QWidget
+from PySide6.QtWidgets import (QApplication, QHeaderView, QStyle,
+                               QToolTip, QWidget)
 
 _OUTLINE = QColor("#60a5fa")
 _HANDLE = 7          # the square's side, in px
@@ -351,6 +352,23 @@ class FillHandle(QObject):
                 widget.unsetCursor()
 
 
+def on_resize_grip(header, pos: QPoint) -> bool:
+    """Whether ``pos`` is on a border the header resizes from — the same
+    band Qt's QHeaderView uses. Everything else a header press can mean (the
+    ▾ button, moving the selection) stands aside there, so a column or row
+    is always widened by its edge, selected or not."""
+    section = header.logicalIndexAt(pos)
+    if section < 0 or header.sectionResizeMode(section) != QHeaderView.Interactive:
+        return False
+    margin = header.style().pixelMetric(QStyle.PM_HeaderGripMargin, None,
+                                        header)
+    start = header.sectionViewportPosition(section)
+    end = start + header.sectionSize(section)
+    along = pos.x() if header.orientation() == Qt.Horizontal else pos.y()
+    return end - along <= margin or (along - start < margin
+                                     and header.visualIndex(section) > 0)
+
+
 class HeaderMove(QObject):
     """Drag selected rows (or columns) by their header to move them."""
 
@@ -433,8 +451,11 @@ class HeaderMove(QObject):
         return False
 
     def _on_button(self, pos: QPoint) -> bool:
+        """The ▾ button or a resize grip: a press there is the header's own,
+        never the start of a move."""
         button_at = getattr(self._header, "_button_at", None)
-        return bool(button_at and button_at(pos) >= 0)
+        return (bool(button_at and button_at(pos) >= 0)
+                or on_resize_grip(self._header, pos))
 
     def _gap_at(self, pos: QPoint) -> int:
         """The gap between sections the pointer is nearest: 0 is before the
