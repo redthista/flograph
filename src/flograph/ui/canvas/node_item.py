@@ -76,6 +76,9 @@ _HANDLED_ITEM_CHANGES = frozenset({
     # again — but an animated card that is hidden rather than flattened
     # would otherwise carry on rendering frames nobody can see.
     QGraphicsItem.ItemVisibleHasChanged,
+    # Once per item: a Table card's ribbon asks its node what applies (the
+    # ⚡ Auto-apply button, undo) and has no scene to ask until it joins one.
+    QGraphicsItem.ItemSceneHasChanged,
 })
 # A deactivated node is faded rather than hidden: it is still part of the
 # graph, still wired, and still the thing you click to switch back on.
@@ -4298,6 +4301,9 @@ class NodeItem(QGraphicsObject):
             if value and self.deferred_refreshes and scene is not None \
                     and hasattr(scene, "resume_deferred"):
                 scene.resume_deferred()
+        if change == QGraphicsItem.ItemSceneHasChanged \
+                and value is not None and self._table_widget is not None:
+            self._table_widget.actions.refresh()
         if change == QGraphicsItem.ItemSelectedHasChanged \
                 and self._button_edit and not value:
             # Clicking the canvas or another node drops the selection, which

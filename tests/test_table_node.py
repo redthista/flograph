@@ -220,6 +220,16 @@ def test_table_card_fits_its_ribbon_and_never_spills_past_the_edge(
         assert proxy.geometry().right() <= item.width + 0.5
 
 
+def test_a_new_table_cards_auto_apply_button_shows_at_once(env, registry):
+    """Reported: the ⚡ Auto-apply button stayed hidden on a new Table card
+    until it was resized — the ribbon asked its node before the card had a
+    scene to find it in."""
+    graph, _stack, scene = env
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
+    item = scene.node_items[node.id]
+    assert not item._table_ribbon._auto.isHidden()
+
+
 def test_table_ribbon_wraps_rather_than_clipping(env, registry):
     """The card's compact ribbon wraps its icon row when the card is dragged
     narrow, rather than clipping buttons off the edge."""
