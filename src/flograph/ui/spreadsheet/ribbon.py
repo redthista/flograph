@@ -71,6 +71,7 @@ QToolButton#ribbon_btn:pressed {{ background: {_PRESSED}; }}
 QToolButton#ribbon_btn:checked {{ background: rgba(96,165,250,0.18);
     border-color: rgba(96,165,250,0.55); }}
 QToolButton#ribbon_btn:disabled {{ color: #5d616c; }}
+QToolButton#ribbon_btn[on_strip="true"] {{ margin: 2px 1px; }}
 QLabel#ribbon_caption {{ color: {_DIM}; font-size: 7.5pt; }}
 QFrame#ribbon_sep {{ color: #3a3d47; }}
 QToolButton#ribbon_submit {{ background: #1f6f43; color: #eafff2;
@@ -324,6 +325,11 @@ class SheetRibbon(QWidget):
                                     label="Submit")
         self._submit.setObjectName("ribbon_submit")
         self._submit.setIconSize(QSize(20, 20))
+        # on the tab strip a button would otherwise set the strip's height
+        # and fill it edge to edge; a margin keeps a gap round its frame
+        self._auto.setProperty("on_strip", True)
+        if compact:
+            self._auto.setIconSize(QSize(16, 16))
         tabs.addWidget(self._auto)
         if not compact:
             tabs.addWidget(self._submit)
@@ -332,6 +338,7 @@ class SheetRibbon(QWidget):
         self._fold.setAutoRaise(True)
         self._fold.setFocusPolicy(Qt.NoFocus)
         self._fold.setIconSize(QSize(14, 14))
+        self._fold.setProperty("on_strip", True)
         self._fold.clicked.connect(lambda: self.set_collapsed(
             not self.collapsed))
         tabs.addWidget(self._fold)
