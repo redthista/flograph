@@ -1883,8 +1883,11 @@ class NodeItem(QGraphicsObject):
         (a table, a list, a web view) won't shrink past their own minimum
         size, so on a card dragged short the last rows would otherwise paint
         out through the bottom edge; ItemClipsToShape cuts them at the card.
+        The floor is 1x1, not 0x0: a layout treats 0x0 as "no minimum set"
+        and puts its own back, which let a Table card's ribbon push the whole
+        widget out past the card's right edge.
         """
-        widget.setMinimumSize(0, 0)
+        widget.setMinimumSize(1, 1)
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(widget)
         proxy.setFlag(QGraphicsItem.ItemClipsToShape, True)

@@ -61,7 +61,7 @@ import json
 NODE = {
     "label": "Table",
     "category": "IO",
-    "version": "1.4",
+    "version": "1.5",
     "card": "grid",
     "inputs": [("table", "dataframe", {"optional": True})],
     "outputs": [("table", "dataframe")],
@@ -98,7 +98,7 @@ PARAMS = [
      "placeholder": "Total scale green\nUnits bar blue\n"
                     "Status = Open => bg amber"},
     {"name": "width", "type": "int", "label": "Width",
-     "default": 320, "min": 220, "max": 4000, "cosmetic": True},
+     "default": 400, "min": 220, "max": 4000, "cosmetic": True},
     {"name": "height", "type": "int", "label": "Height",
      "default": 260, "min": 160, "max": 4000, "cosmetic": True},
 ]

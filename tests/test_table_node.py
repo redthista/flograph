@@ -204,6 +204,22 @@ def test_table_card_keeps_its_grid_inside_the_frame_when_short(env, registry):
     assert item.body_height >= 160
 
 
+def test_table_card_fits_its_ribbon_and_never_spills_past_the_edge(
+        env, registry):
+    """Reported: the inner panel ran out past the card's right edge — the
+    ribbon's tab row asked for more than the card's default width, and the
+    proxy grew to its minimum. A new card is wide enough for the ribbon, and
+    one dragged narrower keeps its panel inside the frame."""
+    graph, _stack, scene = env
+    node = graph.add_node(registry.instantiate("flograph.io.table"))
+    item = scene.node_items[node.id]
+    proxy = item._table_proxy
+    assert proxy.widget().minimumSizeHint().width() <= item.width
+    for width in (item.width, 250, 220):
+        graph.set_param(node.id, "width", width)
+        assert proxy.geometry().right() <= item.width + 0.5
+
+
 def test_table_ribbon_wraps_rather_than_clipping(env, registry):
     """The card's compact ribbon wraps its icon row when the card is dragged
     narrow, rather than clipping buttons off the edge."""
