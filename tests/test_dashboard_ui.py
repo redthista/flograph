@@ -1234,6 +1234,27 @@ class TestTileFullscreen:
         QApplication.sendEvent(view.viewport(), event)
         assert view.zoom == pytest.approx(1.0)
 
+    def test_page_scroll_bars_hide_while_a_tile_is_maximized(
+            self, window, qtbot):
+        """The tile is pinned to the viewport, so the page's bars could only
+        slide it away -- and beside a table's own bars they made two sets."""
+        add_page(window)
+        item = add_tile(window, add_show_table(window))
+        view = self.shown_view(window, qtbot)
+        view.set_scrollbars_enabled(True)
+        assert view.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+
+        view.enter_fullscreen(item)
+        assert view.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+        assert view.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+        # the preference arriving again mid-maximize must not put them back
+        view.set_scrollbars_enabled(True)
+        assert view.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+
+        view.exit_fullscreen()
+        assert view.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+        assert view.horizontalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+
     def test_maximized_tile_cannot_be_moved_or_resized(self, window, qtbot):
         add_page(window)
         item = add_tile(window, add_show_table(window))

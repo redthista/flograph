@@ -766,7 +766,8 @@ class ZoomPanGraphicsView(QGraphicsView):
         preference at every view whenever it changes, and would otherwise
         put the bars back on a page that has none to offer."""
         show = self._scrollbars_enabled and not self.navigation_locked
-        policy = Qt.ScrollBarAsNeeded if show else Qt.ScrollBarAlwaysOff
+        bars = show and not self._scrollbars_overruled()
+        policy = Qt.ScrollBarAsNeeded if bars else Qt.ScrollBarAlwaysOff
         self.setHorizontalScrollBarPolicy(policy)
         self.setVerticalScrollBarPolicy(policy)
         # The span only needs fitting when there are bars to keep proportional;
@@ -775,6 +776,12 @@ class ZoomPanGraphicsView(QGraphicsView):
         scene = self.scene()
         if hasattr(scene, "set_rect_fitted"):
             scene.set_rect_fitted(show)
+
+    def _scrollbars_overruled(self) -> bool:
+        """Hide the bars for a while without touching the setting or the
+        scene's span -- a subclass's moment (a maximized dashboard tile)
+        rather than the user's preference."""
+        return False
 
     def _restore_drag_mode(self) -> None:
         self.setDragMode(QGraphicsView.NoDrag if self.navigation_locked

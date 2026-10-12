@@ -317,6 +317,9 @@ class DashboardView(ZoomPanGraphicsView):
                 self._restore_from_overlay, self)
             item.set_fullscreen_overlaid()
             item.setVisible(False)
+        # before the layout: the bars going away is what gives the
+        # viewport its full size
+        self._apply_scrollbar_policy()
         self._layout_fullscreen()
         if self._fs_overlay is not None:
             self._fs_overlay.show()
@@ -324,6 +327,12 @@ class DashboardView(ZoomPanGraphicsView):
             content.setFocus()
         self._zoom_updated()
         self.fullscreen_changed.emit(True)
+
+    def _scrollbars_overruled(self) -> bool:
+        """No page scroll bars while a tile fills the page. The tile is
+        pinned to the viewport, so they could only slide it out of sight,
+        and beside a tile that scrolls itself they made two sets of bars."""
+        return self._fs_tile is not None
 
     def _restore_from_overlay(self) -> None:
         """Escape or the overlay's close button. Goes through the model like
@@ -355,6 +364,7 @@ class DashboardView(ZoomPanGraphicsView):
                 other.setVisible(True)
         item.setVisible(True)
         item.clear_fullscreen()
+        self._apply_scrollbar_policy()
         if self._fs_restore is not None:
             transform, center = self._fs_restore
             self._fs_restore = None
