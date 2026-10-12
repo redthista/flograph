@@ -1615,7 +1615,11 @@ class MainWindow(QMainWindow):
         if self._disk_note:
             parts.append(self._disk_note)
         self.show_status("  ·  ".join(parts))
-        self._run_bar.setValue(int(100 * self._run_completion()))
+        completion = self._run_completion()
+        self._run_bar.setValue(int(100 * completion))
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.set_run_progress(completion)
 
     def _run_completion(self) -> float:
         """How far through the plan the run is, 0..1.
@@ -6617,6 +6621,9 @@ class MainWindow(QMainWindow):
     def _on_cache_save_progress(self, done: int, total: int) -> None:
         self._save_bar.setRange(0, max(1, total))
         self._save_bar.setValue(done)
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.set_save_progress(done, total)
         name = Path(self._project_path).name if self._project_path else ""
         self.show_status(f"Saving {name} · {done}/{total}")
 

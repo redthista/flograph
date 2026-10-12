@@ -114,7 +114,7 @@ def test_view_menu_toggle_hides_the_shortcuts(frame_window):
     assert tb._reset_btn.text() == "Reset Caches"
     assert tb._clear_cache_btn.text() == "Reset Selected Caches"
     frame_window.engine.run_started.emit()
-    assert tb._run_btn.text() == "Stop"
+    assert tb._run_btn.text() == "Stop  0%"
     frame_window.engine.run_finished.emit(True)
     frame_window._set_titlebar_shortcuts(True)
     assert tb._run_btn.text() == "Run All  (F5)"
@@ -423,6 +423,52 @@ def test_save_button_spins_while_saving(frame_window):
     assert not tb._spin_timer.isActive()
     assert tb._save_btn.text() == "Save Changes"
     assert not tb._save_btn.isVisibleTo(tb)
+
+
+def test_save_button_fills_with_save_progress(frame_window):
+    tb = frame_window._title_bar
+    frame_window._set_titlebar_saving(True)
+    assert tb._save_btn.progress() == 0.0
+    frame_window._on_cache_save_progress(3, 4)
+    assert tb._save_btn.progress() == 0.75
+    assert tb._save_btn.text() == "Saving Changes…  75%"
+    tb._save_btn.grab()                     # paints the fill without error
+    frame_window._set_titlebar_saving(False)
+    assert tb._save_btn.progress() is None
+    assert tb._save_btn.text() == "Save Changes"
+
+
+def test_run_button_fills_with_run_progress(frame_window):
+    tb = frame_window._title_bar
+    tb._set_running(True)
+    assert tb._run_btn.progress() == 0.0
+    assert tb._run_btn.text().startswith("Stop  0%")
+    tb.set_run_progress(0.4)
+    assert tb._run_btn.progress() == 0.4
+    assert tb._run_btn.text().startswith("Stop  40%")
+    tb._run_btn.grab()
+    # the button never narrows while it counts, so neighbours don't jiggle
+    wide = tb._run_btn.minimumWidth()
+    tb.set_run_progress(0.05)
+    assert tb._run_btn.minimumWidth() >= wide
+    tb._set_running(False)
+    assert tb._run_btn.progress() is None
+    assert tb._run_btn.minimumWidth() == 0
+    assert tb._run_btn.text().startswith("Run All")
+    tb.set_run_progress(0.5)                 # a late tick after the run
+    assert tb._run_btn.progress() is None
+
+
+def test_run_status_feeds_the_title_bar(frame_window):
+    tb = frame_window._title_bar
+    tb._set_running(True)
+    frame_window._run_begin()
+    frame_window._run_node_begin("n1", "Load", 2, 4)
+    frame_window._run_fraction = 0.5
+    frame_window._update_run_status()
+    assert tb._run_btn.progress() == frame_window._run_completion() > 0
+    frame_window._run_end()
+    tb._set_running(False)
 
 
 def test_save_button_shows_while_saving_a_clean_flow(frame_window):

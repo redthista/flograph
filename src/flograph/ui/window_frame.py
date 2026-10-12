@@ -406,6 +406,61 @@ QToolButton:disabled {{ color: #5f636d; }}
 QToolButton::menu-indicator {{ image: none; }}
 """
 
+def _percent(fraction: float | None) -> str:
+    return f"{int(100 * (fraction or 0.0))}%"
+
+
+def _hold_width(btn: QToolButton, hold: bool) -> None:
+    """While a button counts up, never let it get narrower — otherwise
+    every digit that changes width nudges the buttons beside it."""
+    btn.setMinimumWidth(
+        max(btn.minimumWidth(), btn.sizeHint().width()) if hold else 0)
+
+
+class _ProgressButton(QToolButton):
+    """A bar button that can fill with how far something has got: a soft
+    tint from the left over the done part, and a 2px rule along the bottom
+    in the same colour. `None` is no fill — an ordinary button."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._fraction: float | None = None
+        self._fill = _FG
+
+    def progress(self) -> float | None:
+        return self._fraction
+
+    def set_progress(self, fraction: float | None,
+                     color: QColor | None = None) -> None:
+        if fraction is not None:
+            fraction = min(1.0, max(0.0, float(fraction)))
+        if color is not None:
+            self._fill = QColor(color)
+        if fraction == self._fraction:
+            return
+        self._fraction = fraction
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._fraction is None:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        clip = QPainterPath()
+        clip.addRoundedRect(r, 4, 4)
+        p.setClipPath(clip)
+        done = QRectF(r.left(), r.top(), r.width() * self._fraction,
+                      r.height())
+        tint = QColor(self._fill)
+        tint.setAlpha(46)
+        p.fillRect(done, tint)
+        p.fillRect(QRectF(r.left(), r.bottom() - 2, done.width(), 2),
+                   self._fill)
+        p.end()
+
+
 _WINBTN_QSS = f"""
 QToolButton {{ background: transparent; border: none; border-radius: 0;
                padding: 0; }}
@@ -859,7 +914,7 @@ class TitleBar(QWidget):
 
         # Only on screen when it matters: no button while everything is
         # saved, and its own label ("Save Changes") once it appears.
-        self._save_btn = QToolButton()
+        self._save_btn = _ProgressButton()
         self._save_btn.setObjectName("save_btn")
         self._save_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._save_btn.setIcon(frame_icon("save", _UNSAVED))
@@ -868,7 +923,8 @@ class TitleBar(QWidget):
         self._save_btn.clicked.connect(window._save)
         self._save_btn.hide()
         # While a save is being written the same button says so, with a
-        # turning arc in place of the disk (see set_saving).
+        # turning arc in place of the disk and fills as it goes (see
+        # set_saving / set_save_progress).
         self._saving = False
         self._spin_angle = 0
         self._spin_timer = QTimer(self)
@@ -884,8 +940,10 @@ class TitleBar(QWidget):
         self._show_shortcuts = True
 
         # Run All doubles as Stop while a run is on — clicking it again, or
-        # Escape, cancels. There is no separate Cancel button.
-        self._run_btn = QToolButton()
+        # Escape, cancels. There is no separate Cancel button. It also fills
+        # green with how far through the plan the run is (set_run_progress).
+        self._run_btn = _ProgressButton()
+        self._run_progress: float | None = None
         self._run_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._run_btn.clicked.connect(self._on_run_clicked)
 
@@ -987,8 +1045,11 @@ class TitleBar(QWidget):
         else:
             self._run_btn.setIcon(toolbar_style.toolbar_icon("run_all"))
             self._run_btn.setToolTip("Run the whole flow  (F5)")
+        self._run_progress = 0.0 if running else None
+        self._run_btn.set_progress(self._run_progress, toolbar_style.RUN)
         self._run_sel_btn.setEnabled(not running)
         self._refresh_run_labels()
+        _hold_width(self._run_btn, running)
 
     def set_show_shortcuts(self, show: bool) -> None:
         """Whether the run / cache buttons show their key in brackets
@@ -1004,13 +1065,28 @@ class TitleBar(QWidget):
             return f"{text}  ({key})" if self._show_shortcuts and key else text
 
         if getattr(self, "_running", False):
-            self._run_btn.setText(label("Stop", w.action_cancel))
+            self._run_btn.setText(label(
+                f"Stop  {_percent(self._run_progress)}", w.action_cancel))
         else:
             self._run_btn.setText(label("Run All", w.action_run))
         self._run_sel_btn.setText(label("Run Selected", w.action_run_selected))
         self._clear_cache_btn.setText(
             label("Reset Selected Caches", w.action_reset_selected_caches))
         self._reset_btn.setText(label("Reset Caches", w.action_reset_caches))
+
+    def set_run_progress(self, fraction: float) -> None:
+        """How far through the plan the running flow is, 0..1 — the Stop
+        button fills with it and says it ("Stop  42%")."""
+        if not getattr(self, "_running", False):
+            return
+        fraction = min(1.0, max(0.0, float(fraction)))
+        if _percent(fraction) == _percent(self._run_progress):
+            self._run_btn.set_progress(fraction)
+            return
+        self._run_progress = fraction
+        self._run_btn.set_progress(fraction)
+        self._refresh_run_labels()
+        _hold_width(self._run_btn, True)
 
     def on_selection(self, count: int) -> None:
         """Run Selected and Reset Selected Caches are only on the bar while
@@ -1081,13 +1157,26 @@ class TitleBar(QWidget):
             self._save_btn.setIcon(spinner_icon(0, _UNSAVED))
             self._save_btn.setText("Saving Changes…")
             self._save_btn.setToolTip("Saving the workflow…")
+            self._save_btn.set_progress(0.0, _UNSAVED)
             self._spin_timer.start()
         else:
             self._spin_timer.stop()
+            self._save_btn.set_progress(None)
+            _hold_width(self._save_btn, False)
             self._save_btn.setIcon(frame_icon("save", _UNSAVED))
             self._save_btn.setText("Save Changes")
             self._save_btn.setToolTip("Save the workflow  (Ctrl+S)")
         self.refresh_title()
+
+    def set_save_progress(self, done: int, total: int) -> None:
+        """The save button fills as the writer gets through the results,
+        and counts it ("Saving Changes…  42%")."""
+        if not self._saving:
+            return
+        fraction = done / total if total > 0 else 0.0
+        self._save_btn.set_progress(fraction)
+        self._save_btn.setText(f"Saving Changes…  {_percent(fraction)}")
+        _hold_width(self._save_btn, True)
 
     def _spin(self) -> None:
         self._spin_angle = (self._spin_angle + 30) % 360
