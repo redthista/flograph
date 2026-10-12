@@ -260,3 +260,66 @@ class TestNumberAndBetween:
         high.setText("")
         high.editingFinished.emit()
         assert node.params["value"] == ""
+
+
+class TestTooltipsOnACard:
+    """A control lives in a proxy's offscreen container, so a tooltip
+    shown against one of its widgets landed at the top of the screen on
+    Wayland (Dan, testing the new controls) — the AA3 fault. Every tooltip
+    in a control now goes through data_table.show_tooltip, which shows it
+    against the view drawing the card."""
+
+    def _tip(self, monkeypatch, widget):
+        from PySide6.QtCore import QEvent, QPoint
+        from PySide6.QtGui import QHelpEvent
+        from PySide6.QtWidgets import QApplication
+        from flograph.ui import data_table
+        shown = []
+        monkeypatch.setattr(data_table, "show_tooltip",
+                            lambda pos, text, w: shown.append(text))
+        pos = QPoint(2, 2)
+        QApplication.sendEvent(widget, QHelpEvent(
+            QEvent.ToolTip, pos, widget.mapToGlobal(pos)))
+        return shown
+
+    def test_help_mark(self, qtbot, registry, monkeypatch):
+        graph = Graph()
+        node = control(graph, registry, "slider", help="Lowest price")
+        widget = widget_for(qtbot, node)
+        assert self._tip(monkeypatch, widget._help) == ["Lowest price"]
+
+    def test_reset_button(self, qtbot, registry, monkeypatch):
+        graph = Graph()
+        node = control(graph, registry, "slider", value=10, show_reset=True)
+        widget = widget_for(qtbot, node)
+        assert self._tip(monkeypatch, widget._reset_button) == [
+            "Reset to the default value"]
+
+    def test_invalid_editor_says_why(self, qtbot, registry, monkeypatch):
+        graph = Graph()
+        node = control(graph, registry, "text", required=True)
+        widget = widget_for(qtbot, node)
+        assert self._tip(monkeypatch, widget._edit) == [
+            "Required — fill this in"]
+
+    def test_widgets_built_later_are_covered(self, qtbot, registry,
+                                             monkeypatch):
+        graph = Graph()
+        node = control(graph, registry, "colour", swatches="#ff0000")
+        widget = widget_for(qtbot, node)
+        assert self._tip(monkeypatch, widget._preset_buttons[0]) == ["#ff0000"]
+
+    def test_a_panel_field(self, qtbot, registry, monkeypatch):
+        graph = Graph()
+        node = graph.add_node(registry.instantiate("flograph.input.input_panel"))
+        graph.set_param(node.id, "fields", 'Region = choice help="Pick one"')
+        widget = widget_for(qtbot, node)
+        field = widget.field_widget("region")
+        assert self._tip(monkeypatch, field._help) == ["Pick one"]
+
+    def test_no_tooltip_hides_rather_than_showing_qt_s(self, qtbot, registry,
+                                                       monkeypatch):
+        graph = Graph()
+        node = control(graph, registry, "slider")
+        widget = widget_for(qtbot, node)
+        assert self._tip(monkeypatch, widget._slider) == []

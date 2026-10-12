@@ -398,6 +398,47 @@ class ControlWidget(QWidget):
             self.refresh_validity()
         finally:
             self._syncing = False
+        # after _apply: a shape may have just built new chips or fields
+        self._watch_tooltips()
+
+    # ----------------------------------------------------------- tooltips
+
+    def _watch_tooltips(self) -> None:
+        """Route every tooltip in this control through `eventFilter`.
+
+        On a card or a tile this widget lives in a QGraphicsProxyWidget's
+        offscreen container, and Qt places a tooltip shown against it as if
+        that container were the screen — on Wayland, at the top of the page
+        (the Show Table cells had the same fault, AA3). Re-run on each sync,
+        since chips, choice buttons and panel fields are built as options
+        change; installing a filter twice is harmless.
+        """
+        for widget in (self, *self.findChildren(QWidget)):
+            widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        from PySide6.QtCore import QEvent
+
+        if event.type() != QEvent.ToolTip or not isinstance(obj, QWidget):
+            return super().eventFilter(obj, event)
+        from PySide6.QtWidgets import QToolTip
+        from .data_table import show_tooltip
+
+        # the hovered widget's own tip, else the nearest one above it inside
+        # this control — what Qt itself would have shown
+        text, widget = "", obj
+        while widget is not None and not text:
+            text = widget.toolTip()
+            if widget is self:
+                break
+            widget = widget.parentWidget()
+        if text:
+            # against the view drawing the card, at the pointer's real screen
+            # position (data_table.tooltip_host); off a card it is the widget
+            show_tooltip(event.globalPos(), text, obj)
+        else:
+            QToolTip.hideText()
+        return True
 
     def _sync_caption(self) -> None:
         import html
